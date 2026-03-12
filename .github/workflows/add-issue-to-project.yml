@@ -1,0 +1,39 @@
+# Add new repo issues to the "Planets Console" project when they are opened or reopened.
+#
+# Setup (one-time):
+# 1. Repo → Settings → Secrets and variables → Actions → New repository secret.
+# 2. Name: PROJECT_ACCESS_TOKEN. Value: a classic PAT with "project" scope (or fine-grained with Projects).
+# 3. If your project has a different node_id, set repo variable PROJECT_NODE_ID; otherwise the default below is used.
+
+name: Add issue to project
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add issue to project
+        env:
+          PROJECT_NODE_ID: ${{ vars.PROJECT_NODE_ID }}
+          TOKEN: ${{ secrets.PROJECT_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "Add a repository secret PROJECT_ACCESS_TOKEN (PAT with project scope)."
+            exit 1
+          fi
+          # Default project node_id for "Planets Console" (user SteveDraper, project 1)
+          PROJECT_NODE_ID="${PROJECT_NODE_ID:-PVT_kwHOAFd56s4BRlN7}"
+          ISSUE_NODE_ID="${{ github.event.issue.node_id }}"
+          res=$(curl -sS -w "\n%{http_code}" -X POST -H "Authorization: bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"query\":\"mutation { addProjectV2ItemById(input: {projectId: \\\"$PROJECT_NODE_ID\\\", contentId: \\\"$ISSUE_NODE_ID\\\"}) { projectItem { id } } }\"}" \
+            https://api.github.com/graphql)
+          http_code=$(echo "$res" | tail -n1)
+          body=$(echo "$res" | sed '$d')
+          if [ "$http_code" != "200" ] || echo "$body" | grep -q '"errors"'; then
+            echo "Response ($http_code): $body"
+            exit 1
+          fi
+          echo "Issue added to project."
