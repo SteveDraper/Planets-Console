@@ -1,0 +1,81 @@
+---
+description: Project architecture, layering, tech stack, and structural conventions for Planets-Console. Consult when adding new features, components, packages, or deciding where code belongs.
+alwaysApply: true
+---
+
+# Planets-Console Architecture
+
+## Layer Hierarchy
+
+The system is structured as four layers, each only ever depending on the layer(s) below it:
+
+```
+┌─────────────────────────────┐
+│         Frontend            │  packages/frontend/   React SPA
+├─────────────────────────────┤
+│            BFF              │  packages/bff/        Backend-for-Frontend
+├─────────────────────────────┤
+│       Core REST API         │  packages/api/        Data model + business logic
+│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │
+│     Storage sub-layer       │  packages/api/storage/  Abstract storage interface + impls
+└─────────────────────────────┘
+```
+
+| Layer | Package | Responsibility |
+|---|---|---|
+| Frontend | `packages/frontend` | React SPA. Never calls Core REST API — always via BFF. |
+| BFF | `packages/bff` | SPA-optimized endpoints. Aggregates/reshapes Core REST API responses. No business logic. |
+| Core REST API | `packages/api` | Data model + business logic. No UI semantics. No knowledge of the SPA. |
+| Storage | `packages/api/storage/` | Abstract `StorageBackend` protocol + concrete implementations. Never referenced directly outside this sub-package. |
+
+**Do not leak UI concerns into the Core REST API layer.**
+**Do not put business logic in the BFF layer.**
+**Do not reference a concrete storage implementation outside `packages/api/storage/`.**
+
+## Repo Structure
+
+```
+planets-console/
+├── packages/
+│   ├── api/          # Core REST API layer (routers, models, services, storage/)
+│   ├── bff/          # BFF layer (FastAPI routers shaped for the SPA)
+│   ├── server/       # Root FastAPI app that mounts the api/ and bff/ sub-apps
+│   └── frontend/     # React SPA (Vite)
+├── scripts/          # Auxiliary scripts (Typer CLI)
+├── pyproject.toml    # Root uv workspace config
+└── .cursor/
+```
+
+## Backend Tech Stack
+
+- **Runtime**: Python 3.14, managed with `uv`
+- **Framework**: FastAPI — single process composed from mounted sub-apps: one Core REST API app and one BFF app, with the BFF exposing its own OpenAPI schema endpoint for frontend codegen
+- **CLI**: Typer for service launch args and auxiliary scripts
+- **Config**: OmegaConf with plain dataclasses (no Pydantic for config)
+- **Data model**: Plain dataclasses with explicit codecs for persistence of non-JSON-native field types
+
+## Preferred FastAPI App Composition
+
+Use one Python process, but structure it as three FastAPI app objects:
+
+- a root app for process-level wiring (middleware, shared startup/shutdown, top-level health endpoints)
+- the root app lives in `packages/server/app.py`
+- a Core REST API sub-app mounted under `/api`
+- a BFF sub-app mounted under `/bff`
+
+This keeps deployment simple while giving each layer its own routing and OpenAPI surface. The preferred frontend codegen source is the BFF sub-app schema endpoint, e.g. `/bff/openapi.json`.
+
+## Frontend Tech Stack
+
+- **Bundler**: Vite · **Routing**: React Router · **Components**: shadcn/ui · **Styling**: Tailwind CSS
+- **Server state**: TanStack Query · **Client state**: Zustand
+- **Graphs**: React Flow · **Tables**: TanStack Table · **Tests**: Vitest + RTL
+
+## Adding New Features
+
+1. Define the data model in `packages/api/models/` as dataclasses
+2. Add codecs in `packages/api/serialization/` when persisted fields are not JSON-native
+3. Add storage access via the `StorageBackend` interface in `packages/api/storage/`
+4. Implement business logic and expose via Core REST API router (`/api/v1/...`) — no UI semantics
+5. Add BFF router endpoint (`/bff/...`) shaped for what the frontend needs and include it in the dedicated BFF OpenAPI schema used by the frontend
+6. Implement frontend: TanStack Query hook → feature component using shadcn/ui + Tailwind

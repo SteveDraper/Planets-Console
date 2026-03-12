@@ -1,0 +1,121 @@
+---
+description: Frontend conventions for React, TypeScript, TanStack Query, Zustand, shadcn/ui, Tailwind, React Flow, and TanStack Table.
+globs: packages/frontend/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend Conventions
+
+## Project Setup
+
+- Vite + React + TypeScript; routing via React Router
+- Components from **shadcn/ui** — prefer these over custom primitives
+- Styling with **Tailwind CSS** — no separate CSS files unless unavoidable
+- All BFF calls go through a typed API client in `src/api/` — never `fetch` directly in components
+
+## BFF Types — OpenAPI Codegen
+
+TypeScript types for all BFF responses are **generated from the BFF-only OpenAPI spec** — never written by hand. This ensures the frontend and BFF stay in sync: a BFF response shape change will produce a TypeScript compile error in the frontend.
+
+The generated file is `src/api/schema.ts` (committed to the repo, never hand-edited). Regenerate it by running:
+
+```bash
+npm run generate:api
+```
+
+Use the generated path types via `openapi-typescript`'s path-based interface:
+
+```ts
+// src/api/systems.ts
+import type { paths } from './schema'
+
+type SystemView =
+  paths['/bff/systems/{id}']['get']['responses']['200']['content']['application/json']
+
+export async function fetchSystem(id: string): Promise<SystemView> {
+  const res = await fetch(`/bff/systems/${id}`)
+  if (!res.ok) throw new Error('Failed to fetch system')
+  return res.json()
+}
+```
+
+- Define one API client file per domain resource in `src/api/` (e.g. `src/api/systems.ts`)
+- TanStack Query hooks in feature folders import from `src/api/` — they never call `fetch` directly
+- If `src/api/schema.ts` is out of date, run `generate:api` and fix any resulting type errors before merging
+- `schema.ts` must be generated from the BFF-only schema endpoint, not from a whole-process backend schema
+
+## State Management — The Core Rule
+
+| Data type | Tool |
+|---|---|
+| Anything fetched from the BFF | **TanStack Query** |
+| Ephemeral UI state (selections, open/close, filters) | **Zustand** |
+
+Never copy server data into a Zustand store. Never use TanStack Query for purely local UI state.
+
+```ts
+// ✅ Server state — TanStack Query (names below are illustrative)
+export function useItems() {
+  return useQuery({ queryKey: ['items'], queryFn: fetchItems });
+}
+
+// ✅ UI state — Zustand (only for ephemeral local state)
+const useFeatureUIStore = create<FeatureUIState>()(set => ({
+  selectedId: null,
+  setSelected: (id) => set({ selectedId: id }),
+}));
+
+// ❌ Never do this — server data does not belong in Zustand
+const useItemsStore = create()(() => ({ items: [] }));
+```
+
+## Component Structure
+
+- One component per file; filename matches component name
+- Colocate hooks, types, and tests with the component they belong to
+- Keep `src/components/` for shared/generic components; feature components live under `src/features/<feature>/`
+
+### Source layout (concrete — follow this structure)
+
+```
+src/
+├── api/
+│   ├── schema.ts      # Generated — do not edit. Run `npm run generate:api` to update.
+│   ├── systems.ts     # (illustrative) Typed fetch functions for one domain resource
+│   └── ...            # One file per domain resource
+├── components/    # Genuinely shared components reused across multiple features
+├── features/      # One subdirectory per product domain feature (see below)
+└── routes/        # React Router route components — thin shells that render feature components
+```
+
+### Feature folder convention (concrete)
+
+Each feature gets its own subdirectory under `src/features/`. The folder name is a domain concept (e.g. `solar-systems`, `missions`, `dashboard`). Inside it, colocate everything that belongs to that feature:
+
+```
+src/features/<feature-name>/
+├── <FeatureComponent>.tsx       # Main component(s) for this feature
+├── <FeatureComponent>.test.tsx  # Tests colocated with the component
+├── use<FeatureName>.ts          # TanStack Query hooks for server state
+└── <featureName>UIStore.ts      # Zustand store — only add if UI state is needed
+```
+
+The names `planets/`, `PlanetList`, and `usePlanets` used elsewhere in this file are **illustrative placeholders** chosen to match the project name. Replace them with the actual domain concepts as features are built.
+
+A component starts in its feature folder. If it later becomes reusable across multiple features, promote it to `src/components/`.
+
+## Graphs — React Flow
+
+- Wrap React Flow in a feature-specific component; never use it directly in a route
+- Node and edge types defined as TypeScript types in the same feature folder
+
+## Tables — TanStack Table
+
+- Define column configs with `ColumnDef<T>` typed to the data model
+- Use shadcn/ui `Table` primitives for rendering
+
+## Testing (Vitest + RTL)
+
+- Test files colocated with components: `Component.test.tsx`
+- Prefer testing user behaviour over implementation details
+- Mock BFF calls at the API client layer, not inside components

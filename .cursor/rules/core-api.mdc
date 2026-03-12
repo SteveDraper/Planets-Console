@@ -1,0 +1,114 @@
+---
+description: Core REST API layer conventions — data model, FastAPI router patterns, business logic rules, and the boundary with the storage sub-layer below and the BFF layer above.
+globs: packages/api/**/*.py
+alwaysApply: false
+---
+
+# Core REST API Layer Conventions
+
+This layer owns the data model and all business logic. It has no knowledge of the SPA or the BFF above it. See `storage.mdc` for the storage sub-layer below.
+
+## Package Structure
+
+```
+packages/api/
+├── models/       # Dataclass definitions — the data model
+├── services/     # Business logic (called by routers, call storage via injected backend)
+├── routers/      # FastAPI APIRouter definitions (one file per domain resource)
+├── transport/    # Optional request/response contract models when HTTP contracts differ from domain models
+├── serialization/ # Explicit codecs for persistence of non-JSON-native field types
+├── storage/      # StorageBackend protocol + implementations (see storage.mdc)
+├── config.py     # AppConfig dataclass + load_config() (see python-tooling.mdc)
+└── app.py        # Core REST API FastAPI sub-app assembly — mounts API routers only
+```
+
+## Data Model
+
+- All domain objects defined as plain `@dataclass` classes in `packages/api/models/`
+- No ORM, no Pydantic models in the data layer
+
+```python
+# packages/api/models/system.py
+@dataclass
+class SolarSystem:
+    id: str
+    name: str
+    star_count: int
+```
+
+## Transport Schemas
+
+FastAPI request/response contracts may reuse domain dataclasses directly **when the domain shape already matches the external API contract**. When the HTTP contract differs, define dedicated transport models in `packages/api/transport/`.
+
+- Reuse domain dataclasses only when field names, shape, and semantics are already correct for the API boundary
+- Introduce dedicated request/response models when the HTTP contract needs different naming, field omission, versioning, validation, or composition
+- Keep the distinction honest: domain models represent the problem space; transport models represent the wire contract
+
+This means the Core REST API may sometimes return a domain dataclass directly and may sometimes map to a transport model first. The BFF will typically need dedicated transport models more often than the Core REST API.
+
+## Serialization Pattern
+
+The storage sub-layer operates entirely in `dict` (JSON blobs). Conversion between dicts and dataclasses happens exclusively in the **service layer** using explicit codecs from `packages/api/serialization/` — never in routers and never inside `storage/`.
+
+- JSON-native dataclasses may use `dataclasses.asdict()` on write
+- `dict -> dataclass` reconstruction uses `dacite.from_dict()`
+- Any non-JSON-native field type (`datetime`, `UUID`, `Enum`, `Path`, `Decimal`, tagged unions, etc.) must be handled via explicit codecs in `packages/api/serialization/`
+- Services call codec functions; they do not hand-encode special field types inline
+
+```python
+# Writing
+payload = system_to_json(obj)
+self._storage.put(f"systems/{obj.id}", payload)
+
+# Reading
+data = self._storage.get(f"systems/{id}")
+return system_from_json(data) if data else None
+```
+
+The storage layer never sees dataclass types or codecs; services never let raw dicts leak beyond their own methods.
+
+## FastAPI Routers
+
+- One `APIRouter` per domain resource in `packages/api/routers/`
+- All routes use prefix `/api/v1/...`
+- Routers are registered in `packages/api/app.py` — no inline route handlers there
+- Routers call services; services call storage — routers do not touch storage directly
+
+```python
+# packages/api/routers/systems.py
+router = APIRouter(prefix="/api/v1/systems", tags=["systems"])
+
+@router.get("/{id}")
+def get_system(id: str, svc: SystemService = Depends(get_system_service)):
+    return svc.get(id)
+```
+
+## Business Logic (Services)
+
+- Services live in `packages/api/services/`, one file per domain
+- Services receive a `StorageBackend` instance via constructor injection — never instantiate storage inside a service
+- Services contain all business logic; routers contain only HTTP concerns (request parsing, response shaping, status codes)
+
+```python
+# packages/api/services/systems.py
+class SystemService:
+    def __init__(self, storage: StorageBackend) -> None:
+        self._storage = storage
+
+    def get(self, id: str) -> SolarSystem | None:
+        data = self._storage.get(f"systems/{id}")
+        return system_from_json(data) if data else None
+```
+
+## Testing
+
+- Service unit tests mock `StorageBackend` and verify business behavior, serialization choices, and key selection
+- Router tests exercise HTTP contracts, status codes, and request/response mapping
+- Codec tests live close to `packages/api/serialization/` and cover non-JSON-native field round-trips
+- Avoid tests that couple unrelated layers together when a smaller unit test would prove the same rule
+
+## Layer Boundary Rules
+
+- **No UI semantics** — route paths, field names, and response shapes must reflect the domain, not the SPA's needs. The BFF layer handles UI-specific reshaping.
+- **No BFF imports** — `packages/api` must never import from `packages/bff`
+- **Storage only via protocol** — never reference `FileStorageBackend` or any concrete implementation outside `packages/api/storage/`

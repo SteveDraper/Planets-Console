@@ -1,0 +1,69 @@
+---
+description: Storage sub-layer conventions — the StorageBackend Protocol, key naming, and rules for adding or switching implementations. This is the lowest sub-layer of the Core REST API layer (packages/api). See core-api.mdc for the layer above.
+globs: packages/api/storage/**/*.py
+alwaysApply: false
+---
+
+# Storage Sub-layer Conventions
+
+The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/storage/`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation.
+
+Storage operates only on JSON-compatible `dict` payloads. It does not know about dataclasses or field-specific codecs; those belong to the service and serialization layers above.
+
+## The Protocol
+
+All storage access in `packages/api` goes through `StorageBackend`. It is defined in `packages/api/storage/base.py` and imported everywhere storage is needed.
+
+```python
+from typing import Protocol
+
+class StorageBackend(Protocol):
+    def get(self, key: str) -> dict | None: ...
+    def put(self, key: str, value: dict) -> None: ...
+    def delete(self, key: str) -> None: ...
+    def list(self, prefix: str) -> list[str]: ...
+```
+
+- **Never** import a concrete implementation (`FileStorageBackend`, etc.) outside `packages/api/storage/`
+- The active backend is injected via dependency injection (FastAPI `Depends`) — never instantiated inline in routers or services
+
+```python
+# ✅ Correct — injected
+def get_storage() -> StorageBackend:
+    return _storage_instance
+
+@router.get("/planets/{id}")
+def get_planet(id: str, storage: StorageBackend = Depends(get_storage)):
+    ...
+
+# ❌ Wrong — concrete type leaked into router
+from api.storage.file import FileStorageBackend
+storage = FileStorageBackend("./data")
+```
+
+## Key Naming
+
+Keys are hierarchical path strings. Use lowercase, forward-slash separated segments. No leading slash.
+
+```
+planets/sol/earth
+planets/sol/mars
+systems/sol
+```
+
+- Segments should be stable identifiers (slugs or IDs), not display names
+- Use `list(prefix="planets/sol/")` to enumerate children of a node
+- Keys must be treated as opaque strings outside the storage module — no string splitting in business logic
+
+## Adding a New Implementation
+
+1. Create `packages/api/storage/<name>.py` implementing `StorageBackend`
+2. Add a config flag in `AppConfig` to select the backend (e.g. `storage_backend: str = "file"`)
+3. Update the `get_storage()` factory in `packages/api/storage/__init__.py` — nowhere else
+4. Write unit tests mocking `StorageBackend` — never tests against the concrete class from outside storage
+
+## Current Implementations
+
+| Name | Module | Notes |
+|---|---|---|
+| File-based | `storage/file.py` | Stores JSON files under `storage_root/` mirroring key hierarchy |

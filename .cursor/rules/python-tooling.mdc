@@ -1,0 +1,59 @@
+---
+description: Cross-cutting Python tooling conventions — uv, OmegaConf config, and Typer CLI. Applies to all Python packages and scripts.
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python Tooling Conventions
+
+These conventions apply across all Python packages (`api`, `bff`) and scripts.
+
+## Environment & Packaging (uv)
+
+- Use `uv` for all dependency and virtual environment management — never `pip` directly
+- Each package has its own `pyproject.toml`; root `pyproject.toml` is the uv workspace config
+- Pin Python to 3.14 in every `pyproject.toml`
+
+```toml
+# Root pyproject.toml
+[tool.uv.workspace]
+members = ["packages/api", "packages/bff"]
+
+# packages/api/pyproject.toml
+[project]
+requires-python = ">=3.14"
+```
+
+## Configuration (OmegaConf)
+
+- Config schema defined as a plain `@dataclass` — no Pydantic
+- Load with `OmegaConf.structured()`, merge overrides with `OmegaConf.merge()`
+- Convert to a dataclass instance before passing config out of the config module — never pass raw OmegaConf objects into application code
+
+```python
+@dataclass
+class AppConfig:
+    host: str = "0.0.0.0"
+    port: int = 8000
+    storage_root: str = "./data"
+
+def load_config(path: str | None = None) -> AppConfig:
+    base = OmegaConf.structured(AppConfig)
+    if path:
+        base = OmegaConf.merge(base, OmegaConf.load(path))
+    return OmegaConf.to_object(base)
+```
+
+## CLI (Typer)
+
+- Use Typer for the service entrypoint and all auxiliary scripts in `scripts/`
+- CLI concerns (arg parsing, config path resolution) stay inside the Typer command function; resolved config is passed into application logic
+
+```python
+app = typer.Typer()
+
+@app.command()
+def serve(config: str = typer.Option(None, help="Path to config file")):
+    cfg = load_config(config)
+    uvicorn.run("server.app:app", host=cfg.host, port=cfg.port)
+```
