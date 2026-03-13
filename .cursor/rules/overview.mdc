@@ -1,0 +1,23 @@
+---
+description: Provides an overview of what Planets Console is, and the capabilities it provides
+alwaysApply: true
+---
+Planets Console is an analytic console onto game states from the game panets.nu.  planets.nu is an implementation of https://vgaplanets.org/index.php?title=Main_Page with a browser front end.
+
+The console will be able to load game state data and perform analytics on it that will highlight useful features and situations to players useng the console to analyze their games.
+
+In overall UI layout the console will be a single page app with the real-estate divided into three main areas:
+
+1. Header bar containing context information that controls where the game state being anlysed comes from.  Elements (laid out horizontally in this bar) will provide:
+1.1 Login identity (player name whose login is used to retrieve the data)
+1.2 Game (tuple of an id and a name)
+1.3 Turn number
+1.4 Viewpoint identity (player name for the player whose position is being shown/analyzed)
+1.5 Mode toggle (always right-aligned) - two-state toggle between tabular and map views
+1.6 A scale slider that is disabled when not in map mode which visually stays with the mode toggle
+
+2. Analytics selector bar - vertical bar left aligned containing a vertical list of sections that define individual analytics.  These will always contain an enable/disable toggle (whether the analytic in question is included in the view or not), and may contain other (low-real-estate) controls to configure that analytic.  If the configuration requires significant UI area then it will be under a 'details' expanding control so that the individual analytic element never takes up much vertical space apart perhaps from transiently while it is being reconfigured.  Each analytic may be able to provide content in eitehr the tabular or the map view modes or display.  Those that do not support the current mode will retain their enablement toggle state but appeared greyed out in the mode they do not support
+
+3. The bulk of the display area (all ut th top bar and the left analytics selector) will contain the output of the analytics.  What this renders depends on the selected mode (tabular vs map):
+* In tabular mode this will be tabular output for each selected analytic in vertically stacked sub-tiles (one per enabled analytic with a title conveyign which it is)
+* In map mode this will be a rendering of the game map (essentially a graph with planets as nodes and connections as edges).  This map will be draggable and scrollable via the mouse-wheel to recenter and scalable via the scaling slider
