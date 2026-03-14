@@ -1,13 +1,14 @@
-import { createContext, type CSSProperties, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BaseEdge,
-  getStraightPath,
   ReactFlow,
-  Background,
   Handle,
   Panel,
   Position,
+  getStraightPath,
+  useReactFlow,
   useStore,
+  useStoreApi,
   type Node,
   type Edge,
   type EdgeProps,
@@ -16,21 +17,26 @@ import {
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
 
-type DotNodeData = {
+type MapNodeData = {
   label?: string
   ordinal: number
   x: number
   y: number
 }
 
+/** Stable node size in flow space so React Flow keeps node measurements through zoom. */
+const NODE_SIZE_FLOW = 12
 /** Fixed pixel size of the planet dot on screen (independent of zoom). */
 const DOT_PIXELS = 8
-/** Minimum node size in flow space so nodes don't vanish at very high zoom. */
-const MIN_NODE_SIZE_FLOW = 0.5
-/** Minimum edge stroke in flow space so edges don't vanish at very high zoom. */
-const MIN_STROKE_FLOW = 0.05
 /** Offset so node and edge targets use the center of the map cell (0.5, 0.5) as demarcated by grid lines at integers. */
 const CELL_CENTER_OFFSET = 0.5
+
+/** Fraction of display area to leave as blank margin on each side when fitting initial view (0.1 = 10%). */
+const INITIAL_FIT_MARGIN = 0.1
+
+function safeZoomScale(scale: number | undefined): number {
+  return typeof scale === 'number' && Number.isFinite(scale) && scale > 0 ? scale : 1
+}
 
 /** Invisible handle at node center so edges connect to dot center. */
 const centerHandleStyle: CSSProperties = {
@@ -39,33 +45,32 @@ const centerHandleStyle: CSSProperties = {
   left: '50%',
   transform: 'translate(-50%, -50%)',
   opacity: 0,
-  width: 1,
-  height: 1,
-  minWidth: 1,
-  minHeight: 1,
+  width: 12,
+  height: 12,
+  minWidth: 12,
+  minHeight: 12,
   border: 'none',
   padding: 0,
+  background: 'transparent',
+  pointerEvents: 'none',
 }
 
-/** Dot plus label. Node wrapper is exactly dotSizeFlow so bbox center = (px,py). Dot is drawn by FixedSizeDotsOverlay (always 8px); this node only provides layout and label. Read-only. */
-function DotNode(props: NodeProps<Node<DotNodeData>>) {
+/** Invisible routing node; visible dot is drawn by the overlay. */
+function DotNode(props: NodeProps<Node<MapNodeData>>) {
   const d = props.data
-  const scale = useStore((s) => s.transform?.[2] ?? 1)
   const label = d?.label ?? ''
   const x = typeof d?.x === 'number' && Number.isFinite(d.x) ? d.x : '?'
   const y = typeof d?.y === 'number' && Number.isFinite(d.y) ? d.y : '?'
-  const s = Math.max(scale, 0.1)
-  const dotSizeFlow = Math.max(DOT_PIXELS / s, MIN_NODE_SIZE_FLOW)
   return (
     <div
       className="relative"
-      style={{ width: dotSizeFlow, height: dotSizeFlow, minWidth: dotSizeFlow, minHeight: dotSizeFlow }}
+      style={{ width: NODE_SIZE_FLOW, height: NODE_SIZE_FLOW, minWidth: NODE_SIZE_FLOW, minHeight: NODE_SIZE_FLOW }}
     >
       <Handle type="target" position={Position.Left} id="t" style={centerHandleStyle} />
       <Handle type="source" position={Position.Left} id="s" style={centerHandleStyle} />
       <span
         className="absolute left-full top-1/2 -translate-y-1/2 whitespace-nowrap pl-1 font-mono text-gray-300"
-        style={{ fontSize: 10 / s }}
+        style={{ fontSize: 10 }}
       >
         {label} ({String(x)},{String(y)})
       </span>
@@ -75,10 +80,45 @@ function DotNode(props: NodeProps<Node<DotNodeData>>) {
 
 const nodeTypes = { dot: DotNode }
 
-/** Map coordinates (px, py) are cell indices; we place the dot at the center of the cell (px + 0.5, py + 0.5) so edges and dot align at high zoom. */
-function toFlowNodes(nodes: CombinedMapData['nodes'], scale: number): Node<DotNodeData>[] {
-  const s = Math.max(scale, 0.1)
-  const half = Math.max(DOT_PIXELS / 2 / s, MIN_NODE_SIZE_FLOW / 2)
+/** Custom edge keeps endpoints centered on dot nodes and stays visually 1px while zooming. */
+function StraightEdgeOnePixel(props: EdgeProps) {
+  const storeState = useStore((s) => s) as {
+    nodeLookup?: Map<string, Node>
+    nodeInternals?: Map<string, Node>
+    transform?: [number, number, number]
+  }
+  const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
+  const scale = safeZoomScale(storeState.transform?.[2])
+  const half = NODE_SIZE_FLOW / 2
+  const sourceNode = nodeLookup?.get(props.source)
+  const targetNode = nodeLookup?.get(props.target)
+  const sourceX = sourceNode ? sourceNode.position.x + half : props.sourceX
+  const sourceY = sourceNode ? sourceNode.position.y + half : props.sourceY
+  const targetX = targetNode ? targetNode.position.x + half : props.targetX
+  const targetY = targetNode ? targetNode.position.y + half : props.targetY
+  const [path] = getStraightPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  })
+
+  return (
+    <BaseEdge
+      path={path}
+      style={{
+        stroke: '#b1b1b7',
+        strokeWidth: 1 / scale,
+      }}
+    />
+  )
+}
+
+const edgeTypes = { straight: StraightEdgeOnePixel }
+
+/** Map coordinates (px, py) are cell indices; node geometry stays fixed and centered on the map cell. */
+function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
+  const half = NODE_SIZE_FLOW / 2
   return nodes.map((node, i) => {
     const x = Number(node.x)
     const y = Number(node.y)
@@ -90,86 +130,12 @@ function toFlowNodes(nodes: CombinedMapData['nodes'], scale: number): Node<DotNo
       id: node.id,
       type: 'dot',
       position: { x: cx - half, y: cy - half },
+      width: NODE_SIZE_FLOW,
+      height: NODE_SIZE_FLOW,
       data: { label: node.label, ordinal: i + 1, x: px, y: py },
     }
   })
 }
-
-const EDGE_STROKE = '#9ca3af'
-
-/** Straight edge from node center to node center; use node position + half size (same as layout) so edge aligns to cell center. 1px stroke at any zoom. */
-function StraightEdgeOnePixel(props: EdgeProps) {
-  const {
-    source,
-    target,
-    style,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition: _sp,
-    targetPosition: _tp,
-    sourceHandleId: _sh,
-    targetHandleId: _th,
-    pathOptions: _po,
-    selectable: _sel,
-    deletable: _del,
-    ...rest
-  } = props
-  const scale = useStore((s) => s.transform?.[2] ?? 1)
-  const storeState = useStore((s) => s) as { nodeLookup?: Map<string, Node>; nodeInternals?: Map<string, Node> }
-  const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
-  const sourceNode = nodeLookup?.get(source) as Node<DotNodeData> | undefined
-  const targetNode = nodeLookup?.get(target) as Node<DotNodeData> | undefined
-  const s = Math.max(scale, 0.1)
-  const half = Math.max(DOT_PIXELS / 2 / s, MIN_NODE_SIZE_FLOW / 2)
-  const sx =
-    sourceNode?.position != null
-      ? sourceNode.position.x + half
-      : typeof sourceNode?.data?.x === 'number'
-        ? sourceNode.data.x + CELL_CENTER_OFFSET
-        : sourceX
-  const sy =
-    sourceNode?.position != null
-      ? sourceNode.position.y + half
-      : typeof sourceNode?.data?.y === 'number'
-        ? sourceNode.data.y + CELL_CENTER_OFFSET
-        : sourceY
-  const tx =
-    targetNode?.position != null
-      ? targetNode.position.x + half
-      : typeof targetNode?.data?.x === 'number'
-        ? targetNode.data.x + CELL_CENTER_OFFSET
-        : targetX
-  const ty =
-    targetNode?.position != null
-      ? targetNode.position.y + half
-      : typeof targetNode?.data?.y === 'number'
-        ? targetNode.data.y + CELL_CENTER_OFFSET
-        : targetY
-  const [path, labelX, labelY] = getStraightPath({
-    sourceX: sx,
-    sourceY: sy,
-    targetX: tx,
-    targetY: ty,
-  })
-  const strokeWidth = Math.max(1 / Math.max(scale, 0.1), MIN_STROKE_FLOW)
-  return (
-    <BaseEdge
-      path={path}
-      labelX={labelX}
-      labelY={labelY}
-      style={{
-        ...style,
-        stroke: EDGE_STROKE,
-        strokeWidth,
-      }}
-      {...rest}
-    />
-  )
-}
-
-const edgeTypes = { straight: StraightEdgeOnePixel }
 
 function toEdges(edges: CombinedMapData['edges']): Edge[] {
   return edges.map((e, i) => ({
@@ -204,6 +170,83 @@ function clientToFlowPosition(
   const y = (paneY - ty) / scale
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   return { x, y }
+}
+
+/**
+ * Computes initial viewport so the bounding rectangle of all node centers is
+ * centered with a 10% margin (whichever dimension is most constrained).
+ * Runs once when the pane has size and nodes are present. Calls onInitialFitDone when done (or when no fit will run).
+ */
+function InitialViewportFit({
+  nodes,
+  onInitialFitDone,
+  onMapZoomChange,
+}: {
+  nodes: CombinedMapData['nodes']
+  onInitialFitDone: () => void
+  onMapZoomChange: (zoom: number) => void
+}) {
+  const { setViewport } = useReactFlow()
+  const domNode = useStore((s) => s.domNode ?? null)
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  const hasFittedRef = useRef(false)
+  const doneCalledRef = useRef(false)
+
+  const callDoneOnce = useCallback(() => {
+    if (doneCalledRef.current) return
+    doneCalledRef.current = true
+    onInitialFitDone()
+  }, [onInitialFitDone])
+
+  useEffect(() => {
+    if (!domNode) return
+    let raf = 0
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 }
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => setSize({ width, height }))
+    })
+    ro.observe(domNode)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [domNode])
+
+  useEffect(() => {
+    if (nodes.length === 0) {
+      callDoneOnce()
+      return
+    }
+    if (size.width <= 0 || size.height <= 0 || hasFittedRef.current) return
+    const xs = nodes.map((n) => Number(n.x)).filter(Number.isFinite)
+    const ys = nodes.map((n) => Number(n.y)).filter(Number.isFinite)
+    if (xs.length === 0 || ys.length === 0) {
+      callDoneOnce()
+      return
+    }
+    const minFx = Math.min(...xs) + CELL_CENTER_OFFSET
+    const maxFx = Math.max(...xs) + CELL_CENTER_OFFSET
+    const minFy = Math.min(...ys) + CELL_CENTER_OFFSET
+    const maxFy = Math.max(...ys) + CELL_CENTER_OFFSET
+    const contentWidth = Math.max(maxFx - minFx, 1)
+    const contentHeight = Math.max(maxFy - minFy, 1)
+    const centerX = (minFx + maxFx) / 2
+    const centerY = (minFy + maxFy) / 2
+    const usableW = size.width * (1 - 2 * INITIAL_FIT_MARGIN)
+    const usableH = size.height * (1 - 2 * INITIAL_FIT_MARGIN)
+    const scaleW = usableW / contentWidth
+    const scaleH = usableH / contentHeight
+    const zoom = Math.min(40, Math.max(0.2, Math.min(scaleW, scaleH)))
+    const x = size.width / 2 - centerX * zoom
+    const y = size.height / 2 - centerY * zoom
+    hasFittedRef.current = true
+    setViewport({ x, y, zoom })
+    onMapZoomChange(zoom)
+    callDoneOnce()
+  }, [nodes, size, setViewport, callDoneOnce, onMapZoomChange])
+
+  return null
 }
 
 /**
@@ -281,7 +324,8 @@ function CoordinateGridOverlay() {
   }, [domNode])
 
   if (!transform || size.width <= 0 || size.height <= 0) return null
-  const [tx, ty, scale] = transform
+  const [tx, ty, rawScale] = transform
+  const scale = safeZoomScale(rawScale)
   if (scale < GRID_ZOOM_THRESHOLD) return null
 
   const { width, height } = size
@@ -331,12 +375,15 @@ function CoordinateGridOverlay() {
 
 /**
  * Renders planet dots in screen (pane) space so they are always exactly DOT_PIXELS
- * in size regardless of zoom. Uses same flow→pane conversion as the grid.
+ * in size regardless of zoom. Uses same flow->pane conversion as the grid.
  */
 function FixedSizeDotsOverlay() {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
-  const storeState = useStore((s) => s) as unknown as { nodeLookup?: Map<string, { id: string; position: { x: number; y: number } }>; nodeInternals?: Map<string, { id: string; position: { x: number; y: number } }> }
+  const storeState = useStore((s) => s) as unknown as {
+    nodeLookup?: Map<string, { id: string; position: { x: number; y: number } }>
+    nodeInternals?: Map<string, { id: string; position: { x: number; y: number } }>
+  }
   const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
   const [size, setSize] = useState({ width: 0, height: 0 })
 
@@ -356,9 +403,9 @@ function FixedSizeDotsOverlay() {
   }, [domNode])
 
   if (!transform || !nodeLookup || size.width <= 0 || size.height <= 0) return null
-  const [tx, ty, scale] = transform
-  const s = Math.max(scale, 0.1)
-  const half = Math.max(DOT_PIXELS / 2 / s, MIN_NODE_SIZE_FLOW / 2)
+  const [tx, ty, rawScale] = transform
+  const scale = safeZoomScale(rawScale)
+  const half = NODE_SIZE_FLOW / 2
   const nodes = Array.from(nodeLookup.values())
 
   return (
@@ -388,51 +435,95 @@ function FixedSizeDotsOverlay() {
 type MapGraphProps = {
   data: CombinedMapData
   className?: string
+  onMapZoomChange: (zoom: number) => void
+  /** Called once so the header slider can drive zoom (same as scroll wheel). */
+  onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
-/** Lifts viewport scale from React Flow store to parent (with optional debounce for position updates). */
-const ScaleSyncContext = createContext<((s: number) => void) | null>(null)
-
-function ScaleSync() {
-  const onScaleChange = useContext(ScaleSyncContext)
-  const scale = useStore((s) => s.transform?.[2] ?? 1)
+/** Mirrors React Flow zoom to the app (wheel, pinch, initial fit, slider). */
+function ViewportZoomSync({ onMapZoomChange }: { onMapZoomChange: (z: number) => void }) {
+  const raw = useStore((s) => s.transform?.[2])
+  const zoom = Number.isFinite(raw) && (raw as number) > 0 ? (raw as number) : 1
+  const prev = useRef(zoom)
   useEffect(() => {
-    onScaleChange?.(scale)
-  }, [scale, onScaleChange])
+    if (Math.abs(prev.current - zoom) < 1e-9) return
+    prev.current = zoom
+    onMapZoomChange(zoom)
+  }, [zoom, onMapZoomChange])
   return null
 }
 
-/** Delay (ms) after zoom stops before we update node positions for correct alignment. */
-const POSITION_UPDATE_DELAY_MS = 120
+/**
+ * Registers setZoom(z) so the header slider can set viewport zoom while keeping the view center fixed.
+ */
+function SliderZoomControl({
+  onMapZoomChange,
+  onSetZoomReady,
+}: {
+  onMapZoomChange: (z: number) => void
+  onSetZoomReady: (setZoom: (z: number) => void) => void
+}) {
+  const { getViewport, setViewport } = useReactFlow()
+  const storeApi = useStoreApi()
+  useEffect(() => {
+    const setZoom = (targetZoom: number) => {
+      const z = Math.min(40, Math.max(0.2, Number(targetZoom) || 0.2))
+      const apply = () => {
+        const domNode = storeApi.getState().domNode
+        if (!domNode || domNode.getBoundingClientRect().width <= 0) return false
+        const vp = getViewport()
+        const rect = domNode.getBoundingClientRect()
+        const w = Math.max(rect.width, 1)
+        const h = Math.max(rect.height, 1)
+        const vz = Math.max(Number(vp.zoom) || 0.2, 0.2)
+        const vx = Number.isFinite(vp.x) ? vp.x : 0
+        const vy = Number.isFinite(vp.y) ? vp.y : 0
+        const cx = (w / 2 - vx) / vz
+        const cy = (h / 2 - vy) / vz
+        const nx = w / 2 - cx * z
+        const ny = h / 2 - cy * z
+        if (!Number.isFinite(nx) || !Number.isFinite(ny)) return false
+        setViewport({ x: nx, y: ny, zoom: z })
+        onMapZoomChange(z)
+        return true
+      }
+      if (apply()) return
+      let n = 0
+      const tick = () => {
+        if (apply()) return
+        if (++n >= 30) return
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    }
+    onSetZoomReady(setZoom)
+  }, [getViewport, setViewport, storeApi, onMapZoomChange, onSetZoomReady])
+  return null
+}
 
-export function MapGraph({ data, className }: MapGraphProps) {
-  const [scaleForPositions, setScaleForPositions] = useState(1)
-  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+/** Max time to wait for initial viewport fit before showing the map anyway (avoids staying invisible if fit never runs). */
+const INITIAL_FIT_REVEAL_MS = 250
 
-  const onScaleChange = useCallback((newScale: number) => {
-    if (delayRef.current) clearTimeout(delayRef.current)
-    delayRef.current = setTimeout(() => {
-      delayRef.current = null
-      setScaleForPositions(newScale)
-    }, POSITION_UPDATE_DELAY_MS)
-  }, [])
+export function MapGraph({ data, className, onMapZoomChange, onSetZoomReady }: MapGraphProps) {
+  const [initialFitDone, setInitialFitDone] = useState(false)
+
+  const onInitialFitDone = useCallback(() => setInitialFitDone(true), [])
 
   useEffect(() => {
-    return () => {
-      if (delayRef.current) clearTimeout(delayRef.current)
-    }
+    const t = setTimeout(() => setInitialFitDone(true), INITIAL_FIT_REVEAL_MS)
+    return () => clearTimeout(t)
   }, [])
 
-  const nodes = useMemo(
-    () => toFlowNodes(data.nodes, scaleForPositions),
-    [data.nodes, scaleForPositions]
-  )
+  const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
   const edges = useMemo(() => toEdges(data.edges), [data.edges])
 
   return (
-    <ScaleSyncContext.Provider value={onScaleChange}>
+    <div
+      className={`map-graph-cursor-default relative min-h-0 overflow-hidden rounded bg-black ${className ?? 'h-[320px] w-full min-w-0'}`}
+    >
       <div
-        className={`map-graph-cursor-default relative min-h-0 overflow-hidden rounded bg-black ${className ?? 'h-[320px] w-full min-w-0'}`}
+        className="h-full w-full transition-opacity duration-150"
+        style={{ opacity: initialFitDone ? 1 : 0 }}
       >
         <ReactFlow
           nodes={nodes}
@@ -451,18 +542,18 @@ export function MapGraph({ data, className }: MapGraphProps) {
           zoomOnScroll
           zoomOnPinch
         >
-          <ScaleSync />
-          <Background
-            gap={16}
-            size={1}
-            className="!stroke-gray-800"
-            color="#1f2937"
+          <InitialViewportFit
+            nodes={data.nodes}
+            onInitialFitDone={onInitialFitDone}
+            onMapZoomChange={onMapZoomChange}
           />
+          <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
+          <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
           <CoordinateGridOverlay />
           <FixedSizeDotsOverlay />
           <FlowCoordinateReadout />
         </ReactFlow>
       </div>
-    </ScaleSyncContext.Provider>
+    </div>
   )
 }

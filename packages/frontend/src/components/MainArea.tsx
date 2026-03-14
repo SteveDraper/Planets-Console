@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type { AnalyticItem, CombinedMapData, MapDataResponse } from '../api/bff'
@@ -32,6 +33,8 @@ type MainAreaProps = {
   viewMode: ViewMode
   enabledAnalyticIds: string[]
   analytics: AnalyticItem[]
+  onMapZoomChange: (zoom: number) => void
+  onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
 function TableTile({ analyticId }: { analyticId: string }) {
@@ -39,16 +42,16 @@ function TableTile({ analyticId }: { analyticId: string }) {
     queryKey: ['analytic', analyticId, 'table'],
     queryFn: () => fetchAnalyticTable(analyticId),
   })
-  if (isPending) return <div className="p-4 text-sm text-gray-500">Loading…</div>
-  if (error) return <div className="p-4 text-sm text-red-600">Error loading data</div>
+  if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
+  if (error) return <div className="p-4 text-sm text-red-400">Error loading data</div>
   if (!data) return null
   return (
     <div className="overflow-auto">
       <table className="min-w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-gray-200 dark:border-gray-600">
+          <tr className="border-b border-[#52575d]">
             {data.columns.map((c) => (
-              <th key={c} className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
+              <th key={c} className="px-3 py-2 text-left font-medium text-slate-200">
                 {c}
               </th>
             ))}
@@ -56,9 +59,9 @@ function TableTile({ analyticId }: { analyticId: string }) {
         </thead>
         <tbody>
           {data.rows.map((row, i) => (
-            <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
+            <tr key={i} className="border-b border-[#52575d]/60">
               {row.map((cell, j) => (
-                <td key={j} className="px-3 py-2 text-gray-600 dark:text-gray-400">
+                <td key={j} className="px-3 py-2 text-gray-400">
                   {cell}
                 </td>
               ))}
@@ -94,13 +97,40 @@ function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]): stri
   return base ? [base, ...withoutBase] : withoutBase
 }
 
-export function MainArea({ viewMode, enabledAnalyticIds, analytics }: MainAreaProps) {
-  const hasBaseMap = baseMapId(analytics) != null
-  const enabledMapIds = enabledMapAnalyticIds(enabledAnalyticIds, analytics)
+export function MainArea({
+  viewMode,
+  enabledAnalyticIds,
+  analytics,
+  onMapZoomChange,
+  onSetZoomReady,
+}: MainAreaProps) {
+  const enabledMapIds = useMemo(
+    () => enabledMapAnalyticIds(enabledAnalyticIds, analytics),
+    [enabledAnalyticIds, analytics]
+  )
+  const mapIds = useMemo(
+    () => (viewMode === 'map' ? mapIdsToFetch(analytics, enabledMapIds) : []),
+    [viewMode, analytics, enabledMapIds]
+  )
+
+  const mapQueries = useQueries({
+    queries: mapIds.map((analyticId) => ({
+      queryKey: ['analytic', analyticId, 'map'] as const,
+      queryFn: () => fetchAnalyticMap(analyticId),
+    })),
+  })
+  const pending = mapQueries.some((q) => q.isPending)
+  const hasError = mapQueries.some((q) => q.error)
+  const mapQueryData = mapQueries.map((q) => q.data)
+  const combined = useMemo(
+    () => combineMapData(mapIds, mapQueryData.map((data) => ({ data }))),
+    [mapIds, ...mapQueryData]
+  )
+  const hasAnyData = mapQueries.some((q) => q.data != null)
 
   if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
     return (
-      <main className="flex flex-1 items-center justify-center p-8 text-gray-500 dark:text-gray-400">
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Enable at least one analytic in the left bar.
       </main>
     )
@@ -108,13 +138,13 @@ export function MainArea({ viewMode, enabledAnalyticIds, analytics }: MainAreaPr
 
   if (viewMode === 'tabular') {
     return (
-      <main className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+      <main className="flex flex-1 flex-col gap-4 overflow-auto bg-black p-4">
         {enabledAnalyticIds.map((id) => (
           <section
             key={id}
-            className="rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900"
+            className="rounded-lg border border-[#52575d] bg-[#40454a] shadow-sm"
           >
-            <h3 className="border-b border-gray-100 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300">
+            <h3 className="border-b border-[#52575d] px-4 py-2 text-sm font-medium text-slate-200">
               Analytic: {id}
             </h3>
             <TableTile analyticId={id} />
@@ -124,25 +154,9 @@ export function MainArea({ viewMode, enabledAnalyticIds, analytics }: MainAreaPr
     )
   }
 
-  // Map mode: base map (planets + edges) always first; selectable analytics add nodes/edges/highlights
-  const mapIds = mapIdsToFetch(analytics, enabledMapIds)
-  const mapQueries = useQueries({
-    queries: mapIds.map((analyticId) => ({
-      queryKey: ['analytic', analyticId, 'map'] as const,
-      queryFn: () => fetchAnalyticMap(analyticId),
-    })),
-  })
-  const pending = mapQueries.some((q) => q.isPending)
-  const hasError = mapQueries.some((q) => q.error)
-  const combined = combineMapData(
-    mapIds,
-    mapQueries.map((q) => ({ data: q.data }))
-  )
-  const hasAnyData = mapQueries.some((q) => q.data != null)
-
   if (viewMode === 'map' && mapIds.length === 0) {
     return (
-      <main className="flex flex-1 items-center justify-center p-8 text-gray-500 dark:text-gray-400">
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         No base map available. Enable at least one map-capable analytic to see the map.
       </main>
     )
@@ -151,27 +165,47 @@ export function MainArea({ viewMode, enabledAnalyticIds, analytics }: MainAreaPr
   // keep rendering the map with current data so React Flow stays mounted and viewport is preserved.
   if (!hasAnyData && pending) {
     return (
-      <main className="flex flex-1 items-center justify-center p-8 text-gray-500 dark:text-gray-400">
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading map…
       </main>
     )
   }
   if (hasError && !hasAnyData) {
     return (
-      <main className="flex flex-1 items-center justify-center p-8 text-red-600 dark:text-red-400">
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-red-400">
         Failed to load map data
       </main>
     )
   }
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col">
-      {pending && (
-        <p className="shrink-0 px-4 py-1 text-sm text-gray-500 dark:text-gray-400">
-          Loading additional map data…
-        </p>
-      )}
-      <MapGraph data={combined} className="h-full w-full min-h-0" />
+    <main className="flex min-h-0 flex-1 flex-col bg-black">
+      <DeferredPendingMessage pending={pending} />
+      <MapGraph
+        data={combined}
+        className="h-full w-full min-h-0"
+        onMapZoomChange={onMapZoomChange}
+        onSetZoomReady={onSetZoomReady}
+      />
     </main>
+  )
+}
+
+/** Shows "Loading additional map data…" only after a short delay so it doesn't flash on first map load. */
+function DeferredPendingMessage({ pending }: { pending: boolean }) {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    if (!pending) {
+      setShow(false)
+      return
+    }
+    const t = setTimeout(() => setShow(true), 400)
+    return () => clearTimeout(t)
+  }, [pending])
+  if (!pending || !show) return null
+  return (
+    <p className="shrink-0 bg-black px-4 py-1 text-sm text-gray-400">
+      Loading additional map data…
+    </p>
   )
 }
