@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type { AnalyticItem, CombinedMapData, MapDataResponse } from '../api/bff'
@@ -122,10 +122,28 @@ export function MainArea({
   const pending = mapQueries.some((q) => q.isPending)
   const hasError = mapQueries.some((q) => q.error)
   const mapQueryData = mapQueries.map((q) => q.data)
-  const combined = useMemo(
-    () => combineMapData(mapIds, mapQueryData.map((data) => ({ data }))),
-    [mapIds, ...mapQueryData]
-  )
+  const combinedCacheRef = useRef<{
+    mapIds: string[]
+    mapQueryData: Array<MapDataResponse | undefined>
+    combined: CombinedMapData
+  } | null>(null)
+  const cachedCombined = combinedCacheRef.current
+  const canReuseCombined =
+    cachedCombined != null &&
+    cachedCombined.mapIds.length === mapIds.length &&
+    cachedCombined.mapQueryData.length === mapQueryData.length &&
+    cachedCombined.mapIds.every((id, i) => id === mapIds[i]) &&
+    cachedCombined.mapQueryData.every((data, i) => data === mapQueryData[i])
+  const combined = canReuseCombined
+    ? cachedCombined.combined
+    : combineMapData(mapIds, mapQueryData.map((data) => ({ data })))
+  if (!canReuseCombined) {
+    combinedCacheRef.current = {
+      mapIds: [...mapIds],
+      mapQueryData: [...mapQueryData],
+      combined,
+    }
+  }
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
   if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
