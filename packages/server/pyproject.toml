@@ -1,0 +1,18 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Root FastAPI app mounting API and BFF"
+requires-python = ">=3.12"
+dependencies = [
+    "api",
+    "bff",
+    "uvicorn[standard]>=0.30.0",
+    "typer>=0.12.0",
+]
+
+[project.scripts]
+serve = "server.cli:app"
+
+[tool.uv.sources]
+api = { workspace = true }
+bff = { workspace = true }

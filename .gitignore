@@ -1,2 +1,7 @@
 # MCP config may contain a GitHub PAT — do not commit
 .cursor/mcp.json
+
+# Python
+.venv/
+
+# Frontend (packages/frontend has its own .gitignore for node_modules, dist)
