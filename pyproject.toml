@@ -1,0 +1,14 @@
+[project]
+name = "planets-console"
+version = "0.1.0"
+description = "Analytic console for planets.nu game state"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["server"]
+
+[tool.uv.workspace]
+members = ["packages/server", "packages/api", "packages/bff"]
+
+[tool.uv.sources]
+server = { workspace = true }
+

@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  color-scheme: light dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Map view: default arrow cursor instead of grab (read-only pan/zoom) */
+.map-graph-cursor-default .react-flow__pane,
+.map-graph-cursor-default .react-flow__pane.draggable,
+.map-graph-cursor-default .react-flow__pane.dragging {
+  cursor: default !important;
+}
