@@ -1,6 +1,7 @@
 pyproject.toml
 bff/__init__.py
 bff/app.py
+bff/errors.py
 bff.egg-info/PKG-INFO
 bff.egg-info/SOURCES.txt
 bff.egg-info/dependency_links.txt

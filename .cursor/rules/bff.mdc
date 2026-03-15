@@ -43,11 +43,15 @@ The BFF may reuse upstream domain dataclasses only when they already match the f
 - Keep these transport models close to the BFF router or in a small `packages/bff/transport/` module if they are shared across routes
 - The BFF should be explicit about what contract it exposes; do not let frontend-facing response shapes emerge accidentally from domain internals
 
+## Exceptions
+
+- See `server-exceptions.mdc` for the exception hierarchy and HTTP handling rules. All exceptions raised by the BFF must inherit from `BFFError` (in `bff.errors`). The BFF app registers a global exception handler via `make_http_exception_handler(BFFError)` (from `api.errors`).
+
 ## Layer Boundary Rules
 
 - **No business logic** — the BFF may filter, aggregate, and rename fields, but must not compute derived state that belongs in the domain model
 - **No direct storage access** — the BFF calls Core REST API services; it never touches `StorageBackend`
-- **Allowed Core REST API import surface** — import from `packages/api/services/` only; do not import from `models/`, `storage/`, or serialization internals
+- **Allowed Core REST API import surface** — import from `packages/api/services/` for business services; import from `packages/api/errors` (e.g. `api.errors`) for `PlanetsConsoleError` and `make_http_exception_handler` only. Do not import from `models/`, `storage/`, or serialization internals
 
 ## OpenAPI Spec & Type Codegen
 

@@ -107,6 +107,10 @@ class SystemService:
 - Codec tests live close to `packages/api/serialization/` and cover non-JSON-native field round-trips
 - Avoid tests that couple unrelated layers together when a smaller unit test would prove the same rule
 
+## Exceptions
+
+- See `server-exceptions.mdc` for the exception hierarchy and HTTP handling rules. All exceptions raised by the Core API must inherit from `CoreAPIError` (in `api.errors`). The app registers a global exception handler via `make_http_exception_handler(CoreAPIError)`.
+
 ## Layer Boundary Rules
 
 - **No UI semantics** — route paths, field names, and response shapes must reflect the domain, not the SPA's needs. The BFF layer handles UI-specific reshaping.

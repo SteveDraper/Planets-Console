@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from bff.errors import BFFError, make_http_exception_handler
 from bff.routers import analytics
 
 app = FastAPI(
@@ -15,6 +16,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_exception_handler(Exception, make_http_exception_handler(BFFError))
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 
 

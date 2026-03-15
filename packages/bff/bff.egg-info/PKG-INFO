@@ -3,6 +3,7 @@ Name: bff
 Version: 0.1.0
 Summary: Backend-for-Frontend layer
 Requires-Python: >=3.12
+Requires-Dist: api
 Requires-Dist: fastapi>=0.115.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0.0; extra == "dev"
