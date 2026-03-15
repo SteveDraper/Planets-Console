@@ -79,3 +79,11 @@ This keeps deployment simple while giving each layer its own routing and OpenAPI
 4. Implement business logic and expose via Core REST API router (`/api/v1/...`) — no UI semantics
 5. Add BFF router endpoint (`/bff/...`) shaped for what the frontend needs and include it in the dedicated BFF OpenAPI schema used by the frontend
 6. Implement frontend: TanStack Query hook → feature component using shadcn/ui + Tailwind
+7. **Features must have unit tests.** Add tests for new behaviour and ensure they are run by the package’s test target (see below).
+
+## Unit tests and Makefile
+
+- **Features should always have unit tests.** New or changed behaviour must be covered by tests in the appropriate package.
+- **Each package that has tests has its own Makefile target.** For example: `test_bff`, `test_api`, `test_frontend`. The target runs that package’s test suite (e.g. `cd packages/<pkg> && uv run pytest` for Python packages).
+- **When adding a new package that has unit tests, add a corresponding `test_<package>` target to the Makefile** and wire it so the package’s tests run from that package directory (or equivalent).
+- **The top-level `test` target in the Makefile must run every package’s tests.** It should depend on all per-package test targets (e.g. `test: test_bff test_api test_frontend`) so that `make test` runs the full suite.
