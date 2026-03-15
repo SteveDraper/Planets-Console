@@ -1,0 +1,13 @@
+# Default amalgamated config. Override with -c/--config (e.g. -c server.port=9000).
+server:
+  host: "127.0.0.1"
+  port: 8000
+
+api:
+  storage_backend: ephemeral
+  storage_asset_path: null  # optional path to JSON asset; null = use package default
+
+bff:
+  cors_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173

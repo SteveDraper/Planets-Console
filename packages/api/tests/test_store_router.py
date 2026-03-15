@@ -1,28 +1,26 @@
 """Unit tests for store REST API: status codes, view=full|shallow, merge param, @ key rejection."""
-import copy
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from api.storage import get_storage
-from api.storage.memory_asset import MemoryAssetBackend
+from api.config import ApiConfig, set_config
+from api.storage import clear_backend_cache, get_storage
 
-INITIAL = {
-    "game": {"turn": 2},
-    "planets": {"sol": {"earth": {"name": "Earth"}, "arr": [1, 2, 3]}},
-}
+# Asset used by router tests: inject via config (see client fixture).
+TEST_ASSET_PATH = Path(__file__).resolve().parent / "fixtures" / "store_router_initial.json"
 
 
 @pytest.fixture
 def client():
-    """Test client with a fresh in-memory backend per test."""
-    backend = MemoryAssetBackend(initial=copy.deepcopy(INITIAL))
-    app.dependency_overrides[get_storage] = lambda: backend
+    """Test client with config pointing at test asset; backend cache cleared per test."""
+    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=str(TEST_ASSET_PATH)))
+    clear_backend_cache()
     try:
         yield TestClient(app)
     finally:
-        app.dependency_overrides.pop(get_storage, None)
+        clear_backend_cache()
 
 
 def test_get_full_returns_node(client):

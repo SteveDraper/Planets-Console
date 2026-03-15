@@ -2,8 +2,9 @@ Metadata-Version: 2.4
 Name: server
 Version: 0.1.0
 Summary: Root FastAPI app mounting API and BFF
-Requires-Python: >=3.12
+Requires-Python: >=3.14
 Requires-Dist: api
 Requires-Dist: bff
+Requires-Dist: omegaconf>=2.3.0
 Requires-Dist: uvicorn[standard]>=0.30.0
 Requires-Dist: typer>=0.12.0

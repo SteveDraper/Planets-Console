@@ -1,0 +1,9 @@
+server:
+  host: "0.0.0.0"
+  port: 9000
+api:
+  storage_backend: ephemeral
+  storage_asset_path: /var/data/store.json
+bff:
+  cors_origins:
+    - https://app.example.com
