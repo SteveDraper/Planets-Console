@@ -9,3 +9,5 @@ server.egg-info/dependency_links.txt
 server.egg-info/entry_points.txt
 server.egg-info/requires.txt
 server.egg-info/top_level.txt
+tests/test_cli.py
+tests/test_config.py
