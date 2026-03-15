@@ -1,12 +1,19 @@
-.PHONY: test test_bff test_api test_frontend
+.PHONY: test test_bff test_api test_server test_frontend
 
-test: test_bff test_api test_frontend
+# Use workspace venv (Python 3.14) and ensure dev deps (pytest) are installed.
+test: test_bff test_api test_server test_frontend
 
 test_bff:
-	cd packages/bff && uv run pytest
+	uv sync --extra dev
+	PYTHONPATH=packages/bff:packages/api uv run python -m pytest packages/bff/tests
 
 test_api:
-	cd packages/api && uv run pytest
+	uv sync --extra dev
+	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests
+
+test_server:
+	uv sync --extra dev
+	PYTHONPATH=packages/server:packages/api:packages/bff uv run python -m pytest packages/server/tests
 
 test_frontend:
 	@echo "No frontend tests configured yet."

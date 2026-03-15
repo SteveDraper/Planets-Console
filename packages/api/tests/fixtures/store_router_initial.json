@@ -1,0 +1,4 @@
+{
+  "game": {"turn": 2},
+  "planets": {"sol": {"earth": {"name": "Earth"}, "arr": [1, 2, 3]}}
+}

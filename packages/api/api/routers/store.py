@@ -2,6 +2,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query
+from starlette.responses import Response
 
 from api.errors import ValidationError
 from api.services.store_service import StoreService
@@ -73,6 +74,7 @@ def update(
 def delete(
     path: str,
     svc: StoreService = Depends(get_store_service),
-) -> None:
+) -> Response:
     """Delete the node at path."""
     svc.delete(path)
+    return Response(status_code=204)

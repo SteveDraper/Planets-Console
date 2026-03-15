@@ -151,7 +151,7 @@ All write errors are fail-fast and preserve atomicity (no partial writes).
 
 ## 9. Integration points
 
-- **Config:** A way to select the backend (e.g. `storage_backend: str = "memory_asset"` or `"file"`) so the app uses the desired implementation. Default can be the asset-backed in-memory backend for development and testing. See storage.mdc “Adding a New Implementation”.
+- **Config:** A way to select the backend (e.g. `storage_backend: str = "ephemeral"` or `"file"`) so the app uses the desired implementation. Default can be the asset-backed in-memory backend for development and testing. See storage.mdc “Adding a New Implementation”.
 - **Core API app:** Register a router for the store (e.g. `routers/store.py`) under `/v1/store` (the Core API app is mounted at `/api`, so the full path is `/api/v1/store`). Router calls a **store service**; the service uses an injected `StorageBackend` and performs create/read/update/delete with the semantics above (including auto-ancestor creation on create only and atomicity), raising the appropriate Core API exceptions.
 - **No BFF or frontend changes** in this enhancement.
 
@@ -230,7 +230,7 @@ The storage implementation is covered by four test modules under `packages/api/t
 - **Reserved `@` in payloads:** Payloads with no key starting with `@` are accepted; any key starting with `@` (top-level or nested) raises `ValidationError`.  
 - **Deep copy:** `deep_copy_value` returns an independent copy (mutations do not affect the original).
 
-**Memory asset backend (`test_memory_asset_backend.py`)**  
+**Ephemeral backend (`test_memory_asset_backend.py`)**  
 - **Get:** Root and nested paths; array-index paths; deep copy on read (caller cannot mutate store); missing path raises `NotFoundError`.  
 - **Put:** Creates missing object ancestors; overwrites existing node; array append (put at `@len`) and set at existing index.  
 - **Delete:** Removes node at path; delete of array element; delete root clears store; missing path raises `NotFoundError`.  

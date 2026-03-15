@@ -2,6 +2,7 @@ pyproject.toml
 server/__init__.py
 server/app.py
 server/cli.py
+server/config.py
 server.egg-info/PKG-INFO
 server.egg-info/SOURCES.txt
 server.egg-info/dependency_links.txt

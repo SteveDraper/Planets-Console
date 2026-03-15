@@ -3,5 +3,6 @@
 
 # Python
 .venv/
+__pycache__/
 
 # Frontend (packages/frontend has its own .gitignore for node_modules, dist)

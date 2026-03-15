@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from bff.config import get_config
 from bff.errors import BFFError, make_http_exception_handler
 from bff.routers import analytics
 
@@ -9,9 +10,11 @@ app = FastAPI(
     title="Planets Console BFF",
     openapi_url="/openapi.json",
 )
+# CORS origins come from BFF config (set by server from amalgamated config)
+_origins = list(get_config().cors_origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

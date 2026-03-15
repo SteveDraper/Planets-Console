@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "api",
     "bff",
+    "omegaconf>=2.3.0",
     "uvicorn[standard]>=0.30.0",
     "typer>=0.12.0",
 ]
