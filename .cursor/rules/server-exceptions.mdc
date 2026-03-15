@@ -1,0 +1,60 @@
+---
+description: Exception hierarchy and HTTP exception handling for the Core API and BFF packages. Applies to all Python server code in packages/api and packages/bff.
+globs:
+  - "packages/api/**/*.py"
+  - "packages/bff/**/*.py"
+alwaysApply: false
+---
+
+# Server Exception Handling (API & BFF)
+
+These rules apply to both the Core REST API (`packages/api`) and the BFF (`packages/bff`). They ensure a consistent exception hierarchy and that every HTTP endpoint returns the correct status and never leaks unexpected errors.
+
+## 1. Package exception hierarchy
+
+- All exceptions **raised by the package code** must inherit from the package root:
+  - **Core API**: `CoreAPIError` (in `api.errors`)
+  - **BFF**: `BFFError` (in `bff.errors`)
+- Both roots inherit from a common base `PlanetsConsoleError` (in `api.errors`), which defines the contract for HTTP status mapping.
+- Each exception class has an **`http_error`** attribute (default `500`) that is the HTTP status code returned when that exception is caught by the app handler. Override it as a **class-level constant** in descendant classes (e.g. `NotFoundError.http_error = 404`), or pass `http_error=` to the constructor for one-off overrides where the base allows it.
+
+Example (Core API):
+
+```python
+from api.errors import CoreAPIError
+
+class NotFoundError(CoreAPIError):
+    http_error = 404
+
+class ValidationError(CoreAPIError):
+    http_error = 422
+```
+
+Example (BFF):
+
+```python
+from bff.errors import BFFError
+
+class BadRequestError(BFFError):
+    http_error = 400
+```
+
+- Do not raise raw `Exception` or other non-package exceptions for expected error cases; use the package root or a descendant so the handler can return the correct status.
+
+## 2. Global exception handler (no per-route decorator)
+
+- Each app (Core API and BFF) must register a **single global exception handler** that catches **all** unhandled exceptions. This is done with FastAPI’s `app.add_exception_handler(Exception, handler)`.
+- Use the shared factory from `api.errors`: `make_http_exception_handler(root_exception_cls)`. The Core API passes `CoreAPIError`, the BFF passes `BFFError`.
+- Behaviour of the handler:
+  - If the exception is an instance of the package root (or a descendant): return a JSON response with **status code = `exc.http_error`** and body `{"detail": "<exception message>"}`.
+  - For **any other** exception: **log at ERROR level** with full stack trace and request details (URL, method, path, query params), then return **500** with a generic body (e.g. `{"detail": "Internal server error"}`). Do not re-raise or expose internal details to the client.
+
+Registration is already done in `api.app` and `bff.app`; when adding new sub-apps or routers, ensure they are attached to an app that has this handler registered (or register the same handler on that app).
+
+## 3. No per-endpoint decorator requirement
+
+- Endpoints do **not** need a custom decorator; the global exception handler covers all routes. Use normal FastAPI decorators (`@router.get(...)`, etc.). A combined “route + exception” decorator is not required and is not used.
+
+## 4. BFF import surface for exceptions
+
+- The BFF may import from `api.errors` for `PlanetsConsoleError`, `make_http_exception_handler`, and any exception base needed to define `BFFError`. It must not depend on other `api` modules (e.g. services, models) except as already allowed by the architecture (e.g. allowed Core API import surface).

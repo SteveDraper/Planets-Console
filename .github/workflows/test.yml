@@ -1,0 +1,41 @@
+# Run unit tests on pull requests.
+#
+# To require this check before merge:
+#   Repo → Settings → Branches → Add/edit branch protection rule (e.g. main)
+#   → Enable "Require status checks to pass before merging"
+#   → Select the "test" check.
+
+name: test
+
+on:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Sync workspace
+        run: uv sync --all-packages
+        working-directory: .
+
+      - name: Install dev dependencies (api, bff)
+        run: |
+          uv sync --package api --extra dev
+          uv sync --package bff --extra dev
+        working-directory: .
+
+      - name: Run unit tests
+        run: make test

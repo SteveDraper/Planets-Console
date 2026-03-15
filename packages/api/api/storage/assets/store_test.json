@@ -1,0 +1,13 @@
+{
+  "game": {
+    "id": "test-game-1",
+    "name": "Test Game",
+    "turn": 2
+  },
+  "planets": {
+    "sol": {
+      "earth": { "name": "Earth", "moons": ["Luna"] },
+      "mars": { "name": "Mars", "moons": ["Phobos", "Deimos"] }
+    }
+  }
+}
