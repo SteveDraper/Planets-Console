@@ -1,4 +1,5 @@
 """Codec for GameInfo (Load Game Info response)."""
+
 import dacite
 
 from api.models.game import GameInfo

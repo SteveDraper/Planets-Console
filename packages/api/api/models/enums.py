@@ -3,6 +3,7 @@
 Uses IntEnum for integer-keyed enumerations. Each enum includes an UNKNOWN = -1
 sentinel so that unrecognised values from the API deserialize gracefully.
 """
+
 from enum import IntEnum
 
 

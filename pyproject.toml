@@ -7,11 +7,20 @@ requires-python = ">=3.14"
 dependencies = ["server"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "httpx>=0.27.0"]
+dev = ["pytest>=8.0.0", "httpx>=0.27.0", "ruff>=0.8.0"]
 
 [tool.uv.workspace]
 members = ["packages/server", "packages/api", "packages/bff"]
 
 [tool.uv.sources]
 server = { workspace = true }
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+exclude = ["packages/frontend", ".venv", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4"]
+ignore = ["B008"]  # B008: allow Depends()/Option() in defaults (FastAPI/Typer pattern)
 

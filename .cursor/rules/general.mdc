@@ -1,0 +1,72 @@
+---
+description: General agent behavior guidelines
+alwaysApply: true
+---
+
+# General Guidelines
+
+## Coding Standards
+
+- Prefer clarity over cleverness.
+- Keep functions focused on a single responsibility.
+- Add comments only when the code cannot speak for itself.
+- **Comments describe current state, not history.** Never reference ticket IDs, past bugs, or previous implementations in code comments (`// Fixed SOA-123`, `// Was broken before`, `// Old approach was X`). That context belongs in git history and commit messages. A comment should be true forever -- if it describes why the code exists today, it's a good comment. If it describes what it used to do or why it changed, delete it.
+- **Never write a TODO comment without discussing it with the user first.** A TODO is an admission that something is incomplete or wrong. The agent does not decide unilaterally to defer work -- that is a scope decision. When you encounter something that could be a TODO, stop and ask: should we fix it now, ticket it, or explicitly accept it as-is? If the user decides to ticket it, create the ticket. If they decide to accept it, leave no comment at all. A `// TODO` with no ticket is just technical debt with extra steps.
+
+## Naming
+
+- **Name for the domain, not the implementation** -- `activeStudents`, not `queryResult`; name what it *is*, not how it works.
+- **One name per concept, one concept per name** -- pick a term and use it everywhere; don't use "classroom" in one place and "section" in another.
+- **Booleans read as yes/no questions** -- `isActive`, `hasEnrollments`, `canEdit`; not bare `active` or `enrollments`.
+- **Functions: return functions describe what, action functions describe the action** -- `getDisplayName()`, `syncEnrollments()`; use the simplest verb (`get` over `fetch` over `retrieve`).
+- **No abbreviations unless universal** -- `URL`, `ID`, `API` are fine; `enr`, `cls`, `usr` are not.
+- **No generic names** -- `data`, `result`, `temp`, `info`, `manager`, `handler`, `utils` are placeholders, not names.
+- **Names must be searchable** -- if you can't grep for it meaningfully, it's too short or generic.
+- **Consistent pairs** -- `start`/`end`, `add`/`remove`, `create`/`delete`; don't mix synonyms across a codebase.
+- **Match team vocabulary** -- use the same terms as in tickets, meetings, and domain conversations.
+
+## Planning
+
+When creating an implementation plan, switching to Plan Mode, or starting any multi-step task, read and follow `planning.mdc`. It is not always-applied, so pull it in explicitly whenever planning is the activity.
+
+## No Tech Debt by Default
+
+**Fix things right, even when it's harder.** Tech debt is a cost that compounds -- a shortcut taken today becomes a bigger problem tomorrow. The default is always to implement the correct solution.
+
+- **If the right fix requires a significant refactor, discuss it with the user first** rather than taking a shortcut. Present the scope, explain why the shortcut is a problem, and let the user decide. They may greenlight the refactor, defer it to a separate ticket, or make a conscious tradeoff -- but that is their call, not yours.
+- **Never introduce tech debt silently.** A hack with no comment, a workaround that papers over a real problem, or a "temporary" fix that will never be revisited are all worse than stopping to discuss. If you can't do it right right now, surface it.
+- **Never add backward-compatibility shims unless explicitly asked.** Backward compatibility locks in old patterns and adds complexity. Use the current best approach. If you're unsure whether compatibility is required, ask.
+- **Move forward, not sideways.** When making a change, don't replicate the old pattern in a new location. Fix the pattern.
+
+## Collaboration
+
+- **Stop at decision points.** When something unexpected comes up mid-task (an error, a missing piece, an ambiguous direction), stop and report back rather than plowing through. The user wants to stay in the loop.
+- **Don't chain unrelated actions silently.** Completing one task and then immediately starting the next without checking is not collaborative. Finish a thing, summarize, and wait.
+- **Errors are decision points.** When a command fails or behavior is unexpected, report what happened and what the options are -- don't immediately start trying fixes.
+- **The todo list does not override collaboration.** Having open todos does not mean ignoring the user and plowing through. Todos track progress; they do not grant permission to skip check-ins. Stop and collaborate whenever the situation calls for it, even mid-task.
+- **Ask when you need access.** If a task requires a tool, credential, API key, permission, or environment you don't have -- stop and ask the user. Never try to work around missing access by substituting a different approach, guessing at credentials, or skipping the step silently. The user is a collaborator and can provide what's needed. "I need X to do Y -- can you provide it?" is always the right move.
+
+## Token Efficiency
+
+- **Batch tool calls.** When multiple independent reads, searches, or commands can run in parallel, send them in one message -- not sequentially.
+- **Skip re-reading files already in context.** If a file was just read and its content is visible, don't read it again to confirm.
+- **Prefer targeted reads over full-file reads.** Use line offsets, grep, or semantic search to retrieve only the relevant portion of large files.
+- **Suppress tool-call commentary.** Don't narrate every step or pre-announce tool calls. Act, then summarize what was done only if it matters.
+- **Don't confirm trivial facts with the user.** If you already have the information to proceed, proceed.
+- **Block, don't poll.** When waiting for something to finish -- a command, a build, a deploy, a test run -- block until it completes rather than running it in the background and checking repeatedly. Every poll round-trip costs tokens; blocking is free. Set `block_until_ms` high enough for the command to actually finish. If a duration is unknown, err on the side of a longer timeout. The one exception is CI after a push -- don't poll CI autonomously, stop and let the user report back when reviews are ready.
+- **Use fast subagents for mechanical work.** Delegate bulk edits, git sequences, linting fixes, and boilerplate generation to a fast model. Reserve the primary agent for reasoning and decisions.
+
+## Certainty and Verification
+
+- When you catch yourself using hedging language like "may", "probably", "likely", "should work", "I think" -- pause and ask whether you actually know or are guessing. If guessing, verify first: read the file, run the command, check the config.
+- High confidence is earned by reading code, running tests, and checking output -- not by pattern matching against training data. If the codebase does something unexpected, trust the code over your expectations.
+- When specifying package APIs, module paths, or config values, verify against the installed version or docs. Training data may be outdated or wrong.
+- If you can't verify, be transparent about the uncertainty. Distinguish between what you've confirmed and what you're inferring.
+
+## Communication
+
+- Be direct. Say what you know, what you don't know, and what you're about to do.
+- Don't over-explain simple things or under-explain complex ones.
+- When presenting options, briefly explain the tradeoffs rather than just listing choices.
+- Always display URLs as clickable markdown links: `[label](url)`. Never paste a bare URL on its own line.
+- **Use ASCII dashes, not em-dashes.** In code, comments, commit messages, shell scripts, config files, and file content you write: use `--` (double hyphen) or `-` (single hyphen) as separators. Never use `—` (U+2014 em-dash).

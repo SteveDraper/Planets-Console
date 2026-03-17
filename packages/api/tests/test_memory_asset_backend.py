@@ -1,8 +1,7 @@
 """Unit tests for MemoryAssetBackend: get/put/delete/list with path semantics."""
-import pytest
 
+import pytest
 from api.errors import NotFoundError
-from api.storage.base import JSONValue
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage.path_utils import deep_copy_value
 

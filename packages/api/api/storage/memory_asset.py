@@ -3,6 +3,7 @@
 Backed by a deep copy of the initial data so all operations (get/put/delete/list) are
 implemented and can be unit tested. Not read-only.
 """
+
 from __future__ import annotations
 
 from api.errors import NotFoundError
@@ -12,8 +13,8 @@ from api.storage.path_utils import (
     ensure_ancestors,
     list_children,
     parse_index_segment,
-    resolve_path,
     resolve_parent_and_segment,
+    resolve_path,
 )
 
 
@@ -26,7 +27,9 @@ class MemoryAssetBackend:
 
     def __init__(self, initial: dict[str, JSONValue] | None = None) -> None:
         """Initialize with a deep copy of initial. Root is always a dict."""
-        self._root: dict[str, JSONValue] = deep_copy_value(initial or {}) if initial is not None else {}
+        self._root: dict[str, JSONValue] = (
+            deep_copy_value(initial or {}) if initial is not None else {}
+        )
 
     def get(self, key: str) -> JSONValue:
         """Return a deep copy of the value at path. Raises NotFoundError if path does not exist."""

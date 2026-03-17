@@ -1,4 +1,5 @@
 """Unit tests for amalgamated config loading and override parsing."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,13 +7,8 @@ from unittest.mock import patch
 
 import pytest
 from omegaconf import OmegaConf
-
 from server.config import (
-    DEFAULT_CONFIG_FILENAME,
-    RootConfig,
-    ServerConfig,
     _apply_override,
-    _find_default_config,
     _parse_literal,
     _parse_override_spec,
     load_config,

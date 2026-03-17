@@ -81,9 +81,10 @@ This keeps deployment simple while giving each layer its own routing and OpenAPI
 6. Implement frontend: TanStack Query hook → feature component using shadcn/ui + Tailwind
 7. **Features must have unit tests.** Add tests for new behaviour and ensure they are run by the package’s test target (see below).
 
-## Unit tests and Makefile
+## Unit tests, linting, and Makefile
 
 - **Features should always have unit tests.** New or changed behaviour must be covered by tests in the appropriate package.
+- **Run linting for all changes.** Backend (Python) linting is provided by Ruff; run `make lint` to check all backend packages and scripts. The top-level `test` target depends on `lint`, so `make test` runs lint then all package tests — use it before committing or in CI.
 - **Each package that has tests has its own Makefile target.** For example: `test_bff`, `test_api`, `test_frontend`. The target runs that package’s test suite (e.g. `cd packages/<pkg> && uv run pytest` for Python packages).
 - **When adding a new package that has unit tests, add a corresponding `test_<package>` target to the Makefile** and wire it so the package’s tests run from that package directory (or equivalent).
-- **The top-level `test` target in the Makefile must run every package’s tests.** It should depend on all per-package test targets (e.g. `test: test_bff test_api test_frontend`) so that `make test` runs the full suite.
+- **The top-level `test` target in the Makefile must run every package’s tests.** It should depend on `lint` and all per-package test targets (e.g. `test: lint test_bff test_api test_frontend`) so that `make test` runs the full suite.

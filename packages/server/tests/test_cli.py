@@ -1,15 +1,14 @@
 """Unit tests for the serve CLI and --config option."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-from typer.testing import CliRunner
-
-from server.cli import app
-from server.config import RootConfig, ServerConfig
 from api.config import ApiConfig
 from bff.config import BffConfig
+from server.cli import app
+from server.config import RootConfig, ServerConfig
+from typer.testing import CliRunner
 
 runner = CliRunner()
 

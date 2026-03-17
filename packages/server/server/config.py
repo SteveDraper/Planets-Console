@@ -1,15 +1,14 @@
 """Amalgamated config loading with default .config.yaml and --config overrides."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
-
 from api.config import ApiConfig
 from bff.config import BffConfig
-
+from omegaconf import OmegaConf
 
 DEFAULT_CONFIG_FILENAME = ".config.yaml"
 
@@ -95,7 +94,10 @@ def _apply_override(conf: Any, key: str, value: str | tuple[str, str]) -> None:
         # leaf=literal: spec allows only leaf overrides
         existing = OmegaConf.select(conf, key, default=None)
         if existing is not None and (OmegaConf.is_config(existing) or OmegaConf.is_list(existing)):
-            raise ValueError(f"Override {key}=<value> is for leaf values only; {key} is a nested structure (use key=@file to replace)")
+            raise ValueError(
+                f"Override {key}=<value> is for leaf values only; {key} is a nested "
+                "structure (use key=@file to replace)"
+            )
         OmegaConf.update(conf, key, _parse_literal(value), merge=False)
 
 
@@ -107,7 +109,8 @@ def load_config(
     """
     Load amalgamated config: default .config.yaml plus optional overrides.
 
-    override_specs: list of strings from --config (e.g. ['api.storage_backend=file', 'bff=@bff.yaml']).
+    override_specs: list of strings from --config
+        (e.g. ['api.storage_backend=file', 'bff=@bff.yaml']).
     default_config_path: if set, use this as base instead of searching for .config.yaml.
     """
     override_specs = override_specs or []
@@ -146,7 +149,8 @@ def load_config(
         if isinstance(value, tuple):
             _apply_override(conf, key, value)
         else:
-            # Leaf override: validate that we're not setting a non-leaf (OmegaConf allows it but spec says leaf only)
+            # Leaf override: validate we're not setting a non-leaf
+            # (OmegaConf allows it but spec says leaf only)
             _apply_override(conf, key, value)
 
     # Convert to RootConfig with typed sub-configs
@@ -160,7 +164,8 @@ def load_config(
     include_dummy = api_dict.get("include_dummy_data", ApiConfig().include_dummy_data)
     if not isinstance(include_dummy, bool):
         raise TypeError(
-            f"api.include_dummy_data must be a boolean, got {type(include_dummy).__name__}: {include_dummy!r}"
+            f"api.include_dummy_data must be a boolean, got "
+            f"{type(include_dummy).__name__}: {include_dummy!r}"
         )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
@@ -171,6 +176,10 @@ def load_config(
     if isinstance(cors, list):
         cors_tuple = tuple(str(o) for o in cors)
     else:
-        cors_tuple = getattr(BffConfig(), "cors_origins", ("http://localhost:5173", "http://127.0.0.1:5173"))
+        cors_tuple = getattr(
+            BffConfig(),
+            "cors_origins",
+            ("http://localhost:5173", "http://127.0.0.1:5173"),
+        )
     bff_config = BffConfig(cors_origins=cors_tuple)
     return RootConfig(server=server_config, api=api_config, bff=bff_config)

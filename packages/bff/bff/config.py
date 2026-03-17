@@ -1,4 +1,5 @@
 """BFF sub-config: SPA-shaped endpoint behaviour. Set by server from amalgamated config."""
+
 from dataclasses import dataclass
 
 _config: "BffConfig | None" = None

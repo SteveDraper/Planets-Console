@@ -1,4 +1,5 @@
 """Seed the in-memory store with dummy data from static JSON assets."""
+
 import json
 import logging
 from pathlib import Path

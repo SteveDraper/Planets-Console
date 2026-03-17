@@ -1,10 +1,9 @@
 """Unit tests for BFF analytics routes. Verify response shape and map node coordinates."""
+
 import math
 
-import pytest
-from fastapi.testclient import TestClient
-
 from bff.app import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 

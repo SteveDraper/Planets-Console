@@ -1,4 +1,5 @@
 """Ship entity dataclasses."""
+
 from dataclasses import dataclass, field
 
 

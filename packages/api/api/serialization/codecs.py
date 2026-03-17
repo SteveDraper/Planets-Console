@@ -1,4 +1,5 @@
 """Shared dacite configuration for Planets API dataclass deserialization."""
+
 from dataclasses import asdict
 from enum import IntEnum
 
@@ -11,11 +12,13 @@ ALL_ENUMS: list[type[IntEnum]] = [MessageType, NativeType, GameStatus]
 
 def _safe_enum(enum_cls: type[IntEnum]):
     """Return a converter that maps unknown int values to the UNKNOWN sentinel."""
+
     def convert(value):
         try:
             return enum_cls(value)
         except ValueError:
             return enum_cls(-1)  # UNKNOWN sentinel
+
     return convert
 
 

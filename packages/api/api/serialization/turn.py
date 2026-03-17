@@ -1,4 +1,5 @@
 """Codec for TurnInfo (rst object from Load Turn Data)."""
+
 import dacite
 
 from api.models.game import TurnInfo

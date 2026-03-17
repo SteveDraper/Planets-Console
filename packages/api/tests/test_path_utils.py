@@ -1,6 +1,6 @@
 """Unit tests for path resolution and @ segment rules."""
-import pytest
 
+import pytest
 from api.errors import NotFoundError, ValidationError
 from api.storage.path_utils import (
     deep_copy_value,

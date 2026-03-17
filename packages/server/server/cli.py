@@ -1,14 +1,18 @@
 """Typer CLI to run the server locally."""
+
 import typer
 import uvicorn
-
 from api import config as api_config
 from bff import config as bff_config
+
 from server.config import load_config
 
 app = typer.Typer()
 
-CONFIG_OPTION_HELP = "Override config (repeatable). Forms: key.leaf=value, key=@file, or @file for full config. Base: .config.yaml. See 'serve config' for details."
+CONFIG_OPTION_HELP = (
+    "Override config (repeatable). Forms: key.leaf=value, key=@file, or @file for "
+    "full config. Base: .config.yaml. See 'serve config' for details."
+)
 
 
 @app.callback(invoke_without_command=True)
@@ -58,13 +62,13 @@ Override syntax (can be repeated):
   2. From file:  --config key.path=@filepath
                  Example: -c bff=@bff-override.yaml
   3. Full:       --config @filepath
-                 Example: -c @production.yaml
+                 Example: -c @production.yaml (or any path)
 
 Config structure:
   server.host             string   [default: 127.0.0.1]  Bind host
   server.port             int      [default: 8000]     Bind port
   api.storage_backend     string   [default: ephemeral]  Backend ID
-  api.storage_asset_path  string or null  [default: null]   JSON file to load for store; null = empty store
+  api.storage_asset_path  string or null  [default: null]   JSON for store; null = empty
   api.include_dummy_data  bool     [default: false]  Seed sample game data on startup
   bff.cors_origins        list of strings  CORS origins for the SPA
 

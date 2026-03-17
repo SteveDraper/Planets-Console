@@ -1,0 +1,51 @@
+---
+description: Planning conventions -- how to structure implementation plans, phase breaks, and what every plan must include. Apply when creating or reviewing an implementation plan in Plan Mode or before starting a multi-step task.
+alwaysApply: false
+---
+
+# Planning
+
+## Structure plans in small, shippable phases
+
+Every plan must be broken into phases that each produce something independently reviewable and mergeable. At the end of each phase, stop and discuss with the user:
+
+- Is this ready to PR on its own?
+- What does testing look like for this phase?
+- Should the next phase start now or wait for this PR to merge first?
+
+Don't plan a single large implementation that gets shipped as one giant PR. If a plan has more than one logical concern, split it.
+
+## Every plan must include as first-class items
+
+These are not afterthoughts -- plan for them explicitly in the phase where the code changes:
+
+- **Tests** -- what new tests are needed, what existing tests need updating, and what the red/green strategy is (write the failing test first, then make it pass).
+- **Documentation** -- inline docblocks, README sections, or project docs that need updating. If you're changing behavior, docs change too.
+
+If a phase has no test or doc component, call that out explicitly and explain why -- don't silently omit them.
+
+## Clean up as you go
+
+When working in a code path, leave it better than you found it. This is especially important in legacy code where hygiene has drifted. As part of every phase, look for and fix:
+
+- Missing or stale docblocks on touched functions and classes
+- Dead code, unused imports, commented-out blocks in the modified file
+- Magic literals that should be named constants
+- Obvious defensive gaps (null checks, error handling) adjacent to the change
+- Formatting inconsistencies in touched lines
+
+Scope cleanup to the code path being modified -- don't expand into unrelated files. The goal is incremental improvement, not a full audit.
+
+## Surface existing issues during execution
+
+As you work through a plan, you will encounter existing bugs, tech debt, or design problems adjacent to your change. Don't silently work around them or fix them without discussion. For each one:
+
+1. Stop and describe what you found.
+2. Ask the user: fix it now (in this phase or a new phase), or create a ticket and move on?
+3. If ticketing: note it clearly in the PR description so it doesn't get lost.
+
+Never silently absorb scope. Every unplanned fix is a decision point.
+
+## Communicate the plan before executing
+
+Before starting any phase, confirm the user has seen and approved the plan for that phase. Don't begin implementation while the plan is still being discussed. A plan that isn't agreed on is just a guess.

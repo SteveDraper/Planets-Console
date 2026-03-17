@@ -3,6 +3,7 @@
 Paths are slash-separated; segments may be object keys or @N for array index.
 Raises NotFoundError, ValidationError from api.errors.
 """
+
 from __future__ import annotations
 
 from api.errors import NotFoundError, ValidationError
@@ -10,12 +11,15 @@ from api.storage.base import JSONValue
 
 
 def parse_index_segment(segment: str) -> int:
-    """Parse @N or @-N. Raises ValidationError if not valid. Call only when segment.startswith('@')."""
+    """Parse @N or @-N. Raises ValidationError if not valid.
+
+    Call only when segment.startswith('@').
+    """
     suffix = segment[1:]
     try:
         return int(suffix)
-    except ValueError:
-        raise ValidationError(f"Invalid path segment (expected @integer): {segment!r}")
+    except ValueError as err:
+        raise ValidationError(f"Invalid path segment (expected @integer): {segment!r}") from err
 
 
 def resolve_path(root: JSONValue, path: str) -> JSONValue:
@@ -29,7 +33,7 @@ def resolve_path(root: JSONValue, path: str) -> JSONValue:
         return root
     segments = [s for s in path.split("/") if s]
     node: JSONValue = root
-    for i, seg in enumerate(segments):
+    for _i, seg in enumerate(segments):
         if seg.startswith("@"):
             idx = parse_index_segment(seg)
             if not isinstance(node, list):
@@ -57,7 +61,7 @@ def resolve_parent_and_segment(root: JSONValue, path: str) -> tuple[JSONValue, s
     """Resolve to the parent node and the final segment (key or @index).
 
     Returns (parent, final_segment, is_array_index).
-    For root path or empty path, returns (root, "", False) and the "node" is root.
+    For root or empty path, returns (root, "", False) and the "node" is root.
     """
     if not path or path.strip() == "":
         return (root, "", False)
@@ -70,17 +74,19 @@ def resolve_parent_and_segment(root: JSONValue, path: str) -> tuple[JSONValue, s
     return (parent, last, last.startswith("@"))
 
 
-def ensure_ancestors(root: dict[str, JSONValue], path: str) -> tuple[dict[str, JSONValue] | list[JSONValue], str, bool]:
-    """Ensure all ancestors exist as objects along path; return (parent, final_segment, is_array_index).
+def ensure_ancestors(
+    root: dict[str, JSONValue], path: str
+) -> tuple[dict[str, JSONValue] | list[JSONValue], str, bool]:
+    """Ensure ancestors exist as objects along path.
 
-    Only object keys are created; array index segments must already exist.
-    Root must be a dict. Returns the parent container and the last segment.
+    Return (parent, final_segment, is_array_index). Only object keys are
+    created; array index segments must already exist. Root must be a dict.
     """
     if not path or path.strip() == "":
         return (root, "", False)
     segments = [s for s in path.split("/") if s]
     node: JSONValue = root
-    for i, seg in enumerate(segments[:-1]):
+    for _i, seg in enumerate(segments[:-1]):
         if seg.startswith("@"):
             idx = parse_index_segment(seg)
             if not isinstance(node, list):

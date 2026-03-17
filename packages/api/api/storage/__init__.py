@@ -3,6 +3,7 @@
 Nothing outside this subpackage may reference a concrete implementation.
 Import the protocol and types from here or from base.
 """
+
 import json
 from pathlib import Path
 
@@ -16,7 +17,10 @@ _backend_cache: StorageBackend | None = None
 
 
 def _load_asset(path: Path | None) -> dict:
-    """Load JSON from path; if path is None, return empty dict. If path is set but not a file, raise."""
+    """Load JSON from path; if path is None, return empty dict.
+
+    If path is set but not a file, raise.
+    """
     if path is None:
         return {}
     if not path.is_file():

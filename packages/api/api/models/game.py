@@ -1,4 +1,5 @@
 """Game-level entity dataclasses (GameSettings, Game, GameInfo, TurnInfo)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,7 +10,16 @@ from api.models.enums import GameStatus
 from api.models.planet import Planet
 from api.models.player import Advantage, Badge, Player, Race, Relation, Score
 from api.models.ship import Ship
-from api.models.space import Artifact, Blackhole, Cutscene, IonStorm, Minefield, Nebula, Star, Wormhole
+from api.models.space import (
+    Artifact,
+    Blackhole,
+    Cutscene,
+    IonStorm,
+    Minefield,
+    Nebula,
+    Star,
+    Wormhole,
+)
 from api.models.starbase import Starbase, StockItem
 
 

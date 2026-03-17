@@ -1,4 +1,5 @@
 """Spatial entity dataclasses (ion storms, minefields, nebulas, stars)."""
+
 from dataclasses import dataclass
 
 

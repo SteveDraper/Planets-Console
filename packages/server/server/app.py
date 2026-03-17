@@ -4,16 +4,16 @@ In non-dev deployments you can serve the built frontend from this process:
 set FRONTEND_DIST to the path to the frontend dist/ (e.g. packages/frontend/dist),
 or run with that directory present; the app will serve static assets and SPA fallback.
 """
-from contextlib import asynccontextmanager
-import os
-from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from starlette.staticfiles import StaticFiles
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from api.app import app as api_app
 from bff.app import app as bff_app
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from starlette.staticfiles import StaticFiles
 
 
 def _frontend_dist() -> Path | None:
