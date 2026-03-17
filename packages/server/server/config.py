@@ -158,10 +158,14 @@ def load_config(
         port=int(server_dict.get("port", ServerConfig().port)),
     )
     include_dummy = api_dict.get("include_dummy_data", ApiConfig().include_dummy_data)
+    if not isinstance(include_dummy, bool):
+        raise TypeError(
+            f"api.include_dummy_data must be a boolean, got {type(include_dummy).__name__}: {include_dummy!r}"
+        )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_asset_path=api_dict.get("storage_asset_path"),
-        include_dummy_data=bool(include_dummy),
+        include_dummy_data=include_dummy,
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):
