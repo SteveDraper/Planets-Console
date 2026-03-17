@@ -5,6 +5,7 @@ description = "Core REST API layer"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.0",
+    "dacite>=1.8.0",
 ]
 
 [project.optional-dependencies]

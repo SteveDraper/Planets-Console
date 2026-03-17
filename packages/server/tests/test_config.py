@@ -192,3 +192,22 @@ def test_load_config_full_replace_last_wins():
     )
     assert root.server.port == 9000
     assert root.server.host == "0.0.0.0"
+
+
+def test_load_config_include_dummy_data_bool():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["api.include_dummy_data=true"],
+        default_config_path=base,
+    )
+    assert root.api.include_dummy_data is True
+
+
+def test_load_config_include_dummy_data_string_raises():
+    """A string like 'false' must not silently coerce to True via bool()."""
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(TypeError, match="must be a boolean"):
+        load_config(
+            override_specs=["api.include_dummy_data=notabool"],
+            default_config_path=base,
+        )

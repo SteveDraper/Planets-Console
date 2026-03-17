@@ -15,7 +15,7 @@ TEST_ASSET_PATH = Path(__file__).resolve().parent / "fixtures" / "store_router_i
 @pytest.fixture
 def client():
     """Test client with config pointing at test asset; backend cache cleared per test."""
-    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=str(TEST_ASSET_PATH)))
+    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=str(TEST_ASSET_PATH), include_dummy_data=False))
     clear_backend_cache()
     try:
         yield TestClient(app)

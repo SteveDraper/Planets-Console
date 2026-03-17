@@ -1,0 +1,3240 @@
+{
+  "settings": {
+    "name": "Serada 9 Sector",
+    "turn": 111,
+    "buildqueueplanetid": 0,
+    "victorycountdown": 6,
+    "maxallies": 1,
+    "maxshareintel": 2,
+    "maxsafepassage": 3,
+    "alliessharefullinfo": false,
+    "mapwidth": 2150,
+    "mapheight": 2150,
+    "numplanets": 500,
+    "shiplimit": 500,
+    "hoststart": "6/23/2025 2:51:28 PM",
+    "hostcompleted": "6/23/2025 2:53:27 PM",
+    "nexthost": "1/1/0001 12:00:00 AM",
+    "lastinvite": "1/1/0001 12:00:00 AM",
+    "teamsize": 1,
+    "planetscanrange": 10000,
+    "shipscanrange": 300,
+    "allvisible": false,
+    "minefieldsvisible": false,
+    "allplanetsvisible": false,
+    "planetownershipvisible": false,
+    "starbasesvisible": false,
+    "shipsatplanetsvisible": false,
+    "noreducedpodscanrange": false,
+    "allnormalscannedshipsvisible": false,
+    "oneseesshipallseeship": false,
+    "spectatormode": false,
+    "allshareintel": false,
+    "nebulas": 0,
+    "stars": 4,
+    "neutrinostars": 0,
+    "blackholes": 0,
+    "maxwormholes": 0,
+    "wormholemix": 80,
+    "wormholescanrange": 100,
+    "discussionid": "",
+    "nuionstorms": true,
+    "maxions": 4,
+    "maxioncloudsperstorm": 10,
+    "debrisdiskpercent": 50,
+    "debrisdiskversion": 2,
+    "cloakfail": 0,
+    "structuredecayrate": 3,
+    "mapshape": 0,
+    "verycloseplanets": 3,
+    "closeplanets": 10,
+    "nextplanets": 0,
+    "otherplanetsminhomeworlddist": 155,
+    "ncircles": 5,
+    "hwdistribution": 2,
+    "ndebrisdiscs": 1,
+    "balanceadjustment": 0,
+    "closeplanetrangeinc": 0,
+    "levelid": 0,
+    "nextlevelid": 0,
+    "storyid": 0,
+    "killrace": false,
+    "runningstart": 0,
+    "deadradius": 81,
+    "playerselectrace": false,
+    "militaryscorepercent": 65,
+    "hideraceselection": false,
+    "hideplayerselection": false,
+    "fixedstartpositions": false,
+    "shuffleteampositions": false,
+    "interestsignup": false,
+    "interestsignupracecount": 0,
+    "minnativeclans": 20,
+    "maxnativeclans": 90000,
+    "nohomeworld": false,
+    "homeworldhasstarbase": true,
+    "homeworldclans": 25000,
+    "homeworldresources": 3,
+    "hwlosthappinesslosscolonists": 70,
+    "hwlosthappinesslossnatives": 20,
+    "gamepassword": "",
+    "extraplanets": 0,
+    "extraships": 0,
+    "centerextraplanets": 0,
+    "centerextraships": 0,
+    "extraplanetsrandomloc": false,
+    "extrashipsrandomloc": false,
+    "wanderingtribescount": 0,
+    "wanderingtribesdist": 0,
+    "neutroniumlevel": 2.24,
+    "duraniumlevel": 1.29,
+    "tritaniumlevel": 1.59,
+    "molybdenumlevel": 1.16,
+    "averagedensitypercent": 55,
+    "developmentfactor": 1,
+    "nativeprobability": 50,
+    "nativegovernmentlevel": 2,
+    "neusurfacemax": 250,
+    "dursurfacemax": 40,
+    "trisurfacemax": 50,
+    "molsurfacemax": 25,
+    "neugroundmax": 700,
+    "durgroundmax": 500,
+    "trigroundmax": 500,
+    "molgroundmax": 200,
+    "planetlevelmax": 0,
+    "computerbuildships": true,
+    "computerbuilddelay": 0,
+    "computerreplacedrops": false,
+    "bringhomesectorships": false,
+    "homesectorshipvaluemin": 0,
+    "homesectorshipvaluemax": 0,
+    "entryportalplayers": "",
+    "reinforcementsallowed": false,
+    "fightorfail": 22,
+    "fofactiveturn": 0,
+    "fofincrement": 5,
+    "fofaccelrate": 0,
+    "fofaccelstartturn": 0,
+    "fofaccelstartdate": "1/1/0001 12:00:00 AM",
+    "fofbyteam": false,
+    "meteorshowerchance": 1,
+    "computerplayerrangelimitation": 0,
+    "stealthmode": false,
+    "sphere": false,
+    "showallexplosions": true,
+    "highidfixchunnelusepodhullid": false,
+    "highidfixfightertransferoffset": 0,
+    "nochunnelhives": true,
+    "mining200adjustment": 0,
+    "freestarbasefighters5adjustment": 0,
+    "cyborgmaxnativetaxrateadjustment": 0,
+    "assimilationrateadjustment": 0,
+    "maxhissersperplanet": 0,
+    "chunnelstabilizationeverywhere": false,
+    "groundattackadjustments": "",
+    "colonisttaxrateadjustments": "",
+    "nativetaxrateadjustments": "",
+    "campaignmode": false,
+    "maxadvantage": 500,
+    "fascistdoublebeams": true,
+    "starbasefightertransfer": true,
+    "superspyadvanced": true,
+    "cloakandintercept": true,
+    "quantumtorpedos": true,
+    "galacticpower": true,
+    "hardenedmines": false,
+    "racehullsonlyfascistdoublebeams": true,
+    "racehullsonlycloakandintercept": true,
+    "racehullsonlyhiss": true,
+    "repairshipreplacessagefrigate": true,
+    "migtransportreplacesmigscout": false,
+    "saurianlightfrigatereplacessaurian": false,
+    "scorpiuscarrierreplacesscorpiuslight": false,
+    "sscruiseriireplacessscruiser": false,
+    "sscarrierplusreplacessscarrier": false,
+    "skyfireplusreplacesskyfire": false,
+    "d7creplacesd7a": false,
+    "quietusplusreplacesquietus": false,
+    "cybernautlightreplacescybernaut": false,
+    "birdshaveenlighten": true,
+    "sscruiserinterceptinterference": true,
+    "moscowinterceptinterference": false,
+    "sapphirenowebimmunity": true,
+    "destroyplanetcausesfear": true,
+    "quantumtorpedomissrateforgravitonics": 90,
+    "torpedomissrateforsinglegunboats": 0,
+    "elusivefighterdefense": 0,
+    "fedfrigatefighterdefense": 0,
+    "scoutsplanetimmunity": false,
+    "hrossfightertransfer": false,
+    "empirehasaggregator": false,
+    "fighterfactoryshipset": 0,
+    "ironslavescoutreplacesironslave": false,
+    "diplomaticspiesnoambassador": false,
+    "simplestealtharmordist": 0,
+    "simplestealtharmorsensorswwepdist": 0,
+    "torpedoset": 0,
+    "shiplimittype": 0,
+    "plsminships": 0,
+    "plsextraships": 0,
+    "plsshipsperplanet": 1,
+    "productionqueue": true,
+    "productionbasecost": 1,
+    "productionstarbaseoutput": 2,
+    "productionstarbasereward": 2,
+    "productionsmallshipset": 1,
+    "planetaryproductionqueue": true,
+    "fcodesrbx": true,
+    "ppqminbuilds": 10,
+    "endturn": 100,
+    "alwaysuseendturn": false,
+    "maxplayersperrace": 10,
+    "nowebfriendlycodes": true,
+    "nowebsinotherids": true,
+    "webdiplomacylevel": 4,
+    "webdraindiplomacylevel": 0,
+    "crystalwebimmunity": 2,
+    "fcodesmustmatchgsx": false,
+    "fcodesextraalchemy": false,
+    "fcodesbdx": false,
+    "fcodesnogsx": false,
+    "fcodesnomix": false,
+    "cloningenabled": true,
+    "supertransportfuelmod": 70,
+    "unlimitedfuel": false,
+    "unlimitedammo": false,
+    "nominefields": false,
+    "nosupplies": false,
+    "nowarpwells": false,
+    "directtransfermc": true,
+    "directtransferammo": true,
+    "transferoverloadprioritizeammo": true,
+    "topadvancecount": 1,
+    "snapgridsize": 0,
+    "dumppartsdumpstorps": false,
+    "burrowsimprovemining": true,
+    "horwaspfighterlossclankill": 2,
+    "hivesdetectlife": true,
+    "sensorsweepcombatpodscanrange": 60,
+    "sensorsweepnoncombatpodscanrange": 30,
+    "horwaspscanrobotmodifier": 0.5,
+    "isacademy": false,
+    "acceleratedturns": 3,
+    "disallowedraces": "",
+    "emorkslegacy": false,
+    "combatrng": 0,
+    "chainedintercept": true,
+    "randomplayerslots": false,
+    "presethulls": false,
+    "presethullsbyrace": "",
+    "presetadvantages": false,
+    "orderedgroupjoindays": 0,
+    "joininggroupindex": 0,
+    "aicanchangediplomacy": false,
+    "defensepostsblocksensorsweep": true,
+    "victoryscorepointsneededsolo": 0,
+    "victoryscorepointsneededally": 0,
+    "victoryscorepointsperplanet": 0,
+    "victoryscorepointsperstarbase": 0,
+    "victoryscorepointsperhighpop": 0,
+    "victoryscoreclansforhighpop": 0,
+    "victoryscorepointsperbonus": 0,
+    "victoryscorebonusdetails": false,
+    "id": 0
+  },
+  "game": {
+    "name": "Serada 9 Sector",
+    "description": "This is a battle for the Serada 9 Sector. The battle will be won when one commander captures 200 planets, or an alliance of two commanders capture 250 planets and hold them for 5 consecutive turns. This battle will run every day for 15 turns and then will drop to 3 turns per week.<br/><br/>Fight or Fail! You must control at least the number of planets shown to stay alive in this game. The Fight or Fail limit will increase every 5 Turns.<br/><br/>Accelerated Start! You can play your first 3 turns immediately, without having to wait for other players.<br/><br/>[2024 Standard Rules]",
+    "shortdescription": "Epic",
+    "status": 3,
+    "datecreated": "10/26/2024 9:02:31 AM",
+    "dateended": "6/23/2025 2:53:43 PM",
+    "maptype": 2,
+    "gametype": 2,
+    "wincondition": 1,
+    "difficulty": 1.19047332832457,
+    "tutorialid": 0,
+    "requiredlevelid": 3,
+    "maxlevelid": 0,
+    "masterplanetid": 163,
+    "quadrant": 0,
+    "mintenacity": 80,
+    "faststart": 15,
+    "turnsperweek": 3,
+    "yearstarted": 166,
+    "isprivate": false,
+    "scenarioid": 0,
+    "createdby": "none",
+    "turn": 111,
+    "slots": 11,
+    "turnstatus": "x___xxx_xx_",
+    "hostdays": "__T_T_S",
+    "slowhostdays": "",
+    "hosttime": "22:21",
+    "lastbackuppath": "d:\\planetsdata\\backups\\game628580\\turn110-638862870869578167.zip",
+    "nexthost": "6/24/2025 10:21:00 PM",
+    "allturnsin": false,
+    "lastnotified": true,
+    "ishosting": false,
+    "lastloadeddate": "3/16/2026 11:49:49 PM",
+    "deletedate": "",
+    "lasthostdate": "6/21/2025 3:33:31 PM",
+    "password": "",
+    "groups": "",
+    "leagueseason": 0,
+    "leaguetier": 0,
+    "leaguegametype": 0,
+    "haspassword": false,
+    "statusname": "Finished",
+    "justended": false,
+    "iscustom": false,
+    "timetohostshort": "Finished",
+    "timetohost": "Finished",
+    "id": 628580
+  },
+  "player": {
+    "status": 1,
+    "statusturn": 1,
+    "accountid": 22825,
+    "username": "koshling",
+    "email": "",
+    "raceid": 8,
+    "teamid": 0,
+    "prioritypoints": 217,
+    "joinrank": 0,
+    "finishrank": 1,
+    "turnjoined": 1,
+    "turnready": false,
+    "turnreadydate": "6/21/2025 9:31:35 PM",
+    "turnstatus": 1,
+    "turnsmissed": 0,
+    "turnsmissedtotal": 0,
+    "turnsholiday": 0,
+    "turnsearly": 25,
+    "turn": 3,
+    "timcontinuum": 0,
+    "savekey": "",
+    "tutorialid": 0,
+    "tutorialtaskid": 0,
+    "megacredits": 0,
+    "duranium": 0,
+    "tritanium": 0,
+    "molybdenum": 0,
+    "leagueteamid": 0,
+    "id": 8,
+    "activehulls": "14,15,16,17,18,68,69,70,71,72,73,74,75,76,77,104,105",
+    "activeadvantages": "22,23,46,48,49,51,57,77",
+    "activeengines": "",
+    "activebeams": "",
+    "activetorps": ""
+  },
+  "players": [
+    {
+      "status": 3,
+      "statusturn": 49,
+      "accountid": 0,
+      "username": "dead",
+      "email": "",
+      "raceid": 1,
+      "teamid": 0,
+      "prioritypoints": 29,
+      "joinrank": 0,
+      "finishrank": 9,
+      "turnjoined": 1,
+      "turnready": false,
+      "turnreadydate": "1/31/2025 1:01:44 AM",
+      "turnstatus": 0,
+      "turnsmissed": 0,
+      "turnsmissedtotal": 0,
+      "turnsholiday": 0,
+      "turnsearly": 46,
+      "turn": 3,
+      "timcontinuum": 0,
+      "savekey": "",
+      "tutorialid": 0,
+      "tutorialtaskid": 0,
+      "megacredits": 0,
+      "duranium": 0,
+      "tritanium": 0,
+      "molybdenum": 0,
+      "leagueteamid": 0,
+      "id": 1,
+      "activehulls": "",
+      "activeadvantages": "",
+      "activeengines": "",
+      "activebeams": "",
+      "activetorps": ""
+    },
+    {
+      "status": 1,
+      "statusturn": 1,
+      "accountid": 173844,
+      "username": "arlowat",
+      "email": "",
+      "raceid": 2,
+      "teamid": 0,
+      "prioritypoints": 16,
+      "joinrank": 0,
+      "finishrank": 5,
+      "turnjoined": 1,
+      "turnready": false,
+      "turnreadydate": "6/21/2025 10:36:35 PM",
+      "turnstatus": 1,
+      "turnsmissed": 0,
+      "turnsmissedtotal": 1,
+      "turnsholiday": 0,
+      "turnsearly": 37,
+      "turn": 3,
+      "timcontinuum": 0,
+      "savekey": "",
+      "tutorialid": 0,
+      "tutorialtaskid": 0,
+      "megacredits": 0,
+      "duranium": 0,
+      "tritanium": 0,
+      "molybdenum": 0,
+      "leagueteamid": 0,
+      "id": 2,
+      "activehulls": "",
+      "activeadvantages": "",
+      "activeengines": "",
+      "activebeams": "",
+      "activetorps": ""
+    },
+    {
+      "status": 1,
+      "statusturn": 1,
+      "accountid": 677,
+      "username": "forger",
+      "email": "",
+      "raceid": 3,
+      "teamid": 0,
+      "prioritypoints": 43,
+      "joinrank": 0,
+      "finishrank": 2,
+      "turnjoined": 1,
+      "turnready": false,
+      "turnreadydate": "6/21/2025 9:59:44 PM",
+      "turnstatus": 1,
+      "turnsmissed": 0,
+      "turnsmissedtotal": 0,
+      "turnsholiday": 0,
+      "turnsearly": 50,
+      "turn": 3,
+      "timcontinuum": 0,
+      "savekey": "",
+      "tutorialid": 0,
+      "tutorialtaskid": 0,
+      "megacredits": 0,
+      "duranium": 0,
+      "tritanium": 0,
+      "molybdenum": 0,
+      "leagueteamid": 0,
+      "id": 3,
+      "activehulls": "",
+      "activeadvantages": "",
+      "activeengines": "",
+      "activebeams": "",
+      "activetorps": ""
+    }
+  ],
+  "scores": [
+    {
+      "dateadded": "6/23/2025 2:52:44 PM",
+      "ownerid": 8,
+      "accountid": 22825,
+      "capitalships": 130,
+      "freighters": 26,
+      "planets": 171,
+      "starbases": 121,
+      "militaryscore": 2509092,
+      "inventoryscore": 17556,
+      "prioritypoints": 217,
+      "turn": 111,
+      "percent": 45.92,
+      "victoryscore": 0,
+      "victorybonuses": "",
+      "technologicalaccumulator": 0,
+      "widestreach": 0,
+      "greatestwarrior": 0,
+      "happybeings": 0,
+      "id": 1218,
+      "shipchange": 1,
+      "freighterchange": 0,
+      "planetchange": -4,
+      "starbasechange": -2,
+      "militarychange": -53869,
+      "inventorychange": -270,
+      "prioritypointchange": 54,
+      "percentchange": -0.0799999999999983,
+      "victoryscorechange": 0
+    },
+    {
+      "dateadded": "6/23/2025 2:52:44 PM",
+      "ownerid": 3,
+      "accountid": 677,
+      "capitalships": 68,
+      "freighters": 17,
+      "planets": 133,
+      "starbases": 40,
+      "militaryscore": 608671,
+      "inventoryscore": 6827,
+      "prioritypoints": 43,
+      "turn": 111,
+      "percent": 11.14,
+      "victoryscore": 0,
+      "victorybonuses": "",
+      "technologicalaccumulator": 0,
+      "widestreach": 0,
+      "greatestwarrior": 0,
+      "happybeings": 0,
+      "id": 1213,
+      "shipchange": 6,
+      "freighterchange": 0,
+      "planetchange": -2,
+      "starbasechange": 0,
+      "militarychange": 48322,
+      "inventorychange": 40,
+      "prioritypointchange": 0,
+      "percentchange": 1.08,
+      "victoryscorechange": 0
+    },
+    {
+      "dateadded": "6/23/2025 2:52:44 PM",
+      "ownerid": 4,
+      "accountid": 172090,
+      "capitalships": 98,
+      "freighters": 18,
+      "planets": 94,
+      "starbases": 62,
+      "militaryscore": 1031980,
+      "inventoryscore": 9378,
+      "prioritypoints": 67,
+      "turn": 111,
+      "percent": 18.89,
+      "victoryscore": 0,
+      "victorybonuses": "",
+      "technologicalaccumulator": 0,
+      "widestreach": 0,
+      "greatestwarrior": 0,
+      "happybeings": 0,
+      "id": 1214,
+      "shipchange": 2,
+      "freighterchange": -1,
+      "planetchange": 9,
+      "starbasechange": 2,
+      "militarychange": 36878,
+      "inventorychange": 349,
+      "prioritypointchange": 6,
+      "percentchange": 1.03,
+      "victoryscorechange": 0
+    }
+  ],
+  "maps": [],
+  "planets": [
+    {
+      "name": "Lorthidonia",
+      "x": 2078,
+      "y": 1149,
+      "friendlycode": "???",
+      "mines": -1,
+      "factories": -1,
+      "defense": -1,
+      "targetmines": 0,
+      "targetfactories": 0,
+      "targetdefense": 0,
+      "builtmines": 0,
+      "builtfactories": 0,
+      "builtdefense": 0,
+      "buildingstarbase": false,
+      "megacredits": -1,
+      "supplies": -1,
+      "suppliessold": 0,
+      "neutronium": -1,
+      "molybdenum": -1,
+      "duranium": -1,
+      "tritanium": -1,
+      "groundneutronium": -1,
+      "groundmolybdenum": -1,
+      "groundduranium": -1,
+      "groundtritanium": -1,
+      "densityneutronium": -1,
+      "densitymolybdenum": -1,
+      "densityduranium": -1,
+      "densitytritanium": -1,
+      "totalneutronium": 0,
+      "totalmolybdenum": 0,
+      "totalduranium": 0,
+      "totaltritanium": 0,
+      "checkneutronium": 0,
+      "checkmolybdenum": 0,
+      "checkduranium": 0,
+      "checktritanium": 0,
+      "checkmegacredits": 0,
+      "checksupplies": 0,
+      "temp": -1,
+      "ownerid": 0,
+      "clans": -1,
+      "colchange": 0,
+      "colonisttaxrate": 0,
+      "colonisthappypoints": 0,
+      "colhappychange": 0,
+      "nativeclans": -1,
+      "nativechange": 0,
+      "nativegovernment": 0,
+      "nativetaxvalue": 0,
+      "nativetype": 0,
+      "nativetaxrate": 0,
+      "nativehappypoints": 0,
+      "nativehappychange": 0,
+      "infoturn": 0,
+      "debrisdisk": 0,
+      "flag": 0,
+      "readystatus": 0,
+      "burrowsize": 0,
+      "developmentlevel": 0,
+      "targetx": 0,
+      "targety": 0,
+      "podhullid": 0,
+      "podspeed": 0,
+      "podcargo": 0,
+      "larva": 0,
+      "larvaturns": 0,
+      "img": "/img/planets/unknown.png",
+      "nativeracename": "none",
+      "nativegovernmentname": "?",
+      "id": 1
+    },
+    {
+      "name": "Virgo Ceti 5",
+      "x": 1447,
+      "y": 1890,
+      "friendlycode": "???",
+      "mines": -1,
+      "factories": -1,
+      "defense": -1,
+      "targetmines": 0,
+      "targetfactories": 0,
+      "targetdefense": 0,
+      "builtmines": 0,
+      "builtfactories": 0,
+      "builtdefense": 0,
+      "buildingstarbase": false,
+      "megacredits": -1,
+      "supplies": -1,
+      "suppliessold": 0,
+      "neutronium": -1,
+      "molybdenum": -1,
+      "duranium": -1,
+      "tritanium": -1,
+      "groundneutronium": -1,
+      "groundmolybdenum": -1,
+      "groundduranium": -1,
+      "groundtritanium": -1,
+      "densityneutronium": -1,
+      "densitymolybdenum": -1,
+      "densityduranium": -1,
+      "densitytritanium": -1,
+      "totalneutronium": 0,
+      "totalmolybdenum": 0,
+      "totalduranium": 0,
+      "totaltritanium": 0,
+      "checkneutronium": 0,
+      "checkmolybdenum": 0,
+      "checkduranium": 0,
+      "checktritanium": 0,
+      "checkmegacredits": 0,
+      "checksupplies": 0,
+      "temp": -1,
+      "ownerid": 0,
+      "clans": -1,
+      "colchange": 0,
+      "colonisttaxrate": 0,
+      "colonisthappypoints": 0,
+      "colhappychange": 0,
+      "nativeclans": -1,
+      "nativechange": 0,
+      "nativegovernment": 0,
+      "nativetaxvalue": 0,
+      "nativetype": 0,
+      "nativetaxrate": 0,
+      "nativehappypoints": 0,
+      "nativehappychange": 0,
+      "infoturn": 0,
+      "debrisdisk": 0,
+      "flag": 0,
+      "readystatus": 0,
+      "burrowsize": 0,
+      "developmentlevel": 0,
+      "targetx": 0,
+      "targety": 0,
+      "podhullid": 0,
+      "podspeed": 0,
+      "podcargo": 0,
+      "larva": 0,
+      "larvaturns": 0,
+      "img": "/img/planets/unknown.png",
+      "nativeracename": "none",
+      "nativegovernmentname": "?",
+      "id": 2
+    },
+    {
+      "name": "Organia 3",
+      "x": 1765,
+      "y": 2643,
+      "friendlycode": "nuK",
+      "mines": 168,
+      "factories": 162,
+      "defense": 113,
+      "targetmines": 0,
+      "targetfactories": 0,
+      "targetdefense": 0,
+      "builtmines": 0,
+      "builtfactories": 0,
+      "builtdefense": 0,
+      "buildingstarbase": false,
+      "megacredits": 1573,
+      "supplies": 38719,
+      "suppliessold": 0,
+      "neutronium": 225,
+      "molybdenum": 390,
+      "duranium": 310,
+      "tritanium": 73,
+      "groundneutronium": 6,
+      "groundmolybdenum": 3,
+      "groundduranium": 20,
+      "groundtritanium": 35,
+      "densityneutronium": 52,
+      "densitymolybdenum": 53,
+      "densityduranium": 40,
+      "densitytritanium": 20,
+      "totalneutronium": 0,
+      "totalmolybdenum": 0,
+      "totalduranium": 0,
+      "totaltritanium": 0,
+      "checkneutronium": 225,
+      "checkmolybdenum": 510,
+      "checkduranium": 510,
+      "checktritanium": 253,
+      "checkmegacredits": 11861,
+      "checksupplies": 39162,
+      "temp": 69,
+      "ownerid": 8,
+      "clans": 4749,
+      "colchange": 0,
+      "colonisttaxrate": 0,
+      "colonisthappypoints": 100,
+      "colhappychange": 7,
+      "nativeclans": 113697,
+      "nativechange": 0,
+      "nativegovernment": 3,
+      "nativetaxvalue": 60,
+      "nativetype": 2,
+      "nativetaxrate": 0,
+      "nativehappypoints": 95,
+      "nativehappychange": 1,
+      "infoturn": 111,
+      "debrisdisk": 0,
+      "flag": 0,
+      "readystatus": 0,
+      "burrowsize": 0,
+      "developmentlevel": 0,
+      "targetx": 1765,
+      "targety": 2643,
+      "podhullid": 0,
+      "podspeed": 0,
+      "podcargo": 0,
+      "larva": 0,
+      "larvaturns": 0,
+      "img": "/img/planets/69.png",
+      "nativeracename": "Bovinoid",
+      "nativegovernmentname": "EarlyTribal",
+      "id": 3
+    },
+    {
+      "name": "YouTwo",
+      "x": 2901,
+      "y": 2113,
+      "friendlycode": "vbc",
+      "mines": 1,
+      "factories": 74,
+      "defense": 1,
+      "targetmines": 0,
+      "targetfactories": 0,
+      "targetdefense": 0,
+      "builtmines": 0,
+      "builtfactories": 0,
+      "builtdefense": 0,
+      "buildingstarbase": false,
+      "megacredits": 0,
+      "supplies": 400,
+      "suppliessold": 0,
+      "neutronium": 5,
+      "molybdenum": 119,
+      "duranium": 319,
+      "tritanium": 5,
+      "groundneutronium": 96,
+      "groundmolybdenum": 191,
+      "groundduranium": 96,
+      "groundtritanium": 191,
+      "densityneutronium": 50,
+      "densitymolybdenum": 87,
+      "densityduranium": 59,
+      "densitytritanium": 87,
+      "totalneutronium": 0,
+      "totalmolybdenum": 0,
+      "totalduranium": 0,
+      "totaltritanium": 0,
+      "checkneutronium": 201,
+      "checkmolybdenum": 119,
+      "checkduranium": 319,
+      "checktritanium": 5,
+      "checkmegacredits": 236,
+      "checksupplies": 476,
+      "temp": 19,
+      "ownerid": 8,
+      "clans": 1,
+      "colchange": 0,
+      "colonisttaxrate": 0,
+      "colonisthappypoints": 100,
+      "colhappychange": 8,
+      "nativeclans": 22088,
+      "nativechange": 0,
+      "nativegovernment": 2,
+      "nativetaxvalue": 40,
+      "nativetype": 9,
+      "nativetaxrate": 0,
+      "nativehappypoints": 100,
+      "nativehappychange": 4,
+      "infoturn": 111,
+      "debrisdisk": 0,
+      "flag": 0,
+      "readystatus": 0,
+      "burrowsize": 0,
+      "developmentlevel": 0,
+      "targetx": 2901,
+      "targety": 2113,
+      "podhullid": 0,
+      "podspeed": 0,
+      "podcargo": 0,
+      "larva": 0,
+      "larvaturns": 0,
+      "img": "/img/planets/119.png",
+      "nativeracename": "Siliconoid",
+      "nativegovernmentname": "PreTribal",
+      "id": 4
+    },
+    {
+      "name": "Nothing Planet",
+      "x": 2479,
+      "y": 1788,
+      "friendlycode": "NUk",
+      "mines": 55,
+      "factories": 128,
+      "defense": 79,
+      "targetmines": 0,
+      "targetfactories": 0,
+      "targetdefense": 0,
+      "builtmines": 0,
+      "builtfactories": 0,
+      "builtdefense": 0,
+      "buildingstarbase": false,
+      "megacredits": 48535,
+      "supplies": 4107,
+      "suppliessold": 0,
+      "neutronium": 5,
+      "molybdenum": 3,
+      "duranium": 1661,
+      "tritanium": 1833,
+      "groundneutronium": 5,
+      "groundmolybdenum": 3,
+      "groundduranium": 4,
+      "groundtritanium": 5,
+      "densityneutronium": 96,
+      "densitymolybdenum": 51,
+      "densityduranium": 74,
+      "densitytritanium": 86,
+      "totalneutronium": 0,
+      "totalmolybdenum": 0,
+      "totalduranium": 0,
+      "totaltritanium": 0,
+      "checkneutronium": 6,
+      "checkmolybdenum": 397,
+      "checkduranium": 1861,
+      "checktritanium": 2424,
+      "checkmegacredits": 89629,
+      "checksupplies": 4479,
+      "temp": 18,
+      "ownerid": 4,
+      "clans": 1072,
+      "colchange": 0,
+      "colonisttaxrate": 0,
+      "colonisthappypoints": 100,
+      "colhappychange": 8,
+      "nativeclans": 79104,
+      "nativechange": 0,
+      "nativegovernment": 8,
+      "nativetaxvalue": 160,
+      "nativetype": 1,
+      "nativetaxrate": 0,
+      "nativehappypoints": 100,
+      "nativehappychange": 5,
+      "infoturn": 111,
+      "debrisdisk": 0,
+      "flag": 0,
+      "readystatus": 0,
+      "burrowsize": 0,
+      "developmentlevel": 0,
+      "targetx": 2479,
+      "targety": 1788,
+      "podhullid": 0,
+      "podspeed": 0,
+      "podcargo": 0,
+      "larva": 0,
+      "larvaturns": 0,
+      "img": "/img/planets/218.png",
+      "nativeracename": "Humanoid",
+      "nativegovernmentname": "Participatory",
+      "id": 5
+    }
+  ],
+  "ships": [
+    {
+      "friendlycode": "uys",
+      "name": "GORBIE CLASS BATTLECARRIER",
+      "warp": 9,
+      "x": 2678,
+      "y": 1832,
+      "beams": 10,
+      "bays": 10,
+      "torps": 0,
+      "mission": 1,
+      "mission1target": 0,
+      "mission2target": 0,
+      "enemy": 0,
+      "damage": 0,
+      "crew": 2287,
+      "clans": 0,
+      "neutronium": 264,
+      "tritanium": 0,
+      "duranium": 0,
+      "molybdenum": 0,
+      "supplies": 0,
+      "ammo": 175,
+      "megacredits": 0,
+      "transferclans": 0,
+      "transferneutronium": 0,
+      "transferduranium": 0,
+      "transfertritanium": 0,
+      "transfermolybdenum": 0,
+      "transfersupplies": 0,
+      "transferammo": 0,
+      "transfermegacredits": 0,
+      "transfertargetid": 0,
+      "transfertargettype": 0,
+      "targetx": 2678,
+      "targety": 1832,
+      "mass": 1479,
+      "heading": -1,
+      "turn": 99,
+      "turnkilled": 0,
+      "beamid": 10,
+      "engineid": 9,
+      "hullid": 70,
+      "ownerid": 8,
+      "torpedoid": 0,
+      "experience": 1,
+      "infoturn": 111,
+      "podhullid": 0,
+      "podcargo": 0,
+      "goal": 0,
+      "goaltarget": 0,
+      "goaltarget2": 0,
+      "waypoints": [],
+      "history": [
+        {
+          "x": 2678,
+          "y": 1832
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        }
+      ],
+      "iscloaked": false,
+      "readystatus": 0,
+      "id": 1
+    },
+    {
+      "friendlycode": "gs4",
+      "name": "Medium Deep Space Freighter",
+      "warp": 9,
+      "x": 2812,
+      "y": 2156,
+      "beams": 0,
+      "bays": 0,
+      "torps": 0,
+      "mission": 0,
+      "mission1target": 0,
+      "mission2target": 0,
+      "enemy": 0,
+      "damage": 0,
+      "crew": 6,
+      "clans": 0,
+      "neutronium": 62,
+      "tritanium": 0,
+      "duranium": 0,
+      "molybdenum": 0,
+      "supplies": 0,
+      "ammo": 0,
+      "megacredits": 0,
+      "transferclans": 0,
+      "transferneutronium": 0,
+      "transferduranium": 0,
+      "transfertritanium": 0,
+      "transfermolybdenum": 0,
+      "transfersupplies": 0,
+      "transferammo": 0,
+      "transfermegacredits": 0,
+      "transfertargetid": 0,
+      "transfertargettype": 0,
+      "targetx": 2810,
+      "targety": 2158,
+      "mass": 122,
+      "heading": 315,
+      "turn": 1,
+      "turnkilled": 0,
+      "beamid": 0,
+      "engineid": 9,
+      "hullid": 16,
+      "ownerid": 4,
+      "torpedoid": 0,
+      "experience": 59,
+      "infoturn": 111,
+      "podhullid": 0,
+      "podcargo": 0,
+      "goal": 0,
+      "goaltarget": 0,
+      "goaltarget2": 0,
+      "waypoints": [],
+      "history": [],
+      "iscloaked": false,
+      "readystatus": 0,
+      "id": 4
+    },
+    {
+      "friendlycode": "md2",
+      "name": "SUPER STAR FRIGATE",
+      "warp": 1,
+      "x": 2440,
+      "y": 1820,
+      "beams": 5,
+      "bays": 0,
+      "torps": 3,
+      "mission": 2,
+      "mission1target": 0,
+      "mission2target": 0,
+      "enemy": 11,
+      "damage": 13,
+      "crew": 102,
+      "clans": 0,
+      "neutronium": 1,
+      "tritanium": 0,
+      "duranium": 0,
+      "molybdenum": 0,
+      "supplies": 0,
+      "ammo": 0,
+      "megacredits": 0,
+      "transferclans": 0,
+      "transferneutronium": 0,
+      "transferduranium": 0,
+      "transfertritanium": 0,
+      "transfermolybdenum": 0,
+      "transfersupplies": 0,
+      "transferammo": 0,
+      "transfermegacredits": 0,
+      "transfertargetid": 0,
+      "transfertargettype": 0,
+      "targetx": 2440,
+      "targety": 1820,
+      "mass": 165,
+      "heading": -1,
+      "turn": 63,
+      "turnkilled": 0,
+      "beamid": 2,
+      "engineid": 9,
+      "hullid": 75,
+      "ownerid": 8,
+      "torpedoid": 10,
+      "experience": 2,
+      "infoturn": 111,
+      "podhullid": 0,
+      "podcargo": 0,
+      "goal": 0,
+      "goaltarget": 0,
+      "goaltarget2": 0,
+      "waypoints": [],
+      "history": [
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1934,
+          "y": 2203
+        },
+        {
+          "x": 1934,
+          "y": 2203
+        },
+        {
+          "x": 1934,
+          "y": 2203
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1934,
+          "y": 2203
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1992,
+          "y": 2242
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        },
+        {
+          "x": 1919,
+          "y": 2216
+        }
+      ],
+      "iscloaked": false,
+      "readystatus": 0,
+      "id": 7
+    },
+    {
+      "friendlycode": "ymo",
+      "name": "Medium Deep Space Freighter",
+      "warp": 9,
+      "x": 1880,
+      "y": 2291,
+      "beams": 0,
+      "bays": 0,
+      "torps": 0,
+      "mission": 8,
+      "mission1target": 0,
+      "mission2target": 0,
+      "enemy": 0,
+      "damage": 0,
+      "crew": 6,
+      "clans": 100,
+      "neutronium": 132,
+      "tritanium": 0,
+      "duranium": 0,
+      "molybdenum": 0,
+      "supplies": 0,
+      "ammo": 0,
+      "megacredits": 0,
+      "transferclans": 0,
+      "transferneutronium": 0,
+      "transferduranium": 0,
+      "transfertritanium": 0,
+      "transfermolybdenum": 0,
+      "transfersupplies": 0,
+      "transferammo": 0,
+      "transfermegacredits": 0,
+      "transfertargetid": 0,
+      "transfertargettype": 0,
+      "targetx": 1880,
+      "targety": 2291,
+      "mass": 292,
+      "heading": -1,
+      "turn": 1,
+      "turnkilled": 0,
+      "beamid": 0,
+      "engineid": 9,
+      "hullid": 16,
+      "ownerid": 8,
+      "torpedoid": 0,
+      "experience": 80,
+      "infoturn": 111,
+      "podhullid": 0,
+      "podcargo": 0,
+      "goal": 0,
+      "goaltarget": 0,
+      "goaltarget2": 0,
+      "waypoints": [],
+      "history": [
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1907,
+          "y": 2365
+        },
+        {
+          "x": 1978,
+          "y": 2401
+        },
+        {
+          "x": 1934,
+          "y": 2352
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1855,
+          "y": 2337
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1880,
+          "y": 2291
+        },
+        {
+          "x": 1914,
+          "y": 2352
+        },
+        {
+          "x": 1978,
+          "y": 2401
+        },
+        {
+          "x": 2012,
+          "y": 2438
+        },
+        {
+          "x": 1140,
+          "y": 1241
+        },
+        {
+          "x": 1140,
+          "y": 1241
+        },
+        {
+          "x": 1155,
+          "y": 1245
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2408,
+          "y": 1856
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2479,
+          "y": 1806
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2422,
+          "y": 1886
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2368,
+          "y": 1837
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2408,
+          "y": 1856
+        },
+        {
+          "x": 2422,
+          "y": 1886
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2440,
+          "y": 1820
+        },
+        {
+          "x": 2901,
+          "y": 2113
+        },
+        {
+          "x": 2901,
+          "y": 2113
+        },
+        {
+          "x": 2836,
+          "y": 2135
+        },
+        {
+          "x": 2901,
+          "y": 2113
+        },
+        {
+          "x": 2937,
+          "y": 2092
+        },
+        {
+          "x": 2901,
+          "y": 2113
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2299,
+          "y": 2693
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2210,
+          "y": 2793
+        },
+        {
+          "x": 2222,
+          "y": 2844
+        },
+        {
+          "x": 2240,
+          "y": 2923
+        },
+        {
+          "x": 2269,
+          "y": 2878
+        },
+        {
+          "x": 2310,
+          "y": 2845
+        },
+        {
+          "x": 2277,
+          "y": 2787
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2210,
+          "y": 2793
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2277,
+          "y": 2787
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2177,
+          "y": 2706
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2177,
+          "y": 2706
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2177,
+          "y": 2706
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2177,
+          "y": 2706
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2177,
+          "y": 2706
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2095,
+          "y": 2622
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2167,
+          "y": 2675
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2095,
+          "y": 2622
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2117,
+          "y": 2681
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2210,
+          "y": 2793
+        },
+        {
+          "x": 2210,
+          "y": 2793
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2210,
+          "y": 2793
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2117,
+          "y": 2681
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2233,
+          "y": 2720
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2167,
+          "y": 2675
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2167,
+          "y": 2675
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2117,
+          "y": 2681
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2167,
+          "y": 2675
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2175,
+          "y": 2684
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2177,
+          "y": 2706
+        },
+        {
+          "x": 2167,
+          "y": 2675
+        },
+        {
+          "x": 2163,
+          "y": 2629
+        },
+        {
+          "x": 2182,
+          "y": 2550
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2208,
+          "y": 2464
+        },
+        {
+          "x": 2252,
+          "y": 2396
+        },
+        {
+          "x": 2267,
+          "y": 2405
+        },
+        {
+          "x": 2255,
+          "y": 2430
+        },
+        {
+          "x": 2321,
+          "y": 2479
+        },
+        {
+          "x": 2293,
+          "y": 2542
+        },
+        {
+          "x": 2232,
+          "y": 2570
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        }
+      ],
+      "iscloaked": false,
+      "readystatus": 0,
+      "id": 8
+    },
+    {
+      "friendlycode": "alm",
+      "name": "MERLIN CLASS ALCHEMY SHIP",
+      "warp": 5,
+      "x": 2187,
+      "y": 2150,
+      "beams": 8,
+      "bays": 0,
+      "torps": 0,
+      "mission": 1,
+      "mission1target": 0,
+      "mission2target": 0,
+      "enemy": 0,
+      "damage": 0,
+      "crew": 120,
+      "clans": 0,
+      "neutronium": 6,
+      "tritanium": 0,
+      "duranium": 0,
+      "molybdenum": 900,
+      "supplies": 0,
+      "ammo": 0,
+      "megacredits": 0,
+      "transferclans": 0,
+      "transferneutronium": 0,
+      "transferduranium": 0,
+      "transfertritanium": 0,
+      "transfermolybdenum": 0,
+      "transfersupplies": 0,
+      "transferammo": 0,
+      "transfermegacredits": 0,
+      "transfertargetid": 0,
+      "transfertargettype": 0,
+      "targetx": 2187,
+      "targety": 2150,
+      "mass": 1834,
+      "heading": -1,
+      "turn": 21,
+      "turnkilled": 0,
+      "beamid": 2,
+      "engineid": 5,
+      "hullid": 105,
+      "ownerid": 8,
+      "torpedoid": 0,
+      "experience": 461,
+      "infoturn": 111,
+      "podhullid": 0,
+      "podcargo": 0,
+      "goal": 0,
+      "goaltarget": 0,
+      "goaltarget2": 0,
+      "waypoints": [],
+      "history": [
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2176,
+          "y": 2147
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2176,
+          "y": 2147
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 1384,
+          "y": 2696
+        },
+        {
+          "x": 1384,
+          "y": 2696
+        },
+        {
+          "x": 1384,
+          "y": 2696
+        },
+        {
+          "x": 1384,
+          "y": 2696
+        },
+        {
+          "x": 1409,
+          "y": 2729
+        },
+        {
+          "x": 1409,
+          "y": 2729
+        },
+        {
+          "x": 1416,
+          "y": 2735
+        },
+        {
+          "x": 1480,
+          "y": 2785
+        },
+        {
+          "x": 1480,
+          "y": 2785
+        },
+        {
+          "x": 1480,
+          "y": 2785
+        },
+        {
+          "x": 1480,
+          "y": 2785
+        },
+        {
+          "x": 1480,
+          "y": 2785
+        },
+        {
+          "x": 1541,
+          "y": 2774
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2179,
+          "y": 2157
+        },
+        {
+          "x": 2115,
+          "y": 2207
+        },
+        {
+          "x": 2094,
+          "y": 2222
+        },
+        {
+          "x": 2073,
+          "y": 2237
+        },
+        {
+          "x": 2067,
+          "y": 2238
+        },
+        {
+          "x": 2067,
+          "y": 2238
+        },
+        {
+          "x": 2071,
+          "y": 2245
+        },
+        {
+          "x": 2058,
+          "y": 2256
+        },
+        {
+          "x": 2058,
+          "y": 2256
+        },
+        {
+          "x": 2060,
+          "y": 2246
+        },
+        {
+          "x": 2069,
+          "y": 2246
+        },
+        {
+          "x": 2069,
+          "y": 2246
+        },
+        {
+          "x": 2060,
+          "y": 2246
+        },
+        {
+          "x": 2073,
+          "y": 2237
+        },
+        {
+          "x": 2073,
+          "y": 2237
+        },
+        {
+          "x": 2073,
+          "y": 2237
+        },
+        {
+          "x": 2073,
+          "y": 2237
+        },
+        {
+          "x": 2064,
+          "y": 2236
+        },
+        {
+          "x": 2071,
+          "y": 2245
+        },
+        {
+          "x": 2064,
+          "y": 2236
+        },
+        {
+          "x": 2065,
+          "y": 2237
+        },
+        {
+          "x": 2064,
+          "y": 2236
+        },
+        {
+          "x": 2082,
+          "y": 2229
+        },
+        {
+          "x": 2100,
+          "y": 2212
+        },
+        {
+          "x": 2121,
+          "y": 2198
+        },
+        {
+          "x": 2187,
+          "y": 2150
+        },
+        {
+          "x": 2179,
+          "y": 2160
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2175,
+          "y": 2515
+        },
+        {
+          "x": 2105,
+          "y": 2509
+        },
+        {
+          "x": 2024,
+          "y": 2502
+        },
+        {
+          "x": 1991,
+          "y": 2502
+        }
+      ],
+      "iscloaked": false,
+      "readystatus": 0,
+      "id": 9
+    }
+  ],
+  "ionstorms": [
+    {
+      "x": 1568,
+      "y": 735,
+      "radius": 209,
+      "voltage": 123,
+      "warp": 5,
+      "heading": 252,
+      "isgrowing": false,
+      "parentid": 0,
+      "id": 17
+    },
+    {
+      "x": 1595,
+      "y": 731,
+      "radius": 102,
+      "voltage": 119,
+      "warp": 5,
+      "heading": 252,
+      "isgrowing": false,
+      "parentid": 17,
+      "id": 19
+    },
+    {
+      "x": 1601,
+      "y": 740,
+      "radius": 112,
+      "voltage": 169,
+      "warp": 5,
+      "heading": 252,
+      "isgrowing": false,
+      "parentid": 17,
+      "id": 21
+    }
+  ],
+  "nebulas": [],
+  "stars": [
+    {
+      "name": "Gores",
+      "x": 1223,
+      "y": 2367,
+      "temp": 28601,
+      "radius": 42,
+      "mass": 6256,
+      "planets": 0,
+      "id": 1
+    },
+    {
+      "name": "John Galt",
+      "x": 2609,
+      "y": 2289,
+      "temp": 1359,
+      "radius": 49,
+      "mass": 7278,
+      "planets": 0,
+      "id": 2
+    }
+  ],
+  "blackholes": [],
+  "artifacts": [],
+  "wormholes": [],
+  "starbases": [
+    {
+      "defense": 200,
+      "builtdefense": 0,
+      "damage": 0,
+      "enginetechlevel": 1,
+      "hulltechlevel": 1,
+      "beamtechlevel": 1,
+      "torptechlevel": 1,
+      "hulltechup": 0,
+      "enginetechup": 0,
+      "beamtechup": 0,
+      "torptechup": 0,
+      "fighters": 60,
+      "builtfighters": 0,
+      "shipmission": 0,
+      "mission": 0,
+      "mission1target": 1195,
+      "planetid": 3,
+      "raceid": 0,
+      "targetshipid": 0,
+      "buildbeamid": 0,
+      "buildengineid": 0,
+      "buildtorpedoid": 0,
+      "buildhullid": 0,
+      "buildbeamcount": 0,
+      "buildtorpcount": 0,
+      "isbuilding": false,
+      "starbasetype": 0,
+      "infoturn": 111,
+      "readystatus": 0,
+      "id": 180
+    },
+    {
+      "defense": 200,
+      "builtdefense": 0,
+      "damage": 0,
+      "enginetechlevel": 10,
+      "hulltechlevel": 10,
+      "beamtechlevel": 10,
+      "torptechlevel": 10,
+      "hulltechup": 0,
+      "enginetechup": 0,
+      "beamtechup": 0,
+      "torptechup": 0,
+      "fighters": 60,
+      "builtfighters": 0,
+      "shipmission": 0,
+      "mission": 0,
+      "mission1target": 0,
+      "planetid": 5,
+      "raceid": 0,
+      "targetshipid": 0,
+      "buildbeamid": 0,
+      "buildengineid": 0,
+      "buildtorpedoid": 0,
+      "buildhullid": 0,
+      "buildbeamcount": 0,
+      "buildtorpcount": 0,
+      "isbuilding": false,
+      "starbasetype": 0,
+      "infoturn": 111,
+      "readystatus": 0,
+      "id": 34
+    },
+    {
+      "defense": 200,
+      "builtdefense": 0,
+      "damage": 0,
+      "enginetechlevel": 10,
+      "hulltechlevel": 1,
+      "beamtechlevel": 1,
+      "torptechlevel": 1,
+      "hulltechup": 0,
+      "enginetechup": 0,
+      "beamtechup": 0,
+      "torptechup": 0,
+      "fighters": 41,
+      "builtfighters": 0,
+      "shipmission": 0,
+      "mission": 0,
+      "mission1target": 158,
+      "planetid": 9,
+      "raceid": 0,
+      "targetshipid": 0,
+      "buildbeamid": 0,
+      "buildengineid": 0,
+      "buildtorpedoid": 0,
+      "buildhullid": 0,
+      "buildbeamcount": 0,
+      "buildtorpcount": 0,
+      "isbuilding": false,
+      "starbasetype": 0,
+      "infoturn": 111,
+      "readystatus": 0,
+      "id": 157
+    }
+  ],
+  "stock": [
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 14,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10960
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 15,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10954
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 16,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10958
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 17,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10963
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 18,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10967
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 68,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10959
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 69,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10964
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 70,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10968
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 71,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10953
+    },
+    {
+      "starbaseid": 180,
+      "stocktype": 1,
+      "stockid": 72,
+      "amount": 0,
+      "builtamount": 0,
+      "id": 10957
+    }
+  ],
+  "minefields": [
+    {
+      "ownerid": 2,
+      "isweb": false,
+      "ishidden": false,
+      "units": 85,
+      "infoturn": 111,
+      "friendlycode": "???",
+      "x": 2131,
+      "y": 1417,
+      "radius": 9,
+      "id": 18
+    },
+    {
+      "ownerid": 4,
+      "isweb": false,
+      "ishidden": false,
+      "units": 2308,
+      "infoturn": 111,
+      "friendlycode": "???",
+      "x": 2474,
+      "y": 2477,
+      "radius": 48,
+      "id": 51
+    },
+    {
+      "ownerid": 8,
+      "isweb": false,
+      "ishidden": false,
+      "units": 328,
+      "infoturn": 111,
+      "friendlycode": "rb1",
+      "x": 2012,
+      "y": 2438,
+      "radius": 18,
+      "id": 52
+    }
+  ],
+  "relations": [
+    {
+      "playerid": 8,
+      "playertoid": 1,
+      "relationto": 1,
+      "relationfrom": 0,
+      "conflictlevel": 0,
+      "color": "",
+      "id": 78
+    },
+    {
+      "playerid": 8,
+      "playertoid": 2,
+      "relationto": 1,
+      "relationfrom": 1,
+      "conflictlevel": 0,
+      "color": "",
+      "id": 79
+    },
+    {
+      "playerid": 8,
+      "playertoid": 3,
+      "relationto": 2,
+      "relationfrom": 2,
+      "conflictlevel": 0,
+      "color": "",
+      "id": 80
+    }
+  ],
+  "messages": [
+    {
+      "ownerid": 8,
+      "messagetype": 1,
+      "headline": "VGA Planets Nu",
+      "body": "Your alliance currently controls enough of the planets to win this sector. You must continue to hold for 0 more turns to gain total control of the Serada 9 Sector and be victorious!",
+      "target": 0,
+      "turn": 111,
+      "x": 0,
+      "y": 0,
+      "id": 209766
+    },
+    {
+      "ownerid": 8,
+      "messagetype": 3,
+      "headline": "Phoebe ID#463",
+      "body": "We have converted our torpedoes into deep space mines and laid them in a field centered at ( 2901, 2113 ).<br/>9639 mines were laid<br/>Mine field ID#722 now contains 9639 mine units and is 98 light years in radius.",
+      "target": 722,
+      "turn": 111,
+      "x": 2901,
+      "y": 2113,
+      "id": 206397
+    },
+    {
+      "ownerid": 8,
+      "messagetype": 3,
+      "headline": "SUPER STAR FRIGATE ID#307",
+      "body": "We have converted our torpedoes into deep space mines and laid them in a field centered at ( 1754, 1447 ).<br/>1000 mines were laid<br/>Mine field ID#697 now contains 4156 mine units and is 64 light years in radius.",
+      "target": 697,
+      "turn": 111,
+      "x": 1754,
+      "y": 1447,
+      "id": 206389
+    },
+    {
+      "ownerid": 8,
+      "messagetype": 3,
+      "headline": "METEOR CLASS BLOCKADE RUNNER ID#273",
+      "body": "We have converted our torpedoes into deep space mines and laid them in a field centered at ( 1969, 1260 ).<br/>4698 mines were laid<br/>Mine field ID#717 now contains 4698 mine units and is 68 light years in radius.",
+      "target": 717,
+      "turn": 111,
+      "x": 1969,
+      "y": 1260,
+      "id": 206387
+    },
+    {
+      "ownerid": 8,
+      "messagetype": 3,
+      "headline": "SUPER STAR FRIGATE ID#61",
+      "body": "We have converted our torpedoes into deep space mines and laid them in a field centered at ( 1589, 1418 ).<br/>600 mines were laid<br/>Mine field ID#657 now contains 4531 mine units and is 67 light years in radius.",
+      "target": 657,
+      "turn": 111,
+      "x": 1589,
+      "y": 1418,
+      "id": 206374
+    }
+  ],
+  "mymessages": [
+    {
+      "ownerid": 8,
+      "messagetype": 17,
+      "headline": "The Hordes of Fury (golf)",
+      "body": "Thank you for reaching out to me and taking me with you on long road to victory for this game.",
+      "target": 4,
+      "turn": 111,
+      "x": 0,
+      "y": 0,
+      "id": 209776
+    },
+    {
+      "ownerid": 8,
+      "messagetype": 17,
+      "headline": "The Hordes of Fury (golf)",
+      "body": "Correction: GA on 2 of your planets.",
+      "target": 4,
+      "turn": 110,
+      "x": 0,
+      "y": 0,
+      "id": 206133
+    },
+    {
+      "ownerid": 8,
+      "messagetype": 17,
+      "headline": "The Hordes of Fury (golf)",
+      "body": "No more requests.\r<br/>\r<br/>If it goes as planned I will take 4 CoM planets this turn. Also trying to take some Bird planets. And p 31 from the Lizards. GA on 1 of your planets too if I counted correctly. Will see what happens.\r<br/>\r<br/>Marking turn ready now.",
+      "target": 4,
+      "turn": 110,
+      "x": 0,
+      "y": 0,
+      "id": 206132
+    }
+  ],
+  "cutscenes": [],
+  "notes": [
+    {
+      "ownerid": 8,
+      "body": "criticalmessagesread eventpinsviewed",
+      "targetid": 11,
+      "targettype": 0,
+      "color": "110",
+      "id": 47
+    },
+    {
+      "ownerid": 8,
+      "body": "676 677 678 679 680 681 682 683 684 685 686 687",
+      "targetid": 15,
+      "targettype": 0,
+      "color": "110",
+      "id": 48
+    },
+    {
+      "ownerid": 8,
+      "body": "",
+      "targetid": 21,
+      "targettype": 0,
+      "color": "110",
+      "id": 49
+    }
+  ],
+  "vcrs": [
+    {
+      "seed": 56,
+      "x": 2368,
+      "y": 1837,
+      "battletype": 0,
+      "leftownerid": 8,
+      "rightownerid": 2,
+      "turn": 111,
+      "id": 688,
+      "left": {
+        "vcrid": 688,
+        "objectid": 198,
+        "name": "GORBIE CLASS BATTLECARRIER",
+        "side": 0,
+        "beamcount": 10,
+        "launchercount": 0,
+        "baycount": 10,
+        "hullid": 70,
+        "beamid": 10,
+        "torpedoid": 0,
+        "shield": 100,
+        "damage": 0,
+        "crew": 2287,
+        "mass": 980,
+        "raceid": 8,
+        "beamkillbonus": 1,
+        "beamchargerate": 1,
+        "torpchargerate": 1,
+        "torpmisspercent": 35,
+        "crewdefensepercent": 0,
+        "torpedos": 0,
+        "fighters": 136,
+        "temperature": 0,
+        "hasstarbase": false,
+        "id": 1375
+      },
+      "right": {
+        "vcrid": 688,
+        "objectid": 74,
+        "name": "T-REX CLASS BATTLESHIP",
+        "side": 1,
+        "beamcount": 10,
+        "launchercount": 5,
+        "baycount": 0,
+        "hullid": 23,
+        "beamid": 8,
+        "torpedoid": 9,
+        "shield": 100,
+        "damage": 0,
+        "crew": 810,
+        "mass": 781,
+        "raceid": 2,
+        "beamkillbonus": 1,
+        "beamchargerate": 1,
+        "torpchargerate": 1,
+        "torpmisspercent": 35,
+        "crewdefensepercent": 0,
+        "torpedos": 30,
+        "fighters": 0,
+        "temperature": 0,
+        "hasstarbase": false,
+        "id": 1376
+      }
+    },
+    {
+      "seed": 30,
+      "x": 2368,
+      "y": 1837,
+      "battletype": 0,
+      "leftownerid": 8,
+      "rightownerid": 2,
+      "turn": 111,
+      "id": 689,
+      "left": {
+        "vcrid": 689,
+        "objectid": 198,
+        "name": "GORBIE CLASS BATTLECARRIER",
+        "side": 0,
+        "beamcount": 9,
+        "launchercount": 0,
+        "baycount": 9,
+        "hullid": 70,
+        "beamid": 10,
+        "torpedoid": 0,
+        "shield": 0,
+        "damage": 12,
+        "crew": 2263,
+        "mass": 980,
+        "raceid": 8,
+        "beamkillbonus": 1,
+        "beamchargerate": 1,
+        "torpchargerate": 1,
+        "torpmisspercent": 35,
+        "crewdefensepercent": 0,
+        "torpedos": 0,
+        "fighters": 106,
+        "temperature": 0,
+        "hasstarbase": false,
+        "id": 1377
+      },
+      "right": {
+        "vcrid": 689,
+        "objectid": 256,
+        "name": "T-REX CLASS BATTLESHIP",
+        "side": 1,
+        "beamcount": 10,
+        "launchercount": 5,
+        "baycount": 0,
+        "hullid": 23,
+        "beamid": 10,
+        "torpedoid": 10,
+        "shield": 100,
+        "damage": 0,
+        "crew": 810,
+        "mass": 781,
+        "raceid": 2,
+        "beamkillbonus": 1,
+        "beamchargerate": 1,
+        "torpchargerate": 1,
+        "torpmisspercent": 35,
+        "crewdefensepercent": 0,
+        "torpedos": 50,
+        "fighters": 0,
+        "temperature": 0,
+        "hasstarbase": false,
+        "id": 1378
+      }
+    }
+  ],
+  "races": [
+    {
+      "name": "Unknown",
+      "shortname": "Unknown",
+      "adjective": "Unknown",
+      "baseadvantages": "",
+      "advantages": "",
+      "basehulls": "",
+      "hulls": "",
+      "id": 0
+    },
+    {
+      "name": "The Solar Federation",
+      "shortname": "The Feds",
+      "adjective": "Fed",
+      "baseadvantages": "1,2,3,4,32,48,49,51,79",
+      "advantages": "1,2,3,4,32,37,38,40,48,49,51,52,74,79,80,81,88",
+      "basehulls": "1,2,3,4,5,6,7,8,9,10,11,12,13,16,17,18,19,20,104,105",
+      "hulls": "1,2,3,4,5,6,7,8,9,10,11,12,13,16,17,18,19,20,104,105,1001,1004,1006,1010,1011,1012,2004,2006,2010,2011,122,173",
+      "id": 1
+    },
+    {
+      "name": "The Lizard Alliance",
+      "shortname": "The Lizards",
+      "adjective": "Lizard",
+      "baseadvantages": "5,6,7,8,31,32,48,49,51",
+      "advantages": "5,6,7,8,31,32,37,39,40,48,49,51,52",
+      "basehulls": "4,7,8,14,15,16,17,18,21,22,23,24,25,49,104,105",
+      "hulls": "4,7,8,14,15,16,17,18,21,22,23,24,25,49,104,105,109,112,1004,1021,1023,1025,1049,2025,3004,3025,173",
+      "id": 2
+    }
+  ],
+  "hulls": [
+    {
+      "name": "Outrider Class Scout",
+      "tritanium": 40,
+      "duranium": 20,
+      "molybdenum": 5,
+      "fueltank": 260,
+      "crew": 180,
+      "engines": 1,
+      "mass": 75,
+      "techlevel": 1,
+      "cargo": 40,
+      "fighterbays": 0,
+      "launchers": 0,
+      "beams": 1,
+      "cancloak": false,
+      "cost": 50,
+      "special": "",
+      "description": "",
+      "advantage": 0,
+      "isbase": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "parentid": 0,
+      "academy": true,
+      "id": 1
+    },
+    {
+      "name": "Small Deep Space Freighter",
+      "tritanium": 2,
+      "duranium": 2,
+      "molybdenum": 3,
+      "fueltank": 200,
+      "crew": 2,
+      "engines": 1,
+      "mass": 30,
+      "techlevel": 1,
+      "cargo": 70,
+      "fighterbays": 0,
+      "launchers": 0,
+      "beams": 0,
+      "cancloak": false,
+      "cost": 10,
+      "special": "",
+      "description": "",
+      "advantage": 0,
+      "isbase": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "parentid": 0,
+      "academy": true,
+      "id": 15
+    },
+    {
+      "name": "Serpent Class Escort",
+      "tritanium": 33,
+      "duranium": 15,
+      "molybdenum": 5,
+      "fueltank": 160,
+      "crew": 35,
+      "engines": 1,
+      "mass": 55,
+      "techlevel": 1,
+      "cargo": 20,
+      "fighterbays": 0,
+      "launchers": 0,
+      "beams": 2,
+      "cancloak": false,
+      "cost": 40,
+      "special": "",
+      "description": "",
+      "advantage": 0,
+      "isbase": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "parentid": 0,
+      "academy": true,
+      "id": 24
+    },
+    {
+      "name": "Swift Heart Class Scout",
+      "tritanium": 20,
+      "duranium": 6,
+      "molybdenum": 5,
+      "fueltank": 170,
+      "crew": 126,
+      "engines": 1,
+      "mass": 45,
+      "techlevel": 1,
+      "cargo": 20,
+      "fighterbays": 0,
+      "launchers": 0,
+      "beams": 2,
+      "cancloak": true,
+      "cost": 60,
+      "special": "Nebula Scanner - Can detect ships or planets within a nebula up to 100ly away at any intensity.",
+      "description": "",
+      "advantage": 5,
+      "isbase": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "parentid": 0,
+      "academy": true,
+      "id": 27
+    },
+    {
+      "name": "Br4 Class Gunship",
+      "tritanium": 17,
+      "duranium": 12,
+      "molybdenum": 35,
+      "fueltank": 80,
+      "crew": 55,
+      "engines": 2,
+      "mass": 55,
+      "techlevel": 1,
+      "cargo": 20,
+      "fighterbays": 0,
+      "launchers": 0,
+      "beams": 5,
+      "cancloak": true,
+      "cost": 60,
+      "special": "Gravitonic - This ship moves twice as far as normal ships at the same warp speed using Gravitonic Accellerators.",
+      "description": "",
+      "advantage": 25,
+      "isbase": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "parentid": 0,
+      "academy": false,
+      "id": 44
+    }
+  ],
+  "racehulls": [
+    71,
+    15,
+    77,
+    73,
+    72
+  ],
+  "beams": [
+    {
+      "name": "Laser",
+      "cost": 1,
+      "tritanium": 1,
+      "duranium": 0,
+      "molybdenum": 0,
+      "mass": 1,
+      "techlevel": 1,
+      "crewkill": 10,
+      "damage": 3,
+      "id": 1
+    },
+    {
+      "name": "X-Ray Laser",
+      "cost": 2,
+      "tritanium": 1,
+      "duranium": 0,
+      "molybdenum": 0,
+      "mass": 1,
+      "techlevel": 1,
+      "crewkill": 15,
+      "damage": 1,
+      "id": 2
+    },
+    {
+      "name": "Plasma Bolt",
+      "cost": 5,
+      "tritanium": 1,
+      "duranium": 2,
+      "molybdenum": 0,
+      "mass": 2,
+      "techlevel": 2,
+      "crewkill": 3,
+      "damage": 10,
+      "id": 3
+    }
+  ],
+  "engines": [
+    {
+      "name": "StarDrive 1",
+      "cost": 1,
+      "tritanium": 5,
+      "duranium": 1,
+      "molybdenum": 0,
+      "techlevel": 1,
+      "warp1": 100,
+      "warp2": 800,
+      "warp3": 2700,
+      "warp4": 6400,
+      "warp5": 12500,
+      "warp6": 21600,
+      "warp7": 34300,
+      "warp8": 51200,
+      "warp9": 72900,
+      "id": 1
+    },
+    {
+      "name": "StarDrive 2",
+      "cost": 2,
+      "tritanium": 5,
+      "duranium": 2,
+      "molybdenum": 1,
+      "techlevel": 2,
+      "warp1": 100,
+      "warp2": 430,
+      "warp3": 2700,
+      "warp4": 6400,
+      "warp5": 12500,
+      "warp6": 21600,
+      "warp7": 34300,
+      "warp8": 51200,
+      "warp9": 72900,
+      "id": 2
+    },
+    {
+      "name": "StarDrive 3",
+      "cost": 3,
+      "tritanium": 3,
+      "duranium": 2,
+      "molybdenum": 5,
+      "techlevel": 3,
+      "warp1": 100,
+      "warp2": 425,
+      "warp3": 970,
+      "warp4": 5400,
+      "warp5": 12500,
+      "warp6": 21600,
+      "warp7": 34300,
+      "warp8": 51200,
+      "warp9": 72900,
+      "id": 3
+    }
+  ],
+  "torpedos": [
+    {
+      "fullid": 1,
+      "name": "Mark 1 Photon",
+      "torpedocost": 1,
+      "launchercost": 1,
+      "tritanium": 1,
+      "duranium": 1,
+      "molybdenum": 0,
+      "mass": 2,
+      "techlevel": 1,
+      "crewkill": 4,
+      "damage": 5,
+      "combatrange": 300,
+      "id": 1
+    },
+    {
+      "fullid": 2,
+      "name": "Proton Torp",
+      "torpedocost": 2,
+      "launchercost": 4,
+      "tritanium": 1,
+      "duranium": 0,
+      "molybdenum": 0,
+      "mass": 2,
+      "techlevel": 2,
+      "crewkill": 6,
+      "damage": 8,
+      "combatrange": 300,
+      "id": 2
+    },
+    {
+      "fullid": 3,
+      "name": "Mark 2 Photon",
+      "torpedocost": 5,
+      "launchercost": 4,
+      "tritanium": 1,
+      "duranium": 4,
+      "molybdenum": 0,
+      "mass": 2,
+      "techlevel": 3,
+      "crewkill": 3,
+      "damage": 10,
+      "combatrange": 300,
+      "id": 3
+    }
+  ],
+  "advantages": [
+    {
+      "name": "Fed Crew Bonus",
+      "description": "Fed ships will fight with an extra 50kt of hull mass, fighter ships will fight as if they have 3 extra fighter bays, damaged Fed ships will fight with all their weapons and 25% shields are recovered between fights. ",
+      "value": 40,
+      "isbase": true,
+      "locked": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "id": 1
+    },
+    {
+      "name": "200% Taxing",
+      "description": "The Solar Federation is very good at making friends with the natives that they contact. They collect twice the megacredits per turn per tax rate percentage point from both the\u00a0natives and the colonists.",
+      "value": 50,
+      "isbase": true,
+      "locked": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "id": 2
+    },
+    {
+      "name": "Super Refit",
+      "description": "Federation starbases may upgrade the parts on Federation owned ships after they are built. ",
+      "value": 50,
+      "isbase": true,
+      "locked": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "id": 3
+    },
+    {
+      "name": "70% Mining",
+      "description": "Due to regulations protecting the environment and native life the Federation can only mine at 70% of normal rates.",
+      "value": -40,
+      "isbase": true,
+      "locked": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "id": 4
+    },
+    {
+      "name": "Lizard Crew Bonus",
+      "description": "Lizard ships can take up to 150% damage before blowing up.",
+      "value": 30,
+      "isbase": true,
+      "locked": true,
+      "dur": 0,
+      "tri": 0,
+      "mol": 0,
+      "mc": 0,
+      "id": 5
+    }
+  ],
+  "activebadges": [
+    {
+      "raceid": 8,
+      "badgelevel": 1,
+      "badgetype": 1,
+      "forrank": 3,
+      "endturn": 20,
+      "achievement": 5,
+      "dur": 5,
+      "tri": 5,
+      "mol": 5,
+      "mc": 10,
+      "planets": 10,
+      "ships": 10,
+      "starbases": 1,
+      "military": 0,
+      "battleswon": 0,
+      "name": "Explorer",
+      "description": "By turn 20 achieve",
+      "id": 281,
+      "completed": true
+    },
+    {
+      "raceid": 8,
+      "badgelevel": 2,
+      "badgetype": 1,
+      "forrank": 4,
+      "endturn": 20,
+      "achievement": 10,
+      "dur": 10,
+      "tri": 10,
+      "mol": 10,
+      "mc": 20,
+      "planets": 12,
+      "ships": 15,
+      "starbases": 1,
+      "military": 0,
+      "battleswon": 0,
+      "name": "Builder",
+      "description": "By turn 20 achieve",
+      "id": 282,
+      "completed": true
+    },
+    {
+      "raceid": 8,
+      "badgelevel": 3,
+      "badgetype": 1,
+      "forrank": 5,
+      "endturn": 20,
+      "achievement": 15,
+      "dur": 15,
+      "tri": 15,
+      "mol": 15,
+      "mc": 40,
+      "planets": 12,
+      "ships": 12,
+      "starbases": 2,
+      "military": 13000,
+      "battleswon": 0,
+      "name": "Engineer",
+      "description": "By turn 20 achieve",
+      "id": 283,
+      "completed": true
+    }
+  ],
+  "badgechange": false
+}
