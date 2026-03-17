@@ -1,12 +1,12 @@
 """Unit tests for store REST API: status codes, view=full|shallow, merge param, @ key rejection."""
+
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from api.app import app
 from api.config import ApiConfig, set_config
-from api.storage import clear_backend_cache, get_storage
+from api.storage import clear_backend_cache
+from fastapi.testclient import TestClient
 
 # Asset used by router tests: inject via config (see client fixture).
 TEST_ASSET_PATH = Path(__file__).resolve().parent / "fixtures" / "store_router_initial.json"
@@ -15,7 +15,13 @@ TEST_ASSET_PATH = Path(__file__).resolve().parent / "fixtures" / "store_router_i
 @pytest.fixture
 def client():
     """Test client with config pointing at test asset; backend cache cleared per test."""
-    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=str(TEST_ASSET_PATH), include_dummy_data=False))
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            storage_asset_path=str(TEST_ASSET_PATH),
+            include_dummy_data=False,
+        )
+    )
     clear_backend_cache()
     try:
         yield TestClient(app)

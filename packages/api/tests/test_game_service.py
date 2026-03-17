@@ -1,9 +1,9 @@
 """Tests for the GameService."""
+
 import json
 from pathlib import Path
 
 import pytest
-
 from api.errors import NotFoundError, ValidationError
 from api.models.game import GameInfo, TurnInfo
 from api.services.game_service import GameService

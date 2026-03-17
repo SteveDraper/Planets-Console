@@ -1,4 +1,5 @@
 """Core API sub-config: storage and API behaviour. Set by server from amalgamated config."""
+
 from dataclasses import dataclass
 
 _config: "ApiConfig | None" = None

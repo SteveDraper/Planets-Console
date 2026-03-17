@@ -1,4 +1,5 @@
 """Starbase and stock item entity dataclasses."""
+
 from dataclasses import dataclass
 
 

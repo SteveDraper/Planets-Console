@@ -1,8 +1,10 @@
 """Core REST API sub-app: data model, business logic, and domain routes."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from api.config import get_config
 from api.errors import (
     ConflictError,
     CoreAPIError,
@@ -10,7 +12,6 @@ from api.errors import (
     ValidationError,
     make_http_exception_handler,
 )
-from api.config import get_config
 from api.routers import games, store
 from api.services.seed import seed_dummy_data
 from api.storage import get_storage

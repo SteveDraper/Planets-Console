@@ -1,4 +1,5 @@
 """Store service: CRUD over the logical JSON store with path semantics and merge rules."""
+
 from __future__ import annotations
 
 from api.errors import ConflictError, NotFoundError, ValidationError
@@ -11,7 +12,10 @@ from api.storage.path_utils import (
 
 
 def _deep_merge_object(target: dict[str, JSONValue], source: dict[str, JSONValue]) -> None:
-    """Merge source into target in place. Only for dicts; arrays and primitives in source overwrite."""
+    """Merge source into target in place.
+
+    Only for dicts; arrays and primitives in source overwrite.
+    """
     for k, v in source.items():
         if k.startswith("@"):
             raise ValidationError(f"Reserved key in payload: {k!r}")
@@ -125,9 +129,11 @@ class StoreService:
             self._storage.put(path_norm, deep_copy_value(value))
             return self._storage.get(path_norm)
 
-        # primitive or null: allow replace only with same "kind" (primitive/null); reject object/array
+        # primitive or null: allow replace only with same kind; reject object/array
         if isinstance(value, (dict, list)):
-            raise ConflictError("Update would change node type from primitive/null to object or array")
+            raise ConflictError(
+                "Update would change node type from primitive/null to object or array."
+            )
         self._storage.put(path_norm, deep_copy_value(value))
         return self._storage.get(path_norm)
 

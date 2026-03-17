@@ -1,4 +1,5 @@
 """Player-related entity dataclasses."""
+
 from dataclasses import dataclass
 
 

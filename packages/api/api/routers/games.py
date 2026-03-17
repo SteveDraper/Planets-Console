@@ -1,4 +1,5 @@
 """Game info and turn data REST API routes."""
+
 from fastapi import APIRouter, Depends
 
 from api.models.game import GameInfo, TurnInfo

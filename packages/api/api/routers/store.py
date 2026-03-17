@@ -1,4 +1,5 @@
 """Store CRUD REST API: Create (PUT), Read (GET), Update (POST), Delete (DELETE)."""
+
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -24,7 +25,9 @@ def _ensure_json_value(raw: Any) -> Any:
         return {k: _ensure_json_value(v) for k, v in raw.items()}
     if isinstance(raw, list):
         return [_ensure_json_value(v) for v in raw]
-    raise ValidationError("Request body must be JSON-serializable (dict, list, str, int, float, bool, null)")
+    raise ValidationError(
+        "Request body must be JSON-serializable (dict, list, str, int, float, bool, null)"
+    )
 
 
 @router.put("/{path:path}", status_code=201)

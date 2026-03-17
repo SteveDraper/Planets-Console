@@ -4,6 +4,7 @@ All package-raised exceptions should inherit from CoreAPIError (or a descendant)
 Each exception class may override `http_error` (default 500) to control the
 HTTP status returned to the client.
 """
+
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Type

@@ -7,7 +7,8 @@ Uses only the standard library (urllib). Safe to run without installing deps.
 Usage:
   python scripts/list_vgaplanets_wiki_category.py
   python scripts/list_vgaplanets_wiki_category.py --category Tactics
-  python scripts/list_vgaplanets_wiki_category.py --category Ships --output docs/wiki-category-ships.txt
+  python scripts/list_vgaplanets_wiki_category.py --category Ships
+      --output docs/wiki-category-ships.txt
 
 Wiki base: https://vgaplanets.org
 API: action=query&list=categorymembers
@@ -44,7 +45,9 @@ def fetch_category_members(category_title: str) -> list[str]:
             params["cmcontinue"] = cmcontinue
 
         url = API_BASE + "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, headers={"User-Agent": "Planets-Console/1.0 (wiki category lister)"})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Planets-Console/1.0 (wiki category lister)"}
+        )
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode())
 

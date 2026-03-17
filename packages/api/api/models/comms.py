@@ -1,4 +1,5 @@
 """Communication entity dataclasses (messages, notes, VCRs)."""
+
 from dataclasses import dataclass
 
 from api.models.enums import MessageType

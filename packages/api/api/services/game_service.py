@@ -1,4 +1,5 @@
 """Game service: read game info and turn data from the store."""
+
 from api.errors import ValidationError
 from api.models.game import GameInfo, TurnInfo
 from api.serialization.game import game_info_from_json
@@ -8,9 +9,7 @@ from api.storage.base import JSONValue, StorageBackend
 
 def _require_dict(data: JSONValue, label: str) -> dict:
     if not isinstance(data, dict):
-        raise ValidationError(
-            f"Expected JSON object for {label}, got {type(data).__name__}"
-        )
+        raise ValidationError(f"Expected JSON object for {label}, got {type(data).__name__}")
     return data
 
 

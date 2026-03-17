@@ -1,13 +1,13 @@
 """Tests for serialization codecs (dacite round-trips, enum handling, nested objects)."""
+
 import json
 from pathlib import Path
 
 import pytest
-
 from api.models.enums import GameStatus, MessageType, NativeType
 from api.models.ship import ShipHistory
-from api.serialization.turn import turn_info_from_json, turn_info_to_json
 from api.serialization.game import game_info_from_json, game_info_to_json
+from api.serialization.turn import turn_info_from_json, turn_info_to_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 

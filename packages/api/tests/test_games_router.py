@@ -1,12 +1,12 @@
 """Tests for the /api/v1/games router."""
+
 import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
+from api.config import ApiConfig, set_config
 from api.storage import clear_backend_cache, get_storage
-from api.config import set_config, ApiConfig
+from fastapi.testclient import TestClient
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -19,7 +19,13 @@ def _setup_storage():
     lifespan seeding — data is injected directly into the backend here.
     """
     clear_backend_cache()
-    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=None, include_dummy_data=False))
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            storage_asset_path=None,
+            include_dummy_data=False,
+        )
+    )
     storage = get_storage()
     with open(ASSETS_DIR / "game_info_sample.json") as f:
         storage.put("games/628580/info", json.load(f))
@@ -32,6 +38,7 @@ def _setup_storage():
 @pytest.fixture
 def client():
     from api.app import app
+
     return TestClient(app, raise_server_exceptions=False)
 
 

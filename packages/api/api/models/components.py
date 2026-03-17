@@ -1,4 +1,5 @@
 """Component entity dataclasses (hulls, beams, engines, torpedoes)."""
+
 from dataclasses import dataclass
 
 

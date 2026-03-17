@@ -1,4 +1,5 @@
 """Planet entity dataclass."""
+
 from dataclasses import dataclass
 
 from api.models.enums import NativeType

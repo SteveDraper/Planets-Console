@@ -1,4 +1,5 @@
 """Placeholder analytics endpoints for the console shell. No business logic."""
+
 from fastapi import APIRouter
 
 router = APIRouter()

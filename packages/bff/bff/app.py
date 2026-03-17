@@ -1,4 +1,5 @@
 """BFF sub-app: SPA-shaped endpoints, no business logic."""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
