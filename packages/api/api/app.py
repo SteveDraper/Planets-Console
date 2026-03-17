@@ -1,4 +1,6 @@
-"""Minimal Core REST API sub-app. Stub until real domain exists."""
+"""Core REST API sub-app: data model, business logic, and domain routes."""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from api.errors import (
@@ -8,11 +10,21 @@ from api.errors import (
     ValidationError,
     make_http_exception_handler,
 )
-from api.routers import store
+from api.routers import games, store
+from api.services.seed import seed_dummy_data
+from api.storage import get_storage
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    seed_dummy_data(get_storage())
+    yield
+
 
 app = FastAPI(
     title="Planets Console Core API",
     openapi_url="/openapi.json",
+    lifespan=_lifespan,
 )
 # Generic handler for all CoreAPIError subclasses (404, 409, 422, etc.)
 app.add_exception_handler(Exception, make_http_exception_handler(CoreAPIError))
@@ -20,6 +32,7 @@ app.add_exception_handler(Exception, make_http_exception_handler(CoreAPIError))
 for _exc_cls in (NotFoundError, ConflictError, ValidationError):
     app.add_exception_handler(_exc_cls, make_http_exception_handler(CoreAPIError))
 app.include_router(store.router)
+app.include_router(games.router)
 
 
 @app.get("/health")

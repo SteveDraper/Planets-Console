@@ -1,0 +1,79 @@
+"""Planet entity dataclass."""
+from dataclasses import dataclass
+
+from api.models.enums import NativeType
+
+
+@dataclass
+class Planet:
+    id: int
+    name: str
+    x: int
+    y: int
+    friendlycode: str
+    mines: int
+    factories: int
+    defense: int
+    targetmines: int
+    targetfactories: int
+    targetdefense: int
+    builtmines: int
+    builtfactories: int
+    builtdefense: int
+    buildingstarbase: bool
+    megacredits: int
+    supplies: int
+    suppliessold: int
+    neutronium: int
+    molybdenum: int
+    duranium: int
+    tritanium: int
+    groundneutronium: int
+    groundmolybdenum: int
+    groundduranium: int
+    groundtritanium: int
+    densityneutronium: int
+    densitymolybdenum: int
+    densityduranium: int
+    densitytritanium: int
+    totalneutronium: int
+    totalmolybdenum: int
+    totalduranium: int
+    totaltritanium: int
+    checkneutronium: int
+    checkmolybdenum: int
+    checkduranium: int
+    checktritanium: int
+    checkmegacredits: int
+    checksupplies: int
+    temp: int
+    ownerid: int
+    clans: int
+    colchange: int
+    colonisttaxrate: int
+    colonisthappypoints: int
+    colhappychange: int
+    nativeclans: int
+    nativechange: int
+    nativegovernment: int
+    nativetaxvalue: int
+    nativetype: NativeType
+    nativetaxrate: int
+    nativehappypoints: int
+    nativehappychange: int
+    infoturn: int
+    debrisdisk: int
+    flag: int
+    readystatus: int
+    burrowsize: int
+    developmentlevel: int
+    targetx: int
+    targety: int
+    podhullid: int
+    podspeed: int
+    podcargo: int
+    larva: int
+    larvaturns: int
+    img: str
+    nativeracename: str
+    nativegovernmentname: str

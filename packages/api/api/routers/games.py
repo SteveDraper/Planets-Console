@@ -1,0 +1,30 @@
+"""Game info and turn data REST API routes."""
+from fastapi import APIRouter, Depends
+
+from api.services.game_service import GameService
+from api.storage import StorageBackend, get_storage
+
+router = APIRouter(prefix="/v1/games", tags=["games"])
+
+
+def get_game_service(storage: StorageBackend = Depends(get_storage)) -> GameService:
+    return GameService(storage)
+
+
+@router.get("/{game_id}/info")
+def get_game_info(
+    game_id: int,
+    svc: GameService = Depends(get_game_service),
+):
+    """Return game info for the given game."""
+    return svc.get_game_info(game_id)
+
+
+@router.get("/{game_id}/turns/{turn_number}")
+def get_turn_info(
+    game_id: int,
+    turn_number: int,
+    svc: GameService = Depends(get_game_service),
+):
+    """Return turn data for the given game and turn."""
+    return svc.get_turn_info(game_id, turn_number)
