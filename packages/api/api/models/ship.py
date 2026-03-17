@@ -3,6 +3,12 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class Waypoint:
+    x: int
+    y: int
+
+
+@dataclass
 class ShipHistory:
     x: int
     y: int
@@ -61,7 +67,7 @@ class Ship:
     goal: int
     goaltarget: int
     goaltarget2: int
-    waypoints: list = field(default_factory=list)
+    waypoints: list[Waypoint] = field(default_factory=list)
     history: list[ShipHistory] = field(default_factory=list)
     iscloaked: bool = False
     readystatus: int = 0

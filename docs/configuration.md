@@ -33,6 +33,7 @@ The amalgamated config has three top-level keys:
 |-------|------|---------|-------------|
 | `storage_backend` | string | `ephemeral` | Backend identifier. Currently only `ephemeral` is supported. |
 | `storage_asset_path` | string or null | null | Path to a JSON file used to initialise the in-memory store. If null or omitted, the store starts empty. If set, the path must exist and be a file (otherwise startup fails). |
+| `include_dummy_data` | bool | false | When true, seed the store with sample game data (game 628580, turn 111) on startup. For development and testing only. |
 
 ### `bff` (BFF)
 
@@ -50,6 +51,7 @@ server:
 api:
   storage_backend: ephemeral
   storage_asset_path: null   # store starts empty
+  include_dummy_data: true   # seed sample game data (set false for production)
 
 bff:
   cors_origins:

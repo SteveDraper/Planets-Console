@@ -10,6 +10,7 @@ from api.errors import (
     ValidationError,
     make_http_exception_handler,
 )
+from api.config import get_config
 from api.routers import games, store
 from api.services.seed import seed_dummy_data
 from api.storage import get_storage
@@ -17,7 +18,8 @@ from api.storage import get_storage
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    seed_dummy_data(get_storage())
+    if get_config().include_dummy_data:
+        seed_dummy_data(get_storage())
     yield
 
 

@@ -8,17 +8,21 @@ from api.models.enums import GameStatus, MessageType, NativeType
 
 ALL_ENUMS: list[type[IntEnum]] = [MessageType, NativeType, GameStatus]
 
+
+def _safe_enum(enum_cls: type[IntEnum]):
+    """Return a converter that maps unknown int values to the UNKNOWN sentinel."""
+    def convert(value):
+        try:
+            return enum_cls(value)
+        except ValueError:
+            return enum_cls(-1)  # UNKNOWN sentinel
+    return convert
+
+
 DACITE_CONFIG = dacite.Config(
-    cast=ALL_ENUMS,
+    type_hooks={cls: _safe_enum(cls) for cls in ALL_ENUMS},
     strict=False,
 )
-
-
-def _enum_to_int(value: object) -> object:
-    """Convert IntEnum instances to plain ints for JSON output."""
-    if isinstance(value, IntEnum):
-        return value.value
-    return value
 
 
 def dataclass_to_json(obj: object) -> dict:

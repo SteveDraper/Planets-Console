@@ -9,7 +9,7 @@ from api.models.enums import GameStatus
 from api.models.planet import Planet
 from api.models.player import Advantage, Badge, Player, Race, Relation, Score
 from api.models.ship import Ship
-from api.models.space import IonStorm, Minefield, Nebula, Star
+from api.models.space import Artifact, Blackhole, Cutscene, IonStorm, Minefield, Nebula, Star, Wormhole
 from api.models.starbase import Starbase, StockItem
 
 
@@ -354,7 +354,7 @@ class TurnInfo:
     advantages: list[Advantage]
     activebadges: list[Badge]
     badgechange: bool
-    blackholes: list[dict] = field(default_factory=list)
-    artifacts: list[dict] = field(default_factory=list)
-    wormholes: list[dict] = field(default_factory=list)
-    cutscenes: list[dict] = field(default_factory=list)
+    blackholes: list[Blackhole] = field(default_factory=list)
+    artifacts: list[Artifact] = field(default_factory=list)
+    wormholes: list[Wormhole] = field(default_factory=list)
+    cutscenes: list[Cutscene] = field(default_factory=list)

@@ -14,6 +14,9 @@ class ApiConfig:
     storage_asset_path: str | None = None
     """Optional path to JSON asset for ephemeral backend. If unset, store starts empty."""
 
+    include_dummy_data: bool = False
+    """Seed the store with sample game data on startup. For development/testing only."""
+
 
 def get_config() -> ApiConfig:
     """Return the current API config. Defaults if not yet set by server."""

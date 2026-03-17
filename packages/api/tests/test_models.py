@@ -36,6 +36,7 @@ class TestEnums:
         assert GameStatus(2) is GameStatus.PAUSED
 
     def test_unknown_enum_value_raises(self):
+        """Direct IntEnum construction still raises for unknown values."""
         with pytest.raises(ValueError):
             MessageType(99)
 

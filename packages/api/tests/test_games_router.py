@@ -13,9 +13,13 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 
 @pytest.fixture(autouse=True)
 def _setup_storage():
-    """Reset storage backend and seed with test data for each test."""
+    """Reset storage backend and seed with test data for each test.
+
+    Explicitly sets include_dummy_data=False so tests don't depend on the
+    lifespan seeding — data is injected directly into the backend here.
+    """
     clear_backend_cache()
-    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=None))
+    set_config(ApiConfig(storage_backend="ephemeral", storage_asset_path=None, include_dummy_data=False))
     storage = get_storage()
     with open(ASSETS_DIR / "game_info_sample.json") as f:
         storage.put("games/628580/info", json.load(f))

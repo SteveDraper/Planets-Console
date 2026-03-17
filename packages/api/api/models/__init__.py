@@ -5,7 +5,7 @@ from api.models.enums import GameStatus, MessageType, NativeType
 from api.models.game import Game, GameInfo, GameSettings, TurnInfo
 from api.models.planet import Planet
 from api.models.player import Advantage, Badge, Player, Race, Relation, Score
-from api.models.ship import Ship, ShipHistory
+from api.models.ship import Ship, ShipHistory, Waypoint
 from api.models.space import (
     Artifact,
     Blackhole,
@@ -51,6 +51,7 @@ __all__ = [
     "Torpedo",
     "TurnInfo",
     "Vcr",
+    "Waypoint",
     "VcrSide",
     "Wormhole",
 ]

@@ -65,6 +65,7 @@ Config structure:
   server.port             int      [default: 8000]     Bind port
   api.storage_backend     string   [default: ephemeral]  Backend ID
   api.storage_asset_path  string or null  [default: null]   JSON file to load for store; null = empty store
+  api.include_dummy_data  bool     [default: false]  Seed sample game data on startup
   bff.cors_origins        list of strings  CORS origins for the SPA
 
 See docs/configuration.md for full documentation.

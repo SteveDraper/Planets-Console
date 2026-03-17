@@ -79,6 +79,30 @@ class TestTurnInfoSerialization:
         assert vcr.right.name
         assert isinstance(vcr.left.hasstarbase, bool)
 
+    def test_unknown_message_type_maps_to_sentinel(self, turn_sample_data):
+        """Unrecognised messagetype ints deserialize to MessageType.UNKNOWN."""
+        turn_sample_data["messages"][0]["messagetype"] = 999
+        ti = turn_info_from_json(turn_sample_data)
+        assert ti.messages[0].messagetype is MessageType.UNKNOWN
+        assert ti.messages[0].messagetype == -1
+
+    def test_unknown_native_type_maps_to_sentinel(self, turn_sample_data):
+        turn_sample_data["planets"][0]["nativetype"] = 42
+        ti = turn_info_from_json(turn_sample_data)
+        assert ti.planets[0].nativetype is NativeType.UNKNOWN
+
+    def test_unknown_game_status_maps_to_sentinel(self, turn_sample_data):
+        turn_sample_data["game"]["status"] = 77
+        ti = turn_info_from_json(turn_sample_data)
+        assert ti.game.status is GameStatus.UNKNOWN
+
+    def test_unknown_enum_round_trips_as_sentinel_value(self, turn_sample_data):
+        """UNKNOWN sentinel serializes as -1 in JSON output."""
+        turn_sample_data["messages"][0]["messagetype"] = 999
+        ti = turn_info_from_json(turn_sample_data)
+        out = turn_info_to_json(ti)
+        assert out["messages"][0]["messagetype"] == -1
+
     def test_extra_keys_tolerated(self, turn_sample_data):
         """Payloads with unknown keys should not cause errors (strict=False)."""
         turn_sample_data["unknown_future_field"] = "value"
