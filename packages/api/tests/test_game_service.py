@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from api.errors import NotFoundError
+from api.errors import NotFoundError, ValidationError
 from api.models.game import GameInfo, TurnInfo
 from api.services.game_service import GameService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -66,3 +66,19 @@ class TestGetTurnInfo:
     def test_not_found_turn(self, service):
         with pytest.raises(NotFoundError):
             service.get_turn_info(628580, 999)
+
+
+class TestMalformedStoreData:
+    def test_game_info_non_dict_raises_validation(self):
+        backend = MemoryAssetBackend(initial={})
+        backend.put("games/1/info", ["not", "a", "dict"])
+        svc = GameService(backend)
+        with pytest.raises(ValidationError, match="Expected JSON object"):
+            svc.get_game_info(1)
+
+    def test_turn_info_non_dict_raises_validation(self):
+        backend = MemoryAssetBackend(initial={})
+        backend.put("games/1/turns/1", "just a string")
+        svc = GameService(backend)
+        with pytest.raises(ValidationError, match="Expected JSON object"):
+            svc.get_turn_info(1, 1)

@@ -1,6 +1,7 @@
 """Game info and turn data REST API routes."""
 from fastapi import APIRouter, Depends
 
+from api.models.game import GameInfo, TurnInfo
 from api.services.game_service import GameService
 from api.storage import StorageBackend, get_storage
 
@@ -15,7 +16,7 @@ def get_game_service(storage: StorageBackend = Depends(get_storage)) -> GameServ
 def get_game_info(
     game_id: int,
     svc: GameService = Depends(get_game_service),
-):
+) -> GameInfo:
     """Return game info for the given game."""
     return svc.get_game_info(game_id)
 
@@ -25,6 +26,6 @@ def get_turn_info(
     game_id: int,
     turn_number: int,
     svc: GameService = Depends(get_game_service),
-):
+) -> TurnInfo:
     """Return turn data for the given game and turn."""
     return svc.get_turn_info(game_id, turn_number)
