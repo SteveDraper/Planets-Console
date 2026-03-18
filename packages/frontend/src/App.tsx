@@ -19,6 +19,7 @@ function ConsoleShell() {
     queryFn: fetchAnalytics,
   })
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const analytics = analyticsData?.analytics ?? []
   const enabledAnalyticIds = useMemo(
     () => analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),

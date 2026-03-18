@@ -101,3 +101,23 @@ class TestGetTurnInfo:
     def test_404_for_unknown_turn(self, client):
         resp = client.get("/v1/games/628580/turns/999")
         assert resp.status_code == 404
+
+
+class TestGetMapBase:
+    def test_returns_200(self, client):
+        resp = client.get("/v1/games/628580/turns/111/map-base")
+        assert resp.status_code == 200
+
+    def test_response_structure(self, client):
+        resp = client.get("/v1/games/628580/turns/111/map-base")
+        data = resp.json()
+        assert data["analyticId"] == "base-map"
+        assert "nodes" in data
+        assert "edges" in data
+        assert isinstance(data["nodes"], list)
+        assert isinstance(data["edges"], list)
+        assert data["edges"] == []
+
+    def test_404_for_unknown_turn(self, client):
+        resp = client.get("/v1/games/628580/turns/999/map-base")
+        assert resp.status_code == 404

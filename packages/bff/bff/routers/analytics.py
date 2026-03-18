@@ -1,6 +1,13 @@
-"""Placeholder analytics endpoints for the console shell. No business logic."""
+"""Analytics endpoints for the console shell.
 
-from fastapi import APIRouter
+Base map is a fixed layer derived from the Core API. Other analytics are placeholders.
+"""
+
+from api.errors import PlanetsConsoleError
+from api.services.game_service import GameService
+from api.services.seed import seed_dummy_data
+from api.storage import get_storage
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 
@@ -37,19 +44,26 @@ ANALYTICS_LIST = [
     },
 ]
 
-# Base map: planets (nodes) and connections (edges). Same shape as analytic map response.
-BASE_MAP_NODES = [
-    {"id": "p1", "label": "Planet 1", "x": 0, "y": 0},
-    {"id": "p2", "label": "Planet 2", "x": 200, "y": 0},
-    {"id": "p3", "label": "Planet 3", "x": 200, "y": 200},
-    {"id": "p4", "label": "Planet 4", "x": 0, "y": 200},
-]
-BASE_MAP_EDGES = [
-    {"source": "p1", "target": "p2"},
-    {"source": "p2", "target": "p3"},
-    {"source": "p3", "target": "p4"},
-    {"source": "p4", "target": "p1"},
-]
+_TEST_GAME_ID = 628580
+_TEST_TURN_NUMBER = 111
+
+
+async def fetch_base_map_from_core() -> dict:
+    """Fetch base-map data from Core for the hard-coded test context."""
+    storage = get_storage()
+    # Dev/test ergonomics: ensure sample game/turn data exists in ephemeral storage.
+    # Core normally seeds this only when `include_dummy_data=true`, but BFF hard-codes
+    # a base-map context and must work even when the Core seed flag is off.
+    seed_dummy_data(storage)
+    svc = GameService(storage)
+    try:
+        return svc.get_turn_analytics(_TEST_GAME_ID, _TEST_TURN_NUMBER, "base-map")
+    except PlanetsConsoleError as e:
+        # Map Core-layer distinguished errors into appropriate HTTP status codes.
+        raise HTTPException(
+            status_code=getattr(e, "http_error", 500),
+            detail=str(e),
+        ) from e
 
 
 @router.get("")
@@ -69,18 +83,14 @@ def get_analytic_table(analytic_id: str):
 
 
 @router.get("/{analytic_id}/map")
-def get_analytic_map(analytic_id: str):
+async def get_analytic_map(analytic_id: str):
     """Map data (nodes/edges). Base map = planets + connections; selectable analytics add overlays.
 
     Nodes use fixed Cartesian coordinates (x, y). Base map is always fetched first;
     selectable analytics contribute extra nodes/edges or (later) highlights.
     """
     if analytic_id == "base-map":
-        return {
-            "analyticId": analytic_id,
-            "nodes": BASE_MAP_NODES,
-            "edges": BASE_MAP_EDGES,
-        }
+        return await fetch_base_map_from_core()
     # Selectable analytics: placeholder 4-node square for now
     return {
         "analyticId": analytic_id,

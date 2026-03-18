@@ -30,3 +30,24 @@ def get_turn_info(
 ) -> TurnInfo:
     """Return turn data for the given game and turn."""
     return svc.get_turn_info(game_id, turn_number)
+
+
+@router.get("/{game_id}/turns/{turn_number}/map-base")
+def get_map_base(
+    game_id: int,
+    turn_number: int,
+    svc: GameService = Depends(get_game_service),
+):
+    """Return base-map data (planets as nodes, no edges yet)."""
+    return svc.get_map_base(game_id, turn_number)
+
+
+@router.get("/{game_id}/turns/{turn_number}/analytics/{analytic_id}")
+def get_turn_analytics(
+    game_id: int,
+    turn_number: int,
+    analytic_id: str,
+    svc: GameService = Depends(get_game_service),
+):
+    """Return per-analytic map data derived from turn state."""
+    return svc.get_turn_analytics(game_id, turn_number, analytic_id)

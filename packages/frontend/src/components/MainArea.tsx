@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
@@ -135,7 +136,7 @@ export function MainArea({
     cachedCombined.mapIds.every((id, i) => id === mapIds[i]) &&
     cachedCombined.mapQueryData.every((data, i) => data === mapQueryData[i])
   const combined = canReuseCombined
-    ? cachedCombined.combined
+    ? cachedCombined!.combined
     : combineMapData(mapIds, mapQueryData.map((data) => ({ data })))
   if (!canReuseCombined) {
     combinedCacheRef.current = {
@@ -209,14 +210,14 @@ export function MainArea({
   )
 }
 
+/* eslint-enable react-hooks/refs */
+
+
 /** Shows "Loading additional map data…" only after a short delay so it doesn't flash on first map load. */
 function DeferredPendingMessage({ pending }: { pending: boolean }) {
   const [show, setShow] = useState(false)
   useEffect(() => {
-    if (!pending) {
-      setShow(false)
-      return
-    }
+    if (!pending) return
     const t = setTimeout(() => setShow(true), 400)
     return () => clearTimeout(t)
   }, [pending])

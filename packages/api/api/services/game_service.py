@@ -30,3 +30,26 @@ class GameService:
     def get_turn_info(self, game_id: int, turn_number: int) -> TurnInfo:
         data = self._storage.get(f"games/{game_id}/turns/{turn_number}")
         return turn_info_from_json(_require_dict(data, f"turn {turn_number} of game {game_id}"))
+
+    def get_map_base(self, game_id: int, turn_number: int) -> dict:
+        """Return base-map data derived from the planets in a turn.
+
+        Base-map is the fixed layer used by the frontend map view. For now:
+        - nodes represent planets (no edges yet)
+        - node ids are prefixed as `p{id}`
+        """
+        turn = self.get_turn_info(game_id, turn_number)
+        nodes = [{"id": f"p{p.id}", "label": p.name, "x": p.x, "y": p.y} for p in turn.planets]
+        return {"analyticId": "base-map", "nodes": nodes, "edges": []}
+
+    def get_turn_analytics(self, game_id: int, turn_number: int, analytic_id: str) -> dict:
+        """Return per-analytic map data derived from turn state.
+
+        This keeps the "analytic_id -> data" pattern in Core, so the BFF can treat
+        base-map like any other analytic.
+        """
+        if analytic_id == "base-map":
+            return self.get_map_base(game_id, turn_number)
+        # Unknown analytic: treat as validation error so the BFF can decide whether
+        # to surface 404/422 vs fallback. For now, match FastAPI's default 404 style.
+        raise ValidationError(f"Unknown analytic_id: {analytic_id!r}")
