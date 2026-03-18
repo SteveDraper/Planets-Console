@@ -82,3 +82,21 @@ class TestMalformedStoreData:
         svc = GameService(backend)
         with pytest.raises(ValidationError, match="Expected JSON object"):
             svc.get_turn_info(1, 1)
+
+
+class TestGetMapBase:
+    def test_returns_planet_nodes(self, service):
+        data = service.get_map_base(628580, 111)
+        assert data["analyticId"] == "base-map"
+        assert isinstance(data["nodes"], list)
+        assert len(data["nodes"]) > 0
+        first = data["nodes"][0]
+        assert first["id"].startswith("p")
+        assert "x" in first and "y" in first
+        assert data["edges"] == []
+
+    def test_not_found_turn_raises(self, service):
+        from api.errors import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            service.get_map_base(628580, 999)

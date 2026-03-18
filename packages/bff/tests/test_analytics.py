@@ -1,11 +1,40 @@
 """Unit tests for BFF analytics routes. Verify response shape and map node coordinates."""
 
+import json
 import math
+from pathlib import Path
 
+import pytest
+from api.config import ApiConfig
+from api.config import set_config as set_api_config
+from api.storage import clear_backend_cache, get_storage
 from bff.app import app
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
+
+REPO_PACKAGES_DIR = Path(__file__).resolve().parents[2]
+ASSETS_DIR = REPO_PACKAGES_DIR / "api" / "api" / "storage" / "assets"
+
+
+@pytest.fixture(autouse=True)
+def _setup_storage_for_core_calls():
+    """Seed Core storage so BFF can call Core via ASGI transport."""
+    clear_backend_cache()
+    set_api_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            storage_asset_path=None,
+            include_dummy_data=False,
+        )
+    )
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/turns/111", json.load(f))
+    yield
+    clear_backend_cache()
 
 
 def test_list_analytics_returns_analytics_list():
@@ -26,20 +55,20 @@ def test_list_analytics_returns_analytics_list():
         assert a["type"] in ("base", "selectable")
 
 
-def test_base_map_returns_planets_and_edges():
-    """GET /analytics/base-map/map returns base map (planets + edges)."""
+def test_base_map_returns_planets_and_no_edges():
+    """GET /analytics/base-map/map returns planet nodes and no edges."""
     response = client.get("/analytics/base-map/map")
     assert response.status_code == 200
     data = response.json()
     assert data["analyticId"] == "base-map"
     nodes = data["nodes"]
     edges = data["edges"]
-    assert len(nodes) == 4
-    assert len(edges) == 4
+    assert len(nodes) > 0
+    assert edges == []
     node_ids = {n["id"] for n in nodes}
-    assert node_ids == {"p1", "p2", "p3", "p4"}
-    for edge in edges:
-        assert edge["source"] in node_ids and edge["target"] in node_ids
+    assert all(node_id.startswith("p") for node_id in node_ids)
+    assert all(isinstance(n["x"], (int, float)) for n in nodes)
+    assert all(isinstance(n["y"], (int, float)) for n in nodes)
 
 
 def test_get_analytic_map_returns_expected_structure():

@@ -12,7 +12,6 @@ import {
   type Node,
   type Edge,
   type EdgeProps,
-  type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
@@ -56,11 +55,7 @@ const centerHandleStyle: CSSProperties = {
 }
 
 /** Invisible routing node; visible dot is drawn by the overlay. */
-function DotNode(props: NodeProps<Node<MapNodeData>>) {
-  const d = props.data
-  const label = d?.label ?? ''
-  const x = typeof d?.x === 'number' && Number.isFinite(d.x) ? d.x : '?'
-  const y = typeof d?.y === 'number' && Number.isFinite(d.y) ? d.y : '?'
+function DotNode() {
   return (
     <div
       className="relative"
@@ -68,12 +63,7 @@ function DotNode(props: NodeProps<Node<MapNodeData>>) {
     >
       <Handle type="target" position={Position.Left} id="t" style={centerHandleStyle} />
       <Handle type="source" position={Position.Left} id="s" style={centerHandleStyle} />
-      <span
-        className="absolute left-full top-1/2 -translate-y-1/2 whitespace-nowrap pl-1 font-mono text-gray-300"
-        style={{ fontSize: 10 }}
-      >
-        {label} ({String(x)},{String(y)})
-      </span>
+      {/* Planet labels are rendered in a separate overlay to keep pixel-stable positioning. */}
     </div>
   )
 }
@@ -408,6 +398,10 @@ function FixedSizeDotsOverlay() {
   const half = NODE_SIZE_FLOW / 2
   const nodes = Array.from(nodeLookup.values())
 
+  const LABEL_FONT_SIZE_PX = 10
+  const LABEL_OFFSET_X_PX = 9
+  const LABEL_OFFSET_Y_PX = -12
+
   return (
     <div className="pointer-events-none absolute inset-0" aria-hidden>
       {nodes.map((node) => {
@@ -415,17 +409,32 @@ function FixedSizeDotsOverlay() {
         const cy = node.position.y + half
         const paneX = cx * scale + tx
         const paneY = cy * scale + ty
+        const mapNode = node as Node<MapNodeData>
+        const label = mapNode.data?.label
+        const coordX = mapNode.data?.x ?? mapNode.position.x
+        const coordY = mapNode.data?.y ?? mapNode.position.y
         return (
-          <div
-            key={node.id}
-            className="absolute rounded-full bg-[#9ca3af]"
-            style={{
-              left: paneX - DOT_PIXELS / 2,
-              top: paneY - DOT_PIXELS / 2,
-              width: DOT_PIXELS,
-              height: DOT_PIXELS,
-            }}
-          />
+          <div key={node.id}>
+            <div
+              className="absolute rounded-full bg-[#9ca3af]"
+              style={{
+                left: paneX - DOT_PIXELS / 2,
+                top: paneY - DOT_PIXELS / 2,
+                width: DOT_PIXELS,
+                height: DOT_PIXELS,
+              }}
+            />
+            <div
+              className="absolute font-mono text-gray-300 whitespace-nowrap"
+              style={{
+                left: paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX,
+                top: paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX,
+                fontSize: LABEL_FONT_SIZE_PX,
+              }}
+            >
+              {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
+            </div>
+          </div>
         )
       })}
     </div>
@@ -445,11 +454,23 @@ function ViewportZoomSync({ onMapZoomChange }: { onMapZoomChange: (z: number) =>
   const raw = useStore((s) => s.transform?.[2])
   const zoom = Number.isFinite(raw) && (raw as number) > 0 ? (raw as number) : 1
   const prev = useRef(zoom)
+  const rafRef = useRef<number | null>(null)
+  const pendingZoomRef = useRef<number>(zoom)
   useEffect(() => {
     if (Math.abs(prev.current - zoom) < 1e-9) return
     prev.current = zoom
-    onMapZoomChange(zoom)
+    pendingZoomRef.current = zoom
+    if (rafRef.current != null) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      onMapZoomChange(pendingZoomRef.current)
+    })
   }, [zoom, onMapZoomChange])
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
   return null
 }
 
