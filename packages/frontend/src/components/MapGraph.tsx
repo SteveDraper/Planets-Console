@@ -409,7 +409,10 @@ function FixedSizeDotsOverlay() {
         const cy = node.position.y + half
         const paneX = cx * scale + tx
         const paneY = cy * scale + ty
-        const label = (node as Node<MapNodeData>).data?.label
+        const mapNode = node as Node<MapNodeData>
+        const label = mapNode.data?.label
+        const coordX = mapNode.data?.x ?? mapNode.position.x
+        const coordY = mapNode.data?.y ?? mapNode.position.y
         return (
           <div key={node.id}>
             <div
@@ -429,7 +432,7 @@ function FixedSizeDotsOverlay() {
                 fontSize: LABEL_FONT_SIZE_PX,
               }}
             >
-              {label ?? node.id} ({Math.floor(node.position.x)},{Math.floor(node.position.y)})
+              {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
             </div>
           </div>
         )
