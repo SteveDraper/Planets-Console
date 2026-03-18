@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
@@ -98,6 +97,41 @@ function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]): stri
   return base ? [base, ...withoutBase] : withoutBase
 }
 
+function useStableCombinedMapData(
+  mapIds: string[],
+  mapQueryData: Array<MapDataResponse | undefined>
+): CombinedMapData {
+  const combinedCacheRef = useRef<{
+    mapIds: string[]
+    mapQueryData: Array<MapDataResponse | undefined>
+    combined: CombinedMapData
+  } | null>(null)
+
+  const cachedCombined = combinedCacheRef.current
+  const canReuseCombined =
+    cachedCombined != null &&
+    cachedCombined.mapIds.length === mapIds.length &&
+    cachedCombined.mapQueryData.length === mapQueryData.length &&
+    cachedCombined.mapIds.every((id, i) => id === mapIds[i]) &&
+    cachedCombined.mapQueryData.every((data, i) => data === mapQueryData[i])
+
+  const combined =
+    canReuseCombined && cachedCombined
+      ? cachedCombined.combined
+      : combineMapData(mapIds, mapQueryData.map((data) => ({ data })))
+
+  useEffect(() => {
+    if (canReuseCombined) return
+    combinedCacheRef.current = {
+      mapIds: [...mapIds],
+      mapQueryData: [...mapQueryData],
+      combined,
+    }
+  }, [canReuseCombined, combined, mapIds, mapQueryData])
+
+  return combined
+}
+
 export function MainArea({
   viewMode,
   enabledAnalyticIds,
@@ -123,28 +157,7 @@ export function MainArea({
   const pending = mapQueries.some((q) => q.isPending)
   const hasError = mapQueries.some((q) => q.error)
   const mapQueryData = mapQueries.map((q) => q.data)
-  const combinedCacheRef = useRef<{
-    mapIds: string[]
-    mapQueryData: Array<MapDataResponse | undefined>
-    combined: CombinedMapData
-  } | null>(null)
-  const cachedCombined = combinedCacheRef.current
-  const canReuseCombined =
-    cachedCombined != null &&
-    cachedCombined.mapIds.length === mapIds.length &&
-    cachedCombined.mapQueryData.length === mapQueryData.length &&
-    cachedCombined.mapIds.every((id, i) => id === mapIds[i]) &&
-    cachedCombined.mapQueryData.every((data, i) => data === mapQueryData[i])
-  const combined = canReuseCombined
-    ? cachedCombined!.combined
-    : combineMapData(mapIds, mapQueryData.map((data) => ({ data })))
-  if (!canReuseCombined) {
-    combinedCacheRef.current = {
-      mapIds: [...mapIds],
-      mapQueryData: [...mapQueryData],
-      combined,
-    }
-  }
+  const combined = useStableCombinedMapData(mapIds, mapQueryData)
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
   if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
@@ -209,9 +222,6 @@ export function MainArea({
     </main>
   )
 }
-
-/* eslint-enable react-hooks/refs */
-
 
 /** Shows "Loading additional map data…" only after a short delay so it doesn't flash on first map load. */
 function DeferredPendingMessage({ pending }: { pending: boolean }) {

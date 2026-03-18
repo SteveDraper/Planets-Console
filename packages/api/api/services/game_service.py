@@ -36,10 +36,10 @@ class GameService:
 
         Base-map is the fixed layer used by the frontend map view. For now:
         - nodes represent planets (no edges yet)
-        - node ids are prefixed as `p{id}`
+        - node id and label are both `p{id}` (stable, independent of turn name data)
         """
         turn = self.get_turn_info(game_id, turn_number)
-        nodes = [{"id": f"p{p.id}", "label": p.name, "x": p.x, "y": p.y} for p in turn.planets]
+        nodes = [{"id": f"p{p.id}", "label": f"p{p.id}", "x": p.x, "y": p.y} for p in turn.planets]
         return {"analyticId": "base-map", "nodes": nodes, "edges": []}
 
     def get_turn_analytics(self, game_id: int, turn_number: int, analytic_id: str) -> dict:
