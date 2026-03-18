@@ -217,9 +217,20 @@ export function MainArea({
 function DeferredPendingMessage({ pending }: { pending: boolean }) {
   const [show, setShow] = useState(false)
   useEffect(() => {
-    if (!pending) return
-    const t = setTimeout(() => setShow(true), 400)
-    return () => clearTimeout(t)
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+    if (pending) {
+      timeoutId = setTimeout(() => setShow(true), 400)
+    } else {
+      // Reset `show` when no longer pending so a future pending state is delayed again.
+      setShow(false)
+    }
+
+    return () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId)
+      }
+    }
   }, [pending])
   if (!pending || !show) return null
   return (
