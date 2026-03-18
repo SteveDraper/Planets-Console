@@ -51,5 +51,5 @@ class GameService:
         if analytic_id == "base-map":
             return self.get_map_base(game_id, turn_number)
         # Unknown analytic: treat as validation error so the BFF can decide whether
-        # to surface 404/422 vs fallback. For now, match FastAPI's default 404 style.
+        # to surface 404/422 vs fallback. This raises ValidationError, which maps to HTTP 422.
         raise ValidationError(f"Unknown analytic_id: {analytic_id!r}")
