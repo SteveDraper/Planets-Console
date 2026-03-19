@@ -21,4 +21,4 @@ test_server:
 	PYTHONPATH=packages/server:packages/api:packages/bff uv run python -m pytest packages/server/tests
 
 test_frontend:
-	@echo "No frontend tests configured yet."
+	cd packages/frontend && npm run test

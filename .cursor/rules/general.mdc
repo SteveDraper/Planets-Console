@@ -46,6 +46,10 @@ When creating an implementation plan, switching to Plan Mode, or starting any mu
 - **The todo list does not override collaboration.** Having open todos does not mean ignoring the user and plowing through. Todos track progress; they do not grant permission to skip check-ins. Stop and collaborate whenever the situation calls for it, even mid-task.
 - **Ask when you need access.** If a task requires a tool, credential, API key, permission, or environment you don't have -- stop and ask the user. Never try to work around missing access by substituting a different approach, guessing at credentials, or skipping the step silently. The user is a collaborator and can provide what's needed. "I need X to do Y -- can you provide it?" is always the right move.
 
+## Credentials and passwords
+
+- **Passwords must never be persisted.** Do not store login passwords in localStorage, sessionStorage, cookies, URL parameters, or any durable storage. In-app session state (e.g. a Zustand store or React state) that holds a password in memory for the duration of the session is allowed; the password must be lost on full page reload or process exit. Any feature that adds "remember me", token refresh, or similar must not persist the raw password.
+
 ## Token Efficiency
 
 - **Batch tool calls.** When multiple independent reads, searches, or commands can run in parallel, send them in one message -- not sequentially.
