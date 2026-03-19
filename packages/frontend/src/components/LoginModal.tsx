@@ -10,12 +10,23 @@ type LoginModalProps = {
 export function LoginModal({ isOpen, onClose }: LoginModalProps) {
   const setCredentials = useSessionStore((s) => s.setCredentials)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  function closeAndReturnFocus() {
+    const target = returnFocusRef.current
+    onClose()
+    if (target?.focus) {
+      requestAnimationFrame(() => target.focus())
+    }
+  }
+
   useEffect(() => {
     if (!isOpen) return
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
     const el = dialogRef.current
     if (!el) return
     const focusables = el.querySelectorAll<HTMLElement>(
@@ -30,7 +41,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        onClose()
+        closeAndReturnFocus()
       }
       if (e.key === 'Tab') {
         const el = dialogRef.current
@@ -58,7 +69,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,7 +79,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
       return
     }
     setCredentials(trimmedName, password)
-    onClose()
+    closeAndReturnFocus()
   }
 
   if (!isOpen) return null
@@ -126,7 +137,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeAndReturnFocus}
               className="rounded border border-[#52575d] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
             >
               Cancel

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Header } from './Header'
 import { useSessionStore } from '../stores/session'
@@ -18,6 +18,8 @@ function renderHeader() {
 describe('Header', () => {
   beforeEach(() => {
     useSessionStore.getState().clearSession()
+    localStorage.clear()
+    sessionStorage.clear()
   })
 
   it('shows change-login button and placeholder when not logged in', () => {
@@ -46,6 +48,17 @@ describe('Header', () => {
     await user.click(screen.getByRole('button', { name: /log in/i }))
     expect(screen.getByText('TestPlayer')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('restores focus to change-login button when modal closes (Cancel)', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    const changeLoginButton = screen.getByRole('button', { name: /change login/i })
+    await user.click(changeLoginButton)
+    expect(screen.getByRole('dialog', { name: /log in to planets\.nu/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /cancel/i }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(changeLoginButton).toHaveFocus())
   })
 
   it('change-login button is always present and opens modal when logged in', async () => {
