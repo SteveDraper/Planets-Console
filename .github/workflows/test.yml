@@ -40,6 +40,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: packages/frontend
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
 
       - name: Run unit tests
         run: make test
