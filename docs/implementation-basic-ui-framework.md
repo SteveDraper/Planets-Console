@@ -32,7 +32,7 @@ Architecture constraints: [.cursor/rules/architecture.mdc](../.cursor/rules/arch
 - [x] **Vite + React** under `packages/frontend`, wrapped in `BrowserRouter` for future routing expansion.
 - [x] **Tailwind CSS** styling for the current shell implementation.
 - [x] **Shell layout** matching overview:
-  - Header: login identity (refresh icon + "Login:" label; icon opens modal to set/change credentials), placeholder game/turn/viewpoint fields, right-aligned tabular/map toggle, and a log-scale map zoom slider that is disabled outside map mode and synchronized with React Flow zoom.
+  - Header: login identity (refresh icon + "Login:" label; icon opens modal to set/change credentials); **game** control ([issue #13](design-issue-13-game-selection.md)) -- clickable `GameControl`, lists stored games from `GET /bff/games`, session-only add-by-id; **turn** and **viewpoint** remain placeholder "—"; right-aligned tabular/map toggle; and a log-scale map zoom slider that is disabled outside map mode and synchronized with React Flow zoom.
   - Left **analytics selector**: vertical list of selectable analytics (excluding the base map), each with enable/disable, pressed/depressed styling, and greyed-out state when unsupported in the current mode.
   - **Main area**: tabular tiles for enabled analytics, or a React Flow map pane with placeholder data.
 - [x] **TanStack Query**—HTTP only to **BFF**, never Core API directly.

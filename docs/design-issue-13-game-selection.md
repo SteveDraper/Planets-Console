@@ -2,7 +2,7 @@
 
 **Source:** [GitHub Issue #13 - [Feature] Select game](https://github.com/SteveDraper/Planets-Console/issues/13)
 
-This document describes the design for adding game selection to the console: a clickable Game control in the header that lets the user choose from games already in storage or add a new one (by game id). **Implementation is out of scope** for this doc; it is a design and acceptance reference only.
+This document describes the design for game selection in the console: a clickable Game control in the header that lets the user choose from games already in storage or add a new one (by game id). It is a design and acceptance reference. The **in-scope** items are implemented in the repo; **out-of-scope** items (fetch/store for new games, persisting selection, wiring map/turn to the selected id) remain future work.
 
 ---
 
@@ -28,23 +28,27 @@ This document describes the design for adding game selection to the console: a c
 
 ---
 
-## 3. Current state
+## 3. Current state (as implemented)
 
-### 3.1 Header
+### 3.1 Header and frontend
 
-- `packages/frontend/src/components/Header.tsx` renders the login identity control (refresh icon + "Login:" label; see issue #12), static "Game: —", and Turn, Viewpoint as "—".
-- No game (or turn/viewpoint) state is passed into the Header; the app has no selected game context yet.
+- `packages/frontend/src/components/Header.tsx` renders the login identity control (see [design-issue-12-login-identity.md](design-issue-12-login-identity.md)), **`GameControl`**, and Turn / Viewpoint as static "—" (still placeholders).
+- **`selectedGameId`** (`string | null`) and **`onSelectGameId`** live in **`packages/frontend/src/App.tsx`** and are passed into `Header` → `GameControl`.
+- **`GameControl`** (`packages/frontend/src/components/GameControl.tsx`): a button showing **Game: None** or **Game: &lt;id&gt;;** opens a popover. TanStack Query loads the list from **`GET /bff/games`** when the popover opens (query key `['bff', 'games']`). The user can select a listed game or enter a game id (adds to selection and to an in-session list only; no planets.nu fetch or store write yet).
+- API helper: **`fetchGames`** in `packages/frontend/src/api/bff.ts`.
+- **Tests:** `packages/frontend/src/components/GameControl.test.tsx`. **`Header.test.tsx`** wraps `Header` in **`QueryClientProvider`** because `GameControl` uses `useQuery`.
 
 ### 3.2 Storage and Core
 
 - Game data lives under the store path `games/{game_id}/...` (e.g. `games/628580/info`, `games/628580/turns/111`).
 - Core exposes **store CRUD** at `/api/v1/store/{path:path}` with `GET ?view=shallow` returning `{ path, node_type, children, count }` where `children` are the next-hop segment names (see [design-storage-abstraction-and-crud-api.md](design-storage-abstraction-and-crud-api.md)).
-- So **listing stored games** is already supported: `GET /api/v1/store/games?view=shallow` returns `children: ["628580", ...]` when the `games` node exists. If the path does not exist (no games stored), Core returns **404**. The BFF will treat 404 as an empty list.
+- **Listing stored games** via Core: `GET /api/v1/store/games?view=shallow` returns `children: ["628580", ...]` when the `games` node exists. If the path does not exist, Core returns **404**.
 
-### 3.3 BFF and frontend
+### 3.3 BFF
 
-- BFF has no games-related endpoint today. The frontend talks only to the BFF (`packages/frontend/src/api/bff.ts`).
-- App state in `App.tsx` holds view mode, map zoom, and enabled analytic ids; there is no selected game id or turn number yet (issue #10 uses hard-coded test values in the BFF for base map).
+- **`GET /bff/games`** is implemented in **`packages/bff/bff/routers/games.py`**. The BFF uses in-process **`StoreService(get_storage()).read_shallow("games")`** (same semantics as the Core store shallow read). **`NotFoundError`** maps to **`{ "games": [] }`**; otherwise **`{ "games": [ { "id": "<child>" }, ... ] }`** from shallow **`children`**.
+- The SPA talks only to the BFF for this feature; it does not call Core store URLs directly.
+- **Downstream:** Base map and other analytics still use **hard-coded test game/turn** in the BFF until a later issue wires **`selectedGameId`** (and turn) end-to-end.
 
 ---
 
@@ -52,18 +56,18 @@ This document describes the design for adding game selection to the console: a c
 
 ### 4.1 Data flow (layered)
 
+**Implemented path:** the BFF calls **`StoreService.read_shallow("games")`** in-process (same behavior as **`GET /api/v1/store/games?view=shallow`** on the Core REST app, without an extra HTTP hop).
+
 ```mermaid
 flowchart LR
   Frontend[Header Game control] -->|GET /bff/games| BFF[BFF games router]
-  BFF -->|GET /api/v1/store/games?view=shallow| Core[Core REST API]
-  Core -->|StoreService.read_shallow or HTTP client| Store[StorageBackend]
-  Store --> Core
-  Core -->|children = game ids| BFF
-  BFF -->|games: array of id, optional name| Frontend
+  BFF -->|StoreService.read_shallow| Store[StorageBackend]
+  Store -->|children = game ids| BFF
+  BFF -->|games: array of id| Frontend
 ```
 
-- Frontend holds **selected game id** (string | null) in state (e.g. in `App.tsx` or a small context/store). It is passed into the Header and used for display and for downstream features (e.g. turn list, base map) in later tickets.
-- When the user opens the game selector, the frontend fetches the list of games from the BFF; the BFF obtains it from Core (store shallow read at `games`).
+- Frontend holds **selected game id** (`string | null`) in **`App.tsx`** and passes it into **`Header`** for display; future features (turn list, base map) should consume the same state.
+- When the user opens the game selector, the frontend fetches the list from the BFF; the BFF performs the shallow read on **`games`** as above.
 
 ### 4.2 Core API
 
@@ -73,17 +77,17 @@ flowchart LR
 
 ### 4.3 BFF
 
-- **New route:** `GET /bff/games`
-  - **Behavior:** Call Core store shallow read for path `games` (in-process via `StoreService.read_shallow("games")` or via HTTP to `GET /api/v1/store/games?view=shallow`, per existing BFF–Core integration choice). On 404 from Core, return an empty list.
+- **Route:** `GET /bff/games`
+  - **Behavior:** Shallow read for store path `games` via in-process **`StoreService.read_shallow("games")`** (equivalent to **`GET /api/v1/store/games?view=shallow`**). On missing path (**`NotFoundError`**), return **`{ "games": [] }`**.
   - **Response shape (proposed):**  
     `{ "games": [ { "id": "<game_id>" } ] }`  
     so the frontend gets a stable contract. Optionally include `name` for each game if the BFF can obtain it cheaply (e.g. one shallow read under `games/{id}/info` or a single batch); for this issue, **id-only is sufficient**; name can be added in a follow-up.
-  - **Errors:** If Core returns something other than 200 or 404 (e.g. 500), BFF propagates an appropriate error to the frontend (e.g. 502 or 500 with detail).
+  - **Errors:** Unexpected storage or service failures propagate as appropriate HTTP errors to the frontend.
 
 ### 4.4 Frontend
 
 - **Header**
-  - Replace the static "Game: —" with a **clickable control** that:
+  - **Game control** (`GameControl`): a **clickable control** that:
     - Shows **"None"** (or similar) when no game is selected.
     - Shows the **selected game id** (or a short label) when a game is selected.
     - On click, opens a **dropdown or popover** that:
@@ -107,23 +111,25 @@ flowchart LR
 
 ---
 
-## 5. Tests (to implement)
+## 5. Tests
 
 ### 5.1 BFF
 
-- **GET /bff/games**
-  - When store has no `games` path (or Core returns 404): response is `{ "games": [] }`.
-  - When store has `games` with children (e.g. `628580`): response is `{ "games": [ { "id": "628580" } ] }` (and optionally name if implemented).
-  - Use in-process store or mock Core so that no real HTTP or persistence is required.
+**`packages/bff/tests/test_games.py`** covers **`GET /bff/games`**:
+
+- No `games` path in store: **`{ "games": [] }`**.
+- Store has `games` with children: response includes those ids (e.g. **`628580`**, **`999`**) in **`{ "games": [ { "id": "..." }, ... ] }`**.
 
 ### 5.2 Frontend
 
-- **Header Game control**
-  - Renders a clickable element that shows "None" when selected game is null and shows the selected game id when set.
-  - Opening the control triggers a request for the games list (e.g. TanStack Query); list is displayed in the dropdown.
-  - "Add new" flow: user can enter a game id and submit; selection updates to that id (and optionally the list updates for the session). No tests required for the TODO part (fetch/store) since it is explicitly out of scope.
+**`packages/frontend/src/components/GameControl.test.tsx`** (mocked **`fetch`** for **`/bff/games`**):
 
-- Prefer unit tests with mocked BFF responses; avoid flaky E2E unless already in use for the header.
+- Trigger shows **None** vs selected id.
+- Opening loads and displays listed games.
+- Selecting a game calls **`onSelectGameId`**.
+- Add-by-id updates selection (session path only).
+
+**`Header.test.tsx`** provides **`QueryClientProvider`** for header integration; game-picker behavior is asserted in **`GameControl.test.tsx`**.
 
 ---
 
@@ -139,13 +145,14 @@ flowchart LR
 - Header shows a **clickable** Game control that displays "None" (or equivalent) when no game is selected and the selected game id when one is selected.
 - Clicking the control opens a dropdown/popover that lists **stored games** from the BFF (which in turn uses Core store shallow read at `games`).
 - User can **add a new game** by entering a game id; selection (and optionally the in-session list) updates; behavior beyond that (fetch/store) is left as TODO.
-- No new Core API routes; enumeration uses existing `GET /api/v1/store/games?view=shallow`.
-- BFF and frontend have unit tests as above; docs/comments reflect the placeholder for the full "add new game" flow.
+- No new Core API routes; enumeration uses the same shallow read as **`GET /api/v1/store/games?view=shallow`** (BFF uses **`StoreService.read_shallow`** in-process).
+- BFF and frontend have unit tests as in **§5**; docs/comments reflect the placeholder for the full "add new game" flow (fetch/store).
 
 ---
 
-## 8. Open points for implementation
+## 8. Open points / follow-ups
 
-- **BFF–Core coupling:** Use in-process `StoreService.read_shallow("games")` (consistent with current BFF use of Core services) or an HTTP client to `GET /api/v1/store/games?view=shallow`. Either is acceptable; choose based on existing BFF patterns and testability.
+- **BFF–Core coupling:** **Resolved** -- implementation uses in-process **`StoreService.read_shallow("games")`** (see **`packages/bff/bff/routers/games.py`**).
 - **Game name:** Omit in this issue or add from `games/{id}/info` (or similar) if a single cheap read is available; avoid N+1.
-- **Persistence of selection:** Storing the selected game id in localStorage or sessionStorage can be done in this ticket or a follow-up; the design does not require it.
+- **Persistence of selection:** Storing the selected game id in localStorage or sessionStorage is a follow-up; not implemented yet.
+- **Wire selected game (and turn) to map and analytics:** Still open; base map continues to use hard-coded test context in the BFF until a later issue.
