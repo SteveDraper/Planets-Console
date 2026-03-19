@@ -37,5 +37,16 @@ jobs:
           uv sync --package bff --extra dev
         working-directory: .
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: packages/frontend
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
       - name: Run unit tests
         run: make test

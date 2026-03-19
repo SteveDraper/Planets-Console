@@ -1,4 +1,8 @@
+import { useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { cn, mapSliderToZoom, mapZoomToSlider } from '../lib/utils'
+import { useSessionStore } from '../stores/session'
+import { LoginModal } from './LoginModal'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -17,12 +21,36 @@ export function Header({
   onMapZoomSliderChange,
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
+  const loginName = useSessionStore((s) => s.name)
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
+  const [loginModalKey, setLoginModalKey] = useState(0)
+
+  const openLoginModal = () => {
+    setLoginModalKey((k) => k + 1)
+    setIsLoginModalOpen(true)
+  }
 
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-[#52575d] bg-[#40454a] px-3 py-1.5 text-slate-200">
-      <span className="text-xs text-slate-400" title="Login identity">
-        Login: <span className="text-slate-200">—</span>
-      </span>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={openLoginModal}
+          className="rounded p-0.5 text-slate-400 hover:bg-white/10 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-400"
+          aria-label="Change login"
+          title="Change login"
+        >
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        <span className="text-xs text-slate-400" title="Login identity">
+          Login: <span className="text-slate-200">{loginName ?? '—'}</span>
+        </span>
+      </div>
+      <LoginModal
+        key={loginModalKey}
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+      />
       <span className="text-xs text-slate-400" title="Game">
         Game: <span className="text-slate-200">—</span>
       </span>
