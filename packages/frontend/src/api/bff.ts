@@ -45,6 +45,20 @@ export type CombinedMapData = {
   edges: MapDataResponse['edges']
 }
 
+export type StoredGameItem = {
+  id: string
+}
+
+export type GamesListResponse = {
+  games: StoredGameItem[]
+}
+
+export async function fetchGames(): Promise<GamesListResponse> {
+  const r = await fetch(`${BFF_BASE}/bff/games`)
+  if (!r.ok) throw new Error(String(r.status))
+  return r.json()
+}
+
 export async function fetchAnalytics(): Promise<AnalyticsListResponse> {
   const r = await fetch(`${BFF_BASE}/bff/analytics`)
   if (!r.ok) throw new Error(String(r.status))

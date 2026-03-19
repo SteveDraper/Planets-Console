@@ -1,17 +1,26 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Header } from './Header'
 import { useSessionStore } from '../stores/session'
 
+const headerQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+})
+
 function renderHeader() {
   return render(
-    <Header
-      viewMode="tabular"
-      onViewModeChange={() => {}}
-      mapZoom={1}
-      onMapZoomSliderChange={() => {}}
-    />
+    <QueryClientProvider client={headerQueryClient}>
+      <Header
+        viewMode="tabular"
+        onViewModeChange={() => {}}
+        mapZoom={1}
+        onMapZoomSliderChange={() => {}}
+        selectedGameId={null}
+        onSelectGameId={() => {}}
+      />
+    </QueryClientProvider>
   )
 }
 
@@ -20,6 +29,7 @@ describe('Header', () => {
     useSessionStore.getState().clearSession()
     localStorage.clear()
     sessionStorage.clear()
+    headerQueryClient.clear()
   })
 
   it('shows change-login button and placeholder when not logged in', () => {
