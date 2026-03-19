@@ -37,5 +37,9 @@ jobs:
           uv sync --package bff --extra dev
         working-directory: .
 
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: packages/frontend
+
       - name: Run unit tests
         run: make test
