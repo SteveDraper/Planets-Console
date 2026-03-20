@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
 import { fetchGames } from '../api/bff'
@@ -9,6 +9,11 @@ type GameControlProps = {
 }
 
 export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps) {
+  const idRoot = useId()
+  const triggerId = `${idRoot}-game-selector-trigger`
+  const popoverId = `${idRoot}-game-selector-popover`
+  const gamesListboxId = `${idRoot}-game-selector-games-listbox`
+
   const [isOpen, setIsOpen] = useState(false)
   const [sessionExtraIds, setSessionExtraIds] = useState<string[]>([])
   const [addNewId, setAddNewId] = useState('')
@@ -81,10 +86,10 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        id="game-selector-trigger"
-        aria-haspopup="listbox"
+        id={triggerId}
+        aria-haspopup="dialog"
         aria-expanded={isOpen}
-        aria-controls={isOpen ? 'game-selector-listbox' : undefined}
+        aria-controls={isOpen ? popoverId : undefined}
         onClick={() => (isOpen ? closeAndReturnFocus() : openMenu())}
         className={cn(
           'rounded border border-transparent px-1 py-0.5 text-left text-xs text-slate-400',
@@ -97,41 +102,57 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
       </button>
       {isOpen && (
         <div
-          id="game-selector-listbox"
-          role="listbox"
-          aria-labelledby="game-selector-trigger"
+          id={popoverId}
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby={triggerId}
           className={cn(
             'absolute left-0 top-full z-50 mt-1 flex min-w-[12rem] max-h-64 flex-col gap-1 overflow-y-auto',
             'rounded border border-[#52575d] bg-[#40454a] p-2 shadow-lg'
           )}
         >
           {isPending && (
-            <span className="px-2 py-1 text-xs text-slate-400">Loading games…</span>
+            <span className="px-2 py-1 text-xs text-slate-400" role="status">
+              Loading games…
+            </span>
           )}
           {isError && (
-            <span className="px-2 py-1 text-xs text-red-400">Failed to load games</span>
+            <span className="px-2 py-1 text-xs text-red-400" role="alert">
+              Failed to load games
+            </span>
           )}
-          {!isPending &&
-            !isError &&
-            displayIds.map((id) => (
-              <button
-                key={id}
-                type="button"
-                role="option"
-                aria-selected={selectedGameId === id}
-                onClick={() => selectId(id)}
-                className={cn(
-                  'rounded px-2 py-1.5 text-left text-xs text-slate-200',
-                  'hover:bg-white/10 focus:bg-white/10 focus:outline-none'
-                )}
-              >
-                {id}
-              </button>
-            ))}
+          {!isPending && !isError && displayIds.length > 0 && (
+            <div
+              id={gamesListboxId}
+              role="listbox"
+              aria-label="Stored games"
+              className="flex flex-col gap-1"
+            >
+              {displayIds.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedGameId === id}
+                  onClick={() => selectId(id)}
+                  className={cn(
+                    'rounded px-2 py-1.5 text-left text-xs text-slate-200',
+                    'hover:bg-white/10 focus:bg-white/10 focus:outline-none'
+                  )}
+                >
+                  {id}
+                </button>
+              ))}
+            </div>
+          )}
           {!isPending && !isError && displayIds.length === 0 && (
             <span className="px-2 py-1 text-xs text-slate-500">No stored games</span>
           )}
-          <div className="mt-1 border-t border-[#52575d] pt-2">
+          <div
+            role="group"
+            aria-label="Add game by id"
+            className="mt-1 border-t border-[#52575d] pt-2"
+          >
             <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-slate-500">
               Add game (id only)
             </p>
