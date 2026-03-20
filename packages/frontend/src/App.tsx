@@ -13,6 +13,7 @@ function ConsoleShell() {
   const [mapZoom, setMapZoom] = useState(1)
   const setMapZoomFromSlider = useRef<(z: number) => void | undefined>(undefined)
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
 
   const { data: analyticsData, isPending, error } = useQuery({
     queryKey: ['bff', 'analytics'],
@@ -50,6 +51,8 @@ function ConsoleShell() {
         onViewModeChange={setViewMode}
         mapZoom={mapZoom}
         onMapZoomSliderChange={handleMapZoomSliderChange}
+        selectedGameId={selectedGameId}
+        onSelectGameId={setSelectedGameId}
       />
       <div className="flex min-h-0 flex-1">
         <AnalyticsBar

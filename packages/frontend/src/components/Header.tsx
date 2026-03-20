@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react'
 import { cn, mapSliderToZoom, mapZoomToSlider } from '../lib/utils'
 import { useSessionStore } from '../stores/session'
 import { LoginModal } from './LoginModal'
+import { GameControl } from './GameControl'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -12,6 +13,8 @@ type HeaderProps = {
   /** Current map zoom (React Flow); drives log-scale slider. */
   mapZoom: number
   onMapZoomSliderChange: (zoom: number) => void
+  selectedGameId: string | null
+  onSelectGameId: (gameId: string | null) => void
 }
 
 export function Header({
@@ -19,6 +22,8 @@ export function Header({
   onViewModeChange,
   mapZoom,
   onMapZoomSliderChange,
+  selectedGameId,
+  onSelectGameId,
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
   const loginName = useSessionStore((s) => s.name)
@@ -51,9 +56,7 @@ export function Header({
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
       />
-      <span className="text-xs text-slate-400" title="Game">
-        Game: <span className="text-slate-200">—</span>
-      </span>
+      <GameControl selectedGameId={selectedGameId} onSelectGameId={onSelectGameId} />
       <span className="text-xs text-slate-400" title="Turn">
         Turn: <span className="text-slate-200">—</span>
       </span>
