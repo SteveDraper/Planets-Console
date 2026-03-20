@@ -50,9 +50,9 @@ describe('GameControl', () => {
     await user.click(screen.getByRole('button', { name: /game:/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: '111' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '111' })).toBeInTheDocument()
     })
-    expect(screen.getByRole('option', { name: '222' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '222' })).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/bff/games'))
   })
 
@@ -66,8 +66,8 @@ describe('GameControl', () => {
 
     renderGameControl(null, onSelect)
     await user.click(screen.getByRole('button', { name: /game:/i }))
-    await waitFor(() => expect(screen.getByRole('option', { name: '628580' })).toBeInTheDocument())
-    await user.click(screen.getByRole('option', { name: '628580' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '628580' })).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '628580' }))
     expect(onSelect).toHaveBeenCalledWith('628580')
   })
 

@@ -12,7 +12,6 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
   const idRoot = useId()
   const triggerId = `${idRoot}-game-selector-trigger`
   const popoverId = `${idRoot}-game-selector-popover`
-  const gamesListboxId = `${idRoot}-game-selector-games-listbox`
 
   const [isOpen, setIsOpen] = useState(false)
   const [sessionExtraIds, setSessionExtraIds] = useState<string[]>([])
@@ -122,28 +121,30 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
             </span>
           )}
           {!isPending && !isError && displayIds.length > 0 && (
-            <div
-              id={gamesListboxId}
-              role="listbox"
+            <ul
               aria-label="Stored games"
-              className="flex flex-col gap-1"
+              className="m-0 flex list-none flex-col gap-1 p-0"
             >
-              {displayIds.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="option"
-                  aria-selected={selectedGameId === id}
-                  onClick={() => selectId(id)}
-                  className={cn(
-                    'rounded px-2 py-1.5 text-left text-xs text-slate-200',
-                    'hover:bg-white/10 focus:bg-white/10 focus:outline-none'
-                  )}
-                >
-                  {id}
-                </button>
-              ))}
-            </div>
+              {displayIds.map((id) => {
+                const isSelected = selectedGameId === id
+                return (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      onClick={() => selectId(id)}
+                      aria-current={isSelected ? true : undefined}
+                      className={cn(
+                        'w-full rounded px-2 py-1.5 text-left text-xs text-slate-200',
+                        'hover:bg-white/10 focus:bg-white/10 focus:outline-none',
+                        isSelected && 'bg-white/10 ring-1 ring-slate-500/60'
+                      )}
+                    >
+                      {id}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
           )}
           {!isPending && !isError && displayIds.length === 0 && (
             <span className="px-2 py-1 text-xs text-slate-500">No stored games</span>
