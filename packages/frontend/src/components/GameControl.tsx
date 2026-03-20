@@ -28,6 +28,12 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
   const serverIds = (data?.games ?? []).map((g) => g.id)
   const displayIds = Array.from(new Set([...serverIds, ...sessionExtraIds])).sort()
 
+  /** Dismiss without moving focus; used for outside pointerdown so the clicked control keeps focus. */
+  const closeWithoutFocusRestore = useCallback(() => {
+    setIsOpen(false)
+    setAddNewId('')
+  }, [])
+
   const closeAndReturnFocus = useCallback(() => {
     const target = returnFocusRef.current
     setIsOpen(false)
@@ -48,7 +54,7 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
     const onPointerDown = (e: MouseEvent) => {
       const el = containerRef.current
       if (el && !el.contains(e.target as Node)) {
-        closeAndReturnFocus()
+        closeWithoutFocusRestore()
       }
     }
     const onKeyDown = (e: KeyboardEvent) => {
@@ -63,7 +69,7 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [isOpen, closeAndReturnFocus])
+  }, [isOpen, closeAndReturnFocus, closeWithoutFocusRestore])
 
   const selectId = (id: string) => {
     onSelectGameId(id)
