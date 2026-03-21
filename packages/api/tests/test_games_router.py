@@ -30,7 +30,7 @@ def _setup_storage():
     with open(ASSETS_DIR / "game_info_sample.json") as f:
         storage.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
-        storage.put("games/628580/turns/111", json.load(f))
+        storage.put("games/628580/1/turns/111", json.load(f))
     yield
     clear_backend_cache()
 
@@ -68,11 +68,11 @@ class TestGetGameInfo:
 
 class TestGetTurnInfo:
     def test_returns_200(self, client):
-        resp = client.get("/v1/games/628580/turns/111")
+        resp = client.get("/v1/games/628580/1/turns/111")
         assert resp.status_code == 200
 
     def test_response_structure(self, client):
-        resp = client.get("/v1/games/628580/turns/111")
+        resp = client.get("/v1/games/628580/1/turns/111")
         data = resp.json()
         assert "settings" in data
         assert "game" in data
@@ -81,7 +81,7 @@ class TestGetTurnInfo:
         assert data["settings"]["turn"] == 111
 
     def test_planets_list(self, client):
-        resp = client.get("/v1/games/628580/turns/111")
+        resp = client.get("/v1/games/628580/1/turns/111")
         data = resp.json()
         assert isinstance(data["planets"], list)
         assert len(data["planets"]) > 0
@@ -89,27 +89,27 @@ class TestGetTurnInfo:
         assert "name" in data["planets"][0]
 
     def test_ships_list(self, client):
-        resp = client.get("/v1/games/628580/turns/111")
+        resp = client.get("/v1/games/628580/1/turns/111")
         data = resp.json()
         assert isinstance(data["ships"], list)
         assert len(data["ships"]) > 0
 
     def test_404_for_unknown_game(self, client):
-        resp = client.get("/v1/games/999999/turns/111")
+        resp = client.get("/v1/games/999999/1/turns/111")
         assert resp.status_code == 404
 
     def test_404_for_unknown_turn(self, client):
-        resp = client.get("/v1/games/628580/turns/999")
+        resp = client.get("/v1/games/628580/1/turns/999")
         assert resp.status_code == 404
 
 
-class TestGetMapBase:
+class TestGetTurnAnalyticsBaseMap:
     def test_returns_200(self, client):
-        resp = client.get("/v1/games/628580/turns/111/map-base")
+        resp = client.get("/v1/games/628580/1/turns/111/analytics/base-map")
         assert resp.status_code == 200
 
     def test_response_structure(self, client):
-        resp = client.get("/v1/games/628580/turns/111/map-base")
+        resp = client.get("/v1/games/628580/1/turns/111/analytics/base-map")
         data = resp.json()
         assert data["analyticId"] == "base-map"
         assert "nodes" in data
@@ -119,5 +119,5 @@ class TestGetMapBase:
         assert data["edges"] == []
 
     def test_404_for_unknown_turn(self, client):
-        resp = client.get("/v1/games/628580/turns/999/map-base")
+        resp = client.get("/v1/games/628580/1/turns/999/analytics/base-map")
         assert resp.status_code == 404

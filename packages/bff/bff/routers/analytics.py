@@ -45,6 +45,7 @@ ANALYTICS_LIST = [
 ]
 
 _TEST_GAME_ID = 628580
+_TEST_PERSPECTIVE = 1
 _TEST_TURN_NUMBER = 111
 
 
@@ -57,7 +58,9 @@ async def fetch_base_map_from_core() -> dict:
     seed_dummy_data(storage)
     svc = GameService(storage)
     try:
-        return svc.get_turn_analytics(_TEST_GAME_ID, _TEST_TURN_NUMBER, "base-map")
+        return svc.get_turn_analytics(
+            _TEST_GAME_ID, _TEST_PERSPECTIVE, _TEST_TURN_NUMBER, "base-map"
+        )
     except PlanetsConsoleError as e:
         # Map Core-layer distinguished errors into appropriate HTTP status codes.
         raise HTTPException(

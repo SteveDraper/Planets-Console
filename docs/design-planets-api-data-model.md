@@ -12,7 +12,7 @@ This document describes the design for adding Python dataclass models for the en
 - Define Python `@dataclass` classes for every entity, using `Enum` types where values come from a known finite set.
 - Provide serialization/deserialization via `dacite` with explicit codecs for non-JSON-native fields.
 - Model the **Load Game Info** response as `GameInfo` and the **Load Turn Data** result object (`rst`) as `TurnInfo`.
-- Add Core API routes: `/api/v1/games/{id}/info` (returns `GameInfo`) and `/api/v1/games/{id}/turns/{number}` (returns `TurnInfo`).
+- Add Core API routes: `/api/v1/games/{id}/info` (returns `GameInfo`) and `/api/v1/games/{id}/{perspective}/turns/{number}` (returns `TurnInfo`).
 - For now, routes serve **dummy data** loaded from static JSON assets to avoid polluting application code.
 
 ---
@@ -723,7 +723,7 @@ Strategy (2) is preferred for simplicity and type safety. The `dacite` `Config` 
 | Route | Method | Response type | Description |
 |-------|--------|---------------|-------------|
 | `/api/v1/games/{game_id}/info` | GET | `GameInfo` | Return game info for the given game |
-| `/api/v1/games/{game_id}/turns/{turn_number}` | GET | `TurnInfo` | Return turn data for the given game and turn |
+| `/api/v1/games/{game_id}/{perspective}/turns/{turn_number}` | GET | `TurnInfo` | Return turn data for the given game, player perspective, and turn |
 
 ### 8.2 Router
 
@@ -738,9 +738,10 @@ def get_game_info(
     svc: GameService = Depends(get_game_service),
 ) -> GameInfo: ...
 
-@router.get("/{game_id}/turns/{turn_number}")
+@router.get("/{game_id}/{perspective}/turns/{turn_number}")
 def get_turn_info(
     game_id: int,
+    perspective: int,
     turn_number: int,
     svc: GameService = Depends(get_game_service),
 ) -> TurnInfo: ...
@@ -766,8 +767,8 @@ class GameService:
         data = self._storage.get(f"games/{game_id}/info")
         return game_info_from_json(data)
 
-    def get_turn_info(self, game_id: int, turn_number: int) -> TurnInfo:
-        data = self._storage.get(f"games/{game_id}/turns/{turn_number}")
+    def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
+        data = self._storage.get(f"games/{game_id}/{perspective}/turns/{turn_number}")
         return turn_info_from_json(data)
 ```
 
@@ -778,7 +779,7 @@ The service reads from the storage backend and deserializes. If the path does no
 For now, routes return dummy data loaded from static JSON files. Following the issue guidance:
 
 - Place static assets under `packages/api/storage/assets/` (e.g. `game_info_sample.json`, `turn_sample.json`).
-- On app startup (or lazily on first request), seed the in-memory store with the dummy data at the expected paths (e.g. `games/628580/info`, `games/628580/turns/111`).
+- On app startup (or lazily on first request), seed the in-memory store with the dummy data at the expected paths (e.g. `games/628580/info`, `games/628580/1/turns/111`).
 - The seeding logic lives in a startup hook or a helper in the service layer — not in router code.
 - The `assets/turn.json` file provides the source for `turn_sample.json`. A trimmed version should be used as the asset (subset of entities to keep the file manageable while still exercising all dataclass types).
 
@@ -815,7 +816,7 @@ No new exception types are needed for this enhancement.
 ### 10.3 Router tests (`test_games_router.py`)
 
 - **GET `/api/v1/games/{id}/info`:** Returns 200 with valid `GameInfo` JSON; returns 404 for unknown game ID.
-- **GET `/api/v1/games/{id}/turns/{number}`:** Returns 200 with valid `TurnInfo` JSON; returns 404 for unknown game or turn.
+- **GET `/api/v1/games/{id}/{perspective}/turns/{number}`:** Returns 200 with valid `TurnInfo` JSON; returns 404 for unknown game, perspective slice, or turn.
 - **Response structure:** Key fields are present and correctly typed in the JSON response.
 
 ### 10.4 Service tests (`test_game_service.py`)
@@ -831,7 +832,7 @@ No new exception types are needed for this enhancement.
 1. **Dataclass models** for all entities in the Planets API `GameInfo` and `TurnInfo` responses, defined in `packages/api/models/`.
 2. **Enum types** for `MessageType`, `NativeType`, `GameStatus` (and others as needed), with `UNKNOWN` sentinels for forward-compatibility.
 3. **Serialization codecs** in `packages/api/serialization/` using `dacite` for JSON ↔ dataclass conversion, with enum cast hooks and lenient unknown-key handling.
-4. **Core API routes** at `/api/v1/games/{id}/info` and `/api/v1/games/{id}/turns/{number}` returning `GameInfo` and `TurnInfo` respectively.
+4. **Core API routes** at `/api/v1/games/{id}/info` and `/api/v1/games/{id}/{perspective}/turns/{number}` returning `GameInfo` and `TurnInfo` respectively.
 5. **Game service** in `packages/api/services/game_service.py` reading from `StorageBackend` and deserializing.
 6. **Dummy data** from static JSON assets seeded into the store, so routes return realistic responses without any external API calls.
 7. **Unit tests** covering models, serialization (including round-trips, enum handling, nested objects), service logic, and router HTTP contracts.

@@ -19,7 +19,7 @@ def seeded_backend():
     with open(ASSETS_DIR / "game_info_sample.json") as f:
         backend.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
-        backend.put("games/628580/turns/111", json.load(f))
+        backend.put("games/628580/1/turns/111", json.load(f))
     return backend
 
 
@@ -47,25 +47,25 @@ class TestGetGameInfo:
 
 class TestGetTurnInfo:
     def test_returns_turn_info(self, service):
-        ti = service.get_turn_info(628580, 111)
+        ti = service.get_turn_info(628580, 1, 111)
         assert isinstance(ti, TurnInfo)
         assert ti.settings.turn == 111
 
     def test_planets_populated(self, service):
-        ti = service.get_turn_info(628580, 111)
+        ti = service.get_turn_info(628580, 1, 111)
         assert len(ti.planets) > 0
 
     def test_ships_populated(self, service):
-        ti = service.get_turn_info(628580, 111)
+        ti = service.get_turn_info(628580, 1, 111)
         assert len(ti.ships) > 0
 
     def test_not_found_game(self, service):
         with pytest.raises(NotFoundError):
-            service.get_turn_info(999999, 111)
+            service.get_turn_info(999999, 1, 111)
 
     def test_not_found_turn(self, service):
         with pytest.raises(NotFoundError):
-            service.get_turn_info(628580, 999)
+            service.get_turn_info(628580, 1, 999)
 
 
 class TestMalformedStoreData:
@@ -78,15 +78,15 @@ class TestMalformedStoreData:
 
     def test_turn_info_non_dict_raises_validation(self):
         backend = MemoryAssetBackend(initial={})
-        backend.put("games/1/turns/1", "just a string")
+        backend.put("games/1/1/turns/1", "just a string")
         svc = GameService(backend)
         with pytest.raises(ValidationError, match="Expected JSON object"):
-            svc.get_turn_info(1, 1)
+            svc.get_turn_info(1, 1, 1)
 
 
 class TestGetMapBase:
     def test_returns_planet_nodes(self, service):
-        data = service.get_map_base(628580, 111)
+        data = service.get_map_base(628580, 1, 111)
         assert data["analyticId"] == "base-map"
         assert isinstance(data["nodes"], list)
         assert len(data["nodes"]) > 0
@@ -99,4 +99,4 @@ class TestGetMapBase:
         from api.errors import NotFoundError
 
         with pytest.raises(NotFoundError):
-            service.get_map_base(628580, 999)
+            service.get_map_base(628580, 1, 999)

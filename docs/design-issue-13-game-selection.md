@@ -40,7 +40,7 @@ This document describes the design for game selection in the console: a clickabl
 
 ### 3.2 Storage and Core
 
-- Game data lives under the store path `games/{game_id}/...` (e.g. `games/628580/info`, `games/628580/turns/111`).
+- Game data lives under the store path `games/{game_id}/...` (e.g. `games/628580/info`, `games/628580/{perspective}/turns/111`).
 - Core exposes **store CRUD** at `/api/v1/store/{path:path}` with `GET ?view=shallow` returning `{ path, node_type, children, count }` where `children` are the next-hop segment names (see [design-storage-abstraction-and-crud-api.md](design-storage-abstraction-and-crud-api.md)).
 - **Listing stored games** via Core: `GET /api/v1/store/games?view=shallow` returns `children: ["628580", ...]` when the `games` node exists. If the path does not exist, Core returns **404**.
 
