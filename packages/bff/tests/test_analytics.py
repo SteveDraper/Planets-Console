@@ -32,7 +32,7 @@ def _setup_storage_for_core_calls():
     with open(ASSETS_DIR / "game_info_sample.json") as f:
         storage.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
-        storage.put("games/628580/turns/111", json.load(f))
+        storage.put("games/628580/1/turns/111", json.load(f))
     yield
     clear_backend_cache()
 

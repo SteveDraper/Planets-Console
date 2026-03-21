@@ -12,7 +12,7 @@ _ASSETS_DIR = Path(__file__).resolve().parent.parent / "storage" / "assets"
 
 _SEED_MAP = {
     "game_info_sample.json": "games/628580/info",
-    "turn_sample.json": "games/628580/turns/111",
+    "turn_sample.json": "games/628580/1/turns/111",
 }
 
 

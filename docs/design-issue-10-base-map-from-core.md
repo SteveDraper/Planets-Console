@@ -35,9 +35,9 @@ The base map is currently hard-coded in the BFF:
 ### 2.3 Core already has game/turn + planet data
 
 Core already provides turn data from storage:
-- `GET /api/v1/games/{game_id}/turns/{turn_number}` in `packages/api/api/routers/games.py`
+- `GET /api/v1/games/{game_id}/{perspective}/turns/{turn_number}` in `packages/api/api/routers/games.py`
 - `packages/api/api/services/game_service.py` loads:
-  - `games/{game_id}/turns/{turn_number}`
+  - `games/{game_id}/{perspective}/turns/{turn_number}`
 
 The domain `Planet` model includes `id`, `x`, and `y`:
 - `packages/api/api/models/planet.py`
@@ -70,7 +70,7 @@ The domain `Planet` model includes `id`, `x`, and `y`:
 flowchart TD
   Frontend[Frontend Map View] -->|GET /bff/analytics/base-map/map| BFF[BFF analytics router]
   BFF -->|GET Core game+turn| Core[Core REST API]
-  Core -->|Storage get(games/{gameId}/turns/{turnNumber})| Storage[StorageBackend]
+  Core -->|Storage get(games/{gameId}/{perspective}/turns/{turnNumber})| Storage[StorageBackend]
   Storage --> Core
   Core -->|Planet nodes only| BFF
   BFF -->|nodes, edges:[]| Frontend
@@ -83,7 +83,7 @@ Issue #10 requires that base-map data be derived from the displayed `gameId` and
 Because Core already returns the whole `TurnInfo`, the final design uses the more general per-analytic pattern so the BFF can treat `base-map` like any other analytic.
 
 Final Core route naming:
-- `GET /api/v1/games/{game_id}/turns/{turn_number}/analytics/{analytic_id}`
+- `GET /api/v1/games/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}`
   - `analytic_id == "base-map"` returns planet nodes derived from the turn
   - edges are an empty array for now
 
@@ -106,7 +106,7 @@ Because this issue is explicitly about replacing dummy data, the design chooses 
 - The Core endpoint treats the parameters as required for now (type `int` in FastAPI), so missing context is a frontend/BFF responsibility rather than a core semantic.
 
 Resulting behavior:
-- If the storage key `games/{gameId}/turns/{turnNumber}` is missing, Core returns `404` via existing store error mapping.
+- If the storage key `games/{gameId}/{perspective}/turns/{turnNumber}` is missing, Core returns `404` via existing store error mapping.
 
 This keeps the design consistent with existing Core routers and services:
 - routers parse path parameters into `int`
@@ -137,7 +137,7 @@ Current behavior:
 Final behavior:
 - for `analytic_id == "base-map"`, obtain the base map from Core-layer service logic (and ensure sample data exists in ephemeral storage):
   - seed/sample: make sure turn data exists for the hard-coded base-map context
-  - call `GameService.get_turn_analytics(game_id, turn_number, "base-map")`
+  - call `GameService.get_turn_analytics(game_id, perspective, turn_number, "base-map")`
 - then return a `MapDataResponse`-compatible payload to the frontend:
   - `analyticId: "base-map"`
   - `nodes` populated from turn planets (`p{id}`, `x`, `y`)
@@ -159,7 +159,7 @@ Implementation choice:
 
 ### 6.1 Core tests
 - Test that the new Core endpoint returns planet nodes:
-  - uses the `TurnInfo` stored at `games/628580/turns/111`
+  - uses the `TurnInfo` stored at `games/628580/1/turns/111`
   - validates the `id` format is `p{id}`
   - validates `x` and `y` match the underlying planet record
   - validates edges are empty

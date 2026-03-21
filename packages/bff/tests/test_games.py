@@ -35,7 +35,7 @@ def test_list_games_returns_child_ids():
     """GET /games returns shallow children of store path `games` as id objects."""
     storage = get_storage()
     storage.put("games/628580/info", {"stub": True})
-    storage.put("games/999/turns/1", {"stub": True})
+    storage.put("games/999/1/turns/1", {"stub": True})
     response = client.get("/games")
     assert response.status_code == 200
     data = response.json()
