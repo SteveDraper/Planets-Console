@@ -3,10 +3,16 @@
 from fastapi import APIRouter, Depends
 
 from api.models.game import GameInfo, TurnInfo
+from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
 from api.storage import StorageBackend, get_storage
+from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 
 router = APIRouter(prefix="/v1/games", tags=["games"])
+
+
+def get_planets_client() -> PlanetsNuClient:
+    return PlanetsNuClient.from_config()
 
 
 def get_game_service(storage: StorageBackend = Depends(get_storage)) -> GameService:
@@ -20,6 +26,30 @@ def get_game_info(
 ) -> GameInfo:
     """Return game info for the given game."""
     return svc.get_game_info(game_id)
+
+
+@router.post("/{game_id}/info")
+def post_game_info(
+    game_id: int,
+    body: GameInfoUpdateRequest,
+    svc: GameService = Depends(get_game_service),
+    planets: PlanetsNuClient = Depends(get_planets_client),
+) -> GameInfo:
+    """Apply an update operation (e.g. refresh from Planets.nu) and return stored game info."""
+    return svc.update_game_info(game_id, body, planets)
+
+
+@router.post("/{game_id}/{perspective}/turns/{turn_number}/ensure")
+def post_ensure_turn(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    body: RefreshGameInfoParams,
+    svc: GameService = Depends(get_game_service),
+    planets: PlanetsNuClient = Depends(get_planets_client),
+) -> TurnInfo:
+    """Load turn from Planets.nu when missing in storage; return stored turn data."""
+    return svc.ensure_turn_loaded(game_id, perspective, turn_number, body, planets)
 
 
 @router.get("/{game_id}/{perspective}/turns/{turn_number}")

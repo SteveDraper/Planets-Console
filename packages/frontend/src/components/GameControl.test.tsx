@@ -6,14 +6,20 @@ import { GameControl } from './GameControl'
 
 function renderGameControl(
   selectedGameId: string | null,
-  onSelectGameId: (id: string | null) => void
+  onCommitGameSelection: (id: string) => void,
+  options?: { isGameRefreshPending?: boolean; reportShellError?: (m: string) => void }
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <GameControl selectedGameId={selectedGameId} onSelectGameId={onSelectGameId} />
+      <GameControl
+        selectedGameId={selectedGameId}
+        onCommitGameSelection={onCommitGameSelection}
+        isGameRefreshPending={options?.isGameRefreshPending ?? false}
+        reportShellError={options?.reportShellError ?? (() => {})}
+      />
     </QueryClientProvider>
   )
 }
@@ -56,34 +62,34 @@ describe('GameControl', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/bff/games'))
   })
 
-  it('calls onSelectGameId when a listed game is chosen', async () => {
+  it('calls onCommitGameSelection when a listed game is chosen', async () => {
     const user = userEvent.setup()
-    const onSelect = vi.fn()
+    const onCommit = vi.fn()
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ games: [{ id: '628580' }] }),
     }) as unknown as typeof fetch
 
-    renderGameControl(null, onSelect)
+    renderGameControl(null, onCommit)
     await user.click(screen.getByRole('button', { name: /game:/i }))
     await waitFor(() => expect(screen.getByRole('button', { name: '628580' })).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: '628580' }))
-    expect(onSelect).toHaveBeenCalledWith('628580')
+    expect(onCommit).toHaveBeenCalledWith('628580')
   })
 
-  it('add game by id updates selection', async () => {
+  it('add game by id commits selection', async () => {
     const user = userEvent.setup()
-    const onSelect = vi.fn()
+    const onCommit = vi.fn()
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ games: [] }),
     }) as unknown as typeof fetch
 
-    renderGameControl(null, onSelect)
+    renderGameControl(null, onCommit)
     await user.click(screen.getByRole('button', { name: /game:/i }))
     await waitFor(() => expect(screen.getByLabelText(/new game id/i)).toBeInTheDocument())
     await user.type(screen.getByLabelText(/new game id/i), '999')
     await user.click(screen.getByRole('button', { name: /^add$/i }))
-    expect(onSelect).toHaveBeenCalledWith('999')
+    expect(onCommit).toHaveBeenCalledWith('999')
   })
 })

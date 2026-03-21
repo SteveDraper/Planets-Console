@@ -36,6 +36,7 @@ Architecture constraints: [.cursor/rules/architecture.mdc](../.cursor/rules/arch
   - Left **analytics selector**: vertical list of selectable analytics (excluding the base map), each with enable/disable, pressed/depressed styling, and greyed-out state when unsupported in the current mode.
   - **Main area**: tabular tiles for enabled analytics, or a React Flow map pane with placeholder data.
 - [x] **TanStack Query**—HTTP only to **BFF**, never Core API directly.
+- [x] **State split** documented: Zustand vs TanStack Query vs local React state, and backend statelessness—see [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).
 
 ### 3. Placeholder analytics & BFF
 

@@ -3,6 +3,8 @@ api/__init__.py
 api/app.py
 api/config.py
 api/errors.py
+api/json_merge.py
+api/planets_nu.py
 api.egg-info/PKG-INFO
 api.egg-info/SOURCES.txt
 api.egg-info/dependency_links.txt
@@ -13,6 +15,7 @@ api/models/comms.py
 api/models/components.py
 api/models/enums.py
 api/models/game.py
+api/models/game_info_operations.py
 api/models/planet.py
 api/models/player.py
 api/models/ship.py
@@ -33,6 +36,8 @@ api/storage/__init__.py
 api/storage/base.py
 api/storage/memory_asset.py
 api/storage/path_utils.py
+api/transport/__init__.py
+api/transport/game_info_update.py
 tests/test_game_service.py
 tests/test_games_router.py
 tests/test_memory_asset_backend.py

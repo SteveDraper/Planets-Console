@@ -66,7 +66,7 @@ flowchart LR
   BFF -->|games: array of id| Frontend
 ```
 
-- Frontend holds **selected game id** (`string | null`) in **`App.tsx`** and passes it into **`Header`** for display; future features (turn list, base map) should consume the same state.
+- Frontend holds **selected game id** and related shell context in the **shell Zustand store** (`packages/frontend/src/stores/shell.ts`); **`Header`** reads that state. See [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).
 - When the user opens the game selector, the frontend fetches the list from the BFF; the BFF performs the shallow read on **`games`** as above.
 
 ### 4.2 Core API

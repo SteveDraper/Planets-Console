@@ -8,7 +8,9 @@ from api.config import get_config
 from api.errors import (
     ConflictError,
     CoreAPIError,
+    LoginCredentialsRequiredError,
     NotFoundError,
+    UpstreamPlanetsError,
     ValidationError,
     make_http_exception_handler,
 )
@@ -32,7 +34,13 @@ app = FastAPI(
 # Generic handler for all CoreAPIError subclasses (404, 409, 422, etc.)
 app.add_exception_handler(Exception, make_http_exception_handler(CoreAPIError))
 # Explicit handlers so Starlette/FastAPI invokes them when exceptions are raised from sync endpoints
-for _exc_cls in (NotFoundError, ConflictError, ValidationError):
+for _exc_cls in (
+    NotFoundError,
+    ConflictError,
+    ValidationError,
+    LoginCredentialsRequiredError,
+    UpstreamPlanetsError,
+):
     app.add_exception_handler(_exc_cls, make_http_exception_handler(CoreAPIError))
 app.include_router(store.router)
 app.include_router(games.router)

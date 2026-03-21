@@ -19,6 +19,8 @@ This document describes the design for adding login identity to the console: a c
 
 ## 2. Current state
 
+**Living reference for client state:** [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md) (Zustand session and shell stores, TanStack Query, local React state).
+
 ### 2.1 Header
 
 - `packages/frontend/src/components/Header.tsx` renders the top bar.
@@ -27,8 +29,10 @@ This document describes the design for adding login identity to the console: a c
 
 ### 2.2 App state
 
-- `packages/frontend/src/App.tsx`: `ConsoleShell` holds view mode, map zoom, and enabled analytics in React `useState`. No app-wide store for user/session yet.
-- Architecture doc specifies "Client state: Zustand"; no Zustand store is used for app context today.
+- `packages/frontend/src/App.tsx`: `ConsoleShell` holds view mode, map zoom, enabled analytics, and shell error rows in React `useState`.
+- **Session:** `packages/frontend/src/stores/session.ts` (Zustand) -- login name and password in memory only.
+- **Shell context (game, turn, perspective):** `packages/frontend/src/stores/shell.ts` (Zustand).
+- **BFF-backed data:** TanStack Query (see the design doc above).
 
 ### 2.3 UI stack
 

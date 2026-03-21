@@ -5,10 +5,18 @@ import { fetchGames } from '../api/bff'
 
 type GameControlProps = {
   selectedGameId: string | null
-  onSelectGameId: (gameId: string | null) => void
+  onCommitGameSelection: (gameId: string) => void
+  isGameRefreshPending: boolean
+  /** Append a dismissible shell error (e.g. games list fetch failed). */
+  reportShellError: (message: string) => void
 }
 
-export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps) {
+export function GameControl({
+  selectedGameId,
+  onCommitGameSelection,
+  isGameRefreshPending,
+  reportShellError,
+}: GameControlProps) {
   const idRoot = useId()
   const triggerId = `${idRoot}-game-selector-trigger`
   const popoverId = `${idRoot}-game-selector-popover`
@@ -19,11 +27,27 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
   const containerRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, error: gamesQueryError } = useQuery({
     queryKey: ['bff', 'games'],
     queryFn: fetchGames,
     enabled: isOpen,
   })
+
+  const gamesListFailureSeen = useRef(false)
+  useEffect(() => {
+    if (isError) {
+      if (!gamesListFailureSeen.current) {
+        gamesListFailureSeen.current = true
+        reportShellError(
+          gamesQueryError instanceof Error
+            ? gamesQueryError.message
+            : 'Failed to load games list'
+        )
+      }
+    } else {
+      gamesListFailureSeen.current = false
+    }
+  }, [isError, gamesQueryError, reportShellError])
 
   const serverIds = (data?.games ?? []).map((g) => g.id)
   const displayIds = Array.from(new Set([...serverIds, ...sessionExtraIds])).sort()
@@ -72,7 +96,7 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
   }, [isOpen, closeAndReturnFocus, closeWithoutFocusRestore])
 
   const selectId = (id: string) => {
-    onSelectGameId(id)
+    onCommitGameSelection(id)
     closeAndReturnFocus()
   }
 
@@ -80,12 +104,12 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
     e.preventDefault()
     const trimmed = addNewId.trim()
     if (!trimmed) return
-    onSelectGameId(trimmed)
+    onCommitGameSelection(trimmed)
     setSessionExtraIds((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]))
     closeAndReturnFocus()
   }
 
-  const displayLabel = selectedGameId ?? 'None'
+  const displayLabel = isGameRefreshPending ? 'Refreshing…' : (selectedGameId ?? 'None')
 
   return (
     <div ref={containerRef} className="relative">
@@ -102,6 +126,7 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
           'focus:outline-none focus:ring-1 focus:ring-slate-400'
         )}
         title="Select game"
+        disabled={isGameRefreshPending}
       >
         Game: <span className="text-slate-200">{displayLabel}</span>
       </button>
@@ -122,8 +147,8 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
             </span>
           )}
           {isError && (
-            <span className="px-2 py-1 text-xs text-red-400" role="alert">
-              Failed to load games
+            <span className="px-2 py-1 text-xs text-slate-500" role="status">
+              Could not load list (see error bar)
             </span>
           )}
           {!isPending && !isError && displayIds.length > 0 && (
@@ -138,10 +163,12 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
                     <button
                       type="button"
                       onClick={() => selectId(id)}
+                      disabled={isGameRefreshPending}
                       aria-current={isSelected ? true : undefined}
                       className={cn(
                         'w-full rounded px-2 py-1.5 text-left text-xs text-slate-200',
                         'hover:bg-white/10 focus:bg-white/10 focus:outline-none',
+                        'disabled:cursor-not-allowed disabled:opacity-50',
                         isSelected && 'bg-white/10 ring-1 ring-slate-500/60'
                       )}
                     >
@@ -174,14 +201,14 @@ export function GameControl({ selectedGameId, onSelectGameId }: GameControlProps
               />
               <button
                 type="submit"
-                className="rounded border border-[#52575d] bg-[#52575d] px-2 py-1 text-xs text-slate-200 hover:bg-[#5e6369]"
+                disabled={isGameRefreshPending}
+                className="rounded border border-[#52575d] bg-[#52575d] px-2 py-1 text-xs text-slate-200 hover:bg-[#5e6369] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Add
               </button>
             </form>
             <p className="mt-1 px-1 text-[10px] leading-tight text-slate-500">
-              Fetching game data from planets.nu and persisting to the store is not implemented
-              yet.
+              Choosing a game loads the latest game info from planets.nu into the store.
             </p>
           </div>
         </div>

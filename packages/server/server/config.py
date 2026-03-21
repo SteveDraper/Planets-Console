@@ -171,6 +171,9 @@ def load_config(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_asset_path=api_dict.get("storage_asset_path"),
         include_dummy_data=include_dummy,
+        planets_api_base_url=str(
+            api_dict.get("planets_api_base_url", ApiConfig().planets_api_base_url)
+        ),
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):

@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
+SCOPE_QS = "gameId=628580&turn=111&perspective=1"
+
 REPO_PACKAGES_DIR = Path(__file__).resolve().parents[2]
 ASSETS_DIR = REPO_PACKAGES_DIR / "api" / "api" / "storage" / "assets"
 
@@ -57,7 +59,7 @@ def test_list_analytics_returns_analytics_list():
 
 def test_base_map_returns_planets_and_no_edges():
     """GET /analytics/base-map/map returns planet nodes and no edges."""
-    response = client.get("/analytics/base-map/map")
+    response = client.get(f"/analytics/base-map/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     assert data["analyticId"] == "base-map"
@@ -73,7 +75,7 @@ def test_base_map_returns_planets_and_no_edges():
 
 def test_get_analytic_map_returns_expected_structure():
     """GET /analytics/{id}/map returns analyticId, nodes, edges."""
-    response = client.get("/analytics/placeholder-2/map")
+    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     assert "analyticId" in data
@@ -86,7 +88,7 @@ def test_get_analytic_map_returns_expected_structure():
 
 def test_get_analytic_map_nodes_have_id_label_x_y():
     """Map response nodes must have id, label, x, y with numeric x and y."""
-    response = client.get("/analytics/placeholder-2/map")
+    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     nodes = data["nodes"]
@@ -105,7 +107,7 @@ def test_get_analytic_map_nodes_have_id_label_x_y():
 
 def test_get_analytic_map_placeholder_has_four_nodes_with_distinct_coordinates():
     """Placeholder map returns 4 nodes with distinct (x,y) in a 200x200 square."""
-    response = client.get("/analytics/placeholder-2/map")
+    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     nodes = data["nodes"]
@@ -117,7 +119,7 @@ def test_get_analytic_map_placeholder_has_four_nodes_with_distinct_coordinates()
 
 def test_get_analytic_map_edges_reference_node_ids():
     """Map edges source/target must match node ids."""
-    response = client.get("/analytics/placeholder-2/map")
+    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     node_ids = {n["id"] for n in data["nodes"]}

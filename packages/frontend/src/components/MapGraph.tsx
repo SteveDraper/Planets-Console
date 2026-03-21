@@ -26,9 +26,16 @@ type MapNodeData = {
 /** Stable node size in flow space so React Flow keeps node measurements through zoom. */
 const NODE_SIZE_FLOW = 12
 /** Fixed pixel size of the planet dot on screen (independent of zoom). */
-const DOT_PIXELS = 8
+const DOT_PIXELS = 4
+/** Mouse distance from dot center (px) at which the planet label is shown. */
+const PLANET_LABEL_HOVER_RADIUS_PX = 14
 /** Offset so node and edge targets use the center of the map cell (0.5, 0.5) as demarcated by grid lines at integers. */
 const CELL_CENTER_OFFSET = 0.5
+
+/** Flow Y for React Flow (y grows downward); smaller game y sits lower on screen. */
+function gameMapYToFlowCenterY(py: number): number {
+  return -(py + CELL_CENTER_OFFSET)
+}
 
 /** Fraction of display area to leave as blank margin on each side when fitting initial view (0.1 = 10%). */
 const INITIAL_FIT_MARGIN = 0.1
@@ -115,7 +122,7 @@ function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
     const px = Number.isFinite(x) ? x : 0
     const py = Number.isFinite(y) ? y : 0
     const cx = px + CELL_CENTER_OFFSET
-    const cy = py + CELL_CENTER_OFFSET
+    const cy = gameMapYToFlowCenterY(py)
     return {
       id: node.id,
       type: 'dot',
@@ -217,8 +224,9 @@ function InitialViewportFit({
     }
     const minFx = Math.min(...xs) + CELL_CENTER_OFFSET
     const maxFx = Math.max(...xs) + CELL_CENTER_OFFSET
-    const minFy = Math.min(...ys) + CELL_CENTER_OFFSET
-    const maxFy = Math.max(...ys) + CELL_CENTER_OFFSET
+    const flowCentersY = ys.map((py) => gameMapYToFlowCenterY(py))
+    const minFy = Math.min(...flowCentersY)
+    const maxFy = Math.max(...flowCentersY)
     const contentWidth = Math.max(maxFx - minFx, 1)
     const contentHeight = Math.max(maxFy - minFy, 1)
     const centerX = (minFx + maxFx) / 2
@@ -271,7 +279,9 @@ function FlowCoordinateReadout() {
     clientPos == null ? (
       scale != null ? <>zoom: {scale.toFixed(2)}</> : '—'
     ) : flow != null ? (
-      <>x: {Math.floor(flow.x)} y: {Math.floor(flow.y)} zoom: {scale != null ? scale.toFixed(2) : '—'}</>
+      <>
+        x: {Math.floor(flow.x)} y: {Math.floor(-flow.y)} zoom: {scale != null ? scale.toFixed(2) : '—'}
+      </>
     ) : (
       <>client: {Math.round(clientPos.x)}, {Math.round(clientPos.y)} zoom: {scale != null ? scale.toFixed(2) : '—'}</>
     )
@@ -376,6 +386,7 @@ function FixedSizeDotsOverlay() {
   }
   const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
   const [size, setSize] = useState({ width: 0, height: 0 })
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!domNode) return
@@ -391,6 +402,45 @@ function FixedSizeDotsOverlay() {
       ro.disconnect()
     }
   }, [domNode])
+
+  useEffect(() => {
+    const el = domNode
+    if (!el || !transform || !nodeLookup || size.width <= 0 || size.height <= 0) return
+    const [tx, ty, rawScale] = transform
+    const scale = safeZoomScale(rawScale)
+    const half = NODE_SIZE_FLOW / 2
+    const flowNodes = Array.from(nodeLookup.values())
+    const hitR2 = PLANET_LABEL_HOVER_RADIUS_PX * PLANET_LABEL_HOVER_RADIUS_PX
+
+    const onMove = (e: MouseEvent) => {
+      const rect = el.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      let closestId: string | null = null
+      let closestD2 = Infinity
+      for (const node of flowNodes) {
+        const cx = node.position.x + half
+        const cy = node.position.y + half
+        const paneX = cx * scale + tx
+        const paneY = cy * scale + ty
+        const dx = mx - paneX
+        const dy = my - paneY
+        const d2 = dx * dx + dy * dy
+        if (d2 < hitR2 && d2 < closestD2) {
+          closestD2 = d2
+          closestId = node.id
+        }
+      }
+      setHoveredNodeId(closestId)
+    }
+    const onLeave = () => setHoveredNodeId(null)
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => {
+      el.removeEventListener('mousemove', onMove)
+      el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [domNode, transform, nodeLookup, size.width, size.height])
 
   if (!transform || !nodeLookup || size.width <= 0 || size.height <= 0) return null
   const [tx, ty, rawScale] = transform
@@ -413,6 +463,7 @@ function FixedSizeDotsOverlay() {
         const label = mapNode.data?.label
         const coordX = mapNode.data?.x ?? mapNode.position.x
         const coordY = mapNode.data?.y ?? mapNode.position.y
+        const showLabel = hoveredNodeId === node.id
         return (
           <div key={node.id}>
             <div
@@ -424,16 +475,18 @@ function FixedSizeDotsOverlay() {
                 height: DOT_PIXELS,
               }}
             />
-            <div
-              className="absolute font-mono text-gray-300 whitespace-nowrap"
-              style={{
-                left: paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX,
-                top: paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX,
-                fontSize: LABEL_FONT_SIZE_PX,
-              }}
-            >
-              {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
-            </div>
+            {showLabel ? (
+              <div
+                className="absolute font-mono text-gray-300 whitespace-nowrap"
+                style={{
+                  left: paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX,
+                  top: paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX,
+                  fontSize: LABEL_FONT_SIZE_PX,
+                }}
+              >
+                {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
+              </div>
+            ) : null}
           </div>
         )
       })}

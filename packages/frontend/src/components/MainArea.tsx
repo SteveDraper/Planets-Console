@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
-import type { AnalyticItem, CombinedMapData, MapDataResponse } from '../api/bff'
+import type {
+  AnalyticItem,
+  AnalyticShellScope,
+  CombinedMapData,
+  MapDataResponse,
+} from '../api/bff'
 import { MapGraph } from './MapGraph'
 
 type ViewMode = 'tabular' | 'map'
@@ -33,15 +38,39 @@ type MainAreaProps = {
   viewMode: ViewMode
   enabledAnalyticIds: string[]
   analytics: AnalyticItem[]
+  /** When null, tabular/map analytic data is not requested (missing game, turn, or perspective). */
+  analyticScope: AnalyticShellScope | null
+  /** When true, turn data for `analyticScope` is present in storage (ensure query succeeded). */
+  turnDataReady: boolean
+  turnEnsurePending: boolean
+  turnEnsureIsError: boolean
+  /** Scope is set but login name is missing, so turn cannot be ensured. */
+  turnBlockedNoLogin: boolean
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
-function TableTile({ analyticId }: { analyticId: string }) {
+function TableTile({
+  analyticId,
+  analyticScope,
+  fetchEnabled,
+}: {
+  analyticId: string
+  analyticScope: AnalyticShellScope | null
+  fetchEnabled: boolean
+}) {
   const { data, isPending, error } = useQuery({
-    queryKey: ['analytic', analyticId, 'table'],
-    queryFn: () => fetchAnalyticTable(analyticId),
+    queryKey: ['analytic', analyticId, 'table', analyticScope] as const,
+    queryFn: () => fetchAnalyticTable(analyticId, analyticScope!),
+    enabled: fetchEnabled,
   })
+  if (analyticScope == null) {
+    return (
+      <div className="p-4 text-sm text-gray-400">
+        Load game info and choose a turn and viewpoint to load this analytic.
+      </div>
+    )
+  }
   if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
   if (error) return <div className="p-4 text-sm text-red-400">Error loading data</div>
   if (!data) return null
@@ -136,9 +165,16 @@ export function MainArea({
   viewMode,
   enabledAnalyticIds,
   analytics,
+  analyticScope,
+  turnDataReady,
+  turnEnsurePending,
+  turnEnsureIsError,
+  turnBlockedNoLogin,
   onMapZoomChange,
   onSetZoomReady,
 }: MainAreaProps) {
+  const analyticFetchEnabled = analyticScope != null && turnDataReady
+
   const enabledMapIds = useMemo(
     () => enabledMapAnalyticIds(enabledAnalyticIds, analytics),
     [enabledAnalyticIds, analytics]
@@ -150,8 +186,9 @@ export function MainArea({
 
   const mapQueries = useQueries({
     queries: mapIds.map((analyticId) => ({
-      queryKey: ['analytic', analyticId, 'map'] as const,
-      queryFn: () => fetchAnalyticMap(analyticId),
+      queryKey: ['analytic', analyticId, 'map', analyticScope] as const,
+      queryFn: () => fetchAnalyticMap(analyticId, analyticScope!),
+      enabled: analyticFetchEnabled,
     })),
   })
   const pending = mapQueries.some((q) => q.isPending)
@@ -168,6 +205,30 @@ export function MainArea({
     )
   }
 
+  if (analyticScope != null && turnBlockedNoLogin) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        Set login name in the header to load turn data for analytics.
+      </main>
+    )
+  }
+
+  if (analyticScope != null && !turnDataReady && turnEnsurePending) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        Loading turn data…
+      </main>
+    )
+  }
+
+  if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-red-400">
+        Failed to load turn data. See the error bar or try another turn or viewpoint.
+      </main>
+    )
+  }
+
   if (viewMode === 'tabular') {
     return (
       <main className="flex flex-1 flex-col gap-4 overflow-auto bg-black p-4">
@@ -179,9 +240,21 @@ export function MainArea({
             <h3 className="border-b border-[#52575d] px-4 py-2 text-sm font-medium text-slate-200">
               Analytic: {id}
             </h3>
-            <TableTile analyticId={id} />
+            <TableTile
+              analyticId={id}
+              analyticScope={analyticScope}
+              fetchEnabled={analyticFetchEnabled}
+            />
           </section>
         ))}
+      </main>
+    )
+  }
+
+  if (viewMode === 'map' && analyticScope == null) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        Load game info and choose a turn and viewpoint to load the map.
       </main>
     )
   }

@@ -1,13 +1,16 @@
 """Tests for the GameService."""
 
+import copy
 import json
 from pathlib import Path
 
 import pytest
-from api.errors import NotFoundError, ValidationError
+from api.errors import LoginCredentialsRequiredError, NotFoundError, ValidationError
 from api.models.game import GameInfo, TurnInfo
+from api.models.game_info_operations import GameInfoUpdateOperation
 from api.services.game_service import GameService
 from api.storage.memory_asset import MemoryAssetBackend
+from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -100,3 +103,139 @@ class TestGetMapBase:
 
         with pytest.raises(NotFoundError):
             service.get_map_base(628580, 1, 999)
+
+
+class FakePlanetsNu:
+    def __init__(self, load_payload: dict, *, login_returns: str = "fake-api-key") -> None:
+        self._load_payload = load_payload
+        self._login_returns = login_returns
+        self.login_calls: list[tuple[str, str]] = []
+        self.load_calls: list[int] = []
+        self.load_turn_calls: list[tuple[int, int, int]] = []
+
+    def login(self, username: str, password: str) -> str:
+        self.login_calls.append((username, password))
+        return self._login_returns
+
+    def load_game_info(self, game_id: int) -> dict:
+        self.load_calls.append(game_id)
+        return copy.deepcopy(self._load_payload)
+
+    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+        self.load_turn_calls.append((game_id, turn, player_id))
+        raise AssertionError("load_turn must be overridden when used")
+
+
+class TestRefreshGameInfo:
+    @pytest.fixture
+    def sample_info(self):
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            return json.load(f)
+
+    def test_requires_password_when_no_stored_api_key(self, sample_info):
+        backend = MemoryAssetBackend(initial={})
+        svc = GameService(backend)
+        planets = FakePlanetsNu(sample_info)
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1"},
+        )
+        with pytest.raises(LoginCredentialsRequiredError, match="Login credentials are required"):
+            svc.update_game_info(628580, body, planets)
+        assert planets.login_calls == []
+        assert planets.load_calls == []
+
+    def test_login_and_store_when_password_given(self, sample_info):
+        backend = MemoryAssetBackend(initial={})
+        svc = GameService(backend)
+        planets = FakePlanetsNu(sample_info, login_returns="stored-key")
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "secret"},
+        )
+        gi = svc.update_game_info(628580, body, planets)
+        assert planets.login_calls == [("player1", "secret")]
+        assert planets.load_calls == [628580]
+        assert backend.get("credentials/accounts/player1/api_key") == "stored-key"
+        assert isinstance(gi, GameInfo)
+        assert gi.game.id == 628580
+
+    def test_skips_login_when_api_key_cached(self, sample_info):
+        backend = MemoryAssetBackend(initial={})
+        backend.put("credentials/accounts/player1/api_key", "cached-key")
+        svc = GameService(backend)
+        planets = FakePlanetsNu(sample_info)
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1"},
+        )
+        svc.update_game_info(628580, body, planets)
+        assert planets.login_calls == []
+        assert planets.load_calls == [628580]
+
+    def test_wrong_game_id_from_host_raises(self, sample_info):
+        bad = copy.deepcopy(sample_info)
+        bad["game"]["id"] = 1
+        backend = MemoryAssetBackend(initial={})
+        svc = GameService(backend)
+        planets = FakePlanetsNu(bad)
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "x"},
+        )
+        with pytest.raises(ValidationError, match="does not match"):
+            svc.update_game_info(628580, body, planets)
+
+
+class FakePlanetsNuWithTurn(FakePlanetsNu):
+    def __init__(self, load_payload: dict, rst_payload: dict, **kwargs) -> None:
+        super().__init__(load_payload, **kwargs)
+        self._rst = rst_payload
+
+    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+        self.load_turn_calls.append((game_id, turn, player_id))
+        return {"success": True, "rst": copy.deepcopy(self._rst)}
+
+
+class TestEnsureTurnLoaded:
+    @pytest.fixture
+    def turn_rst(self):
+        with open(ASSETS_DIR / "turn_sample.json") as f:
+            return json.load(f)
+
+    def test_returns_stored_turn_without_calling_planets(self, seeded_backend, turn_rst):
+        svc = GameService(seeded_backend)
+        planets = FakePlanetsNuWithTurn({}, turn_rst)
+        params = RefreshGameInfoParams(username="player1", password="x")
+        ti = svc.ensure_turn_loaded(628580, 1, 111, params, planets)
+        assert isinstance(ti, TurnInfo)
+        assert ti.settings.turn == 111
+        assert planets.load_turn_calls == []
+
+    def test_fetches_and_stores_when_missing(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        svc = GameService(backend)
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, turn_rst)
+        backend.put("credentials/accounts/player1/api_key", "k")
+        params = RefreshGameInfoParams(username="player1")
+        ti = svc.ensure_turn_loaded(628580, 1, 42, params, planets)
+        assert ti.settings.turn == 111
+        assert planets.load_turn_calls == [(628580, 42, 1)]
+        backend.get("games/628580/1/turns/42")
+
+    def test_requires_password_when_no_key(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        svc = GameService(backend)
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, turn_rst)
+        params = RefreshGameInfoParams(username="player1")
+        with pytest.raises(LoginCredentialsRequiredError):
+            svc.ensure_turn_loaded(628580, 1, 42, params, planets)
+        assert planets.load_turn_calls == []

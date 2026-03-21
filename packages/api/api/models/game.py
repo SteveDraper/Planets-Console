@@ -79,7 +79,7 @@ class GameSettings:
     ncircles: int
     hwdistribution: int
     ndebrisdiscs: int
-    balanceadjustment: int
+    balanceadjustment: float
     closeplanetrangeinc: int
     levelid: int
     nextlevelid: int
@@ -330,8 +330,8 @@ class GameInfo:
     schedule: str
     timetohost: str
     wincondition: str
-    yearfrom: int
-    yearto: int
+    yearfrom: int | None = None
+    yearto: int | None = None
 
 
 @dataclass

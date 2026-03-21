@@ -68,7 +68,7 @@ This keeps deployment simple while giving each layer its own routing and OpenAPI
 ## Frontend Tech Stack
 
 - **Bundler**: Vite · **Routing**: React Router · **Components**: shadcn/ui · **Styling**: Tailwind CSS
-- **Server state**: TanStack Query · **Client state**: Zustand
+- **Server state**: TanStack Query · **Client state**: Zustand (see [docs/design-frontend-and-backend-state.md](../../docs/design-frontend-and-backend-state.md) for what belongs in each, plus backend statelessness and storage)
 - **Graphs**: React Flow · **Tables**: TanStack Table · **Tests**: Vitest + RTL
 
 ## Adding New Features
