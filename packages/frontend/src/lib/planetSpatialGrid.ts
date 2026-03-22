@@ -83,7 +83,7 @@ export function buildPlanetSpatialGrid(nodes: MapNodeLike[]): PlanetSpatialGrid 
     maxY = Math.max(maxY, py)
   }
   if (points.length === 0) return null
-  const cellSize = cellSizeFromBoundingBox(minX, maxX, minY, minY, points.length)
+  const cellSize = cellSizeFromBoundingBox(minX, maxX, minY, maxY, points.length)
   const buckets = new Map<string, PlanetPoint[]>()
   for (const p of points) {
     const ix = Math.floor((p.px - minX) / cellSize)

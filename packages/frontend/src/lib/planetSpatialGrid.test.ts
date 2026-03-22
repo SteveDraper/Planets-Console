@@ -28,6 +28,15 @@ describe('buildPlanetSpatialGrid', () => {
     expect(g).not.toBeNull()
     expect(g!.buckets.size).toBe(1)
   })
+
+  it('uses Y span when computing cell size (degenerate X)', () => {
+    const g = buildPlanetSpatialGrid([
+      { id: 'a', x: 0, y: 0 },
+      { id: 'b', x: 0, y: 100 },
+    ])
+    expect(g).not.toBeNull()
+    expect(g!.cellSize).toBeGreaterThan(10)
+  })
 })
 
 describe('findClosestPlanetWithinRadius', () => {

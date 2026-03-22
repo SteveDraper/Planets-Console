@@ -1,5 +1,7 @@
 """Request bodies for POST /v1/games/{game_id}/info."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
