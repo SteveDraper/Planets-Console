@@ -14,6 +14,7 @@ from api.models.game import GameInfo, TurnInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
 from api.planets_nu import PlanetsNuClient
 from api.serialization.game import game_info_from_json
+from api.serialization.planet import planet_to_public_json
 from api.serialization.turn import turn_info_from_json
 from api.storage.base import JSONValue, StorageBackend
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
@@ -224,7 +225,25 @@ class GameService:
         - node id and label are both `p{id}` (stable, independent of turn name data)
         """
         turn = self.get_turn_info(game_id, perspective, turn_number)
-        nodes = [{"id": f"p{p.id}", "label": f"p{p.id}", "x": p.x, "y": p.y} for p in turn.planets]
+        players_by_id = {pl.id: pl for pl in turn.players}
+
+        def owner_name(owner_id: int) -> str | None:
+            pl = players_by_id.get(owner_id)
+            return pl.username if pl else None
+
+        nodes = []
+        for p in turn.planets:
+            pid = f"p{p.id}"
+            nodes.append(
+                {
+                    "id": pid,
+                    "label": pid,
+                    "x": p.x,
+                    "y": p.y,
+                    "planet": planet_to_public_json(p),
+                    "ownerName": owner_name(p.ownerid),
+                }
+            )
         return {"analyticId": "base-map", "nodes": nodes, "edges": []}
 
     def get_turn_analytics(

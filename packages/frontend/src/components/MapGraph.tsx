@@ -30,12 +30,21 @@ import {
   PLANET_CELL_CENTER_OFFSET,
   type PlanetSpatialGrid,
 } from '../lib/planetSpatialGrid'
+import { cn } from '../lib/utils'
+import { PlanetMapLabel } from './PlanetMapLabel'
+import {
+  DEFAULT_PLANET_LABEL_OPTIONS,
+  planetLabelOptionsShowAnyLabel,
+  type PlanetLabelOptions,
+} from './planetMapLabelModel'
 
 type MapNodeData = {
   label?: string
   ordinal: number
   x: number
   y: number
+  planet?: Record<string, unknown>
+  ownerName?: string | null
 }
 
 /** Stable node size in flow space so React Flow keeps node measurements through zoom. */
@@ -144,7 +153,14 @@ function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
       position: { x: cx - half, y: cy - half },
       width: NODE_SIZE_FLOW,
       height: NODE_SIZE_FLOW,
-      data: { label: node.label, ordinal: i + 1, x: px, y: py },
+      data: {
+        label: node.label,
+        ordinal: i + 1,
+        x: px,
+        y: py,
+        planet: node.planet,
+        ownerName: node.ownerName,
+      },
     }
   })
 }
@@ -369,7 +385,7 @@ function CoordinateGridOverlay() {
 
   return (
     <div
-      className="pointer-events-none absolute inset-0"
+      className="pointer-events-none absolute inset-0 z-[5]"
       aria-hidden
     >
       <svg
@@ -396,23 +412,87 @@ function CoordinateGridOverlay() {
  */
 const HOVER_CLIENT_MOVE_EPS_PX = 0.5
 
-function FixedSizeDotsOverlay({ planetGrid }: { planetGrid: PlanetSpatialGrid | null }) {
+/** Label text uses map payload (planet name, etc.). React Flow's internal node store does not reliably retain custom `data` fields. */
+type MapNodeLabelSource = {
+  planet?: Record<string, unknown>
+  ownerName?: string | null
+  mapX: number
+  mapY: number
+}
+
+function buildLabelSourceByNodeId(nodes: CombinedMapData['nodes']): Map<string, MapNodeLabelSource> {
+  const m = new Map<string, MapNodeLabelSource>()
+  for (const n of nodes) {
+    const payload: MapNodeLabelSource = {
+      planet: n.planet,
+      ownerName: n.ownerName ?? null,
+      mapX: Number(n.x),
+      mapY: Number(n.y),
+    }
+    m.set(n.id, payload)
+  }
+  return m
+}
+
+/** Flow-space center of the planet dot; must match `toFlowNodes` + half offset. */
+function flowCenterFromMapNode(mapNode: { x: number; y: number }): { cx: number; cy: number } {
+  const x = Number(mapNode.x)
+  const y = Number(mapNode.y)
+  const px = Number.isFinite(x) ? x : 0
+  const py = Number.isFinite(y) ? y : 0
+  const cx = px + CELL_CENTER_OFFSET
+  const cy = gameMapYToFlowCenterY(py)
+  return { cx, cy }
+}
+
+function FixedSizeDotsOverlay({
+  planetGrid,
+  planetLabelOptions,
+  labelSourceByNodeId,
+  mapNodes,
+}: {
+  planetGrid: PlanetSpatialGrid | null
+  planetLabelOptions: PlanetLabelOptions
+  labelSourceByNodeId: Map<string, MapNodeLabelSource>
+  mapNodes: CombinedMapData['nodes']
+}) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
-  const storeState = useStore((s) => s) as unknown as {
-    nodeLookup?: Map<string, { id: string; position: { x: number; y: number } }>
-    nodeInternals?: Map<string, { id: string; position: { x: number; y: number } }>
-  }
-  const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [pinnedNodeId, setPinnedNodeId] = useState<string | null>(null)
   const hoverRafRef = useRef<number | null>(null)
   const pendingClientRef = useRef<{ x: number; y: number } | null>(null)
   const lastProcessedClientRef = useRef<{ x: number; y: number } | null>(null)
   const transformRef = useRef(transform)
+  const pinnedNodeIdRef = useRef<string | null>(null)
   useLayoutEffect(() => {
     transformRef.current = transform
   }, [transform])
+  useLayoutEffect(() => {
+    pinnedNodeIdRef.current = pinnedNodeId
+  }, [pinnedNodeId])
+
+  const mapNodeIdsKey = useMemo(() => mapNodes.map((n) => n.id).join('\0'), [mapNodes])
+
+  useEffect(() => {
+    setPinnedNodeId(null)
+  }, [mapNodeIdsKey])
+
+  useEffect(() => {
+    if (pinnedNodeId == null) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPinnedNodeId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [pinnedNodeId])
+
+  useEffect(() => {
+    if (pinnedNodeId != null) {
+      setHoveredNodeId(null)
+    }
+  }, [pinnedNodeId])
 
   useEffect(() => {
     if (!domNode) return
@@ -438,6 +518,7 @@ function FixedSizeDotsOverlay({ planetGrid }: { planetGrid: PlanetSpatialGrid | 
     }
 
     const runHitTest = (clientX: number, clientY: number) => {
+      if (pinnedNodeIdRef.current != null) return
       const t = transformRef.current
       if (!t) {
         setHoveredNodeId(null)
@@ -499,55 +580,117 @@ function FixedSizeDotsOverlay({ planetGrid }: { planetGrid: PlanetSpatialGrid | 
     }
   }, [domNode, size.width, size.height, planetGrid])
 
-  if (!transform || !nodeLookup || size.width <= 0 || size.height <= 0) return null
+  useEffect(() => {
+    const el = domNode
+    if (!el || !planetGrid) return
+
+    const onClick = (e: MouseEvent) => {
+      if (e.button !== 0) return
+      const t = transformRef.current
+      if (!t) return
+      const paneRect = el.getBoundingClientRect()
+      const flow = clientToFlowPosition(e.clientX, e.clientY, el, t, paneRect)
+      if (!flow) return
+      const rawScale = t[2]
+      const scale = safeZoomScale(rawScale)
+      const radiusPlanet = PLANET_LABEL_HOVER_RADIUS_PX / scale
+      const { px, py } = flowCenterToPlanet(flow.x, flow.y)
+      const closestId = findClosestPlanetWithinRadius(planetGrid, px, py, radiusPlanet)
+      if (closestId == null) {
+        if (pinnedNodeIdRef.current != null) {
+          setPinnedNodeId(null)
+        }
+        return
+      }
+      setPinnedNodeId((prev) => {
+        if (prev === closestId) return null
+        return closestId
+      })
+    }
+    el.addEventListener('click', onClick)
+    return () => el.removeEventListener('click', onClick)
+  }, [domNode, planetGrid])
+
+  if (!transform || size.width <= 0 || size.height <= 0) return null
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
-  const half = NODE_SIZE_FLOW / 2
-  const nodes = Array.from(nodeLookup.values())
   const hoveredForDisplay = planetGrid ? hoveredNodeId : null
+  const showAnyLabelOption = planetLabelOptionsShowAnyLabel(planetLabelOptions)
 
-  const LABEL_FONT_SIZE_PX = 10
   const LABEL_OFFSET_X_PX = 9
   const LABEL_OFFSET_Y_PX = -12
 
+  /**
+   * Dots and labels must not share one per-planet stacking group: later planets' dots were painting
+   * above earlier planets' labels (same z-index, DOM order), which looked like map bleed-through.
+   */
   return (
-    <div className="pointer-events-none absolute inset-0" aria-hidden>
-      {nodes.map((node) => {
-        const cx = node.position.x + half
-        const cy = node.position.y + half
-        const paneX = cx * scale + tx
-        const paneY = cy * scale + ty
-        const mapNode = node as Node<MapNodeData>
-        const label = mapNode.data?.label
-        const coordX = mapNode.data?.x ?? mapNode.position.x
-        const coordY = mapNode.data?.y ?? mapNode.position.y
-        const showLabel = hoveredForDisplay === node.id
-        return (
-          <div key={node.id}>
+    <div
+      className="pointer-events-none absolute inset-0 z-[5]"
+      aria-hidden={pinnedNodeId == null ? true : undefined}
+    >
+      <div className="absolute inset-0" aria-hidden>
+        {mapNodes.map((mapNode) => {
+          const { cx, cy } = flowCenterFromMapNode(mapNode)
+          const paneX = cx * scale + tx
+          const paneY = cy * scale + ty
+          return (
             <div
+              key={`dot-${mapNode.id}`}
               className="absolute rounded-full bg-[#9ca3af]"
               style={{
-                left: paneX - DOT_PIXELS / 2,
-                top: paneY - DOT_PIXELS / 2,
+                left: Math.round(paneX - DOT_PIXELS / 2),
+                top: Math.round(paneY - DOT_PIXELS / 2),
                 width: DOT_PIXELS,
                 height: DOT_PIXELS,
               }}
             />
-            {showLabel ? (
-              <div
-                className="absolute font-mono text-gray-300 whitespace-nowrap"
-                style={{
-                  left: paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX,
-                  top: paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX,
-                  fontSize: LABEL_FONT_SIZE_PX,
-                }}
-              >
-                {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
-              </div>
-            ) : null}
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
+      <div className="absolute inset-0 z-[1]">
+        {mapNodes.map((mapNode) => {
+          const { cx, cy } = flowCenterFromMapNode(mapNode)
+          const paneX = cx * scale + tx
+          const paneY = cy * scale + ty
+          const labelSrc = labelSourceByNodeId.get(mapNode.id)
+          const coordX =
+            labelSrc != null && Number.isFinite(labelSrc.mapX) ? labelSrc.mapX : Number(mapNode.x)
+          const coordY =
+            labelSrc != null && Number.isFinite(labelSrc.mapY) ? labelSrc.mapY : Number(mapNode.y)
+          const isPinned = pinnedNodeId === mapNode.id
+          const showHoverLabel =
+            pinnedNodeId == null && showAnyLabelOption && hoveredForDisplay === mapNode.id
+          const showLabel = isPinned || showHoverLabel
+          if (!showLabel) return null
+          return (
+            <div
+              key={`label-${mapNode.id}`}
+              className={cn(
+                'absolute font-mono text-gray-300',
+                isPinned && 'pointer-events-auto z-[2]'
+              )}
+              style={{
+                left: Math.round(paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX),
+                top: Math.round(paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX),
+                fontSize: 10,
+                backgroundColor: '#000000',
+                borderRadius: 6,
+              }}
+              onClick={isPinned ? (e) => e.stopPropagation() : undefined}
+            >
+              <PlanetMapLabel
+                options={planetLabelOptions}
+                nodeId={mapNode.id}
+                planet={labelSrc?.planet}
+                ownerName={labelSrc?.ownerName}
+                planetX={coordX}
+                planetY={coordY}
+              />
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -558,6 +701,7 @@ type MapGraphProps = {
   onMapZoomChange: (zoom: number) => void
   /** Called once so the header slider can drive zoom (same as scroll wheel). */
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
+  planetLabelOptions?: PlanetLabelOptions
 }
 
 /** Mirrors React Flow zoom to the app (wheel, pinch, initial fit, slider). */
@@ -636,7 +780,13 @@ function SliderZoomControl({
 /** Max time to wait for initial viewport fit before showing the map anyway (avoids staying invisible if fit never runs). */
 const INITIAL_FIT_REVEAL_MS = 250
 
-export function MapGraph({ data, className, onMapZoomChange, onSetZoomReady }: MapGraphProps) {
+export function MapGraph({
+  data,
+  className,
+  onMapZoomChange,
+  onSetZoomReady,
+  planetLabelOptions = DEFAULT_PLANET_LABEL_OPTIONS,
+}: MapGraphProps) {
   const [initialFitDone, setInitialFitDone] = useState(false)
 
   const onInitialFitDone = useCallback(() => setInitialFitDone(true), [])
@@ -649,10 +799,11 @@ export function MapGraph({ data, className, onMapZoomChange, onSetZoomReady }: M
   const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
   const edges = useMemo(() => toEdges(data.edges), [data.edges])
   const planetGrid = useMemo(() => buildPlanetSpatialGrid(data.nodes), [data.nodes])
+  const labelSourceByNodeId = useMemo(() => buildLabelSourceByNodeId(data.nodes), [data.nodes])
 
   return (
     <div
-      className={`map-graph-cursor-default relative min-h-0 overflow-hidden rounded bg-black ${className ?? 'h-[320px] w-full min-w-0'}`}
+      className={`map-graph-cursor-default relative min-h-0 overflow-hidden bg-black ${className ?? 'h-[320px] w-full min-w-0'}`}
     >
       <div
         className="h-full w-full transition-opacity duration-150"
@@ -683,7 +834,12 @@ export function MapGraph({ data, className, onMapZoomChange, onSetZoomReady }: M
           <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
           <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
           <CoordinateGridOverlay />
-          <FixedSizeDotsOverlay planetGrid={planetGrid} />
+          <FixedSizeDotsOverlay
+            planetGrid={planetGrid}
+            planetLabelOptions={planetLabelOptions}
+            labelSourceByNodeId={labelSourceByNodeId}
+            mapNodes={data.nodes}
+          />
           <FlowCoordinateReadout />
         </ReactFlow>
       </div>

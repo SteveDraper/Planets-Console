@@ -71,6 +71,9 @@ def test_base_map_returns_planets_and_no_edges():
     assert all(node_id.startswith("p") for node_id in node_ids)
     assert all(isinstance(n["x"], (int, float)) for n in nodes)
     assert all(isinstance(n["y"], (int, float)) for n in nodes)
+    first = nodes[0]
+    assert "planet" in first and isinstance(first["planet"], dict)
+    assert "ownerName" in first
 
 
 def test_get_analytic_map_returns_expected_structure():
