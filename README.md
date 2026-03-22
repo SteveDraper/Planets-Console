@@ -103,3 +103,11 @@ packages/
 ```
 
 The frontend **only** calls the BFF; it never calls the Core API directly.
+
+## Documentation
+
+- **[Frontend and backend state](docs/design-frontend-and-backend-state.md)** -- Zustand vs TanStack Query, local React state, and stateless backend + storage.
+- **[Shell error handling](docs/design-shell-error-handling.md)** -- BFF errors and the shell error bar.
+- **[Storage abstraction](docs/design-storage-abstraction-and-crud-api.md)** -- `StorageBackend` and CRUD semantics.
+
+Other design notes live under [`docs/`](docs/).

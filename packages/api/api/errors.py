@@ -63,6 +63,18 @@ class ValidationError(CoreAPIError):
     http_error: int = 422
 
 
+class LoginCredentialsRequiredError(CoreAPIError):
+    """Stored API key is missing and no password was supplied for refresh."""
+
+    http_error: int = 401
+
+
+class UpstreamPlanetsError(CoreAPIError):
+    """Planets.nu HTTP or transport failure, or an unusable response body."""
+
+    http_error: int = 502
+
+
 def make_http_exception_handler(
     root_exception_cls: Type[PlanetsConsoleError],
 ) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:

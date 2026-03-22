@@ -1,5 +1,6 @@
 """Tests for serialization codecs (dacite round-trips, enum handling, nested objects)."""
 
+import copy
 import json
 from pathlib import Path
 
@@ -145,5 +146,26 @@ class TestGameInfoSerialization:
         assert gi.schedule
         assert gi.timetohost
         assert gi.wincondition
-        assert isinstance(gi.yearfrom, int)
-        assert isinstance(gi.yearto, int)
+        assert gi.yearfrom == 166
+        assert gi.yearto == 277
+
+    def test_yearfrom_yearto_string_coercion(self, game_info_sample_data):
+        data = copy.deepcopy(game_info_sample_data)
+        data["yearfrom"] = "0180"
+        data["yearto"] = "0277"
+        gi = game_info_from_json(data)
+        assert gi.yearfrom == 180
+        assert gi.yearto == 277
+
+    def test_yearto_question_mark_unknown(self, game_info_sample_data):
+        data = copy.deepcopy(game_info_sample_data)
+        data["yearto"] = "?"
+        gi = game_info_from_json(data)
+        assert gi.yearto is None
+
+    def test_game_info_from_json_does_not_mutate_input(self, game_info_sample_data):
+        data = copy.deepcopy(game_info_sample_data)
+        data["yearfrom"] = "0180"
+        before = copy.deepcopy(data)
+        _ = game_info_from_json(data)
+        assert data == before

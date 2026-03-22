@@ -1,13 +1,14 @@
 """Analytics endpoints for the console shell.
 
 Base map is a fixed layer derived from the Core API. Other analytics are placeholders.
+All data routes require ``gameId``, ``turn``, and ``perspective`` query parameters so the
+BFF can load turn-scoped analytics from Core (no hard-coded game context).
 """
 
 from api.errors import PlanetsConsoleError
 from api.services.game_service import GameService
-from api.services.seed import seed_dummy_data
 from api.storage import get_storage
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
 
@@ -44,25 +45,15 @@ ANALYTICS_LIST = [
     },
 ]
 
-_TEST_GAME_ID = 628580
-_TEST_PERSPECTIVE = 1
-_TEST_TURN_NUMBER = 111
 
-
-async def fetch_base_map_from_core() -> dict:
-    """Fetch base-map data from Core for the hard-coded test context."""
+def _turn_analytics_from_core(
+    game_id: int, perspective: int, turn_number: int, analytic_id: str
+) -> dict:
     storage = get_storage()
-    # Dev/test ergonomics: ensure sample game/turn data exists in ephemeral storage.
-    # Core normally seeds this only when `include_dummy_data=true`, but BFF hard-codes
-    # a base-map context and must work even when the Core seed flag is off.
-    seed_dummy_data(storage)
     svc = GameService(storage)
     try:
-        return svc.get_turn_analytics(
-            _TEST_GAME_ID, _TEST_PERSPECTIVE, _TEST_TURN_NUMBER, "base-map"
-        )
+        return svc.get_turn_analytics(game_id, perspective, turn_number, analytic_id)
     except PlanetsConsoleError as e:
-        # Map Core-layer distinguished errors into appropriate HTTP status codes.
         raise HTTPException(
             status_code=getattr(e, "http_error", 500),
             detail=str(e),
@@ -76,8 +67,14 @@ def list_analytics():
 
 
 @router.get("/{analytic_id}/table")
-def get_analytic_table(analytic_id: str):
-    """Placeholder tabular data for an analytic."""
+def get_analytic_table(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=1),
+):
+    """Placeholder tabular data (scoped for cache invalidation; same shape for now)."""
+    _ = (game_id, turn, perspective)
     return {
         "analyticId": analytic_id,
         "columns": ["Col A", "Col B", "Col C"],
@@ -86,14 +83,19 @@ def get_analytic_table(analytic_id: str):
 
 
 @router.get("/{analytic_id}/map")
-async def get_analytic_map(analytic_id: str):
+def get_analytic_map(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=1),
+):
     """Map data (nodes/edges). Base map = planets + connections; selectable analytics add overlays.
 
     Nodes use fixed Cartesian coordinates (x, y). Base map is always fetched first;
     selectable analytics contribute extra nodes/edges or (later) highlights.
     """
     if analytic_id == "base-map":
-        return await fetch_base_map_from_core()
+        return _turn_analytics_from_core(game_id, perspective, turn, "base-map")
     # Selectable analytics: placeholder 4-node square for now
     return {
         "analyticId": analytic_id,

@@ -6,12 +6,24 @@ BFF under `/bff`, so the SPA and full-stack docs use **GET /bff/games**.
 
 The handler maps Core store path `games` shallow children to `{"games": [{"id": "..."}]}`.
 If `games` does not exist (`NotFoundError` from the store), returns an empty list.
+
+**POST /games/{game_id}/info** forwards the SPA refresh payload to Core `GameService` (same
+contract as Core **POST /api/v1/games/{game_id}/info**): load game info from Planets.nu and
+replace stored game info.
+
+**POST /games/{game_id}/turns/ensure** ensures turn data is in storage (Planets.nu loadturn
+when missing), using the same credential rules as game info refresh.
 """
 
-from api.errors import NotFoundError
+from api.errors import NotFoundError, PlanetsConsoleError
+from api.models.game import GameInfo
+from api.planets_nu import PlanetsNuClient
+from api.services.game_service import GameService
 from api.services.store_service import StoreService
 from api.storage import get_storage
-from fastapi import APIRouter
+from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.turn_ensure import TurnEnsureRequest
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 
@@ -31,3 +43,34 @@ def list_stored_games():
         return {"games": []}
     children = shallow.get("children") or []
     return {"games": [{"id": str(child)} for child in children]}
+
+
+@router.post("/{game_id}/info")
+def post_game_info(game_id: int, body: GameInfoUpdateRequest) -> GameInfo:
+    """Refresh game info from Planets.nu (`refresh`); returns updated `GameInfo`."""
+    storage = get_storage()
+    svc = GameService(storage)
+    planets = PlanetsNuClient.from_config()
+    try:
+        return svc.update_game_info(game_id, body, planets)
+    except PlanetsConsoleError as exc:
+        raise HTTPException(
+            status_code=getattr(exc, "http_error", 500),
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/{game_id}/turns/ensure")
+def post_ensure_turn(game_id: int, body: TurnEnsureRequest):
+    """Ensure turn data exists in storage; fetch from Planets.nu when absent."""
+    storage = get_storage()
+    svc = GameService(storage)
+    planets = PlanetsNuClient.from_config()
+    params = RefreshGameInfoParams(username=body.username, password=body.password)
+    try:
+        return svc.ensure_turn_loaded(game_id, body.perspective, body.turn, params, planets)
+    except PlanetsConsoleError as exc:
+        raise HTTPException(
+            status_code=getattr(exc, "http_error", 500),
+            detail=str(exc),
+        ) from exc

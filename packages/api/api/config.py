@@ -18,6 +18,9 @@ class ApiConfig:
     include_dummy_data: bool = False
     """Seed the store with sample game data on startup. For development/testing only."""
 
+    planets_api_base_url: str = "https://api.planets.nu"
+    """Base URL for Planets.nu HTTP API (login, loadinfo, etc.)."""
+
 
 def get_config() -> ApiConfig:
     """Return the current API config. Defaults if not yet set by server."""

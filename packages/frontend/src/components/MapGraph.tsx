@@ -1,4 +1,12 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   BaseEdge,
   ReactFlow,
@@ -15,6 +23,13 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
+import {
+  buildPlanetSpatialGrid,
+  findClosestPlanetWithinRadius,
+  flowCenterToPlanet,
+  PLANET_CELL_CENTER_OFFSET,
+  type PlanetSpatialGrid,
+} from '../lib/planetSpatialGrid'
 
 type MapNodeData = {
   label?: string
@@ -26,9 +41,16 @@ type MapNodeData = {
 /** Stable node size in flow space so React Flow keeps node measurements through zoom. */
 const NODE_SIZE_FLOW = 12
 /** Fixed pixel size of the planet dot on screen (independent of zoom). */
-const DOT_PIXELS = 8
+const DOT_PIXELS = 4
+/** Mouse distance from dot center (px) at which the planet label is shown. */
+const PLANET_LABEL_HOVER_RADIUS_PX = 14
 /** Offset so node and edge targets use the center of the map cell (0.5, 0.5) as demarcated by grid lines at integers. */
-const CELL_CENTER_OFFSET = 0.5
+const CELL_CENTER_OFFSET = PLANET_CELL_CENTER_OFFSET
+
+/** Flow Y for React Flow (y grows downward); smaller game y sits lower on screen. */
+function gameMapYToFlowCenterY(py: number): number {
+  return -(py + CELL_CENTER_OFFSET)
+}
 
 /** Fraction of display area to leave as blank margin on each side when fitting initial view (0.1 = 10%). */
 const INITIAL_FIT_MARGIN = 0.1
@@ -115,7 +137,7 @@ function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
     const px = Number.isFinite(x) ? x : 0
     const py = Number.isFinite(y) ? y : 0
     const cx = px + CELL_CENTER_OFFSET
-    const cy = py + CELL_CENTER_OFFSET
+    const cy = gameMapYToFlowCenterY(py)
     return {
       id: node.id,
       type: 'dot',
@@ -148,10 +170,12 @@ function clientToFlowPosition(
   clientX: number,
   clientY: number,
   domNode: HTMLElement | null,
-  transform: [number, number, number] | undefined
+  transform: [number, number, number] | undefined,
+  /** When supplied, avoids getBoundingClientRect (e.g. one rect per animation frame). */
+  paneRect?: Pick<DOMRect, 'left' | 'top'>
 ): { x: number; y: number } | null {
   if (!domNode || !transform) return null
-  const rect = domNode.getBoundingClientRect()
+  const rect = paneRect ?? domNode.getBoundingClientRect()
   const [tx, ty, scale] = transform
   if (typeof scale !== 'number' || !Number.isFinite(scale) || scale <= 0) return null
   const paneX = clientX - rect.left
@@ -217,8 +241,9 @@ function InitialViewportFit({
     }
     const minFx = Math.min(...xs) + CELL_CENTER_OFFSET
     const maxFx = Math.max(...xs) + CELL_CENTER_OFFSET
-    const minFy = Math.min(...ys) + CELL_CENTER_OFFSET
-    const maxFy = Math.max(...ys) + CELL_CENTER_OFFSET
+    const flowCentersY = ys.map((py) => gameMapYToFlowCenterY(py))
+    const minFy = Math.min(...flowCentersY)
+    const maxFy = Math.max(...flowCentersY)
     const contentWidth = Math.max(maxFx - minFx, 1)
     const contentHeight = Math.max(maxFy - minFy, 1)
     const centerX = (minFx + maxFx) / 2
@@ -271,7 +296,9 @@ function FlowCoordinateReadout() {
     clientPos == null ? (
       scale != null ? <>zoom: {scale.toFixed(2)}</> : '—'
     ) : flow != null ? (
-      <>x: {Math.floor(flow.x)} y: {Math.floor(flow.y)} zoom: {scale != null ? scale.toFixed(2) : '—'}</>
+      <>
+        x: {Math.floor(flow.x)} y: {Math.floor(-flow.y)} zoom: {scale != null ? scale.toFixed(2) : '—'}
+      </>
     ) : (
       <>client: {Math.round(clientPos.x)}, {Math.round(clientPos.y)} zoom: {scale != null ? scale.toFixed(2) : '—'}</>
     )
@@ -367,7 +394,9 @@ function CoordinateGridOverlay() {
  * Renders planet dots in screen (pane) space so they are always exactly DOT_PIXELS
  * in size regardless of zoom. Uses same flow->pane conversion as the grid.
  */
-function FixedSizeDotsOverlay() {
+const HOVER_CLIENT_MOVE_EPS_PX = 0.5
+
+function FixedSizeDotsOverlay({ planetGrid }: { planetGrid: PlanetSpatialGrid | null }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const storeState = useStore((s) => s) as unknown as {
@@ -376,6 +405,14 @@ function FixedSizeDotsOverlay() {
   }
   const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
   const [size, setSize] = useState({ width: 0, height: 0 })
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const hoverRafRef = useRef<number | null>(null)
+  const pendingClientRef = useRef<{ x: number; y: number } | null>(null)
+  const lastProcessedClientRef = useRef<{ x: number; y: number } | null>(null)
+  const transformRef = useRef(transform)
+  useLayoutEffect(() => {
+    transformRef.current = transform
+  }, [transform])
 
   useEffect(() => {
     if (!domNode) return
@@ -392,11 +429,82 @@ function FixedSizeDotsOverlay() {
     }
   }, [domNode])
 
+  useEffect(() => {
+    const el = domNode
+    if (!el || size.width <= 0 || size.height <= 0) return
+
+    if (!planetGrid) {
+      return
+    }
+
+    const runHitTest = (clientX: number, clientY: number) => {
+      const t = transformRef.current
+      if (!t) {
+        setHoveredNodeId(null)
+        return
+      }
+      const paneRect = el.getBoundingClientRect()
+      const flow = clientToFlowPosition(clientX, clientY, el, t, paneRect)
+      if (!flow) {
+        setHoveredNodeId(null)
+        return
+      }
+      const rawScale = t[2]
+      const scale = safeZoomScale(rawScale)
+      const radiusPlanet = PLANET_LABEL_HOVER_RADIUS_PX / scale
+      const { px, py } = flowCenterToPlanet(flow.x, flow.y)
+      const closestId = findClosestPlanetWithinRadius(planetGrid, px, py, radiusPlanet)
+      setHoveredNodeId(closestId)
+    }
+
+    const flushHover = () => {
+      const p = pendingClientRef.current
+      if (!p) return
+      const last = lastProcessedClientRef.current
+      if (
+        last &&
+        Math.abs(p.x - last.x) < HOVER_CLIENT_MOVE_EPS_PX &&
+        Math.abs(p.y - last.y) < HOVER_CLIENT_MOVE_EPS_PX
+      ) {
+        return
+      }
+      lastProcessedClientRef.current = { x: p.x, y: p.y }
+      runHitTest(p.x, p.y)
+    }
+
+    const onMove = (e: MouseEvent) => {
+      pendingClientRef.current = { x: e.clientX, y: e.clientY }
+      if (hoverRafRef.current != null) return
+      hoverRafRef.current = requestAnimationFrame(() => {
+        hoverRafRef.current = null
+        flushHover()
+      })
+    }
+    const onLeave = () => {
+      pendingClientRef.current = null
+      lastProcessedClientRef.current = null
+      if (hoverRafRef.current != null) {
+        cancelAnimationFrame(hoverRafRef.current)
+        hoverRafRef.current = null
+      }
+      setHoveredNodeId(null)
+    }
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => {
+      if (hoverRafRef.current != null) cancelAnimationFrame(hoverRafRef.current)
+      hoverRafRef.current = null
+      el.removeEventListener('mousemove', onMove)
+      el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [domNode, size.width, size.height, planetGrid])
+
   if (!transform || !nodeLookup || size.width <= 0 || size.height <= 0) return null
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
   const half = NODE_SIZE_FLOW / 2
   const nodes = Array.from(nodeLookup.values())
+  const hoveredForDisplay = planetGrid ? hoveredNodeId : null
 
   const LABEL_FONT_SIZE_PX = 10
   const LABEL_OFFSET_X_PX = 9
@@ -413,6 +521,7 @@ function FixedSizeDotsOverlay() {
         const label = mapNode.data?.label
         const coordX = mapNode.data?.x ?? mapNode.position.x
         const coordY = mapNode.data?.y ?? mapNode.position.y
+        const showLabel = hoveredForDisplay === node.id
         return (
           <div key={node.id}>
             <div
@@ -424,16 +533,18 @@ function FixedSizeDotsOverlay() {
                 height: DOT_PIXELS,
               }}
             />
-            <div
-              className="absolute font-mono text-gray-300 whitespace-nowrap"
-              style={{
-                left: paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX,
-                top: paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX,
-                fontSize: LABEL_FONT_SIZE_PX,
-              }}
-            >
-              {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
-            </div>
+            {showLabel ? (
+              <div
+                className="absolute font-mono text-gray-300 whitespace-nowrap"
+                style={{
+                  left: paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX,
+                  top: paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX,
+                  fontSize: LABEL_FONT_SIZE_PX,
+                }}
+              >
+                {label ?? node.id} ({Math.floor(coordX)},{Math.floor(coordY)})
+              </div>
+            ) : null}
           </div>
         )
       })}
@@ -537,6 +648,7 @@ export function MapGraph({ data, className, onMapZoomChange, onSetZoomReady }: M
 
   const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
   const edges = useMemo(() => toEdges(data.edges), [data.edges])
+  const planetGrid = useMemo(() => buildPlanetSpatialGrid(data.nodes), [data.nodes])
 
   return (
     <div
@@ -571,7 +683,7 @@ export function MapGraph({ data, className, onMapZoomChange, onSetZoomReady }: M
           <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
           <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
           <CoordinateGridOverlay />
-          <FixedSizeDotsOverlay />
+          <FixedSizeDotsOverlay planetGrid={planetGrid} />
           <FlowCoordinateReadout />
         </ReactFlow>
       </div>

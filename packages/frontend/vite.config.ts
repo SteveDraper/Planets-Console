@@ -9,6 +9,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // One worker avoids many vitest/node processes at 100% CPU on this small suite; raise if tests get slow.
+    maxWorkers: 1,
+    fileParallelism: false,
   },
   server: {
     port: 5173,

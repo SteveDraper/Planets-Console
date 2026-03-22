@@ -1,5 +1,6 @@
 """Tests for the /api/v1/games router."""
 
+import copy
 import json
 from pathlib import Path
 
@@ -66,6 +67,66 @@ class TestGetGameInfo:
         assert resp.status_code == 404
 
 
+class _FakePlanetsNu:
+    """Minimal stub for POST /info refresh tests."""
+
+    def __init__(self, load_payload: dict) -> None:
+        self._load_payload = copy.deepcopy(load_payload)
+
+    def login(self, username: str, password: str) -> str:
+        return "fake-key"
+
+    def load_game_info(self, game_id: int) -> dict:
+        return copy.deepcopy(self._load_payload)
+
+    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+        raise AssertionError("load_turn should not be called in this test")
+
+
+class TestPostGameInfoRefresh:
+    def test_401_when_no_stored_key_and_no_password(self, client):
+        from api.app import app
+        from api.routers.games import get_planets_client
+
+        class _NeverCalled:
+            def login(self, *args, **kwargs):
+                raise AssertionError("login should not be called")
+
+            def load_game_info(self, *args, **kwargs):
+                raise AssertionError("load_game_info should not be called")
+
+        app.dependency_overrides[get_planets_client] = lambda: _NeverCalled()
+        try:
+            resp = client.post(
+                "/v1/games/628580/info",
+                json={"operation": "refresh", "params": {"username": "player1"}},
+            )
+            assert resp.status_code == 401
+            assert "credential" in resp.json()["detail"].lower()
+        finally:
+            app.dependency_overrides.pop(get_planets_client, None)
+
+    def test_200_with_cached_api_key(self, client):
+        from api.app import app
+        from api.routers.games import get_planets_client
+
+        storage = get_storage()
+        storage.put("credentials/accounts/player1/api_key", "cached-key")
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            payload = json.load(f)
+        app.dependency_overrides[get_planets_client] = lambda: _FakePlanetsNu(payload)
+        try:
+            resp = client.post(
+                "/v1/games/628580/info",
+                json={"operation": "refresh", "params": {"username": "player1"}},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["game"]["id"] == 628580
+        finally:
+            app.dependency_overrides.pop(get_planets_client, None)
+
+
 class TestGetTurnInfo:
     def test_returns_200(self, client):
         resp = client.get("/v1/games/628580/1/turns/111")
@@ -121,3 +182,57 @@ class TestGetTurnAnalyticsBaseMap:
     def test_404_for_unknown_turn(self, client):
         resp = client.get("/v1/games/628580/1/turns/999/analytics/base-map")
         assert resp.status_code == 404
+
+
+class _FakePlanetsNuEnsure(_FakePlanetsNu):
+    def __init__(self, load_payload: dict, rst: dict) -> None:
+        super().__init__(load_payload)
+        self._rst = copy.deepcopy(rst)
+        self.load_turn_calls: list[tuple[int, int, int]] = []
+
+    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+        self.load_turn_calls.append((game_id, turn, player_id))
+        return {"success": True, "rst": copy.deepcopy(self._rst)}
+
+
+class TestPostEnsureTurn:
+    def test_200_when_already_stored(self, client):
+        from api.app import app
+        from api.routers.games import get_planets_client
+
+        app.dependency_overrides[get_planets_client] = lambda: _FakePlanetsNu({})
+        try:
+            storage = get_storage()
+            storage.put("credentials/accounts/player1/api_key", "cached-key")
+            resp = client.post(
+                "/v1/games/628580/1/turns/111/ensure",
+                json={"username": "player1"},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["settings"]["turn"] == 111
+        finally:
+            app.dependency_overrides.pop(get_planets_client, None)
+
+    def test_loads_remote_when_missing(self, client):
+        from api.app import app
+        from api.routers.games import get_planets_client
+
+        with open(ASSETS_DIR / "turn_sample.json") as f:
+            rst = json.load(f)
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        fake = _FakePlanetsNuEnsure(info, rst)
+        app.dependency_overrides[get_planets_client] = lambda: fake
+        try:
+            storage = get_storage()
+            storage.delete("games/628580/1/turns/111")
+            storage.put("credentials/accounts/player1/api_key", "cached-key")
+            resp = client.post(
+                "/v1/games/628580/1/turns/111/ensure",
+                json={"username": "player1"},
+            )
+            assert resp.status_code == 200
+            assert fake.load_turn_calls == [(628580, 111, 1)]
+            storage.get("games/628580/1/turns/111")
+        finally:
+            app.dependency_overrides.pop(get_planets_client, None)
