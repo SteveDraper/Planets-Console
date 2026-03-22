@@ -38,7 +38,7 @@ const queryClient = new QueryClient({
 function ConsoleShell() {
   const queryClient = useQueryClient()
   const loginName = useSessionStore((s) => s.name)
-  const [viewMode, setViewMode] = useState<'tabular' | 'map'>('tabular')
+  const [viewMode, setViewMode] = useState<'tabular' | 'map'>('map')
   /** React Flow zoom (same as mousewheel); 1 = 100% on slider. Updated by MapGraph. */
   const [mapZoom, setMapZoom] = useState(1)
   const setMapZoomFromSlider = useRef<(z: number) => void | undefined>(undefined)

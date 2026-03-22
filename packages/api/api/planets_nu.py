@@ -13,6 +13,15 @@ from api.errors import UpstreamPlanetsError, ValidationError
 logger = logging.getLogger(__name__)
 
 
+def _safe_httpx_error_summary(exc: httpx.HTTPError) -> str:
+    """Describe an httpx error without str(exc); httpx often embeds full URLs with query params."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{exc.request.method} {exc.request.url.path} -> HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.RequestError):
+        return f"{exc.request.method} {exc.request.url.path}: {type(exc).__name__}"
+    return type(exc).__name__
+
+
 class PlanetsNuClient:
     """Thin wrapper around api.planets.nu for login, loadinfo, and loadturn."""
 
@@ -32,7 +41,7 @@ class PlanetsNuClient:
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPError as exc:
-            logger.warning("Planets.nu login HTTP error: %s", exc)
+            logger.warning("Planets.nu login HTTP error: %s", _safe_httpx_error_summary(exc))
             raise UpstreamPlanetsError("Planets.nu login request failed.") from exc
         except ValueError as exc:
             raise UpstreamPlanetsError("Planets.nu login returned invalid JSON.") from exc
@@ -55,7 +64,7 @@ class PlanetsNuClient:
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPError as exc:
-            logger.warning("Planets.nu loadinfo HTTP error: %s", exc)
+            logger.warning("Planets.nu loadinfo HTTP error: %s", _safe_httpx_error_summary(exc))
             raise UpstreamPlanetsError("Planets.nu load game info request failed.") from exc
         except ValueError as exc:
             raise UpstreamPlanetsError("Planets.nu loadinfo returned invalid JSON.") from exc
@@ -87,7 +96,7 @@ class PlanetsNuClient:
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPError as exc:
-            logger.warning("Planets.nu loadturn HTTP error: %s", exc)
+            logger.warning("Planets.nu loadturn HTTP error: %s", _safe_httpx_error_summary(exc))
             raise UpstreamPlanetsError("Planets.nu load turn request failed.") from exc
         except ValueError as exc:
             raise UpstreamPlanetsError("Planets.nu loadturn returned invalid JSON.") from exc

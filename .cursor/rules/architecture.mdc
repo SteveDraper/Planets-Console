@@ -54,6 +54,15 @@ planets-console/
 - **Config**: OmegaConf with plain dataclasses (no Pydantic for config)
 - **Data model**: Plain dataclasses with explicit codecs for persistence of non-JSON-native field types
 
+## Core REST API: deserialization before semantic validation
+
+When a service handles a JSON payload from storage or an upstream call that maps to a domain dataclass:
+
+1. **Deserialize first** using the codec in `packages/api/serialization/` (e.g. `*_from_json`). That layer owns **syntactic** concerns: structure, types, required fields, and wire-to-domain fixes.
+2. **Then** run **semantic** checks on the dataclass instance (e.g. ids match the request, turn numbers agree with what was asked for, cross-field consistency).
+
+Do not implement semantic validation by walking a raw `dict` before deserialization. That duplicates shape logic, invites type errors on bad JSON, and blurs syntactic vs semantic failures. The only pre-deserialization step should be minimal (e.g. confirming the stored value is a JSON object where the contract requires it).
+
 ## Preferred FastAPI App Composition
 
 Use one Python process, but structure it as three FastAPI app objects:

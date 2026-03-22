@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 
 import pytest
-from api.errors import LoginCredentialsRequiredError, NotFoundError, ValidationError
+from api.errors import (
+    LoginCredentialsRequiredError,
+    NotFoundError,
+    UpstreamPlanetsError,
+    ValidationError,
+)
 from api.models.game import GameInfo, TurnInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
 from api.services.game_service import GameService
@@ -37,6 +42,17 @@ class TestGetGameInfo:
         assert isinstance(gi, GameInfo)
         assert gi.game.id == 628580
         assert gi.game.name == "Serada 9 Sector"
+
+    def test_player_id_for_perspective_from_game_info(self, service):
+        gi = service.get_game_info(628580)
+        pid = GameService._player_id_for_perspective_from_game_info(gi, 1, 628580)
+        assert isinstance(pid, int)
+        assert pid == gi.players[0].id
+
+    def test_player_id_invalid_perspective_raises(self, service):
+        gi = service.get_game_info(628580)
+        with pytest.raises(ValidationError, match="Invalid perspective"):
+            GameService._player_id_for_perspective_from_game_info(gi, 99999, 628580)
 
     def test_players_populated(self, service):
         gi = service.get_game_info(628580)
@@ -186,6 +202,19 @@ class TestRefreshGameInfo:
         with pytest.raises(ValidationError, match="does not match"):
             svc.update_game_info(628580, body, planets)
 
+    def test_rejects_inconsistent_game_and_settings_turn(self, sample_info):
+        bad = copy.deepcopy(sample_info)
+        bad["settings"]["turn"] = 1
+        backend = MemoryAssetBackend(initial={})
+        svc = GameService(backend)
+        planets = FakePlanetsNu(bad)
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "x"},
+        )
+        with pytest.raises(ValidationError, match="inconsistent"):
+            svc.update_game_info(628580, body, planets)
+
 
 class FakePlanetsNuWithTurn(FakePlanetsNu):
     def __init__(self, load_payload: dict, rst_payload: dict, **kwargs) -> None:
@@ -222,10 +251,61 @@ class TestEnsureTurnLoaded:
         planets = FakePlanetsNuWithTurn(info, turn_rst)
         backend.put("credentials/accounts/player1/api_key", "k")
         params = RefreshGameInfoParams(username="player1")
-        ti = svc.ensure_turn_loaded(628580, 1, 42, params, planets)
+        ti = svc.ensure_turn_loaded(628580, 1, 111, params, planets)
         assert ti.settings.turn == 111
-        assert planets.load_turn_calls == [(628580, 42, 1)]
-        backend.get("games/628580/1/turns/42")
+        assert planets.load_turn_calls == [(628580, 111, 1)]
+        backend.get("games/628580/1/turns/111")
+
+    def test_rejects_mismatched_settings_turn_without_storing(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        bad = copy.deepcopy(turn_rst)
+        bad["settings"]["turn"] = 42
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, bad)
+        backend.put("credentials/accounts/player1/api_key", "k")
+        params = RefreshGameInfoParams(username="player1")
+        svc = GameService(backend)
+        with pytest.raises(UpstreamPlanetsError, match="settings.turn"):
+            svc.ensure_turn_loaded(628580, 1, 111, params, planets)
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/111")
+
+    def test_rejects_mismatched_game_id_without_storing(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        bad = copy.deepcopy(turn_rst)
+        bad["game"]["id"] = 999999
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, bad)
+        backend.put("credentials/accounts/player1/api_key", "k")
+        params = RefreshGameInfoParams(username="player1")
+        svc = GameService(backend)
+        with pytest.raises(UpstreamPlanetsError, match="game.id"):
+            svc.ensure_turn_loaded(628580, 1, 111, params, planets)
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/111")
+
+    def test_rejects_mismatched_game_turn_without_storing(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        bad = copy.deepcopy(turn_rst)
+        bad["game"]["turn"] = 42
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, bad)
+        backend.put("credentials/accounts/player1/api_key", "k")
+        params = RefreshGameInfoParams(username="player1")
+        svc = GameService(backend)
+        with pytest.raises(UpstreamPlanetsError, match="game.turn"):
+            svc.ensure_turn_loaded(628580, 1, 111, params, planets)
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/111")
 
     def test_requires_password_when_no_key(self, turn_rst):
         backend = MemoryAssetBackend(initial={})

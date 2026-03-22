@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../stores/session'
 import { cn } from '../lib/utils'
 
@@ -6,6 +6,17 @@ type LoginModalProps = {
   isOpen: boolean
   onClose: () => void
 }
+
+/** Last successful login name only (never the password). */
+export const LAST_LOGIN_USERNAME_STORAGE_KEY = 'planetsConsoleLastLoginUsername'
+
+/** Match non-autofill styling; browsers force autofill backgrounds unless overridden. */
+const loginFieldClassName = cn(
+  'rounded border border-[#52575d] bg-[#2b2e32] px-2 py-1.5 text-sm text-slate-200',
+  'focus:border-slate-400 focus:outline-none',
+  '[&:-webkit-autofill]:border-[#52575d] [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_rgb(43_46_50)] [&:-webkit-autofill]:[-webkit-text-fill-color:rgb(226_232_240)]',
+  '[&:autofill]:border-[#52575d] [&:autofill]:bg-[#2b2e32] [&:autofill]:text-slate-200'
+)
 
 export function LoginModal({ isOpen, onClose }: LoginModalProps) {
   const setCredentials = useSessionStore((s) => s.setCredentials)
@@ -23,17 +34,28 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
     }
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) return
     returnFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null
+    let savedName = ''
+    try {
+      savedName = localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)?.trim() ?? ''
+    } catch {
+      savedName = ''
+    }
+    setName(savedName)
+    setPassword('')
+    setError(null)
+
     const el = dialogRef.current
     if (!el) return
     const focusables = el.querySelectorAll<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     )
-    const first = focusables[0]
-    if (first) first.focus()
+    const target =
+      savedName !== '' && focusables.length >= 2 ? focusables[1] : focusables[0]
+    target?.focus()
   }, [isOpen])
 
   useEffect(() => {
@@ -79,6 +101,11 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
       return
     }
     setCredentials(trimmedName, password)
+    try {
+      localStorage.setItem(LAST_LOGIN_USERNAME_STORAGE_KEY, trimmedName)
+    } catch {
+      // ignore quota / private mode
+    }
     closeAndReturnFocus()
   }
 
@@ -113,7 +140,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="username"
-              className="rounded border border-[#52575d] bg-[#2b2e32] px-2 py-1.5 text-sm text-slate-200 focus:border-slate-400 focus:outline-none"
+              className={loginFieldClassName}
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -126,7 +153,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
-              className="rounded border border-[#52575d] bg-[#2b2e32] px-2 py-1.5 text-sm text-slate-200 focus:border-slate-400 focus:outline-none"
+              className={loginFieldClassName}
             />
           </div>
           {error && (

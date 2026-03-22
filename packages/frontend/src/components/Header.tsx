@@ -115,13 +115,11 @@ export function Header({
               <ChevronDown className="h-3.5 w-3.5" aria-hidden />
             </button>
             <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
+              type="number"
+              min={1}
+              max={shellTurnMax}
+              step={1}
               aria-label="Turn number"
-              aria-valuemin={1}
-              aria-valuemax={shellTurnMax}
-              aria-valuenow={shellTurnValue}
               value={displayTurnInput}
               onChange={(e) => setTurnInputDraft(e.target.value)}
               onFocus={() => setTurnInputDraft(committedTurnStr)}
@@ -137,7 +135,11 @@ export function Header({
                   ;(e.target as HTMLInputElement).blur()
                 }
               }}
-              className="w-11 border-x border-[#52575d] bg-transparent py-0.5 text-center text-xs tabular-nums text-slate-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-slate-400"
+              className={cn(
+                'w-11 border-x border-[#52575d] bg-transparent py-0.5 text-center text-xs tabular-nums text-slate-200',
+                '[-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-slate-400'
+              )}
             />
             <button
               type="button"

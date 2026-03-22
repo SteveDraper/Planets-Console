@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Header } from './Header'
+import { LAST_LOGIN_USERNAME_STORAGE_KEY } from './LoginModal'
 import { useSessionStore } from '../stores/session'
 
 const headerQueryClient = new QueryClient({
@@ -153,17 +154,34 @@ describe('Header', () => {
     }
     render(<Wrapper />)
     const input = screen.getByLabelText(/turn number/i)
-    expect(input).toHaveValue('2')
+    expect(input).toHaveValue(2)
     const dec = screen.getByRole('button', { name: /decrease turn/i })
     const inc = screen.getByRole('button', { name: /increase turn/i })
     await user.click(dec)
-    expect(input).toHaveValue('1')
+    expect(input).toHaveValue(1)
     expect(dec).toBeDisabled()
     await user.click(inc)
-    expect(input).toHaveValue('2')
+    expect(input).toHaveValue(2)
     await user.click(inc)
-    expect(input).toHaveValue('3')
+    expect(input).toHaveValue(3)
     expect(inc).toBeDisabled()
+  })
+
+  it('prefills name from localStorage when opening login modal', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(LAST_LOGIN_USERNAME_STORAGE_KEY, 'PrefilledUser')
+    renderHeader()
+    await user.click(screen.getByRole('button', { name: /change login/i }))
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue('PrefilledUser')
+    expect(screen.getByLabelText(/^password$/i)).toHaveValue('')
+    expect(screen.getByLabelText(/^password$/i)).toHaveFocus()
+  })
+
+  it('focuses name field when no saved username in localStorage', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    await user.click(screen.getByRole('button', { name: /change login/i }))
+    expect(screen.getByLabelText(/^name$/i)).toHaveFocus()
   })
 
   it('opens login modal when change-login button is clicked', async () => {
@@ -206,22 +224,23 @@ describe('Header', () => {
     expect(screen.getByRole('dialog', { name: /log in to planets\.nu/i })).toBeInTheDocument()
   })
 
-  it('does not persist password to localStorage or sessionStorage', async () => {
+  it('persists last username in localStorage but not password', async () => {
     const user = userEvent.setup()
     renderHeader()
     await user.click(screen.getByRole('button', { name: /change login/i }))
-    await user.type(screen.getByLabelText(/name/i), 'User')
-    await user.type(screen.getByLabelText(/password/i), 'sensitive-password')
+    await user.type(screen.getByLabelText(/^name$/i), 'User')
+    await user.type(screen.getByLabelText(/^password$/i), 'sensitive-password')
     await user.click(screen.getByRole('button', { name: /log in/i }))
-    expect(localStorage.length).toBe(0)
+    expect(localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)).toBe('User')
     expect(sessionStorage.length).toBe(0)
-    const localKeys = Object.keys(localStorage)
     const sessionKeys = Object.keys(sessionStorage)
-    const localStr = localKeys.length ? localKeys.map((k) => localStorage.getItem(k)).join('') : ''
     const sessionStr = sessionKeys.length
       ? sessionKeys.map((k) => sessionStorage.getItem(k)).join('')
       : ''
-    expect(localStr).not.toContain('sensitive-password')
     expect(sessionStr).not.toContain('sensitive-password')
+    const localStr = Object.keys(localStorage)
+      .map((k) => localStorage.getItem(k) ?? '')
+      .join('')
+    expect(localStr).not.toContain('sensitive-password')
   })
 })
