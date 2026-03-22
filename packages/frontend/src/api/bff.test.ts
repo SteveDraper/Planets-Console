@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isGenericServerErrorMessage, withEndpointIfGeneric } from './bff'
+import { isGenericServerErrorMessage, normalizeMapDataResponse, withEndpointIfGeneric } from './bff'
 
 describe('withEndpointIfGeneric', () => {
   it('appends endpoint for Internal Server Error', () => {
@@ -32,5 +32,37 @@ describe('withEndpointIfGeneric', () => {
 describe('isGenericServerErrorMessage', () => {
   it('treats empty as generic', () => {
     expect(isGenericServerErrorMessage('')).toBe(true)
+  })
+})
+
+describe('normalizeMapDataResponse', () => {
+  it('copies planet onto each node as a plain object', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        {
+          id: 'p1',
+          label: 'p1',
+          x: 10,
+          y: 20,
+          planet: { id: 1, name: 'Homeworld' },
+          ownerName: null,
+        },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].planet).toEqual({ id: 1, name: 'Homeworld' })
+    expect(out.nodes[0].planet).not.toBe((raw.nodes[0] as { planet: object }).planet)
+  })
+
+  it('reads nested snapshot from Planet key when planet is absent', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [{ id: 'p2', label: 'p2', x: 0, y: 0, Planet: { id: 2, name: 'Alt' } }],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].planet?.name).toBe('Alt')
   })
 })

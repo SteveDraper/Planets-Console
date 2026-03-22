@@ -112,6 +112,10 @@ class TestGetMapBase:
         first = data["nodes"][0]
         assert first["id"].startswith("p")
         assert "x" in first and "y" in first
+        assert "planet" in first
+        assert isinstance(first["planet"], dict)
+        assert first["planet"]["id"] == 1
+        assert "ownerName" in first
         assert data["edges"] == []
 
     def test_not_found_turn_raises(self, service):

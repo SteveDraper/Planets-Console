@@ -8,6 +8,12 @@ import type {
   MapDataResponse,
 } from '../api/bff'
 import { MapGraph } from './MapGraph'
+import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
+import { PlanetMapInfoControls } from './PlanetMapInfoControls'
+import {
+  DEFAULT_PLANET_LABEL_OPTIONS,
+  type PlanetLabelOptions,
+} from './planetMapLabelModel'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -22,7 +28,17 @@ function combineMapData(
     const prefix = analyticIds[idx] ?? ''
     if (!data) return
     data.nodes.forEach((n) => {
-      nodes.push({ id: `${prefix}:${n.id}`, label: n.label, x: n.x, y: n.y })
+      const base = {
+        id: `${prefix}:${n.id}`,
+        label: n.label,
+        x: n.x,
+        y: n.y,
+      }
+      if (n.planet != null) {
+        nodes.push({ ...base, planet: n.planet, ownerName: n.ownerName ?? null })
+      } else {
+        nodes.push(base)
+      }
     })
     data.edges.forEach((e) => {
       edges.push({
@@ -186,9 +202,11 @@ export function MainArea({
 
   const mapQueries = useQueries({
     queries: mapIds.map((analyticId) => ({
-      queryKey: ['analytic', analyticId, 'map', analyticScope] as const,
+      queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet'] as const,
       queryFn: () => fetchAnalyticMap(analyticId, analyticScope!),
       enabled: analyticFetchEnabled,
+      /** Deep nested `planet` on nodes must not be merged from stale query cache references. */
+      structuralSharing: false,
     })),
   })
   const pending = mapQueries.some((q) => q.isPending)
@@ -196,6 +214,10 @@ export function MainArea({
   const mapQueryData = mapQueries.map((q) => q.data)
   const combined = useStableCombinedMapData(mapIds, mapQueryData)
   const hasAnyData = mapQueries.some((q) => q.data != null)
+
+  const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
+    DEFAULT_PLANET_LABEL_OPTIONS
+  )
 
   if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
     return (
@@ -286,12 +308,19 @@ export function MainArea({
   return (
     <main className="flex min-h-0 flex-1 flex-col bg-black">
       <DeferredPendingMessage pending={pending} />
-      <MapGraph
-        data={combined}
-        className="h-full w-full min-h-0"
-        onMapZoomChange={onMapZoomChange}
-        onSetZoomReady={onSetZoomReady}
-      />
+      <MapPaneWithDisplayControls
+        controls={
+          <PlanetMapInfoControls value={planetLabelOptions} onChange={setPlanetLabelOptions} />
+        }
+      >
+        <MapGraph
+          data={combined}
+          className="h-full w-full min-h-0"
+          onMapZoomChange={onMapZoomChange}
+          onSetZoomReady={onSetZoomReady}
+          planetLabelOptions={planetLabelOptions}
+        />
+      </MapPaneWithDisplayControls>
     </main>
   )
 }

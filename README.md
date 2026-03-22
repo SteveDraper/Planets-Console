@@ -106,8 +106,28 @@ The frontend **only** calls the BFF; it never calls the Core API directly.
 
 ## Documentation
 
+### User documentation
+
+- **[User guide](docs/user-guide.md)** -- full tour of the console UI (header, analytics, tabular and map views, map options, login). Image paths under `docs/images/user-guide/` are placeholders for screenshots.
+
+### Design documentation
+
+These documents describe intended behavior, architecture decisions, and implementation notes for contributors.
+
 - **[Frontend and backend state](docs/design-frontend-and-backend-state.md)** -- Zustand vs TanStack Query, local React state, and stateless backend + storage.
 - **[Shell error handling](docs/design-shell-error-handling.md)** -- BFF errors and the shell error bar.
 - **[Storage abstraction](docs/design-storage-abstraction-and-crud-api.md)** -- `StorageBackend` and CRUD semantics.
+- **[Planets API data model](docs/design-planets-api-data-model.md)** -- data model direction for planets.nu–shaped data.
+- **[Base map from Core API](docs/design-issue-10-base-map-from-core.md)** -- base map analytic sourcing.
+- **[Login identity](docs/design-issue-12-login-identity.md)** -- login and identity in the shell.
+- **[Game selection](docs/design-issue-13-game-selection.md)** -- game selection and refresh flow.
+- **[Map planet labels and options](docs/design-map-planet-labels-and-options.md)** -- map labels and display options.
+- **[Basic UI framework](docs/implementation-basic-ui-framework.md)** -- shell layout and UI framework notes.
 
-Other design notes live under [`docs/`](docs/).
+### Additional documentation
+
+- **[Configuration](docs/configuration.md)** -- server and app configuration.
+- **[VGA Planets domain context](docs/vga-planets-domain-context.md)** -- game/domain context for the console.
+- **[Cursor GitHub setup](docs/cursor-github-setup.md)** -- GitHub integration notes for Cursor.
+
+All Markdown docs live under [`docs/`](docs/).

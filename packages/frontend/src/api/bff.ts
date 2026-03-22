@@ -68,12 +68,65 @@ export type MapNode = {
   label: string
   x: number
   y: number
+  /** Present for base-map planets; full turn snapshot fields for map labels. */
+  planet?: Record<string, unknown>
+  /** Resolved from turn players when `planet` is present. */
+  ownerName?: string | null
 }
 
 export type MapDataResponse = {
   analyticId: string
   nodes: MapNode[]
   edges: { source: string; target: string }[]
+}
+
+/**
+ * Parses each node so `planet` / `ownerName` are plain objects (not lost to reference sharing).
+ * Accepts `Planet` as an alternate key for the nested snapshot (defensive).
+ */
+export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
+  if (raw == null || typeof raw !== 'object') {
+    return { analyticId: '', nodes: [], edges: [] }
+  }
+  const o = raw as Record<string, unknown>
+  const nodesRaw = o.nodes
+  const edgesRaw = o.edges
+  const nodes = Array.isArray(nodesRaw) ? nodesRaw.map(normalizeMapNode) : []
+  const edges = Array.isArray(edgesRaw)
+    ? (edgesRaw as MapDataResponse['edges']).filter(
+        (e) => e != null && typeof e === 'object' && 'source' in e && 'target' in e
+      )
+    : []
+  return {
+    analyticId: typeof o.analyticId === 'string' ? o.analyticId : String(o.analyticId ?? ''),
+    nodes,
+    edges,
+  }
+}
+
+function normalizeMapNode(raw: unknown): MapNode {
+  if (raw == null || typeof raw !== 'object') {
+    return { id: '', label: '', x: 0, y: 0 }
+  }
+  const n = raw as Record<string, unknown>
+  const nested = n.planet ?? n.Planet
+  const planet =
+    nested != null && typeof nested === 'object' && !Array.isArray(nested)
+      ? ({ ...(nested as Record<string, unknown>) } as Record<string, unknown>)
+      : undefined
+  const base: MapNode = {
+    id: typeof n.id === 'string' ? n.id : String(n.id ?? ''),
+    label: typeof n.label === 'string' ? n.label : String(n.label ?? ''),
+    x: typeof n.x === 'number' ? n.x : Number(n.x) || 0,
+    y: typeof n.y === 'number' ? n.y : Number(n.y) || 0,
+  }
+  if (planet != null) {
+    base.planet = planet
+  }
+  if (Object.prototype.hasOwnProperty.call(n, 'ownerName')) {
+    base.ownerName = n.ownerName as string | null | undefined
+  }
+  return base
 }
 
 /** Combined nodes/edges from multiple analytics for the single shared map. */
@@ -254,5 +307,6 @@ export async function fetchAnalyticMap(
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
-  return r.json()
+  const raw = await r.json()
+  return normalizeMapDataResponse(raw)
 }
