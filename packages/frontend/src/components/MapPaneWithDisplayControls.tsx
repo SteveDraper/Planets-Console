@@ -66,6 +66,8 @@ export function MapPaneWithDisplayControls({
         id={panelId}
         role="region"
         aria-label="Map options"
+        aria-hidden={!isOpen}
+        inert={!isOpen}
         className={cn(
           'absolute bottom-0 right-0 z-[50] flex max-h-full min-h-0 w-1/2 min-w-0 flex-col overflow-hidden',
           'rounded-tl-md border border-b-0 border-[#52575d] bg-[#40454a] shadow-lg',

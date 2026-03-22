@@ -21,5 +21,10 @@ describe('MapPaneWithDisplayControls', () => {
 
     await user.click(screen.getByRole('button', { name: /hide map options/i }))
     expect(screen.getByRole('button', { name: /show map options/i })).toBeVisible()
+
+    const panel = document.querySelector('[role="region"][aria-label="Map options"]')
+    expect(panel).not.toBeNull()
+    expect(panel).toHaveAttribute('aria-hidden', 'true')
+    expect(panel).toHaveAttribute('inert')
   })
 })

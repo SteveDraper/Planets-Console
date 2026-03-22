@@ -473,11 +473,19 @@ function FixedSizeDotsOverlay({
     pinnedNodeIdRef.current = pinnedNodeId
   }, [pinnedNodeId])
 
+  const showAnyLabelOption = planetLabelOptionsShowAnyLabel(planetLabelOptions)
+
   const mapNodeIdsKey = useMemo(() => mapNodes.map((n) => n.id).join('\0'), [mapNodes])
 
   useEffect(() => {
     setPinnedNodeId(null)
   }, [mapNodeIdsKey])
+
+  useEffect(() => {
+    if (!showAnyLabelOption) {
+      setPinnedNodeId(null)
+    }
+  }, [showAnyLabelOption])
 
   useEffect(() => {
     if (pinnedNodeId == null) return
@@ -602,6 +610,12 @@ function FixedSizeDotsOverlay({
         }
         return
       }
+      if (!showAnyLabelOption) {
+        if (pinnedNodeIdRef.current != null) {
+          setPinnedNodeId(null)
+        }
+        return
+      }
       setPinnedNodeId((prev) => {
         if (prev === closestId) return null
         return closestId
@@ -609,13 +623,12 @@ function FixedSizeDotsOverlay({
     }
     el.addEventListener('click', onClick)
     return () => el.removeEventListener('click', onClick)
-  }, [domNode, planetGrid])
+  }, [domNode, planetGrid, showAnyLabelOption])
 
   if (!transform || size.width <= 0 || size.height <= 0) return null
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
   const hoveredForDisplay = planetGrid ? hoveredNodeId : null
-  const showAnyLabelOption = planetLabelOptionsShowAnyLabel(planetLabelOptions)
 
   const LABEL_OFFSET_X_PX = 9
   const LABEL_OFFSET_Y_PX = -12
