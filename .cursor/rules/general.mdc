@@ -29,6 +29,10 @@ alwaysApply: true
 
 When creating an implementation plan, switching to Plan Mode, or starting any multi-step task, read and follow `planning.mdc`. It is not always-applied, so pull it in explicitly whenever planning is the activity.
 
+## Debugging
+
+When investigating bugs, flaky tests, or unexplained behavior, read and follow `debugging.mdc`. It is not always-applied, so pull it in explicitly when diagnosis is the activity.
+
 ## No Tech Debt by Default
 
 **Fix things right, even when it's harder.** Tech debt is a cost that compounds -- a shortcut taken today becomes a bigger problem tomorrow. The default is always to implement the correct solution.

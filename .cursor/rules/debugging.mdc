@@ -1,0 +1,36 @@
+---
+description: >-
+  How to debug and diagnose problems -- hypotheses, evidence, experiments, and logging.
+  Apply when investigating bugs, unexpected behavior, test failures, or ambiguous errors.
+alwaysApply: false
+---
+
+# Debugging and problem diagnosis
+
+When the cause is unclear, work systematically instead of guessing once and stopping.
+
+## Hypotheses and evidence
+
+1. **Form a hypothesis** about what might be going wrong (which layer, which code path, which assumption).
+
+2. **Look for supporting evidence** in code, config, logs, tests, and reproduction steps.
+
+3. **Actively hunt for disconfirming evidence** -- facts that would be unlikely if the hypothesis were true. If you find such evidence, **reject the hypothesis** and form a new one rather than stretching the story to fit.
+
+4. If behavior is vague or underspecified, **ask the user** for more detail on the aspects that would narrow the search (exact steps, expected vs actual, environment, timing, scope).
+
+## When evidence is insufficient
+
+If you cannot explain the issue confidently from what you have:
+
+- **(i) Targeted experiments** -- minimal checks that would distinguish between plausible causes (run a command, isolate a function, vary one input). Prefer the smallest experiment that answers a clear question.
+
+- **(ii) Logging** -- add temporary, purposeful logging (or structured output) where it will produce **discriminative** evidence: values at boundaries, branch taken, before/after state. Remove or gate noisy logs once the issue is understood.
+
+## Who runs what
+
+- If an experiment can be run **autonomously** with available tools (read file, grep, run tests, shell commands in the repo), **do it** without asking permission for each step.
+
+- If it **cannot** (needs local UI interaction, secrets, production access, hardware, or a long-running process the user must drive), **ask the user** to perform it and **say what to capture** (exact command, what output or screenshot matters).
+
+Do not treat the first plausible story as final until evidence supports it or experiments rule out alternatives.
