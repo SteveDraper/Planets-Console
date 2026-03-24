@@ -38,6 +38,8 @@ import {
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
 import {
+  flowBoundsIntersect,
+  normalWarpWellFlowBoundingBox,
   normalWarpWellGridSegmentsFlow,
   planetIsInDebrisDisk,
   type WarpWellGridSegmentFlow,
@@ -451,7 +453,7 @@ function clipWarpWellSegmentToFlowViewport(
 /**
  * Per-planet full grid for map cells whose center lies in the normal warp well (every cell
  * edge, deduped on shared sides; same integer-line placement as `CoordinateGridOverlay`).
- * Omitted for debris-disk planets.
+ * Only nodes with a planet turn snapshot get wells; omitted for debris-disk planets.
  */
 function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: CombinedMapData['nodes'] }) {
   const domNode = useStore((s) => s.domNode ?? null)
@@ -486,8 +488,18 @@ function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: CombinedMapData
 
   const lines: { key: string; x1: number; y1: number; x2: number; y2: number }[] = []
   for (const n of mapNodes) {
+    if (n.planet == null) continue
     if (planetIsInDebrisDisk(n.planet)) continue
-    const segs = normalWarpWellGridSegmentsFlow(Number(n.x), Number(n.y))
+    const px = Number(n.x)
+    const py = Number(n.y)
+    const wellBounds = normalWarpWellFlowBoundingBox(px, py)
+    if (
+      wellBounds == null ||
+      !flowBoundsIntersect(wellBounds, flowXMin, flowXMax, flowYMin, flowYMax)
+    ) {
+      continue
+    }
+    const segs = normalWarpWellGridSegmentsFlow(px, py)
     segs.forEach((s, i) => {
       const clipped = clipWarpWellSegmentToFlowViewport(s, flowXMin, flowXMax, flowYMin, flowYMax)
       if (clipped == null) return

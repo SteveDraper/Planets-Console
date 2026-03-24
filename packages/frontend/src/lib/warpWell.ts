@@ -47,10 +47,6 @@ export function isCoordinateInWarpWell(
   return d < HYPERJUMP_EXCLUSIVE_RADIUS
 }
 
-function mapCellKey(gx: number, gy: number): string {
-  return `${gx},${gy}`
-}
-
 /**
  * Map cells whose center lies in the given warp well. When ``planet`` is set and the planet is
  * in a debris disk, returns no cells (matches ``api.concepts.warp_well``).
@@ -93,6 +89,51 @@ export function mapCellsWithCenterInNormalWarpWell(
   planetMapY: number
 ): { gx: number; gy: number }[] {
   return mapCellsInWarpWell(planetMapX, planetMapY, 'normal', undefined)
+}
+
+/** Axis-aligned bounds in React Flow space for culling (see `normalWarpWellFlowBoundingBox`). */
+export type NormalWarpWellFlowBounds = {
+  flowXMin: number
+  flowXMax: number
+  flowYMin: number
+  flowYMax: number
+}
+
+/**
+ * Tight axis-aligned box in flow coordinates that contains every normal-well grid segment.
+ * Map cells in the well have gx in [px - R, px + R] and gy in [py - R, py + R]; cell edges match
+ * `CoordinateGridOverlay` (x from gx to gx+1, y from -(gy+1) to -gy).
+ */
+export function normalWarpWellFlowBoundingBox(
+  planetMapX: number,
+  planetMapY: number
+): NormalWarpWellFlowBounds | null {
+  if (!Number.isFinite(planetMapX) || !Number.isFinite(planetMapY)) return null
+  const px = planetMapX
+  const py = planetMapY
+  const r = NORMAL_RADIUS
+  return {
+    flowXMin: px - r,
+    flowXMax: px + r + 1,
+    flowYMin: -(py + r + 1),
+    flowYMax: -(py - r),
+  }
+}
+
+/** Whether two closed flow-axis rectangles overlap (same convention as segment clipping). */
+export function flowBoundsIntersect(
+  a: NormalWarpWellFlowBounds,
+  flowXMin: number,
+  flowXMax: number,
+  flowYMin: number,
+  flowYMax: number
+): boolean {
+  return (
+    a.flowXMin <= flowXMax &&
+    a.flowXMax >= flowXMin &&
+    a.flowYMin <= flowYMax &&
+    a.flowYMax >= flowYMin
+  )
 }
 
 /** Axis-aligned segment in React Flow coordinates (same space as the coordinate grid). */

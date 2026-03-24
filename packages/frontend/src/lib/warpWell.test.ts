@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  flowBoundsIntersect,
   isCoordinateInWarpWell,
   mapCellsWithCenterInNormalWarpWell,
+  normalWarpWellFlowBoundingBox,
   normalWarpWellGridSegmentsFlow,
   planetIsInDebrisDisk,
   warpWellCartesianDistance,
@@ -94,5 +96,44 @@ describe('warpWellCartesianDistance', () => {
   it('matches hypot', () => {
     expect(warpWellCartesianDistance(0, 0, 3, 4)).toBe(5)
     expect(warpWellCartesianDistance(0, 0, -3, 0)).toBe(3)
+  })
+})
+
+describe('normalWarpWellFlowBoundingBox', () => {
+  it('contains every endpoint of normalWarpWellGridSegmentsFlow', () => {
+    const px = 10
+    const py = -5
+    const box = normalWarpWellFlowBoundingBox(px, py)
+    expect(box).not.toBeNull()
+    const segs = normalWarpWellGridSegmentsFlow(px, py)
+    for (const s of segs) {
+      for (const v of [s.x1, s.x2, s.y1, s.y2]) {
+        expect(Number.isFinite(v)).toBe(true)
+      }
+      expect(s.x1).toBeGreaterThanOrEqual(box!.flowXMin)
+      expect(s.x1).toBeLessThanOrEqual(box!.flowXMax)
+      expect(s.x2).toBeGreaterThanOrEqual(box!.flowXMin)
+      expect(s.x2).toBeLessThanOrEqual(box!.flowXMax)
+      expect(s.y1).toBeGreaterThanOrEqual(box!.flowYMin)
+      expect(s.y1).toBeLessThanOrEqual(box!.flowYMax)
+      expect(s.y2).toBeGreaterThanOrEqual(box!.flowYMin)
+      expect(s.y2).toBeLessThanOrEqual(box!.flowYMax)
+    }
+  })
+
+  it('returns null for non-finite coordinates', () => {
+    expect(normalWarpWellFlowBoundingBox(NaN, 0)).toBeNull()
+  })
+})
+
+describe('flowBoundsIntersect', () => {
+  it('is true when viewport overlaps the well box', () => {
+    const box = normalWarpWellFlowBoundingBox(100, 200)!
+    expect(flowBoundsIntersect(box, 90, 110, -210, -190)).toBe(true)
+  })
+
+  it('is false when viewport is disjoint', () => {
+    const box = normalWarpWellFlowBoundingBox(100, 200)!
+    expect(flowBoundsIntersect(box, 500, 600, -210, -190)).toBe(false)
   })
 })
