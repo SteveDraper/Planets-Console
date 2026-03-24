@@ -14,7 +14,7 @@ from api.errors import (
     ValidationError,
     make_http_exception_handler,
 )
-from api.routers import games, store
+from api.routers import game_concepts, games, store
 from api.services.seed import seed_dummy_data
 from api.storage import get_storage
 
@@ -44,6 +44,7 @@ for _exc_cls in (
     app.add_exception_handler(_exc_cls, make_http_exception_handler(CoreAPIError))
 app.include_router(store.router)
 app.include_router(games.router)
+app.include_router(game_concepts.router)
 
 
 @app.get("/health")

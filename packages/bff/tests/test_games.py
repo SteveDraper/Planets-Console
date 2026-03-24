@@ -133,3 +133,39 @@ def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     )
     assert response.status_code == 200
     mock_instance.load_turn.assert_not_called()
+
+
+def test_post_warp_well_coordinate_in_well_matches_core():
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+
+    response = client.post(
+        "/games/628580/1/turns/111/concepts/warp-wells/coordinate-in-well",
+        json={
+            "planet_id": 1,
+            "map_x": 2078,
+            "map_y": 1149,
+            "well_type": "normal",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"inside": True}
+
+
+def test_get_warp_well_cells_matches_core():
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+
+    response = client.get(
+        "/games/628580/1/turns/111/concepts/warp-wells/cells",
+        params={"planet_id": 1, "well_type": "normal"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert {"x": 2078, "y": 1149} in data["cells"]

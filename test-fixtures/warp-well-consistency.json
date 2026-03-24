@@ -1,0 +1,147 @@
+{
+  "description": "Shared golden vectors for warp-well math; Python (api.concepts) and TypeScript (warpWell.ts) must agree.",
+  "coordinateCases": [
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 0,
+      "queryX": 10,
+      "queryY": 20,
+      "wellType": "normal",
+      "inside": true
+    },
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 0,
+      "queryX": 13,
+      "queryY": 20,
+      "wellType": "normal",
+      "inside": true
+    },
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 0,
+      "queryX": 14,
+      "queryY": 20,
+      "wellType": "normal",
+      "inside": false
+    },
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 0,
+      "queryX": 10,
+      "queryY": 24,
+      "wellType": "normal",
+      "inside": false
+    },
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 0,
+      "queryX": 13,
+      "queryY": 20,
+      "wellType": "hyperjump",
+      "inside": false
+    },
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 0,
+      "queryX": 12,
+      "queryY": 20,
+      "wellType": "hyperjump",
+      "inside": true
+    },
+    {
+      "planetX": 10,
+      "planetY": 20,
+      "debrisdisk": 1,
+      "queryX": 10,
+      "queryY": 20,
+      "wellType": "normal",
+      "inside": false
+    }
+  ],
+  "cellCases": [
+    {
+      "planetX": 0,
+      "planetY": 0,
+      "debrisdisk": 0,
+      "wellType": "normal",
+      "cells": [
+        [-3, 0],
+        [-2, -2],
+        [-2, -1],
+        [-2, 0],
+        [-2, 1],
+        [-2, 2],
+        [-1, -2],
+        [-1, -1],
+        [-1, 0],
+        [-1, 1],
+        [-1, 2],
+        [0, -3],
+        [0, -2],
+        [0, -1],
+        [0, 0],
+        [0, 1],
+        [0, 2],
+        [0, 3],
+        [1, -2],
+        [1, -1],
+        [1, 0],
+        [1, 1],
+        [1, 2],
+        [2, -2],
+        [2, -1],
+        [2, 0],
+        [2, 1],
+        [2, 2],
+        [3, 0]
+      ]
+    },
+    {
+      "planetX": 0,
+      "planetY": 0,
+      "debrisdisk": 0,
+      "wellType": "hyperjump",
+      "cells": [
+        [-2, -2],
+        [-2, -1],
+        [-2, 0],
+        [-2, 1],
+        [-2, 2],
+        [-1, -2],
+        [-1, -1],
+        [-1, 0],
+        [-1, 1],
+        [-1, 2],
+        [0, -2],
+        [0, -1],
+        [0, 0],
+        [0, 1],
+        [0, 2],
+        [1, -2],
+        [1, -1],
+        [1, 0],
+        [1, 1],
+        [1, 2],
+        [2, -2],
+        [2, -1],
+        [2, 0],
+        [2, 1],
+        [2, 2]
+      ]
+    },
+    {
+      "planetX": 0,
+      "planetY": 0,
+      "debrisdisk": 1,
+      "wellType": "normal",
+      "cells": []
+    }
+  ]
+}

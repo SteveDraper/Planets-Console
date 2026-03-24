@@ -10,9 +10,12 @@ This document describes the **map options** UI and **planet hover/pin labels** o
 | Planet info controls (checkboxes + detail level) | `packages/frontend/src/components/PlanetMapInfoControls.tsx` |
 | Label model (options, availability, title line, minerals) | `packages/frontend/src/components/planetMapLabelModel.ts` |
 | Label rendering | `packages/frontend/src/components/PlanetMapLabel.tsx` |
-| Map graph (dots, overlay, hover, pin, grid) | `packages/frontend/src/components/MapGraph.tsx` |
+| Map graph (dots, overlay, hover, pin, grid, warp wells) | `packages/frontend/src/components/MapGraph.tsx` |
+| Warp well geometry and predicates | `packages/frontend/src/lib/warpWell.ts` |
 | Wiring + combined map data | `packages/frontend/src/components/MainArea.tsx` |
 | BFF map node normalization | `packages/frontend/src/api/bff.ts` (`normalizeMapDataResponse`, `normalizeMapNode`) |
+
+Warp wells (normal/hyperjump logic, map overlay, zoom thresholds, styling): [design-warp-wells-map.md](design-warp-wells-map.md).
 
 Related: base-map data flow and node shape are summarized in [design-issue-10-base-map-from-core.md](design-issue-10-base-map-from-core.md). Shell state split (where `planetLabelOptions` lives) follows [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).
 

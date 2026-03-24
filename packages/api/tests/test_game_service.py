@@ -87,6 +87,17 @@ class TestGetTurnInfo:
             service.get_turn_info(628580, 1, 999)
 
 
+class TestGetPlanetFromTurn:
+    def test_returns_planet_by_id(self, service):
+        p = service.get_planet_from_turn(628580, 1, 111, 1)
+        assert p.id == 1
+        assert p.name == "Lorthidonia"
+
+    def test_unknown_planet_id_raises(self, service):
+        with pytest.raises(NotFoundError, match="No planet id"):
+            service.get_planet_from_turn(628580, 1, 111, 999999999)
+
+
 class TestMalformedStoreData:
     def test_game_info_non_dict_raises_validation(self):
         backend = MemoryAssetBackend(initial={})

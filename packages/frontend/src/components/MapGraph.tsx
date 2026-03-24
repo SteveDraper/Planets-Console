@@ -37,6 +37,11 @@ import {
   planetLabelOptionsShowAnyLabel,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
+import {
+  normalWarpWellGridSegmentsFlow,
+  planetIsInDebrisDisk,
+  type WarpWellGridSegmentFlow,
+} from '../lib/warpWell'
 
 type MapNodeData = {
   label?: string
@@ -327,10 +332,16 @@ function FlowCoordinateReadout() {
 }
 
 /** Show grid when zoom >= this (pixels per flow unit). */
-const GRID_ZOOM_THRESHOLD = 5
+const GRID_ZOOM_THRESHOLD = 15
 
-/** Solid light grey so crossings don't brighten (no alpha blend). */
-const GRID_STROKE = '#6b7280'
+/** Show normal warp well outlines when zoom >= this (pixels per flow unit). */
+const WARP_WELL_OVERLAY_ZOOM_THRESHOLD = 5
+
+/** Light grey at 30% opacity so the warp-well overlay reads stronger when lines coincide. */
+const GRID_STROKE = 'rgba(107, 114, 128, 0.3)'
+
+/** Slightly warmer than the coordinate grid so both remain distinguishable. */
+const WARP_WELL_STROKE = '#78716c'
 
 /**
  * Coordinate grid overlay when zoomed in. Drawn in pixel space so lines stay 1px at any zoom;
@@ -399,6 +410,104 @@ function CoordinateGridOverlay() {
           ))}
           {horizontals.map(({ key, y }) => (
             <line key={key} x1={0} y1={y} x2={width} y2={y} />
+          ))}
+        </g>
+      </svg>
+    </div>
+  )
+}
+
+function clipWarpWellSegmentToFlowViewport(
+  s: WarpWellGridSegmentFlow,
+  fxMin: number,
+  fxMax: number,
+  fyMin: number,
+  fyMax: number
+): WarpWellGridSegmentFlow | null {
+  const { x1, y1, x2, y2 } = s
+  if (x1 === x2) {
+    const x = x1
+    if (x < fxMin || x > fxMax) return null
+    const yLo = Math.min(y1, y2)
+    const yHi = Math.max(y1, y2)
+    const cl = Math.max(yLo, fyMin)
+    const ch = Math.min(yHi, fyMax)
+    if (ch < cl) return null
+    return { x1: x, y1: cl, x2: x, y2: ch }
+  }
+  if (y1 === y2) {
+    const y = y1
+    if (y < fyMin || y > fyMax) return null
+    const xLo = Math.min(x1, x2)
+    const xHi = Math.max(x1, x2)
+    const cl = Math.max(xLo, fxMin)
+    const ch = Math.min(xHi, fxMax)
+    if (ch < cl) return null
+    return { x1: cl, y1: y, x2: ch, y2: y }
+  }
+  return null
+}
+
+/**
+ * Per-planet full grid for map cells whose center lies in the normal warp well (every cell
+ * edge, deduped on shared sides; same integer-line placement as `CoordinateGridOverlay`).
+ * Omitted for debris-disk planets.
+ */
+function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: CombinedMapData['nodes'] }) {
+  const domNode = useStore((s) => s.domNode ?? null)
+  const transform = useStore((s) => s.transform)
+  const [size, setSize] = useState({ width: 0, height: 0 })
+
+  useEffect(() => {
+    if (!domNode) return
+    let raf = 0
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 }
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => setSize({ width, height }))
+    })
+    ro.observe(domNode)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [domNode])
+
+  if (!transform || size.width <= 0 || size.height <= 0) return null
+  const [tx, ty, rawScale] = transform
+  const scale = safeZoomScale(rawScale)
+  if (scale < WARP_WELL_OVERLAY_ZOOM_THRESHOLD) return null
+
+  const { width, height } = size
+  const flowXMin = -tx / scale
+  const flowXMax = (width - tx) / scale
+  const flowYMin = -ty / scale
+  const flowYMax = (height - ty) / scale
+
+  const lines: { key: string; x1: number; y1: number; x2: number; y2: number }[] = []
+  for (const n of mapNodes) {
+    if (planetIsInDebrisDisk(n.planet)) continue
+    const segs = normalWarpWellGridSegmentsFlow(Number(n.x), Number(n.y))
+    segs.forEach((s, i) => {
+      const clipped = clipWarpWellSegmentToFlowViewport(s, flowXMin, flowXMax, flowYMin, flowYMax)
+      if (clipped == null) return
+      const x1 = clipped.x1 * scale + tx
+      const y1 = clipped.y1 * scale + ty
+      const x2 = clipped.x2 * scale + tx
+      const y2 = clipped.y2 * scale + ty
+      if (![x1, y1, x2, y2].every((v) => Number.isFinite(v))) return
+      lines.push({ key: `${n.id}-${i}`, x1, y1, x2, y2 })
+    })
+  }
+
+  if (lines.length === 0) return null
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+      <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <g stroke={WARP_WELL_STROKE} strokeWidth={1}>
+          {lines.map(({ key, x1, y1, x2, y2 }) => (
+            <line key={key} x1={x1} y1={y1} x2={x2} y2={y2} />
           ))}
         </g>
       </svg>
@@ -847,6 +956,7 @@ export function MapGraph({
           <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
           <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
           <CoordinateGridOverlay />
+          <NormalWarpWellOutlinesOverlay mapNodes={data.nodes} />
           <FixedSizeDotsOverlay
             planetGrid={planetGrid}
             planetLabelOptions={planetLabelOptions}

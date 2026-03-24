@@ -138,6 +138,17 @@ Map layers combine the **base map** (if available) with every **enabled** analyt
 - Initial load may show **Loading map…**
 - If you add another map analytic, a short message **Loading additional map data…** can appear after a brief delay so quick updates do not flash.
 
+### Coordinate grid and warp wells
+
+The map can draw two kinds of **grid lines** aligned to map coordinates (the same integer lines you see in the corner readout when you move the pointer).
+
+- **Warp well grid** -- When you zoom in past a **moderate** level (about **500%** on the header scale, or higher), each planet that is **not** in a **debris disk** shows a grid for its **normal warp well**: every map cell whose **center** lies within **Euclidean distance 3** of the planet’s map cell. Those lines use a **solid** gray so they stay visible.
+- **Full background grid** -- When you zoom in **further** (about **1500%** or higher), a **coordinate grid** is drawn across the whole map. It uses the **same** line positions but is drawn **fainter** (30% opacity) so it does not overpower the warp well lines where they overlap.
+
+**Hyperjump** wells are defined in code for distance checks but are **not** drawn on the map today.
+
+For exact rules, thresholds, and file locations, see [Warp wells on the map](design-warp-wells-map.md).
+
 ### Planet labels and hover
 
 Planet **dots** sit on the grid; **labels** (and optional detail) follow settings in **Map options** (see below). Moving the pointer near a planet can reveal or emphasize label content depending on implementation.
@@ -188,6 +199,7 @@ Opening the login flow shows a centered dialog: **Log in to planets.nu**, fields
 | Scale | Map zoom (map mode only) |
 | Analytics | Enable/disable each analytic; grey = wrong mode |
 | Map options | Planet label content and detail level |
+| Zoom | Higher zoom shows warp well grid, then fainter full coordinate grid (see map section) |
 | Error bar | Read errors; dismiss per message |
 
 For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md).
