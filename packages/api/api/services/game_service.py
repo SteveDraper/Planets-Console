@@ -4,6 +4,11 @@ import re
 
 from dacite.exceptions import DaciteError
 
+from api.concepts.warp_well import (
+    WarpWellKind,
+    coordinate_in_warp_well,
+    map_cell_indices_in_warp_well,
+)
 from api.errors import (
     LoginCredentialsRequiredError,
     NotFoundError,
@@ -12,6 +17,7 @@ from api.errors import (
 )
 from api.models.game import GameInfo, TurnInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
+from api.models.planet import Planet
 from api.planets_nu import PlanetsNuClient
 from api.serialization.game import game_info_from_json
 from api.serialization.planet import planet_to_public_json
@@ -154,6 +160,42 @@ class GameService:
         return turn_info_from_json(
             _require_dict(data, f"turn {turn_number} of game {game_id} perspective {perspective}")
         )
+
+    def get_planet_from_turn(
+        self, game_id: int, perspective: int, turn_number: int, planet_id: int
+    ) -> Planet:
+        turn = self.get_turn_info(game_id, perspective, turn_number)
+        for p in turn.planets:
+            if p.id == planet_id:
+                return p
+        raise NotFoundError(
+            f"No planet id {planet_id} in turn {turn_number} "
+            f"(game {game_id}, perspective {perspective})."
+        )
+
+    def warp_well_coordinate_in_well(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        planet_id: int,
+        map_x: float,
+        map_y: float,
+        well_kind: WarpWellKind,
+    ) -> bool:
+        planet = self.get_planet_from_turn(game_id, perspective, turn_number, planet_id)
+        return coordinate_in_warp_well(planet, map_x, map_y, well_kind)
+
+    def warp_well_cells(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        planet_id: int,
+        well_kind: WarpWellKind,
+    ) -> list[dict[str, int]]:
+        planet = self.get_planet_from_turn(game_id, perspective, turn_number, planet_id)
+        return [{"x": gx, "y": gy} for gx, gy in map_cell_indices_in_warp_well(planet, well_kind)]
 
     def _player_id_for_perspective(self, game_id: int, perspective: int) -> int:
         info = self.get_game_info(game_id)
