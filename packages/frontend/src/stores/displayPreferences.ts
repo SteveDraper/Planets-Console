@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
+import { createLocalStorageOrMemoryStateStorage } from '../lib/browserPersistStorage'
+
+const displayPreferencesPersistStorage = createLocalStorageOrMemoryStateStorage()
 
 export type PlayerListLabelMode =
   | 'player_names_only'
@@ -28,7 +31,7 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesState>()(
     }),
     {
       name: 'planets-console-display-preferences',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => displayPreferencesPersistStorage),
     }
   )
 )

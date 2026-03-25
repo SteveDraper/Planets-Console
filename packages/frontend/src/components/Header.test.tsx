@@ -75,7 +75,8 @@ describe('Header', () => {
     const user = userEvent.setup()
     renderHeader()
     await user.click(screen.getByRole('button', { name: /open menu/i }))
-    await user.click(screen.getByRole('menuitem', { name: /^settings$/i }))
+    expect(screen.getByRole('dialog', { name: /header menu/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^settings$/i }))
     expect(screen.getByRole('dialog', { name: /^settings$/i })).toBeInTheDocument()
   })
 

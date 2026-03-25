@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, MoreVertical, RefreshCw } from 'lucide-react'
+import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn, mapSliderToZoom, mapZoomToSlider } from '../lib/utils'
 import { formatViewpointRowLabel } from '../lib/displayFormatters'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
@@ -60,7 +61,9 @@ export function Header({
   const headerMenuTriggerId = `${headerMenuIdRoot}-header-menu-trigger`
   const headerMenuPopoverId = `${headerMenuIdRoot}-header-menu-popover`
   const headerMenuContainerRef = useRef<HTMLDivElement>(null)
+  const headerMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const headerMenuReturnFocusRef = useRef<HTMLElement | null>(null)
+  const changeLoginButtonRef = useRef<HTMLButtonElement>(null)
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
@@ -88,9 +91,7 @@ export function Header({
   const closeHeaderMenuAndReturnFocus = useCallback(() => {
     const target = headerMenuReturnFocusRef.current
     setIsHeaderMenuOpen(false)
-    if (target?.focus) {
-      requestAnimationFrame(() => target.focus())
-    }
+    restoreFocusToElementOrFallback(target, () => headerMenuTriggerRef.current)
   }, [])
 
   const openHeaderMenu = () => {
@@ -121,10 +122,20 @@ export function Header({
     }
   }, [isHeaderMenuOpen, closeHeaderMenuAndReturnFocus])
 
+  useLayoutEffect(() => {
+    if (!isHeaderMenuOpen) return
+    const root = headerMenuContainerRef.current
+    if (!root) return
+    const panel = root.querySelector<HTMLElement>(`#${CSS.escape(headerMenuPopoverId)}`)
+    const firstAction = panel?.querySelector<HTMLElement>('button, [href], input, select, textarea')
+    firstAction?.focus()
+  }, [isHeaderMenuOpen, headerMenuPopoverId])
+
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-[#52575d] bg-[#40454a] px-3 py-1.5 text-slate-200">
       <div className="flex items-center gap-1.5">
         <button
+          ref={changeLoginButtonRef}
           type="button"
           onClick={openLoginModal}
           className="rounded p-0.5 text-slate-400 hover:bg-white/10 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-400"
@@ -141,6 +152,7 @@ export function Header({
         key={loginModalKey}
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
+        getFocusRestoreFallback={() => changeLoginButtonRef.current}
       />
       <GameControl
         selectedGameId={selectedGameId}
@@ -293,9 +305,10 @@ export function Header({
         </div>
         <div ref={headerMenuContainerRef} className="relative">
           <button
+            ref={headerMenuTriggerRef}
             type="button"
             id={headerMenuTriggerId}
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
             aria-expanded={isHeaderMenuOpen}
             aria-controls={isHeaderMenuOpen ? headerMenuPopoverId : undefined}
             onClick={() =>
@@ -313,8 +326,9 @@ export function Header({
           {isHeaderMenuOpen && (
             <div
               id={headerMenuPopoverId}
-              role="menu"
-              aria-labelledby={headerMenuTriggerId}
+              role="dialog"
+              aria-modal="false"
+              aria-label="Header menu"
               className={cn(
                 'absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded border border-[#52575d]',
                 'bg-[#40454a] py-1 shadow-lg'
@@ -322,7 +336,6 @@ export function Header({
             >
               <button
                 type="button"
-                role="menuitem"
                 className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10"
                 onClick={() => {
                   closeHeaderMenu()
@@ -335,7 +348,11 @@ export function Header({
           )}
         </div>
       </div>
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        getFocusRestoreFallback={() => headerMenuTriggerRef.current}
+      />
     </header>
   )
 }

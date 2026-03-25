@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type ReactElement } from 'react'
+import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import {
   useDisplayPreferencesStore,
@@ -9,6 +10,8 @@ import {
 type SettingsModalProps = {
   isOpen: boolean
   onClose: () => void
+  /** When the opener (e.g. a menu item) unmounts before close, focus moves here instead. */
+  getFocusRestoreFallback?: () => HTMLElement | null
 }
 
 const PLAYER_LABEL_OPTIONS: { value: PlayerListLabelMode; label: string }[] = [
@@ -92,17 +95,19 @@ const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   },
 ].sort((a, b) => a.title.localeCompare(b.title))
 
-export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+export function SettingsModal({
+  isOpen,
+  onClose,
+  getFocusRestoreFallback,
+}: SettingsModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
   const closeAndReturnFocus = useCallback(() => {
     const target = returnFocusRef.current
     onClose()
-    if (target?.focus) {
-      requestAnimationFrame(() => target.focus())
-    }
-  }, [onClose])
+    restoreFocusToElementOrFallback(target, getFocusRestoreFallback)
+  }, [onClose, getFocusRestoreFallback])
 
   useLayoutEffect(() => {
     if (!isOpen) return

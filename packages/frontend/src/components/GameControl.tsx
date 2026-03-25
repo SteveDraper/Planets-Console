@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchGames } from '../api/bff'
 import { formatStoredGameRowLabel } from '../lib/displayFormatters'
+import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useShellStore } from '../stores/shell'
@@ -31,6 +32,7 @@ export function GameControl({
   const [addNewId, setAddNewId] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  const gameTriggerRef = useRef<HTMLButtonElement>(null)
 
   const { data, isPending, isError, error: gamesQueryError } = useQuery({
     queryKey: ['bff', 'games'],
@@ -78,9 +80,7 @@ export function GameControl({
     const target = returnFocusRef.current
     setIsOpen(false)
     setAddNewId('')
-    if (target?.focus) {
-      requestAnimationFrame(() => target.focus())
-    }
+    restoreFocusToElementOrFallback(target, () => gameTriggerRef.current)
   }, [])
 
   const openMenu = () => {
@@ -138,6 +138,7 @@ export function GameControl({
   return (
     <div ref={containerRef} className="relative">
       <button
+        ref={gameTriggerRef}
         type="button"
         id={triggerId}
         aria-haspopup="dialog"

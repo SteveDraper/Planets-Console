@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { useSessionStore } from '../stores/session'
 import { cn } from '../lib/utils'
 
 type LoginModalProps = {
   isOpen: boolean
   onClose: () => void
+  getFocusRestoreFallback?: () => HTMLElement | null
 }
 
 /** Last successful login name only (never the password). */
@@ -18,7 +20,7 @@ const loginFieldClassName = cn(
   '[&:autofill]:border-[#52575d] [&:autofill]:bg-[#2b2e32] [&:autofill]:text-slate-200'
 )
 
-export function LoginModal({ isOpen, onClose }: LoginModalProps) {
+export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginModalProps) {
   const setCredentials = useSessionStore((s) => s.setCredentials)
   const dialogRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -29,9 +31,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
   function closeAndReturnFocus() {
     const target = returnFocusRef.current
     onClose()
-    if (target?.focus) {
-      requestAnimationFrame(() => target.focus())
-    }
+    restoreFocusToElementOrFallback(target, getFocusRestoreFallback)
   }
 
   useLayoutEffect(() => {
