@@ -7,6 +7,8 @@ export type GameInfoShellContext = {
   perspectives: PerspectiveRow[]
   /** When false, only the login-matched perspective may be selected in the shell. */
   isGameFinished: boolean
+  /** `game.name` / `settings.name` from last refresh; drives sector display labels. */
+  sectorDisplayName: string | null
 }
 
 type ShellState = {

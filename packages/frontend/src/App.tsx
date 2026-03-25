@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildPerspectivesFromGameInfo,
   getLatestTurnFromGameInfo,
+  getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
   perspectiveOrdinalForName,
   viewpointNameForLogin,
@@ -78,6 +79,7 @@ function ConsoleShell() {
         turn: latestTurn,
         perspectives,
         isGameFinished: isGameFinishedFromGameInfo(data),
+        sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
       })
 
       void queryClient.invalidateQueries({ queryKey: ['bff', 'games'] })
@@ -180,20 +182,25 @@ function ConsoleShell() {
   )
 
   const shellViewpoints = useMemo(() => {
-    const names = shellPerspectiveNames
-    if (names.length === 0) {
+    const perspectives = gameInfoContext?.perspectives ?? []
+    if (perspectives.length === 0) {
       return []
     }
     const finished = gameInfoContext?.isGameFinished ?? true
     if (finished) {
-      return names.map((name) => ({ name, disabled: false }))
+      return perspectives.map((row) => ({
+        name: row.name,
+        raceName: row.raceName,
+        disabled: false,
+      }))
     }
     const allowed = shellDefaultViewpointName
-    return names.map((name) => ({
-      name,
-      disabled: allowed == null ? true : name !== allowed,
+    return perspectives.map((row) => ({
+      name: row.name,
+      raceName: row.raceName,
+      disabled: allowed == null ? true : row.name !== allowed,
     }))
-  }, [shellPerspectiveNames, gameInfoContext?.isGameFinished, shellDefaultViewpointName])
+  }, [gameInfoContext?.perspectives, gameInfoContext?.isGameFinished, shellDefaultViewpointName])
 
   useEffect(() => {
     if (!gameInfoContext || gameInfoContext.isGameFinished) {

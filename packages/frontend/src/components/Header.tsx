@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, MoreVertical, RefreshCw } from 'lucide-react'
+import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn, mapSliderToZoom, mapZoomToSlider } from '../lib/utils'
+import { formatViewpointRowLabel } from '../lib/displayFormatters'
+import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
-import { LoginModal } from './LoginModal'
 import { GameControl } from './GameControl'
+import { LoginModal } from './LoginModal'
+import { SettingsModal } from './SettingsModal'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -24,7 +28,7 @@ type HeaderProps = {
   shellTurnValue: number | null
   onShellTurnChange: (turn: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
-  shellViewpoints: { name: string; disabled: boolean }[]
+  shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
   /** Current viewpoint (login default or user override). */
   shellSelectedViewpointName: string | null
   onShellViewpointChange: (name: string) => void
@@ -48,8 +52,18 @@ export function Header({
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
   const loginName = useSessionStore((s) => s.name)
+  const playerListLabelMode = useDisplayPreferencesStore((s) => s.playerListLabelMode)
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [loginModalKey, setLoginModalKey] = useState(0)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false)
+  const headerMenuIdRoot = useId()
+  const headerMenuTriggerId = `${headerMenuIdRoot}-header-menu-trigger`
+  const headerMenuPopoverId = `${headerMenuIdRoot}-header-menu-popover`
+  const headerMenuContainerRef = useRef<HTMLDivElement>(null)
+  const headerMenuTriggerRef = useRef<HTMLButtonElement>(null)
+  const headerMenuReturnFocusRef = useRef<HTMLElement | null>(null)
+  const changeLoginButtonRef = useRef<HTMLButtonElement>(null)
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
@@ -70,10 +84,58 @@ export function Header({
     setIsLoginModalOpen(true)
   }
 
+  const closeHeaderMenu = useCallback(() => {
+    setIsHeaderMenuOpen(false)
+  }, [])
+
+  const closeHeaderMenuAndReturnFocus = useCallback(() => {
+    const target = headerMenuReturnFocusRef.current
+    setIsHeaderMenuOpen(false)
+    restoreFocusToElementOrFallback(target, () => headerMenuTriggerRef.current)
+  }, [])
+
+  const openHeaderMenu = () => {
+    headerMenuReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setIsHeaderMenuOpen(true)
+  }
+
+  useEffect(() => {
+    if (!isHeaderMenuOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      const el = headerMenuContainerRef.current
+      if (el && !el.contains(e.target as Node)) {
+        setIsHeaderMenuOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeHeaderMenuAndReturnFocus()
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isHeaderMenuOpen, closeHeaderMenuAndReturnFocus])
+
+  useLayoutEffect(() => {
+    if (!isHeaderMenuOpen) return
+    const root = headerMenuContainerRef.current
+    if (!root) return
+    const panel = root.querySelector<HTMLElement>(`#${CSS.escape(headerMenuPopoverId)}`)
+    const firstAction = panel?.querySelector<HTMLElement>('button, [href], input, select, textarea')
+    firstAction?.focus()
+  }, [isHeaderMenuOpen, headerMenuPopoverId])
+
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-[#52575d] bg-[#40454a] px-3 py-1.5 text-slate-200">
       <div className="flex items-center gap-1.5">
         <button
+          ref={changeLoginButtonRef}
           type="button"
           onClick={openLoginModal}
           className="rounded p-0.5 text-slate-400 hover:bg-white/10 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-400"
@@ -90,6 +152,7 @@ export function Header({
         key={loginModalKey}
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
+        getFocusRestoreFallback={() => changeLoginButtonRef.current}
       />
       <GameControl
         selectedGameId={selectedGameId}
@@ -179,9 +242,9 @@ export function Header({
               'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400'
             )}
           >
-            {shellViewpoints.map(({ name, disabled }, index) => (
+            {shellViewpoints.map(({ name, raceName, disabled }, index) => (
               <option key={`${index}-${name}`} value={name} disabled={disabled}>
-                {name}
+                {formatViewpointRowLabel(playerListLabelMode, name, raceName)}
               </option>
             ))}
           </select>
@@ -240,7 +303,56 @@ export function Header({
             {Number.isFinite(mapZoom) ? Math.round(mapZoom * 100) : 100}%
           </span>
         </div>
+        <div ref={headerMenuContainerRef} className="relative">
+          <button
+            ref={headerMenuTriggerRef}
+            type="button"
+            id={headerMenuTriggerId}
+            aria-haspopup="dialog"
+            aria-expanded={isHeaderMenuOpen}
+            aria-controls={isHeaderMenuOpen ? headerMenuPopoverId : undefined}
+            onClick={() =>
+              isHeaderMenuOpen ? closeHeaderMenuAndReturnFocus() : openHeaderMenu()
+            }
+            className={cn(
+              'rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-300',
+              'focus:outline-none focus:ring-1 focus:ring-slate-400'
+            )}
+            aria-label="Open menu"
+            title="Menu"
+          >
+            <MoreVertical className="h-4 w-4" aria-hidden />
+          </button>
+          {isHeaderMenuOpen && (
+            <div
+              id={headerMenuPopoverId}
+              role="dialog"
+              aria-modal="false"
+              aria-label="Header menu"
+              className={cn(
+                'absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded border border-[#52575d]',
+                'bg-[#40454a] py-1 shadow-lg'
+              )}
+            >
+              <button
+                type="button"
+                className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10"
+                onClick={() => {
+                  closeHeaderMenu()
+                  setIsSettingsOpen(true)
+                }}
+              >
+                Settings
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        getFocusRestoreFallback={() => headerMenuTriggerRef.current}
+      />
     </header>
   )
 }

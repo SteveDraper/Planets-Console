@@ -4,8 +4,11 @@ This router is mounted on the BFF sub-app at prefix `/games`, so **GET /games** 
 when using `TestClient(bff.app)` or OpenAPI for the BFF app alone. The root server mounts the
 BFF under `/bff`, so the SPA and full-stack docs use **GET /bff/games**.
 
-The handler maps Core store path `games` shallow children to `{"games": [{"id": "..."}]}`.
-If `games` does not exist (`NotFoundError` from the store), returns an empty list.
+The handler maps Core store path `games` shallow children to `{"games": [{"id": "..."}, ...]}`.
+Each item may include `sectorName` when `games/{id}/info` has a title (`game.name` or
+`settings.name`). Titles are memoized in-process per game id so repeated list requests avoid
+re-reading every `games/{id}/info`. If `games` does not exist (`NotFoundError` from the store),
+returns an empty list.
 
 **POST /games/{game_id}/info** forwards the SPA refresh payload to Core `GameService` (same
 contract as Core **POST /api/v1/games/{game_id}/info**): load game info from Planets.nu and
@@ -38,6 +41,48 @@ from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
 
+_sector_title_by_stored_game_id: dict[str, str | None] = {}
+
+
+def _sector_title_from_stored_info_payload(raw: object) -> str | None:
+    """Best-effort sector title from a stored `games/{{id}}/info` JSON object."""
+    if not isinstance(raw, dict):
+        return None
+    for key in ("game", "settings"):
+        block = raw.get(key)
+        if isinstance(block, dict):
+            name = block.get("name")
+            if isinstance(name, str):
+                trimmed = name.strip()
+                if trimmed:
+                    return trimmed
+    return None
+
+
+def _sector_title_from_game_info(info: GameInfo) -> str | None:
+    """Match `_sector_title_from_stored_info_payload` precedence using a loaded `GameInfo`."""
+    for name in (info.game.name, info.settings.name):
+        if isinstance(name, str):
+            trimmed = name.strip()
+            if trimmed:
+                return trimmed
+    return None
+
+
+def _resolved_sector_title_for_listed_game(svc: StoreService, game_id: str) -> str | None:
+    """Sector title for the games list; uses a per-process cache to avoid repeated store reads."""
+    cached = _sector_title_by_stored_game_id.get(game_id)
+    if cached is not None or game_id in _sector_title_by_stored_game_id:
+        return cached
+    try:
+        raw = svc.read(f"games/{game_id}/info")
+    except NotFoundError:
+        _sector_title_by_stored_game_id[game_id] = None
+        return None
+    title = _sector_title_from_stored_info_payload(raw)
+    _sector_title_by_stored_game_id[game_id] = title
+    return title
+
 
 @router.get("")
 def list_stored_games():
@@ -53,7 +98,15 @@ def list_stored_games():
     except NotFoundError:
         return {"games": []}
     children = shallow.get("children") or []
-    return {"games": [{"id": str(child)} for child in children]}
+    games: list[dict[str, str]] = []
+    for child in children:
+        gid = str(child)
+        entry: dict[str, str] = {"id": gid}
+        sector = _resolved_sector_title_for_listed_game(svc, gid)
+        if sector is not None:
+            entry["sectorName"] = sector
+        games.append(entry)
+    return {"games": games}
 
 
 @router.post("/{game_id}/info")
@@ -63,12 +116,14 @@ def post_game_info(game_id: int, body: GameInfoUpdateRequest) -> GameInfo:
     svc = GameService(storage)
     planets = PlanetsNuClient.from_config()
     try:
-        return svc.update_game_info(game_id, body, planets)
+        updated = svc.update_game_info(game_id, body, planets)
     except PlanetsConsoleError as exc:
         raise HTTPException(
             status_code=getattr(exc, "http_error", 500),
             detail=str(exc),
         ) from exc
+    _sector_title_by_stored_game_id[str(game_id)] = _sector_title_from_game_info(updated)
+    return updated
 
 
 @router.post("/{game_id}/turns/ensure")

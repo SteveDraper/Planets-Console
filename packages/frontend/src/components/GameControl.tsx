@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { cn } from '../lib/utils'
 import { fetchGames } from '../api/bff'
+import { formatStoredGameRowLabel } from '../lib/displayFormatters'
+import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
+import { cn } from '../lib/utils'
+import { useDisplayPreferencesStore } from '../stores/displayPreferences'
+import { useShellStore } from '../stores/shell'
 
 type GameControlProps = {
   selectedGameId: string | null
@@ -17,6 +21,8 @@ export function GameControl({
   isGameRefreshPending,
   reportShellError,
 }: GameControlProps) {
+  const sectorListLabelMode = useDisplayPreferencesStore((s) => s.sectorListLabelMode)
+  const sectorDisplayName = useShellStore((s) => s.gameInfoContext?.sectorDisplayName ?? null)
   const idRoot = useId()
   const triggerId = `${idRoot}-game-selector-trigger`
   const popoverId = `${idRoot}-game-selector-popover`
@@ -26,6 +32,7 @@ export function GameControl({
   const [addNewId, setAddNewId] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  const gameTriggerRef = useRef<HTMLButtonElement>(null)
 
   const { data, isPending, isError, error: gamesQueryError } = useQuery({
     queryKey: ['bff', 'games'],
@@ -49,6 +56,17 @@ export function GameControl({
     }
   }, [isError, gamesQueryError, reportShellError])
 
+  const sectorNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const g of data?.games ?? []) {
+      const sn = g.sectorName?.trim()
+      if (sn) {
+        m.set(g.id, sn)
+      }
+    }
+    return m
+  }, [data?.games])
+
   const serverIds = (data?.games ?? []).map((g) => g.id)
   const displayIds = Array.from(new Set([...serverIds, ...sessionExtraIds])).sort()
 
@@ -62,9 +80,7 @@ export function GameControl({
     const target = returnFocusRef.current
     setIsOpen(false)
     setAddNewId('')
-    if (target?.focus) {
-      requestAnimationFrame(() => target.focus())
-    }
+    restoreFocusToElementOrFallback(target, () => gameTriggerRef.current)
   }, [])
 
   const openMenu = () => {
@@ -109,11 +125,20 @@ export function GameControl({
     closeAndReturnFocus()
   }
 
-  const displayLabel = isGameRefreshPending ? 'Refreshing…' : (selectedGameId ?? 'None')
+  const displayLabel = isGameRefreshPending
+    ? 'Refreshing…'
+    : selectedGameId == null
+      ? 'None'
+      : formatStoredGameRowLabel(
+          sectorListLabelMode,
+          selectedGameId,
+          sectorDisplayName ?? sectorNameById.get(selectedGameId)
+        )
 
   return (
     <div ref={containerRef} className="relative">
       <button
+        ref={gameTriggerRef}
         type="button"
         id={triggerId}
         aria-haspopup="dialog"
@@ -158,6 +183,11 @@ export function GameControl({
             >
               {displayIds.map((id) => {
                 const isSelected = selectedGameId === id
+                const rowLabel = formatStoredGameRowLabel(
+                  sectorListLabelMode,
+                  id,
+                  sectorNameById.get(id)
+                )
                 return (
                   <li key={id}>
                     <button
@@ -172,7 +202,7 @@ export function GameControl({
                         isSelected && 'bg-white/10 ring-1 ring-slate-500/60'
                       )}
                     >
-                      {id}
+                      {rowLabel}
                     </button>
                   </li>
                 )
