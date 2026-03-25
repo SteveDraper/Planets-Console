@@ -49,7 +49,20 @@ def test_list_games_returns_child_ids():
     ids = {g["id"] for g in data["games"]}
     assert ids == {"628580", "999"}
     for g in data["games"]:
-        assert list(g.keys()) == ["id"]
+        assert "id" in g
+        assert set(g.keys()) <= {"id", "sectorName"}
+
+
+def test_list_games_includes_sector_name_when_cached_info_has_title():
+    """Each game may include sectorName from stored `games/{id}/info` when present."""
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    response = client.get("/games")
+    assert response.status_code == 200
+    games = response.json()["games"]
+    hit = next(g for g in games if g["id"] == "628580")
+    assert hit.get("sectorName") == "Serada 9 Sector"
 
 
 @patch("bff.routers.games.PlanetsNuClient")

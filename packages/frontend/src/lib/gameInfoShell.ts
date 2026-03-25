@@ -1,9 +1,12 @@
 import type { GameInfoResponse } from '../api/bff'
+import { resolveRaceDisplayNameFromGameInfo } from './planetsNuRaceDisplayName'
 
 /** 1-based player index in game info `players` order, with display name. */
 export type PerspectiveRow = {
   ordinal: number
   name: string
+  /** From turn-style `races` on the payload when present, else static HOST catalog. */
+  raceName: string | null
 }
 
 /**
@@ -52,18 +55,42 @@ export function buildPerspectivesFromGameInfo(data: GameInfoResponse): Perspecti
   }
   return raw.map((entry, i) => {
     let username = ''
-    if (entry && typeof entry === 'object' && 'username' in entry) {
-      const u = (entry as { username: unknown }).username
+    let raceId: number | null = null
+    if (entry && typeof entry === 'object') {
+      const o = entry as Record<string, unknown>
+      const u = o.username
       if (typeof u === 'string') {
         username = u
       }
+      const rid = o.raceid
+      if (typeof rid === 'number' && Number.isFinite(rid)) {
+        raceId = rid
+      }
     }
     const trimmed = username.trim()
+    const name = trimmed || `Player ${i + 1}`
+    const raceName = resolveRaceDisplayNameFromGameInfo(raceId, data)
     return {
       ordinal: i + 1,
-      name: trimmed || `Player ${i + 1}`,
+      name,
+      raceName,
     }
   })
+}
+
+/** Sector title from game info (`game.name` or `settings.name`). */
+export function getSectorDisplayNameFromGameInfo(data: GameInfoResponse): string | null {
+  for (const key of ['game', 'settings'] as const) {
+    const block = (data as Record<string, unknown>)[key]
+    if (block != null && typeof block === 'object' && !Array.isArray(block)) {
+      const n = (block as Record<string, unknown>).name
+      if (typeof n === 'string') {
+        const t = n.trim()
+        if (t) return t
+      }
+    }
+  }
+  return null
 }
 
 /** 1-based perspective slot for Core/BFF, or null if unknown. */

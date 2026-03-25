@@ -1,0 +1,52 @@
+{
+  "races": [
+    {
+      "id": 0,
+      "name": "Unknown"
+    },
+    {
+      "id": 1,
+      "name": "The Solar Federation"
+    },
+    {
+      "id": 2,
+      "name": "The Lizard Alliance"
+    },
+    {
+      "id": 3,
+      "name": "The Bird Men"
+    },
+    {
+      "id": 4,
+      "name": "The Fascist Empire"
+    },
+    {
+      "id": 5,
+      "name": "The Privateers"
+    },
+    {
+      "id": 6,
+      "name": "The Cyborg"
+    },
+    {
+      "id": 7,
+      "name": "The Crystal Confederation"
+    },
+    {
+      "id": 8,
+      "name": "The Evil Empire"
+    },
+    {
+      "id": 9,
+      "name": "The Robotic Imperium"
+    },
+    {
+      "id": 10,
+      "name": "The Rebels"
+    },
+    {
+      "id": 11,
+      "name": "The Colonies of Man"
+    }
+  ]
+}

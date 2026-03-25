@@ -4,8 +4,9 @@ This router is mounted on the BFF sub-app at prefix `/games`, so **GET /games** 
 when using `TestClient(bff.app)` or OpenAPI for the BFF app alone. The root server mounts the
 BFF under `/bff`, so the SPA and full-stack docs use **GET /bff/games**.
 
-The handler maps Core store path `games` shallow children to `{"games": [{"id": "..."}]}`.
-If `games` does not exist (`NotFoundError` from the store), returns an empty list.
+The handler maps Core store path `games` shallow children to `{"games": [{"id": "..."}, ...]}`.
+Each item may include `sectorName` when cached `games/{id}/info` has a title (`game.name` or
+`settings.name`). If `games` does not exist (`NotFoundError` from the store), returns an empty list.
 
 **POST /games/{game_id}/info** forwards the SPA refresh payload to Core `GameService` (same
 contract as Core **POST /api/v1/games/{game_id}/info**): load game info from Planets.nu and
@@ -39,6 +40,25 @@ from fastapi import APIRouter, HTTPException, Query
 router = APIRouter()
 
 
+def _stored_sector_name(svc: StoreService, game_id: str) -> str | None:
+    """Best-effort sector title from cached game info (`game.name` or `settings.name`)."""
+    try:
+        raw = svc.read(f"games/{game_id}/info")
+    except NotFoundError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    for key in ("game", "settings"):
+        block = raw.get(key)
+        if isinstance(block, dict):
+            name = block.get("name")
+            if isinstance(name, str):
+                trimmed = name.strip()
+                if trimmed:
+                    return trimmed
+    return None
+
+
 @router.get("")
 def list_stored_games():
     """Return game ids present under store path `games` (next-hop segment names).
@@ -53,7 +73,15 @@ def list_stored_games():
     except NotFoundError:
         return {"games": []}
     children = shallow.get("children") or []
-    return {"games": [{"id": str(child)} for child in children]}
+    games: list[dict[str, str]] = []
+    for child in children:
+        gid = str(child)
+        entry: dict[str, str] = {"id": gid}
+        sector = _stored_sector_name(svc, gid)
+        if sector is not None:
+            entry["sectorName"] = sector
+        games.append(entry)
+    return {"games": games}
 
 
 @router.post("/{game_id}/info")

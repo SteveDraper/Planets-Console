@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Header } from './Header'
 import { LAST_LOGIN_USERNAME_STORAGE_KEY } from './LoginModal'
+import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
 
 const headerQueryClient = new QueryClient({
@@ -40,6 +41,10 @@ describe('Header', () => {
     localStorage.clear()
     sessionStorage.clear()
     headerQueryClient.clear()
+    useDisplayPreferencesStore.setState({
+      playerListLabelMode: 'player_names_only',
+      sectorListLabelMode: 'sector_ids_only',
+    })
   })
 
   it('shows change-login button and placeholder when not logged in', () => {
@@ -66,6 +71,14 @@ describe('Header', () => {
     expect(screen.queryByLabelText(/^viewpoint$/i)).not.toBeInTheDocument()
   })
 
+  it('opens settings from the header menu', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    await user.click(screen.getByRole('button', { name: /open menu/i }))
+    await user.click(screen.getByRole('menuitem', { name: /^settings$/i }))
+    expect(screen.getByRole('dialog', { name: /^settings$/i })).toBeInTheDocument()
+  })
+
   it('renders viewpoint as a dropdown and reports changes', async () => {
     const user = userEvent.setup()
     const onViewpoint = vi.fn()
@@ -84,8 +97,8 @@ describe('Header', () => {
           shellTurnValue={null}
           onShellTurnChange={() => {}}
           shellViewpoints={[
-            { name: 'Alpha', disabled: false },
-            { name: 'Beta', disabled: false },
+            { name: 'Alpha', raceName: null, disabled: false },
+            { name: 'Beta', raceName: null, disabled: false },
           ]}
           shellSelectedViewpointName="Alpha"
           onShellViewpointChange={onViewpoint}
@@ -115,8 +128,8 @@ describe('Header', () => {
           shellTurnValue={null}
           onShellTurnChange={() => {}}
           shellViewpoints={[
-            { name: 'Alpha', disabled: false },
-            { name: 'Beta', disabled: true },
+            { name: 'Alpha', raceName: null, disabled: false },
+            { name: 'Beta', raceName: null, disabled: true },
           ]}
           shellSelectedViewpointName="Alpha"
           onShellViewpointChange={onViewpoint}

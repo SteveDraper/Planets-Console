@@ -137,6 +137,8 @@ export type CombinedMapData = {
 
 export type StoredGameItem = {
   id: string
+  /** Cached game / settings title when `games/{id}/info` exists in storage. */
+  sectorName?: string
 }
 
 export type GamesListResponse = {

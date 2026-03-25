@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildPerspectivesFromGameInfo,
   getLatestTurnFromGameInfo,
+  getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
   perspectiveOrdinalForName,
   viewpointNameForLogin,
@@ -61,8 +62,8 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows).toEqual([
-      { ordinal: 1, name: 'alice' },
-      { ordinal: 2, name: 'bob' },
+      { ordinal: 1, name: 'alice', raceName: null },
+      { ordinal: 2, name: 'bob', raceName: null },
     ])
   })
 
@@ -73,13 +74,60 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows[0].name).toBe('Player 1')
+    expect(rows[0].raceName).toBeNull()
+  })
+
+  it('prefers wire races[] over the static catalog when both exist', () => {
+    const rows = buildPerspectivesFromGameInfo(
+      minimalInfo({
+        players: [{ username: 'alice', raceid: 2 }],
+        races: [{ id: 2, name: 'Override From Turn RST' }],
+      })
+    )
+    expect(rows[0]).toEqual({
+      ordinal: 1,
+      name: 'alice',
+      raceName: 'Override From Turn RST',
+    })
+  })
+
+  it('uses the static catalog when races[] is absent (planets.nu loadinfo)', () => {
+    const rows = buildPerspectivesFromGameInfo(
+      minimalInfo({
+        players: [{ username: 'bob', raceid: 8 }],
+      })
+    )
+    expect(rows[0].raceName).toBe('The Evil Empire')
+  })
+})
+
+describe('getSectorDisplayNameFromGameInfo', () => {
+  it('prefers game.name over settings.name', () => {
+    expect(
+      getSectorDisplayNameFromGameInfo(
+        minimalInfo({
+          game: { id: 1, name: 'Sector A' },
+          settings: { name: 'Sector B' },
+        })
+      )
+    ).toBe('Sector A')
+  })
+
+  it('falls back to settings.name', () => {
+    expect(
+      getSectorDisplayNameFromGameInfo(minimalInfo({ settings: { name: 'Only Here' } }))
+    ).toBe('Only Here')
+  })
+
+  it('returns null when missing', () => {
+    expect(getSectorDisplayNameFromGameInfo(minimalInfo())).toBeNull()
   })
 })
 
 describe('perspectiveOrdinalForName', () => {
   const p = [
-    { ordinal: 1, name: 'Alpha' },
-    { ordinal: 2, name: 'Beta' },
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
   ]
 
   it('returns null for empty name', () => {
@@ -99,8 +147,8 @@ describe('perspectiveOrdinalForName', () => {
 
 describe('viewpointNameForLogin', () => {
   const p = [
-    { ordinal: 1, name: 'Alpha' },
-    { ordinal: 2, name: 'Beta' },
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
   ]
 
   it('returns first when no login', () => {

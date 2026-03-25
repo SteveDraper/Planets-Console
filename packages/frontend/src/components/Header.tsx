@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, MoreVertical, RefreshCw } from 'lucide-react'
 import { cn, mapSliderToZoom, mapZoomToSlider } from '../lib/utils'
+import { formatViewpointRowLabel } from '../lib/displayFormatters'
+import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
-import { LoginModal } from './LoginModal'
 import { GameControl } from './GameControl'
+import { LoginModal } from './LoginModal'
+import { SettingsModal } from './SettingsModal'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -24,7 +27,7 @@ type HeaderProps = {
   shellTurnValue: number | null
   onShellTurnChange: (turn: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
-  shellViewpoints: { name: string; disabled: boolean }[]
+  shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
   /** Current viewpoint (login default or user override). */
   shellSelectedViewpointName: string | null
   onShellViewpointChange: (name: string) => void
@@ -48,8 +51,16 @@ export function Header({
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
   const loginName = useSessionStore((s) => s.name)
+  const playerListLabelMode = useDisplayPreferencesStore((s) => s.playerListLabelMode)
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [loginModalKey, setLoginModalKey] = useState(0)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false)
+  const headerMenuIdRoot = useId()
+  const headerMenuTriggerId = `${headerMenuIdRoot}-header-menu-trigger`
+  const headerMenuPopoverId = `${headerMenuIdRoot}-header-menu-popover`
+  const headerMenuContainerRef = useRef<HTMLDivElement>(null)
+  const headerMenuReturnFocusRef = useRef<HTMLElement | null>(null)
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
@@ -69,6 +80,46 @@ export function Header({
     setLoginModalKey((k) => k + 1)
     setIsLoginModalOpen(true)
   }
+
+  const closeHeaderMenu = useCallback(() => {
+    setIsHeaderMenuOpen(false)
+  }, [])
+
+  const closeHeaderMenuAndReturnFocus = useCallback(() => {
+    const target = headerMenuReturnFocusRef.current
+    setIsHeaderMenuOpen(false)
+    if (target?.focus) {
+      requestAnimationFrame(() => target.focus())
+    }
+  }, [])
+
+  const openHeaderMenu = () => {
+    headerMenuReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setIsHeaderMenuOpen(true)
+  }
+
+  useEffect(() => {
+    if (!isHeaderMenuOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      const el = headerMenuContainerRef.current
+      if (el && !el.contains(e.target as Node)) {
+        setIsHeaderMenuOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeHeaderMenuAndReturnFocus()
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isHeaderMenuOpen, closeHeaderMenuAndReturnFocus])
 
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-[#52575d] bg-[#40454a] px-3 py-1.5 text-slate-200">
@@ -179,9 +230,9 @@ export function Header({
               'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400'
             )}
           >
-            {shellViewpoints.map(({ name, disabled }, index) => (
+            {shellViewpoints.map(({ name, raceName, disabled }, index) => (
               <option key={`${index}-${name}`} value={name} disabled={disabled}>
-                {name}
+                {formatViewpointRowLabel(playerListLabelMode, name, raceName)}
               </option>
             ))}
           </select>
@@ -240,7 +291,51 @@ export function Header({
             {Number.isFinite(mapZoom) ? Math.round(mapZoom * 100) : 100}%
           </span>
         </div>
+        <div ref={headerMenuContainerRef} className="relative">
+          <button
+            type="button"
+            id={headerMenuTriggerId}
+            aria-haspopup="menu"
+            aria-expanded={isHeaderMenuOpen}
+            aria-controls={isHeaderMenuOpen ? headerMenuPopoverId : undefined}
+            onClick={() =>
+              isHeaderMenuOpen ? closeHeaderMenuAndReturnFocus() : openHeaderMenu()
+            }
+            className={cn(
+              'rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-300',
+              'focus:outline-none focus:ring-1 focus:ring-slate-400'
+            )}
+            aria-label="Open menu"
+            title="Menu"
+          >
+            <MoreVertical className="h-4 w-4" aria-hidden />
+          </button>
+          {isHeaderMenuOpen && (
+            <div
+              id={headerMenuPopoverId}
+              role="menu"
+              aria-labelledby={headerMenuTriggerId}
+              className={cn(
+                'absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded border border-[#52575d]',
+                'bg-[#40454a] py-1 shadow-lg'
+              )}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10"
+                onClick={() => {
+                  closeHeaderMenu()
+                  setIsSettingsOpen(true)
+                }}
+              >
+                Settings
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </header>
   )
 }
