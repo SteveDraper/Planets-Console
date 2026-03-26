@@ -76,8 +76,19 @@ describe('Header', () => {
     renderHeader()
     await user.click(screen.getByRole('button', { name: /open menu/i }))
     expect(screen.getByRole('dialog', { name: /header menu/i })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /^settings$/i }))
+    await user.click(screen.getByRole('button', { name: /^settings\.\.\.$/i }))
     expect(screen.getByRole('dialog', { name: /^settings$/i })).toBeInTheDocument()
+  })
+
+  it('opens about from the header menu', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    await user.click(screen.getByRole('button', { name: /open menu/i }))
+    await user.click(screen.getByRole('button', { name: /^about$/i }))
+    expect(screen.getByRole('dialog', { name: /^about$/i })).toBeInTheDocument()
+    expect(screen.getByText('Planets Analytic Console')).toBeInTheDocument()
+    expect(screen.getByText('Steve Draper')).toBeInTheDocument()
+    expect(screen.getByText('0.1')).toBeInTheDocument()
   })
 
   it('renders viewpoint as a dropdown and reports changes', async () => {
