@@ -71,6 +71,7 @@ Config structure:
   api.storage_asset_path  string or null  [default: null]   JSON for store; null = empty
   api.include_dummy_data  bool     [default: false]  Seed sample game data on startup
   bff.cors_origins        list of strings  CORS origins for the SPA
+  bff.show_initial_game   string or null [default: null]  SPA loads this game without login
 
 See docs/configuration.md for full documentation.
 """

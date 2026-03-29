@@ -33,7 +33,7 @@ TanStack Query owns **data fetched from the BFF** (the SPA never calls the Core 
 |---------|---------|----------|
 | `['bff', '<resource>']` | BFF lists or singleton metadata | `['bff', 'analytics']`, `['bff', 'games']` |
 | `['analytic', <id>, 'table', <scope>]` | Tabular analytic for a **game + turn + perspective** | Scope is `AnalyticShellScope` (or equivalent fields) so changing shell context **refetches** without manual `invalidateQueries`. |
-| `['analytic', <id>, 'map', <scope>]` | Map analytic (including **base-map**) with the same scope rules. |
+| `['analytic', <id>, 'map', ...]` | Map analytic. **base-map** uses key `['analytic', 'base-map', 'map', <scope>, 'planet']` (scope object). **connections** uses a **primitive** key tail so warp and flare settings invalidate cache: `['analytic','connections','map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode]`. |
 | `['bff', 'turnData', gameId, turn, perspective, loginName]` | **Turn presence in storage** (see below) | One logical ensure per distinct shell + identity; not used for analytic payloads. |
 
 **Mutations** (`useMutation`) are for operations that **change server-side** data (e.g. `POST /bff/games/{id}/info`). They may call `queryClient.invalidateQueries` for related lists (e.g. games) when needed.
@@ -60,9 +60,9 @@ Turn blobs live in **Core storage** (`games/{gameId}/{perspective}/turns/{turn}`
 
 **Ensure query (`App.tsx`):**
 
-- **Endpoint:** `POST /bff/games/{gameId}/turns/ensure` with `{ turn, perspective, username, password? }` (same credential pattern as game info refresh).
+- **Endpoint:** `POST /bff/games/{gameId}/turns/ensure` with `{ turn, perspective, username, password? }` (same credential pattern as game info refresh). Username may be empty **only** when the turn is **already** in storage (no Planets.nu loadturn); the shell enables this path when the selected game matches **`bff.show_initial_game`** from bootstrap config (dev/demo).
 - **Query key:** `['bff', 'turnData', gameId, turn, perspective, loginName]` (primitives only; **do not** put the session password in the key).
-- **Enabled** only when shell scope is complete **and** a non-empty login name is set (`turnEnsureEnabled`). If the user has not set a login name, the ensure query does not run; the main area explains that turn data cannot be loaded.
+- **Enabled** when shell scope is complete **and** either a non-empty login name is set **or** the “initial game without login” path applies (see `App.tsx` `turnAllowWithoutLogin`). If ensure is disabled because login is missing and the path above does not apply, the main area explains that turn data cannot be loaded.
 - **Caching:** `staleTime: Infinity` and `refetchOnWindowFocus: false` so a stable scope does not trigger duplicate ensure POSTs; changing game, turn, perspective, or login name changes the key and runs **at most one** new ensure for that key.
 
 **Why this yields a single ensure when turn and perspective change together (e.g. new game selection):**
@@ -107,3 +107,4 @@ The **BFF** does not introduce its own persistence; it shapes responses for the 
 | Storage protocol and CRUD | [design-storage-abstraction-and-crud-api.md](design-storage-abstraction-and-crud-api.md) |
 | Shell error bar and query/mutation failures | [design-shell-error-handling.md](design-shell-error-handling.md) |
 | Game selection UX | [design-issue-13-game-selection.md](design-issue-13-game-selection.md) |
+| Connections map analytic (reachability, flares, BFF) | [design-connections-analytic.md](design-connections-analytic.md) |

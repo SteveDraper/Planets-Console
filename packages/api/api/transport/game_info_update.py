@@ -12,7 +12,10 @@ from api.models.game_info_operations import GameInfoUpdateOperation
 class RefreshGameInfoParams(BaseModel):
     """Parameters for operation `refresh`."""
 
-    username: str = Field(min_length=1)
+    username: str = Field(
+        default="",
+        description="Non-empty required for refresh; ensure-turn may omit when data is local.",
+    )
     password: str | None = None
 
 

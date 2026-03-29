@@ -46,6 +46,11 @@ As you work through a plan, you will encounter existing bugs, tech debt, or desi
 
 Never silently absorb scope. Every unplanned fix is a decision point.
 
+## Consult existing documentation first
+
+Before analysing code first analyse existing design documents.  Only analyse code if you need
+to clarify finer points that are ambiguous in the documentation in order to formulate the plan.
+
 ## Communicate the plan before executing
 
 Before starting any phase, confirm the user has seen and approved the plan for that phase. Don't begin implementation while the plan is still being discussed. A plan that isn't agreed on is just a guess.

@@ -1,7 +1,8 @@
 """Game info and turn data REST API routes."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
+from api.concepts.planet_connections import FlareConnectionMode
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
@@ -69,7 +70,18 @@ def get_turn_analytics(
     perspective: int,
     turn_number: int,
     analytic_id: str,
+    warp_speed: int | None = Query(None, ge=1, le=9, alias="warpSpeed"),
+    gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
+    flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
     svc: GameService = Depends(get_game_service),
 ):
     """Return per-analytic map data derived from turn state."""
-    return svc.get_turn_analytics(game_id, perspective, turn_number, analytic_id)
+    return svc.get_turn_analytics(
+        game_id,
+        perspective,
+        turn_number,
+        analytic_id,
+        connection_warp_speed=warp_speed,
+        connection_gravitonic_movement=gravitonic_movement,
+        connection_flare_mode=flare_mode,
+    )

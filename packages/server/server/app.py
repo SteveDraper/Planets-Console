@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from api.app import app as api_app
+from api.services.seed import run_startup_seed_if_configured
 from bff.app import app as bff_app
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -28,7 +29,7 @@ def _frontend_dist() -> Path | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Shared startup/shutdown when needed
+    run_startup_seed_if_configured()
     yield
 
 

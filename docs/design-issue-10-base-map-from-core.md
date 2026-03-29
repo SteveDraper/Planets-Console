@@ -189,3 +189,9 @@ Implementation choice:
 1. Transport model choice: should the Core endpoint return a “map-like” `{nodes, edges}` payload or a Core-only `{planets}` payload that BFF transforms? This doc chooses `{nodes, edges}` for simplicity and contract stability.
 2. Label field: does the frontend require `label`? (frontend supports it but map rendering currently mainly needs `x/y` and `id`; this should be confirmed once base-map rendering is fully implemented beyond placeholder.)
 
+---
+
+## 9. Related: Connections overlay
+
+**Travel edges** between planets are **not** part of the base-map payload. They come from the selectable **Connections** analytic (`GET /bff/analytics/connections/map`), merged in the SPA onto **`base-map:p{planetId}`** nodes. See [design-connections-analytic.md](design-connections-analytic.md).
+

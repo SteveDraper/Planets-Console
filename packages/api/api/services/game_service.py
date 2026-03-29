@@ -4,6 +4,10 @@ import re
 
 from dacite.exceptions import DaciteError
 
+from api.concepts.planet_connections import (
+    FlareConnectionMode,
+    connection_routes_for_planets,
+)
 from api.concepts.warp_well import (
     WarpWellKind,
     coordinate_in_warp_well,
@@ -129,6 +133,8 @@ class GameService:
     def refresh_game_info(
         self, game_id: int, params: RefreshGameInfoParams, planets: PlanetsNuClient
     ) -> GameInfo:
+        if not params.username.strip():
+            raise ValidationError("username is required to refresh game info.")
         if self._get_stored_api_key(params.username) is None:
             if params.password is None:
                 raise LoginCredentialsRequiredError("Login credentials are required.")
@@ -221,6 +227,11 @@ class GameService:
         except NotFoundError:
             pass
 
+        if not params.username.strip():
+            raise LoginCredentialsRequiredError(
+                "Login name is required to load turn data when it is not already in storage."
+            )
+
         player_id = self._player_id_for_perspective(game_id, perspective)
 
         if self._get_stored_api_key(params.username) is None:
@@ -289,7 +300,15 @@ class GameService:
         return {"analyticId": "base-map", "nodes": nodes, "edges": []}
 
     def get_turn_analytics(
-        self, game_id: int, perspective: int, turn_number: int, analytic_id: str
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        analytic_id: str,
+        *,
+        connection_warp_speed: int | None = None,
+        connection_gravitonic_movement: bool = False,
+        connection_flare_mode: FlareConnectionMode = FlareConnectionMode.OFF,
     ) -> dict:
         """Return per-analytic map data derived from turn state.
 
@@ -298,6 +317,23 @@ class GameService:
         """
         if analytic_id == "base-map":
             return self.get_map_base(game_id, perspective, turn_number)
+        if analytic_id == "connections":
+            turn = self.get_turn_info(game_id, perspective, turn_number)
+            warp = connection_warp_speed if connection_warp_speed is not None else 9
+            if warp < 1 or warp > 9:
+                raise ValidationError("warpSpeed must be between 1 and 9.")
+            routes = connection_routes_for_planets(
+                list(turn.planets),
+                warp_speed=warp,
+                gravitonic_movement=connection_gravitonic_movement,
+                flare_mode=connection_flare_mode,
+            )
+            return {
+                "analyticId": "connections",
+                "nodes": [],
+                "edges": [],
+                "routes": routes,
+            }
         # Unknown analytic: treat as validation error so the BFF can decide whether
         # to surface 404/422 vs fallback. This raises ValidationError, which maps to HTTP 422.
         raise ValidationError(f"Unknown analytic_id: {analytic_id!r}")

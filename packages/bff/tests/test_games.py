@@ -10,6 +10,8 @@ from api.config import set_config as set_api_config
 from api.services.store_service import StoreService
 from api.storage import clear_backend_cache, get_storage
 from bff.app import app
+from bff.config import BffConfig
+from bff.config import set_config as set_bff_config
 from bff.routers import games as games_router
 from fastapi.testclient import TestClient
 
@@ -22,6 +24,7 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "api" / "api" / "st
 def _reset_storage():
     clear_backend_cache()
     games_router._sector_title_by_stored_game_id.clear()
+    set_bff_config(BffConfig())
     set_api_config(
         ApiConfig(
             storage_backend="ephemeral",
@@ -154,6 +157,16 @@ def test_post_turns_ensure_uses_loadturn_when_missing(mock_pc_class):
     storage.get("games/628580/1/turns/111")
 
 
+def test_get_stored_game_info():
+    """GET /games/{id}/info returns game info from storage without Planets.nu."""
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    response = client.get("/games/628580/info")
+    assert response.status_code == 200
+    assert response.json()["game"]["id"] == 628580
+
+
 @patch("bff.routers.games.PlanetsNuClient")
 def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     mock_instance = mock_pc_class.from_config.return_value
@@ -174,6 +187,29 @@ def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     )
     assert response.status_code == 200
     mock_instance.load_turn.assert_not_called()
+
+
+@patch("bff.routers.games.PlanetsNuClient")
+def test_post_turns_ensure_empty_username_when_turn_in_storage(mock_pc_class):
+    """Turn already in storage: no username and no Planets.nu loadturn."""
+    mock_instance = mock_pc_class.from_config.return_value
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+
+    response = client.post(
+        "/games/628580/turns/ensure",
+        json={
+            "turn": 111,
+            "perspective": 1,
+            "username": "",
+        },
+    )
+    assert response.status_code == 200
+    mock_instance.load_turn.assert_not_called()
+    mock_instance.login.assert_not_called()
 
 
 def test_post_warp_well_coordinate_in_well_matches_core():

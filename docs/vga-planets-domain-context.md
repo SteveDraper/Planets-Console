@@ -54,7 +54,7 @@ Derived from wiki overview + **Load Turn** payload (§6). These are the natural 
 
 **Economy / resources (typical):** megacredits, **minerals** (often tritanium, duranium, molybdenum, neutronium), **fuel**, colonists/clans, fighters, torpedoes. Structures scale with population (mines/factories/defense posts — see wiki *Planets* page for NU vs THOST rounding).
 
-**Map:** Described as a **graph** in product terms: **planets as nodes**, **connections/routes as edges** — draggable, zoomable; scale slider in map mode.
+**Map:** Described as a **graph** in product terms: **planets as nodes**, **connections/routes as edges** — draggable, zoomable; scale slider in map mode. The console’s **Connections** analytic implements one-turn reachability (wells + flares) in [design-connections-analytic.md](design-connections-analytic.md).
 
 ---
 

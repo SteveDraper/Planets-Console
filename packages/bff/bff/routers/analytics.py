@@ -1,10 +1,12 @@
 """Analytics endpoints for the console shell.
 
-Base map is a fixed layer derived from the Core API. Other analytics are placeholders.
+The **base-map** analytic is planet nodes only (no travel edges). The **connections** analytic
+adds reachability routes separately. Other entries may be placeholders.
 All data routes require ``gameId``, ``turn``, and ``perspective`` query parameters so the
 BFF can load turn-scoped analytics from Core (no hard-coded game context).
 """
 
+from api.concepts.planet_connections import FlareConnectionMode
 from api.errors import PlanetsConsoleError
 from api.services.game_service import GameService
 from api.storage import get_storage
@@ -12,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
 
-# type: "base" = always-on base map (planets + edges), not shown in analytics pane.
+# type: "base" = always-on base map (planet nodes only; edges empty), not shown in analytics pane.
 # type: "selectable" = user can enable/disable in the left bar.
 ANALYTICS_LIST = [
     {
@@ -27,6 +29,13 @@ ANALYTICS_LIST = [
         "name": "Placeholder Table",
         "supportsTable": True,
         "supportsMap": False,
+        "type": "selectable",
+    },
+    {
+        "id": "connections",
+        "name": "Connections",
+        "supportsTable": False,
+        "supportsMap": True,
         "type": "selectable",
     },
     {
@@ -47,12 +56,12 @@ ANALYTICS_LIST = [
 
 
 def _turn_analytics_from_core(
-    game_id: int, perspective: int, turn_number: int, analytic_id: str
+    game_id: int, perspective: int, turn_number: int, analytic_id: str, **kwargs
 ) -> dict:
     storage = get_storage()
     svc = GameService(storage)
     try:
-        return svc.get_turn_analytics(game_id, perspective, turn_number, analytic_id)
+        return svc.get_turn_analytics(game_id, perspective, turn_number, analytic_id, **kwargs)
     except PlanetsConsoleError as e:
         raise HTTPException(
             status_code=getattr(e, "http_error", 500),
@@ -88,14 +97,30 @@ def get_analytic_map(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=1),
+    warp_speed: int = Query(9, ge=1, le=9, alias="warpSpeed"),
+    gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
+    flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
 ):
-    """Map data (nodes/edges). Base map = planets + connections; selectable analytics add overlays.
+    """Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
 
-    Nodes use fixed Cartesian coordinates (x, y). Base map is always fetched first;
-    selectable analytics contribute extra nodes/edges or (later) highlights.
+    **connections** returns route pairs for the SPA to draw as edges on those nodes.
+    Other analytic ids return placeholder shapes until implemented.
+
+    Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
+    enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
     """
     if analytic_id == "base-map":
         return _turn_analytics_from_core(game_id, perspective, turn, "base-map")
+    if analytic_id == "connections":
+        return _turn_analytics_from_core(
+            game_id,
+            perspective,
+            turn,
+            "connections",
+            connection_warp_speed=warp_speed,
+            connection_gravitonic_movement=gravitonic_movement,
+            connection_flare_mode=flare_mode,
+        )
     # Selectable analytics: placeholder 4-node square for now
     return {
         "analyticId": analytic_id,

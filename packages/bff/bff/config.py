@@ -11,6 +11,8 @@ class BffConfig:
 
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
     """Allowed CORS origins for the SPA."""
+    show_initial_game: str | None = None
+    """When set, the SPA loads this stored game id from the server without login (dev/demo)."""
 
 
 def get_config() -> BffConfig:

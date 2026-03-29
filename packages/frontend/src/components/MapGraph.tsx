@@ -131,12 +131,19 @@ function StraightEdgeOnePixel(props: EdgeProps) {
     targetY,
   })
 
+  const viaFlare =
+    props.data != null &&
+    typeof props.data === 'object' &&
+    (props.data as { viaFlare?: boolean }).viaFlare === true
+
   return (
     <BaseEdge
       path={path}
       style={{
-        stroke: '#b1b1b7',
+        stroke: viaFlare ? '#facc15' : '#b1b1b7',
         strokeWidth: 1 / scale,
+        opacity: 0.5,
+        ...(viaFlare ? { strokeDasharray: `${4 / scale} ${3 / scale}` } : {}),
       }}
     />
   )
@@ -180,6 +187,7 @@ function toEdges(edges: CombinedMapData['edges']): Edge[] {
     sourceHandle: 's',
     targetHandle: 't',
     type: 'straight',
+    data: { viaFlare: e.viaFlare === true },
   }))
 }
 
