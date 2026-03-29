@@ -256,6 +256,14 @@ class TestEnsureTurnLoaded:
         assert ti.settings.turn == 111
         assert planets.load_turn_calls == []
 
+    def test_allows_empty_username_when_turn_already_stored(self, seeded_backend, turn_rst):
+        svc = GameService(seeded_backend)
+        planets = FakePlanetsNuWithTurn({}, turn_rst)
+        params = RefreshGameInfoParams(username="")
+        ti = svc.ensure_turn_loaded(628580, 1, 111, params, planets)
+        assert ti.settings.turn == 111
+        assert planets.load_turn_calls == []
+
     def test_fetches_and_stores_when_missing(self, turn_rst):
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
@@ -334,3 +342,18 @@ class TestEnsureTurnLoaded:
         with pytest.raises(LoginCredentialsRequiredError):
             svc.ensure_turn_loaded(628580, 1, 42, params, planets)
         assert planets.load_turn_calls == []
+
+    def test_rejects_empty_username_when_turn_missing(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        svc = GameService(backend)
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, turn_rst)
+        params = RefreshGameInfoParams(username="")
+        with pytest.raises(LoginCredentialsRequiredError, match="not already in storage"):
+            svc.ensure_turn_loaded(628580, 1, 111, params, planets)
+        assert planets.load_turn_calls == []
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/111")

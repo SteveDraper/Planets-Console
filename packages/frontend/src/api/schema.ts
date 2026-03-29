@@ -53,10 +53,13 @@ export interface paths {
         };
         /**
          * Get Analytic Map
-         * @description Map data (nodes/edges). Base map = planets + connections; selectable analytics add overlays.
+         * @description Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
          *
-         *     Nodes use fixed Cartesian coordinates (x, y). Base map is always fetched first;
-         *     selectable analytics contribute extra nodes/edges or (later) highlights.
+         *     **connections** returns route pairs for the SPA to draw as edges on those nodes.
+         *     Other analytic ids return placeholder shapes until implemented.
+         *
+         *     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
+         *     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
          */
         get: operations["get_analytic_map_analytics__analytic_id__map_get"];
         put?: never;

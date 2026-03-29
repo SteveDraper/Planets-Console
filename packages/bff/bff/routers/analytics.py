@@ -1,6 +1,7 @@
 """Analytics endpoints for the console shell.
 
-Base map is a fixed layer derived from the Core API. Other analytics are placeholders.
+The **base-map** analytic is planet nodes only (no travel edges). The **connections** analytic
+adds reachability routes separately. Other entries may be placeholders.
 All data routes require ``gameId``, ``turn``, and ``perspective`` query parameters so the
 BFF can load turn-scoped analytics from Core (no hard-coded game context).
 """
@@ -13,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
 
-# type: "base" = always-on base map (planets + edges), not shown in analytics pane.
+# type: "base" = always-on base map (planet nodes only; edges empty), not shown in analytics pane.
 # type: "selectable" = user can enable/disable in the left bar.
 ANALYTICS_LIST = [
     {
@@ -100,10 +101,13 @@ def get_analytic_map(
     gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
 ):
-    """Map data (nodes/edges). Base map = planets + connections; selectable analytics add overlays.
+    """Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
 
-    Nodes use fixed Cartesian coordinates (x, y). Base map is always fetched first;
-    selectable analytics contribute extra nodes/edges or (later) highlights.
+    **connections** returns route pairs for the SPA to draw as edges on those nodes.
+    Other analytic ids return placeholder shapes until implemented.
+
+    Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
+    enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
     """
     if analytic_id == "base-map":
         return _turn_analytics_from_core(game_id, perspective, turn, "base-map")

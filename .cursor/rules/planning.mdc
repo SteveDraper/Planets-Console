@@ -48,7 +48,7 @@ Never silently absorb scope. Every unplanned fix is a decision point.
 
 ## Consult existing documentation first
 
-Before analysing code first analyse existign design documents.  Only analyse code if you need
+Before analysing code first analyse existing design documents.  Only analyse code if you need
 to clarify finer points that are ambiguous in the documentation in order to formulate the plan.
 
 ## Communicate the plan before executing

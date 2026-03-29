@@ -227,6 +227,11 @@ class GameService:
         except NotFoundError:
             pass
 
+        if not params.username.strip():
+            raise LoginCredentialsRequiredError(
+                "Login name is required to load turn data when it is not already in storage."
+            )
+
         player_id = self._player_id_for_perspective(game_id, perspective)
 
         if self._get_stored_api_key(params.username) is None:
