@@ -18,7 +18,7 @@ The amalgamated config has three top-level keys:
 |----------|--------|
 | `server` | Bind host and port |
 | `api`    | Core REST API (storage backend, asset path) |
-| `bff`    | BFF layer (CORS origins, etc.) |
+| `bff`    | BFF layer (CORS origins, SPA bootstrap options) |
 
 ### `server` (process)
 
@@ -40,6 +40,7 @@ The amalgamated config has three top-level keys:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `cors_origins` | list of strings | `["http://localhost:5173", "http://127.0.0.1:5173"]` | Allowed CORS origins for the SPA. |
+| `show_initial_game` | string, int, or null | null | When set to a non-empty string (numeric ids may be written unquoted in YAML), the SPA loads that **stored** game id without login via `GET /bff/shell/bootstrap` and stored game info. Requires the game (and turn) to exist in storage; pair with `api.include_dummy_data` for the sample game in dev. See [Frontend and backend state](design-frontend-and-backend-state.md). |
 
 Example `.config.yaml`:
 
@@ -57,6 +58,7 @@ bff:
   cors_origins:
     - http://localhost:5173
     - http://127.0.0.1:5173
+  # show_initial_game: "628580"   # optional SPA auto-load of a stored game id (dev)
 ```
 
 ## Command-line overrides

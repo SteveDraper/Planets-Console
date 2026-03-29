@@ -109,6 +109,20 @@ def list_stored_games():
     return {"games": games}
 
 
+@router.get("/{game_id}/info")
+def get_stored_game_info(game_id: int) -> GameInfo:
+    """Return game info already in storage (no Planets.nu refresh)."""
+    storage = get_storage()
+    svc = GameService(storage)
+    try:
+        return svc.get_game_info(game_id)
+    except PlanetsConsoleError as exc:
+        raise HTTPException(
+            status_code=getattr(exc, "http_error", 500),
+            detail=str(exc),
+        ) from exc
+
+
 @router.post("/{game_id}/info")
 def post_game_info(game_id: int, body: GameInfoUpdateRequest) -> GameInfo:
     """Refresh game info from Planets.nu (`refresh`); returns updated `GameInfo`."""

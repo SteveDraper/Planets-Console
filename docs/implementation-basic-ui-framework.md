@@ -64,7 +64,7 @@ Architecture constraints: [.cursor/rules/architecture.mdc](../.cursor/rules/arch
 
 ## Map mode (as implemented)
 
-- **Base map**: A pseudo-analytic of type `base` supplies the core map (planets as nodes, connections as edges). It is always included when map mode is active and is intentionally omitted from the analytics sidebar. User-selectable map analytics add their own nodes and edges on top.
+- **Base map**: A pseudo-analytic of type `base` supplies **planet** nodes (and empty edges on that layer). It is always included when map mode is active and is omitted from the analytics sidebar. Other map-capable analytics (e.g. **Connections** for travel reachability edges) add overlays; see [design-connections-analytic.md](design-connections-analytic.md).
 - **Initial view fit**: On first render, the map computes the bounding rectangle of all node centers, centers it in the viewport, and chooses an initial zoom that leaves roughly 10% margin on the constrained dimension.
 - **Rendering**: React Flow uses an invisible routing node at each planet center, an external fixed-size dot overlay, and a custom straight-edge renderer. Planet dots stay 8 px on screen regardless of zoom, while edge thickness remains visually about 1 px and edge endpoints stay aligned to the dot centers.
 - **Interaction**: The map is read-only. Users can pan by dragging and zoom by scroll wheel, trackpad pinch, or the header scale slider. The header slider uses a logarithmic mapping and stays synchronized with the current map zoom.

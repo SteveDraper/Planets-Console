@@ -91,13 +91,27 @@ The left column is titled **Analytics**. Each row is one analytic with a **check
 
 - Check an analytic to **include** it in the current view (tabular tables or map layers, depending on mode).
 - Analytics that **do not support** the current mode stay visible but look **greyed out**; their checkboxes are disabled until you switch mode.
-- The **base map** (planets and connections) is not listed here; when present, it is combined automatically in map mode with your enabled map-capable analytics.
+- The **base map** layer (planet positions as nodes) is **not** listed here; in **map** mode it is still fetched and combined automatically with whatever map-capable analytics you enable (see below).
+- **Connections** is a separate **selectable** analytic: it adds **travel reachability** edges between planets. Enable its checkbox to load those edges; see [Connections analytic](#connections-analytic-map-mode).
 
 ![Analytics list with some enabled and one greyed for current mode](images/user-guide/08-analytics-bar.png)
 
 *Screenshot placeholder: sidebar with multiple analytics, mixed enabled/greyed.*
 
 While the list of analytics is loading from the server, the main area may show **Loading analytics…**
+
+### Connections analytic (map mode)
+
+**Connections** shows **one-turn** ship reachability between planets (warp wells, optional **flare** tricks) for the current game, turn, and viewpoint.
+
+- **Enable** it with the **Connections** checkbox in the sidebar (map mode only in practice; tabular support may be a placeholder).
+- When enabled, a **Flares** row appears under the tile title:
+  - **Do not show flares** -- only **direct** warp-well links; pairs reachable **only** via a flare **do not** appear.
+  - **Show flares** -- direct links (solid gray) **plus** flare-only links where applicable (**dashed yellow**).
+  - **Show only flares** -- only flare-assisted pairs.
+- Use the **chevron** on the Connections row to expand **Warp** (1--9) and **Gravitonic movement** (doubles effective range in the model).
+
+Technical detail, API query parameters, and merge rules live in [design-connections-analytic.md](design-connections-analytic.md).
 
 ---
 
@@ -117,7 +131,7 @@ With **Tabular** selected, the main area shows **one section per enabled analyti
 
 ## Main area -- map mode
 
-With **Map** selected, the main area shows an interactive **graph map** (React Flow): planets as nodes and connections as edges.
+With **Map** selected, the main area shows an interactive **graph map** (React Flow): **planets as nodes**; **travel edges** appear when you enable the **Connections** analytic (see [Connections analytic](#connections-analytic-map-mode) in the sidebar section).
 
 ### Pan and zoom
 
@@ -131,7 +145,7 @@ With **Map** selected, the main area shows an interactive **graph map** (React F
 
 ### Combining analytics
 
-Map layers combine the **base map** (if available) with every **enabled** analytic that supports the map. If nothing map-capable is enabled or no base map exists, you may see a message explaining that.
+Map layers combine the **base map** (planet nodes from the current turn) with every **enabled** analytic that supports the map. The **Connections** analytic adds **edges** between planet nodes using the same ids as the base map. If no map-capable analytic is enabled **and** the app cannot build a base map, you may see a message explaining that.
 
 ### Loading states
 
@@ -197,9 +211,9 @@ Opening the login flow shows a centered dialog: **Log in to planets.nu**, fields
 | Viewpoint | Choose perspective player when allowed |
 | Tabular / Map | Switch main content |
 | Scale | Map zoom (map mode only) |
-| Analytics | Enable/disable each analytic; grey = wrong mode |
+| Analytics | Enable/disable each analytic; grey = wrong mode; **Connections** adds travel edges (see sidebar section) |
 | Map options | Planet label content and detail level |
 | Zoom | Higher zoom shows warp well grid, then fainter full coordinate grid (see map section) |
 | Error bar | Read errors; dismiss per message |
 
-For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md).
+For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md). For the Connections reachability model and BFF contract, see [design-connections-analytic.md](design-connections-analytic.md).

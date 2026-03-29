@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
   CombinedMapData,
+  ConnectionsFlareMode,
+  ConnectionsMapParams,
   MapDataResponse,
+  MapEdge,
 } from '../api/bff'
 import { MapGraph } from './MapGraph'
 import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
@@ -19,10 +22,13 @@ type ViewMode = 'tabular' | 'map'
 
 function combineMapData(
   analyticIds: string[],
-  results: { data?: MapDataResponse }[]
+  results: { data?: MapDataResponse }[],
+  /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
+  liveConnectionsParams: ConnectionsMapParams | null
 ): CombinedMapData {
+  const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
   const nodes: CombinedMapData['nodes'] = []
-  const edges: CombinedMapData['edges'] = []
+  const edges: MapEdge[] = []
   results.forEach((result, idx) => {
     const data = result.data
     const prefix = analyticIds[idx] ?? ''
@@ -41,11 +47,35 @@ function combineMapData(
       }
     })
     data.edges.forEach((e) => {
-      edges.push({
+      const edge: MapEdge = {
         source: `${prefix}:${e.source}`,
         target: `${prefix}:${e.target}`,
-      })
+      }
+      if (e.viaFlare) edge.viaFlare = true
+      edges.push(edge)
     })
+    if (
+      data.analyticId === 'connections' &&
+      baseMapAnalyticId != null &&
+      data.routes != null &&
+      data.routes.length > 0
+    ) {
+      let routesToDraw = data.routes
+      if (liveConnectionsParams != null) {
+        if (liveConnectionsParams.flareMode === 'only') {
+          routesToDraw = routesToDraw.filter((r) => r.viaFlare === true)
+        } else if (liveConnectionsParams.flareMode === 'off') {
+          routesToDraw = routesToDraw.filter((r) => r.viaFlare !== true)
+        }
+      }
+      for (const r of routesToDraw) {
+        edges.push({
+          source: `${baseMapAnalyticId}:p${r.fromPlanetId}`,
+          target: `${baseMapAnalyticId}:p${r.toPlanetId}`,
+          viaFlare: r.viaFlare === true,
+        })
+      }
+    }
   })
   return { nodes, edges }
 }
@@ -62,6 +92,8 @@ type MainAreaProps = {
   turnEnsureIsError: boolean
   /** Scope is set but login name is missing, so turn cannot be ensured. */
   turnBlockedNoLogin: boolean
+  /** Parameters for the Connections map analytic (refetch when these change). */
+  connectionsMapParams: ConnectionsMapParams
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
@@ -142,41 +174,6 @@ function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]): stri
   return base ? [base, ...withoutBase] : withoutBase
 }
 
-function useStableCombinedMapData(
-  mapIds: string[],
-  mapQueryData: Array<MapDataResponse | undefined>
-): CombinedMapData {
-  const combinedCacheRef = useRef<{
-    mapIds: string[]
-    mapQueryData: Array<MapDataResponse | undefined>
-    combined: CombinedMapData
-  } | null>(null)
-
-  const cachedCombined = combinedCacheRef.current
-  const canReuseCombined =
-    cachedCombined != null &&
-    cachedCombined.mapIds.length === mapIds.length &&
-    cachedCombined.mapQueryData.length === mapQueryData.length &&
-    cachedCombined.mapIds.every((id, i) => id === mapIds[i]) &&
-    cachedCombined.mapQueryData.every((data, i) => data === mapQueryData[i])
-
-  const combined =
-    canReuseCombined && cachedCombined
-      ? cachedCombined.combined
-      : combineMapData(mapIds, mapQueryData.map((data) => ({ data })))
-
-  useEffect(() => {
-    if (canReuseCombined) return
-    combinedCacheRef.current = {
-      mapIds: [...mapIds],
-      mapQueryData: [...mapQueryData],
-      combined,
-    }
-  }, [canReuseCombined, combined, mapIds, mapQueryData])
-
-  return combined
-}
-
 export function MainArea({
   viewMode,
   enabledAnalyticIds,
@@ -186,6 +183,7 @@ export function MainArea({
   turnEnsurePending,
   turnEnsureIsError,
   turnBlockedNoLogin,
+  connectionsMapParams,
   onMapZoomChange,
   onSetZoomReady,
 }: MainAreaProps) {
@@ -201,18 +199,93 @@ export function MainArea({
   )
 
   const mapQueries = useQueries({
-    queries: mapIds.map((analyticId) => ({
-      queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet'] as const,
-      queryFn: () => fetchAnalyticMap(analyticId, analyticScope!),
-      enabled: analyticFetchEnabled,
-      /** Deep nested `planet` on nodes must not be merged from stale query cache references. */
-      structuralSharing: false,
-    })),
+    queries: mapIds.map((analyticId) => {
+      if (analyticId === 'connections') {
+        const queryKey =
+          analyticScope != null
+            ? ([
+                'analytic',
+                'connections',
+                'map',
+                analyticScope.gameId,
+                analyticScope.turn,
+                analyticScope.perspective,
+                connectionsMapParams.warpSpeed,
+                connectionsMapParams.gravitonicMovement,
+                connectionsMapParams.flareMode,
+              ] as const)
+            : ([
+                'analytic',
+                'connections',
+                'map',
+                'idle',
+                0,
+                0,
+                connectionsMapParams.warpSpeed,
+                connectionsMapParams.gravitonicMovement,
+                connectionsMapParams.flareMode,
+              ] as const)
+        return {
+          queryKey,
+          queryFn: async ({ queryKey: qk }) => {
+            if (qk[3] === 'idle') {
+              return {
+                analyticId: 'connections',
+                nodes: [],
+                edges: [],
+              } satisfies MapDataResponse
+            }
+            const [, , , gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode] = qk
+            const scope: AnalyticShellScope = {
+              gameId: String(gameId),
+              turn: Number(turn),
+              perspective: Number(perspective),
+            }
+            const params: ConnectionsMapParams = {
+              warpSpeed: Number(warpSpeed),
+              gravitonicMovement: Boolean(gravitonicMovement),
+              flareMode: flareMode as ConnectionsFlareMode,
+            }
+            return fetchAnalyticMap('connections', scope, params)
+          },
+          enabled: analyticFetchEnabled,
+          placeholderData: undefined,
+          structuralSharing: false as const,
+        }
+      }
+      return {
+        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet'] as const,
+        queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
+        enabled: analyticFetchEnabled,
+        structuralSharing: false as const,
+      }
+    }),
   })
   const pending = mapQueries.some((q) => q.isPending)
   const hasError = mapQueries.some((q) => q.error)
-  const mapQueryData = mapQueries.map((q) => q.data)
-  const combined = useStableCombinedMapData(mapIds, mapQueryData)
+  const mapQueriesStateSignature = mapQueries
+    .map((q) => `${q.dataUpdatedAt}:${q.fetchStatus}:${q.status}`)
+    .join('|')
+  const liveConnectionsParams =
+    mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
+  const mapIdsKey = mapIds.join('\0')
+  const combined = useMemo(
+    () =>
+      combineMapData(
+        mapIds,
+        mapQueries.map((q) => ({ data: q.data })),
+        liveConnectionsParams
+      ),
+    [
+      mapIdsKey,
+      mapQueriesStateSignature,
+      liveConnectionsParams,
+      analyticFetchEnabled,
+      connectionsMapParams.flareMode,
+      connectionsMapParams.warpSpeed,
+      connectionsMapParams.gravitonicMovement,
+    ]
+  )
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(

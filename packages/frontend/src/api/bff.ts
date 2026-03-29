@@ -74,16 +74,68 @@ export type MapNode = {
   ownerName?: string | null
 }
 
+/** Edge in map wire format or after combining route pairs onto base-map node ids. */
+export type MapEdge = {
+  source: string
+  target: string
+  /** True when reachability uses a flare (dashed edge on the map). */
+  viaFlare?: boolean
+}
+
+/** UI-independent planet pair from the Connections analytic (Core/BFF). */
+export type PlanetPairRoute = {
+  fromPlanetId: number
+  toPlanetId: number
+  viaFlare: boolean
+}
+
 export type MapDataResponse = {
   analyticId: string
   nodes: MapNode[]
-  edges: { source: string; target: string }[]
+  edges: MapEdge[]
+  routes?: PlanetPairRoute[]
+}
+
+/** How flare-assisted routes are requested from Core (`flareMode` query). */
+export type ConnectionsFlareMode = 'off' | 'include' | 'only'
+
+/** Query parameters for the Connections map analytic (BFF forwards to Core). */
+export type ConnectionsMapParams = {
+  warpSpeed: number
+  gravitonicMovement: boolean
+  flareMode: ConnectionsFlareMode
 }
 
 /**
  * Parses each node so `planet` / `ownerName` are plain objects (not lost to reference sharing).
  * Accepts `Planet` as an alternate key for the nested snapshot (defensive).
  */
+function normalizePlanetPairRoute(raw: unknown): PlanetPairRoute | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const fromRaw = r.fromPlanetId ?? r.from_planet_id
+  const toRaw = r.toPlanetId ?? r.to_planet_id
+  const fromPlanetId = typeof fromRaw === 'number' ? fromRaw : Number(fromRaw)
+  const toPlanetId = typeof toRaw === 'number' ? toRaw : Number(toRaw)
+  if (!Number.isFinite(fromPlanetId) || !Number.isFinite(toPlanetId)) return null
+  return {
+    fromPlanetId,
+    toPlanetId,
+    viaFlare: r.viaFlare === true,
+  }
+}
+
+function normalizeMapEdge(raw: unknown): MapEdge | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const e = raw as Record<string, unknown>
+  const source = typeof e.source === 'string' ? e.source : String(e.source ?? '')
+  const target = typeof e.target === 'string' ? e.target : String(e.target ?? '')
+  if (source === '' || target === '') return null
+  const edge: MapEdge = { source, target }
+  if (e.viaFlare === true) edge.viaFlare = true
+  return edge
+}
+
 export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
   if (raw == null || typeof raw !== 'object') {
     return { analyticId: '', nodes: [], edges: [] }
@@ -91,17 +143,23 @@ export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
   const o = raw as Record<string, unknown>
   const nodesRaw = o.nodes
   const edgesRaw = o.edges
+  const routesRaw = o.routes
   const nodes = Array.isArray(nodesRaw) ? nodesRaw.map(normalizeMapNode) : []
   const edges = Array.isArray(edgesRaw)
-    ? (edgesRaw as MapDataResponse['edges']).filter(
-        (e) => e != null && typeof e === 'object' && 'source' in e && 'target' in e
-      )
+    ? (edgesRaw.map(normalizeMapEdge).filter((e) => e != null) as MapEdge[])
     : []
-  return {
+  const routes = Array.isArray(routesRaw)
+    ? (routesRaw.map(normalizePlanetPairRoute).filter((r) => r != null) as PlanetPairRoute[])
+    : undefined
+  const out: MapDataResponse = {
     analyticId: typeof o.analyticId === 'string' ? o.analyticId : String(o.analyticId ?? ''),
     nodes,
     edges,
   }
+  if (routes != null) {
+    out.routes = routes
+  }
+  return out
 }
 
 function normalizeMapNode(raw: unknown): MapNode {
@@ -132,7 +190,7 @@ function normalizeMapNode(raw: unknown): MapNode {
 /** Combined nodes/edges from multiple analytics for the single shared map. */
 export type CombinedMapData = {
   nodes: MapDataResponse['nodes']
-  edges: MapDataResponse['edges']
+  edges: MapEdge[]
 }
 
 export type StoredGameItem = {
@@ -174,15 +232,48 @@ export type EnsureTurnParams = {
   password?: string
 }
 
-/** Ensures turn data exists in Core storage (Planets.nu loadturn when missing). */
+export type ShellBootstrapResponse = {
+  showInitialGame: string | null
+}
+
+export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
+  const endpointLabel = 'GET /bff/shell/bootstrap'
+  const r = await fetch(`${BFF_BASE}/bff/shell/bootstrap`)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+/** Game info from server storage only (no Planets.nu refresh). */
+export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoResponse> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/info`
+  const endpointLabel = `GET ${path}`
+  const r = await fetch(`${BFF_BASE}${path}`)
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  return r.json()
+}
+
+/**
+ * Ensures turn data exists in Core storage (Planets.nu loadturn when missing).
+ * Username may be empty when the turn is already stored (no upstream fetch).
+ */
 export async function ensureTurnData(
   gameId: string,
   params: EnsureTurnParams
 ): Promise<{ ready: true }> {
   const trimmedUser = params.username.trim()
-  if (!trimmedUser) {
-    throw new Error('Set login name in the header before loading turn data.')
-  }
   const body: {
     turn: number
     perspective: number
@@ -284,6 +375,27 @@ function analyticScopeQuery(scope: AnalyticShellScope): string {
   return `?${params.toString()}`
 }
 
+function analyticMapQueryString(
+  scope: AnalyticShellScope,
+  analyticId: string,
+  connectionsParams: ConnectionsMapParams | undefined
+): string {
+  const params = new URLSearchParams({
+    gameId: scope.gameId,
+    turn: String(scope.turn),
+    perspective: String(scope.perspective),
+  })
+  if (analyticId === 'connections' && connectionsParams != null) {
+    params.set('warpSpeed', String(connectionsParams.warpSpeed))
+    params.set(
+      'gravitonicMovement',
+      connectionsParams.gravitonicMovement ? 'true' : 'false'
+    )
+    params.set('flareMode', connectionsParams.flareMode)
+  }
+  return `?${params.toString()}`
+}
+
 export async function fetchAnalyticTable(
   analyticId: string,
   scope: AnalyticShellScope
@@ -300,12 +412,13 @@ export async function fetchAnalyticTable(
 
 export async function fetchAnalyticMap(
   analyticId: string,
-  scope: AnalyticShellScope
+  scope: AnalyticShellScope,
+  connectionsParams?: ConnectionsMapParams
 ): Promise<MapDataResponse> {
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/map`
-  const qs = analyticScopeQuery(scope)
+  const qs = analyticMapQueryString(scope, analyticId, connectionsParams)
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}${qs}`)
+  const r = await fetch(`${BFF_BASE}${path}${qs}`, { cache: 'no-store' })
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }

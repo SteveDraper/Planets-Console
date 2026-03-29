@@ -184,5 +184,22 @@ def load_config(
             "cors_origins",
             ("http://localhost:5173", "http://127.0.0.1:5173"),
         )
-    bff_config = BffConfig(cors_origins=cors_tuple)
+    raw_show = bff_dict.get("show_initial_game")
+    if raw_show is None:
+        show_initial_game: str | None = None
+    elif isinstance(raw_show, bool):
+        raise TypeError(
+            f"bff.show_initial_game must be a string or null, got boolean: {raw_show!r}"
+        )
+    elif isinstance(raw_show, int):
+        show_initial_game = str(raw_show)
+    elif isinstance(raw_show, str):
+        stripped = raw_show.strip()
+        show_initial_game = stripped if stripped else None
+    else:
+        raise TypeError(
+            f"bff.show_initial_game must be a string, int, or null, got "
+            f"{type(raw_show).__name__}: {raw_show!r}"
+        )
+    bff_config = BffConfig(cors_origins=cors_tuple, show_initial_game=show_initial_game)
     return RootConfig(server=server_config, api=api_config, bff=bff_config)

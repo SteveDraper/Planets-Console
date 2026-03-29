@@ -21,8 +21,11 @@ import { MainArea } from './components/MainArea'
 import {
   ensureTurnData,
   fetchAnalytics,
+  fetchShellBootstrap,
+  fetchStoredGameInfo,
   refreshGameInfo,
   type AnalyticShellScope,
+  type ConnectionsMapParams,
 } from './api/bff'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
@@ -44,6 +47,11 @@ function ConsoleShell() {
   const [mapZoom, setMapZoom] = useState(1)
   const setMapZoomFromSlider = useRef<(z: number) => void | undefined>(undefined)
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
+  const [connectionsMapParams, setConnectionsMapParams] = useState<ConnectionsMapParams>({
+    warpSpeed: 9,
+    gravitonicMovement: false,
+    flareMode: 'include',
+  })
   const [shellErrors, setShellErrors] = useState<ShellErrorItem[]>([])
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
@@ -106,6 +114,66 @@ function ConsoleShell() {
     },
     [refreshGameMutation]
   )
+
+  const { data: shellBootstrap } = useQuery({
+    queryKey: ['bff', 'shell-bootstrap'],
+    queryFn: fetchShellBootstrap,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  })
+
+  const configuredInitialGameId = useMemo(() => {
+    const raw = shellBootstrap?.showInitialGame
+    if (raw == null) return null
+    const t = raw.trim()
+    return t.length > 0 ? t : null
+  }, [shellBootstrap?.showInitialGame])
+
+  const { data: initialStoredGameInfo, isError: initialGameInfoIsError, error: initialGameInfoError } =
+    useQuery({
+      queryKey: ['bff', 'games', configuredInitialGameId, 'stored-info'],
+      queryFn: () => fetchStoredGameInfo(configuredInitialGameId!),
+      enabled: Boolean(configuredInitialGameId) && selectedGameId === null,
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      retry: false,
+    })
+
+  useEffect(() => {
+    if (!initialStoredGameInfo || !configuredInitialGameId) return
+    if (useShellStore.getState().selectedGameId != null) return
+    const latestTurn = getLatestTurnFromGameInfo(initialStoredGameInfo)
+    const perspectives = buildPerspectivesFromGameInfo(initialStoredGameInfo)
+    applyGameInfoRefresh(configuredInitialGameId, {
+      turn: latestTurn,
+      perspectives,
+      isGameFinished: isGameFinishedFromGameInfo(initialStoredGameInfo),
+      sectorDisplayName: getSectorDisplayNameFromGameInfo(initialStoredGameInfo),
+    })
+  }, [initialStoredGameInfo, configuredInitialGameId, applyGameInfoRefresh])
+
+  const initialGameBootstrapFailureSeen = useRef(false)
+  useEffect(() => {
+    if (!initialGameInfoIsError || !configuredInitialGameId) {
+      initialGameBootstrapFailureSeen.current = false
+      return
+    }
+    if (!initialGameBootstrapFailureSeen.current) {
+      initialGameBootstrapFailureSeen.current = true
+      const message =
+        initialGameInfoError instanceof Error
+          ? initialGameInfoError.message
+          : 'Failed to load configured initial game from server'
+      queueMicrotask(() => {
+        addShellError(message)
+      })
+    }
+  }, [
+    initialGameInfoIsError,
+    initialGameInfoError,
+    configuredInitialGameId,
+    addShellError,
+  ])
 
   const { data: analyticsData, isPending, error: analyticsError, isError: analyticsIsError } =
     useQuery({
@@ -271,7 +339,10 @@ function ConsoleShell() {
   }, [selectedGameId, selectedTurn, gameInfoContext?.perspectives, shellSelectedViewpointName])
 
   const loginTrimmed = loginName?.trim() ?? ''
-  const turnEnsureEnabled = analyticScope != null && loginTrimmed !== ''
+  const turnAllowWithoutLogin =
+    configuredInitialGameId != null && selectedGameId === configuredInitialGameId
+  const turnEnsureEnabled =
+    analyticScope != null && (loginTrimmed !== '' || turnAllowWithoutLogin)
 
   const {
     isSuccess: turnEnsureSuccess,
@@ -321,7 +392,8 @@ function ConsoleShell() {
     }
   }, [turnEnsureIsError, turnEnsureError, addShellError])
 
-  const turnBlockedNoLogin = analyticScope != null && loginTrimmed === ''
+  const turnBlockedNoLogin =
+    analyticScope != null && loginTrimmed === '' && !turnAllowWithoutLogin
   const turnDataReady = turnEnsureEnabled && turnEnsureSuccess
 
   return (
@@ -349,6 +421,8 @@ function ConsoleShell() {
           enabledIds={enabledIds}
           onToggle={toggleAnalytic}
           viewMode={viewMode}
+          connectionsMapParams={connectionsMapParams}
+          onConnectionsMapParamsChange={setConnectionsMapParams}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
@@ -364,6 +438,7 @@ function ConsoleShell() {
             turnEnsurePending={turnEnsurePending}
             turnEnsureIsError={turnEnsureIsError}
             turnBlockedNoLogin={turnBlockedNoLogin}
+            connectionsMapParams={connectionsMapParams}
             onMapZoomChange={handleMapZoomChange}
             onSetZoomReady={handleSetZoomReady}
           />

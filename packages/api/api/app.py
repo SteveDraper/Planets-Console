@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from api.config import get_config
 from api.errors import (
     ConflictError,
     CoreAPIError,
@@ -15,14 +14,12 @@ from api.errors import (
     make_http_exception_handler,
 )
 from api.routers import concepts, game_concepts, games, store
-from api.services.seed import seed_dummy_data
-from api.storage import get_storage
+from api.services.seed import run_startup_seed_if_configured
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    if get_config().include_dummy_data:
-        seed_dummy_data(get_storage())
+    run_startup_seed_if_configured()
     yield
 
 

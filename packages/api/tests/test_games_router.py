@@ -184,6 +184,26 @@ class TestGetTurnAnalyticsBaseMap:
         assert resp.status_code == 404
 
 
+class TestGetTurnAnalyticsConnections:
+    def test_returns_routes(self, client):
+        resp = client.get(
+            "/v1/games/628580/1/turns/111/analytics/connections?warpSpeed=9"
+            "&gravitonicMovement=false&flareMode=off"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["analyticId"] == "connections"
+        assert data["nodes"] == []
+        assert data["edges"] == []
+        assert "routes" in data
+        assert isinstance(data["routes"], list)
+        for row in data["routes"]:
+            assert "fromPlanetId" in row
+            assert "toPlanetId" in row
+            assert "viaFlare" in row
+            assert row["fromPlanetId"] < row["toPlanetId"]
+
+
 class _FakePlanetsNuEnsure(_FakePlanetsNu):
     def __init__(self, load_payload: dict, rst: dict) -> None:
         super().__init__(load_payload)

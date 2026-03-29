@@ -130,3 +130,19 @@ def test_get_analytic_map_edges_reference_node_ids():
         assert "source" in edge and "target" in edge
         assert edge["source"] in node_ids, f"edge source {edge['source']} not in node ids"
         assert edge["target"] in node_ids, f"edge target {edge['target']} not in node ids"
+
+
+def test_connections_map_returns_routes_not_nodes():
+    """Connections analytic returns route pairs for the SPA to bind to base-map planet ids."""
+    qs = f"{SCOPE_QS}&warpSpeed=9&gravitonicMovement=false&flareMode=off"
+    response = client.get(f"/analytics/connections/map?{qs}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "connections"
+    assert data["nodes"] == []
+    assert data["edges"] == []
+    assert "routes" in data
+    assert isinstance(data["routes"], list)
+    for row in data["routes"]:
+        assert row["fromPlanetId"] < row["toPlanetId"]
+        assert isinstance(row["viaFlare"], bool)

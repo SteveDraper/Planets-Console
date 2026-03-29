@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bff.config import get_config
 from bff.errors import BFFError, make_http_exception_handler
-from bff.routers import analytics, games
+from bff.routers import analytics, games, shell
 
 app = FastAPI(
     title="Planets Console BFF",
@@ -23,6 +23,7 @@ app.add_middleware(
 app.add_exception_handler(Exception, make_http_exception_handler(BFFError))
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 app.include_router(games.router, prefix="/games", tags=["games"])
+app.include_router(shell.router, prefix="/shell", tags=["shell"])
 
 
 @app.get("/health")

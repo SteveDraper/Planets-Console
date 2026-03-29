@@ -207,3 +207,21 @@ def test_load_config_include_dummy_data_string_raises():
             override_specs=["api.include_dummy_data=notabool"],
             default_config_path=base,
         )
+
+
+def test_load_config_show_initial_game_string():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["bff.show_initial_game=628580"],
+        default_config_path=base,
+    )
+    assert root.bff.show_initial_game == "628580"
+
+
+def test_load_config_show_initial_game_bool_raises():
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(TypeError, match="bff.show_initial_game"):
+        load_config(
+            override_specs=["bff.show_initial_game=true"],
+            default_config_path=base,
+        )

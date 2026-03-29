@@ -116,7 +116,11 @@ Unknown **`planet_id`** for that turn returns **404**.
 
 Same paths under the BFF prefix (e.g. **`/bff/games/...`** when the BFF is mounted at `/bff`): handlers call **`GameService`** directly today so they can later be swapped for HTTP to Core without changing contracts.
 
-### 5.3 Tests
+### 5.3 Connections analytic (reachability)
+
+**Warp well** distance rules in this doc also drive **simplified wells** in **`planet_connections`**: whether a movement **ends** inside another planet’s well, and whether a pair has a **direct** edge. The **Connections** map analytic (`GET /bff/analytics/connections/map`) does **not** draw well outlines; it returns **route pairs** for the map edges layer. Full behavior (flare tables, `flareMode`, merge with base map) is documented in [design-connections-analytic.md](design-connections-analytic.md).
+
+### 5.4 Tests
 
 - **`packages/api/tests/test_warp_well_concepts.py`** -- pure concept behavior.
 - **`packages/api/tests/test_game_concepts_router.py`** -- Core routes.

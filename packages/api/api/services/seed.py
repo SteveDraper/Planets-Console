@@ -27,3 +27,16 @@ def seed_dummy_data(storage: StorageBackend) -> None:
             data = json.load(f)
         storage.put(store_path, data)
         logger.info("Seeded store path %r from %s", store_path, filename)
+
+
+def run_startup_seed_if_configured() -> None:
+    """If `include_dummy_data` is on, seed the process store (idempotent overwrites).
+
+    Starlette does not run mounted sub-apps' lifespans, so the combined ``server.app``
+    must call this from its own lifespan in addition to ``api.app`` doing so when run alone.
+    """
+    from api.config import get_config
+    from api.storage import get_storage
+
+    if get_config().include_dummy_data:
+        seed_dummy_data(get_storage())
