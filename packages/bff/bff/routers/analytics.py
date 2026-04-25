@@ -6,11 +6,22 @@ All data routes require ``gameId``, ``turn``, and ``perspective`` query paramete
 BFF can load turn-scoped analytics from Core (no hard-coded game context).
 """
 
+from collections.abc import Callable
+
 from api.concepts.planet_connections import FlareConnectionMode
+from api.diagnostics import DiagnosticNode, timed_section
 from api.errors import PlanetsConsoleError
 from api.services.game_service import GameService
 from api.storage import get_storage
 from fastapi import APIRouter, HTTPException, Query
+
+from bff.diagnostics_dep import (
+    IncludeDiagnostics,
+    JSONScalar,
+    finish_response,
+    optional_request_root,
+    with_timed_child,
+)
 
 router = APIRouter()
 
@@ -56,12 +67,25 @@ ANALYTICS_LIST = [
 
 
 def _turn_analytics_from_core(
-    game_id: int, perspective: int, turn_number: int, analytic_id: str, **kwargs
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    analytic_id: str,
+    *,
+    diagnostics: DiagnosticNode | None = None,
+    **kwargs: object,
 ) -> dict:
     storage = get_storage()
     svc = GameService(storage)
     try:
-        return svc.get_turn_analytics(game_id, perspective, turn_number, analytic_id, **kwargs)
+        return svc.get_turn_analytics(
+            game_id,
+            perspective,
+            turn_number,
+            analytic_id,
+            diagnostics=diagnostics,
+            **kwargs,
+        )
     except PlanetsConsoleError as e:
         raise HTTPException(
             status_code=getattr(e, "http_error", 500),
@@ -70,9 +94,16 @@ def _turn_analytics_from_core(
 
 
 @router.get("")
-def list_analytics():
+def list_analytics(
+    include: IncludeDiagnostics = False,
+):
     """Return analytics available to the console (placeholder list)."""
-    return {"analytics": ANALYTICS_LIST}
+    body = {"analytics": ANALYTICS_LIST}
+    root = optional_request_root(
+        include, "GET", "/analytics", handler="list_analytics"
+    )
+    with_timed_child(root, "list_analytics", "total", lambda: body)
+    return finish_response(body, root)
 
 
 @router.get("/{analytic_id}/table")
@@ -81,14 +112,29 @@ def get_analytic_table(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=1),
+    include: IncludeDiagnostics = False,
 ):
     """Placeholder tabular data (scoped for cache invalidation; same shape for now)."""
-    _ = (game_id, turn, perspective)
-    return {
-        "analyticId": analytic_id,
-        "columns": ["Col A", "Col B", "Col C"],
-        "rows": [["a1", "b1", "c1"], ["a2", "b2", "c2"]],
-    }
+    bff_path = f"/analytics/{analytic_id}/table"
+
+    def work() -> dict:
+        return {
+            "analyticId": analytic_id,
+            "columns": ["Col A", "Col B", "Col C"],
+            "rows": [["a1", "b1", "c1"], ["a2", "b2", "c2"]],
+        }
+
+    root = optional_request_root(
+        include,
+        "GET",
+        bff_path,
+        gameId=game_id,
+        turn=turn,
+        perspective=perspective,
+        handler="get_analytic_table",
+    )
+    body = with_timed_child(root, "get_analytic_table", "total", work)
+    return finish_response(body, root)
 
 
 @router.get("/{analytic_id}/map")
@@ -100,6 +146,8 @@ def get_analytic_map(
     warp_speed: int = Query(9, ge=1, le=9, alias="warpSpeed"),
     gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
+    flare_depth: int = Query(1, ge=1, le=3, alias="flareDepth"),
+    include: IncludeDiagnostics = False,
 ):
     """Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
 
@@ -109,31 +157,90 @@ def get_analytic_map(
     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
     """
+    bff_path = f"/analytics/{analytic_id}/map"
+
+    def run_with_diag(
+        work: Callable[[], dict],
+        *,
+        section: str = "turn_analytics_from_core",
+        **root_kw: JSONScalar,
+    ) -> object:
+        root = optional_request_root(include, "GET", bff_path, **root_kw)
+        body = with_timed_child(root, "get_analytic_map", section, work)
+        return finish_response(body, root)
+
     if analytic_id == "base-map":
-        return _turn_analytics_from_core(game_id, perspective, turn, "base-map")
-    if analytic_id == "connections":
-        return _turn_analytics_from_core(
-            game_id,
-            perspective,
-            turn,
-            "connections",
-            connection_warp_speed=warp_speed,
-            connection_gravitonic_movement=gravitonic_movement,
-            connection_flare_mode=flare_mode,
+        return run_with_diag(
+            lambda: _turn_analytics_from_core(game_id, perspective, turn, "base-map"),
+            gameId=game_id,
+            turn=turn,
+            perspective=perspective,
+            handler="get_analytic_map",
         )
+    if analytic_id == "connections":
+        root = optional_request_root(
+            include,
+            "GET",
+            bff_path,
+            gameId=game_id,
+            turn=turn,
+            perspective=perspective,
+            warpSpeed=warp_speed,
+            gravitonicMovement=gravitonic_movement,
+            flareMode=str(flare_mode.value),
+            flareDepth=flare_depth,
+            handler="get_analytic_map",
+        )
+        if root is None:
+            body = _turn_analytics_from_core(
+                game_id,
+                perspective,
+                turn,
+                "connections",
+                connection_warp_speed=warp_speed,
+                connection_gravitonic_movement=gravitonic_movement,
+                connection_flare_mode=flare_mode,
+                connection_flare_depth=flare_depth,
+            )
+        else:
+            map_node = root.child("get_analytic_map")
+            with timed_section(map_node, "turn_analytics_from_core"):
+                body = _turn_analytics_from_core(
+                    game_id,
+                    perspective,
+                    turn,
+                    "connections",
+                    diagnostics=map_node,
+                    connection_warp_speed=warp_speed,
+                    connection_gravitonic_movement=gravitonic_movement,
+                    connection_flare_mode=flare_mode,
+                    connection_flare_depth=flare_depth,
+                )
+        return finish_response(body, root)
     # Selectable analytics: placeholder 4-node square for now
-    return {
-        "analyticId": analytic_id,
-        "nodes": [
-            {"id": "n1", "label": "Node 1", "x": 0, "y": 0},
-            {"id": "n2", "label": "Node 2", "x": 200, "y": 0},
-            {"id": "n3", "label": "Node 3", "x": 200, "y": 200},
-            {"id": "n4", "label": "Node 4", "x": 0, "y": 200},
-        ],
-        "edges": [
-            {"source": "n1", "target": "n2"},
-            {"source": "n2", "target": "n3"},
-            {"source": "n3", "target": "n4"},
-            {"source": "n4", "target": "n1"},
-        ],
-    }
+
+    def placeholder() -> dict:
+        return {
+            "analyticId": analytic_id,
+            "nodes": [
+                {"id": "n1", "label": "Node 1", "x": 0, "y": 0},
+                {"id": "n2", "label": "Node 2", "x": 200, "y": 0},
+                {"id": "n3", "label": "Node 3", "x": 200, "y": 200},
+                {"id": "n4", "label": "Node 4", "x": 0, "y": 200},
+            ],
+            "edges": [
+                {"source": "n1", "target": "n2"},
+                {"source": "n2", "target": "n3"},
+                {"source": "n3", "target": "n4"},
+                {"source": "n4", "target": "n1"},
+            ],
+        }
+
+    return run_with_diag(
+        placeholder,
+        section="total",
+        gameId=game_id,
+        turn=turn,
+        perspective=perspective,
+        handler="get_analytic_map",
+    )

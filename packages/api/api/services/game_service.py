@@ -13,6 +13,7 @@ from api.concepts.warp_well import (
     coordinate_in_warp_well,
     map_cell_indices_in_warp_well,
 )
+from api.diagnostics import DiagnosticNode
 from api.errors import (
     LoginCredentialsRequiredError,
     NotFoundError,
@@ -309,6 +310,8 @@ class GameService:
         connection_warp_speed: int | None = None,
         connection_gravitonic_movement: bool = False,
         connection_flare_mode: FlareConnectionMode = FlareConnectionMode.OFF,
+        connection_flare_depth: int = 1,
+        diagnostics: DiagnosticNode | None = None,
     ) -> dict:
         """Return per-analytic map data derived from turn state.
 
@@ -322,11 +325,15 @@ class GameService:
             warp = connection_warp_speed if connection_warp_speed is not None else 9
             if warp < 1 or warp > 9:
                 raise ValidationError("warpSpeed must be between 1 and 9.")
+            if connection_flare_depth < 1 or connection_flare_depth > 3:
+                raise ValidationError("flareDepth must be 1, 2, or 3.")
             routes = connection_routes_for_planets(
                 list(turn.planets),
                 warp_speed=warp,
                 gravitonic_movement=connection_gravitonic_movement,
                 flare_mode=connection_flare_mode,
+                flare_depth=connection_flare_depth,
+                diagnostics=diagnostics,
             )
             return {
                 "analyticId": "connections",

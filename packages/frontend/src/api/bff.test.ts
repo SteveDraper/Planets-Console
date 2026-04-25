@@ -1,5 +1,12 @@
-import { describe, it, expect } from 'vitest'
-import { isGenericServerErrorMessage, normalizeMapDataResponse, withEndpointIfGeneric } from './bff'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import {
+  fetchGames,
+  INCLUDE_DIAGNOSTICS_SESSION_KEY,
+  isGenericServerErrorMessage,
+  normalizeMapDataResponse,
+  toFetchRejectionError,
+  withEndpointIfGeneric,
+} from './bff'
 
 describe('withEndpointIfGeneric', () => {
   it('appends endpoint for Internal Server Error', () => {
@@ -32,6 +39,65 @@ describe('withEndpointIfGeneric', () => {
 describe('isGenericServerErrorMessage', () => {
   it('treats empty as generic', () => {
     expect(isGenericServerErrorMessage('')).toBe(true)
+  })
+})
+
+describe('toFetchRejectionError', () => {
+  it('includes endpoint and request path', () => {
+    const e = toFetchRejectionError(
+      new TypeError('Failed to fetch'),
+      'GET /bff/games/1/info',
+      '/bff/games/1/info'
+    )
+    expect(e.message).toContain('GET /bff/games/1/info')
+    expect(e.message).toContain('request: /bff/games/1/info')
+    expect(e.message).toContain('Failed to fetch')
+    expect(e.message).toContain('No HTTP response')
+  })
+
+  it('appends Error.cause when present', () => {
+    const inner = new Error('connection reset')
+    const e = toFetchRejectionError(
+      Object.assign(new TypeError('Failed to fetch'), { cause: inner }),
+      'POST /bff/games/1/turns/ensure',
+      '/bff/games/1/turns/ensure'
+    )
+    expect(e.message).toContain('cause:')
+    expect(e.message).toContain('connection reset')
+  })
+})
+
+describe('bffRequest (network failure)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    sessionStorage.removeItem(INCLUDE_DIAGNOSTICS_SESSION_KEY)
+  })
+
+  it('appends includeDiagnostics=true to /bff paths when session recording is on', async () => {
+    sessionStorage.setItem(INCLUDE_DIAGNOSTICS_SESSION_KEY, '1')
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify({ games: [] }), { status: 200 }))
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await fetchGames()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/bff/games?includeDiagnostics=true',
+      undefined
+    )
+  })
+
+  it('fetchGames throws an error that names the BFF path', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch')))
+    )
+    await expect(fetchGames()).rejects.toSatisfy((thrown: unknown) => {
+      expect(thrown).toBeInstanceOf(Error)
+      const m = (thrown as Error).message
+      expect(m).toMatch(/GET \/bff\/games/)
+      expect(m).toMatch(/request: \/bff\/games/)
+      return true
+    })
   })
 })
 

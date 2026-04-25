@@ -201,5 +201,22 @@ def load_config(
             f"bff.show_initial_game must be a string, int, or null, got "
             f"{type(raw_show).__name__}: {raw_show!r}"
         )
-    bff_config = BffConfig(cors_origins=cors_tuple, show_initial_game=show_initial_game)
+    raw_db = bff_dict.get("diagnostics_buffer_size", 10)
+    if isinstance(raw_db, bool):
+        raise TypeError(
+            f"bff.diagnostics_buffer_size must be an int, got {type(raw_db).__name__}: {raw_db!r}"
+        )
+    if isinstance(raw_db, float) and raw_db.is_integer():
+        raw_db = int(raw_db)
+    if not isinstance(raw_db, int):
+        raise TypeError(
+            f"bff.diagnostics_buffer_size must be an int, got {type(raw_db).__name__}: {raw_db!r}"
+        )
+    if raw_db < 0:
+        raise ValueError(f"bff.diagnostics_buffer_size must be >= 0, got {raw_db}")
+    bff_config = BffConfig(
+        cors_origins=cors_tuple,
+        show_initial_game=show_initial_game,
+        diagnostics_buffer_size=raw_db,
+    )
     return RootConfig(server=server_config, api=api_config, bff=bff_config)

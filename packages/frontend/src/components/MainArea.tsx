@@ -90,6 +90,8 @@ type MainAreaProps = {
   turnDataReady: boolean
   turnEnsurePending: boolean
   turnEnsureIsError: boolean
+  /** TanStack `error` for the turn-ensure query (shown inline when `turnEnsureIsError`). */
+  turnEnsureError: unknown | null | undefined
   /** Scope is set but login name is missing, so turn cannot be ensured. */
   turnBlockedNoLogin: boolean
   /** Parameters for the Connections map analytic (refetch when these change). */
@@ -120,7 +122,14 @@ function TableTile({
     )
   }
   if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
-  if (error) return <div className="p-4 text-sm text-red-400">Error loading data</div>
+  if (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return (
+      <div className="max-w-prose p-4 text-sm text-red-400 break-words">
+        Error loading data. {detail}
+      </div>
+    )
+  }
   if (!data) return null
   return (
     <div className="overflow-auto">
@@ -182,6 +191,7 @@ export function MainArea({
   turnDataReady,
   turnEnsurePending,
   turnEnsureIsError,
+  turnEnsureError,
   turnBlockedNoLogin,
   connectionsMapParams,
   onMapZoomChange,
@@ -213,6 +223,7 @@ export function MainArea({
                 connectionsMapParams.warpSpeed,
                 connectionsMapParams.gravitonicMovement,
                 connectionsMapParams.flareMode,
+                connectionsMapParams.flareDepth,
               ] as const)
             : ([
                 'analytic',
@@ -224,6 +235,7 @@ export function MainArea({
                 connectionsMapParams.warpSpeed,
                 connectionsMapParams.gravitonicMovement,
                 connectionsMapParams.flareMode,
+                connectionsMapParams.flareDepth,
               ] as const)
         return {
           queryKey,
@@ -235,7 +247,8 @@ export function MainArea({
                 edges: [],
               } satisfies MapDataResponse
             }
-            const [, , , gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode] = qk
+            const [, , , gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth] =
+              qk
             const scope: AnalyticShellScope = {
               gameId: String(gameId),
               turn: Number(turn),
@@ -245,6 +258,7 @@ export function MainArea({
               warpSpeed: Number(warpSpeed),
               gravitonicMovement: Boolean(gravitonicMovement),
               flareMode: flareMode as ConnectionsFlareMode,
+              flareDepth: Number(flareDepth) as ConnectionsMapParams['flareDepth'],
             }
             return fetchAnalyticMap('connections', scope, params)
           },
@@ -284,6 +298,7 @@ export function MainArea({
       connectionsMapParams.flareMode,
       connectionsMapParams.warpSpeed,
       connectionsMapParams.gravitonicMovement,
+      connectionsMapParams.flareDepth,
     ]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
@@ -317,9 +332,21 @@ export function MainArea({
   }
 
   if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
+    const detail =
+      turnEnsureError instanceof Error
+        ? turnEnsureError.message
+        : turnEnsureError != null
+          ? String(turnEnsureError)
+          : 'Unknown error'
     return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-red-400">
-        Failed to load turn data. See the error bar or try another turn or viewpoint.
+      <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
+        <p className="text-center font-medium">Failed to load turn data</p>
+        <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
+          {detail}
+        </p>
+        <p className="text-center text-sm text-gray-500">
+          See the error bar, or try another turn or viewpoint.
+        </p>
       </main>
     )
   }
@@ -371,9 +398,19 @@ export function MainArea({
     )
   }
   if (hasError && !hasAnyData) {
+    const firstErr = mapQueries.find((q) => q.error)?.error
+    const detail =
+      firstErr instanceof Error
+        ? firstErr.message
+        : firstErr != null
+          ? String(firstErr)
+          : 'Failed to load map data'
     return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-red-400">
-        Failed to load map data
+      <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
+        <p className="text-center font-medium">Failed to load map data</p>
+        <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
+          {detail}
+        </p>
       </main>
     )
   }

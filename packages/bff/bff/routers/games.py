@@ -39,6 +39,13 @@ from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInf
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, HTTPException, Query
 
+from bff.diagnostics_dep import (
+    IncludeDiagnostics,
+    finish_response,
+    optional_request_root,
+    with_timed_child,
+)
+
 router = APIRouter()
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
@@ -84,15 +91,7 @@ def _resolved_sector_title_for_listed_game(svc: StoreService, game_id: str) -> s
     return title
 
 
-@router.get("")
-def list_stored_games():
-    """Return game ids present under store path `games` (next-hop segment names).
-
-    Route: **GET /games** on the BFF app; **GET /bff/games** when the BFF is mounted at `/bff`.
-
-    Uses the same shallow enumeration as GET /api/v1/store/games?view=shallow.
-    """
-    svc = StoreService(get_storage())
+def _games_list_body(svc: StoreService) -> dict:
     try:
         shallow = svc.read_shallow("games")
     except NotFoundError:
@@ -109,51 +108,116 @@ def list_stored_games():
     return {"games": games}
 
 
+@router.get("")
+def list_stored_games(
+    include: IncludeDiagnostics = False,
+):
+    """Return game ids present under store path `games` (next-hop segment names).
+
+    Route: **GET /games** on the BFF app; **GET /bff/games** when the BFF is mounted at `/bff`.
+
+    Uses the same shallow enumeration as GET /api/v1/store/games?view=shallow.
+    """
+    svc = StoreService(get_storage())
+    root = optional_request_root(include, "GET", "/games", handler="list_stored_games")
+    body = with_timed_child(
+        root, "list_stored_games", "total", lambda: _games_list_body(svc)
+    )
+    return finish_response(body, root)
+
+
 @router.get("/{game_id}/info")
-def get_stored_game_info(game_id: int) -> GameInfo:
+def get_stored_game_info(
+    game_id: int, include: IncludeDiagnostics = False
+) -> object:
     """Return game info already in storage (no Planets.nu refresh)."""
     storage = get_storage()
     svc = GameService(storage)
-    try:
-        return svc.get_game_info(game_id)
-    except PlanetsConsoleError as exc:
-        raise HTTPException(
-            status_code=getattr(exc, "http_error", 500),
-            detail=str(exc),
-        ) from exc
+    root = optional_request_root(
+        include,
+        "GET",
+        f"/games/{game_id}/info",
+        gameId=game_id,
+        handler="get_stored_game_info",
+    )
+
+    def work() -> GameInfo:
+        try:
+            return svc.get_game_info(game_id)
+        except PlanetsConsoleError as exc:
+            raise HTTPException(
+                status_code=getattr(exc, "http_error", 500),
+                detail=str(exc),
+            ) from exc
+
+    result = with_timed_child(root, "get_stored_game_info", "total", work)
+    return finish_response(result, root)
 
 
 @router.post("/{game_id}/info")
-def post_game_info(game_id: int, body: GameInfoUpdateRequest) -> GameInfo:
+def post_game_info(
+    game_id: int,
+    body: GameInfoUpdateRequest,
+    include: IncludeDiagnostics = False,
+) -> object:
     """Refresh game info from Planets.nu (`refresh`); returns updated `GameInfo`."""
     storage = get_storage()
     svc = GameService(storage)
     planets = PlanetsNuClient.from_config()
-    try:
-        updated = svc.update_game_info(game_id, body, planets)
-    except PlanetsConsoleError as exc:
-        raise HTTPException(
-            status_code=getattr(exc, "http_error", 500),
-            detail=str(exc),
-        ) from exc
+    root = optional_request_root(
+        include,
+        "POST",
+        f"/games/{game_id}/info",
+        gameId=game_id,
+        handler="post_game_info",
+    )
+
+    def work() -> GameInfo:
+        try:
+            return svc.update_game_info(game_id, body, planets)
+        except PlanetsConsoleError as exc:
+            raise HTTPException(
+                status_code=getattr(exc, "http_error", 500),
+                detail=str(exc),
+            ) from exc
+
+    updated = with_timed_child(root, "post_game_info", "total", work)
     _sector_title_by_stored_game_id[str(game_id)] = _sector_title_from_game_info(updated)
-    return updated
+    return finish_response(updated, root)
 
 
 @router.post("/{game_id}/turns/ensure")
-def post_ensure_turn(game_id: int, body: TurnEnsureRequest):
+def post_ensure_turn(
+    game_id: int,
+    body: TurnEnsureRequest,
+    include: IncludeDiagnostics = False,
+) -> object:
     """Ensure turn data exists in storage; fetch from Planets.nu when absent."""
     storage = get_storage()
     svc = GameService(storage)
     planets = PlanetsNuClient.from_config()
     params = RefreshGameInfoParams(username=body.username, password=body.password)
-    try:
-        return svc.ensure_turn_loaded(game_id, body.perspective, body.turn, params, planets)
-    except PlanetsConsoleError as exc:
-        raise HTTPException(
-            status_code=getattr(exc, "http_error", 500),
-            detail=str(exc),
-        ) from exc
+    root = optional_request_root(
+        include,
+        "POST",
+        f"/games/{game_id}/turns/ensure",
+        gameId=game_id,
+        turn=body.turn,
+        perspective=body.perspective,
+        handler="post_ensure_turn",
+    )
+
+    def work():
+        try:
+            return svc.ensure_turn_loaded(game_id, body.perspective, body.turn, params, planets)
+        except PlanetsConsoleError as exc:
+            raise HTTPException(
+                status_code=getattr(exc, "http_error", 500),
+                detail=str(exc),
+            ) from exc
+
+    result = with_timed_child(root, "post_ensure_turn", "total", work)
+    return finish_response(result, root)
 
 
 @router.post(
@@ -165,27 +229,49 @@ def post_warp_well_coordinate_in_well(
     perspective: int,
     turn_number: int,
     body: CoordinateInWarpWellRequest,
-) -> CoordinateInWarpWellResponse:
+    include: IncludeDiagnostics = False,
+) -> object:
     """Shallow forward to Core ``GameService`` (same contract as Core REST)."""
     storage = get_storage()
     svc = GameService(storage)
     kind = WarpWellKind(body.well_type.value)
-    try:
-        inside = svc.warp_well_coordinate_in_well(
-            game_id,
-            perspective,
-            turn_number,
-            body.planet_id,
-            body.map_x,
-            body.map_y,
-            kind,
-        )
-        return CoordinateInWarpWellResponse(inside=inside)
-    except PlanetsConsoleError as exc:
-        raise HTTPException(
-            status_code=getattr(exc, "http_error", 500),
-            detail=str(exc),
-        ) from exc
+    bff_path = (
+        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/"
+        "coordinate-in-well"
+    )
+    root = optional_request_root(
+        include,
+        "POST",
+        bff_path,
+        gameId=game_id,
+        perspective=perspective,
+        turn=turn_number,
+        planetId=body.planet_id,
+        handler="post_warp_well_coordinate_in_well",
+    )
+
+    def work() -> CoordinateInWarpWellResponse:
+        try:
+            inside = svc.warp_well_coordinate_in_well(
+                game_id,
+                perspective,
+                turn_number,
+                body.planet_id,
+                body.map_x,
+                body.map_y,
+                kind,
+            )
+            return CoordinateInWarpWellResponse(inside=inside)
+        except PlanetsConsoleError as exc:
+            raise HTTPException(
+                status_code=getattr(exc, "http_error", 500),
+                detail=str(exc),
+            ) from exc
+
+    result = with_timed_child(
+        root, "post_warp_well_coordinate_in_well", "total", work
+    )
+    return finish_response(result, root)
 
 
 @router.get(
@@ -198,16 +284,38 @@ def get_warp_well_cells(
     turn_number: int,
     planet_id: int = Query(..., ge=1),
     well_type: WarpWellTypeParam = Query(...),
-) -> WarpWellCellsResponse:
+    include: IncludeDiagnostics = False,
+) -> object:
     """Shallow forward to Core ``GameService`` (same contract as Core REST)."""
     storage = get_storage()
     svc = GameService(storage)
     kind = WarpWellKind(well_type.value)
-    try:
-        cells = svc.warp_well_cells(game_id, perspective, turn_number, planet_id, kind)
-        return WarpWellCellsResponse(cells=cells)
-    except PlanetsConsoleError as exc:
-        raise HTTPException(
-            status_code=getattr(exc, "http_error", 500),
-            detail=str(exc),
-        ) from exc
+    bff_path = (
+        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/cells"
+    )
+    root = optional_request_root(
+        include,
+        "GET",
+        bff_path,
+        gameId=game_id,
+        perspective=perspective,
+        turn=turn_number,
+        planetId=planet_id,
+        wellType=well_type.value,
+        handler="get_warp_well_cells",
+    )
+
+    def work() -> WarpWellCellsResponse:
+        try:
+            cells = svc.warp_well_cells(
+                game_id, perspective, turn_number, planet_id, kind
+            )
+            return WarpWellCellsResponse(cells=cells)
+        except PlanetsConsoleError as exc:
+            raise HTTPException(
+                status_code=getattr(exc, "http_error", 500),
+                detail=str(exc),
+            ) from exc
+
+    result = with_timed_child(root, "get_warp_well_cells", "total", work)
+    return finish_response(result, root)

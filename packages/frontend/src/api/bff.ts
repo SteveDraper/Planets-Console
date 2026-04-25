@@ -4,6 +4,81 @@
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 
+/** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
+export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const
+
+export function isIncludeDiagnosticsSessionEnabled(): boolean {
+  if (typeof sessionStorage === 'undefined') {
+    return false
+  }
+  return sessionStorage.getItem(INCLUDE_DIAGNOSTICS_SESSION_KEY) === '1'
+}
+
+export function setIncludeDiagnosticsSessionEnabled(enabled: boolean): void {
+  if (typeof sessionStorage === 'undefined') {
+    return
+  }
+  if (enabled) {
+    sessionStorage.setItem(INCLUDE_DIAGNOSTICS_SESSION_KEY, '1')
+  } else {
+    sessionStorage.removeItem(INCLUDE_DIAGNOSTICS_SESSION_KEY)
+  }
+}
+
+function appendIncludeDiagnosticsQuery(path: string): string {
+  if (!path.startsWith('/bff/')) {
+    return path
+  }
+  if (!isIncludeDiagnosticsSessionEnabled()) {
+    return path
+  }
+  if (/[?&]includeDiagnostics=/.test(path)) {
+    return path
+  }
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}includeDiagnostics=true`
+}
+
+/**
+ * When `fetch` rejects (no HTTP response), browsers often set only a generic
+ * "Failed to fetch" / "Load failed" message. This keeps the original text but
+ * adds method+path, the request URL path, and `cause` when present.
+ */
+export function toFetchRejectionError(
+  err: unknown,
+  endpointLabel: string,
+  attemptedPath: string
+): Error {
+  const name = err instanceof Error ? err.name : 'Error'
+  const message = err instanceof Error ? err.message : String(err)
+  let cause = ''
+  if (err instanceof Error && 'cause' in err) {
+    const c = (err as Error & { cause?: unknown }).cause
+    if (c != null) {
+      cause = `; cause: ${String(c)}`
+    }
+  }
+  return new Error(
+    `${name}: ${message} — ${endpointLabel} (request: ${attemptedPath}). ` +
+      `No HTTP response${cause}. ` +
+      `Check BFF is running, the dev proxy targets it, and there is no CORS or connection problem.`
+  )
+}
+
+async function bffRequest(
+  path: string,
+  init: RequestInit | undefined,
+  endpointLabel: string
+): Promise<Response> {
+  const requestPath = appendIncludeDiagnosticsQuery(path)
+  const url = `${BFF_BASE}${requestPath}`
+  try {
+    return await fetch(url, init)
+  } catch (e) {
+    throw toFetchRejectionError(e, endpointLabel, requestPath)
+  }
+}
+
 /** Human-readable endpoint for error rows (method + path, no host). */
 export function withEndpointIfGeneric(message: string, endpointLabel: string): string {
   const detail = message.trim()
@@ -99,11 +174,20 @@ export type MapDataResponse = {
 /** How flare-assisted routes are requested from Core (`flareMode` query). */
 export type ConnectionsFlareMode = 'off' | 'include' | 'only'
 
+/**
+ * Maximum BFS cap (1–3). Pairs are evaluated for k = 1…N (flare vs k normal moves), so
+ * e.g. depth 2 still shows single-flare links from depth-1, not only two-flare pairs.
+ * Only when `flareMode` is not `off`.
+ */
+export type ConnectionsFlareDepth = 1 | 2 | 3
+
 /** Query parameters for the Connections map analytic (BFF forwards to Core). */
 export type ConnectionsMapParams = {
   warpSpeed: number
   gravitonicMovement: boolean
   flareMode: ConnectionsFlareMode
+  /** Flare chain length cap (1–3). */
+  flareDepth: ConnectionsFlareDepth
 }
 
 /**
@@ -204,8 +288,9 @@ export type GamesListResponse = {
 }
 
 export async function fetchGames(): Promise<GamesListResponse> {
+  const path = '/bff/games'
   const endpointLabel = 'GET /bff/games'
-  const r = await fetch(`${BFF_BASE}/bff/games`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -237,8 +322,9 @@ export type ShellBootstrapResponse = {
 }
 
 export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
+  const path = '/bff/shell/bootstrap'
   const endpointLabel = 'GET /bff/shell/bootstrap'
-  const r = await fetch(`${BFF_BASE}/bff/shell/bootstrap`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -249,7 +335,7 @@ export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
 export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -289,11 +375,15 @@ export async function ensureTurnData(
   }
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/ensure`
   const endpointLabel = `POST ${path}`
-  const r = await fetch(`${BFF_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    endpointLabel
+  )
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -330,11 +420,15 @@ export async function refreshGameInfo(
   }
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
   const endpointLabel = `POST ${path}`
-  const r = await fetch(`${BFF_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    endpointLabel
+  )
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -351,8 +445,9 @@ export async function refreshGameInfo(
 }
 
 export async function fetchAnalytics(): Promise<AnalyticsListResponse> {
+  const path = '/bff/analytics'
   const endpointLabel = 'GET /bff/analytics'
-  const r = await fetch(`${BFF_BASE}/bff/analytics`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -392,6 +487,7 @@ function analyticMapQueryString(
       connectionsParams.gravitonicMovement ? 'true' : 'false'
     )
     params.set('flareMode', connectionsParams.flareMode)
+    params.set('flareDepth', String(connectionsParams.flareDepth))
   }
   return `?${params.toString()}`
 }
@@ -403,7 +499,7 @@ export async function fetchAnalyticTable(
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/table`
   const qs = analyticScopeQuery(scope)
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}${qs}`)
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -418,10 +514,60 @@ export async function fetchAnalyticMap(
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/map`
   const qs = analyticMapQueryString(scope, analyticId, connectionsParams)
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}${qs}`, { cache: 'no-store' })
+  const r = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
   const raw = await r.json()
   return normalizeMapDataResponse(raw)
+}
+
+// --- Server diagnostics (MRU buffer of request trees) ---
+
+export type DiagnosticTree = {
+  name: string
+  values: Record<string, string | number | boolean | null>
+  timings: Record<string, number>
+  children: DiagnosticTree[]
+}
+
+export type DiagnosticsRecentItem = {
+  capturedAt: string
+  summary: string
+  diagnostics: DiagnosticTree
+}
+
+export type DiagnosticsRecentResponse = {
+  items: DiagnosticsRecentItem[]
+}
+
+export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentResponse> {
+  const attempts: [string, string][] = [
+    ['/bff/diagnostics/recent', 'GET /bff/diagnostics/recent'],
+    [
+      '/diagnostics/recent',
+      'GET /diagnostics/recent (server alias; use if /bff is not proxied)',
+    ],
+  ]
+  for (const [path, label] of attempts) {
+    const r = await bffRequest(path, undefined, label)
+    if (r.ok) {
+      return (await r.json()) as DiagnosticsRecentResponse
+    }
+    if (r.status !== 404) {
+      const body = await r.text().catch(() => '')
+      const clip = body.length > 400 ? `${body.slice(0, 400)}…` : body
+      throw new Error(
+        withEndpointIfGeneric(
+          clip ? `${r.status}: ${clip}` : String(r.status),
+          label
+        )
+      )
+    }
+  }
+  throw new Error(
+    'HTTP 404 for /bff/diagnostics/recent and /diagnostics/recent. ' +
+      'Run `uv run serve` from the repo root so the process on :8000 includes the BFF (not the Core API alone). ' +
+      'Confirm the Vite proxy in vite.config.ts forwards /bff and /diagnostics to that port.'
+  )
 }

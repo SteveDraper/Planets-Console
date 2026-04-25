@@ -30,3 +30,15 @@ def test_root_app_lifespan_seeds_when_include_dummy_data(_api_config_and_storage
         raw = get_storage().get("games/628580/info")
     assert isinstance(raw, dict)
     assert raw.get("game", {}).get("id") == 628580
+
+
+def test_diagnostics_recent_alias_matches_bff_mount(_api_config_and_storage):
+    """Root app exposes MRU at both /bff/diagnostics/recent and /diagnostics/recent."""
+    from server.app import app
+
+    c = TestClient(app)
+    r1 = c.get("/bff/diagnostics/recent")
+    r2 = c.get("/diagnostics/recent")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json() == r2.json() == {"items": []}

@@ -134,7 +134,7 @@ def test_get_analytic_map_edges_reference_node_ids():
 
 def test_connections_map_returns_routes_not_nodes():
     """Connections analytic returns route pairs for the SPA to bind to base-map planet ids."""
-    qs = f"{SCOPE_QS}&warpSpeed=9&gravitonicMovement=false&flareMode=off"
+    qs = f"{SCOPE_QS}&warpSpeed=9&gravitonicMovement=false&flareMode=off&flareDepth=1"
     response = client.get(f"/analytics/connections/map?{qs}")
     assert response.status_code == 200
     data = response.json()

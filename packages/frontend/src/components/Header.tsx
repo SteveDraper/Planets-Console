@@ -8,6 +8,7 @@ import { useSessionStore } from '../stores/session'
 import { GameControl } from './GameControl'
 import { LoginModal } from './LoginModal'
 import { AboutModal } from './AboutModal'
+import { DiagnosticsModal } from './DiagnosticsModal'
 import { SettingsModal } from './SettingsModal'
 
 type ViewMode = 'tabular' | 'map'
@@ -58,6 +59,7 @@ export function Header({
   const [loginModalKey, setLoginModalKey] = useState(0)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false)
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false)
   const headerMenuIdRoot = useId()
   const headerMenuTriggerId = `${headerMenuIdRoot}-header-menu-trigger`
@@ -356,6 +358,21 @@ export function Header({
                 className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10"
                 onClick={() => {
                   closeHeaderMenu()
+                  setIsDiagnosticsOpen(true)
+                }}
+              >
+                Diagnostics
+              </button>
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                className="my-1 h-px bg-[#52575d]"
+              />
+              <button
+                type="button"
+                className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10"
+                onClick={() => {
+                  closeHeaderMenu()
                   setIsSettingsOpen(true)
                 }}
               >
@@ -373,6 +390,11 @@ export function Header({
       <AboutModal
         isOpen={isAboutOpen}
         onClose={() => setIsAboutOpen(false)}
+        getFocusRestoreFallback={() => headerMenuTriggerRef.current}
+      />
+      <DiagnosticsModal
+        isOpen={isDiagnosticsOpen}
+        onClose={() => setIsDiagnosticsOpen(false)}
         getFocusRestoreFallback={() => headerMenuTriggerRef.current}
       />
     </header>

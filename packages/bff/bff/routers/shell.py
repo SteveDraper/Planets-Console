@@ -4,6 +4,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
 from bff.config import get_config
+from bff.diagnostics_dep import (
+    IncludeDiagnostics,
+    finish_response,
+    optional_request_root,
+    with_timed_child,
+)
 
 router = APIRouter()
 
@@ -19,10 +25,20 @@ class ShellBootstrapResponse(BaseModel):
 
 
 @router.get("/bootstrap")
-def get_shell_bootstrap() -> ShellBootstrapResponse:
+def get_shell_bootstrap(include: IncludeDiagnostics = False) -> object:
     """Return shell-oriented server config for the SPA (e.g. optional default game id)."""
     raw = get_config().show_initial_game
     if raw is None:
-        return ShellBootstrapResponse(show_initial_game=None)
-    trimmed = raw.strip()
-    return ShellBootstrapResponse(show_initial_game=trimmed if trimmed else None)
+        show: str | None = None
+    else:
+        trimmed = raw.strip()
+        show = trimmed if trimmed else None
+    root = optional_request_root(
+        include, "GET", "/shell/bootstrap", handler="get_shell_bootstrap"
+    )
+
+    def work() -> ShellBootstrapResponse:
+        return ShellBootstrapResponse(show_initial_game=show)
+
+    result = with_timed_child(root, "get_shell_bootstrap", "total", work)
+    return finish_response(result, root)

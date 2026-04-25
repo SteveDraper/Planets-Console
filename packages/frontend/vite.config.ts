@@ -18,6 +18,8 @@ export default defineConfig({
     proxy: {
       '/bff': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      // Same MRU buffer as /bff/diagnostics/recent (root app); used when /bff is not routed
+      '/diagnostics': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

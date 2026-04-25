@@ -65,7 +65,10 @@ describe('GameControl', () => {
       expect(screen.getByRole('button', { name: '111' })).toBeInTheDocument()
     })
     expect(screen.getByRole('button', { name: '222' })).toBeInTheDocument()
-    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/bff/games'))
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/bff/games'),
+      undefined
+    )
   })
 
   it('lists sector titles when settings ask for names and BFF provides sectorName', async () => {

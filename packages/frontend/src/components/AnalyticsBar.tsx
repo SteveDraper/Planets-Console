@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { cn } from '../lib/utils'
 import type {
   AnalyticItem,
+  ConnectionsFlareDepth,
   ConnectionsFlareMode,
   ConnectionsMapParams,
 } from '../api/bff'
@@ -34,6 +35,8 @@ const FLARE_MODE_OPTIONS: { value: ConnectionsFlareMode; label: string }[] = [
   { value: 'include', label: 'Show flares' },
   { value: 'only', label: 'Show only flares' },
 ]
+
+const FLARE_DEPTH_OPTIONS: ConnectionsFlareDepth[] = [1, 2, 3]
 
 type TileChrome = {
   supportsMode: boolean
@@ -80,6 +83,7 @@ function ConnectionsMapTile({
 
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
+  const flaresEnabled = connectionsMapParams.flareMode !== 'off'
 
   return (
     <div
@@ -148,6 +152,31 @@ function ConnectionsMapTile({
               {FLARE_MODE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-0 w-full items-center gap-1.5">
+            <span className="w-11 shrink-0 text-slate-400">Depth</span>
+            <select
+              value={connectionsMapParams.flareDepth}
+              onChange={(e) =>
+                onConnectionsMapParamsChange({
+                  ...connectionsMapParams,
+                  flareDepth: Number(e.target.value) as ConnectionsFlareDepth,
+                })
+              }
+              disabled={!flaresEnabled}
+              title={
+                flaresEnabled
+                  ? 'Cap on how many flares in a row to search. At 2 or 3 you still get every link that was shown at 1, plus new links that need a longer chain.'
+                  : 'Enable flares to set depth'
+              }
+              className="min-w-0 w-0 flex-1 rounded border border-[#52575d] bg-[#2a2d30] px-1 py-0.5 text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {FLARE_DEPTH_OPTIONS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
                 </option>
               ))}
             </select>
