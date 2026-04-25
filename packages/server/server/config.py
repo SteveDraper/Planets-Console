@@ -201,9 +201,7 @@ def load_config(
             f"bff.show_initial_game must be a string, int, or null, got "
             f"{type(raw_show).__name__}: {raw_show!r}"
         )
-    raw_db = bff_dict.get(
-        "diagnostics_buffer_size", BffConfig().diagnostics_buffer_size
-    )
+    raw_db = bff_dict.get("diagnostics_buffer_size", BffConfig().diagnostics_buffer_size)
     if isinstance(raw_db, bool):
         raise TypeError(
             f"bff.diagnostics_buffer_size must be an int, got {type(raw_db).__name__}: {raw_db!r}"
