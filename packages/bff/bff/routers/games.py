@@ -120,16 +120,12 @@ def list_stored_games(
     """
     svc = StoreService(get_storage())
     root = optional_request_root(include, "GET", "/games", handler="list_stored_games")
-    body = with_timed_child(
-        root, "list_stored_games", "total", lambda: _games_list_body(svc)
-    )
+    body = with_timed_child(root, "list_stored_games", "total", lambda: _games_list_body(svc))
     return finish_response(body, root)
 
 
 @router.get("/{game_id}/info")
-def get_stored_game_info(
-    game_id: int, include: IncludeDiagnostics = False
-) -> object:
+def get_stored_game_info(game_id: int, include: IncludeDiagnostics = False) -> object:
     """Return game info already in storage (no Planets.nu refresh)."""
     storage = get_storage()
     svc = GameService(storage)
@@ -236,8 +232,7 @@ def post_warp_well_coordinate_in_well(
     svc = GameService(storage)
     kind = WarpWellKind(body.well_type.value)
     bff_path = (
-        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/"
-        "coordinate-in-well"
+        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/coordinate-in-well"
     )
     root = optional_request_root(
         include,
@@ -268,9 +263,7 @@ def post_warp_well_coordinate_in_well(
                 detail=str(exc),
             ) from exc
 
-    result = with_timed_child(
-        root, "post_warp_well_coordinate_in_well", "total", work
-    )
+    result = with_timed_child(root, "post_warp_well_coordinate_in_well", "total", work)
     return finish_response(result, root)
 
 
@@ -290,9 +283,7 @@ def get_warp_well_cells(
     storage = get_storage()
     svc = GameService(storage)
     kind = WarpWellKind(well_type.value)
-    bff_path = (
-        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/cells"
-    )
+    bff_path = f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/cells"
     root = optional_request_root(
         include,
         "GET",
@@ -307,9 +298,7 @@ def get_warp_well_cells(
 
     def work() -> WarpWellCellsResponse:
         try:
-            cells = svc.warp_well_cells(
-                game_id, perspective, turn_number, planet_id, kind
-            )
+            cells = svc.warp_well_cells(game_id, perspective, turn_number, planet_id, kind)
             return WarpWellCellsResponse(cells=cells)
         except PlanetsConsoleError as exc:
             raise HTTPException(

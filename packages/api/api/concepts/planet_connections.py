@@ -218,9 +218,7 @@ def _pair_reachable_in_k_normal_moves(
 
 
 def _point_lies_in_any_planet_well(qx: float, qy: float, planets: list[Planet]) -> bool:
-    return any(
-        point_in_simplified_normal_well(p, qx, qy) for p in planets
-    )
+    return any(point_in_simplified_normal_well(p, qx, qy) for p in planets)
 
 
 def _iter_normal_one_hop_integer_lattice(
@@ -330,9 +328,7 @@ def _flare_path_state_exceeds_distance_bound(
     if not use_distance_prune or step_max <= 0.0:
         return False
     rem = max_hops - hops_completed
-    d_to_well = min_distance_point_to_simplified_normal_well(
-        float(x), float(y), to_planet
-    )
+    d_to_well = min_distance_point_to_simplified_normal_well(float(x), float(y), to_planet)
     return d_to_well > rem * step_max + 1e-9
 
 
@@ -862,9 +858,7 @@ def connection_routes_for_planets(
             cr.child("flare_eligible_by_layer") if cr is not None else None
         )
         if flare_layer_diag is not None:
-            flare_layer_diag.values["maxK"] = int(
-                min(_MAX_FLARE_CHAIN_DEPTH, flare_depth)
-            )
+            flare_layer_diag.values["maxK"] = int(min(_MAX_FLARE_CHAIN_DEPTH, flare_depth))
         e1, e2, e3 = _build_flare_eligible_by_layer(
             sorted_planets,
             index,
@@ -899,10 +893,7 @@ def connection_routes_for_planets(
             direct = _pair_has_direct_connection(planet_a, planet_b, max_travel)
             pair_key = _canonical_pair_id(planet_a, planet_b)
             exclusive_flare = (
-                u_flare is not None
-                and pair_key in u_flare
-                and not in_flare_inner
-                and not direct
+                u_flare is not None and pair_key in u_flare and not in_flare_inner and not direct
             )
 
             if flare_mode == FlareConnectionMode.OFF:

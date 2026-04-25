@@ -33,9 +33,7 @@ def get_shell_bootstrap(include: IncludeDiagnostics = False) -> object:
     else:
         trimmed = raw.strip()
         show = trimmed if trimmed else None
-    root = optional_request_root(
-        include, "GET", "/shell/bootstrap", handler="get_shell_bootstrap"
-    )
+    root = optional_request_root(include, "GET", "/shell/bootstrap", handler="get_shell_bootstrap")
 
     def work() -> ShellBootstrapResponse:
         return ShellBootstrapResponse(show_initial_game=show)

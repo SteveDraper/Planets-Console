@@ -99,9 +99,7 @@ def list_analytics(
 ):
     """Return analytics available to the console (placeholder list)."""
     body = {"analytics": ANALYTICS_LIST}
-    root = optional_request_root(
-        include, "GET", "/analytics", handler="list_analytics"
-    )
+    root = optional_request_root(include, "GET", "/analytics", handler="list_analytics")
     with_timed_child(root, "list_analytics", "total", lambda: body)
     return finish_response(body, root)
 

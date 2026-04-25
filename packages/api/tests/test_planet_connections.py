@@ -7,17 +7,17 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.planet_connections import (
     FlareConnectionMode,
-    _PlanetSpatialIndex,
     _max_flare_arrival_extent,
     _pair_has_direct_connection,
+    _PlanetSpatialIndex,
     _reachable_via_flare_limited_depth,
     connection_routes_for_planets,
     max_travel_distance,
     min_distance_point_to_simplified_normal_well,
 )
-from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.warp_well import NORMAL_RADIUS
 from api.models.flare_point import FlarePoint
 from api.services.game_service import GameService
@@ -140,7 +140,10 @@ def test_flare_p5_p6_waypoint_farther_than_warp_squared(sample_planet):
 
 
 def test_depth_two_includes_single_flare_pairs_from_depth_one(sample_planet):
-    """Depth N must not drop 1-flare links that appear at depth 1 (per-k normal check, not N only)."""
+    """Depth N must not drop 1-flare links that appear at depth 1.
+
+    Uses per-k normal check, not N only.
+    """
     p5 = _p(sample_planet, 5, 2479, 1788)
     p6 = _p(sample_planet, 6, 2528, 1857)
     one = connection_routes_for_planets(
@@ -157,22 +160,29 @@ def test_depth_two_includes_single_flare_pairs_from_depth_one(sample_planet):
         flare_mode=FlareConnectionMode.INCLUDE,
         flare_depth=2,
     )
-    assert one == two == [
-        {"fromPlanetId": 5, "toPlanetId": 6, "viaFlare": True},
-    ]
+    assert (
+        one
+        == two
+        == [
+            {"fromPlanetId": 5, "toPlanetId": 6, "viaFlare": True},
+        ]
+    )
 
 
 def test_flare_depth_cap_includes_shorter_chains(sample_planet):
     """A pair needing 2 flares is omitted at max-depth 1 and included at 2 (not only at 3)."""
     a = _p(sample_planet, 1, 2549, 1691)
     b = _p(sample_planet, 2, 2507, 1851)
-    assert connection_routes_for_planets(
-        [a, b],
-        warp_speed=9,
-        gravitonic_movement=False,
-        flare_mode=FlareConnectionMode.INCLUDE,
-        flare_depth=1,
-    ) == []
+    assert (
+        connection_routes_for_planets(
+            [a, b],
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.INCLUDE,
+            flare_depth=1,
+        )
+        == []
+    )
     assert connection_routes_for_planets(
         [a, b],
         warp_speed=9,
@@ -220,9 +230,9 @@ def test_flare_limited_depth_two_hops(sample_planet):
     assert not _reachable_via_flare_limited_depth(a, b, [hop], 1, [a, b], mt)
     assert _reachable_via_flare_limited_depth(a, b, [hop], 2, [a, b], mt)
     c = _p(sample_planet, 3, 10, 0)
-    assert not _reachable_via_flare_limited_depth(
-        a, b, [hop], 2, [a, b, c], mt
-    ), "intermediate arrival must not lie in another planet's well"
+    assert not _reachable_via_flare_limited_depth(a, b, [hop], 2, [a, b, c], mt), (
+        "intermediate arrival must not lie in another planet's well"
+    )
 
 
 def test_flare_bfs_distance_prune_matches_unpruned_on_annulus(sample_planet):
@@ -289,15 +299,12 @@ def test_depth_two_flare_real_table_row_waypoint_not_arrival(sample_planet):
     # The vector from intermediate to B's map cell is (-18, 82), which is not a table row;
     # the (only) table flare that ends in B's well from (2525, 1769) is (-16, 80) -> (2509, 1849).
     assert any(
-        f.arrival_offset == (-16, 80) and (ix + f.arrival_offset[0], iy + f.arrival_offset[1]) == (2509, 1849)
+        f.arrival_offset == (-16, 80)
+        and (ix + f.arrival_offset[0], iy + f.arrival_offset[1]) == (2509, 1849)
         for f in fl
     )
-    assert not _pair_has_direct_connection(
-        a, b, max_travel_distance(9, False)
-    )
-    assert _reachable_via_flare_limited_depth(
-        a, b, fl, 2, [a, b], max_travel_distance(9, False)
-    )
+    assert not _pair_has_direct_connection(a, b, max_travel_distance(9, False))
+    assert _reachable_via_flare_limited_depth(a, b, fl, 2, [a, b], max_travel_distance(9, False))
     routes = connection_routes_for_planets(
         [a, b],
         warp_speed=9,
@@ -306,7 +313,6 @@ def test_depth_two_flare_real_table_row_waypoint_not_arrival(sample_planet):
         flare_depth=2,
     )
     assert routes == [{"fromPlanetId": 1, "toPlanetId": 2, "viaFlare": True}]
-
 
 
 class TestSpatialIndexFallback:
