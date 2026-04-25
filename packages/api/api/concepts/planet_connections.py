@@ -772,35 +772,6 @@ def _build_flare_eligible_by_layer(
     return (e1, e2, e3)
 
 
-def _pair_has_exclusive_flare_connection(
-    planet_a: Planet,
-    planet_b: Planet,
-    max_travel: float,
-    flares: list[FlarePoint],
-    flare_depth: int,
-    all_planets: list[Planet],
-    *,
-    use_distance_prune: bool = True,
-) -> bool:
-    """True if some flare chain up to ``flare_depth`` should count as a map flare edge."""
-    if not flares or flare_depth < 1:
-        return False
-    for k in range(1, flare_depth + 1):
-        if _pair_reachable_in_k_normal_moves(planet_a, planet_b, max_travel, k):
-            continue
-        if _pair_reachable_via_flare_either_direction(
-            planet_a,
-            planet_b,
-            flares,
-            k,
-            all_planets,
-            max_travel,
-            use_distance_prune=use_distance_prune,
-        ):
-            return True
-    return False
-
-
 def connection_routes_for_planets(
     planets: list[Planet],
     *,
