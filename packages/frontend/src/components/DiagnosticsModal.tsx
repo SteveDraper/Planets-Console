@@ -49,7 +49,14 @@ export function DiagnosticsModal({
     const focusables = el.querySelectorAll<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     )
-    focusables[0]?.focus()
+    for (const node of focusables) {
+      if (node.matches(':disabled')) {
+        continue
+      }
+      node.focus()
+      return
+    }
+    el.focus()
   }, [isOpen])
 
   useEffect(() => {
@@ -110,9 +117,11 @@ export function DiagnosticsModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="diagnostics-title"
+        tabIndex={-1}
         className={cn(
           'flex max-h-[85vh] w-[min(42rem,100vw-2rem)] flex-col overflow-hidden',
-          'rounded-lg border border-[#52575d] bg-[#2d3136] shadow-xl'
+          'rounded-lg border border-[#52575d] bg-[#2d3136] shadow-xl',
+          'outline-none focus-visible:ring-1 focus-visible:ring-slate-400'
         )}
       >
         <div className="flex items-center justify-between border-b border-[#52575d] px-4 py-3">

@@ -36,9 +36,9 @@ def test_diagnostics_recent_alias_matches_bff_mount(_api_config_and_storage):
     """Root app exposes MRU at both /bff/diagnostics/recent and /diagnostics/recent."""
     from server.app import app
 
-    c = TestClient(app)
-    r1 = c.get("/bff/diagnostics/recent")
-    r2 = c.get("/diagnostics/recent")
+    with TestClient(app) as c:
+        r1 = c.get("/bff/diagnostics/recent")
+        r2 = c.get("/diagnostics/recent")
     assert r1.status_code == 200
     assert r2.status_code == 200
     assert r1.json() == r2.json() == {"items": []}
