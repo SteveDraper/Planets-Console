@@ -28,14 +28,14 @@ class DiagnosticsBuffer:
             self._items = deque(self._items, maxlen=self._maxlen)
 
     def append(self, summary: str, tree: dict[str, Any]) -> None:
-        if self._maxlen <= 0:
-            return
-        rec = {
-            "capturedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "summary": summary,
-            "diagnostics": tree,
-        }
         with self._lock:
+            if self._maxlen <= 0:
+                return
+            rec = {
+                "capturedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "summary": summary,
+                "diagnostics": tree,
+            }
             self._items.append(rec)
 
     def recent(self) -> list[dict[str, Any]]:

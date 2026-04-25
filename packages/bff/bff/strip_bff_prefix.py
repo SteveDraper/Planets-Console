@@ -15,6 +15,23 @@ from typing import Any
 ASGIApp = Callable[[Any, Any, Any], Awaitable[None]]
 
 
+def _raw_path_after_strip_bff(new_path: str, previous_raw: bytes | bytearray | None) -> bytes:
+    """Match ``raw_path`` to the stripped ``path`` without assuming ASCII or re-encoding the tail.
+
+    Prefer slicing the existing ``/bff`` prefix from ``scope["raw_path"]`` so percent-bytes
+    in the rest of the path are preserved. Fall back to UTF-8 for ``new_path`` when the raw
+    form does not start with a literal ``b"/bff"`` (e.g. different encoding of ``bff``).
+    """
+    if previous_raw is None:
+        return new_path.encode("utf-8")
+    b = bytes(previous_raw)
+    if b.startswith(b"/bff/"):
+        return b[4:]
+    if b == b"/bff":
+        return b"/"
+    return new_path.encode("utf-8")
+
+
 class StripBffPrefixWhenRootApp:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -25,7 +42,12 @@ class StripBffPrefixWhenRootApp:
             if path.startswith("/bff/") or path == "/bff":
                 new = path[4:] if path.startswith("/bff/") else "/"
                 new_scope: dict = {**scope, "path": new}
-                if "raw_path" in scope and isinstance(scope.get("raw_path"), (bytes, bytearray)):
-                    new_scope["raw_path"] = new.encode("ascii")
+                rp = scope.get("raw_path")
+                if isinstance(rp, (bytes, bytearray)) or rp is None:
+                    new_scope["raw_path"] = _raw_path_after_strip_bff(
+                        new, rp if isinstance(rp, (bytes, bytearray)) else None
+                    )
+                else:
+                    new_scope["raw_path"] = new.encode("utf-8")
                 scope = new_scope
         await self.app(scope, receive, send)
