@@ -541,6 +541,33 @@ def _iter_flare_candidate_edges(
             yield planet_a, planet_b, in_flare_inner
 
 
+def _list_flare_annulus_candidate_edges(
+    sorted_planets: list[Planet],
+    index: _PlanetSpatialIndex,
+    *,
+    max_travel: float,
+    scan_flare: float,
+    scan_direct: float,
+) -> list[tuple[Planet, Planet]]:
+    """Annulus candidate pairs (``use_flare_discs=True``), one spatial pass for reuse across *k*.
+
+    Excludes inner-disc pairs so each layer reuses the same list without repeat index queries
+    and per-``planet_a`` set/list allocations.
+    """
+    return [
+        (pa, pb)
+        for pa, pb, in_flare_inner in _iter_flare_candidate_edges(
+            sorted_planets,
+            index,
+            max_travel=max_travel,
+            scan_flare=scan_flare,
+            scan_direct=scan_direct,
+            use_flare_discs=True,
+        )
+        if not in_flare_inner
+    ]
+
+
 def _build_flare_eligible_by_layer(
     sorted_planets: list[Planet],
     index: _PlanetSpatialIndex,
@@ -563,23 +590,21 @@ def _build_flare_eligible_by_layer(
     e2: set[tuple[int, int]] = set()
     e3: set[tuple[int, int]] = set()
 
+    annulus_edges = _list_flare_annulus_candidate_edges(
+        sorted_planets,
+        index,
+        max_travel=max_travel,
+        scan_flare=scan_flare,
+        scan_direct=scan_direct,
+    )
+    annulus_n = len(annulus_edges)
+
     m1 = _FlareBfsMetrics() if diagnostics is not None else None
-    annulus1 = 0
     if diagnostics is not None:
         d1 = diagnostics.child("flare_transitive_k1")
         d1.values["k"] = 1
         with timed_section(d1, "total"):
-            for planet_a, planet_b, in_flare_inner in _iter_flare_candidate_edges(
-                sorted_planets,
-                index,
-                max_travel=max_travel,
-                scan_flare=scan_flare,
-                scan_direct=scan_direct,
-                use_flare_discs=True,
-            ):
-                if in_flare_inner:
-                    continue
-                annulus1 += 1
+            for planet_a, planet_b in annulus_edges:
                 key = _canonical_pair_id(planet_a, planet_b)
                 if not _pair_reachable_in_k_normal_moves(
                     planet_a, planet_b, max_travel, 1
@@ -594,7 +619,7 @@ def _build_flare_eligible_by_layer(
                     bfs_metrics=m1,
                 ):
                     e1.add(key)
-        d1.values["annulusPairs"] = annulus1
+        d1.values["annulusPairs"] = annulus_n
         d1.values["connectionsFoundInLayer"] = len(e1)
         d1.values["cumulativeConnections"] = len(e1)
         if m1 is not None:
@@ -602,16 +627,7 @@ def _build_flare_eligible_by_layer(
             d1.values["intermediateRoutePoints"] = m1.bfs_dequeues
             d1.values["searchEnqueues"] = m1.bfs_enqueues
     else:
-        for planet_a, planet_b, in_flare_inner in _iter_flare_candidate_edges(
-            sorted_planets,
-            index,
-            max_travel=max_travel,
-            scan_flare=scan_flare,
-            scan_direct=scan_direct,
-            use_flare_discs=True,
-        ):
-            if in_flare_inner:
-                continue
+        for planet_a, planet_b in annulus_edges:
             key = _canonical_pair_id(planet_a, planet_b)
             if not _pair_reachable_in_k_normal_moves(
                 planet_a, planet_b, max_travel, 1
@@ -631,22 +647,11 @@ def _build_flare_eligible_by_layer(
         return (e1, e2, e3)
 
     m2 = _FlareBfsMetrics() if diagnostics is not None else None
-    annulus2 = 0
     if diagnostics is not None:
         d2 = diagnostics.child("flare_transitive_k2")
         d2.values["k"] = 2
         with timed_section(d2, "total"):
-            for planet_a, planet_b, in_flare_inner in _iter_flare_candidate_edges(
-                sorted_planets,
-                index,
-                max_travel=max_travel,
-                scan_flare=scan_flare,
-                scan_direct=scan_direct,
-                use_flare_discs=True,
-            ):
-                if in_flare_inner:
-                    continue
-                annulus2 += 1
+            for planet_a, planet_b in annulus_edges:
                 key = _canonical_pair_id(planet_a, planet_b)
                 if key in e1:
                     continue
@@ -663,7 +668,7 @@ def _build_flare_eligible_by_layer(
                     bfs_metrics=m2,
                 ):
                     e2.add(key)
-        d2.values["annulusPairs"] = annulus2
+        d2.values["annulusPairs"] = annulus_n
         d2.values["connectionsFoundInLayer"] = len(e2)
         d2.values["cumulativeConnections"] = len(e1) + len(e2)
         if m2 is not None:
@@ -671,16 +676,7 @@ def _build_flare_eligible_by_layer(
             d2.values["intermediateRoutePoints"] = m2.bfs_dequeues
             d2.values["searchEnqueues"] = m2.bfs_enqueues
     else:
-        for planet_a, planet_b, in_flare_inner in _iter_flare_candidate_edges(
-            sorted_planets,
-            index,
-            max_travel=max_travel,
-            scan_flare=scan_flare,
-            scan_direct=scan_direct,
-            use_flare_discs=True,
-        ):
-            if in_flare_inner:
-                continue
+        for planet_a, planet_b in annulus_edges:
             key = _canonical_pair_id(planet_a, planet_b)
             if key in e1:
                 continue
@@ -703,22 +699,11 @@ def _build_flare_eligible_by_layer(
     e12 = e1 | e2
 
     m3 = _FlareBfsMetrics() if diagnostics is not None else None
-    annulus3 = 0
     if diagnostics is not None:
         d3 = diagnostics.child("flare_transitive_k3")
         d3.values["k"] = 3
         with timed_section(d3, "total"):
-            for planet_a, planet_b, in_flare_inner in _iter_flare_candidate_edges(
-                sorted_planets,
-                index,
-                max_travel=max_travel,
-                scan_flare=scan_flare,
-                scan_direct=scan_direct,
-                use_flare_discs=True,
-            ):
-                if in_flare_inner:
-                    continue
-                annulus3 += 1
+            for planet_a, planet_b in annulus_edges:
                 key = _canonical_pair_id(planet_a, planet_b)
                 if key in e12:
                     continue
@@ -735,7 +720,7 @@ def _build_flare_eligible_by_layer(
                     bfs_metrics=m3,
                 ):
                     e3.add(key)
-        d3.values["annulusPairs"] = annulus3
+        d3.values["annulusPairs"] = annulus_n
         d3.values["connectionsFoundInLayer"] = len(e3)
         d3.values["cumulativeConnections"] = len(e1) + len(e2) + len(e3)
         if m3 is not None:
@@ -743,16 +728,7 @@ def _build_flare_eligible_by_layer(
             d3.values["intermediateRoutePoints"] = m3.bfs_dequeues
             d3.values["searchEnqueues"] = m3.bfs_enqueues
     else:
-        for planet_a, planet_b, in_flare_inner in _iter_flare_candidate_edges(
-            sorted_planets,
-            index,
-            max_travel=max_travel,
-            scan_flare=scan_flare,
-            scan_direct=scan_direct,
-            use_flare_discs=True,
-        ):
-            if in_flare_inner:
-                continue
+        for planet_a, planet_b in annulus_edges:
             key = _canonical_pair_id(planet_a, planet_b)
             if key in e12:
                 continue
@@ -785,9 +761,10 @@ def connection_routes_for_planets(
     """Canonical planet pairs (lower id -> higher id) with direct and/or flare connectivity.
 
     With flares, ``flare_depth`` *N* is the **maximum hop count** (each hop is a normal move of
-    at most ``max_travel`` or one flare), with at least one flare on the path. Eligible pairs
-    are precomputed in independent passes for *k* = 1, 2, 3 (skipping a pair in later passes
-    if it is already in a shallower layer), then unioned to match the *k*‑or semantics.
+    at most ``max_travel`` or one flare), with at least one flare on the path. Annulus
+    candidate pairs are built once (same spatial-index work for every *k*), then for each
+    *k* = 1, 2, 3 in order we add pairs not already in a shallower layer, unioning to match the
+    *k*‑or semantics.
 
     **Candidates:** the spatial index is queried twice: all planets with center distance
     ≤ ``max_travel`` (inner disc) and all within the flare reach disc (``scan_flare``). The

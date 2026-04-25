@@ -32,6 +32,7 @@ export function DiagnosticsModal({
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const [items, setItems] = useState<DiagnosticsRecentItem[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [clipboardError, setClipboardError] = useState<string | null>(null)
   const [recordBffDiagnostics, setRecordBffDiagnostics] = useState(false)
 
   const closeAndReturnFocus = useCallback(() => {
@@ -62,6 +63,7 @@ export function DiagnosticsModal({
   useEffect(() => {
     if (!isOpen) return
     setLoadError(null)
+    setClipboardError(null)
     setItems(null)
     setRecordBffDiagnostics(isIncludeDiagnosticsSessionEnabled())
     void fetchDiagnosticsRecent()
@@ -83,13 +85,45 @@ export function DiagnosticsModal({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, closeAndReturnFocus])
 
+  const runClipboardCopy = useCallback((text: string) => {
+    if (typeof globalThis.isSecureContext === 'boolean' && !globalThis.isSecureContext) {
+      setClipboardError(
+        'Clipboard needs a secure context (HTTPS). Open the app over HTTPS or use localhost.'
+      )
+      return
+    }
+    if (
+      typeof navigator === 'undefined' ||
+      typeof navigator.clipboard?.writeText !== 'function'
+    ) {
+      setClipboardError(
+        'Clipboard API is not available in this browser or context. Check permissions or try another browser.'
+      )
+      return
+    }
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setClipboardError(null)
+      })
+      .catch((e: unknown) => {
+        const msg =
+          e instanceof Error
+            ? e.message
+            : typeof e === 'string'
+              ? e
+              : 'Could not copy to clipboard.'
+        setClipboardError(msg || 'Could not copy to clipboard.')
+      })
+  }, [])
+
   const copyOne = (item: DiagnosticsRecentItem) => {
-    void navigator.clipboard.writeText(formatBlob(item))
+    runClipboardCopy(formatBlob(item))
   }
 
   const copyAll = () => {
     if (!items?.length) return
-    void navigator.clipboard.writeText(
+    runClipboardCopy(
       JSON.stringify(
         {
           items: items.map((i) => ({
@@ -176,6 +210,11 @@ export function DiagnosticsModal({
           </label>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {clipboardError != null && (
+            <p className="mb-2 text-sm text-red-400" role="alert">
+              {clipboardError}
+            </p>
+          )}
           {loadError != null && (
             <p className="text-sm text-red-400" role="alert">
               {loadError}
