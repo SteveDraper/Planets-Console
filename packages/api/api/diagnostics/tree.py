@@ -1,6 +1,9 @@
 """Composable diagnostic tree: names, values, per-section timings, and child nodes.
 
-Values must be JSON-friendly atomics: ``str | int | float | bool | None``.
+``values`` are **JSON-serializable** in the sense of a finite nested structure: scalars, lists,
+and string-keyed dicts (see :class:`JSONValue`). In practice, request root nodes set only
+**scalars** (query/path metadata); children may add structured detail (e.g. lists of small
+dicts) that still round-trips with :func:`json.dumps` / :meth:`jsonable_encoder` on the BFF.
 Timings are wall seconds (``time.perf_counter`` deltas) per named section.
 """
 
@@ -9,9 +12,11 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Iterator, TypeAlias
 
-JSONScalar = str | int | float | bool | None
+JSONScalar: TypeAlias = str | int | float | bool | None
+# Nested JSON-shaped payloads (natively ``json``-encodable, no set/date unless encoded elsewhere).
+JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
 
 @dataclass
@@ -19,7 +24,7 @@ class DiagnosticNode:
     """One node in a diagnostic tree (typically one instrumented function or a request shell)."""
 
     name: str
-    values: dict[str, JSONScalar] = field(default_factory=dict)
+    values: dict[str, JSONValue] = field(default_factory=dict)
     timings: dict[str, float] = field(default_factory=dict)
     children: list[DiagnosticNode] = field(default_factory=list)
 
@@ -30,7 +35,7 @@ class DiagnosticNode:
         return c
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a JSON-friendly nested dict."""
+        """Return a tree dict whose ``values`` values are :class:`JSONValue` (JSON-encodable)."""
         return {
             "name": self.name,
             "values": dict(self.values),
@@ -50,8 +55,11 @@ def request_root_node(
 
     ``path`` should be the logical route (e.g. ``/analytics/connections/map``).
     ``path_template`` if set is stored in ``values`` (e.g. for OpenAPI template paths).
+
+    Kwargs are **scalars** (typical for query and handler labels); :attr:`values` on the
+    node still accepts the full :class:`JSONValue` set for any later mutation on children.
     """
-    values: dict[str, JSONScalar] = dict(param_values)
+    values: dict[str, JSONValue] = dict(param_values)
     if path_template is not None:
         values["pathTemplate"] = path_template
     return DiagnosticNode(name=f"{method} {path}", values=values)

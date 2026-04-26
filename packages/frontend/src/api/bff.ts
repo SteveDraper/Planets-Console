@@ -601,9 +601,21 @@ export async function fetchAnalyticMap(
 
 // --- Server diagnostics (MRU buffer of request trees) ---
 
+/**
+ * Finitely nested JSON shape (natively JSON-serializable; matches Core/BFF `JSONValue` on trees).
+ * Request roots usually attach only scalars; child nodes may add arrays or small objects.
+ */
+export type JsonValue =
+  | null
+  | string
+  | number
+  | boolean
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 export type DiagnosticTree = {
   name: string
-  values: Record<string, string | number | boolean | null>
+  values: Record<string, JsonValue>
   timings: Record<string, number>
   children: DiagnosticTree[]
 }

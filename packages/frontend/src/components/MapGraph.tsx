@@ -195,6 +195,13 @@ function PolylineEdgeOnePixel(props: EdgeProps) {
   const targetNode = nodeLookup?.get(props.target)
   const data = props.data as MapEdgeData | undefined
   const wps = data?.waypointsInGame
+  const viaFlare = data?.viaFlare === true
+  const mapEdgeStrokeStyle: CSSProperties = {
+    stroke: viaFlare ? '#facc15' : '#b1b1b7',
+    strokeWidth: 1 / scale,
+    opacity: 0.5,
+    ...(viaFlare ? { strokeDasharray: `${4 / scale} ${3 / scale}` } : {}),
+  }
   if (!sourceNode || !targetNode) {
     const [path] = getStraightPath({
       sourceX: props.sourceX,
@@ -202,7 +209,7 @@ function PolylineEdgeOnePixel(props: EdgeProps) {
       targetX: props.targetX,
       targetY: props.targetY,
     })
-    return <BaseEdge path={path} style={{ stroke: '#b1b1b7', strokeWidth: 1 / scale, opacity: 0.5 }} />
+    return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
   }
   const sCx = sourceNode.position.x + half
   const sCy = sourceNode.position.y + half
@@ -225,32 +232,10 @@ function PolylineEdgeOnePixel(props: EdgeProps) {
       targetX: tCx,
       targetY: tCy,
     })
-    const viaFlare = data?.viaFlare === true
-    return (
-      <BaseEdge
-        path={path}
-        style={{
-          stroke: viaFlare ? '#facc15' : '#b1b1b7',
-          strokeWidth: 1 / scale,
-          opacity: 0.5,
-          ...(viaFlare ? { strokeDasharray: `${4 / scale} ${3 / scale}` } : {}),
-        }}
-      />
-    )
+    return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
   }
   const path = buildSvgPathThroughFlowPoints(flowPoints)
-  const viaFlare = data?.viaFlare === true
-  return (
-    <BaseEdge
-      path={path}
-      style={{
-        stroke: viaFlare ? '#facc15' : '#b1b1b7',
-        strokeWidth: 1 / scale,
-        opacity: 0.5,
-        ...(viaFlare ? { strokeDasharray: `${4 / scale} ${3 / scale}` } : {}),
-      }}
-    />
-  )
+  return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
 }
 
 const edgeTypes = { straight: StraightEdgeOnePixel, polyline: PolylineEdgeOnePixel }

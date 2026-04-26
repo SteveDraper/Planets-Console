@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Annotated, Any, TypeVar
 
-from api.diagnostics import DiagnosticNode, request_root_node, timed_section
+from api.diagnostics import DiagnosticNode, JSONScalar, request_root_node, timed_section
 from fastapi import Query
 from fastapi.encoders import jsonable_encoder
 
@@ -21,8 +21,6 @@ from bff.diagnostics_http import response_with_diagnostics
 IncludeDiagnostics = Annotated[bool, Query(alias="includeDiagnostics")]
 
 T = TypeVar("T")
-
-JSONScalar = str | int | float | bool | None
 
 
 def optional_request_root(
