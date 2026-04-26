@@ -190,9 +190,12 @@ export type MapDataResponse = {
 export type ConnectionsFlareMode = 'off' | 'include' | 'only'
 
 /**
- * Maximum BFS cap (1–3). Pairs are evaluated for k = 1…N (flare vs k normal moves), so
- * e.g. depth 2 still shows single-flare links from depth-1, not only two-flare pairs.
- * Only when `flareMode` is not `off`.
+ * Max **hops** (1–3) for Core’s mixed **normal-move + flare** reachability test: each hop is one
+ * normal well move (within max travel) or one flare from the table, and a valid path must use
+ * **at least one** flare. This is a hop **budget**, not a cap on “flares in a row.”
+ * Pair **discovery** unions center-distance **annuli** for k = 1…N, so a higher value adds
+ * candidate pairs and longer mixed paths; it does not drop links accepted at a smaller value.
+ * Only used when `flareMode` is not `off` (no flare geometry otherwise).
  */
 export type ConnectionsFlareDepth = 1 | 2 | 3
 
@@ -201,7 +204,10 @@ export type ConnectionsMapParams = {
   warpSpeed: number
   gravitonicMovement: boolean
   flareMode: ConnectionsFlareMode
-  /** Flare chain length cap (1–3). */
+  /**
+   * `flareDepth` query (1–3): hop budget for mixed normal+flare paths; at least one hop must be
+   * a flare. Raising it widens per-k annulus search and can admit longer mixed paths.
+   */
   flareDepth: ConnectionsFlareDepth
 }
 
@@ -561,7 +567,7 @@ function analyticMapQueryString(
     )
     params.set('flareMode', connectionsParams.flareMode)
     params.set('flareDepth', String(connectionsParams.flareDepth))
-    // Multi-hop flare paths (intermediate cells) are only available when depth ≥2; single-hop has no waypoints.
+    // Illustrative routes (per-hop waypoints) are only useful when the hop budget can exceed one.
     if (connectionsParams.flareMode !== 'off' && connectionsParams.flareDepth >= 2) {
       params.set('includeIllustrativeRoutes', 'true')
     }

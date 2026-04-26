@@ -169,7 +169,7 @@ function ConnectionsMapTile({
               disabled={!flaresEnabled}
               title={
                 flaresEnabled
-                  ? 'Cap on how many flares in a row to search. At 2 or 3 you still get every link that was shown at 1, plus new links that need a longer chain.'
+                  ? 'Max hops on mixed normal+flare paths (each hop is a normal move or a flare; the path must include at least one flare). Higher values add annulus candidates and can show longer paths; 2+ also enables illustrative waypoints in the request.'
                   : 'Enable flares to set depth'
               }
               className="min-w-0 w-0 flex-1 rounded border border-[#52575d] bg-[#2a2d30] px-1 py-0.5 text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"

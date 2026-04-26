@@ -91,9 +91,16 @@ def connection_routes_with_options(
 ) -> ConnectionRoutesOutcome:
     """Canonical planet pairs (lower id -> higher id) with direct and/or flare connectivity.
 
-    Flare eligibility uses per-*k* center-distance annuli
+    **Flare pathfinding:** for annulus-candidate pairs, reachability uses a hop **budget** of
+    ``flare_depth`` (1–3), each hop being a normal move or a flare, with **at least one** flare
+    in the path (see
+    :func:`api.concepts.planet_connections.flare_pathfind._reachable_via_flare_limited_depth`).
+    This is not a "count only consecutive flares" model.
+
+    Flare **pair discovery** uses per-*k* center-distance annuli
     ``(k*max_travel, k*hop_loose + NORMAL_RADIUS]`` (see
-    :func:`_build_flare_eligible_per_depth_center_annuli`).
+    :func:`_build_flare_eligible_per_depth_center_annuli`); results for k ≤ ``flare_depth`` are
+    unioned so larger ``flare_depth`` only adds candidates.
 
     **Candidates:** the spatial index is queried for inner disc and outer flare reach; expensive
     flare BFS runs only for annulus pairs. Set ``flare_bfs_use_distance_prune`` to False only

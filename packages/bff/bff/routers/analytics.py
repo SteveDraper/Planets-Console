@@ -144,8 +144,21 @@ def get_analytic_map(
     warp_speed: int = Query(9, ge=1, le=9, alias="warpSpeed"),
     gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
-    flare_depth: int = Query(1, ge=1, le=3, alias="flareDepth"),
-    include_illustrative_routes: bool = Query(False, alias="includeIllustrativeRoutes"),
+    flare_depth: int = Query(
+        1,
+        ge=1,
+        le=3,
+        alias="flareDepth",
+        description=(
+            "Max hops (1–3) for mixed normal-move + flare paths; at least one hop must be a flare. "
+            "Larger values add annulus pair candidates. Ignored when flareMode is off."
+        ),
+    ),
+    include_illustrative_routes: bool = Query(
+        False,
+        alias="includeIllustrativeRoutes",
+        description="When true, flare routes may include per-hop illustrativeRoute steps (Core).",
+    ),
     include: IncludeDiagnostics = False,
 ):
     """Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
