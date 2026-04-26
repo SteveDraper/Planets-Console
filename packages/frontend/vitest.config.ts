@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import { mergeConfig } from 'vite'
-import viteConfig from './vite.config.js'
+import viteConfig from './vite.config.ts'
 
 // `test` is typed on Vitest's config, not Vite's — merge keeps vite.config.ts free of suppressions.
 export default mergeConfig(
