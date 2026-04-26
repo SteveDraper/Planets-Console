@@ -160,6 +160,60 @@ describe('normalizeMapDataResponse', () => {
     expect(flare.arrivalOffset).toEqual([5, -1])
   })
 
+  it('drops illustrative steps when to.x / to.y are not finite numbers (e.g. null, empty string)', () => {
+    const raw = {
+      analyticId: 'connections',
+      nodes: [],
+      edges: [],
+      routes: [
+        {
+          fromPlanetId: 1,
+          toPlanetId: 2,
+          viaFlare: true,
+          illustrativeRoute: [
+            { kind: 'normal', to: { x: null, y: 0 } },
+            { kind: 'normal', to: { x: 5, y: 6 } },
+            { kind: 'normal', to: { x: '', y: 7 } },
+          ],
+        },
+      ],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.routes![0].illustrativeRoute).toEqual([
+      { kind: 'normal', to: { x: 5, y: 6 } },
+    ])
+  })
+
+  it('omits waypoint/arrival offset pairs when an element is null, empty string, or non-numeric (no coercion to 0)', () => {
+    const raw: unknown = JSON.parse(
+      `{
+        "analyticId": "connections",
+        "nodes": [],
+        "edges": [],
+        "routes": [
+          {
+            "fromPlanetId": 1,
+            "toPlanetId": 2,
+            "viaFlare": true,
+            "illustrativeRoute": [
+              {
+                "kind": "flare",
+                "to": { "x": 0, "y": 0 },
+                "waypointOffset": [null, 1],
+                "arrivalOffset": ["", 2]
+              },
+              { "kind": "normal", "to": { "x": 1, "y": 1 } }
+            ]
+          }
+        ]
+      }`
+    )
+    const out = normalizeMapDataResponse(raw)
+    const step = out.routes![0].illustrativeRoute![0]
+    expect(step.waypointOffset).toBeUndefined()
+    expect(step.arrivalOffset).toBeUndefined()
+  })
+
   it('accepts snake_case offset keys and omits invalid offset tuples', () => {
     const raw = {
       analyticId: 'connections',

@@ -211,6 +211,23 @@ export type ConnectionsMapParams = {
   flareDepth: ConnectionsFlareDepth
 }
 
+/** Parse a single JSON number; rejects null, non-numeric, and `Number('')` → 0. */
+function parseJsonFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string') {
+    if (value.trim() === '') return null
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+/**
+ * 2D offset tuple from the wire. Each element must be a finite `number` or a non-empty
+ * numeric string — never `Number()` on arbitrary values (avoids `null`/`""` → `0`).
+ */
 function parseFiniteNumberPair(
   s: Record<string, unknown>,
   camelKey: string,
@@ -219,9 +236,9 @@ function parseFiniteNumberPair(
   const raw = s[camelKey] ?? s[snakeKey]
   if (raw == null) return undefined
   if (!Array.isArray(raw) || raw.length !== 2) return undefined
-  const a = typeof raw[0] === 'number' ? raw[0] : Number(raw[0])
-  const b = typeof raw[1] === 'number' ? raw[1] : Number(raw[1])
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return undefined
+  const a = parseJsonFiniteNumber(raw[0])
+  const b = parseJsonFiniteNumber(raw[1])
+  if (a == null || b == null) return undefined
   return [a, b]
 }
 
@@ -233,9 +250,9 @@ function normalizeIllustrativeRouteStep(raw: unknown): IllustrativeRouteStep | n
   const toRaw = s.to
   if (toRaw == null || typeof toRaw !== 'object') return null
   const t = toRaw as Record<string, unknown>
-  const x = typeof t.x === 'number' ? t.x : Number(t.x)
-  const y = typeof t.y === 'number' ? t.y : Number(t.y)
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  const x = parseJsonFiniteNumber(t.x)
+  const y = parseJsonFiniteNumber(t.y)
+  if (x == null || y == null) return null
   const out: IllustrativeRouteStep = { kind, to: { x, y } }
   const wp = parseFiniteNumberPair(s, 'waypointOffset', 'waypoint_offset')
   if (wp != null) {
@@ -652,12 +669,11 @@ export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentRespons
     if (r.status !== 404) {
       const body = await r.text().catch(() => '')
       const clip = body.length > 400 ? `${body.slice(0, 400)}…` : body
-      throw new Error(
-        withEndpointIfGeneric(
-          clip ? `${r.status}: ${clip}` : String(r.status),
-          label
-        )
-      )
+      // Do not use `withEndpointIfGeneric` here: a body snippet (e.g. "500: <html>…") is not
+      // a "generic" message, so the label would be omitted. Always include the attempt label.
+      const parts: string[] = [label, `HTTP ${r.status}`]
+      if (clip) parts.push(clip)
+      throw new Error(parts.join(' — '))
     }
   }
   throw new Error(
