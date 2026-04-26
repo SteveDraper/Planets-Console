@@ -48,5 +48,5 @@ jobs:
         env:
           NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
 
-      - name: Run unit tests
-        run: make test
+      - name: Run CI (lint, typecheck, tests)
+        run: make ci

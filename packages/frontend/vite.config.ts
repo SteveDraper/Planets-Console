@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Vitest adds `test`; Vite's `UserConfig` type does not include it (see reference types above).
+  // @ts-expect-error TS2769: vitest extends ViteConfig with `test`
   test: {
     environment: 'jsdom',
     globals: true,

@@ -48,7 +48,7 @@ function combineMapData(
   const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
   const nodes: CombinedMapData['nodes'] = []
   const edges: MapEdge[] = []
-  const waypointsByKey = new Map<string, { gx: number; gy: number }>()
+  const waypointsByKey = new Map<string, { x: number; y: number }>()
   results.forEach((result, idx) => {
     const data = result.data
     const prefix = analyticIds[idx] ?? ''
