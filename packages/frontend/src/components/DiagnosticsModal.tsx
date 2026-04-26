@@ -7,6 +7,7 @@ import {
   setIncludeDiagnosticsSessionEnabled,
   type DiagnosticsRecentItem,
 } from '../api/bff'
+import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 
@@ -82,17 +83,7 @@ export function DiagnosticsModal({
       })
   }, [isOpen])
 
-  useEffect(() => {
-    if (!isOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        closeAndReturnFocus()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, closeAndReturnFocus])
+  useModalKeydownFocusTrap(isOpen, dialogRef, closeAndReturnFocus)
 
   const runClipboardCopy = useCallback((text: string) => {
     if (typeof globalThis.isSecureContext === 'boolean' && !globalThis.isSecureContext) {
