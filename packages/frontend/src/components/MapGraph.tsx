@@ -734,8 +734,12 @@ function FixedSizeDotsOverlay({
     }
   }, [pinnedNodeId])
 
+  const routeWaypointIdSet = useMemo(
+    () => new Set(routeWaypoints.map((w) => w.id)),
+    [routeWaypoints]
+  )
   const hoveredWaypointInList =
-    hoveredWaypointId != null && routeWaypoints.some((w) => w.id === hoveredWaypointId)
+    hoveredWaypointId != null && routeWaypointIdSet.has(hoveredWaypointId)
   const hoveredWaypointIdForLabel =
     pinnedNodeId == null && hoveredWaypointInList ? hoveredWaypointId : null
 
