@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.planet_connections import (
-    ConnectionRouteAlgorithm,
     FlareConnectionMode,
     _max_flare_arrival_extent,
     _pair_has_direct_connection,
@@ -321,29 +320,6 @@ def test_depth_two_flare_real_table_row_waypoint_not_arrival(sample_planet):
 
 
 class TestConnectionRouteOptions:
-    def test_test_mode_runs_both_algorithms(self, sample_planet):
-        a = _p(sample_planet, 1, 0, 0)
-        b = _p(sample_planet, 2, 12, 0)
-        out = connection_routes_with_options(
-            [a, b],
-            warp_speed=9,
-            gravitonic_movement=False,
-            flare_mode=FlareConnectionMode.INCLUDE,
-            flare_depth=2,
-            connection_routes_test_mode=True,
-        )
-        assert out.connection_route_test is not None
-        t = out.connection_route_test
-        assert t["default"]["seconds"] >= 0.0
-        assert t["perDepthCenterAnnulus"]["seconds"] >= 0.0
-        assert "routes" in t["default"] and "routes" in t["perDepthCenterAnnulus"]
-        assert isinstance(t["default"]["illustrativeValidationErrors"], list)
-        assert isinstance(t["perDepthCenterAnnulus"]["illustrativeValidationErrors"], list)
-        assert "diff" in t
-        d = t["diff"]
-        assert "flareEdgesOnlyInDefault" in d and "edgeSignatureSymmetricDifference" in d
-        assert d["validationFailuresDefault"] is not None
-
     def test_validate_illustrative_requires_flare_hop(self, sample_planet):
         a = _p(sample_planet, 1, 0, 0)
         b = _p(sample_planet, 2, 1, 0)
@@ -351,13 +327,11 @@ class TestConnectionRouteOptions:
             {"kind": "normal", "to": {"x": 0, "y": 0}},
             {"kind": "normal", "to": {"x": 1, "y": 0}},
         ]
-        err = validate_illustrative_flare_route(
-            a, b, only_normal, max_travel_distance(9, False)
-        )
+        err = validate_illustrative_flare_route(a, b, only_normal, max_travel_distance(9, False))
         assert err is not None
         assert "no flare" in err.lower()
 
-    def test_per_depth_algorithm_runs(self, sample_planet):
+    def test_with_options_returns_routes(self, sample_planet):
         a = _p(sample_planet, 1, 0, 0)
         b = _p(sample_planet, 2, 5, 0)
         out = connection_routes_with_options(
@@ -366,7 +340,6 @@ class TestConnectionRouteOptions:
             gravitonic_movement=False,
             flare_mode=FlareConnectionMode.INCLUDE,
             flare_depth=1,
-            connection_route_algorithm=ConnectionRouteAlgorithm.PER_DEPTH_CENTER_ANNULUS,
         )
         assert isinstance(out.routes, list)
 

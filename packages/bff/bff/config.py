@@ -15,10 +15,6 @@ class BffConfig:
     """When set, the SPA loads this stored game id from the server without login (dev/demo)."""
     diagnostics_buffer_size: int = 10
     """How many most-recent per-request diagnostic trees to keep (0 disables retention)."""
-    connection_routes_live_compare: bool = False
-    """If True, BFF ``/analytics/connections/map`` runs both route algorithms, illustrative
-    validation, full diff, and (when includeDiagnostics) a diagnostic child — intended for local
-    verification, not for production default traffic."""
 
 
 def get_config() -> BffConfig:

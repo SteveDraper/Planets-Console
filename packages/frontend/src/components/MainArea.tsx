@@ -7,6 +7,7 @@ import type {
   CombinedMapData,
   ConnectionsFlareMode,
   ConnectionsMapParams,
+  IllustrativeRouteStep,
   MapDataResponse,
   MapEdge,
 } from '../api/bff'
@@ -20,6 +21,24 @@ import {
 
 type ViewMode = 'tabular' | 'map'
 
+/** Game cells visited before the last hop; excludes the destination planet's arrival cell. */
+function intermediateGameCellsFromIllustrative(
+  steps: IllustrativeRouteStep[] | undefined
+): { x: number; y: number }[] {
+  if (steps == null || steps.length <= 1) return []
+  const out: { x: number; y: number }[] = []
+  for (let i = 0; i < steps.length - 1; i += 1) {
+    const to = steps[i]?.to
+    if (to == null) continue
+    const x = Math.trunc(to.x)
+    const y = Math.trunc(to.y)
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      out.push({ x, y })
+    }
+  }
+  return out
+}
+
 function combineMapData(
   analyticIds: string[],
   results: { data?: MapDataResponse }[],
@@ -29,6 +48,7 @@ function combineMapData(
   const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
   const nodes: CombinedMapData['nodes'] = []
   const edges: MapEdge[] = []
+  const waypointsByKey = new Map<string, { gx: number; gy: number }>()
   results.forEach((result, idx) => {
     const data = result.data
     const prefix = analyticIds[idx] ?? ''
@@ -69,15 +89,39 @@ function combineMapData(
         }
       }
       for (const r of routesToDraw) {
-        edges.push({
+        const intermediates =
+          r.viaFlare === true && r.illustrativeRoute
+            ? intermediateGameCellsFromIllustrative(r.illustrativeRoute)
+            : []
+        const edge: MapEdge = {
           source: `${baseMapAnalyticId}:p${r.fromPlanetId}`,
           target: `${baseMapAnalyticId}:p${r.toPlanetId}`,
           viaFlare: r.viaFlare === true,
-        })
+        }
+        if (intermediates.length > 0) {
+          edge.waypointsInGame = intermediates.map((c) => ({ x: c.x, y: c.y }))
+        }
+        edges.push(edge)
+        if (r.viaFlare === true && r.illustrativeRoute) {
+          for (const c of intermediates) {
+            const k = `${c.x},${c.y}`
+            if (!waypointsByKey.has(k)) {
+              waypointsByKey.set(k, c)
+            }
+          }
+        }
       }
     }
   })
-  return { nodes, edges }
+  return {
+    nodes,
+    edges,
+    routeWaypoints: [...waypointsByKey.values()].map((c) => ({
+      id: `wp:${c.x},${c.y}`,
+      gx: c.x,
+      gy: c.y,
+    })),
+  }
 }
 
 type MainAreaProps = {
@@ -245,6 +289,7 @@ export function MainArea({
                 analyticId: 'connections',
                 nodes: [],
                 edges: [],
+                routes: [],
               } satisfies MapDataResponse
             }
             const [, , , gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth] =

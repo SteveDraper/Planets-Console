@@ -113,8 +113,11 @@ describe('GameControl', () => {
 
     renderGameControl(null, onCommit)
     await user.click(screen.getByRole('button', { name: /game:/i }))
-    await waitFor(() => expect(screen.getByLabelText(/new game id/i)).toBeInTheDocument())
-    await user.type(screen.getByLabelText(/new game id/i), '999')
+    const newIdInput = screen.getByLabelText(/new game id/i) as HTMLInputElement
+    await waitFor(() => expect(newIdInput).toBeInTheDocument())
+    await user.click(newIdInput)
+    await user.type(newIdInput, '999')
+    await waitFor(() => expect(newIdInput).toHaveValue('999'))
     await user.click(screen.getByRole('button', { name: /^add$/i }))
     expect(onCommit).toHaveBeenCalledWith('999')
   })

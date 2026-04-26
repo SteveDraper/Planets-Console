@@ -155,6 +155,19 @@ export type MapEdge = {
   target: string
   /** True when reachability uses a flare (dashed edge on the map). */
   viaFlare?: boolean
+  /**
+   * Intermediate map cells (game integer coordinates) between source and target.
+   * When set, the map draws a polyline A → waypoints → B instead of a single segment.
+   */
+  waypointsInGame?: { x: number; y: number }[]
+}
+
+/** One hop in a Core `illustrativeRoute` (normal move or flare). */
+export type IllustrativeRouteStep = {
+  kind: 'normal' | 'flare'
+  to: { x: number; y: number }
+  waypointOffset?: [number, number]
+  arrivalOffset?: [number, number]
 }
 
 /** UI-independent planet pair from the Connections analytic (Core/BFF). */
@@ -162,6 +175,8 @@ export type PlanetPairRoute = {
   fromPlanetId: number
   toPlanetId: number
   viaFlare: boolean
+  /** Present when the server was asked for illustrative paths (multi-hop flares). */
+  illustrativeRoute?: IllustrativeRouteStep[]
 }
 
 export type MapDataResponse = {
@@ -190,6 +205,21 @@ export type ConnectionsMapParams = {
   flareDepth: ConnectionsFlareDepth
 }
 
+function normalizeIllustrativeRouteStep(raw: unknown): IllustrativeRouteStep | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const s = raw as Record<string, unknown>
+  const kind = s.kind === 'flare' ? 'flare' : s.kind === 'normal' ? 'normal' : null
+  if (kind == null) return null
+  const toRaw = s.to
+  if (toRaw == null || typeof toRaw !== 'object') return null
+  const t = toRaw as Record<string, unknown>
+  const x = typeof t.x === 'number' ? t.x : Number(t.x)
+  const y = typeof t.y === 'number' ? t.y : Number(t.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  const out: IllustrativeRouteStep = { kind, to: { x, y } }
+  return out
+}
+
 /**
  * Parses each node so `planet` / `ownerName` are plain objects (not lost to reference sharing).
  * Accepts `Planet` as an alternate key for the nested snapshot (defensive).
@@ -202,11 +232,23 @@ function normalizePlanetPairRoute(raw: unknown): PlanetPairRoute | null {
   const fromPlanetId = typeof fromRaw === 'number' ? fromRaw : Number(fromRaw)
   const toPlanetId = typeof toRaw === 'number' ? toRaw : Number(toRaw)
   if (!Number.isFinite(fromPlanetId) || !Number.isFinite(toPlanetId)) return null
-  return {
+  let illustrativeRoute: IllustrativeRouteStep[] | undefined
+  const irRaw = r.illustrativeRoute ?? r.illustrative_route
+  if (Array.isArray(irRaw) && irRaw.length > 0) {
+    const steps = irRaw
+      .map(normalizeIllustrativeRouteStep)
+      .filter((s): s is IllustrativeRouteStep => s != null)
+    if (steps.length > 0) illustrativeRoute = steps
+  }
+  const o: PlanetPairRoute = {
     fromPlanetId,
     toPlanetId,
     viaFlare: r.viaFlare === true,
   }
+  if (illustrativeRoute != null) {
+    o.illustrativeRoute = illustrativeRoute
+  }
+  return o
 }
 
 function normalizeMapEdge(raw: unknown): MapEdge | null {
@@ -271,10 +313,19 @@ function normalizeMapNode(raw: unknown): MapNode {
   return base
 }
 
+/** Intermediate cell along a multi-hop flare (game map integer coordinates), for subtle markers. */
+export type RouteMapWaypoint = {
+  id: string
+  gx: number
+  gy: number
+}
+
 /** Combined nodes/edges from multiple analytics for the single shared map. */
 export type CombinedMapData = {
   nodes: MapDataResponse['nodes']
   edges: MapEdge[]
+  /** Deduped intermediate cells for illustrated flare routes (when `includeIllustrativeRoutes` was requested). */
+  routeWaypoints: RouteMapWaypoint[]
 }
 
 export type StoredGameItem = {
@@ -488,6 +539,10 @@ function analyticMapQueryString(
     )
     params.set('flareMode', connectionsParams.flareMode)
     params.set('flareDepth', String(connectionsParams.flareDepth))
+    // Multi-hop flare paths (intermediate cells) are only available when depth ≥2; single-hop has no waypoints.
+    if (connectionsParams.flareMode !== 'off' && connectionsParams.flareDepth >= 2) {
+      params.set('includeIllustrativeRoutes', 'true')
+    }
   }
   return `?${params.toString()}`
 }
