@@ -653,6 +653,11 @@ export type DiagnosticsRecentResponse = {
   items: DiagnosticsRecentItem[]
 }
 
+const DIAGNOSTICS_RECENT_404_HELP =
+  'HTTP 404 for /bff/diagnostics/recent and /diagnostics/recent. ' +
+  'Run `uv run serve` from the repo root so the process on :8000 includes the BFF (not the Core API alone). ' +
+  'Confirm the Vite proxy in vite.config.ts forwards /bff and /diagnostics to that port.'
+
 export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentResponse> {
   const attempts: [string, string][] = [
     ['/bff/diagnostics/recent', 'GET /bff/diagnostics/recent'],
@@ -661,8 +666,16 @@ export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentRespons
       'GET /diagnostics/recent (server alias; use if /bff is not proxied)',
     ],
   ]
+  let lastNetworkError: Error | null = null
+  let notFoundCount = 0
   for (const [path, label] of attempts) {
-    const r = await bffRequest(path, undefined, label)
+    let r: Response
+    try {
+      r = await bffRequest(path, undefined, label)
+    } catch (e) {
+      lastNetworkError = e instanceof Error ? e : new Error(String(e))
+      continue
+    }
     if (r.ok) {
       return (await r.json()) as DiagnosticsRecentResponse
     }
@@ -675,10 +688,23 @@ export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentRespons
       if (clip) parts.push(clip)
       throw new Error(parts.join(' — '))
     }
+    notFoundCount += 1
   }
-  throw new Error(
-    'HTTP 404 for /bff/diagnostics/recent and /diagnostics/recent. ' +
-      'Run `uv run serve` from the repo root so the process on :8000 includes the BFF (not the Core API alone). ' +
-      'Confirm the Vite proxy in vite.config.ts forwards /bff and /diagnostics to that port.'
-  )
+  if (notFoundCount === attempts.length) {
+    throw new Error(DIAGNOSTICS_RECENT_404_HELP)
+  }
+  if (lastNetworkError != null) {
+    if (notFoundCount > 0) {
+      throw new Error(
+        'Diagnostics: one path could not be reached, another returned HTTP 404. ' +
+          `Tried: ${attempts.map((a) => a[0]).join(' → ')}. ` +
+          `Last connection error: ${lastNetworkError.message}`
+      )
+    }
+    throw new Error(
+      `Diagnostics: could not reach any diagnostics recent path (${attempts.map((a) => a[0]).join(' → ')}). ` +
+        `Last error: ${lastNetworkError.message}`
+    )
+  }
+  throw new Error('Unexpected state in fetchDiagnosticsRecent')
 }
