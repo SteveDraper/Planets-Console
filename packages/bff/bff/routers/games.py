@@ -22,9 +22,15 @@ when missing), using the same credential rules as game info refresh.
 ``/v1/games``). Shallow calls today; replaceable with HTTP to Core later.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import fields
+from typing import Any, get_type_hints
+
 from api.concepts.warp_well import WarpWellKind
 from api.errors import NotFoundError, PlanetsConsoleError
-from api.models.game import GameInfo
+from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
 from api.services.store_service import StoreService
@@ -38,6 +44,7 @@ from api.transport.concept_warp_well import (
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer
 
 from bff.diagnostics_dep import (
     IncludeDiagnostics,
@@ -47,6 +54,44 @@ from bff.diagnostics_dep import (
 )
 
 router = APIRouter()
+
+
+def _bff_dataclass_response_with_diagnostics(
+    pydantic_model_name: str,
+    dataclass_type: type,
+) -> type[BaseModel]:
+    """Pydantic model mirroring ``dataclass_type`` with optional BFF ``diagnostics`` (OpenAPI)."""
+    hints = get_type_hints(dataclass_type, include_extras=True)
+    field_defs: dict = {f.name: (hints[f.name], Field()) for f in fields(dataclass_type)}
+    field_defs["diagnostics"] = (
+        dict[str, Any] | None,
+        Field(
+            default=None,
+            description="Request timing tree; present when includeDiagnostics=true.",
+        ),
+    )
+
+    class _OmitNullDiagnosticsBase(BaseModel):
+        @model_serializer(mode="wrap")
+        def _omit_diagnostics(self, handler: Callable[[BaseModel], Any]) -> Any:
+            data = handler(self)
+            if isinstance(data, dict) and data.get("diagnostics") is None:
+                out = dict(data)
+                out.pop("diagnostics", None)
+                return out
+            return data
+
+    return create_model(
+        pydantic_model_name,
+        __base__=_OmitNullDiagnosticsBase,
+        __config__=ConfigDict(),
+        __module__=__name__,
+        **field_defs,
+    )
+
+
+BffGameInfoResponse = _bff_dataclass_response_with_diagnostics("BffGameInfoResponse", GameInfo)
+BffTurnInfoResponse = _bff_dataclass_response_with_diagnostics("BffTurnInfoResponse", TurnInfo)
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 
@@ -124,7 +169,7 @@ def list_stored_games(
     return finish_response(body, root)
 
 
-@router.get("/{game_id}/info")
+@router.get("/{game_id}/info", response_model=BffGameInfoResponse)
 def get_stored_game_info(game_id: int, include: IncludeDiagnostics = False) -> object:
     """Return game info already in storage (no Planets.nu refresh)."""
     storage = get_storage()
@@ -150,7 +195,7 @@ def get_stored_game_info(game_id: int, include: IncludeDiagnostics = False) -> o
     return finish_response(result, root)
 
 
-@router.post("/{game_id}/info")
+@router.post("/{game_id}/info", response_model=BffGameInfoResponse)
 def post_game_info(
     game_id: int,
     body: GameInfoUpdateRequest,
@@ -182,7 +227,7 @@ def post_game_info(
     return finish_response(updated, root)
 
 
-@router.post("/{game_id}/turns/ensure")
+@router.post("/{game_id}/turns/ensure", response_model=BffTurnInfoResponse)
 def post_ensure_turn(
     game_id: int,
     body: TurnEnsureRequest,

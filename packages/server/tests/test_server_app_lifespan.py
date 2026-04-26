@@ -34,8 +34,11 @@ def test_root_app_lifespan_seeds_when_include_dummy_data(_api_config_and_storage
 
 def test_diagnostics_recent_alias_matches_bff_mount(_api_config_and_storage):
     """Root app exposes MRU at both /bff/diagnostics/recent and /diagnostics/recent."""
+    from bff.diagnostics_buffer import get_diagnostics_buffer
     from server.app import app
 
+    # Process-global buffer; other tests may have appended diagnostics.
+    get_diagnostics_buffer().clear()
     with TestClient(app) as c:
         r1 = c.get("/bff/diagnostics/recent")
         r2 = c.get("/diagnostics/recent")

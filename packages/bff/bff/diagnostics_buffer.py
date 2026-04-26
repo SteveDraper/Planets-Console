@@ -42,6 +42,11 @@ class DiagnosticsBuffer:
         with self._lock:
             return list(reversed(self._items))
 
+    def clear(self) -> None:
+        """Empty retained items (e.g. tests that assert on MRU contents)."""
+        with self._lock:
+            self._items.clear()
+
 
 def get_diagnostics_buffer() -> DiagnosticsBuffer:
     global _buffer

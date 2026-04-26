@@ -1,7 +1,10 @@
 """SPA shell bootstrap: config surfaced for first paint without hard-coding in the frontend."""
 
+from collections.abc import Callable
+from typing import Any
+
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from bff.config import get_config
 from bff.diagnostics_dep import (
@@ -22,9 +25,22 @@ class ShellBootstrapResponse(BaseModel):
         serialization_alias="showInitialGame",
         description="Stored game id to load automatically without login, or null when disabled.",
     )
+    diagnostics: dict[str, Any] | None = Field(
+        default=None,
+        description="Request timing tree; present when includeDiagnostics=true.",
+    )
+
+    @model_serializer(mode="wrap")
+    def _json_omit_diagnostics_when_none(self, handler: Callable[[BaseModel], Any]) -> Any:
+        data = handler(self)
+        if isinstance(data, dict) and data.get("diagnostics") is None:
+            out = dict(data)
+            out.pop("diagnostics", None)
+            return out
+        return data
 
 
-@router.get("/bootstrap")
+@router.get("/bootstrap", response_model=ShellBootstrapResponse)
 def get_shell_bootstrap(include: IncludeDiagnostics = False) -> object:
     """Return shell-oriented server config for the SPA (e.g. optional default game id)."""
     raw = get_config().show_initial_game

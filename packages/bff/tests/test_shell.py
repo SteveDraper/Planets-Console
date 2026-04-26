@@ -7,6 +7,7 @@ from api.storage import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
+from bff.diagnostics_buffer import get_diagnostics_buffer
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -16,6 +17,7 @@ client = TestClient(app)
 def _reset():
     clear_backend_cache()
     set_bff_config(BffConfig())
+    get_diagnostics_buffer().clear()
     set_api_config(
         ApiConfig(
             storage_backend="ephemeral",
