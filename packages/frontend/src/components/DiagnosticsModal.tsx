@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { ClipboardCopy } from 'lucide-react'
 import {
   fetchDiagnosticsRecent,
@@ -15,6 +16,13 @@ type DiagnosticsModalProps = {
   getFocusRestoreFallback?: () => HTMLElement | null
 }
 
+/** Newest `capturedAt` first (ISO-8601 strings compare lexicographically). */
+function _diagnosticsByNewestFirst(
+  list: DiagnosticsRecentItem[]
+): DiagnosticsRecentItem[] {
+  return [...list].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt))
+}
+
 function formatBlob(item: DiagnosticsRecentItem): string {
   return JSON.stringify(
     { capturedAt: item.capturedAt, summary: item.summary, diagnostics: item.diagnostics },
@@ -28,6 +36,7 @@ export function DiagnosticsModal({
   onClose,
   getFocusRestoreFallback,
 }: DiagnosticsModalProps) {
+  const queryClient = useQueryClient()
   const dialogRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const [items, setItems] = useState<DiagnosticsRecentItem[] | null>(null)
@@ -123,10 +132,11 @@ export function DiagnosticsModal({
 
   const copyAll = () => {
     if (!items?.length) return
+    const ordered = _diagnosticsByNewestFirst(items)
     runClipboardCopy(
       JSON.stringify(
         {
-          items: items.map((i) => ({
+          items: ordered.map((i) => ({
             capturedAt: i.capturedAt,
             summary: i.summary,
             diagnostics: i.diagnostics,
@@ -196,6 +206,11 @@ export function DiagnosticsModal({
                 const on = e.target.checked
                 setIncludeDiagnosticsSessionEnabled(on)
                 setRecordBffDiagnostics(on)
+                // Session flag is not part of React Query keys; invalidate so map/shell requests
+                // re-run with ?includeDiagnostics=true and populate the server buffer (e.g.
+                // GET /analytics/connections/map connection_routes trees).
+                void queryClient.invalidateQueries({ queryKey: ['bff'] })
+                void queryClient.invalidateQueries({ queryKey: ['analytic'] })
               }}
             />
             <span>
@@ -203,7 +218,8 @@ export function DiagnosticsModal({
               <span className="mt-0.5 block text-xs text-slate-500">
                 Adds <code className="text-slate-400">includeDiagnostics=true</code> to BFF
                 calls from this tab (maps, games, shell, etc.). Then trigger a request — e.g.
-                change a map control or refresh data — and open this panel again; recent trees
+                Toggling this also refetches cached BFF data so new requests include diagnostics.
+                Or change a map control (e.g. flare depth) and open this panel again; recent trees
                 appear in the buffer below. Cleared when the tab ends.
               </span>
             </span>
@@ -232,7 +248,7 @@ export function DiagnosticsModal({
           )}
           {items != null && items.length > 0 && (
             <ul className="flex flex-col gap-3">
-              {items.map((item) => {
+              {_diagnosticsByNewestFirst(items).map((item) => {
                 const label = item.summary || item.capturedAt
                 return (
                   <li

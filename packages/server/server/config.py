@@ -214,9 +214,18 @@ def load_config(
         )
     if raw_db < 0:
         raise ValueError(f"bff.diagnostics_buffer_size must be >= 0, got {raw_db}")
+    raw_live = bff_dict.get(
+        "connection_routes_live_compare", BffConfig().connection_routes_live_compare
+    )
+    if not isinstance(raw_live, bool):
+        raise TypeError(
+            f"bff.connection_routes_live_compare must be a bool, got "
+            f"{type(raw_live).__name__}: {raw_live!r}"
+        )
     bff_config = BffConfig(
         cors_origins=cors_tuple,
         show_initial_game=show_initial_game,
         diagnostics_buffer_size=raw_db,
+        connection_routes_live_compare=raw_live,
     )
     return RootConfig(server=server_config, api=api_config, bff=bff_config)

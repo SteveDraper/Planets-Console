@@ -9,14 +9,17 @@ from pathlib import Path
 import pytest
 from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.planet_connections import (
+    ConnectionRouteAlgorithm,
     FlareConnectionMode,
     _max_flare_arrival_extent,
     _pair_has_direct_connection,
     _PlanetSpatialIndex,
     _reachable_via_flare_limited_depth,
     connection_routes_for_planets,
+    connection_routes_with_options,
     max_travel_distance,
     min_distance_point_to_simplified_normal_well,
+    validate_illustrative_flare_route,
 )
 from api.concepts.warp_well import NORMAL_RADIUS
 from api.models.flare_point import FlarePoint
@@ -218,7 +221,7 @@ def test_flare_connection_allows_normal_move_then_flare(sample_planet):
     b = _p(sample_planet, 2, 12, 0)
     fl = [FlarePoint((0, 0), (2, 0), (0, 0))]
     mt = 10.0
-    assert _reachable_via_flare_limited_depth(a, b, fl, 2, [a, b], mt)
+    assert _reachable_via_flare_limited_depth(a, b, fl, 2, _PlanetSpatialIndex([a, b]), mt)
 
 
 def test_flare_limited_depth_two_hops(sample_planet):
@@ -227,12 +230,12 @@ def test_flare_limited_depth_two_hops(sample_planet):
     b = _p(sample_planet, 2, 20, 0)
     hop = FlarePoint((0, 0), (10, 0), (0, 0))
     mt = max_travel_distance(9, False)
-    assert not _reachable_via_flare_limited_depth(a, b, [hop], 1, [a, b], mt)
-    assert _reachable_via_flare_limited_depth(a, b, [hop], 2, [a, b], mt)
+    assert not _reachable_via_flare_limited_depth(a, b, [hop], 1, _PlanetSpatialIndex([a, b]), mt)
+    assert _reachable_via_flare_limited_depth(a, b, [hop], 2, _PlanetSpatialIndex([a, b]), mt)
     c = _p(sample_planet, 3, 10, 0)
-    assert not _reachable_via_flare_limited_depth(a, b, [hop], 2, [a, b, c], mt), (
-        "intermediate arrival must not lie in another planet's well"
-    )
+    assert not _reachable_via_flare_limited_depth(
+        a, b, [hop], 2, _PlanetSpatialIndex([a, b, c]), mt
+    ), "intermediate arrival must not lie in another planet's well"
 
 
 def test_flare_bfs_distance_prune_matches_unpruned_on_annulus(sample_planet):
@@ -304,7 +307,9 @@ def test_depth_two_flare_real_table_row_waypoint_not_arrival(sample_planet):
         for f in fl
     )
     assert not _pair_has_direct_connection(a, b, max_travel_distance(9, False))
-    assert _reachable_via_flare_limited_depth(a, b, fl, 2, [a, b], max_travel_distance(9, False))
+    assert _reachable_via_flare_limited_depth(
+        a, b, fl, 2, _PlanetSpatialIndex([a, b]), max_travel_distance(9, False)
+    )
     routes = connection_routes_for_planets(
         [a, b],
         warp_speed=9,
@@ -313,6 +318,57 @@ def test_depth_two_flare_real_table_row_waypoint_not_arrival(sample_planet):
         flare_depth=2,
     )
     assert routes == [{"fromPlanetId": 1, "toPlanetId": 2, "viaFlare": True}]
+
+
+class TestConnectionRouteOptions:
+    def test_test_mode_runs_both_algorithms(self, sample_planet):
+        a = _p(sample_planet, 1, 0, 0)
+        b = _p(sample_planet, 2, 12, 0)
+        out = connection_routes_with_options(
+            [a, b],
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.INCLUDE,
+            flare_depth=2,
+            connection_routes_test_mode=True,
+        )
+        assert out.connection_route_test is not None
+        t = out.connection_route_test
+        assert t["default"]["seconds"] >= 0.0
+        assert t["perDepthCenterAnnulus"]["seconds"] >= 0.0
+        assert "routes" in t["default"] and "routes" in t["perDepthCenterAnnulus"]
+        assert isinstance(t["default"]["illustrativeValidationErrors"], list)
+        assert isinstance(t["perDepthCenterAnnulus"]["illustrativeValidationErrors"], list)
+        assert "diff" in t
+        d = t["diff"]
+        assert "flareEdgesOnlyInDefault" in d and "edgeSignatureSymmetricDifference" in d
+        assert d["validationFailuresDefault"] is not None
+
+    def test_validate_illustrative_requires_flare_hop(self, sample_planet):
+        a = _p(sample_planet, 1, 0, 0)
+        b = _p(sample_planet, 2, 1, 0)
+        only_normal = [
+            {"kind": "normal", "to": {"x": 0, "y": 0}},
+            {"kind": "normal", "to": {"x": 1, "y": 0}},
+        ]
+        err = validate_illustrative_flare_route(
+            a, b, only_normal, max_travel_distance(9, False)
+        )
+        assert err is not None
+        assert "no flare" in err.lower()
+
+    def test_per_depth_algorithm_runs(self, sample_planet):
+        a = _p(sample_planet, 1, 0, 0)
+        b = _p(sample_planet, 2, 5, 0)
+        out = connection_routes_with_options(
+            [a, b],
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.INCLUDE,
+            flare_depth=1,
+            connection_route_algorithm=ConnectionRouteAlgorithm.PER_DEPTH_CENTER_ANNULUS,
+        )
+        assert isinstance(out.routes, list)
 
 
 class TestSpatialIndexFallback:

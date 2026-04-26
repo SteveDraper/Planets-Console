@@ -40,7 +40,7 @@ class DiagnosticsBuffer:
 
     def recent(self) -> list[dict[str, Any]]:
         with self._lock:
-            return list(self._items)
+            return list(reversed(self._items))
 
 
 def get_diagnostics_buffer() -> DiagnosticsBuffer:

@@ -5,8 +5,9 @@ import re
 from dacite.exceptions import DaciteError
 
 from api.concepts.planet_connections import (
+    ConnectionRouteAlgorithm,
     FlareConnectionMode,
-    connection_routes_for_planets,
+    connection_routes_with_options,
 )
 from api.concepts.warp_well import (
     WarpWellKind,
@@ -37,6 +38,46 @@ def _require_dict(data: JSONValue, label: str) -> dict:
     if not isinstance(data, dict):
         raise ValidationError(f"Expected JSON object for {label}, got {type(data).__name__}")
     return data
+
+
+def _add_connection_route_ab_diagnostics(
+    node: DiagnosticNode,
+    diff: dict[str, object],
+    *,
+    test: dict[str, object] | None = None,
+) -> None:
+    """Add a child to the connections-map diagnostics node for A/B diff + validation rollups."""
+    ab = node.child("connectionRouteAbCompare")
+    odef = diff.get("flareEdgesOnlyInDefault", [])
+    oper = diff.get("flareEdgesOnlyInPerDepthCenterAnnulus", [])
+    ab.values["flareOnlyInDefaultCount"] = len(odef) if isinstance(odef, list) else 0
+    ab.values["flareOnlyInPerDepthCount"] = len(oper) if isinstance(oper, list) else 0
+    esd = diff.get("edgeSignatureSymmetricDifference", [])
+    n_esd = len(esd) if isinstance(esd, list) else 0
+    ab.values["edgeSignatureSymmetricDifferenceCount"] = n_esd
+    vfd = diff.get("validationFailuresDefault", [])
+    vfp = diff.get("validationFailuresPerDepthCenterAnnulus", [])
+    ab.values["validationFailureCountDefault"] = len(vfd) if isinstance(vfd, list) else 0
+    ab.values["validationFailureCountPerDepth"] = len(vfp) if isinstance(vfp, list) else 0
+    if test is not None:
+        d_block = test.get("default")
+        p_block = test.get("perDepthCenterAnnulus")
+        if isinstance(d_block, dict):
+            s = d_block.get("seconds")
+            if isinstance(s, (int, float)):
+                ab.values["defaultTotalSeconds"] = s
+        if isinstance(p_block, dict):
+            s = p_block.get("seconds")
+            if isinstance(s, (int, float)):
+                ab.values["perDepthTotalSeconds"] = s
+    if isinstance(odef, list) and odef:
+        ab.values["sampleFlareOnlyInDefault"] = str(odef[:16])
+    if isinstance(oper, list) and oper:
+        ab.values["sampleFlareOnlyInPerDepth"] = str(oper[:16])
+    if isinstance(vfd, list) and vfd:
+        ab.values["sampleValidationErrorsDefault"] = " | ".join(str(x) for x in vfd[:8])
+    if isinstance(vfp, list) and vfp:
+        ab.values["sampleValidationErrorsPerDepth"] = " | ".join(str(x) for x in vfp[:8])
 
 
 class GameService:
@@ -311,6 +352,10 @@ class GameService:
         connection_gravitonic_movement: bool = False,
         connection_flare_mode: FlareConnectionMode = FlareConnectionMode.OFF,
         connection_flare_depth: int = 1,
+        connection_route_algorithm: str | None = None,
+        connection_include_illustrative_routes: bool = False,
+        connection_routes_test_mode: bool = False,
+        connection_routes_live_compare: bool = False,
         diagnostics: DiagnosticNode | None = None,
     ) -> dict:
         """Return per-analytic map data derived from turn state.
@@ -327,20 +372,50 @@ class GameService:
                 raise ValidationError("warpSpeed must be between 1 and 9.")
             if connection_flare_depth < 1 or connection_flare_depth > 3:
                 raise ValidationError("flareDepth must be 1, 2, or 3.")
-            routes = connection_routes_for_planets(
+            algo = ConnectionRouteAlgorithm.PER_DEPTH_CENTER_ANNULUS
+            if connection_route_algorithm is not None:
+                try:
+                    algo = ConnectionRouteAlgorithm(connection_route_algorithm)
+                except ValueError as e:
+                    raise ValidationError(
+                        f"Invalid connectionRouteAlgorithm: {connection_route_algorithm!r}"
+                    ) from e
+            do_live = connection_routes_live_compare
+            run_ab = connection_routes_test_mode or do_live
+            include_ill = connection_include_illustrative_routes or do_live
+            out = connection_routes_with_options(
                 list(turn.planets),
                 warp_speed=warp,
                 gravitonic_movement=connection_gravitonic_movement,
                 flare_mode=connection_flare_mode,
                 flare_depth=connection_flare_depth,
                 diagnostics=diagnostics,
+                connection_route_algorithm=algo,
+                include_illustrative_routes=include_ill,
+                connection_routes_test_mode=run_ab,
+                connection_routes_live_compare=do_live,
+                validate_illustrative_routes=do_live,
             )
-            return {
+            result: dict = {
                 "analyticId": "connections",
                 "nodes": [],
                 "edges": [],
-                "routes": routes,
+                "routes": out.routes,
             }
+            if out.connection_route_test is not None:
+                result["connectionRouteTest"] = out.connection_route_test
+            if (
+                diagnostics is not None
+                and out.connection_route_test is not None
+                and isinstance(out.connection_route_test, dict)
+                and "diff" in out.connection_route_test
+            ):
+                _add_connection_route_ab_diagnostics(
+                    diagnostics,
+                    out.connection_route_test["diff"],
+                    test=out.connection_route_test,
+                )
+            return result
         # Unknown analytic: treat as validation error so the BFF can decide whether
         # to surface 404/422 vs fallback. This raises ValidationError, which maps to HTTP 422.
         raise ValidationError(f"Unknown analytic_id: {analytic_id!r}")

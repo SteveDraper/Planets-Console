@@ -15,6 +15,7 @@ from api.services.game_service import GameService
 from api.storage import get_storage
 from fastapi import APIRouter, HTTPException, Query
 
+from bff.config import get_config
 from bff.diagnostics_dep import (
     IncludeDiagnostics,
     JSONScalar,
@@ -145,6 +146,9 @@ def get_analytic_map(
     gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
     flare_depth: int = Query(1, ge=1, le=3, alias="flareDepth"),
+    connection_route_algorithm: str | None = Query(None, alias="connectionRouteAlgorithm"),
+    include_illustrative_routes: bool = Query(False, alias="includeIllustrativeRoutes"),
+    connection_routes_test_mode: bool = Query(False, alias="connectionRoutesTestMode"),
     include: IncludeDiagnostics = False,
 ):
     """Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
@@ -176,6 +180,20 @@ def get_analytic_map(
             handler="get_analytic_map",
         )
     if analytic_id == "connections":
+        bff_cfg = get_config()
+        live_compare = bff_cfg.connection_routes_live_compare
+        run_ab = connection_routes_test_mode or live_compare
+        do_illustr = include_illustrative_routes or live_compare
+        conn_common = {
+            "connection_warp_speed": warp_speed,
+            "connection_gravitonic_movement": gravitonic_movement,
+            "connection_flare_mode": flare_mode,
+            "connection_flare_depth": flare_depth,
+            "connection_route_algorithm": connection_route_algorithm,
+            "connection_include_illustrative_routes": do_illustr,
+            "connection_routes_test_mode": run_ab,
+            "connection_routes_live_compare": live_compare,
+        }
         root = optional_request_root(
             include,
             "GET",
@@ -187,18 +205,15 @@ def get_analytic_map(
             gravitonicMovement=gravitonic_movement,
             flareMode=str(flare_mode.value),
             flareDepth=flare_depth,
+            connectionRouteAlgorithm=connection_route_algorithm or "",
+            includeIllustrativeRoutes=do_illustr,
+            connectionRoutesTestMode=run_ab,
+            connectionRoutesLiveCompare=live_compare,
             handler="get_analytic_map",
         )
         if root is None:
             body = _turn_analytics_from_core(
-                game_id,
-                perspective,
-                turn,
-                "connections",
-                connection_warp_speed=warp_speed,
-                connection_gravitonic_movement=gravitonic_movement,
-                connection_flare_mode=flare_mode,
-                connection_flare_depth=flare_depth,
+                game_id, perspective, turn, "connections", **conn_common
             )
         else:
             map_node = root.child("get_analytic_map")
@@ -209,10 +224,7 @@ def get_analytic_map(
                     turn,
                     "connections",
                     diagnostics=map_node,
-                    connection_warp_speed=warp_speed,
-                    connection_gravitonic_movement=gravitonic_movement,
-                    connection_flare_mode=flare_mode,
-                    connection_flare_depth=flare_depth,
+                    **conn_common,
                 )
         return finish_response(body, root)
     # Selectable analytics: placeholder 4-node square for now

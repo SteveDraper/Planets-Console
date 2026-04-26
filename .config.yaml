@@ -12,5 +12,8 @@ bff:
   cors_origins:
     - http://localhost:5173
     - http://127.0.0.1:5173
+  # When true, every connections map request runs both route algorithms, validation, and diff
+  # (add ?includeDiagnostics=true to see the connectionRouteAbCompare diagnostic child).
+  # connection_routes_live_compare: true
   # Optional: auto-load this stored game id without login (pair with api.include_dummy_data for sample 628580).
   # show_initial_game: "628580"
