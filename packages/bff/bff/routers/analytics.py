@@ -9,7 +9,7 @@ BFF can load turn-scoped analytics from Core (no hard-coded game context).
 from collections.abc import Callable
 
 from api.concepts.planet_connections import FlareConnectionMode
-from api.diagnostics import DiagnosticNode, timed_section
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
 from api.errors import PlanetsConsoleError
 from api.services.game_service import GameService
 from api.storage import get_storage
@@ -72,7 +72,7 @@ def _turn_analytics_from_core(
     turn_number: int,
     analytic_id: str,
     *,
-    diagnostics: DiagnosticNode | None = None,
+    diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     **kwargs: object,
 ) -> dict:
     storage = get_storage()
@@ -198,21 +198,16 @@ def get_analytic_map(
             includeIllustrativeRoutes=include_illustrative_routes,
             handler="get_analytic_map",
         )
-        if root is None:
+        map_node = root.child("get_analytic_map")
+        with timed_section(map_node, "turn_analytics_from_core"):
             body = _turn_analytics_from_core(
-                game_id, perspective, turn, "connections", **conn_common
+                game_id,
+                perspective,
+                turn,
+                "connections",
+                diagnostics=map_node,
+                **conn_common,
             )
-        else:
-            map_node = root.child("get_analytic_map")
-            with timed_section(map_node, "turn_analytics_from_core"):
-                body = _turn_analytics_from_core(
-                    game_id,
-                    perspective,
-                    turn,
-                    "connections",
-                    diagnostics=map_node,
-                    **conn_common,
-                )
         return finish_response(body, root)
     # Selectable analytics: placeholder 4-node square for now
 

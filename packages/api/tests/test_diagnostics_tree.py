@@ -1,6 +1,13 @@
 """Diagnostic tree model."""
 
-from api.diagnostics import DiagnosticNode, JSONValue, request_root_node, timed_section
+from api.diagnostics import (
+    NOOP_DIAGNOSTICS,
+    DiagnosticNode,
+    JSONValue,
+    optional_request_root,
+    request_root_node,
+    timed_section,
+)
 
 
 def test_diagnostic_node_round_trip_dict():
@@ -30,6 +37,22 @@ def test_timed_section_sets_timing():
         pass
     assert "block" in n.timings
     assert n.timings["block"] >= 0.0
+
+
+def test_noop_diagnostics_discards_children_values_and_timings():
+    assert not NOOP_DIAGNOSTICS.enabled
+    child = NOOP_DIAGNOSTICS.child("ignored")
+    child.values["k"] = 1
+    with timed_section(child, "block"):
+        pass
+    assert child is NOOP_DIAGNOSTICS
+    assert child.to_dict() == {"name": "", "values": {}, "timings": {}, "children": []}
+
+
+def test_optional_request_root_returns_noop_when_disabled():
+    root = optional_request_root(False, "GET", "/x", gameId=1)
+    assert not root.enabled
+    assert root.to_dict()["children"] == []
 
 
 def test_values_allow_nested_json_structures():

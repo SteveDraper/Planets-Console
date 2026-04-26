@@ -20,7 +20,7 @@ from api.concepts.planet_connections.wells import (
     max_travel_distance,
 )
 from api.concepts.warp_well import NORMAL_RADIUS
-from api.diagnostics import DiagnosticNode, timed_section
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
 from api.models.planet import Planet
 
 
@@ -86,7 +86,7 @@ def connection_routes_with_options(
     flare_mode: FlareConnectionMode,
     flare_depth: int = 1,
     flare_bfs_use_distance_prune: bool = True,
-    diagnostics: DiagnosticNode | None = None,
+    diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     include_illustrative_routes: bool = False,
 ) -> ConnectionRoutesOutcome:
     """Canonical planet pairs (lower id -> higher id) with direct and/or flare connectivity.
@@ -119,19 +119,18 @@ def connection_routes_with_options(
 
     index = _PlanetSpatialIndex(planets)
     sorted_planets = sorted(planets, key=lambda p: p.id)
-    cr = diagnostics.child("connection_routes") if diagnostics is not None else None
+    cr = diagnostics.child("connection_routes")
     hop_loose = max_travel
     if use_flare_geometry and flares:
         hop_loose = max(max_travel, _max_flare_arrival_extent(flares))
 
     def _build_flare_eligible(
-        diag: DiagnosticNode | None,
+        diag: Diagnostics,
     ) -> set[tuple[int, int]] | None:
         if not use_flare_geometry or not flares or flare_mode is FlareConnectionMode.OFF:
             return None
-        fdiag = diag.child("flare_per_depth_center_union") if diag is not None else None
-        if fdiag is not None:
-            fdiag.values["maxK"] = int(min(_MAX_FLARE_CHAIN_DEPTH, flare_depth))
+        fdiag = diag.child("flare_per_depth_center_union")
+        fdiag.values["maxK"] = int(min(_MAX_FLARE_CHAIN_DEPTH, flare_depth))
         e1, e2, e3 = _build_flare_eligible_per_depth_center_annuli(
             sorted_planets,
             index,
@@ -226,13 +225,10 @@ def connection_routes_with_options(
 
     u_sel = _build_flare_eligible(cr)
     routes_out: list[dict[str, object]] = []
-    if cr is not None:
-        ar = cr.child("assemble_routes")
-        with timed_section(ar, "total"):
-            _emit(routes_out, u_sel, include_illustrative_routes)
-        ar.values["outRoutes"] = len(routes_out)
-    else:
+    ar = cr.child("assemble_routes")
+    with timed_section(ar, "total"):
         _emit(routes_out, u_sel, include_illustrative_routes)
+    ar.values["outRoutes"] = len(routes_out)
     routes_out.sort(key=lambda r: (int(r["fromPlanetId"]), int(r["toPlanetId"])))
     return ConnectionRoutesOutcome(routes=routes_out)
 
@@ -245,7 +241,7 @@ def connection_routes_for_planets(
     flare_mode: FlareConnectionMode,
     flare_depth: int = 1,
     flare_bfs_use_distance_prune: bool = True,
-    diagnostics: DiagnosticNode | None = None,
+    diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
 ) -> list[dict[str, bool | int]]:
     """Same as :func:`connection_routes_with_options` without illustrative routes or diagnostics."""
     return connection_routes_with_options(

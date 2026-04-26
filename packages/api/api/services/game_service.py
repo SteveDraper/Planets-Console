@@ -10,7 +10,7 @@ from api.concepts.warp_well import (
     coordinate_in_warp_well,
     map_cell_indices_in_warp_well,
 )
-from api.diagnostics import DiagnosticNode
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import (
     LoginCredentialsRequiredError,
     NotFoundError,
@@ -309,7 +309,7 @@ class GameService:
         connection_flare_mode: FlareConnectionMode = FlareConnectionMode.OFF,
         connection_flare_depth: int = 1,
         connection_include_illustrative_routes: bool = False,
-        diagnostics: DiagnosticNode | None = None,
+        diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     ) -> dict:
         """Return per-analytic map data derived from turn state.
 

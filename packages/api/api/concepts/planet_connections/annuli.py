@@ -16,7 +16,7 @@ from api.concepts.planet_connections.pairing import _canonical_pair_id
 from api.concepts.planet_connections.spatial_index import _PlanetSpatialIndex
 from api.concepts.planet_connections.wells import _pair_reachable_in_k_normal_moves
 from api.concepts.warp_well import NORMAL_RADIUS
-from api.diagnostics import DiagnosticNode, timed_section
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
 from api.models.flare_point import FlarePoint
 from api.models.planet import Planet
 
@@ -60,38 +60,36 @@ def _build_flare_eligible_per_depth_center_annuli(
     max_k: int,
     *,
     use_distance_prune: bool,
-    diagnostics: DiagnosticNode | None = None,
+    diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
 ) -> tuple[set[tuple[int, int]], set[tuple[int, int]], set[tuple[int, int]]]:
     e1: set[tuple[int, int]] = set()
     e2: set[tuple[int, int]] = set()
     e3: set[tuple[int, int]] = set()
-    lattice_diagnostics = _LatticeBuildDiagnostics() if diagnostics is not None else None
-    m1 = _FlareBfsMetrics() if diagnostics is not None else None
-    m2 = _FlareBfsMetrics() if diagnostics is not None else None
-    m3 = _FlareBfsMetrics() if diagnostics is not None else None
-    hot1 = _FlareBfsHotspotTimings() if diagnostics is not None else None
-    hot2 = _FlareBfsHotspotTimings() if diagnostics is not None else None
-    hot3 = _FlareBfsHotspotTimings() if diagnostics is not None else None
-    if diagnostics is not None:
-        diagnostics.values["maxTravel"] = max_travel
-        diagnostics.values["hopLoose"] = hop_loose
-        diagnostics.values["normalRadius"] = float(NORMAL_RADIUS)
-        for kk in range(1, max_k + 1):
-            inn, outv = _per_depth_center_annulus_radii(kk, max_travel, hop_loose)
-            diagnostics.values[f"annulusK{kk}Inner"] = inn
-            diagnostics.values[f"annulusK{kk}Outer"] = outv
+    lattice_diagnostics = _LatticeBuildDiagnostics() if diagnostics.enabled else None
+    m1 = _FlareBfsMetrics() if diagnostics.enabled else None
+    m2 = _FlareBfsMetrics() if diagnostics.enabled else None
+    m3 = _FlareBfsMetrics() if diagnostics.enabled else None
+    hot1 = _FlareBfsHotspotTimings() if diagnostics.enabled else None
+    hot2 = _FlareBfsHotspotTimings() if diagnostics.enabled else None
+    hot3 = _FlareBfsHotspotTimings() if diagnostics.enabled else None
+    diagnostics.values["maxTravel"] = max_travel
+    diagnostics.values["hopLoose"] = hop_loose
+    diagnostics.values["normalRadius"] = float(NORMAL_RADIUS)
+    for kk in range(1, max_k + 1):
+        inn, outv = _per_depth_center_annulus_radii(kk, max_travel, hop_loose)
+        diagnostics.values[f"annulusK{kk}Inner"] = inn
+        diagnostics.values[f"annulusK{kk}Outer"] = outv
     if max_k >= 1:
         ann1 = _list_per_depth_center_annulus_for_k(
             sorted_planets, k=1, max_travel=max_travel, hop_loose=hop_loose
         )
         inner1, outer1 = _per_depth_center_annulus_radii(1, max_travel, hop_loose)
-        if diagnostics is not None:
-            d1 = diagnostics.child("flare_per_depth_center_k1")
-            d1.values["k"] = 1
-            d1.values["annulusInnerRadius"] = inner1
-            d1.values["annulusOuterRadius"] = outer1
-            d1.values["annulusPairs"] = len(ann1)
-        if diagnostics is not None and d1 is not None and m1 is not None:
+        d1 = diagnostics.child("flare_per_depth_center_k1")
+        d1.values["k"] = 1
+        d1.values["annulusInnerRadius"] = inner1
+        d1.values["annulusOuterRadius"] = outer1
+        d1.values["annulusPairs"] = len(ann1)
+        if diagnostics.enabled and m1 is not None:
             with timed_section(d1, "total"):
                 for planet_a, planet_b in ann1:
                     key = _canonical_pair_id(planet_a, planet_b)
@@ -135,7 +133,7 @@ def _build_flare_eligible_per_depth_center_annuli(
                 ):
                     e1.add(key)
     if max_k < 2:
-        if diagnostics is not None and lattice_diagnostics is not None:
+        if diagnostics.enabled and lattice_diagnostics is not None:
             lattice_diagnostics.add_to_diagnostics(diagnostics)
         return (e1, e2, e3)
     if max_k >= 2:
@@ -143,13 +141,12 @@ def _build_flare_eligible_per_depth_center_annuli(
             sorted_planets, k=2, max_travel=max_travel, hop_loose=hop_loose
         )
         inner2, outer2 = _per_depth_center_annulus_radii(2, max_travel, hop_loose)
-        if diagnostics is not None:
-            d2 = diagnostics.child("flare_per_depth_center_k2")
-            d2.values["k"] = 2
-            d2.values["annulusInnerRadius"] = inner2
-            d2.values["annulusOuterRadius"] = outer2
-            d2.values["annulusPairs"] = len(ann2)
-        if diagnostics is not None and d2 is not None and m2 is not None:
+        d2 = diagnostics.child("flare_per_depth_center_k2")
+        d2.values["k"] = 2
+        d2.values["annulusInnerRadius"] = inner2
+        d2.values["annulusOuterRadius"] = outer2
+        d2.values["annulusPairs"] = len(ann2)
+        if diagnostics.enabled and m2 is not None:
             with timed_section(d2, "total"):
                 n_past_s1 = 0
                 for planet_a, planet_b in ann2:
@@ -200,7 +197,7 @@ def _build_flare_eligible_per_depth_center_annuli(
                 ):
                     e2.add(key)
     if max_k < 3:
-        if diagnostics is not None and lattice_diagnostics is not None:
+        if diagnostics.enabled and lattice_diagnostics is not None:
             lattice_diagnostics.add_to_diagnostics(diagnostics)
         return (e1, e2, e3)
     ann3 = _list_per_depth_center_annulus_for_k(
@@ -208,13 +205,12 @@ def _build_flare_eligible_per_depth_center_annuli(
     )
     inner3, outer3 = _per_depth_center_annulus_radii(3, max_travel, hop_loose)
     e12 = e1 | e2
-    if diagnostics is not None:
-        d3 = diagnostics.child("flare_per_depth_center_k3")
-        d3.values["k"] = 3
-        d3.values["annulusInnerRadius"] = inner3
-        d3.values["annulusOuterRadius"] = outer3
-        d3.values["annulusPairs"] = len(ann3)
-    if diagnostics is not None and d3 is not None and m3 is not None:
+    d3 = diagnostics.child("flare_per_depth_center_k3")
+    d3.values["k"] = 3
+    d3.values["annulusInnerRadius"] = inner3
+    d3.values["annulusOuterRadius"] = outer3
+    d3.values["annulusPairs"] = len(ann3)
+    if diagnostics.enabled and m3 is not None:
         with timed_section(d3, "total"):
             n_past_s12 = 0
             for planet_a, planet_b in ann3:
@@ -264,6 +260,6 @@ def _build_flare_eligible_per_depth_center_annuli(
                 bfs_metrics=None,
             ):
                 e3.add(key)
-    if diagnostics is not None and lattice_diagnostics is not None:
+    if diagnostics.enabled and lattice_diagnostics is not None:
         lattice_diagnostics.add_to_diagnostics(diagnostics)
     return (e1, e2, e3)

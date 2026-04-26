@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from api.diagnostics import DiagnosticNode
+from api.diagnostics import Diagnostics
 
 
 @dataclass
@@ -29,7 +29,7 @@ class _FlareBfsHotspotTimings:
     well_index_sec: float = 0.0
     dest_well_test_sec: float = 0.0
 
-    def add_to_diagnostics(self, d: DiagnosticNode) -> None:
+    def add_to_diagnostics(self, d: Diagnostics) -> None:
         d.values["bfsCumulativeHotspotDistancePruneSec"] = self.distance_prune_sec
         d.values["bfsCumulativeHotspotNormalBranchSec"] = self.normal_branch_sec
         d.values["bfsCumulativeHotspotFlareBranchSec"] = self.flare_branch_sec
@@ -43,7 +43,7 @@ class _LatticeBuildDiagnostics:
 
     builds: list[dict[str, int | float | bool]] = field(default_factory=list)
 
-    def add_to_diagnostics(self, d: DiagnosticNode) -> None:
+    def add_to_diagnostics(self, d: Diagnostics) -> None:
         d.values["latticeBuildEventCount"] = len(self.builds)
         d.values["latticeBuildCumulativeSec"] = (
             sum(float(b["buildSec"]) for b in self.builds) if self.builds else 0.0
