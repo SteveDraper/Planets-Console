@@ -1,6 +1,7 @@
 /**
  * Uniform grid in planet (map cell) coordinates for sub-linear hover / radius queries.
  * Matches MapGraph: flow center (cx, cy) = (px + offset, -(py + offset)).
+ * Used for planet dots and for multi-hop route waypoint markers (same map-cell distance as flow).
  */
 
 export const PLANET_CELL_CENTER_OFFSET = 0.5

@@ -131,4 +131,70 @@ describe('normalizeMapDataResponse', () => {
     const out = normalizeMapDataResponse(raw)
     expect(out.nodes[0].planet?.name).toBe('Alt')
   })
+
+  it('keeps flare illustrativeRoute waypointOffset and arrivalOffset when valid', () => {
+    const raw = {
+      analyticId: 'connections',
+      nodes: [],
+      edges: [],
+      routes: [
+        {
+          fromPlanetId: 1,
+          toPlanetId: 2,
+          viaFlare: true,
+          illustrativeRoute: [
+            { kind: 'normal', to: { x: 0, y: 0 } },
+            {
+              kind: 'flare',
+              to: { x: 3, y: 4 },
+              waypointOffset: [10, 20],
+              arrivalOffset: [5, -1],
+            },
+          ],
+        },
+      ],
+    }
+    const out = normalizeMapDataResponse(raw)
+    const flare = out.routes![0].illustrativeRoute![1]
+    expect(flare.waypointOffset).toEqual([10, 20])
+    expect(flare.arrivalOffset).toEqual([5, -1])
+  })
+
+  it('accepts snake_case offset keys and omits invalid offset tuples', () => {
+    const raw = {
+      analyticId: 'connections',
+      nodes: [],
+      edges: [],
+      routes: [
+        {
+          fromPlanetId: 1,
+          toPlanetId: 2,
+          viaFlare: true,
+          illustrativeRoute: [
+            {
+              kind: 'flare',
+              to: { x: 0, y: 0 },
+              waypoint_offset: [1, 2],
+              arrival_offset: [3, 4],
+            },
+            {
+              kind: 'flare',
+              to: { x: 1, y: 1 },
+              waypointOffset: [0, Number.NaN],
+            },
+            {
+              kind: 'normal',
+              to: { x: 2, y: 2 },
+            },
+          ],
+        },
+      ],
+    }
+    const out = normalizeMapDataResponse(raw)
+    const steps = out.routes![0].illustrativeRoute!
+    expect(steps[0].waypointOffset).toEqual([1, 2])
+    expect(steps[0].arrivalOffset).toEqual([3, 4])
+    expect(steps[1].waypointOffset).toBeUndefined()
+    expect(steps[2].waypointOffset).toBeUndefined()
+  })
 })

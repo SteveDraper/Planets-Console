@@ -685,39 +685,21 @@ function flowCenterFromMapNode(mapNode: { x: number; y: number }): { cx: number;
   return { cx, cy }
 }
 
-/** Same flow-space hit radius as :func:`findClosestPlanetWithinRadius` but for plain cell centers. */
-function findClosestRouteWaypointInFlow(
-  waypoints: readonly RouteMapWaypoint[],
-  flowX: number,
-  flowY: number,
-  radiusInFlow: number
-): RouteMapWaypoint | null {
-  if (waypoints.length === 0) return null
-  let best: RouteMapWaypoint | null = null
-  let bestD = Infinity
-  for (const w of waypoints) {
-    const { cx, cy } = flowCenterFromMapNode({ x: w.gx, y: w.gy })
-    const d = Math.hypot(flowX - cx, flowY - cy)
-    if (d <= radiusInFlow && d < bestD) {
-      bestD = d
-      best = w
-    }
-  }
-  return best
-}
-
 function FixedSizeDotsOverlay({
   planetGrid,
   planetLabelOptions,
   labelSourceByNodeId,
   mapNodes,
   routeWaypoints,
+  waypointGrid,
 }: {
   planetGrid: PlanetSpatialGrid | null
   planetLabelOptions: PlanetLabelOptions
   labelSourceByNodeId: Map<string, MapNodeLabelSource>
   mapNodes: CombinedMapData['nodes']
   routeWaypoints: readonly RouteMapWaypoint[]
+  /** Sub-linear hover: same map-cell + radius model as :func:`buildPlanetSpatialGrid` for planets. */
+  waypointGrid: PlanetSpatialGrid | null
 }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
@@ -736,11 +718,6 @@ function FixedSizeDotsOverlay({
   useLayoutEffect(() => {
     pinnedNodeIdRef.current = pinnedNodeId
   }, [pinnedNodeId])
-
-  const routeWaypointsRef = useRef(routeWaypoints)
-  useLayoutEffect(() => {
-    routeWaypointsRef.current = routeWaypoints
-  }, [routeWaypoints])
 
   const showAnyLabelOption = planetLabelOptionsShowAnyLabel(planetLabelOptions)
 
@@ -796,7 +773,7 @@ function FixedSizeDotsOverlay({
     const el = domNode
     if (!el || size.width <= 0 || size.height <= 0) return
 
-    if (!planetGrid && routeWaypoints.length === 0) {
+    if (!planetGrid && !waypointGrid) {
       return
     }
 
@@ -828,10 +805,9 @@ function FixedSizeDotsOverlay({
         }
       }
       setHoveredNodeId(null)
-      const wps = routeWaypointsRef.current
-      if (wps.length > 0) {
-        const w = findClosestRouteWaypointInFlow(wps, flow.x, flow.y, radiusFlow)
-        setHoveredWaypointId(w?.id ?? null)
+      if (waypointGrid) {
+        const { px, py } = flowCenterToPlanet(flow.x, flow.y)
+        setHoveredWaypointId(findClosestPlanetWithinRadius(waypointGrid, px, py, radiusFlow))
       } else {
         setHoveredWaypointId(null)
       }
@@ -878,7 +854,7 @@ function FixedSizeDotsOverlay({
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseleave', onLeave)
     }
-  }, [domNode, size.width, size.height, planetGrid, routeWaypoints.length])
+  }, [domNode, size.width, size.height, planetGrid, waypointGrid])
 
   useEffect(() => {
     const el = domNode
@@ -1151,6 +1127,11 @@ export function MapGraph({
   const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
   const edges = useMemo(() => toEdges(data.edges), [data.edges])
   const planetGrid = useMemo(() => buildPlanetSpatialGrid(data.nodes), [data.nodes])
+  const waypointGrid = useMemo(() => {
+    const wps = data.routeWaypoints
+    if (wps.length === 0) return null
+    return buildPlanetSpatialGrid(wps.map((w) => ({ id: w.id, x: w.gx, y: w.gy })))
+  }, [data.routeWaypoints])
   const labelSourceByNodeId = useMemo(() => buildLabelSourceByNodeId(data.nodes), [data.nodes])
 
   return (
@@ -1193,6 +1174,7 @@ export function MapGraph({
             labelSourceByNodeId={labelSourceByNodeId}
             mapNodes={data.nodes}
             routeWaypoints={data.routeWaypoints}
+            waypointGrid={waypointGrid}
           />
           <FlowCoordinateReadout />
         </ReactFlow>

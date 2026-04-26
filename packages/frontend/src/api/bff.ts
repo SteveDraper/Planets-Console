@@ -205,6 +205,20 @@ export type ConnectionsMapParams = {
   flareDepth: ConnectionsFlareDepth
 }
 
+function parseFiniteNumberPair(
+  s: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string
+): [number, number] | undefined {
+  const raw = s[camelKey] ?? s[snakeKey]
+  if (raw == null) return undefined
+  if (!Array.isArray(raw) || raw.length !== 2) return undefined
+  const a = typeof raw[0] === 'number' ? raw[0] : Number(raw[0])
+  const b = typeof raw[1] === 'number' ? raw[1] : Number(raw[1])
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return undefined
+  return [a, b]
+}
+
 function normalizeIllustrativeRouteStep(raw: unknown): IllustrativeRouteStep | null {
   if (raw == null || typeof raw !== 'object') return null
   const s = raw as Record<string, unknown>
@@ -217,6 +231,14 @@ function normalizeIllustrativeRouteStep(raw: unknown): IllustrativeRouteStep | n
   const y = typeof t.y === 'number' ? t.y : Number(t.y)
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   const out: IllustrativeRouteStep = { kind, to: { x, y } }
+  const wp = parseFiniteNumberPair(s, 'waypointOffset', 'waypoint_offset')
+  if (wp != null) {
+    out.waypointOffset = wp
+  }
+  const ar = parseFiniteNumberPair(s, 'arrivalOffset', 'arrival_offset')
+  if (ar != null) {
+    out.arrivalOffset = ar
+  }
   return out
 }
 
