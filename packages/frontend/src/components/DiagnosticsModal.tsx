@@ -76,11 +76,19 @@ export function DiagnosticsModal({
     setClipboardError(null)
     setItems(null)
     setRecordBffDiagnostics(isIncludeDiagnosticsSessionEnabled())
+    let cancelled = false
     void fetchDiagnosticsRecent()
-      .then((r) => setItems(r.items))
+      .then((r) => {
+        if (cancelled) return
+        setItems(r.items)
+      })
       .catch((e: unknown) => {
+        if (cancelled) return
         setLoadError(e instanceof Error ? e.message : String(e))
       })
+    return () => {
+      cancelled = true
+    }
   }, [isOpen])
 
   useModalKeydownFocusTrap(isOpen, dialogRef, closeAndReturnFocus)

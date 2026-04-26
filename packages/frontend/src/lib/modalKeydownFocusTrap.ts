@@ -1,8 +1,35 @@
 import { type RefObject, useEffect, useRef } from 'react'
 
-/** Selectors for elements that participate in the modal Tab cycle (matches existing modals). */
+/** Selectors for elements that might participate in the modal Tab cycle (broad, then filtered). */
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Broad selector candidates include disabled and non-tabbable nodes; the browser skips them on
+ * Tab, but this trap builds its own list—so we must match native tab order semantics.
+ */
+function isTabbableModalElement(el: HTMLElement): boolean {
+  if (!el.isConnected) return false
+  if (el.tabIndex < 0) return false
+  if (el.hasAttribute('hidden')) return false
+  if (el.getAttribute('aria-hidden') === 'true') return false
+  if (el.getAttribute('aria-disabled') === 'true') return false
+  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
+    if (n.inert) return false
+  }
+  try {
+    if (el.matches(':disabled')) return false
+  } catch {
+    return false
+  }
+  return true
+}
+
+function getTabbableElementsInContainer(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    isTabbableModalElement
+  )
+}
 
 /**
  * When `isOpen`, traps Tab / Shift+Tab within `dialogRef` and calls `onEscape` for Escape
@@ -26,9 +53,7 @@ export function useModalKeydownFocusTrap(
       if (e.key === 'Tab') {
         const el = dialogRef.current
         if (!el) return
-        const focusables = Array.from(
-          el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-        )
+        const focusables = getTabbableElementsInContainer(el)
         const len = focusables.length
         if (len === 0) return
         const i = focusables.indexOf(document.activeElement as HTMLElement)
