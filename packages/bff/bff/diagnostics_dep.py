@@ -50,7 +50,9 @@ def to_diagnostic_payload(body: object) -> dict[str, Any]:
     """Coerce a handler result to a dict suitable for merging with ``diagnostics``."""
     if isinstance(body, dict):
         return body
-    enc = jsonable_encoder(body)
+    # Preserve model field names so FastAPI can still validate/filter through ``response_model``
+    # before applying any serialization aliases on the final response.
+    enc = jsonable_encoder(body, by_alias=False)
     if isinstance(enc, dict):
         return enc
     return {"value": enc}

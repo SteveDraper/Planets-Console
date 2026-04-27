@@ -40,3 +40,11 @@ def test_shell_bootstrap_returns_trimmed_game_id():
     response = client.get("/shell/bootstrap")
     assert response.status_code == 200
     assert response.json() == {"showInitialGame": "628580"}
+
+
+def test_shell_bootstrap_preserves_game_id_when_diagnostics_enabled():
+    set_bff_config(BffConfig(show_initial_game="  628580  ", diagnostics_buffer_size=10))
+    response = client.get("/shell/bootstrap?includeDiagnostics=true")
+    assert response.status_code == 200
+    assert response.json()["showInitialGame"] == "628580"
+    assert "diagnostics" in response.json()
