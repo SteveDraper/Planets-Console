@@ -61,9 +61,11 @@ Strings on the wire match the enum values: `off`, `include`, `only`.
 - The general Core pattern is `GET /api/v1/games/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}` (see [design-issue-10-base-map-from-core.md](design-issue-10-base-map-from-core.md)); **`connections`** uses the same analytics hook with keyword args:
   - `connection_warp_speed` (int 1--9),
   - `connection_gravitonic_movement` (bool),
-  - `connection_flare_mode` (`FlareConnectionMode`).
+  - `connection_flare_mode` (`FlareConnectionMode`),
+  - `connection_flare_depth` (int 1--3, default **1**): **hop budget** for mixed normal-move + flare BFS. Each hop is a normal well move (within max travel) or a flare from the static table; a valid path must use **at least one** flare. This is not a "flares in a row" count. Pair discovery also unions **per-k** center-distance **annuli** (k = 1…depth), so increasing depth can only add candidate pairs and longer mixed paths, not remove pairs that were already eligible at a smaller depth.
+  - Optional: `connection_include_illustrative_routes` when the client wants per-hop `illustrativeRoute` steps on flare rows (BFF may set this from the SPA when depth ≥2 and flares are on).
 
-Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`connection_routes_for_planets`** (`planet_connections.py`).
+Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`connection_routes_for_planets`** (`planet_connections` package).
 
 ---
 
@@ -78,7 +80,9 @@ Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`co
 - **Connections-specific query (defaults in parentheses):**
   - `warpSpeed` (int 1--9, default **9**),
   - `gravitonicMovement` (bool, default **false**),
-  - `flareMode` (`off` \| `include` \| `only`, default **off** for raw HTTP callers without the query; the SPA sends an explicit value).
+  - `flareMode` (`off` \| `include` \| `only`, default **off** for raw HTTP callers without the query; the SPA sends an explicit value),
+  - `flareDepth` (int 1--3, default **1**): same semantics as Core `connection_flare_depth` (mixed-hop budget + annulus layers; at least one flare in the path),
+  - `includeIllustrativeRoutes` (bool, default **false**): forwarded to Core; the SPA sets **true** when `flareMode` is not `off` and `flareDepth` ≥ 2 so multi-hop paths can return intermediate waypoints.
 
 **Response shape** (map payload):
 
@@ -99,15 +103,16 @@ The BFF does not recompute logic; it forwards to Core **`get_turn_analytics`** w
 - **`connectionsMapParams`** in `App.tsx` holds:
   - **`warpSpeed`** (1--9),
   - **`gravitonicMovement`**,
-  - **`flareMode`** (`off` \| `include` \| `only`).
+  - **`flareMode`** (`off` \| `include` \| `only`),
+  - **`flareDepth`** (1--3; hop budget / annulus cap as above; **Depth** in the UI).
 
-Controls live in **`AnalyticsBar`** (Connections tile): **Flares** is shown when Connections is enabled; **Warp** and **Gravitonic** sit in the expandable section (chevron).
+Controls live in **`AnalyticsBar`** (Connections tile): **Flares** and **Depth** are shown when Connections is enabled; **Warp** and **Gravitonic** sit in the expandable section (chevron).
 
 **Important:** With **`flareMode: off`**, the server **drops** pairs that are **only** reachable via flare. For maps where the only link between two planets is a flare, you must use **`include`** or **`only`** to see an edge.
 
 ### 6.2 Fetch and cache key
 
-`MainArea` uses **`useQueries`**. For **connections**, the TanStack **query key** includes (in order): `'analytic'`, `'connections'`, `'map'`, `gameId`, `turn`, `perspective`, **`warpSpeed`**, **`gravitonicMovement`**, **`flareMode`**. Changing any of these refetches the connections overlay.
+`MainArea` uses **`useQueries`**. For **connections**, the TanStack **query key** includes (in order): `'analytic'`, `'connections'`, `'map'`, `gameId`, `turn`, `perspective`, **`warpSpeed`**, **`gravitonicMovement`**, **`flareMode`**, **`flareDepth`**. Changing any of these refetches the connections overlay.
 
 `fetchAnalyticMap` passes the three connection parameters as query string fields on the GET (see `analyticMapQueryString` in `bff.ts`).
 

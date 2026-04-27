@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { shallow } from 'zustand/shallow'
 import {
   BaseEdge,
   ReactFlow,
@@ -22,7 +23,7 @@ import {
   type EdgeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { CombinedMapData } from '../api/bff'
+import type { CombinedMapData, RouteMapWaypoint } from '../api/bff'
 import {
   buildPlanetSpatialGrid,
   findClosestPlanetWithinRadius,
@@ -58,6 +59,8 @@ type MapNodeData = {
 const NODE_SIZE_FLOW = 12
 /** Fixed pixel size of the planet dot on screen (independent of zoom). */
 const DOT_PIXELS = 4
+/** On-screen size of a multi-hop route intermediate marker (smaller and quieter than planet dots). */
+const ROUTE_WAYPOINT_CROSS_PX = 5
 /** Mouse distance from dot center (px) at which the planet label is shown. */
 const PLANET_LABEL_HOVER_RADIUS_PX = 14
 /** Offset so node and edge targets use the center of the map cell (0.5, 0.5) as demarcated by grid lines at integers. */
@@ -110,16 +113,19 @@ const nodeTypes = { dot: DotNode }
 
 /** Custom edge keeps endpoints centered on dot nodes and stays visually 1px while zooming. */
 function StraightEdgeOnePixel(props: EdgeProps) {
-  const storeState = useStore((s) => s) as {
-    nodeLookup?: Map<string, Node>
-    nodeInternals?: Map<string, Node>
-    transform?: [number, number, number]
-  }
-  const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
-  const scale = safeZoomScale(storeState.transform?.[2])
+  const { sourceNode, targetNode, zoom } = useStore(
+    (s) => {
+      const nodeLookup = s.nodeLookup
+      return {
+        sourceNode: nodeLookup.get(props.source),
+        targetNode: nodeLookup.get(props.target),
+        zoom: s.transform[2],
+      }
+    },
+    shallow
+  )
+  const scale = safeZoomScale(zoom)
   const half = NODE_SIZE_FLOW / 2
-  const sourceNode = nodeLookup?.get(props.source)
-  const targetNode = nodeLookup?.get(props.target)
   const sourceX = sourceNode ? sourceNode.position.x + half : props.sourceX
   const sourceY = sourceNode ? sourceNode.position.y + half : props.sourceY
   const targetX = targetNode ? targetNode.position.x + half : props.targetX
@@ -149,7 +155,97 @@ function StraightEdgeOnePixel(props: EdgeProps) {
   )
 }
 
-const edgeTypes = { straight: StraightEdgeOnePixel }
+const FLOW_POINT_EPS = 1e-6
+
+function dedupeConsecutiveFlowPoints(
+  points: { x: number; y: number }[]
+): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = []
+  for (const p of points) {
+    const last = out[out.length - 1]
+    if (last == null || Math.hypot(p.x - last.x, p.y - last.y) > FLOW_POINT_EPS) {
+      out.push(p)
+    }
+  }
+  return out
+}
+
+function buildSvgPathThroughFlowPoints(
+  points: { x: number; y: number }[]
+): string {
+  if (points.length < 2) return ''
+  let d = `M ${points[0].x} ${points[0].y}`
+  for (let i = 1; i < points.length; i += 1) {
+    d += ` L ${points[i].x} ${points[i].y}`
+  }
+  return d
+}
+
+type MapEdgeData = { viaFlare?: boolean; waypointsInGame?: { x: number; y: number }[] }
+
+/**
+ * Multi-segment map edge: source → (optional game-cell waypoints) → target, 1px on screen, same style as `StraightEdgeOnePixel`.
+ */
+function PolylineEdgeOnePixel(props: EdgeProps) {
+  const { sourceNode, targetNode, zoom } = useStore(
+    (s) => {
+      const nodeLookup = s.nodeLookup
+      return {
+        sourceNode: nodeLookup.get(props.source),
+        targetNode: nodeLookup.get(props.target),
+        zoom: s.transform[2],
+      }
+    },
+    shallow
+  )
+  const scale = safeZoomScale(zoom)
+  const half = NODE_SIZE_FLOW / 2
+  const data = props.data as MapEdgeData | undefined
+  const wps = data?.waypointsInGame
+  const viaFlare = data?.viaFlare === true
+  const mapEdgeStrokeStyle: CSSProperties = {
+    stroke: viaFlare ? '#facc15' : '#b1b1b7',
+    strokeWidth: 1 / scale,
+    opacity: 0.5,
+    ...(viaFlare ? { strokeDasharray: `${4 / scale} ${3 / scale}` } : {}),
+  }
+  if (!sourceNode || !targetNode) {
+    const [path] = getStraightPath({
+      sourceX: props.sourceX,
+      sourceY: props.sourceY,
+      targetX: props.targetX,
+      targetY: props.targetY,
+    })
+    return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
+  }
+  const sCx = sourceNode.position.x + half
+  const sCy = sourceNode.position.y + half
+  const tCx = targetNode.position.x + half
+  const tCy = targetNode.position.y + half
+  const flowPoints = dedupeConsecutiveFlowPoints([
+    { x: sCx, y: sCy },
+    ...(Array.isArray(wps)
+      ? wps.map((g) => {
+          const { cx, cy } = flowCenterFromMapNode({ x: g.x, y: g.y })
+          return { x: cx, y: cy }
+        })
+      : []),
+    { x: tCx, y: tCy },
+  ])
+  if (flowPoints.length < 2) {
+    const [path] = getStraightPath({
+      sourceX: sCx,
+      sourceY: sCy,
+      targetX: tCx,
+      targetY: tCy,
+    })
+    return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
+  }
+  const path = buildSvgPathThroughFlowPoints(flowPoints)
+  return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
+}
+
+const edgeTypes = { straight: StraightEdgeOnePixel, polyline: PolylineEdgeOnePixel }
 
 /** Map coordinates (px, py) are cell indices; node geometry stays fixed and centered on the map cell. */
 function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
@@ -180,15 +276,22 @@ function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
 }
 
 function toEdges(edges: CombinedMapData['edges']): Edge[] {
-  return edges.map((e, i) => ({
-    id: `e-${e.source}-${e.target}-${i}`,
-    source: e.source,
-    target: e.target,
-    sourceHandle: 's',
-    targetHandle: 't',
-    type: 'straight',
-    data: { viaFlare: e.viaFlare === true },
-  }))
+  return edges.map((e, i) => {
+    const wps = e.waypointsInGame
+    const hasPoly = Array.isArray(wps) && wps.length > 0
+    return {
+      id: `e-${e.source}-${e.target}-${i}`,
+      source: e.source,
+      target: e.target,
+      sourceHandle: 's',
+      targetHandle: 't',
+      type: hasPoly ? 'polyline' : 'straight',
+      data: {
+        viaFlare: e.viaFlare === true,
+        ...(hasPoly ? { waypointsInGame: wps } : {}),
+      } satisfies MapEdgeData,
+    }
+  })
 }
 
 /**
@@ -579,16 +682,22 @@ function FixedSizeDotsOverlay({
   planetLabelOptions,
   labelSourceByNodeId,
   mapNodes,
+  routeWaypoints,
+  waypointGrid,
 }: {
   planetGrid: PlanetSpatialGrid | null
   planetLabelOptions: PlanetLabelOptions
   labelSourceByNodeId: Map<string, MapNodeLabelSource>
   mapNodes: CombinedMapData['nodes']
+  routeWaypoints: readonly RouteMapWaypoint[]
+  /** Sub-linear hover: same map-cell + radius model as :func:`buildPlanetSpatialGrid` for planets. */
+  waypointGrid: PlanetSpatialGrid | null
 }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [hoveredWaypointId, setHoveredWaypointId] = useState<string | null>(null)
   const [pinnedNodeId, setPinnedNodeId] = useState<string | null>(null)
   const hoverRafRef = useRef<number | null>(null)
   const pendingClientRef = useRef<{ x: number; y: number } | null>(null)
@@ -628,8 +737,18 @@ function FixedSizeDotsOverlay({
   useEffect(() => {
     if (pinnedNodeId != null) {
       setHoveredNodeId(null)
+      setHoveredWaypointId(null)
     }
   }, [pinnedNodeId])
+
+  const routeWaypointIdSet = useMemo(
+    () => new Set(routeWaypoints.map((w) => w.id)),
+    [routeWaypoints]
+  )
+  const hoveredWaypointInList =
+    hoveredWaypointId != null && routeWaypointIdSet.has(hoveredWaypointId)
+  const hoveredWaypointIdForLabel =
+    pinnedNodeId == null && hoveredWaypointInList ? hoveredWaypointId : null
 
   useEffect(() => {
     if (!domNode) return
@@ -650,7 +769,7 @@ function FixedSizeDotsOverlay({
     const el = domNode
     if (!el || size.width <= 0 || size.height <= 0) return
 
-    if (!planetGrid) {
+    if (!planetGrid && !waypointGrid) {
       return
     }
 
@@ -659,20 +778,35 @@ function FixedSizeDotsOverlay({
       const t = transformRef.current
       if (!t) {
         setHoveredNodeId(null)
+        setHoveredWaypointId(null)
         return
       }
       const paneRect = el.getBoundingClientRect()
       const flow = clientToFlowPosition(clientX, clientY, el, t, paneRect)
       if (!flow) {
         setHoveredNodeId(null)
+        setHoveredWaypointId(null)
         return
       }
       const rawScale = t[2]
       const scale = safeZoomScale(rawScale)
-      const radiusPlanet = PLANET_LABEL_HOVER_RADIUS_PX / scale
-      const { px, py } = flowCenterToPlanet(flow.x, flow.y)
-      const closestId = findClosestPlanetWithinRadius(planetGrid, px, py, radiusPlanet)
-      setHoveredNodeId(closestId)
+      const radiusFlow = PLANET_LABEL_HOVER_RADIUS_PX / scale
+      if (planetGrid) {
+        const { px, py } = flowCenterToPlanet(flow.x, flow.y)
+        const closestId = findClosestPlanetWithinRadius(planetGrid, px, py, radiusFlow)
+        if (closestId != null) {
+          setHoveredNodeId(closestId)
+          setHoveredWaypointId(null)
+          return
+        }
+      }
+      setHoveredNodeId(null)
+      if (waypointGrid) {
+        const { px, py } = flowCenterToPlanet(flow.x, flow.y)
+        setHoveredWaypointId(findClosestPlanetWithinRadius(waypointGrid, px, py, radiusFlow))
+      } else {
+        setHoveredWaypointId(null)
+      }
     }
 
     const flushHover = () => {
@@ -706,6 +840,7 @@ function FixedSizeDotsOverlay({
         hoverRafRef.current = null
       }
       setHoveredNodeId(null)
+      setHoveredWaypointId(null)
     }
     el.addEventListener('mousemove', onMove)
     el.addEventListener('mouseleave', onLeave)
@@ -715,7 +850,7 @@ function FixedSizeDotsOverlay({
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseleave', onLeave)
     }
-  }, [domNode, size.width, size.height, planetGrid])
+  }, [domNode, size.width, size.height, planetGrid, waypointGrid])
 
   useEffect(() => {
     const el = domNode
@@ -772,6 +907,31 @@ function FixedSizeDotsOverlay({
       aria-hidden={pinnedNodeId == null ? true : undefined}
     >
       <div className="absolute inset-0" aria-hidden>
+        {routeWaypoints.map((w) => {
+          const { cx, cy } = flowCenterFromMapNode({ x: w.gx, y: w.gy })
+          const paneX = cx * scale + tx
+          const paneY = cy * scale + ty
+          const s = ROUTE_WAYPOINT_CROSS_PX
+          return (
+            <div
+              key={w.id}
+              className="absolute text-gray-500/75"
+              style={{
+                left: Math.round(paneX - s / 2),
+                top: Math.round(paneY - s / 2),
+                width: s,
+                height: s,
+              }}
+            >
+              <svg viewBox="0 0 8 8" className="h-full w-full" aria-hidden>
+                <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.1" />
+                <line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" strokeWidth="1.1" />
+              </svg>
+            </div>
+          )
+        })}
+      </div>
+      <div className="absolute inset-0" aria-hidden>
         {mapNodes.map((mapNode) => {
           const { cx, cy } = flowCenterFromMapNode(mapNode)
           const paneX = cx * scale + tx
@@ -791,6 +951,28 @@ function FixedSizeDotsOverlay({
         })}
       </div>
       <div className="absolute inset-0 z-[1]">
+        {routeWaypoints.map((w) => {
+          if (hoveredWaypointIdForLabel !== w.id) return null
+          const { cx, cy } = flowCenterFromMapNode({ x: w.gx, y: w.gy })
+          const paneX = cx * scale + tx
+          const paneY = cy * scale + ty
+          return (
+            <div
+              key={`wpl-${w.id}`}
+              className="absolute font-mono text-gray-400"
+              style={{
+                left: Math.round(paneX - DOT_PIXELS / 2 + LABEL_OFFSET_X_PX),
+                top: Math.round(paneY - DOT_PIXELS / 2 + LABEL_OFFSET_Y_PX),
+                fontSize: 10,
+                backgroundColor: '#000000',
+                borderRadius: 6,
+                padding: '0 4px',
+              }}
+            >
+              {w.gx}, {w.gy}
+            </div>
+          )
+        })}
         {mapNodes.map((mapNode) => {
           const { cx, cy } = flowCenterFromMapNode(mapNode)
           const paneX = cx * scale + tx
@@ -941,6 +1123,11 @@ export function MapGraph({
   const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
   const edges = useMemo(() => toEdges(data.edges), [data.edges])
   const planetGrid = useMemo(() => buildPlanetSpatialGrid(data.nodes), [data.nodes])
+  const waypointGrid = useMemo(() => {
+    const wps = data.routeWaypoints
+    if (wps.length === 0) return null
+    return buildPlanetSpatialGrid(wps.map((w) => ({ id: w.id, x: w.gx, y: w.gy })))
+  }, [data.routeWaypoints])
   const labelSourceByNodeId = useMemo(() => buildLabelSourceByNodeId(data.nodes), [data.nodes])
 
   return (
@@ -982,6 +1169,8 @@ export function MapGraph({
             planetLabelOptions={planetLabelOptions}
             labelSourceByNodeId={labelSourceByNodeId}
             mapNodes={data.nodes}
+            routeWaypoints={data.routeWaypoints}
+            waypointGrid={waypointGrid}
           />
           <FlowCoordinateReadout />
         </ReactFlow>

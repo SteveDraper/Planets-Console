@@ -1,9 +1,18 @@
 """SPA shell bootstrap: config surfaced for first paint without hard-coding in the frontend."""
 
+from collections.abc import Callable
+from typing import Any
+
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from bff.config import get_config
+from bff.diagnostics_dep import (
+    IncludeDiagnostics,
+    finish_response,
+    optional_request_root,
+    with_timed_child,
+)
 
 router = APIRouter()
 
@@ -16,13 +25,34 @@ class ShellBootstrapResponse(BaseModel):
         serialization_alias="showInitialGame",
         description="Stored game id to load automatically without login, or null when disabled.",
     )
+    diagnostics: dict[str, Any] | None = Field(
+        default=None,
+        description="Request timing tree; present when includeDiagnostics=true.",
+    )
+
+    @model_serializer(mode="wrap")
+    def _json_omit_diagnostics_when_none(self, handler: Callable[[BaseModel], Any]) -> Any:
+        data = handler(self)
+        if isinstance(data, dict) and data.get("diagnostics") is None:
+            out = dict(data)
+            out.pop("diagnostics", None)
+            return out
+        return data
 
 
-@router.get("/bootstrap")
-def get_shell_bootstrap() -> ShellBootstrapResponse:
+@router.get("/bootstrap", response_model=ShellBootstrapResponse)
+def get_shell_bootstrap(include: IncludeDiagnostics = False) -> object:
     """Return shell-oriented server config for the SPA (e.g. optional default game id)."""
     raw = get_config().show_initial_game
     if raw is None:
-        return ShellBootstrapResponse(show_initial_game=None)
-    trimmed = raw.strip()
-    return ShellBootstrapResponse(show_initial_game=trimmed if trimmed else None)
+        show: str | None = None
+    else:
+        trimmed = raw.strip()
+        show = trimmed if trimmed else None
+    root = optional_request_root(include, "GET", "/shell/bootstrap", handler="get_shell_bootstrap")
+
+    def work() -> ShellBootstrapResponse:
+        return ShellBootstrapResponse(show_initial_game=show)
+
+    result = with_timed_child(root, "get_shell_bootstrap", "total", work)
+    return finish_response(result, root)

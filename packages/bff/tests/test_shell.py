@@ -7,6 +7,7 @@ from api.storage import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
+from bff.diagnostics_buffer import get_diagnostics_buffer
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -16,6 +17,7 @@ client = TestClient(app)
 def _reset():
     clear_backend_cache()
     set_bff_config(BffConfig())
+    get_diagnostics_buffer().clear()
     set_api_config(
         ApiConfig(
             storage_backend="ephemeral",
@@ -38,3 +40,11 @@ def test_shell_bootstrap_returns_trimmed_game_id():
     response = client.get("/shell/bootstrap")
     assert response.status_code == 200
     assert response.json() == {"showInitialGame": "628580"}
+
+
+def test_shell_bootstrap_preserves_game_id_when_diagnostics_enabled():
+    set_bff_config(BffConfig(show_initial_game="  628580  ", diagnostics_buffer_size=10))
+    response = client.get("/shell/bootstrap?includeDiagnostics=true")
+    assert response.status_code == 200
+    assert response.json()["showInitialGame"] == "628580"
+    assert "diagnostics" in response.json()

@@ -13,6 +13,8 @@ class BffConfig:
     """Allowed CORS origins for the SPA."""
     show_initial_game: str | None = None
     """When set, the SPA loads this stored game id from the server without login (dev/demo)."""
+    diagnostics_buffer_size: int = 10
+    """How many most-recent per-request diagnostic trees to keep (0 disables retention)."""
 
 
 def get_config() -> BffConfig:
@@ -27,3 +29,6 @@ def set_config(cfg: BffConfig) -> None:
     """Set the BFF config (called by server at startup)."""
     global _config
     _config = cfg
+    from bff.diagnostics_buffer import reconfigure_diagnostics_buffer
+
+    reconfigure_diagnostics_buffer(cfg.diagnostics_buffer_size)

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type ReactElement } from 'react'
+import { useCallback, useLayoutEffect, useRef, type ReactElement } from 'react'
+import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import {
@@ -121,40 +122,7 @@ export function SettingsModal({
     focusables[0]?.focus()
   }, [isOpen])
 
-  useEffect(() => {
-    if (!isOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        closeAndReturnFocus()
-      }
-      if (e.key === 'Tab') {
-        const el = dialogRef.current
-        if (!el) return
-        const focusables = Array.from(
-          el.querySelectorAll<HTMLElement>(
-            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-          )
-        )
-        const len = focusables.length
-        if (len === 0) return
-        const i = focusables.indexOf(document.activeElement as HTMLElement)
-        if (e.shiftKey) {
-          if (i <= 0) {
-            e.preventDefault()
-            focusables[len - 1]?.focus()
-          }
-        } else {
-          if (i === -1 || i >= len - 1) {
-            e.preventDefault()
-            focusables[0]?.focus()
-          }
-        }
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, closeAndReturnFocus])
+  useModalKeydownFocusTrap(isOpen, dialogRef, closeAndReturnFocus)
 
   if (!isOpen) return null
 

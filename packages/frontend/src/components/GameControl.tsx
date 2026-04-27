@@ -161,6 +161,7 @@ export function GameControl({
           role="dialog"
           aria-modal="false"
           aria-labelledby={triggerId}
+          onMouseDown={(e) => e.stopPropagation()}
           className={cn(
             'absolute left-0 top-full z-50 mt-1 flex min-w-[12rem] max-h-64 flex-col gap-1 overflow-y-auto',
             'rounded border border-[#52575d] bg-[#40454a] p-2 shadow-lg'

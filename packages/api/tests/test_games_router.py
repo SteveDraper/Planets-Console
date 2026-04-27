@@ -188,7 +188,7 @@ class TestGetTurnAnalyticsConnections:
     def test_returns_routes(self, client):
         resp = client.get(
             "/v1/games/628580/1/turns/111/analytics/connections?warpSpeed=9"
-            "&gravitonicMovement=false&flareMode=off"
+            "&gravitonicMovement=false&flareMode=off&flareDepth=1"
         )
         assert resp.status_code == 200
         data = resp.json()

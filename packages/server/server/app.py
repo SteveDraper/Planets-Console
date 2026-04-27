@@ -12,6 +12,7 @@ from pathlib import Path
 from api.app import app as api_app
 from api.services.seed import run_startup_seed_if_configured
 from bff.app import app as bff_app
+from bff.routers.diagnostics import recent_diagnostics_response
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from starlette.staticfiles import StaticFiles
@@ -39,6 +40,14 @@ app = FastAPI(
 )
 app.mount("/api", api_app)
 app.mount("/bff", bff_app)
+
+
+@app.get("/diagnostics/recent", include_in_schema=False)
+def diagnostics_recent_mru_alias():
+    """Same MRU buffer as ``GET /bff/diagnostics/recent`` (avoids depending on ``/bff`` when the
+    dev proxy or a misconfigured backend returns 404 for the mounted path).
+    """
+    return recent_diagnostics_response()
 
 
 @app.get("/health")

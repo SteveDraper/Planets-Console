@@ -4,6 +4,81 @@
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 
+/** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
+export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const
+
+export function isIncludeDiagnosticsSessionEnabled(): boolean {
+  if (typeof sessionStorage === 'undefined') {
+    return false
+  }
+  return sessionStorage.getItem(INCLUDE_DIAGNOSTICS_SESSION_KEY) === '1'
+}
+
+export function setIncludeDiagnosticsSessionEnabled(enabled: boolean): void {
+  if (typeof sessionStorage === 'undefined') {
+    return
+  }
+  if (enabled) {
+    sessionStorage.setItem(INCLUDE_DIAGNOSTICS_SESSION_KEY, '1')
+  } else {
+    sessionStorage.removeItem(INCLUDE_DIAGNOSTICS_SESSION_KEY)
+  }
+}
+
+function appendIncludeDiagnosticsQuery(path: string): string {
+  if (!path.startsWith('/bff/')) {
+    return path
+  }
+  if (!isIncludeDiagnosticsSessionEnabled()) {
+    return path
+  }
+  if (/[?&]includeDiagnostics=/.test(path)) {
+    return path
+  }
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}includeDiagnostics=true`
+}
+
+/**
+ * When `fetch` rejects (no HTTP response), browsers often set only a generic
+ * "Failed to fetch" / "Load failed" message. This keeps the original text but
+ * adds method+path, the request URL path, and `cause` when present.
+ */
+export function toFetchRejectionError(
+  err: unknown,
+  endpointLabel: string,
+  attemptedPath: string
+): Error {
+  const name = err instanceof Error ? err.name : 'Error'
+  const message = err instanceof Error ? err.message : String(err)
+  let cause = ''
+  if (err instanceof Error && 'cause' in err) {
+    const c = (err as Error & { cause?: unknown }).cause
+    if (c != null) {
+      cause = `; cause: ${String(c)}`
+    }
+  }
+  return new Error(
+    `${name}: ${message} — ${endpointLabel} (request: ${attemptedPath}). ` +
+      `No HTTP response${cause}. ` +
+      `Check BFF is running, the dev proxy targets it, and there is no CORS or connection problem.`
+  )
+}
+
+async function bffRequest(
+  path: string,
+  init: RequestInit | undefined,
+  endpointLabel: string
+): Promise<Response> {
+  const requestPath = appendIncludeDiagnosticsQuery(path)
+  const url = `${BFF_BASE}${requestPath}`
+  try {
+    return await fetch(url, init)
+  } catch (e) {
+    throw toFetchRejectionError(e, endpointLabel, requestPath)
+  }
+}
+
 /** Human-readable endpoint for error rows (method + path, no host). */
 export function withEndpointIfGeneric(message: string, endpointLabel: string): string {
   const detail = message.trim()
@@ -80,6 +155,19 @@ export type MapEdge = {
   target: string
   /** True when reachability uses a flare (dashed edge on the map). */
   viaFlare?: boolean
+  /**
+   * Intermediate map cells (game integer coordinates) between source and target.
+   * When set, the map draws a polyline A → waypoints → B instead of a single segment.
+   */
+  waypointsInGame?: { x: number; y: number }[]
+}
+
+/** One hop in a Core `illustrativeRoute` (normal move or flare). */
+export type IllustrativeRouteStep = {
+  kind: 'normal' | 'flare'
+  to: { x: number; y: number }
+  waypointOffset?: [number, number]
+  arrivalOffset?: [number, number]
 }
 
 /** UI-independent planet pair from the Connections analytic (Core/BFF). */
@@ -87,6 +175,8 @@ export type PlanetPairRoute = {
   fromPlanetId: number
   toPlanetId: number
   viaFlare: boolean
+  /** Present when the server was asked for illustrative paths (multi-hop flares). */
+  illustrativeRoute?: IllustrativeRouteStep[]
 }
 
 export type MapDataResponse = {
@@ -99,11 +189,80 @@ export type MapDataResponse = {
 /** How flare-assisted routes are requested from Core (`flareMode` query). */
 export type ConnectionsFlareMode = 'off' | 'include' | 'only'
 
+/**
+ * Max **hops** (1–3) for Core’s mixed **normal-move + flare** reachability test: each hop is one
+ * normal well move (within max travel) or one flare from the table, and a valid path must use
+ * **at least one** flare. This is a hop **budget**, not a cap on “flares in a row.”
+ * Pair **discovery** unions center-distance **annuli** for k = 1…N, so a higher value adds
+ * candidate pairs and longer mixed paths; it does not drop links accepted at a smaller value.
+ * Only used when `flareMode` is not `off` (no flare geometry otherwise).
+ */
+export type ConnectionsFlareDepth = 1 | 2 | 3
+
 /** Query parameters for the Connections map analytic (BFF forwards to Core). */
 export type ConnectionsMapParams = {
   warpSpeed: number
   gravitonicMovement: boolean
   flareMode: ConnectionsFlareMode
+  /**
+   * `flareDepth` query (1–3): hop budget for mixed normal+flare paths; at least one hop must be
+   * a flare. Raising it widens per-k annulus search and can admit longer mixed paths.
+   */
+  flareDepth: ConnectionsFlareDepth
+}
+
+/** Parse a single JSON number; rejects null, non-numeric, and `Number('')` → 0. */
+function parseJsonFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string') {
+    if (value.trim() === '') return null
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+/**
+ * 2D offset tuple from the wire. Each element must be a finite `number` or a non-empty
+ * numeric string — never `Number()` on arbitrary values (avoids `null`/`""` → `0`).
+ */
+function parseFiniteNumberPair(
+  s: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string
+): [number, number] | undefined {
+  const raw = s[camelKey] ?? s[snakeKey]
+  if (raw == null) return undefined
+  if (!Array.isArray(raw) || raw.length !== 2) return undefined
+  const a = parseJsonFiniteNumber(raw[0])
+  const b = parseJsonFiniteNumber(raw[1])
+  if (a == null || b == null) return undefined
+  return [a, b]
+}
+
+function normalizeIllustrativeRouteStep(raw: unknown): IllustrativeRouteStep | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const s = raw as Record<string, unknown>
+  const kind = s.kind === 'flare' ? 'flare' : s.kind === 'normal' ? 'normal' : null
+  if (kind == null) return null
+  const toRaw = s.to
+  if (toRaw == null || typeof toRaw !== 'object') return null
+  const t = toRaw as Record<string, unknown>
+  const x = parseJsonFiniteNumber(t.x)
+  const y = parseJsonFiniteNumber(t.y)
+  if (x == null || y == null) return null
+  const out: IllustrativeRouteStep = { kind, to: { x, y } }
+  const wp = parseFiniteNumberPair(s, 'waypointOffset', 'waypoint_offset')
+  if (wp != null) {
+    out.waypointOffset = wp
+  }
+  const ar = parseFiniteNumberPair(s, 'arrivalOffset', 'arrival_offset')
+  if (ar != null) {
+    out.arrivalOffset = ar
+  }
+  return out
 }
 
 /**
@@ -118,11 +277,23 @@ function normalizePlanetPairRoute(raw: unknown): PlanetPairRoute | null {
   const fromPlanetId = typeof fromRaw === 'number' ? fromRaw : Number(fromRaw)
   const toPlanetId = typeof toRaw === 'number' ? toRaw : Number(toRaw)
   if (!Number.isFinite(fromPlanetId) || !Number.isFinite(toPlanetId)) return null
-  return {
+  let illustrativeRoute: IllustrativeRouteStep[] | undefined
+  const irRaw = r.illustrativeRoute ?? r.illustrative_route
+  if (Array.isArray(irRaw) && irRaw.length > 0) {
+    const steps = irRaw
+      .map(normalizeIllustrativeRouteStep)
+      .filter((s): s is IllustrativeRouteStep => s != null)
+    if (steps.length > 0) illustrativeRoute = steps
+  }
+  const o: PlanetPairRoute = {
     fromPlanetId,
     toPlanetId,
     viaFlare: r.viaFlare === true,
   }
+  if (illustrativeRoute != null) {
+    o.illustrativeRoute = illustrativeRoute
+  }
+  return o
 }
 
 function normalizeMapEdge(raw: unknown): MapEdge | null {
@@ -187,10 +358,19 @@ function normalizeMapNode(raw: unknown): MapNode {
   return base
 }
 
+/** Intermediate cell along a multi-hop flare (game map integer coordinates), for subtle markers. */
+export type RouteMapWaypoint = {
+  id: string
+  gx: number
+  gy: number
+}
+
 /** Combined nodes/edges from multiple analytics for the single shared map. */
 export type CombinedMapData = {
   nodes: MapDataResponse['nodes']
   edges: MapEdge[]
+  /** Deduped intermediate cells for illustrated flare routes (when `includeIllustrativeRoutes` was requested). */
+  routeWaypoints: RouteMapWaypoint[]
 }
 
 export type StoredGameItem = {
@@ -204,8 +384,9 @@ export type GamesListResponse = {
 }
 
 export async function fetchGames(): Promise<GamesListResponse> {
+  const path = '/bff/games'
   const endpointLabel = 'GET /bff/games'
-  const r = await fetch(`${BFF_BASE}/bff/games`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -237,8 +418,9 @@ export type ShellBootstrapResponse = {
 }
 
 export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
+  const path = '/bff/shell/bootstrap'
   const endpointLabel = 'GET /bff/shell/bootstrap'
-  const r = await fetch(`${BFF_BASE}/bff/shell/bootstrap`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -249,7 +431,7 @@ export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
 export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -289,11 +471,15 @@ export async function ensureTurnData(
   }
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/ensure`
   const endpointLabel = `POST ${path}`
-  const r = await fetch(`${BFF_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    endpointLabel
+  )
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -330,11 +516,15 @@ export async function refreshGameInfo(
   }
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
   const endpointLabel = `POST ${path}`
-  const r = await fetch(`${BFF_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    endpointLabel
+  )
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -351,8 +541,9 @@ export async function refreshGameInfo(
 }
 
 export async function fetchAnalytics(): Promise<AnalyticsListResponse> {
+  const path = '/bff/analytics'
   const endpointLabel = 'GET /bff/analytics'
-  const r = await fetch(`${BFF_BASE}/bff/analytics`)
+  const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -392,6 +583,11 @@ function analyticMapQueryString(
       connectionsParams.gravitonicMovement ? 'true' : 'false'
     )
     params.set('flareMode', connectionsParams.flareMode)
+    params.set('flareDepth', String(connectionsParams.flareDepth))
+    // Illustrative routes (per-hop waypoints) are only useful when the hop budget can exceed one.
+    if (connectionsParams.flareMode !== 'off' && connectionsParams.flareDepth >= 2) {
+      params.set('includeIllustrativeRoutes', 'true')
+    }
   }
   return `?${params.toString()}`
 }
@@ -403,7 +599,7 @@ export async function fetchAnalyticTable(
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/table`
   const qs = analyticScopeQuery(scope)
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}${qs}`)
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -418,10 +614,97 @@ export async function fetchAnalyticMap(
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/map`
   const qs = analyticMapQueryString(scope, analyticId, connectionsParams)
   const endpointLabel = `GET ${path}`
-  const r = await fetch(`${BFF_BASE}${path}${qs}`, { cache: 'no-store' })
+  const r = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
   const raw = await r.json()
   return normalizeMapDataResponse(raw)
+}
+
+// --- Server diagnostics (MRU buffer of request trees) ---
+
+/**
+ * Finitely nested JSON shape (natively JSON-serializable; matches Core/BFF `JSONValue` on trees).
+ * Request roots usually attach only scalars; child nodes may add arrays or small objects.
+ */
+export type JsonValue =
+  | null
+  | string
+  | number
+  | boolean
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
+export type DiagnosticTree = {
+  name: string
+  values: Record<string, JsonValue>
+  timings: Record<string, number>
+  children: DiagnosticTree[]
+}
+
+export type DiagnosticsRecentItem = {
+  capturedAt: string
+  summary: string
+  diagnostics: DiagnosticTree
+}
+
+export type DiagnosticsRecentResponse = {
+  items: DiagnosticsRecentItem[]
+}
+
+const DIAGNOSTICS_RECENT_404_HELP =
+  'HTTP 404 for /bff/diagnostics/recent and /diagnostics/recent. ' +
+  'Run `uv run serve` from the repo root so the process on :8000 includes the BFF (not the Core API alone). ' +
+  'Confirm the Vite proxy in vite.config.ts forwards /bff and /diagnostics to that port.'
+
+export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentResponse> {
+  const attempts: [string, string][] = [
+    ['/bff/diagnostics/recent', 'GET /bff/diagnostics/recent'],
+    [
+      '/diagnostics/recent',
+      'GET /diagnostics/recent (server alias; use if /bff is not proxied)',
+    ],
+  ]
+  let lastNetworkError: Error | null = null
+  let notFoundCount = 0
+  for (const [path, label] of attempts) {
+    let r: Response
+    try {
+      r = await bffRequest(path, undefined, label)
+    } catch (e) {
+      lastNetworkError = e instanceof Error ? e : new Error(String(e))
+      continue
+    }
+    if (r.ok) {
+      return (await r.json()) as DiagnosticsRecentResponse
+    }
+    if (r.status !== 404) {
+      const body = await r.text().catch(() => '')
+      const clip = body.length > 400 ? `${body.slice(0, 400)}…` : body
+      // Do not use `withEndpointIfGeneric` here: a body snippet (e.g. "500: <html>…") is not
+      // a "generic" message, so the label would be omitted. Always include the attempt label.
+      const parts: string[] = [label, `HTTP ${r.status}`]
+      if (clip) parts.push(clip)
+      throw new Error(parts.join(' — '))
+    }
+    notFoundCount += 1
+  }
+  if (notFoundCount === attempts.length) {
+    throw new Error(DIAGNOSTICS_RECENT_404_HELP)
+  }
+  if (lastNetworkError != null) {
+    if (notFoundCount > 0) {
+      throw new Error(
+        'Diagnostics: one path could not be reached, another returned HTTP 404. ' +
+          `Tried: ${attempts.map((a) => a[0]).join(' → ')}. ` +
+          `Last connection error: ${lastNetworkError.message}`
+      )
+    }
+    throw new Error(
+      `Diagnostics: could not reach any diagnostics recent path (${attempts.map((a) => a[0]).join(' → ')}). ` +
+        `Last error: ${lastNetworkError.message}`
+    )
+  }
+  throw new Error('Unexpected state in fetchDiagnosticsRecent')
 }

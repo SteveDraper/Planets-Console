@@ -51,6 +51,8 @@ function ConsoleShell() {
     warpSpeed: 9,
     gravitonicMovement: false,
     flareMode: 'include',
+    /** 2+ includes full static table (1- and 3-pair host rows); 1 is 1-pair rows only. */
+    flareDepth: 2,
   })
   const [shellErrors, setShellErrors] = useState<ShellErrorItem[]>([])
 
@@ -437,6 +439,7 @@ function ConsoleShell() {
             turnDataReady={turnDataReady}
             turnEnsurePending={turnEnsurePending}
             turnEnsureIsError={turnEnsureIsError}
+            turnEnsureError={turnEnsureError}
             turnBlockedNoLogin={turnBlockedNoLogin}
             connectionsMapParams={connectionsMapParams}
             onMapZoomChange={handleMapZoomChange}

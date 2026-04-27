@@ -12,6 +12,7 @@ from api.storage import clear_backend_cache, get_storage
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
+from bff.diagnostics_buffer import get_diagnostics_buffer
 from bff.routers import games as games_router
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,7 @@ def _reset_storage():
     clear_backend_cache()
     games_router._sector_title_by_stored_game_id.clear()
     set_bff_config(BffConfig())
+    get_diagnostics_buffer().clear()
     set_api_config(
         ApiConfig(
             storage_backend="ephemeral",

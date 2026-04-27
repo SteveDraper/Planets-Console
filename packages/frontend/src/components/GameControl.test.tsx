@@ -65,7 +65,10 @@ describe('GameControl', () => {
       expect(screen.getByRole('button', { name: '111' })).toBeInTheDocument()
     })
     expect(screen.getByRole('button', { name: '222' })).toBeInTheDocument()
-    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/bff/games'))
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/bff/games'),
+      undefined
+    )
   })
 
   it('lists sector titles when settings ask for names and BFF provides sectorName', async () => {
@@ -110,8 +113,10 @@ describe('GameControl', () => {
 
     renderGameControl(null, onCommit)
     await user.click(screen.getByRole('button', { name: /game:/i }))
-    await waitFor(() => expect(screen.getByLabelText(/new game id/i)).toBeInTheDocument())
-    await user.type(screen.getByLabelText(/new game id/i), '999')
+    const newIdInput = (await screen.findByLabelText(/new game id/i)) as HTMLInputElement
+    await user.click(newIdInput)
+    await user.type(newIdInput, '999')
+    await waitFor(() => expect(newIdInput).toHaveValue('999'))
     await user.click(screen.getByRole('button', { name: /^add$/i }))
     expect(onCommit).toHaveBeenCalledWith('999')
   })

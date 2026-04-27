@@ -4,15 +4,13 @@ import re
 
 from dacite.exceptions import DaciteError
 
-from api.concepts.planet_connections import (
-    FlareConnectionMode,
-    connection_routes_for_planets,
-)
+from api.concepts.planet_connections import FlareConnectionMode, connection_routes_with_options
 from api.concepts.warp_well import (
     WarpWellKind,
     coordinate_in_warp_well,
     map_cell_indices_in_warp_well,
 )
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import (
     LoginCredentialsRequiredError,
     NotFoundError,
@@ -309,6 +307,9 @@ class GameService:
         connection_warp_speed: int | None = None,
         connection_gravitonic_movement: bool = False,
         connection_flare_mode: FlareConnectionMode = FlareConnectionMode.OFF,
+        connection_flare_depth: int = 1,
+        connection_include_illustrative_routes: bool = False,
+        diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     ) -> dict:
         """Return per-analytic map data derived from turn state.
 
@@ -322,17 +323,22 @@ class GameService:
             warp = connection_warp_speed if connection_warp_speed is not None else 9
             if warp < 1 or warp > 9:
                 raise ValidationError("warpSpeed must be between 1 and 9.")
-            routes = connection_routes_for_planets(
+            if connection_flare_depth < 1 or connection_flare_depth > 3:
+                raise ValidationError("flareDepth must be 1, 2, or 3.")
+            out = connection_routes_with_options(
                 list(turn.planets),
                 warp_speed=warp,
                 gravitonic_movement=connection_gravitonic_movement,
                 flare_mode=connection_flare_mode,
+                flare_depth=connection_flare_depth,
+                diagnostics=diagnostics,
+                include_illustrative_routes=connection_include_illustrative_routes,
             )
             return {
                 "analyticId": "connections",
                 "nodes": [],
                 "edges": [],
-                "routes": routes,
+                "routes": out.routes,
             }
         # Unknown analytic: treat as validation error so the BFF can decide whether
         # to surface 404/422 vs fallback. This raises ValidationError, which maps to HTTP 422.

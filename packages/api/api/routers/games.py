@@ -73,6 +73,16 @@ def get_turn_analytics(
     warp_speed: int | None = Query(None, ge=1, le=9, alias="warpSpeed"),
     gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
+    flare_depth: int = Query(
+        1,
+        ge=1,
+        le=3,
+        alias="flareDepth",
+        description=(
+            "Max hops (1–3) for mixed normal-move + flare paths; at least one hop must be a flare. "
+            "Larger values add annulus pair candidates. Ignored when flareMode is off."
+        ),
+    ),
     svc: GameService = Depends(get_game_service),
 ):
     """Return per-analytic map data derived from turn state."""
@@ -84,4 +94,5 @@ def get_turn_analytics(
         connection_warp_speed=warp_speed,
         connection_gravitonic_movement=gravitonic_movement,
         connection_flare_mode=flare_mode,
+        connection_flare_depth=flare_depth,
     )
