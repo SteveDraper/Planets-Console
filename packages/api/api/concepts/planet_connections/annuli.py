@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 from api.concepts.planet_connections._diagnostics import (
     _FlareBfsHotspotTimings,
     _FlareBfsMetrics,
@@ -32,6 +30,7 @@ def _per_depth_center_annulus_radii(
 
 def _list_per_depth_center_annulus_for_k(
     sorted_planets: list[Planet],
+    index: _PlanetSpatialIndex,
     *,
     k: int,
     max_travel: float,
@@ -40,13 +39,18 @@ def _list_per_depth_center_annulus_for_k(
     inner, outer = _per_depth_center_annulus_radii(k, max_travel, hop_loose)
     if outer <= inner + 1e-12:
         return []
+    # Match the legacy O(n^2) bounds: open inner, inclusive outer with tiny slack.
+    inner_sq = inner * inner
+    outer_b = outer + 1e-9
+    outer_b_sq = outer_b * outer_b
     out: list[tuple[Planet, Planet]] = []
-    for i, pa in enumerate(sorted_planets):
+    for pa in sorted_planets:
         ax, ay = float(pa.x), float(pa.y)
-        for pb in sorted_planets[i + 1 :]:
+        for pb in index.iter_planets_within_radius(ax, ay, outer_b, min_planet_id_exclusive=pa.id):
             bx, by = float(pb.x), float(pb.y)
-            d = math.hypot(bx - ax, by - ay)
-            if inner < d <= outer + 1e-9:
+            dx, dy = bx - ax, by - ay
+            d_sq = dx * dx + dy * dy
+            if d_sq > inner_sq and d_sq <= outer_b_sq:
                 out.append((pa, pb))
     return out
 
@@ -80,14 +84,15 @@ def _build_flare_eligible_per_depth_center_annuli(
         diagnostics.values[f"annulusK{kk}Inner"] = inn
         diagnostics.values[f"annulusK{kk}Outer"] = outv
     if max_k >= 1:
-        ann1 = _list_per_depth_center_annulus_for_k(
-            sorted_planets, k=1, max_travel=max_travel, hop_loose=hop_loose
-        )
         inner1, outer1 = _per_depth_center_annulus_radii(1, max_travel, hop_loose)
         d1 = diagnostics.child("flare_per_depth_center_k1")
         d1.values["k"] = 1
         d1.values["annulusInnerRadius"] = inner1
         d1.values["annulusOuterRadius"] = outer1
+        with timed_section(d1, "annulusList"):
+            ann1 = _list_per_depth_center_annulus_for_k(
+                sorted_planets, index, k=1, max_travel=max_travel, hop_loose=hop_loose
+            )
         d1.values["annulusPairs"] = len(ann1)
         if diagnostics.enabled and m1 is not None:
             with timed_section(d1, "total"):
@@ -137,14 +142,15 @@ def _build_flare_eligible_per_depth_center_annuli(
             lattice_diagnostics.add_to_diagnostics(diagnostics)
         return (e1, e2, e3)
     if max_k >= 2:
-        ann2 = _list_per_depth_center_annulus_for_k(
-            sorted_planets, k=2, max_travel=max_travel, hop_loose=hop_loose
-        )
         inner2, outer2 = _per_depth_center_annulus_radii(2, max_travel, hop_loose)
         d2 = diagnostics.child("flare_per_depth_center_k2")
         d2.values["k"] = 2
         d2.values["annulusInnerRadius"] = inner2
         d2.values["annulusOuterRadius"] = outer2
+        with timed_section(d2, "annulusList"):
+            ann2 = _list_per_depth_center_annulus_for_k(
+                sorted_planets, index, k=2, max_travel=max_travel, hop_loose=hop_loose
+            )
         d2.values["annulusPairs"] = len(ann2)
         if diagnostics.enabled and m2 is not None:
             with timed_section(d2, "total"):
@@ -200,15 +206,16 @@ def _build_flare_eligible_per_depth_center_annuli(
         if diagnostics.enabled and lattice_diagnostics is not None:
             lattice_diagnostics.add_to_diagnostics(diagnostics)
         return (e1, e2, e3)
-    ann3 = _list_per_depth_center_annulus_for_k(
-        sorted_planets, k=3, max_travel=max_travel, hop_loose=hop_loose
-    )
     inner3, outer3 = _per_depth_center_annulus_radii(3, max_travel, hop_loose)
     e12 = e1 | e2
     d3 = diagnostics.child("flare_per_depth_center_k3")
     d3.values["k"] = 3
     d3.values["annulusInnerRadius"] = inner3
     d3.values["annulusOuterRadius"] = outer3
+    with timed_section(d3, "annulusList"):
+        ann3 = _list_per_depth_center_annulus_for_k(
+            sorted_planets, index, k=3, max_travel=max_travel, hop_loose=hop_loose
+        )
     d3.values["annulusPairs"] = len(ann3)
     if diagnostics.enabled and m3 is not None:
         with timed_section(d3, "total"):
