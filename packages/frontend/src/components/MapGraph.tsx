@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { shallow } from 'zustand/shallow'
 import {
   BaseEdge,
   ReactFlow,
@@ -112,16 +113,19 @@ const nodeTypes = { dot: DotNode }
 
 /** Custom edge keeps endpoints centered on dot nodes and stays visually 1px while zooming. */
 function StraightEdgeOnePixel(props: EdgeProps) {
-  const storeState = useStore((s) => s) as {
-    nodeLookup?: Map<string, Node>
-    nodeInternals?: Map<string, Node>
-    transform?: [number, number, number]
-  }
-  const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
-  const scale = safeZoomScale(storeState.transform?.[2])
+  const { sourceNode, targetNode, zoom } = useStore(
+    (s) => {
+      const nodeLookup = s.nodeLookup
+      return {
+        sourceNode: nodeLookup.get(props.source),
+        targetNode: nodeLookup.get(props.target),
+        zoom: s.transform[2],
+      }
+    },
+    shallow
+  )
+  const scale = safeZoomScale(zoom)
   const half = NODE_SIZE_FLOW / 2
-  const sourceNode = nodeLookup?.get(props.source)
-  const targetNode = nodeLookup?.get(props.target)
   const sourceX = sourceNode ? sourceNode.position.x + half : props.sourceX
   const sourceY = sourceNode ? sourceNode.position.y + half : props.sourceY
   const targetX = targetNode ? targetNode.position.x + half : props.targetX
@@ -183,16 +187,19 @@ type MapEdgeData = { viaFlare?: boolean; waypointsInGame?: { x: number; y: numbe
  * Multi-segment map edge: source → (optional game-cell waypoints) → target, 1px on screen, same style as `StraightEdgeOnePixel`.
  */
 function PolylineEdgeOnePixel(props: EdgeProps) {
-  const storeState = useStore((s) => s) as {
-    nodeLookup?: Map<string, Node>
-    nodeInternals?: Map<string, Node>
-    transform?: [number, number, number]
-  }
-  const nodeLookup = storeState.nodeLookup ?? storeState.nodeInternals
-  const scale = safeZoomScale(storeState.transform?.[2])
+  const { sourceNode, targetNode, zoom } = useStore(
+    (s) => {
+      const nodeLookup = s.nodeLookup
+      return {
+        sourceNode: nodeLookup.get(props.source),
+        targetNode: nodeLookup.get(props.target),
+        zoom: s.transform[2],
+      }
+    },
+    shallow
+  )
+  const scale = safeZoomScale(zoom)
   const half = NODE_SIZE_FLOW / 2
-  const sourceNode = nodeLookup?.get(props.source)
-  const targetNode = nodeLookup?.get(props.target)
   const data = props.data as MapEdgeData | undefined
   const wps = data?.waypointsInGame
   const viaFlare = data?.viaFlare === true
