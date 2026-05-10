@@ -2,7 +2,16 @@
  * BFF client — frontend talks only to BFF, never to Core API.
  */
 
+import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
+import type { ConnectionsMapParams } from '../analytics/connections/api'
+
 const BFF_BASE = '' // proxy in dev: /bff -> backend
+
+export type {
+  ConnectionsFlareDepth,
+  ConnectionsFlareMode,
+  ConnectionsMapParams,
+} from '../analytics/connections/api'
 
 /** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
 export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const
@@ -184,31 +193,6 @@ export type MapDataResponse = {
   nodes: MapNode[]
   edges: MapEdge[]
   routes?: PlanetPairRoute[]
-}
-
-/** How flare-assisted routes are requested from Core (`flareMode` query). */
-export type ConnectionsFlareMode = 'off' | 'include' | 'only'
-
-/**
- * Max **hops** (1–3) for Core’s mixed **normal-move + flare** reachability test: each hop is one
- * normal well move (within max travel) or one flare from the table, and a valid path must use
- * **at least one** flare. This is a hop **budget**, not a cap on “flares in a row.”
- * Pair **discovery** unions center-distance **annuli** for k = 1…N, so a higher value adds
- * candidate pairs and longer mixed paths; it does not drop links accepted at a smaller value.
- * Only used when `flareMode` is not `off` (no flare geometry otherwise).
- */
-export type ConnectionsFlareDepth = 1 | 2 | 3
-
-/** Query parameters for the Connections map analytic (BFF forwards to Core). */
-export type ConnectionsMapParams = {
-  warpSpeed: number
-  gravitonicMovement: boolean
-  flareMode: ConnectionsFlareMode
-  /**
-   * `flareDepth` query (1–3): hop budget for mixed normal+flare paths; at least one hop must be
-   * a flare. Raising it widens per-k annulus search and can admit longer mixed paths.
-   */
-  flareDepth: ConnectionsFlareDepth
 }
 
 /** Parse a single JSON number; rejects null, non-numeric, and `Number('')` → 0. */
@@ -577,17 +561,7 @@ function analyticMapQueryString(
     perspective: String(scope.perspective),
   })
   if (analyticId === 'connections' && connectionsParams != null) {
-    params.set('warpSpeed', String(connectionsParams.warpSpeed))
-    params.set(
-      'gravitonicMovement',
-      connectionsParams.gravitonicMovement ? 'true' : 'false'
-    )
-    params.set('flareMode', connectionsParams.flareMode)
-    params.set('flareDepth', String(connectionsParams.flareDepth))
-    // Illustrative routes (per-hop waypoints) are only useful when the hop budget can exceed one.
-    if (connectionsParams.flareMode !== 'off' && connectionsParams.flareDepth >= 2) {
-      params.set('includeIllustrativeRoutes', 'true')
-    }
+    appendConnectionsMapQueryParams(params, connectionsParams)
   }
   return `?${params.toString()}`
 }

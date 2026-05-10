@@ -204,6 +204,20 @@ class TestGetTurnAnalyticsConnections:
             assert row["fromPlanetId"] < row["toPlanetId"]
 
 
+class TestGetTurnAnalyticsScores:
+    def test_returns_score_rows(self, client):
+        resp = client.get("/v1/games/628580/1/turns/111/analytics/scores")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["analyticId"] == "scores"
+        assert len(data["rows"]) == 3
+        first = data["rows"][0]
+        assert first["racePlayer"] == "koshling"
+        assert first["planets"] == {"value": 171, "change": -4}
+        assert first["military"] == {"value": 2509092, "change": -53869}
+        assert first["priorityPoints"] == {"value": 217, "change": 54}
+
+
 class _FakePlanetsNuEnsure(_FakePlanetsNu):
     def __init__(self, load_payload: dict, rst: dict) -> None:
         super().__init__(load_payload)

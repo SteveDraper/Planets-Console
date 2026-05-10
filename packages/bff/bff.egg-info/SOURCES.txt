@@ -2,7 +2,11 @@ pyproject.toml
 bff/__init__.py
 bff/app.py
 bff/config.py
+bff/diagnostics_buffer.py
+bff/diagnostics_dep.py
+bff/diagnostics_http.py
 bff/errors.py
+bff/strip_bff_prefix.py
 bff.egg-info/PKG-INFO
 bff.egg-info/SOURCES.txt
 bff.egg-info/dependency_links.txt
@@ -10,4 +14,11 @@ bff.egg-info/requires.txt
 bff.egg-info/top_level.txt
 bff/routers/__init__.py
 bff/routers/analytics.py
+bff/routers/diagnostics.py
+bff/routers/games.py
+bff/routers/shell.py
 tests/test_analytics.py
+tests/test_diagnostics.py
+tests/test_games.py
+tests/test_shell.py
+tests/test_strip_bff_prefix.py

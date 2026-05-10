@@ -88,6 +88,7 @@ Short notes distilled from wiki pages for analytics/UI. Full pages may contain f
 - Shown on Planets.nu scoreboard; derived from **Autoscore**-style logic.
 - **Interpretation:** Indicates what opponents are **building**, **ship size**, and **ammo** (fighters/torpedoes loaded also raise the score).
 - **Rule of thumb:** **Larger score increment ⇒ larger ship built that turn** (and/or heavy fighter/torp load).
+- Planets Console exposes a `scores` tabular analytic from each turn's `scores` payload, showing race/player, planets, starbases, war ships, freighters, military score, and priority points with per-turn deltas.
 - **External tools:** Psydev spreadsheet / Python scripts to decode; Onebit Shipyard calculator; PlanetsCon 2021 talk — links on wiki page.
 - **Wiki:** [Military Score](https://vgaplanets.org/index.php?title=Military_Score)
 
@@ -183,6 +184,7 @@ Add one row per external source you incorporate. Keeps provenance for future con
 
 | Date | Change |
 |------|--------|
+| 2026-05-10 | Added `scores` tabular analytic note for scoreboard-style current values and per-turn deltas |
 | 2025-03-12 | Initial doc: wiki main + API + categories + entity/mechanic map |
 | 2025-03-12 | §4.1 mechanic notes (Ship Movement, Military Score, mines); §5.1 + script `list_vgaplanets_wiki_category.py` |
 

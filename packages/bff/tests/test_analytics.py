@@ -57,6 +57,47 @@ def test_list_analytics_returns_analytics_list():
         assert a["type"] in ("base", "selectable")
 
 
+def test_list_analytics_includes_scores_table_analytic():
+    """Scores is selectable in tabular mode."""
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    analytics = response.json()["analytics"]
+    scores = next(a for a in analytics if a["id"] == "scores")
+    assert scores == {
+        "id": "scores",
+        "name": "Scores",
+        "supportsTable": True,
+        "supportsMap": False,
+        "type": "selectable",
+    }
+
+
+def test_scores_table_returns_scoreboard_columns_and_deltas():
+    """Scores table mirrors the scoreboard columns except the generic Score column."""
+    response = client.get(f"/analytics/scores/table?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "scores"
+    assert data["columns"] == [
+        "Race (player)",
+        "Planets",
+        "Starbases",
+        "War Ships",
+        "Freighters",
+        "Military",
+        "Priority Points",
+    ]
+    assert data["rows"][0] == [
+        "koshling",
+        "171 (-4)",
+        "121 (-2)",
+        "130 (+1)",
+        "26",
+        "2509092 (-53869)",
+        "217 (+54)",
+    ]
+
+
 def test_base_map_returns_planets_and_no_edges():
     """GET /analytics/base-map/map returns planet nodes and no edges."""
     response = client.get(f"/analytics/base-map/map?{SCOPE_QS}")

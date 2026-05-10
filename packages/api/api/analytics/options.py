@@ -1,0 +1,16 @@
+"""Shared options for Core turn analytics."""
+
+from dataclasses import dataclass
+
+from api.concepts.planet_connections import FlareConnectionMode
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
+
+
+@dataclass(frozen=True)
+class TurnAnalyticsOptions:
+    connection_warp_speed: int | None = None
+    connection_gravitonic_movement: bool = False
+    connection_flare_mode: FlareConnectionMode | str = FlareConnectionMode.OFF
+    connection_flare_depth: int = 1
+    connection_include_illustrative_routes: bool = False
+    diagnostics: Diagnostics = NOOP_DIAGNOSTICS

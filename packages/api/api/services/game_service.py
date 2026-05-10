@@ -4,7 +4,10 @@ import re
 
 from dacite.exceptions import DaciteError
 
-from api.concepts.planet_connections import FlareConnectionMode, connection_routes_with_options
+from api.analytics import TurnAnalyticsOptions, get_turn_analytic
+from api.analytics.base_map import get_base_map
+from api.analytics.scores import get_scores_table
+from api.concepts.planet_connections import FlareConnectionMode
 from api.concepts.warp_well import (
     WarpWellKind,
     coordinate_in_warp_well,
@@ -22,7 +25,6 @@ from api.models.game_info_operations import GameInfoUpdateOperation
 from api.models.planet import Planet
 from api.planets_nu import PlanetsNuClient
 from api.serialization.game import game_info_from_json
-from api.serialization.planet import planet_to_public_json
 from api.serialization.turn import turn_info_from_json
 from api.storage.base import JSONValue, StorageBackend
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
@@ -269,33 +271,14 @@ class GameService:
         return turn
 
     def get_map_base(self, game_id: int, perspective: int, turn_number: int) -> dict:
-        """Return base-map data derived from the planets in a turn.
-
-        Base-map is the fixed layer used by the frontend map view. For now:
-        - nodes represent planets (no edges yet)
-        - node id and label are both `p{id}` (stable, independent of turn name data)
-        """
+        """Return base-map data derived from the planets in a turn."""
         turn = self.get_turn_info(game_id, perspective, turn_number)
-        players_by_id = {pl.id: pl for pl in turn.players}
+        return get_base_map(turn)
 
-        def owner_name(owner_id: int) -> str | None:
-            pl = players_by_id.get(owner_id)
-            return pl.username if pl else None
-
-        nodes = []
-        for p in turn.planets:
-            pid = f"p{p.id}"
-            nodes.append(
-                {
-                    "id": pid,
-                    "label": pid,
-                    "x": p.x,
-                    "y": p.y,
-                    "planet": planet_to_public_json(p),
-                    "ownerName": owner_name(p.ownerid),
-                }
-            )
-        return {"analyticId": "base-map", "nodes": nodes, "edges": []}
+    def get_scores_table(self, game_id: int, perspective: int, turn_number: int) -> dict:
+        """Return scoreboard values for each player in a turn."""
+        turn = self.get_turn_info(game_id, perspective, turn_number)
+        return get_scores_table(turn)
 
     def get_turn_analytics(
         self,
@@ -316,30 +299,16 @@ class GameService:
         This keeps the "analytic_id -> data" pattern in Core, so the BFF can treat
         base-map like any other analytic.
         """
-        if analytic_id == "base-map":
-            return self.get_map_base(game_id, perspective, turn_number)
-        if analytic_id == "connections":
-            turn = self.get_turn_info(game_id, perspective, turn_number)
-            warp = connection_warp_speed if connection_warp_speed is not None else 9
-            if warp < 1 or warp > 9:
-                raise ValidationError("warpSpeed must be between 1 and 9.")
-            if connection_flare_depth < 1 or connection_flare_depth > 3:
-                raise ValidationError("flareDepth must be 1, 2, or 3.")
-            out = connection_routes_with_options(
-                list(turn.planets),
-                warp_speed=warp,
-                gravitonic_movement=connection_gravitonic_movement,
-                flare_mode=connection_flare_mode,
-                flare_depth=connection_flare_depth,
+        turn = self.get_turn_info(game_id, perspective, turn_number)
+        return get_turn_analytic(
+            analytic_id,
+            turn,
+            TurnAnalyticsOptions(
+                connection_warp_speed=connection_warp_speed,
+                connection_gravitonic_movement=connection_gravitonic_movement,
+                connection_flare_mode=connection_flare_mode,
+                connection_flare_depth=connection_flare_depth,
+                connection_include_illustrative_routes=connection_include_illustrative_routes,
                 diagnostics=diagnostics,
-                include_illustrative_routes=connection_include_illustrative_routes,
-            )
-            return {
-                "analyticId": "connections",
-                "nodes": [],
-                "edges": [],
-                "routes": out.routes,
-            }
-        # Unknown analytic: treat as validation error so the BFF can decide whether
-        # to surface 404/422 vs fallback. This raises ValidationError, which maps to HTTP 422.
-        raise ValidationError(f"Unknown analytic_id: {analytic_id!r}")
+            ),
+        )

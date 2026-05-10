@@ -11,3 +11,4 @@ server.egg-info/requires.txt
 server.egg-info/top_level.txt
 tests/test_cli.py
 tests/test_config.py
+tests/test_server_app_lifespan.py

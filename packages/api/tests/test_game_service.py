@@ -136,6 +136,22 @@ class TestGetMapBase:
             service.get_map_base(628580, 1, 999)
 
 
+class TestGetScoresTable:
+    def test_returns_score_rows_with_current_values_and_changes(self, service):
+        data = service.get_turn_analytics(628580, 1, 111, "scores")
+        assert data["analyticId"] == "scores"
+        assert len(data["rows"]) == 3
+        first = data["rows"][0]
+        assert first["playerId"] == 8
+        assert first["racePlayer"] == "koshling"
+        assert first["planets"] == {"value": 171, "change": -4}
+        assert first["starbases"] == {"value": 121, "change": -2}
+        assert first["warShips"] == {"value": 130, "change": 1}
+        assert first["freighters"] == {"value": 26, "change": 0}
+        assert first["military"] == {"value": 2509092, "change": -53869}
+        assert first["priorityPoints"] == {"value": 217, "change": 54}
+
+
 class FakePlanetsNu:
     def __init__(self, load_payload: dict, *, login_returns: str = "fake-api-key") -> None:
         self._load_payload = load_payload
