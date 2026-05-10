@@ -4,7 +4,7 @@ This document describes an approach for inferring likely per-turn builds from sc
 
 The goal is not to prove what happened. Military score is deliberately lossy: several combinations of ships, ammunition, and defenses can produce the same delta. The analytic should therefore return feasible explanations, rank them by plausibility, and make ambiguity visible.
 
-**Related:** [vga-planets-domain-context.md](vga-planets-domain-context.md), [design-analytics-structure.md](design-analytics-structure.md), [design-planets-api-data-model.md](design-planets-api-data-model.md).
+**Related:** [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md), [vga-planets-domain-context.md](vga-planets-domain-context.md), [design-analytics-structure.md](design-analytics-structure.md), [design-planets-api-data-model.md](design-planets-api-data-model.md).
 
 ---
 
