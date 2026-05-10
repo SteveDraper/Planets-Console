@@ -338,7 +338,7 @@ It should not be embedded directly in the military-score equation.
 
 ## 8. Output shape
 
-The analytic should return a per-player list of explanations:
+The inference engine should return a per-player list of explanations that can enrich the existing scoreboard analytic:
 
 - observed deltas,
 - constraints used,
@@ -347,15 +347,10 @@ The analytic should return a per-player list of explanations:
 - explanation probability or score,
 - action breakdown,
 - residuals if any constraint was relaxed,
-- warnings about ignored deferred effects.
+- warnings about ignored deferred effects,
+- a compact summary suitable for a scoreboard cell.
 
-For the initial UI, a table is enough:
-
-| Player | Deltas | Status | Top explanation | Alternatives |
-|--------|--------|--------|-----------------|--------------|
-| Robots | `+1 warship, +4180 military` | exact | Built Golem with fighters | 3 close |
-
-The detailed view can show the action vector and score arithmetic for each explanation.
+The user-facing feature should be an optional capability of the existing Scores analytic rather than a separate analytic. When enabled, the scoreboard adds an inference column with row-level status: green tick for at least one solution, hourglass while a row is still solving, and red cross for no solution or solver failure. Hover text should summarize the result. Clicking a green tick should open a modal with the detailed ranked explanations, including action vectors and score arithmetic.
 
 ---
 
