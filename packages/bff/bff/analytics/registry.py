@@ -2,8 +2,9 @@
 
 from api.diagnostics import Diagnostics
 
-from bff.analytics import base_map, connections, placeholder, scores
 from bff.analytics.models import ConnectionsMapQuery, CoreAnalyticsLoader, TurnScope
+
+from . import base_map, connections, placeholder, scores
 
 ANALYTICS_LIST = [
     base_map.METADATA,

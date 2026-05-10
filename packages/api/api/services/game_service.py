@@ -289,7 +289,7 @@ class GameService:
         *,
         connection_warp_speed: int | None = None,
         connection_gravitonic_movement: bool = False,
-        connection_flare_mode: FlareConnectionMode = FlareConnectionMode.OFF,
+        connection_flare_mode: FlareConnectionMode | str = FlareConnectionMode.OFF,
         connection_flare_depth: int = 1,
         connection_include_illustrative_routes: bool = False,
         diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
