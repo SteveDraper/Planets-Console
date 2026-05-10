@@ -1,2 +1,0 @@
-[console_scripts]
-serve = server.cli:app
