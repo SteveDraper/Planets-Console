@@ -21,6 +21,7 @@ def test_registry_metadata_keeps_scores_selectable_table_only():
 def test_scores_table_dispatch_shapes_core_rows():
     def load_core(game_id, perspective, turn, analytic_id, **kwargs):
         assert (game_id, perspective, turn, analytic_id) == (628580, 1, 111, "scores")
+        assert kwargs["diagnostics"] is NOOP_DIAGNOSTICS
         return {
             "analyticId": "scores",
             "rows": [
@@ -36,7 +37,7 @@ def test_scores_table_dispatch_shapes_core_rows():
             ],
         }
 
-    data = get_table_response("scores", TurnScope(628580, 1, 111), load_core)
+    data = get_table_response("scores", TurnScope(628580, 1, 111), load_core, NOOP_DIAGNOSTICS)
     assert data["rows"][0] == [
         "The Solar Federation (sylk)",
         "76 (+1)",

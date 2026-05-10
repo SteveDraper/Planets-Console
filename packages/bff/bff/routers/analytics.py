@@ -76,9 +76,6 @@ def get_analytic_table(
     bff_path = f"/analytics/{analytic_id}/table"
     scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn)
 
-    def work() -> dict:
-        return get_table_response(analytic_id, scope, _turn_analytics_from_core)
-
     root = optional_request_root(
         include,
         "GET",
@@ -88,7 +85,9 @@ def get_analytic_table(
         perspective=perspective,
         handler="get_analytic_table",
     )
-    body = with_timed_child(root, "get_analytic_table", "total", work)
+    table_node = root.child("get_analytic_table")
+    with timed_section(table_node, "total"):
+        body = get_table_response(analytic_id, scope, _turn_analytics_from_core, table_node)
     return finish_response(body, root)
 
 

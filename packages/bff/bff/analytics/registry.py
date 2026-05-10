@@ -28,11 +28,12 @@ def get_table_response(
     analytic_id: str,
     scope: TurnScope,
     load_core: CoreAnalyticsLoader,
+    diagnostics: Diagnostics,
 ) -> dict:
     handler = TABLE_HANDLERS.get(analytic_id)
     if handler is None:
         return placeholder.get_table(analytic_id)
-    return handler(scope, load_core)
+    return handler(scope, load_core, diagnostics)
 
 
 def map_diagnostic_values(analytic_id: str, query: ConnectionsMapQuery) -> dict:

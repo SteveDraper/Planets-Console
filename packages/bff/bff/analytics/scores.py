@@ -1,5 +1,7 @@
 """BFF Scores table analytic handler."""
 
+from api.diagnostics import Diagnostics
+
 from bff.analytics.models import CoreAnalyticsLoader, TurnScope, load_core_analytic
 
 ANALYTIC_ID = "scores"
@@ -62,6 +64,6 @@ def table_from_core(core_data: dict) -> dict:
     }
 
 
-def get_table(scope: TurnScope, load_core: CoreAnalyticsLoader) -> dict:
-    core_data = load_core_analytic(load_core, scope, ANALYTIC_ID)
+def get_table(scope: TurnScope, load_core: CoreAnalyticsLoader, diagnostics: Diagnostics) -> dict:
+    core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
     return table_from_core(core_data)
