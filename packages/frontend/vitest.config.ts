@@ -8,6 +8,11 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
+      environmentOptions: {
+        jsdom: {
+          url: 'http://localhost:5173',
+        },
+      },
       globals: true,
       setupFiles: ['./src/test/setup.ts'],
       // One worker avoids many vitest/node processes at 100% CPU on this small suite; raise if tests get slow.

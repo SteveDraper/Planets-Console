@@ -9,10 +9,10 @@ This document describes the **Connections** analytic: **one-turn ship reachabili
 | Reachability + flare pairing | `packages/api/api/concepts/planet_connections.py` |
 | Flare offset tables (per warp, regular vs gravitonic) | `packages/api/api/concepts/flare_points.py`, `flare_point_quadrant_seeds.py` |
 | Warp well geometry (shared with other features) | `packages/api/api/concepts/warp_well.py` |
-| Core service entry | `packages/api/api/services/game_service.py` -- `get_turn_analytics(..., analytic_id="connections", ...)` |
-| BFF map route | `packages/bff/bff/routers/analytics.py` -- `GET .../analytics/connections/map` |
-| SPA: fetch, merge with base map, styling | `packages/frontend/src/api/bff.ts`, `MainArea.tsx`, `MapGraph.tsx` |
-| SPA: enable + parameters | `packages/frontend/src/App.tsx` (`connectionsMapParams`), `AnalyticsBar.tsx` |
+| Core analytics adapter | `packages/api/api/analytics/connections.py` |
+| BFF map route + handler | `packages/bff/bff/routers/analytics.py`, `packages/bff/bff/analytics/connections.py` |
+| SPA: fetch, merge with base map, styling | `packages/frontend/src/api/bff.ts`, `packages/frontend/src/analytics/mapLayers.ts`, `MapGraph.tsx` |
+| SPA: enable + parameters | `packages/frontend/src/App.tsx` (`connectionsMapParams`), `packages/frontend/src/analytics/connections/ConnectionsMapTile.tsx` |
 | Tests | `packages/api/tests/test_planet_connections.py`, `packages/bff/tests/test_analytics.py` |
 
 Related: [Warp wells on the map](design-warp-wells-map.md) (well drawing and concept HTTP), [vga-planets-domain-context.md](vga-planets-domain-context.md) (domain), [Frontend and backend state](design-frontend-and-backend-state.md) (query keys and gating).
@@ -65,13 +65,13 @@ Strings on the wire match the enum values: `off`, `include`, `only`.
   - `connection_flare_depth` (int 1--3, default **1**): **hop budget** for mixed normal-move + flare BFS. Each hop is a normal well move (within max travel) or a flare from the static table; a valid path must use **at least one** flare. This is not a "flares in a row" count. Pair discovery also unions **per-k** center-distance **annuli** (k = 1…depth), so increasing depth can only add candidate pairs and longer mixed paths, not remove pairs that were already eligible at a smaller depth.
   - Optional: `connection_include_illustrative_routes` when the client wants per-hop `illustrativeRoute` steps on flare rows (BFF may set this from the SPA when depth ≥2 and flares are on).
 
-Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`connection_routes_for_planets`** (`planet_connections` package).
+Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`connection_routes_with_options`** (`planet_connections` package) through the Core analytics adapter.
 
 ---
 
 ## 5. BFF
 
-**List entry:** `ANALYTICS_LIST` in `packages/bff/bff/routers/analytics.py` includes `id: "connections"`, map-capable, selectable.
+**List entry:** `ANALYTICS_LIST` from `packages/bff/bff/analytics/registry.py` includes `id: "connections"`, map-capable, selectable.
 
 **Map:**
 
@@ -106,7 +106,7 @@ The BFF does not recompute logic; it forwards to Core **`get_turn_analytics`** w
   - **`flareMode`** (`off` \| `include` \| `only`),
   - **`flareDepth`** (1--3; hop budget / annulus cap as above; **Depth** in the UI).
 
-Controls live in **`AnalyticsBar`** (Connections tile): **Flares** and **Depth** are shown when Connections is enabled; **Warp** and **Gravitonic** sit in the expandable section (chevron).
+Controls live in **`ConnectionsMapTile`**: **Flares** and **Depth** are shown when Connections is enabled; **Warp** and **Gravitonic** sit in the expandable section (chevron).
 
 **Important:** With **`flareMode: off`**, the server **drops** pairs that are **only** reachable via flare. For maps where the only link between two planets is a flare, you must use **`include`** or **`only`** to see an edge.
 
@@ -114,11 +114,11 @@ Controls live in **`AnalyticsBar`** (Connections tile): **Flares** and **Depth**
 
 `MainArea` uses **`useQueries`**. For **connections**, the TanStack **query key** includes (in order): `'analytic'`, `'connections'`, `'map'`, `gameId`, `turn`, `perspective`, **`warpSpeed`**, **`gravitonicMovement`**, **`flareMode`**, **`flareDepth`**. Changing any of these refetches the connections overlay.
 
-`fetchAnalyticMap` passes the three connection parameters as query string fields on the GET (see `analyticMapQueryString` in `bff.ts`).
+`fetchAnalyticMap` passes the connection parameters as query string fields on the GET (see `appendConnectionsMapQueryParams` in `src/analytics/connections/api.ts`).
 
 ### 6.3 Merging into the shared map
 
-**`combineMapData`** (`MainArea.tsx`):
+**`combineMapData`** (`src/analytics/mapLayers.ts`):
 
 - Base map nodes use ids like **`base-map:p{planetId}`** (from planet nodes returned by the base-map analytic).
 - Each **route** becomes an **edge** from **`base-map:p{fromPlanetId}`** to **`base-map:p{toPlanetId}`**.

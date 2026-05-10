@@ -4,13 +4,11 @@ import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
-  CombinedMapData,
   ConnectionsFlareMode,
   ConnectionsMapParams,
-  IllustrativeRouteStep,
   MapDataResponse,
-  MapEdge,
 } from '../api/bff'
+import { combineMapData } from '../analytics/mapLayers'
 import { MapGraph } from './MapGraph'
 import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from './PlanetMapInfoControls'
@@ -20,109 +18,6 @@ import {
 } from './planetMapLabelModel'
 
 type ViewMode = 'tabular' | 'map'
-
-/** Game cells visited before the last hop; excludes the destination planet's arrival cell. */
-function intermediateGameCellsFromIllustrative(
-  steps: IllustrativeRouteStep[] | undefined
-): { x: number; y: number }[] {
-  if (steps == null || steps.length <= 1) return []
-  const out: { x: number; y: number }[] = []
-  for (let i = 0; i < steps.length - 1; i += 1) {
-    const to = steps[i]?.to
-    if (to == null) continue
-    const x = Math.trunc(to.x)
-    const y = Math.trunc(to.y)
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      out.push({ x, y })
-    }
-  }
-  return out
-}
-
-function combineMapData(
-  analyticIds: string[],
-  results: { data?: MapDataResponse }[],
-  /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
-  liveConnectionsParams: ConnectionsMapParams | null
-): CombinedMapData {
-  const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
-  const nodes: CombinedMapData['nodes'] = []
-  const edges: MapEdge[] = []
-  const waypointsByKey = new Map<string, { x: number; y: number }>()
-  results.forEach((result, idx) => {
-    const data = result.data
-    const prefix = analyticIds[idx] ?? ''
-    if (!data) return
-    data.nodes.forEach((n) => {
-      const base = {
-        id: `${prefix}:${n.id}`,
-        label: n.label,
-        x: n.x,
-        y: n.y,
-      }
-      if (n.planet != null) {
-        nodes.push({ ...base, planet: n.planet, ownerName: n.ownerName ?? null })
-      } else {
-        nodes.push(base)
-      }
-    })
-    data.edges.forEach((e) => {
-      const edge: MapEdge = {
-        source: `${prefix}:${e.source}`,
-        target: `${prefix}:${e.target}`,
-      }
-      if (e.viaFlare) edge.viaFlare = true
-      edges.push(edge)
-    })
-    if (
-      data.analyticId === 'connections' &&
-      baseMapAnalyticId != null &&
-      data.routes != null &&
-      data.routes.length > 0
-    ) {
-      let routesToDraw = data.routes
-      if (liveConnectionsParams != null) {
-        if (liveConnectionsParams.flareMode === 'only') {
-          routesToDraw = routesToDraw.filter((r) => r.viaFlare === true)
-        } else if (liveConnectionsParams.flareMode === 'off') {
-          routesToDraw = routesToDraw.filter((r) => r.viaFlare !== true)
-        }
-      }
-      for (const r of routesToDraw) {
-        const intermediates =
-          r.viaFlare === true && r.illustrativeRoute
-            ? intermediateGameCellsFromIllustrative(r.illustrativeRoute)
-            : []
-        const edge: MapEdge = {
-          source: `${baseMapAnalyticId}:p${r.fromPlanetId}`,
-          target: `${baseMapAnalyticId}:p${r.toPlanetId}`,
-          viaFlare: r.viaFlare === true,
-        }
-        if (intermediates.length > 0) {
-          edge.waypointsInGame = intermediates.map((c) => ({ x: c.x, y: c.y }))
-        }
-        edges.push(edge)
-        if (r.viaFlare === true && r.illustrativeRoute) {
-          for (const c of intermediates) {
-            const k = `${c.x},${c.y}`
-            if (!waypointsByKey.has(k)) {
-              waypointsByKey.set(k, c)
-            }
-          }
-        }
-      }
-    }
-  })
-  return {
-    nodes,
-    edges,
-    routeWaypoints: [...waypointsByKey.values()].map((c) => ({
-      id: `wp:${c.x},${c.y}`,
-      gx: c.x,
-      gy: c.y,
-    })),
-  }
-}
 
 type MainAreaProps = {
   viewMode: ViewMode
@@ -405,7 +300,7 @@ export function MainArea({
             className="rounded-lg border border-[#52575d] bg-[#40454a] shadow-sm"
           >
             <h3 className="border-b border-[#52575d] px-4 py-2 text-sm font-medium text-slate-200">
-              Analytic: {id}
+              {analytics.find((a) => a.id === id)?.name ?? id}
             </h3>
             <TableTile
               analyticId={id}
