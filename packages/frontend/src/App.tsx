@@ -537,6 +537,7 @@ function ConsoleShell() {
       .then(({ perspectives }) => {
         if (cancelled) return
         if (perspectives.length === 0) {
+          setStorageAvailablePerspectives([])
           addShellError(LOGIN_REQUIRED_FOR_GAME_SELECTION)
           return
         }
