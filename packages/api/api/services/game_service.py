@@ -164,6 +164,7 @@ class GameService:
     def list_stored_turn_perspectives(self, game_id: int, turn_number: int) -> list[int]:
         """Return sorted 1-based perspective slots with turn data already in storage."""
         game_prefix = f"games/{game_id}"
+        turn_label = str(turn_number)
         try:
             perspective_segments = self._storage.list(game_prefix)
         except NotFoundError:
@@ -177,12 +178,13 @@ class GameService:
                 continue
             if perspective < 1:
                 continue
-            turn_path = f"{game_prefix}/{perspective}/turns/{turn_number}"
+            turns_prefix = f"{game_prefix}/{perspective}/turns"
             try:
-                self._storage.get(turn_path)
+                turn_segments = self._storage.list(turns_prefix)
             except NotFoundError:
                 continue
-            stored.append(perspective)
+            if turn_label in turn_segments:
+                stored.append(perspective)
         return sorted(stored)
 
     def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:

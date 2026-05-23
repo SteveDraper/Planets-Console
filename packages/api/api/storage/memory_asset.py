@@ -16,6 +16,7 @@ from api.storage.path_utils import (
     parse_index_segment,
     resolve_parent_and_segment,
     resolve_path,
+    validate_no_reserved_at_keys,
 )
 
 
@@ -48,6 +49,7 @@ class MemoryAssetBackend:
         if path == "":
             raise ValidationError("Cannot put root path")
         resolve_breakpoint(path)
+        validate_no_reserved_at_keys(value)
         value_copy = deep_copy_value(value)
         parent, segment, is_array_index = ensure_ancestors(self._root, path)
         if is_array_index:

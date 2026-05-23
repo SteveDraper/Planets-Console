@@ -20,7 +20,7 @@ This is a precursor to a real storage implementation and to loading/serving game
 
 | In scope | Out of scope |
 |----------|--------------|
-| Abstract storage interface (protocol) in `packages/api/storage/` | Database persistence (SQLite/Postgres) |
+| Abstract storage interface (protocol) in `packages/api/api/storage/` (import `api.storage`) | Database persistence (SQLite/Postgres) |
 | Asset-backed in-memory test implementation (full CRUD) | JsonPath filters/expressions; only literal path access |
 | Breakpoint-based file backend (see §15; [ADR 0001](adr/0001-breakpoint-file-storage.md)) | |
 | CRUD REST API under Core API (e.g. `/api/v1/store/...`) | BFF or frontend changes |
@@ -48,7 +48,7 @@ All values are JSON-serialisable (dict, list, str, int, float, bool, null). The 
 
 ## 4. Storage abstraction (Python)
 
-- **Location:** `packages/api/storage/` (existing rule in [storage.mdc](../.cursor/rules/storage.mdc)).
+- **Location:** `packages/api/api/storage/` (import `api.storage`; see [storage.mdc](../.cursor/rules/storage.mdc)).
 - **Protocol:** The existing `StorageBackend` concept (get/put/delete/list) is the abstract interface. It already uses key-based access and JSON-compatible payloads. This enhancement **does not replace** that protocol; it **realises** it (and may extend it if needed for “create only if not exists” or “merge” semantics, or those can be implemented in a service layer above the backend).
 - **Type contract:** Storage values use a recursive JSON type alias:
 
@@ -143,10 +143,10 @@ All write errors are fail-fast and preserve atomicity (no partial writes).
 
 ## 8. Test implementation (asset-backed in-memory backend)
 
-- **Location:** `packages/api/storage/` (e.g. `memory_asset.py`). Not referenced outside the storage subpackage except via the `StorageBackend` protocol and dependency injection (see storage.mdc).
+- **Location:** `packages/api/api/storage/` (e.g. `memory_asset.py`). Not referenced outside the storage subpackage except via the `StorageBackend` protocol and dependency injection (see storage.mdc).
 - **Data source:** A **single monolithic JSON file** whose structure defines the initial path space (e.g. top-level keys `game`, `planets`; nested structure gives path segments). Loaded at backend instantiation and deep-copied into an in-memory structure.
 - **Behaviour:** Full CRUD. The backend holds a mutable in-memory copy of the initial JSON so that `get`, `put`, `delete`, and `list` are all implemented. This allows all store semantics (create-only, merge, path resolution, reserved `@` validation) to be unit tested without persistence. No writes to disk; mutations affect only the in-memory state.
-- **Asset location:** Under `packages/api/storage/assets/` (e.g. `store_test.json`) or similar; the exact path is an implementation detail.
+- **Asset location:** Under `packages/api/api/storage/assets/` (e.g. `store_test.json`) or similar; the exact path is an implementation detail.
 
 ---
 
@@ -160,7 +160,7 @@ All write errors are fail-fast and preserve atomicity (no partial writes).
 
 ## 10. Deliverables (acceptance)
 
-1. **Abstract interface:** Storage protocol in Python (in `packages/api/storage/`) used for all store access; get/put/delete/list with path-based keys and `JSONValue` payloads.
+1. **Abstract interface:** Storage protocol in Python (in `packages/api/api/storage/`, import `api.storage`) used for all store access; get/put/delete/list with path-based keys and `JSONValue` payloads.
 2. **Test implementation:** In-memory backend initialized from a static JSON asset; full CRUD supported so all operations and semantics can be unit tested.
 3. **CRUD REST API:** Core API endpoints for Create (PUT), Read (GET), Update (POST), Delete (DELETE) with path-based resource identification; semantics and error mapping as above. Paths support array indexing via the reserved `@` convention (§11); payloads with any object key starting with `@` are rejected (422); full traversal on insert for validation. Create auto-creates missing ancestor objects; update does not. Write operations are atomic.
 4. **Read query modes:** GET supports `view=full|shallow` where `shallow` returns one-level child enumeration and node metadata to avoid full-subtree fetch for hierarchy traversal.

@@ -115,3 +115,12 @@ def test_get_returns_deep_copy(backend):
     assert isinstance(value, dict)
     value["name"] = "mutated"
     assert backend.get(GAME_INFO) == {"name": "A"}
+
+
+def test_put_rejects_reserved_at_keys(backend):
+    with pytest.raises(ValidationError):
+        backend.put(GAME_INFO, {"@reserved": 1})
+    with pytest.raises(ValidationError):
+        backend.put(GAME_NESTED, {"nested": {"@0": "bad"}})
+    with pytest.raises(NotFoundError):
+        backend.get(GAME_INFO)

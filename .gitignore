@@ -1,6 +1,9 @@
 # MCP config may contain a GitHub PAT — do not commit
 .cursor/mcp.json
 
+# Editor workspace files (local multi-root layout)
+*.code-workspace
+
 # Python
 .venv/
 __pycache__/
