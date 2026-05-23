@@ -20,11 +20,27 @@ type ShellState = {
   perspectiveOverrideName: string | null
   /** Last game id used for turn/perspective reset heuristics on refresh. */
   lastShellGameId: string | null
+  /** Game loaded from storage without login; turn ensure may skip credentials. */
+  storageOnlyLoad: boolean
+  /** Perspective slots with stored turn data for the current storage-only session. */
+  storageAvailablePerspectives: number[] | null
   setSelectedTurn: (turn: number | null) => void
   setPerspectiveOverrideName: (name: string | null) => void
   resetPerspectiveOverride: () => void
+  setStorageAvailablePerspectives: (perspectives: number[] | null) => void
+  clearStorageOnlyLoad: () => void
   /** Apply game-info refresh success: updates context, turn, and override rules. */
-  applyGameInfoRefresh: (gameId: string, ctx: GameInfoShellContext) => void
+  applyGameInfoRefresh: (
+    gameId: string,
+    ctx: GameInfoShellContext,
+    options?: ApplyGameInfoRefreshOptions
+  ) => void
+}
+
+export type ApplyGameInfoRefreshOptions = {
+  perspectiveOverrideName?: string | null
+  storageOnlyLoad?: boolean
+  storageAvailablePerspectives?: number[] | null
 }
 
 export const useShellStore = create<ShellState>((set, get) => ({
@@ -33,15 +49,24 @@ export const useShellStore = create<ShellState>((set, get) => ({
   selectedTurn: null,
   perspectiveOverrideName: null,
   lastShellGameId: null,
+  storageOnlyLoad: false,
+  storageAvailablePerspectives: null,
   setSelectedTurn: (turn) => set({ selectedTurn: turn }),
   setPerspectiveOverrideName: (name) => set({ perspectiveOverrideName: name }),
   resetPerspectiveOverride: () => set({ perspectiveOverrideName: null }),
-  applyGameInfoRefresh: (gameId, ctx) => {
+  setStorageAvailablePerspectives: (perspectives) =>
+    set({ storageAvailablePerspectives: perspectives }),
+  clearStorageOnlyLoad: () =>
+    set({ storageOnlyLoad: false, storageAvailablePerspectives: null }),
+  applyGameInfoRefresh: (gameId, ctx, options) => {
     const prevGameId = get().lastShellGameId
     const latestTurn = ctx.turn
+    const overrideFromOptions = options?.perspectiveOverrideName
 
     if (prevGameId !== gameId) {
-      set({ perspectiveOverrideName: null })
+      set({ perspectiveOverrideName: overrideFromOptions ?? null })
+    } else if (overrideFromOptions !== undefined) {
+      set({ perspectiveOverrideName: overrideFromOptions })
     } else {
       const names = new Set(ctx.perspectives.map((p) => p.name))
       set((s) => ({
@@ -63,11 +88,17 @@ export const useShellStore = create<ShellState>((set, get) => ({
         t == null ? Math.floor(latestTurn) : Math.min(Math.max(1, t), Math.floor(latestTurn))
     }
 
+    const storageOnlyLoad = options?.storageOnlyLoad ?? false
+
     set({
       selectedGameId: gameId,
       gameInfoContext: ctx,
       selectedTurn: nextTurn,
       lastShellGameId: gameId,
+      storageOnlyLoad,
+      storageAvailablePerspectives: storageOnlyLoad
+        ? (options?.storageAvailablePerspectives ?? null)
+        : null,
     })
   },
 }))

@@ -5,6 +5,7 @@ import {
   getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
   perspectiveOrdinalForName,
+  perspectiveNameForOrdinal,
   viewpointNameForLogin,
 } from './gameInfoShell'
 import type { GameInfoResponse } from '../api/bff'
@@ -161,5 +162,20 @@ describe('viewpointNameForLogin', () => {
 
   it('returns first when login not in list', () => {
     expect(viewpointNameForLogin(p, 'nobody')).toBe('Alpha')
+  })
+})
+
+describe('perspectiveNameForOrdinal', () => {
+  const p = [
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
+  ]
+
+  it('returns name for known ordinal', () => {
+    expect(perspectiveNameForOrdinal(p, 2)).toBe('Beta')
+  })
+
+  it('returns null for unknown ordinal', () => {
+    expect(perspectiveNameForOrdinal(p, 99)).toBeNull()
   })
 })

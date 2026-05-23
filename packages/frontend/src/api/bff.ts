@@ -431,6 +431,33 @@ export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoRespo
   return r.json()
 }
 
+export type StoredTurnPerspectivesResponse = {
+  perspectives: number[]
+}
+
+/** Perspective slots that already have turn data in storage (no Planets.nu). */
+export async function fetchStoredTurnPerspectives(
+  gameId: string,
+  turn: number
+): Promise<StoredTurnPerspectivesResponse> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/turns/${encodeURIComponent(String(turn))}/stored-perspectives`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  return r.json()
+}
+
 /**
  * Ensures turn data exists in Core storage (Planets.nu loadturn when missing).
  * Username may be empty when the turn is already stored (no upstream fetch).

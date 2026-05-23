@@ -169,6 +169,23 @@ def test_get_stored_game_info():
     assert response.json()["game"]["id"] == 628580
 
 
+def test_get_stored_turn_perspectives():
+    """GET /games/{id}/turns/{turn}/stored-perspectives lists slots with stored turn data."""
+    storage = get_storage()
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+    response = client.get("/games/628580/turns/111/stored-perspectives")
+    assert response.status_code == 200
+    assert response.json() == {"perspectives": [1]}
+
+
+def test_get_stored_turn_perspectives_empty_when_missing():
+    storage = get_storage()
+    response = client.get("/games/628580/turns/111/stored-perspectives")
+    assert response.status_code == 200
+    assert response.json() == {"perspectives": []}
+
+
 @patch("bff.routers.games.PlanetsNuClient")
 def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     mock_instance = mock_pc_class.from_config.return_value

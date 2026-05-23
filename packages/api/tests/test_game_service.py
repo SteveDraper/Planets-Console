@@ -64,6 +64,17 @@ class TestGetGameInfo:
             service.get_game_info(999999)
 
 
+class TestListStoredTurnPerspectives:
+    def test_returns_perspectives_with_turn_in_storage(self, service):
+        assert service.list_stored_turn_perspectives(628580, 111) == [1]
+
+    def test_empty_when_turn_missing(self, service):
+        assert service.list_stored_turn_perspectives(628580, 999) == []
+
+    def test_empty_when_game_missing(self, service):
+        assert service.list_stored_turn_perspectives(999999, 111) == []
+
+
 class TestGetTurnInfo:
     def test_returns_turn_info(self, service):
         ti = service.get_turn_info(628580, 1, 111)

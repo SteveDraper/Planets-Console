@@ -161,6 +161,30 @@ class GameService:
         data = self._storage.get(f"games/{game_id}/info")
         return game_info_from_json(_require_dict(data, f"game info {game_id}"))
 
+    def list_stored_turn_perspectives(self, game_id: int, turn_number: int) -> list[int]:
+        """Return sorted 1-based perspective slots with turn data already in storage."""
+        game_prefix = f"games/{game_id}"
+        try:
+            perspective_segments = self._storage.list(game_prefix)
+        except NotFoundError:
+            return []
+
+        stored: list[int] = []
+        for segment in perspective_segments:
+            try:
+                perspective = int(segment)
+            except ValueError:
+                continue
+            if perspective < 1:
+                continue
+            turn_path = f"{game_prefix}/{perspective}/turns/{turn_number}"
+            try:
+                self._storage.get(turn_path)
+            except NotFoundError:
+                continue
+            stored.append(perspective)
+        return sorted(stored)
+
     def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
         data = self._storage.get(f"games/{game_id}/{perspective}/turns/{turn_number}")
         return turn_info_from_json(
