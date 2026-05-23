@@ -520,16 +520,17 @@ function ConsoleShell() {
     }
   }, [turnEnsureIsError, turnEnsureError, addShellError])
 
-  const storageTurnResyncSeen = useRef<number | null>(null)
+  const storageTurnResyncSeen = useRef<{ gameId: string; turn: number } | null>(null)
   useEffect(() => {
     if (!storageOnlyLoad || loginTrimmed || !selectedGameId || selectedTurn == null) {
       storageTurnResyncSeen.current = null
       return
     }
-    if (storageTurnResyncSeen.current === selectedTurn) {
+    const seen = storageTurnResyncSeen.current
+    if (seen?.gameId === selectedGameId && seen.turn === selectedTurn) {
       return
     }
-    storageTurnResyncSeen.current = selectedTurn
+    storageTurnResyncSeen.current = { gameId: selectedGameId, turn: selectedTurn }
 
     let cancelled = false
     void fetchStoredTurnPerspectives(selectedGameId, selectedTurn)

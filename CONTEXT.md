@@ -25,7 +25,7 @@ The in-memory `MemoryAssetBackend` used for tests and dev; mutations do not surv
 _Avoid_: temporary storage (ambiguous with session state)
 
 **Breakpoint registry**:
-A code-defined list of path patterns (in `packages/api/storage/`) that declares where JSON documents begin. Kept in sync with service key conventions; not loaded from external config.
+A code-defined list of path patterns (in `packages/api/api/storage/boundaries.py`, import `api.storage.boundaries`) that declares where JSON documents begin. Kept in sync with service key conventions; not loaded from external config.
 _Avoid_: storage schema file, boundaries YAML
 
 **Registered path**:

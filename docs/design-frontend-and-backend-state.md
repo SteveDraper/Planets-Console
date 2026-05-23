@@ -93,7 +93,7 @@ If a piece of UI state later needs to be shared widely, promote it to Zustand or
 
 The **Core REST API**, **BFF**, and **root server** process handle requests **without per-client in-memory session state**. There is no server-side map of "current user" or "selected game" for the SPA; each request is handled with injected dependencies (storage, config, clients).
 
-**Durable** game info, turn blobs, credentials keys, and other stored data live **only** behind the **`StorageBackend`** abstraction (`packages/api/storage/`). With `storage_backend: file` (repo default), data is persisted as JSON documents at registry **breakpoints** under `storage_root` (default `./.data/`). Services use that protocol; routers do not touch concrete backends. See [design-storage-abstraction-and-crud-api.md](design-storage-abstraction-and-crud-api.md) §15 and [ADR 0001](adr/0001-breakpoint-file-storage.md).
+**Durable** game info, turn blobs, credentials keys, and other stored data live **only** behind the **`StorageBackend`** abstraction (`packages/api/api/storage/`, import `api.storage`). With `storage_backend: file` (repo default), data is persisted as JSON documents at registry **breakpoints** under `storage_root` (default `./.data/`). Services use that protocol; routers do not touch concrete backends. See [design-storage-abstraction-and-crud-api.md](design-storage-abstraction-and-crud-api.md) §15 and [ADR 0001](adr/0001-breakpoint-file-storage.md).
 
 The **BFF** does not introduce its own persistence; it shapes responses for the SPA and may call Core services according to the allowed import surface in architecture rules.
 

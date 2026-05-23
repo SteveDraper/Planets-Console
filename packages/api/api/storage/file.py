@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from pathlib import Path
 
 from api.errors import NotFoundError, ValidationError
@@ -46,7 +47,9 @@ class FileStorageBackend:
     def _atomic_write(self, file_path: Path, value: JSONValue) -> None:
         validate_no_reserved_at_keys(value)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = file_path.with_name(f".{file_path.name}.tmp")
+        temp_path = file_path.with_name(
+            f".{file_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+        )
         try:
             with open(temp_path, "w", encoding="utf-8") as handle:
                 json.dump(value, handle, ensure_ascii=False)

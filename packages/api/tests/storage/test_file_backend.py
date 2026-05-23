@@ -61,6 +61,22 @@ def test_atomic_write_uses_temp_then_replace(backend, storage_root):
     assert any("tmp" in call for call in calls)
 
 
+def test_atomic_write_uses_unique_temp_name_per_write(backend, storage_root):
+    temp_names: list[str] = []
+    original_replace = __import__("os").replace
+
+    def tracking_replace(src, dst):
+        temp_names.append(Path(src).name)
+        return original_replace(src, dst)
+
+    with patch("api.storage.file.os.replace", side_effect=tracking_replace):
+        backend.put(GAME_INFO, {"name": "A"})
+        backend.put(GAME_INFO, {"name": "B"})
+
+    assert len(temp_names) == 2
+    assert temp_names[0] != temp_names[1]
+
+
 def test_prune_empty_dirs_after_document_delete(backend, storage_root):
     backend.put(GAME_INFO, {"name": "A"})
     game_dir = storage_root / "games" / "628580"
