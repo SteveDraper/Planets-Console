@@ -97,7 +97,7 @@ class MemoryAssetBackend:
         """Return next-hop segment names under the prefix."""
         path = (prefix or "").strip().strip("/") or ""
         if not is_navigable_prefix(path):
-            raise ValidationError(f"Unregistered store path prefix: {prefix!r}")
+            raise ValidationError(f"Unregistered store path prefix: {path!r}")
         if path == "":
             return list_children(self._root)
         node = resolve_path(self._root, path)

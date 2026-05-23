@@ -176,7 +176,7 @@ class FileStorageBackend:
     def list(self, prefix: str) -> list[str]:
         path = self._normalize(prefix)
         if not is_navigable_prefix(path):
-            raise ValidationError(f"Unregistered store path prefix: {prefix!r}")
+            raise ValidationError(f"Unregistered store path prefix: {path!r}")
 
         if path == "":
             if not self._root.is_dir():
