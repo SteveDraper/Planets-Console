@@ -4,9 +4,12 @@ import {
   getLatestTurnFromGameInfo,
   getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
+  LOGIN_REQUIRED_FOR_GAME_SELECTION,
   perspectiveOrdinalForName,
+  perspectiveNameForOrdinal,
   viewpointNameForLogin,
 } from './lib/gameInfoShell'
+import { loadGameFromStorage, type StorageGameLoadResult } from './lib/loadGameFromStorage'
 import {
   QueryClient,
   QueryClientProvider,
@@ -23,9 +26,11 @@ import {
   fetchAnalytics,
   fetchShellBootstrap,
   fetchStoredGameInfo,
+  fetchStoredTurnPerspectives,
   refreshGameInfo,
   type AnalyticShellScope,
   type ConnectionsMapParams,
+  type GameInfoResponse,
 } from './api/bff'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
@@ -64,6 +69,10 @@ function ConsoleShell() {
   const setPerspectiveOverrideName = useShellStore((s) => s.setPerspectiveOverrideName)
   const setSelectedTurn = useShellStore((s) => s.setSelectedTurn)
   const resetPerspectiveOverride = useShellStore((s) => s.resetPerspectiveOverride)
+  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
+  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
+  const setStorageAvailablePerspectives = useShellStore((s) => s.setStorageAvailablePerspectives)
+  const clearStorageOnlyLoad = useShellStore((s) => s.clearStorageOnlyLoad)
 
   const addShellError = useCallback((message: string) => {
     setShellErrors((prev) => [...prev, { id: crypto.randomUUID(), message }])
@@ -74,23 +83,54 @@ function ConsoleShell() {
   }, [])
 
   const refreshGameMutation = useMutation({
-    mutationFn: async (vars: { gameId: string; username: string; password?: string }) => {
+    mutationFn: async (vars: {
+      gameId: string
+      username: string
+      password?: string
+    }): Promise<
+      | { source: 'refresh'; gameInfo: GameInfoResponse }
+      | { source: 'storage'; load: StorageGameLoadResult }
+    > => {
       const username = vars.username.trim()
-      if (!username) {
-        throw new Error('Set login name in the header before selecting a game.')
+      if (username) {
+        return {
+          source: 'refresh',
+          gameInfo: await refreshGameInfo(vars.gameId, { username, password: vars.password }),
+        }
       }
-      return refreshGameInfo(vars.gameId, { username, password: vars.password })
+      return { source: 'storage', load: await loadGameFromStorage(vars.gameId) }
     },
     retry: false,
     onSuccess: (data, vars) => {
-      const latestTurn = getLatestTurnFromGameInfo(data)
-      const perspectives = buildPerspectivesFromGameInfo(data)
-      applyGameInfoRefresh(vars.gameId, {
-        turn: latestTurn,
-        perspectives,
-        isGameFinished: isGameFinishedFromGameInfo(data),
-        sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
-      })
+      if (data.source === 'storage') {
+        const { load } = data
+        const perspectives = buildPerspectivesFromGameInfo(load.gameInfo)
+        applyGameInfoRefresh(
+          vars.gameId,
+          {
+            turn: load.turn,
+            perspectives,
+            isGameFinished: isGameFinishedFromGameInfo(load.gameInfo),
+            sectorDisplayName: getSectorDisplayNameFromGameInfo(load.gameInfo),
+          },
+          {
+            storageOnlyLoad: true,
+            storageAvailablePerspectives: load.storedPerspectives,
+            perspectiveOverrideName: load.defaultViewpointName,
+          }
+        )
+      } else {
+        clearStorageOnlyLoad()
+        const { gameInfo } = data
+        const latestTurn = getLatestTurnFromGameInfo(gameInfo)
+        const perspectives = buildPerspectivesFromGameInfo(gameInfo)
+        applyGameInfoRefresh(vars.gameId, {
+          turn: latestTurn,
+          perspectives,
+          isGameFinished: isGameFinishedFromGameInfo(gameInfo),
+          sectorDisplayName: getSectorDisplayNameFromGameInfo(gameInfo),
+        })
+      }
 
       void queryClient.invalidateQueries({ queryKey: ['bff', 'games'] })
     },
@@ -103,7 +143,10 @@ function ConsoleShell() {
 
   useEffect(() => {
     resetPerspectiveOverride()
-  }, [loginName, resetPerspectiveOverride])
+    if (loginName?.trim()) {
+      clearStorageOnlyLoad()
+    }
+  }, [loginName, resetPerspectiveOverride, clearStorageOnlyLoad])
 
   const handleCommitGameSelection = useCallback(
     (gameId: string) => {
@@ -131,10 +174,23 @@ function ConsoleShell() {
     return t.length > 0 ? t : null
   }, [shellBootstrap?.showInitialGame])
 
-  const { data: initialStoredGameInfo, isError: initialGameInfoIsError, error: initialGameInfoError } =
+  const { data: initialGameBootstrap, isError: initialGameInfoIsError, error: initialGameInfoError } =
     useQuery({
-      queryKey: ['bff', 'games', configuredInitialGameId, 'stored-info'],
-      queryFn: () => fetchStoredGameInfo(configuredInitialGameId!),
+      queryKey: ['bff', 'games', configuredInitialGameId, 'bootstrap', loginName?.trim() ?? ''],
+      queryFn: async () => {
+        const gameId = configuredInitialGameId!
+        const trimmedLogin = loginName?.trim() ?? ''
+        if (trimmedLogin) {
+          return {
+            kind: 'stored-info' as const,
+            data: await fetchStoredGameInfo(gameId),
+          }
+        }
+        return {
+          kind: 'storage-only' as const,
+          data: await loadGameFromStorage(gameId),
+        }
+      },
       enabled: Boolean(configuredInitialGameId) && selectedGameId === null,
       staleTime: Infinity,
       refetchOnWindowFocus: false,
@@ -142,17 +198,37 @@ function ConsoleShell() {
     })
 
   useEffect(() => {
-    if (!initialStoredGameInfo || !configuredInitialGameId) return
+    if (!initialGameBootstrap || !configuredInitialGameId) return
     if (useShellStore.getState().selectedGameId != null) return
-    const latestTurn = getLatestTurnFromGameInfo(initialStoredGameInfo)
-    const perspectives = buildPerspectivesFromGameInfo(initialStoredGameInfo)
+    if (initialGameBootstrap.kind === 'storage-only') {
+      const loaded = initialGameBootstrap.data
+      const perspectives = buildPerspectivesFromGameInfo(loaded.gameInfo)
+      applyGameInfoRefresh(
+        configuredInitialGameId,
+        {
+          turn: loaded.turn,
+          perspectives,
+          isGameFinished: isGameFinishedFromGameInfo(loaded.gameInfo),
+          sectorDisplayName: getSectorDisplayNameFromGameInfo(loaded.gameInfo),
+        },
+        {
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: loaded.storedPerspectives,
+          perspectiveOverrideName: loaded.defaultViewpointName,
+        }
+      )
+      return
+    }
+    const data = initialGameBootstrap.data
+    const latestTurn = getLatestTurnFromGameInfo(data)
+    const perspectives = buildPerspectivesFromGameInfo(data)
     applyGameInfoRefresh(configuredInitialGameId, {
       turn: latestTurn,
       perspectives,
-      isGameFinished: isGameFinishedFromGameInfo(initialStoredGameInfo),
-      sectorDisplayName: getSectorDisplayNameFromGameInfo(initialStoredGameInfo),
+      isGameFinished: isGameFinishedFromGameInfo(data),
+      sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
     })
-  }, [initialStoredGameInfo, configuredInitialGameId, applyGameInfoRefresh])
+  }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh])
 
   const initialGameBootstrapFailureSeen = useRef(false)
   useEffect(() => {
@@ -256,6 +332,18 @@ function ConsoleShell() {
     if (perspectives.length === 0) {
       return []
     }
+    const loginTrimmedLocal = loginName?.trim() ?? ''
+    const storageSlots =
+      storageOnlyLoad && loginTrimmedLocal === ''
+        ? new Set(storageAvailablePerspectives ?? [])
+        : null
+    if (storageSlots != null) {
+      return perspectives.map((row) => ({
+        name: row.name,
+        raceName: row.raceName,
+        disabled: !storageSlots.has(row.ordinal),
+      }))
+    }
     const finished = gameInfoContext?.isGameFinished ?? true
     if (finished) {
       return perspectives.map((row) => ({
@@ -270,7 +358,14 @@ function ConsoleShell() {
       raceName: row.raceName,
       disabled: allowed == null ? true : row.name !== allowed,
     }))
-  }, [gameInfoContext?.perspectives, gameInfoContext?.isGameFinished, shellDefaultViewpointName])
+  }, [
+    gameInfoContext?.perspectives,
+    gameInfoContext?.isGameFinished,
+    shellDefaultViewpointName,
+    storageOnlyLoad,
+    storageAvailablePerspectives,
+    loginName,
+  ])
 
   useEffect(() => {
     if (!gameInfoContext || gameInfoContext.isGameFinished) {
@@ -293,6 +388,20 @@ function ConsoleShell() {
 
   const shellSelectedViewpointName = useMemo(() => {
     if (shellPerspectiveNames.length === 0) return null
+    const loginTrimmedLocal = loginName?.trim() ?? ''
+    if (storageOnlyLoad && loginTrimmedLocal === '') {
+      const preferred = perspectiveOverrideName
+      if (preferred && shellPerspectiveNames.includes(preferred)) return preferred
+      const firstStored = storageAvailablePerspectives?.[0]
+      if (firstStored != null) {
+        const name = perspectiveNameForOrdinal(
+          gameInfoContext?.perspectives ?? [],
+          firstStored
+        )
+        if (name && shellPerspectiveNames.includes(name)) return name
+      }
+      return shellPerspectiveNames[0] ?? null
+    }
     const finished = gameInfoContext?.isGameFinished ?? true
     if (!finished) {
       if (shellDefaultViewpointName && shellPerspectiveNames.includes(shellDefaultViewpointName)) {
@@ -308,10 +417,23 @@ function ConsoleShell() {
     perspectiveOverrideName,
     shellDefaultViewpointName,
     gameInfoContext?.isGameFinished,
+    gameInfoContext?.perspectives,
+    storageOnlyLoad,
+    storageAvailablePerspectives,
+    loginName,
   ])
 
   const handleShellViewpointChange = useCallback(
     (name: string) => {
+      const loginTrimmedLocal = loginName?.trim() ?? ''
+      if (storageOnlyLoad && loginTrimmedLocal === '') {
+        const ordinal = perspectiveOrdinalForName(gameInfoContext?.perspectives ?? [], name)
+        if (ordinal == null || !(storageAvailablePerspectives ?? []).includes(ordinal)) {
+          return
+        }
+        setPerspectiveOverrideName(name)
+        return
+      }
       if (gameInfoContext && !gameInfoContext.isGameFinished) {
         const allowed = viewpointNameForLogin(gameInfoContext.perspectives, loginName)
         if (
@@ -323,7 +445,13 @@ function ConsoleShell() {
       }
       setPerspectiveOverrideName(name)
     },
-    [gameInfoContext, loginName, setPerspectiveOverrideName]
+    [
+      gameInfoContext,
+      loginName,
+      setPerspectiveOverrideName,
+      storageOnlyLoad,
+      storageAvailablePerspectives,
+    ]
   )
 
   const analyticScope = useMemo((): AnalyticShellScope | null => {
@@ -341,10 +469,8 @@ function ConsoleShell() {
   }, [selectedGameId, selectedTurn, gameInfoContext?.perspectives, shellSelectedViewpointName])
 
   const loginTrimmed = loginName?.trim() ?? ''
-  const turnAllowWithoutLogin =
-    configuredInitialGameId != null && selectedGameId === configuredInitialGameId
   const turnEnsureEnabled =
-    analyticScope != null && (loginTrimmed !== '' || turnAllowWithoutLogin)
+    analyticScope != null && (loginTrimmed !== '' || storageOnlyLoad)
 
   const {
     isSuccess: turnEnsureSuccess,
@@ -394,8 +520,61 @@ function ConsoleShell() {
     }
   }, [turnEnsureIsError, turnEnsureError, addShellError])
 
+  const storageTurnResyncSeen = useRef<{ gameId: string; turn: number } | null>(null)
+  useEffect(() => {
+    if (!storageOnlyLoad || loginTrimmed || !selectedGameId || selectedTurn == null) {
+      storageTurnResyncSeen.current = null
+      return
+    }
+    const seen = storageTurnResyncSeen.current
+    if (seen?.gameId === selectedGameId && seen.turn === selectedTurn) {
+      return
+    }
+    storageTurnResyncSeen.current = { gameId: selectedGameId, turn: selectedTurn }
+
+    let cancelled = false
+    void fetchStoredTurnPerspectives(selectedGameId, selectedTurn)
+      .then(({ perspectives }) => {
+        if (cancelled) return
+        if (perspectives.length === 0) {
+          setStorageAvailablePerspectives([])
+          addShellError(LOGIN_REQUIRED_FOR_GAME_SELECTION)
+          return
+        }
+        setStorageAvailablePerspectives(perspectives)
+        const perspectivesRows = useShellStore.getState().gameInfoContext?.perspectives ?? []
+        const currentName = useShellStore.getState().perspectiveOverrideName
+        const currentOrdinal = perspectiveOrdinalForName(perspectivesRows, currentName)
+        if (currentOrdinal != null && perspectives.includes(currentOrdinal)) {
+          return
+        }
+        const nextName = perspectiveNameForOrdinal(perspectivesRows, perspectives[0])
+        if (nextName) {
+          setPerspectiveOverrideName(nextName)
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        addShellError(
+          err instanceof Error ? err.message : LOGIN_REQUIRED_FOR_GAME_SELECTION
+        )
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    storageOnlyLoad,
+    loginTrimmed,
+    selectedGameId,
+    selectedTurn,
+    setStorageAvailablePerspectives,
+    setPerspectiveOverrideName,
+    addShellError,
+  ])
+
   const turnBlockedNoLogin =
-    analyticScope != null && loginTrimmed === '' && !turnAllowWithoutLogin
+    analyticScope != null && loginTrimmed === '' && !storageOnlyLoad
   const turnDataReady = turnEnsureEnabled && turnEnsureSuccess
 
   return (

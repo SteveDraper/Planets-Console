@@ -122,3 +122,16 @@ export function viewpointNameForLogin(
   }
   return perspectives[0].name
 }
+
+/** Player display name for a 1-based perspective slot, or null if unknown. */
+export function perspectiveNameForOrdinal(
+  perspectives: PerspectiveRow[],
+  ordinal: number
+): string | null {
+  const hit = perspectives.find((p) => p.ordinal === ordinal)
+  return hit?.name ?? null
+}
+
+/** Shown when a game or turn must be fetched from Planets.nu but login is missing. */
+export const LOGIN_REQUIRED_FOR_GAME_SELECTION =
+  'Set login name in the header before selecting a game.'

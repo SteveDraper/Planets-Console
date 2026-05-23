@@ -20,8 +20,9 @@ This is a precursor to a real storage implementation and to loading/serving game
 
 | In scope | Out of scope |
 |----------|--------------|
-| Abstract storage interface (protocol) in `packages/api/storage/` | Real persistence (file/DB) implementation |
+| Abstract storage interface (protocol) in `packages/api/api/storage/` (import `api.storage`) | Database persistence (SQLite/Postgres) |
 | Asset-backed in-memory test implementation (full CRUD) | JsonPath filters/expressions; only literal path access |
+| Breakpoint-based file backend (see §15; [ADR 0001](adr/0001-breakpoint-file-storage.md)) | |
 | CRUD REST API under Core API (e.g. `/api/v1/store/...`) | BFF or frontend changes |
 | New Core API exception types (NotFound, Conflict, Validation, etc.) | Game-domain models or serialization |
 | Path model: hierarchical, slash-separated, mapping to nodes in a logical JSON tree | Full JsonPath spec or query language |
@@ -47,7 +48,7 @@ All values are JSON-serialisable (dict, list, str, int, float, bool, null). The 
 
 ## 4. Storage abstraction (Python)
 
-- **Location:** `packages/api/storage/` (existing rule in [storage.mdc](../.cursor/rules/storage.mdc)).
+- **Location:** `packages/api/api/storage/` (import `api.storage`; see [storage.mdc](../.cursor/rules/storage.mdc)).
 - **Protocol:** The existing `StorageBackend` concept (get/put/delete/list) is the abstract interface. It already uses key-based access and JSON-compatible payloads. This enhancement **does not replace** that protocol; it **realises** it (and may extend it if needed for “create only if not exists” or “merge” semantics, or those can be implemented in a service layer above the backend).
 - **Type contract:** Storage values use a recursive JSON type alias:
 
@@ -142,16 +143,16 @@ All write errors are fail-fast and preserve atomicity (no partial writes).
 
 ## 8. Test implementation (asset-backed in-memory backend)
 
-- **Location:** `packages/api/storage/` (e.g. `memory_asset.py`). Not referenced outside the storage subpackage except via the `StorageBackend` protocol and dependency injection (see storage.mdc).
+- **Location:** `packages/api/api/storage/` (e.g. `memory_asset.py`). Not referenced outside the storage subpackage except via the `StorageBackend` protocol and dependency injection (see storage.mdc).
 - **Data source:** A **single monolithic JSON file** whose structure defines the initial path space (e.g. top-level keys `game`, `planets`; nested structure gives path segments). Loaded at backend instantiation and deep-copied into an in-memory structure.
 - **Behaviour:** Full CRUD. The backend holds a mutable in-memory copy of the initial JSON so that `get`, `put`, `delete`, and `list` are all implemented. This allows all store semantics (create-only, merge, path resolution, reserved `@` validation) to be unit tested without persistence. No writes to disk; mutations affect only the in-memory state.
-- **Asset location:** Under `packages/api/storage/assets/` (e.g. `store_test.json`) or similar; the exact path is an implementation detail.
+- **Asset location:** Under `packages/api/api/storage/assets/` (e.g. `store_test.json`) or similar; the exact path is an implementation detail.
 
 ---
 
 ## 9. Integration points
 
-- **Config:** A way to select the backend (e.g. `storage_backend: str = "ephemeral"` or `"file"`) so the app uses the desired implementation. Default can be the asset-backed in-memory backend for development and testing. See storage.mdc “Adding a New Implementation”.
+- **Config:** Select backend via `storage_backend` (`ephemeral` | `file`) and `storage_root` for the file backend. Code default is ephemeral; repo `.config.yaml` uses `file` + `./.data`. See §15.5 and [docs/configuration.md](configuration.md).
 - **Core API app:** Register a router for the store (e.g. `routers/store.py`) under `/v1/store` (the Core API app is mounted at `/api`, so the full path is `/api/v1/store`). Router calls a **store service**; the service uses an injected `StorageBackend` and performs create/read/update/delete with the semantics above (including auto-ancestor creation on create only and atomicity), raising the appropriate Core API exceptions.
 - **No BFF or frontend changes** in this enhancement.
 
@@ -159,7 +160,7 @@ All write errors are fail-fast and preserve atomicity (no partial writes).
 
 ## 10. Deliverables (acceptance)
 
-1. **Abstract interface:** Storage protocol in Python (in `packages/api/storage/`) used for all store access; get/put/delete/list with path-based keys and `JSONValue` payloads.
+1. **Abstract interface:** Storage protocol in Python (in `packages/api/api/storage/`, import `api.storage`) used for all store access; get/put/delete/list with path-based keys and `JSONValue` payloads.
 2. **Test implementation:** In-memory backend initialized from a static JSON asset; full CRUD supported so all operations and semantics can be unit tested.
 3. **CRUD REST API:** Core API endpoints for Create (PUT), Read (GET), Update (POST), Delete (DELETE) with path-based resource identification; semantics and error mapping as above. Paths support array indexing via the reserved `@` convention (§11); payloads with any object key starting with `@` are rejected (422); full traversal on insert for validation. Create auto-creates missing ancestor objects; update does not. Write operations are atomic.
 4. **Read query modes:** GET supports `view=full|shallow` where `shallow` returns one-level child enumeration and node metadata to avoid full-subtree fetch for hierarchy traversal.
@@ -216,12 +217,86 @@ From the first implementation, paths support **per-element array indexing** via 
 - [storage.mdc](../.cursor/rules/storage.mdc) — StorageBackend protocol, key naming, no concrete impl outside storage.
 - [core-api.mdc](../.cursor/rules/core-api.mdc) — Routers, services, no storage in routers.
 - [server-exceptions.mdc](../.cursor/rules/server-exceptions.mdc) — CoreAPIError hierarchy and HTTP mapping.
+- [ADR 0001: Breakpoint-based file storage](adr/0001-breakpoint-file-storage.md) — durable persistence decisions.
+- [CONTEXT.md](../CONTEXT.md) — project glossary (breakpoint, document, registered path).
+
+---
+
+## 15. Durable file backend (breakpoint documents)
+
+This section extends §8–§9 with the design for `storage_backend: file`. Implementation follows [ADR 0001](adr/0001-breakpoint-file-storage.md).
+
+### 15.1 Goal
+
+Persist the logical JSON store to disk so game info, turn blobs, and credentials survive process restart, while keeping the same `StorageBackend` protocol and path semantics as the ephemeral backend.
+
+### 15.2 Breakpoint registry
+
+Breakpoints are declared in code (`packages/api/api/storage/boundaries.py`), not in external config. Patterns use `*` for a single path segment. **Longest matching prefix wins.**
+
+**V1 patterns** (aligned with current service paths):
+
+| Pattern | Example path | Document file (under `storage_root/`) |
+|---------|--------------|---------------------------------------|
+| `games/*/info` | `games/628580/info` | `games/628580/info.json` |
+| `games/*/*/turns/*` | `games/628580/1/turns/111` | `games/628580/1/turns/111.json` |
+| `credentials/accounts/*` | `credentials/accounts/alice` | `credentials/accounts/alice.json` |
+
+- The JSON file contents are the **value at the breakpoint path** (not wrapped in an extra envelope).
+- Logical paths below the breakpoint (e.g. `games/628580/info/settings`) are navigated **inside** the loaded document.
+- Intermediate segments (e.g. `games/628580`, `games/628580/1/turns`) are **directories** for layout and listing, not standalone JSON files unless a pattern breakpoints there.
+
+**Unregistered paths:** Any `get`/`put`/`delete` whose path is not covered by a registry pattern raises `ValidationError`. No catch-all wildcard.
+
+### 15.3 On-disk layout and I/O
+
+- **`storage_root`:** Config field (default `./.data`). All document paths are relative to this directory.
+- **File naming:** `{breakpoint_path_with_slashes}.json` (UTF-8 JSON).
+- **Writes:** Write to a temp file in the target directory, then `os.replace()` into place (atomic at the file level). v1 assumes single process / single worker; cross-process locking is out of scope.
+- **Document delete:** Remove the JSON file; prune empty parent directories upward until `storage_root` (do not remove `storage_root` itself).
+- **In-document delete:** Load document, mutate, rewrite whole file (same atomic replace).
+
+### 15.4 Root path (`""`) — cross-backend invariant
+
+| Operation | Behaviour |
+|-----------|-----------|
+| `list("")` | Top-level segments (`games`, `credentials`, …) from filesystem / store structure |
+| `get("")`, `put("")`, `delete("")` | `ValidationError` on **all** backends (including ephemeral) |
+
+There is no aggregate root document on disk. Implementations must stay semantically invariant.
+
+### 15.5 Config and startup
+
+| Field | Code default | Repo `.config.yaml` |
+|-------|--------------|---------------------|
+| `storage_backend` | `ephemeral` | `file` |
+| `storage_root` | `./.data` | `./.data` |
+| `storage_asset_path` | null | null (unused for file backend) |
+
+Code defaults stay `ephemeral` so tests and CI need no config file; repo `.config.yaml` uses `file` for durable local dev under `./.data/`.
+
+- **`include_dummy_data`:** When true, seed each sample path only if `get` raises `NotFoundError` (idempotent; never overwrite existing documents). Same for both backends.
+- **`./.data/`** is gitignored; local dev persists by default when using repo config.
+
+### 15.6 Testing
+
+- **Conformance suite:** Parametrized tests (`test_backend_conformance.py`) exercise shared `StorageBackend` contract against ephemeral and file backends.
+- **Backend-specific tests:** Ephemeral — deep-copy isolation, asset loading. File — atomic write, directory layout, prune-on-delete, unregistered path leaves no orphan files.
+- CI and unit tests continue to set `storage_backend: ephemeral` explicitly in fixtures.
+
+### 15.7 Deliverables (acceptance)
+
+1. `FileStorageBackend` in `packages/api/api/storage/file.py` implementing §15.2–15.4.
+2. Breakpoint registry module with v1 patterns; factory in `get_storage()` selects backend from config.
+3. Ephemeral backend updated for root list-only (§15.4).
+4. Conformance tests per §15.6; existing storage tests updated.
+5. `ApiConfig.storage_root`, config loading, `.config.yaml`, `docs/configuration.md`, and `.gitignore` updated.
 
 ---
 
 ## Addendum: Summary of storage unit tests
 
-The storage implementation is covered by four test modules under `packages/api/tests/`:
+The storage implementation is covered by test modules under `packages/api/tests/` and `packages/api/tests/storage/`:
 
 **Path utilities (`test_path_utils.py`)**  
 - **Index segment parsing:** Valid `@N` / `@-N` parsing; invalid segments (`@abc`, `@`, `@1.5`) raise `ValidationError`.  
@@ -230,12 +305,21 @@ The storage implementation is covered by four test modules under `packages/api/t
 - **Reserved `@` in payloads:** Payloads with no key starting with `@` are accepted; any key starting with `@` (top-level or nested) raises `ValidationError`.  
 - **Deep copy:** `deep_copy_value` returns an independent copy (mutations do not affect the original).
 
+**Backend conformance (`test_backend_conformance.py`)**  
+- Parametrized tests shared by ephemeral and file backends: path CRUD, `list`, registered-path rejection, root list-only, `@` index segments inside documents.
+
+**Breakpoint registry (`test_boundaries.py`)**  
+- Breakpoint resolution for v1 patterns; navigable prefixes; rejection of unsafe path segments (`.`, `..`, backslashes, empty segments).
+
 **Ephemeral backend (`test_memory_asset_backend.py`)**  
-- **Get:** Root and nested paths; array-index paths; deep copy on read (caller cannot mutate store); missing path raises `NotFoundError`.  
-- **Put:** Creates missing object ancestors; overwrites existing node; array append (put at `@len`) and set at existing index.  
-- **Delete:** Removes node at path; delete of array element; delete root clears store; missing path raises `NotFoundError`.  
+- **Get:** Nested paths; array-index paths; deep copy on read (caller cannot mutate store); missing path raises `NotFoundError`; root get raises `ValidationError`.  
+- **Put:** Creates missing object ancestors; overwrites existing node; array append (put at `@len`) and set at existing index; root put raises `ValidationError`.  
+- **Delete:** Removes node at path; delete of array element; missing path raises `NotFoundError`; root delete raises `ValidationError`.  
 - **List:** Root and prefix listing; array nodes return `@0`..`@(n-1)`; missing prefix raises `NotFoundError`.  
-- **Empty initial:** Backend with `{}` accepts put and get.
+- **Empty initial:** Backend with `{}` accepts put and get at registered paths.
+
+**File backend (`test_file_backend.py`)**  
+- Document layout under `storage_root/`; atomic replace on write; prune empty dirs on document delete; unregistered paths fail without orphan files; unsafe path segments rejected before any filesystem access.
 
 **Store service (`test_store_service.py`)**  
 - **Create:** New path succeeds; existing path raises `ConflictError`; payload with reserved `@` key raises `ValidationError`.  
@@ -250,4 +334,4 @@ The storage implementation is covered by four test modules under `packages/api/t
 - **POST:** Merge returns 200; `merge=append` / `merge=prepend` for arrays; invalid `merge` returns 422.  
 - **DELETE:** Success returns 204; missing path returns 404.  
 
-Tests use a per-test in-memory backend (or service over that backend) so all CRUD behaviour and error mapping are exercised without persistence.
+Ephemeral and store-layer tests use a per-test in-memory backend; file backend tests use a temporary `storage_root` directory.

@@ -3,6 +3,7 @@
 import copy
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from api.errors import (
@@ -62,6 +63,33 @@ class TestGetGameInfo:
     def test_not_found_raises(self, service):
         with pytest.raises(NotFoundError):
             service.get_game_info(999999)
+
+
+class TestListStoredTurnPerspectives:
+    def test_returns_perspectives_with_turn_in_storage(self, service):
+        assert service.list_stored_turn_perspectives(628580, 111) == [1]
+
+    def test_empty_when_turn_missing(self, service):
+        assert service.list_stored_turn_perspectives(628580, 999) == []
+
+    def test_empty_when_game_missing(self, service):
+        assert service.list_stored_turn_perspectives(999999, 111) == []
+
+    def test_lists_turn_prefix_without_getting_turn_documents(self):
+        storage = MagicMock()
+        storage.list.side_effect = [
+            ["1", "2"],
+            ["111"],
+            ["111", "110"],
+        ]
+        service = GameService(storage)
+
+        assert service.list_stored_turn_perspectives(628580, 111) == [1, 2]
+
+        storage.get.assert_not_called()
+        storage.list.assert_any_call("games/628580")
+        storage.list.assert_any_call("games/628580/1/turns")
+        storage.list.assert_any_call("games/628580/2/turns")
 
 
 class TestGetTurnInfo:

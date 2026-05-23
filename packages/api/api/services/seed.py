@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 
+from api.errors import NotFoundError
 from api.storage.base import StorageBackend
 
 logger = logging.getLogger(__name__)
@@ -23,14 +24,17 @@ def seed_dummy_data(storage: StorageBackend) -> None:
         if not asset_path.is_file():
             logger.warning("Seed asset not found: %s", asset_path)
             continue
-        with open(asset_path, encoding="utf-8") as f:
-            data = json.load(f)
-        storage.put(store_path, data)
-        logger.info("Seeded store path %r from %s", store_path, filename)
+        try:
+            storage.get(store_path)
+        except NotFoundError:
+            with open(asset_path, encoding="utf-8") as f:
+                data = json.load(f)
+            storage.put(store_path, data)
+            logger.info("Seeded store path %r from %s", store_path, filename)
 
 
 def run_startup_seed_if_configured() -> None:
-    """If `include_dummy_data` is on, seed the process store (idempotent overwrites).
+    """If `include_dummy_data` is on, seed missing sample paths (skip-if-present).
 
     Starlette does not run mounted sub-apps' lifespans, so the combined ``server.app``
     must call this from its own lifespan in addition to ``api.app`` doing so when run alone.

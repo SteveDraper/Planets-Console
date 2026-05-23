@@ -209,6 +209,20 @@ def test_load_config_include_dummy_data_string_raises():
         )
 
 
+def test_load_config_storage_root_null_uses_default(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("server: {}\napi:\n  storage_root: null\nbff: {}\n", encoding="utf-8")
+    root = load_config(default_config_path=cfg)
+    assert root.api.storage_root == "./.data"
+
+
+def test_load_config_storage_root_non_string_raises(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("server: {}\napi:\n  storage_root: 123\nbff: {}\n", encoding="utf-8")
+    with pytest.raises(TypeError, match="api.storage_root"):
+        load_config(default_config_path=cfg)
+
+
 def test_load_config_show_initial_game_string():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(

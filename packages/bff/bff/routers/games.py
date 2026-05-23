@@ -43,7 +43,7 @@ from api.transport.concept_warp_well import (
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 from api.transport.turn_ensure import TurnEnsureRequest
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer
 
 from bff.diagnostics_dep import (
@@ -92,6 +92,13 @@ def _bff_dataclass_response_with_diagnostics(
 
 BffGameInfoResponse = _bff_dataclass_response_with_diagnostics("BffGameInfoResponse", GameInfo)
 BffTurnInfoResponse = _bff_dataclass_response_with_diagnostics("BffTurnInfoResponse", TurnInfo)
+
+
+class StoredTurnPerspectivesResponse(BaseModel):
+    """1-based perspective slots that already have turn data in storage."""
+
+    perspectives: list[int] = Field(default_factory=list)
+
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 
@@ -167,6 +174,32 @@ def list_stored_games(
     root = optional_request_root(include, "GET", "/games", handler="list_stored_games")
     body = with_timed_child(root, "list_stored_games", "total", lambda: _games_list_body(svc))
     return finish_response(body, root)
+
+
+@router.get("/{game_id}/turns/{turn_number}/stored-perspectives")
+def get_stored_turn_perspectives(
+    game_id: int,
+    turn_number: int = Path(..., ge=1),
+    include: IncludeDiagnostics = False,
+) -> object:
+    """Return perspective slots that already have turn data in storage (no Planets.nu)."""
+    storage = get_storage()
+    svc = GameService(storage)
+    root = optional_request_root(
+        include,
+        "GET",
+        f"/games/{game_id}/turns/{turn_number}/stored-perspectives",
+        gameId=game_id,
+        turn=turn_number,
+        handler="get_stored_turn_perspectives",
+    )
+
+    def work() -> StoredTurnPerspectivesResponse:
+        perspectives = svc.list_stored_turn_perspectives(game_id, turn_number)
+        return StoredTurnPerspectivesResponse(perspectives=perspectives)
+
+    result = with_timed_child(root, "get_stored_turn_perspectives", "total", work)
+    return finish_response(result, root)
 
 
 @router.get("/{game_id}/info", response_model=BffGameInfoResponse)

@@ -125,6 +125,21 @@ export function isGenericServerErrorMessage(message: string): boolean {
   return false
 }
 
+/** True when a BFF fetch failed because the requested store path does not exist (HTTP 404). */
+export function isBffNotFoundError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false
+  }
+  const msg = err.message.trim()
+  if (/^404\b/.test(msg)) {
+    return true
+  }
+  if (msg.startsWith('Not Found')) {
+    return true
+  }
+  return msg.startsWith('Document not found:') || msg.startsWith('Path does not exist:')
+}
+
 /** base = always-on map (planets + edges), not shown in pane. selectable = user can toggle. */
 export type AnalyticType = 'base' | 'selectable'
 
@@ -414,6 +429,33 @@ export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
 /** Game info from server storage only (no Planets.nu refresh). */
 export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  return r.json()
+}
+
+export type StoredTurnPerspectivesResponse = {
+  perspectives: number[]
+}
+
+/** Perspective slots that already have turn data in storage (no Planets.nu). */
+export async function fetchStoredTurnPerspectives(
+  gameId: string,
+  turn: number
+): Promise<StoredTurnPerspectivesResponse> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/turns/${encodeURIComponent(String(turn))}/stored-perspectives`
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {

@@ -8,7 +8,9 @@ from api.config import ApiConfig, set_config
 from api.storage import clear_backend_cache
 from fastapi.testclient import TestClient
 
-# Asset used by router tests: inject via config (see client fixture).
+INFO = "games/sample/info"
+NESTED = f"{INFO}/nested"
+
 TEST_ASSET_PATH = Path(__file__).resolve().parent / "fixtures" / "store_router_initial.json"
 
 
@@ -30,56 +32,61 @@ def client():
 
 
 def test_get_full_returns_node(client):
-    response = client.get("/v1/store/planets/sol/earth")
+    response = client.get(f"/v1/store/{NESTED}/earth")
     assert response.status_code == 200
     assert response.json() == {"name": "Earth"}
 
 
 def test_get_shallow_returns_metadata_and_children(client):
-    response = client.get("/v1/store/planets/sol?view=shallow")
+    response = client.get(f"/v1/store/{NESTED}?view=shallow")
     assert response.status_code == 200
     data = response.json()
-    assert data["path"] == "planets/sol"
+    assert data["path"] == NESTED
     assert data["node_type"] == "object"
     assert set(data["children"]) == {"earth", "arr"}
     assert data["count"] == 2
 
 
 def test_get_invalid_view_returns_422(client):
-    response = client.get("/v1/store/game?view=invalid")
+    response = client.get(f"/v1/store/{INFO}?view=invalid")
     assert response.status_code == 422
 
 
 def test_get_missing_returns_404(client):
-    response = client.get("/v1/store/missing/path")
+    response = client.get("/v1/store/games/missing/info")
     assert response.status_code == 404
 
 
+def test_get_unregistered_returns_422(client):
+    response = client.get("/v1/store/missing/path")
+    assert response.status_code == 422
+
+
 def test_put_create_returns_201(client):
-    response = client.put("/v1/store/new/resource", json={"created": True})
+    response = client.put("/v1/store/games/newgame/info/settings", json={"created": True})
     assert response.status_code == 201
-    assert client.get("/v1/store/new/resource").json() == {"created": True}
+    assert client.get("/v1/store/games/newgame/info/settings").json() == {"created": True}
 
 
 def test_put_existing_returns_409(client):
-    response = client.put("/v1/store/game", json={"overwrite": True})
+    response = client.put(f"/v1/store/{INFO}", json={"overwrite": True})
     assert response.status_code == 409
 
 
 def test_put_reserved_at_key_returns_422(client):
-    response = client.put("/v1/store/x", json={"@reserved": 1})
+    response = client.put("/v1/store/credentials/accounts/test", json={"@reserved": 1})
     assert response.status_code == 422
 
 
 def test_post_update_merge_returns_200(client):
-    response = client.post("/v1/store/planets/sol/earth", json={"moons": ["Luna"]})
+    response = client.post(f"/v1/store/{NESTED}/earth", json={"moons": ["Luna"]})
     assert response.status_code == 200
     assert response.json()["moons"] == ["Luna"]
 
 
 def test_post_merge_append_returns_200(client):
     response = client.post(
-        "/v1/store/planets/sol/arr",
+        f"/v1/store/{NESTED}/arr",
         json=4,
         params={"merge": "append"},
     )
@@ -89,7 +96,7 @@ def test_post_merge_append_returns_200(client):
 
 def test_post_invalid_merge_param_returns_422(client):
     response = client.post(
-        "/v1/store/planets/sol/arr",
+        f"/v1/store/{NESTED}/arr",
         json=4,
         params={"merge": "invalid"},
     )
@@ -97,12 +104,12 @@ def test_post_invalid_merge_param_returns_422(client):
 
 
 def test_delete_returns_204(client):
-    client.put("/v1/store/todelete", json={"x": 1})
-    response = client.delete("/v1/store/todelete")
+    client.put("/v1/store/games/delgame/info/item", json={"x": 1})
+    response = client.delete("/v1/store/games/delgame/info/item")
     assert response.status_code == 204
-    assert client.get("/v1/store/todelete").status_code == 404
+    assert client.get("/v1/store/games/delgame/info/item").status_code == 404
 
 
 def test_delete_missing_returns_404(client):
-    response = client.delete("/v1/store/nonexistent/path")
+    response = client.delete("/v1/store/games/missing/info")
     assert response.status_code == 404

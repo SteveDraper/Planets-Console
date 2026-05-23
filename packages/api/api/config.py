@@ -10,7 +10,10 @@ class ApiConfig:
     """Configuration for the Core REST API layer."""
 
     storage_backend: str = "ephemeral"
-    """Backend key: 'ephemeral' (asset-backed in-memory)."""
+    """Backend key: 'ephemeral' (in-memory) or 'file' (breakpoint JSON under storage_root)."""
+
+    storage_root: str = "./.data"
+    """Root directory for the file backend. Ignored when storage_backend is ephemeral."""
 
     storage_asset_path: str | None = None
     """Optional path to JSON asset for ephemeral backend. If unset, store starts empty."""

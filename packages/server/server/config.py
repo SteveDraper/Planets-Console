@@ -101,6 +101,17 @@ def _apply_override(conf: Any, key: str, value: str | tuple[str, str]) -> None:
         OmegaConf.update(conf, key, _parse_literal(value), merge=False)
 
 
+def _parse_api_storage_root(raw: object) -> str:
+    """Return storage_root; null or missing uses ApiConfig default."""
+    default = ApiConfig().storage_root
+    if raw is None:
+        return default
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        return stripped if stripped else default
+    raise TypeError(f"api.storage_root must be a string or null, got {type(raw).__name__}: {raw!r}")
+
+
 def load_config(
     override_specs: list[str] | None = None,
     *,
@@ -169,6 +180,7 @@ def load_config(
         )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
+        storage_root=_parse_api_storage_root(api_dict.get("storage_root")),
         storage_asset_path=api_dict.get("storage_asset_path"),
         include_dummy_data=include_dummy,
         planets_api_base_url=str(

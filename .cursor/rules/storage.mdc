@@ -1,30 +1,30 @@
 ---
-description: Storage sub-layer conventions — the StorageBackend Protocol, key naming, and rules for adding or switching implementations. This is the lowest sub-layer of the Core REST API layer (packages/api). See core-api.mdc for the layer above.
-globs: packages/api/storage/**/*.py
+description: Storage sub-layer conventions — the StorageBackend Protocol, key naming, breakpoint file layout, and rules for adding or switching implementations. This is the lowest sub-layer of the Core REST API layer (packages/api). See core-api.mdc for the layer above.
+globs: packages/api/api/storage/**/*.py
 alwaysApply: false
 ---
 
 # Storage Sub-layer Conventions
 
-The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/storage/`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation.
+The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/api/storage/`, import `api.storage`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation.
 
-Storage operates only on JSON-compatible `dict` payloads. It does not know about dataclasses or field-specific codecs; those belong to the service and serialization layers above.
+Storage operates on JSON-compatible values (`JSONValue`). It does not know about dataclasses or field-specific codecs; those belong to the service and serialization layers above.
 
 ## The Protocol
 
-All storage access in `packages/api` goes through `StorageBackend`. It is defined in `packages/api/storage/base.py` and imported everywhere storage is needed.
+All storage access in `packages/api` goes through `StorageBackend`. It is defined in `packages/api/api/storage/base.py` and imported everywhere storage is needed.
 
 ```python
-from typing import Protocol
+JSONValue = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
 
 class StorageBackend(Protocol):
-    def get(self, key: str) -> dict | None: ...
-    def put(self, key: str, value: dict) -> None: ...
-    def delete(self, key: str) -> None: ...
+    def get(self, key: str) -> JSONValue: ...       # NotFoundError if missing
+    def put(self, key: str, value: JSONValue) -> None: ...
+    def delete(self, key: str) -> None: ...          # NotFoundError if missing
     def list(self, prefix: str) -> list[str]: ...
 ```
 
-- **Never** import a concrete implementation (`FileStorageBackend`, etc.) outside `packages/api/storage/`
+- **Never** import a concrete implementation (`FileStorageBackend`, `MemoryAssetBackend`, etc.) outside `api.storage`
 - The active backend is injected via dependency injection (FastAPI `Depends`) — never instantiated inline in routers or services
 
 ```python
@@ -38,32 +38,51 @@ def get_planet(id: str, storage: StorageBackend = Depends(get_storage)):
 
 # ❌ Wrong — concrete type leaked into router
 from api.storage.file import FileStorageBackend
-storage = FileStorageBackend("./data")
+storage = FileStorageBackend("./.data")
 ```
+
+### Root path (`""`)
+
+- **`list("")`** — top-level logical segments.
+- **`get("")`, `put("")`, `delete("")`** — raise `ValidationError` on **all** implementations (no whole-store document).
 
 ## Key Naming
 
 Keys are hierarchical path strings. Use lowercase, forward-slash separated segments. No leading slash.
 
 ```
-planets/sol/earth
-planets/sol/mars
-systems/sol
+games/628580/info
+games/628580/1/turns/111
+credentials/accounts/player1
 ```
 
 - Segments should be stable identifiers (slugs or IDs), not display names
-- Use `list(prefix="planets/sol/")` to enumerate children of a node
-- Keys must be treated as opaque strings outside the storage module — no string splitting in business logic
+- Array index segments use `@N` (e.g. `@0`, `@-1`); object keys starting with `@` are forbidden in stored payloads
+- Use `list(prefix=...)` to enumerate next-hop segments under a prefix
+- Services choose paths; only the storage sub-layer resolves paths to documents (file backend) or in-memory nodes (ephemeral)
+
+## Breakpoint file layout (durable backend)
+
+The file backend persists **documents** at **breakpoints** from a code registry (`boundaries.py`). See [ADR 0001](../../docs/adr/0001-breakpoint-file-storage.md).
+
+- Longest matching breakpoint prefix → one `{path}.json` under `storage_root/`
+- Nested paths without a deeper breakpoint are stored **inside** that JSON file
+- Unregistered paths → `ValidationError` (fail fast)
+- Document writes: temp file + atomic `replace`; document delete: remove file + prune empty parent dirs
+
+**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `credentials/accounts/*`
 
 ## Adding a New Implementation
 
-1. Create `packages/api/storage/<name>.py` implementing `StorageBackend`
-2. Add a config flag in `AppConfig` to select the backend (e.g. `storage_backend: str = "file"`)
-3. Update the `get_storage()` factory in `packages/api/storage/__init__.py` — nowhere else
-4. Write unit tests mocking `StorageBackend` — never tests against the concrete class from outside storage
+1. Create `packages/api/api/storage/<name>.py` implementing `StorageBackend`
+2. Add a config flag in `ApiConfig` to select the backend (e.g. `storage_backend: str = "file"`)
+3. Update the `get_storage()` factory in `packages/api/api/storage/__init__.py` — nowhere else
+4. Add the implementation to the shared conformance test parametrization
+5. Write backend-specific unit tests under `packages/api/tests/` — never tests against the concrete class from outside storage
 
 ## Current Implementations
 
-| Name | Module | Notes |
-|---|---|---|
-| File-based | `storage/file.py` | Stores JSON files under `storage_root/` mirroring key hierarchy |
+| Name | Config id | Module | Notes |
+|---|---|---|---|
+| Ephemeral | `ephemeral` | `storage/memory_asset.py` | In-memory; optional JSON asset seed at startup; for tests and CI |
+| File | `file` | `storage/file.py` | Breakpoint JSON documents under `storage_root/` (default `./.data`) |

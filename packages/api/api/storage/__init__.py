@@ -9,6 +9,7 @@ from pathlib import Path
 
 from api.config import get_config
 from api.storage.base import JSONValue, StorageBackend
+from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 
 __all__ = ["JSONValue", "StorageBackend", "get_storage", "clear_backend_cache"]
@@ -35,11 +36,14 @@ def get_storage() -> StorageBackend:
     if _backend_cache is not None:
         return _backend_cache
     cfg = get_config()
-    if cfg.storage_backend != "ephemeral":
+    if cfg.storage_backend == "ephemeral":
+        asset_path = Path(cfg.storage_asset_path) if cfg.storage_asset_path else None
+        initial = _load_asset(asset_path)
+        _backend_cache = MemoryAssetBackend(initial=initial)
+    elif cfg.storage_backend == "file":
+        _backend_cache = FileStorageBackend(Path(cfg.storage_root))
+    else:
         raise ValueError(f"Unknown storage_backend: {cfg.storage_backend!r}")
-    asset_path = Path(cfg.storage_asset_path) if cfg.storage_asset_path else None
-    initial = _load_asset(asset_path)
-    _backend_cache = MemoryAssetBackend(initial=initial)
     return _backend_cache
 
 

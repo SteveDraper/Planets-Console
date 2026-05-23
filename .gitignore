@@ -1,9 +1,15 @@
 # MCP config may contain a GitHub PAT — do not commit
 .cursor/mcp.json
 
+# Editor workspace files (local multi-root layout)
+*.code-workspace
+
 # Python
 .venv/
 __pycache__/
 *.egg-info/
+
+# Durable file storage (api.storage_root default)
+.data/
 
 # Frontend (packages/frontend has its own .gitignore for node_modules, dist)
