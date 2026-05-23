@@ -57,7 +57,7 @@ class StoreService:
         if path_norm == "" or not is_registered_path(path_norm):
             children = self._storage.list(path_norm)
             return {
-                "path": path_norm or "(root)",
+                "path": path_norm,
                 "node_type": "object",
                 "children": children,
                 "count": len(children),
@@ -87,7 +87,7 @@ class StoreService:
             node_type = "string"
             count = 0
         return {
-            "path": path_norm or "(root)",
+            "path": path_norm,
             "node_type": node_type,
             "children": children,
             "count": count,

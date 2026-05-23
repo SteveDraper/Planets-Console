@@ -41,7 +41,7 @@ uv run serve
 ```
 
 - Server listens on **http://127.0.0.1:8000**
-- Game data persists under `./.data/` when `api.storage_backend` is `file` (see [configuration](docs/configuration.md); requires file backend implementation per [ADR 0001](docs/adr/0001-breakpoint-file-storage.md)).
+- Game data persists under `./.data/` when `api.storage_backend` is `file` (repo default in `.config.yaml`; see [configuration](docs/configuration.md) and [ADR 0001](docs/adr/0001-breakpoint-file-storage.md) for breakpoint layout).
 - Health: http://127.0.0.1:8000/health  
 - Core API: http://127.0.0.1:8000/api  
 - BFF (for the SPA): http://127.0.0.1:8000/bff  

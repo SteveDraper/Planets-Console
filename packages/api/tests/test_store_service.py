@@ -67,6 +67,13 @@ def test_read_shallow_object(service):
     assert shallow["count"] == 2
 
 
+def test_read_shallow_root_returns_empty_path(service):
+    shallow = service.read_shallow("")
+    assert shallow["path"] == ""
+    assert shallow["node_type"] == "object"
+    assert "games" in shallow["children"]
+
+
 def test_read_shallow_array(service):
     shallow = service.read_shallow(f"{NESTED}/arr")
     assert shallow["node_type"] == "array"
