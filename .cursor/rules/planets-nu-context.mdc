@@ -1,0 +1,28 @@
+---
+description: Delegate Planets.nu game-domain background to the planets-nu-wiki subagent before implementing game-related features
+alwaysApply: true
+---
+
+# Game-domain context via subagent
+
+Planets-Console analytics and UI encode **Planets.nu** semantics. Keep vault reading out of the main agent's context by delegating to the **`planets-nu-wiki`** subagent (`.cursor/agents/planets-nu-wiki.md`).
+
+## When to delegate
+
+Before designing or implementing work that depends on **game meaning** — not just code structure — delegate first. Examples:
+
+- Analytics: what to compute, highlight, or warn about
+- Map or tabular views: planets, ships, mines, connections, overlays
+- Game state fields: parsing, naming, validation, display labels
+- API or BFF shapes driven by turn data or host rules
+- Feature specs that reference races, missions, friendly codes, build queues, etc.
+
+## How to delegate
+
+1. Invoke **`planets-nu-wiki`** with a focused prompt: the **feature/task** plus **specific questions** you need answered.
+2. Wait for its **Background brief** return; treat that as your game-domain source for the rest of the task.
+3. **Do not** read Personal-wiki vault pages in the main agent when the subagent can answer — unless the subagent is unavailable or the user asks you to edit the wiki.
+
+## When to skip
+
+Purely structural work with no game semantics: refactors, CI, generic UI plumbing, dependency updates, tests that do not assert game rules.
