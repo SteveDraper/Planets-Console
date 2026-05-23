@@ -6,4 +6,7 @@
 __pycache__/
 *.egg-info/
 
+# Durable file storage (api.storage_root default)
+.data/
+
 # Frontend (packages/frontend has its own .gitignore for node_modules, dist)

@@ -169,6 +169,7 @@ def load_config(
         )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
+        storage_root=str(api_dict.get("storage_root", ApiConfig().storage_root)),
         storage_asset_path=api_dict.get("storage_asset_path"),
         include_dummy_data=include_dummy,
         planets_api_base_url=str(

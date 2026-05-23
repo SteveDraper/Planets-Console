@@ -41,6 +41,7 @@ uv run serve
 ```
 
 - Server listens on **http://127.0.0.1:8000**
+- Game data persists under `./.data/` when `api.storage_backend` is `file` (see [configuration](docs/configuration.md); requires file backend implementation per [ADR 0001](docs/adr/0001-breakpoint-file-storage.md)).
 - Health: http://127.0.0.1:8000/health  
 - Core API: http://127.0.0.1:8000/api  
 - BFF (for the SPA): http://127.0.0.1:8000/bff  
@@ -116,7 +117,9 @@ These documents describe intended behavior, architecture decisions, and implemen
 
 - **[Frontend and backend state](docs/design-frontend-and-backend-state.md)** -- Zustand vs TanStack Query, local React state, and stateless backend + storage.
 - **[Shell error handling](docs/design-shell-error-handling.md)** -- BFF errors and the shell error bar.
-- **[Storage abstraction](docs/design-storage-abstraction-and-crud-api.md)** -- `StorageBackend` and CRUD semantics.
+- **[Storage abstraction](docs/design-storage-abstraction-and-crud-api.md)** -- `StorageBackend`, CRUD semantics, and durable file backend (§15).
+- **[ADR 0001: Breakpoint file storage](docs/adr/0001-breakpoint-file-storage.md)** -- on-disk layout and persistence trade-offs.
+- **[CONTEXT.md](CONTEXT.md)** -- project glossary (breakpoints, documents, backends).
 - **[Planets API data model](docs/design-planets-api-data-model.md)** -- data model direction for planets.nu–shaped data.
 - **[Base map from Core API](docs/design-issue-10-base-map-from-core.md)** -- base map analytic sourcing.
 - **[Login identity](docs/design-issue-12-login-identity.md)** -- login and identity in the shell.

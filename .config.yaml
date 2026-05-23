@@ -4,9 +4,10 @@ server:
   port: 8000
 
 api:
-  storage_backend: ephemeral
-  storage_asset_path: null  # optional path to JSON asset; null = use package default
-  include_dummy_data: true  # seed sample game data on startup (set false for production)
+  storage_backend: file
+  storage_root: ./.data
+  storage_asset_path: null   # ephemeral only; ignored for file backend
+  include_dummy_data: true   # seed sample paths if missing (set false for production)
 
 bff:
   cors_origins:

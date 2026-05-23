@@ -31,9 +31,10 @@ The amalgamated config has three top-level keys:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `storage_backend` | string | `ephemeral` | Backend identifier. Currently only `ephemeral` is supported. |
-| `storage_asset_path` | string or null | null | Path to a JSON file used to initialise the in-memory store. If null or omitted, the store starts empty. If set, the path must exist and be a file (otherwise startup fails). |
-| `include_dummy_data` | bool | false | When true, seed the store with sample game data (game 628580, turn 111) on startup. For development and testing only. |
+| `storage_backend` | string | `ephemeral` | Backend identifier: `ephemeral` (in-memory) or `file` (durable JSON under `storage_root`). See [ADR 0001](adr/0001-breakpoint-file-storage.md). |
+| `storage_root` | string | `./.data` | Root directory for the file backend. Ignored when `storage_backend` is `ephemeral`. Created on first write if missing. Gitignored in the repo. |
+| `storage_asset_path` | string or null | null | **Ephemeral only:** path to a JSON file used to initialise the in-memory store. If null, the store starts empty. If set, the path must exist and be a file (otherwise startup fails). |
+| `include_dummy_data` | bool | false | When true, seed sample game data (game 628580, turn 111) on startup **only for paths that are not already present** (idempotent skip-if-present). For development and testing only. |
 
 ### `bff` (BFF)
 
@@ -50,9 +51,10 @@ server:
   port: 8000
 
 api:
-  storage_backend: ephemeral
-  storage_asset_path: null   # store starts empty
-  include_dummy_data: true   # seed sample game data (set false for production)
+  storage_backend: file
+  storage_root: ./.data      # durable store (gitignored); use ephemeral in CI/tests
+  storage_asset_path: null   # ephemeral only; ignored for file backend
+  include_dummy_data: true   # seed sample paths if missing (set false for production)
 
 bff:
   cors_origins:
@@ -126,7 +128,8 @@ uv run serve -c api.storage_asset_path=/data/store.json -c bff=@bff.yaml
 ## How it’s used
 
 - Config is loaded at server startup in the CLI (before uvicorn runs). The amalgamated config is built; then `server` host/port are used for the uvicorn bind, and `api` and `bff` sub-configs are passed into their layers via `set_config()`.
-- The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`. The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend` and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
+- The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`. The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend`, `storage_root`, and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
+- Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly.
 - Implementation lives in: `packages/server/server/config.py` (loading, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config).
 
 ## Unit tests

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.storage.base import JSONValue, StorageBackend
+from api.storage.boundaries import is_navigable_prefix, is_registered_path
 from api.storage.path_utils import (
     deep_copy_value,
     list_children,
@@ -50,6 +51,18 @@ class StoreService:
     def read_shallow(self, path: str) -> dict:
         """Return shallow metadata: path, node_type, children, count."""
         path_norm = (path or "").strip().strip("/") or ""
+        if not is_navigable_prefix(path_norm):
+            raise ValidationError(f"Unregistered store path prefix: {path_norm!r}")
+
+        if path_norm == "" or not is_registered_path(path_norm):
+            children = self._storage.list(path_norm)
+            return {
+                "path": path_norm or "(root)",
+                "node_type": "object",
+                "children": children,
+                "count": len(children),
+            }
+
         node = self._storage.get(path_norm)
         children = list_children(node)
         if isinstance(node, dict):

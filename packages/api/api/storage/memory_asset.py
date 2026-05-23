@@ -6,8 +6,9 @@ implemented and can be unit tested. Not read-only.
 
 from __future__ import annotations
 
-from api.errors import NotFoundError
+from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
+from api.storage.boundaries import is_navigable_prefix, is_registered_path, resolve_breakpoint
 from api.storage.path_utils import (
     deep_copy_value,
     ensure_ancestors,
@@ -35,20 +36,19 @@ class MemoryAssetBackend:
         """Return a deep copy of the value at path. Raises NotFoundError if path does not exist."""
         path = (key or "").strip().strip("/") or ""
         if path == "":
-            return deep_copy_value(self._root)
+            raise ValidationError("Cannot get root path")
+        if not is_registered_path(path):
+            raise ValidationError(f"Unregistered store path: {path!r}")
         node = resolve_path(self._root, path)
         return deep_copy_value(node)
 
     def put(self, key: str, value: JSONValue) -> None:
         """Store value at path. Creates object ancestors as needed. Overwrites if path exists."""
         path = (key or "").strip().strip("/") or ""
-        value_copy = deep_copy_value(value)
         if path == "":
-            if not isinstance(value_copy, dict):
-                raise ValueError("Root must be a JSON object")
-            self._root.clear()
-            self._root.update(value_copy)
-            return
+            raise ValidationError("Cannot put root path")
+        resolve_breakpoint(path)
+        value_copy = deep_copy_value(value)
         parent, segment, is_array_index = ensure_ancestors(self._root, path)
         if is_array_index:
             idx = parse_index_segment(segment)
@@ -74,8 +74,8 @@ class MemoryAssetBackend:
         """Remove the node at path. Raises NotFoundError if path does not exist."""
         path = (key or "").strip().strip("/") or ""
         if path == "":
-            self._root.clear()
-            return
+            raise ValidationError("Cannot delete root path")
+        resolve_breakpoint(path)
         parent, segment, is_array_index = resolve_parent_and_segment(self._root, path)
         if is_array_index:
             idx = parse_index_segment(segment)
@@ -94,6 +94,8 @@ class MemoryAssetBackend:
     def list(self, prefix: str) -> list[str]:
         """Return next-hop segment names under the prefix."""
         path = (prefix or "").strip().strip("/") or ""
+        if not is_navigable_prefix(path):
+            raise ValidationError(f"Unregistered store path prefix: {prefix!r}")
         if path == "":
             return list_children(self._root)
         node = resolve_path(self._root, path)
