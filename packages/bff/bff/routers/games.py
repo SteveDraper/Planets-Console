@@ -99,6 +99,7 @@ class StoredTurnPerspectivesResponse(BaseModel):
 
     perspectives: list[int] = Field(default_factory=list)
 
+
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 
 

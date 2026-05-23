@@ -125,6 +125,21 @@ export function isGenericServerErrorMessage(message: string): boolean {
   return false
 }
 
+/** True when a BFF fetch failed because the requested store path does not exist (HTTP 404). */
+export function isBffNotFoundError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false
+  }
+  const msg = err.message.trim()
+  if (/^404\b/.test(msg)) {
+    return true
+  }
+  if (msg.startsWith('Not Found')) {
+    return true
+  }
+  return msg.startsWith('Document not found:') || msg.startsWith('Path does not exist:')
+}
+
 /** base = always-on map (planets + edges), not shown in pane. selectable = user can toggle. */
 export type AnalyticType = 'base' | 'selectable'
 

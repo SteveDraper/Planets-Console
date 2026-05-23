@@ -17,8 +17,25 @@ BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
 )
 
 
+def _validate_path_segment(segment: str) -> None:
+    """Reject segments that could escape ``storage_root`` when joined as paths."""
+    if segment in (".", ".."):
+        raise ValidationError(f"Invalid path segment: {segment!r}")
+    if "\\" in segment:
+        raise ValidationError("Store path must use forward slashes only")
+    if segment == "":
+        raise ValidationError("Path must not contain empty segments")
+
+
 def _path_segments(path: str) -> list[str]:
-    return [s for s in path.split("/") if s]
+    if "\\" in path:
+        raise ValidationError("Store path must use forward slashes only")
+    parts = path.split("/")
+    if any(part == "" for part in parts):
+        raise ValidationError("Path must not contain empty segments")
+    for part in parts:
+        _validate_path_segment(part)
+    return parts
 
 
 def _pattern_matches_path(pattern: tuple[str, ...], segments: list[str]) -> bool:
@@ -93,4 +110,5 @@ def is_navigable_prefix(prefix: str) -> bool:
 
 def document_relpath(breakpoint_path: str) -> Path:
     """Map a breakpoint path to its relative JSON file path under ``storage_root``."""
+    _path_segments(breakpoint_path)
     return Path(f"{breakpoint_path}.json")

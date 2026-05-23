@@ -232,7 +232,7 @@ Persist the logical JSON store to disk so game info, turn blobs, and credentials
 
 ### 15.2 Breakpoint registry
 
-Breakpoints are declared in code (`packages/api/storage/boundaries.py`), not in external config. Patterns use `*` for a single path segment. **Longest matching prefix wins.**
+Breakpoints are declared in code (`packages/api/api/storage/boundaries.py`), not in external config. Patterns use `*` for a single path segment. **Longest matching prefix wins.**
 
 **V1 patterns** (aligned with current service paths):
 
@@ -269,11 +269,11 @@ There is no aggregate root document on disk. Implementations must stay semantica
 
 | Field | Code default | Repo `.config.yaml` |
 |-------|--------------|---------------------|
-| `storage_backend` | `ephemeral` | `file` (when file backend is implemented) |
+| `storage_backend` | `ephemeral` | `file` |
 | `storage_root` | `./.data` | `./.data` |
 | `storage_asset_path` | null | null (unused for file backend) |
 
-Repo `.config.yaml` remains on `ephemeral` until implementation; then switch to `file` per this table.
+Code defaults stay `ephemeral` so tests and CI need no config file; repo `.config.yaml` uses `file` for durable local dev under `./.data/`.
 
 - **`include_dummy_data`:** When true, seed each sample path only if `get` raises `NotFoundError` (idempotent; never overwrite existing documents). Same for both backends.
 - **`./.data/`** is gitignored; local dev persists by default when using repo config.
@@ -286,7 +286,7 @@ Repo `.config.yaml` remains on `ephemeral` until implementation; then switch to 
 
 ### 15.7 Deliverables (acceptance)
 
-1. `FileStorageBackend` in `packages/api/storage/file.py` implementing §15.2–15.4.
+1. `FileStorageBackend` in `packages/api/api/storage/file.py` implementing §15.2–15.4.
 2. Breakpoint registry module with v1 patterns; factory in `get_storage()` selects backend from config.
 3. Ephemeral backend updated for root list-only (§15.4).
 4. Conformance tests per §15.6; existing storage tests updated.
@@ -296,7 +296,7 @@ Repo `.config.yaml` remains on `ephemeral` until implementation; then switch to 
 
 ## Addendum: Summary of storage unit tests
 
-The storage implementation is covered by four test modules under `packages/api/tests/`:
+The storage implementation is covered by test modules under `packages/api/tests/` and `packages/api/tests/storage/`:
 
 **Path utilities (`test_path_utils.py`)**  
 - **Index segment parsing:** Valid `@N` / `@-N` parsing; invalid segments (`@abc`, `@`, `@1.5`) raise `ValidationError`.  
@@ -305,8 +305,11 @@ The storage implementation is covered by four test modules under `packages/api/t
 - **Reserved `@` in payloads:** Payloads with no key starting with `@` are accepted; any key starting with `@` (top-level or nested) raises `ValidationError`.  
 - **Deep copy:** `deep_copy_value` returns an independent copy (mutations do not affect the original).
 
-**Backend conformance (`test_backend_conformance.py`)** — planned  
+**Backend conformance (`test_backend_conformance.py`)**  
 - Parametrized tests shared by ephemeral and file backends: path CRUD, `list`, registered-path rejection, root list-only, `@` index segments inside documents.
+
+**Breakpoint registry (`test_boundaries.py`)**  
+- Breakpoint resolution for v1 patterns; navigable prefixes; rejection of unsafe path segments (`.`, `..`, backslashes, empty segments).
 
 **Ephemeral backend (`test_memory_asset_backend.py`)**  
 - **Get:** Nested paths; array-index paths; deep copy on read (caller cannot mutate store); missing path raises `NotFoundError`; root get raises `ValidationError`.  
@@ -315,8 +318,8 @@ The storage implementation is covered by four test modules under `packages/api/t
 - **List:** Root and prefix listing; array nodes return `@0`..`@(n-1)`; missing prefix raises `NotFoundError`.  
 - **Empty initial:** Backend with `{}` accepts put and get at registered paths.
 
-**File backend (`test_file_backend.py`)** — planned  
-- Document layout under `storage_root/`; atomic replace on write; prune empty dirs on document delete; unregistered paths fail without orphan files.
+**File backend (`test_file_backend.py`)**  
+- Document layout under `storage_root/`; atomic replace on write; prune empty dirs on document delete; unregistered paths fail without orphan files; unsafe path segments rejected before any filesystem access.
 
 **Store service (`test_store_service.py`)**  
 - **Create:** New path succeeds; existing path raises `ConflictError`; payload with reserved `@` key raises `ValidationError`.  
@@ -331,4 +334,4 @@ The storage implementation is covered by four test modules under `packages/api/t
 - **POST:** Merge returns 200; `merge=append` / `merge=prepend` for arrays; invalid `merge` returns 422.  
 - **DELETE:** Success returns 204; missing path returns 404.  
 
-Tests use a per-test in-memory backend (or service over that backend) so all CRUD behaviour and error mapping are exercised without persistence.
+Ephemeral and store-layer tests use a per-test in-memory backend; file backend tests use a temporary `storage_root` directory.

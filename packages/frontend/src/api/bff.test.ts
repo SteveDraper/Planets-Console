@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   fetchGames,
   INCLUDE_DIAGNOSTICS_SESSION_KEY,
+  isBffNotFoundError,
   isGenericServerErrorMessage,
   normalizeMapDataResponse,
   toFetchRejectionError,
@@ -33,6 +34,29 @@ describe('withEndpointIfGeneric', () => {
     expect(
       withEndpointIfGeneric('500 (GET /bff/games)', 'GET /bff/games')
     ).toBe('500 (GET /bff/games)')
+  })
+})
+
+describe('isBffNotFoundError', () => {
+  it('returns true for leading 404 status in message', () => {
+    expect(isBffNotFoundError(new Error('404'))).toBe(true)
+    expect(isBffNotFoundError(new Error('404 (GET /bff/games/1/info)'))).toBe(true)
+  })
+
+  it('returns true for Core store not-found detail text', () => {
+    expect(isBffNotFoundError(new Error("Document not found: 'games/1/info'"))).toBe(true)
+    expect(isBffNotFoundError(new Error("Path does not exist: 'games/1/info'"))).toBe(true)
+  })
+
+  it('returns false for server and network failures', () => {
+    expect(isBffNotFoundError(new Error('Internal Server Error (GET /bff/games/1/info)'))).toBe(
+      false
+    )
+    expect(
+      isBffNotFoundError(
+        new Error('TypeError: Failed to fetch — GET /bff/games/1/info (request: /bff/games/1/info).')
+      )
+    ).toBe(false)
   })
 })
 

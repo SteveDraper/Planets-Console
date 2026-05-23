@@ -180,7 +180,6 @@ def test_get_stored_turn_perspectives():
 
 
 def test_get_stored_turn_perspectives_empty_when_missing():
-    storage = get_storage()
     response = client.get("/games/628580/turns/111/stored-perspectives")
     assert response.status_code == 200
     assert response.json() == {"perspectives": []}

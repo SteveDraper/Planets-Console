@@ -9,7 +9,7 @@ import {
   perspectiveNameForOrdinal,
   viewpointNameForLogin,
 } from './lib/gameInfoShell'
-import { loadGameFromStorage } from './lib/loadGameFromStorage'
+import { loadGameFromStorage, type StorageGameLoadResult } from './lib/loadGameFromStorage'
 import {
   QueryClient,
   QueryClientProvider,
@@ -30,6 +30,7 @@ import {
   refreshGameInfo,
   type AnalyticShellScope,
   type ConnectionsMapParams,
+  type GameInfoResponse,
 } from './api/bff'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
@@ -82,40 +83,52 @@ function ConsoleShell() {
   }, [])
 
   const refreshGameMutation = useMutation({
-    mutationFn: async (vars: { gameId: string; username: string; password?: string }) => {
+    mutationFn: async (vars: {
+      gameId: string
+      username: string
+      password?: string
+    }): Promise<
+      | { source: 'refresh'; gameInfo: GameInfoResponse }
+      | { source: 'storage'; load: StorageGameLoadResult }
+    > => {
       const username = vars.username.trim()
       if (username) {
-        return refreshGameInfo(vars.gameId, { username, password: vars.password })
+        return {
+          source: 'refresh',
+          gameInfo: await refreshGameInfo(vars.gameId, { username, password: vars.password }),
+        }
       }
-      return loadGameFromStorage(vars.gameId)
+      return { source: 'storage', load: await loadGameFromStorage(vars.gameId) }
     },
     retry: false,
     onSuccess: (data, vars) => {
-      if ('gameInfo' in data) {
-        const perspectives = buildPerspectivesFromGameInfo(data.gameInfo)
+      if (data.source === 'storage') {
+        const { load } = data
+        const perspectives = buildPerspectivesFromGameInfo(load.gameInfo)
         applyGameInfoRefresh(
           vars.gameId,
           {
-            turn: data.turn,
+            turn: load.turn,
             perspectives,
-            isGameFinished: isGameFinishedFromGameInfo(data.gameInfo),
-            sectorDisplayName: getSectorDisplayNameFromGameInfo(data.gameInfo),
+            isGameFinished: isGameFinishedFromGameInfo(load.gameInfo),
+            sectorDisplayName: getSectorDisplayNameFromGameInfo(load.gameInfo),
           },
           {
             storageOnlyLoad: true,
-            storageAvailablePerspectives: data.storedPerspectives,
-            perspectiveOverrideName: data.defaultViewpointName,
+            storageAvailablePerspectives: load.storedPerspectives,
+            perspectiveOverrideName: load.defaultViewpointName,
           }
         )
       } else {
         clearStorageOnlyLoad()
-        const latestTurn = getLatestTurnFromGameInfo(data)
-        const perspectives = buildPerspectivesFromGameInfo(data)
+        const { gameInfo } = data
+        const latestTurn = getLatestTurnFromGameInfo(gameInfo)
+        const perspectives = buildPerspectivesFromGameInfo(gameInfo)
         applyGameInfoRefresh(vars.gameId, {
           turn: latestTurn,
           perspectives,
-          isGameFinished: isGameFinishedFromGameInfo(data),
-          sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
+          isGameFinished: isGameFinishedFromGameInfo(gameInfo),
+          sectorDisplayName: getSectorDisplayNameFromGameInfo(gameInfo),
         })
       }
 

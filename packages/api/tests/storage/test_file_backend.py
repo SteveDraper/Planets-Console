@@ -93,3 +93,22 @@ def test_in_document_delete_rewrites_file(backend, storage_root):
 def test_missing_document_raises_not_found(backend):
     with pytest.raises(NotFoundError):
         backend.get(GAME_INFO)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "games/../info",
+        "games/628580/../info",
+        "games\\628580\\info",
+        "games//628580/info",
+    ],
+)
+def test_unsafe_path_segments_rejected_before_filesystem(backend, storage_root, path):
+    with pytest.raises(ValidationError):
+        backend.put(path, {"x": 1})
+    with pytest.raises(ValidationError):
+        backend.get(path)
+    with pytest.raises(ValidationError):
+        backend.list(path)
+    assert list(storage_root.rglob("*")) == []

@@ -55,3 +55,38 @@ def test_is_navigable_prefix():
 def test_is_registered_path():
     assert is_registered_path("games/628580/info")
     assert not is_registered_path("games/628580")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "games/../info",
+        "games/628580/../info",
+        "games/foo/../../credentials/accounts/alice",
+        "games/628580/1/turns/111/../../../info",
+        "games\\628580\\info",
+        "games//628580/info",
+        "games/./info",
+    ],
+)
+def test_resolve_breakpoint_rejects_unsafe_segments(path: str):
+    with pytest.raises(ValidationError):
+        resolve_breakpoint(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "games/..",
+        "games/../info",
+        "games\\628580",
+        "games//628580",
+    ],
+)
+def test_is_navigable_prefix_rejects_unsafe_segments(path: str):
+    with pytest.raises(ValidationError):
+        is_navigable_prefix(path)
+
+
+def test_is_registered_path_rejects_unsafe_segments():
+    assert not is_registered_path("games/../info")

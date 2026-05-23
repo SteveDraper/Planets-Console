@@ -1,18 +1,18 @@
 ---
 description: Storage sub-layer conventions — the StorageBackend Protocol, key naming, breakpoint file layout, and rules for adding or switching implementations. This is the lowest sub-layer of the Core REST API layer (packages/api). See core-api.mdc for the layer above.
-globs: packages/api/storage/**/*.py
+globs: packages/api/api/storage/**/*.py
 alwaysApply: false
 ---
 
 # Storage Sub-layer Conventions
 
-The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/storage/`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation.
+The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/api/storage/`, import `api.storage`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation.
 
 Storage operates on JSON-compatible values (`JSONValue`). It does not know about dataclasses or field-specific codecs; those belong to the service and serialization layers above.
 
 ## The Protocol
 
-All storage access in `packages/api` goes through `StorageBackend`. It is defined in `packages/api/storage/base.py` and imported everywhere storage is needed.
+All storage access in `packages/api` goes through `StorageBackend`. It is defined in `packages/api/api/storage/base.py` and imported everywhere storage is needed.
 
 ```python
 JSONValue = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
@@ -24,7 +24,7 @@ class StorageBackend(Protocol):
     def list(self, prefix: str) -> list[str]: ...
 ```
 
-- **Never** import a concrete implementation (`FileStorageBackend`, `MemoryAssetBackend`, etc.) outside `packages/api/storage/`
+- **Never** import a concrete implementation (`FileStorageBackend`, `MemoryAssetBackend`, etc.) outside `api.storage`
 - The active backend is injected via dependency injection (FastAPI `Depends`) — never instantiated inline in routers or services
 
 ```python
@@ -74,9 +74,9 @@ The file backend persists **documents** at **breakpoints** from a code registry 
 
 ## Adding a New Implementation
 
-1. Create `packages/api/storage/<name>.py` implementing `StorageBackend`
+1. Create `packages/api/api/storage/<name>.py` implementing `StorageBackend`
 2. Add a config flag in `ApiConfig` to select the backend (e.g. `storage_backend: str = "file"`)
-3. Update the `get_storage()` factory in `packages/api/storage/__init__.py` — nowhere else
+3. Update the `get_storage()` factory in `packages/api/api/storage/__init__.py` — nowhere else
 4. Add the implementation to the shared conformance test parametrization
 5. Write backend-specific unit tests under `packages/api/tests/` — never tests against the concrete class from outside storage
 

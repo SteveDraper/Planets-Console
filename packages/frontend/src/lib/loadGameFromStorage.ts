@@ -1,5 +1,5 @@
 import type { GameInfoResponse } from '../api/bff'
-import { fetchStoredGameInfo, fetchStoredTurnPerspectives } from '../api/bff'
+import { fetchStoredGameInfo, fetchStoredTurnPerspectives, isBffNotFoundError } from '../api/bff'
 import {
   LOGIN_REQUIRED_FOR_GAME_SELECTION,
   getLatestTurnFromGameInfo,
@@ -19,8 +19,11 @@ export async function loadGameFromStorage(gameId: string): Promise<StorageGameLo
   let gameInfo: GameInfoResponse
   try {
     gameInfo = await fetchStoredGameInfo(gameId)
-  } catch {
-    throw new Error(LOGIN_REQUIRED_FOR_GAME_SELECTION)
+  } catch (err) {
+    if (isBffNotFoundError(err)) {
+      throw new Error(LOGIN_REQUIRED_FOR_GAME_SELECTION)
+    }
+    throw err
   }
 
   const turn = getLatestTurnFromGameInfo(gameInfo)
