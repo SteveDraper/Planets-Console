@@ -5,13 +5,16 @@ from pathlib import Path
 
 import pytest
 from api.concepts.warp_well import (
+    NORMAL_WELL_CELL_COUNT,
     WarpWellKind,
     coordinate_in_warp_well,
     map_cell_indices_in_warp_well,
+    min_distance_to_reachability_well,
     planet_is_in_debris_disk,
+    point_in_reachability_well,
     warp_well_cartesian_distance,
 )
-from api.services.game_service import GameService
+from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -24,8 +27,8 @@ def lorthidonia_planet():
         backend.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
         backend.put("games/628580/1/turns/111", json.load(f))
-    svc = GameService(backend)
-    return svc.get_planet_from_turn(628580, 1, 111, 1)
+    _, turns, _, _ = build_service_stack(backend)
+    return turns.get_planet_from_turn(628580, 1, 111, 1)
 
 
 class TestPlanetIsInDebrisDisk:
@@ -72,6 +75,10 @@ class TestMapCellIndices:
         cells = map_cell_indices_in_warp_well(lorthidonia_planet, WarpWellKind.NORMAL)
         assert (px, py) in cells
 
+    def test_normal_well_has_fixed_cell_count(self, lorthidonia_planet):
+        cells = map_cell_indices_in_warp_well(lorthidonia_planet, WarpWellKind.NORMAL)
+        assert len(cells) == NORMAL_WELL_CELL_COUNT
+
     def test_debris_empty(self, lorthidonia_planet):
         from dataclasses import replace
 
@@ -82,3 +89,26 @@ class TestMapCellIndices:
 class TestWarpWellCartesianDistance:
     def test_hypot(self):
         assert warp_well_cartesian_distance(0, 0, 3, 4) == 5.0
+
+
+class TestReachabilityWellEquivalence:
+    def test_point_in_matches_canonical_for_non_debris(self, lorthidonia_planet):
+        cases = [
+            (float(lorthidonia_planet.x), float(lorthidonia_planet.y)),
+            (float(lorthidonia_planet.x) + 3, float(lorthidonia_planet.y)),
+            (float(lorthidonia_planet.x) + 4, float(lorthidonia_planet.y)),
+        ]
+        for qx, qy in cases:
+            canonical = coordinate_in_warp_well(lorthidonia_planet, qx, qy, WarpWellKind.NORMAL)
+            reachability = point_in_reachability_well(lorthidonia_planet, qx, qy)
+            assert reachability == canonical
+
+    def test_min_distance_zero_inside_disc(self, lorthidonia_planet):
+        px, py = float(lorthidonia_planet.x), float(lorthidonia_planet.y)
+        assert min_distance_to_reachability_well(px + 2, py, lorthidonia_planet) == 0.0
+
+    def test_min_distance_outside_disc(self, lorthidonia_planet):
+        from dataclasses import replace
+
+        p = replace(lorthidonia_planet, x=0, y=0)
+        assert min_distance_to_reachability_well(10.0, 0.0, p) == 7.0

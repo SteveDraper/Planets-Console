@@ -146,6 +146,56 @@ describe('normalizeMapDataResponse', () => {
     expect(out.nodes[0].planet).not.toBe((raw.nodes[0] as { planet: object }).planet)
   })
 
+  it('preserves normalWellCells on base-map nodes', () => {
+    const cells = [{ x: 10, y: 20 }, { x: 11, y: 20 }]
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        {
+          id: 'p1',
+          label: 'p1',
+          x: 10,
+          y: 20,
+          planet: { id: 1 },
+          normalWellCells: cells,
+        },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].normalWellCells).toEqual(cells)
+  })
+
+  it('drops normalWellCells with non-integer or coercible-invalid coordinates', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        {
+          id: 'p1',
+          label: 'p1',
+          x: 10,
+          y: 20,
+          normalWellCells: [
+            { x: 10, y: 20 },
+            { x: null, y: 0 },
+            { x: true, y: 0 },
+            { x: '', y: 0 },
+            { x: 10.5, y: 20 },
+            { x: '11', y: '20' },
+            { x: 12, y: 21 },
+          ],
+        },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].normalWellCells).toEqual([
+      { x: 10, y: 20 },
+      { x: 11, y: 20 },
+      { x: 12, y: 21 },
+    ])
+  })
+
   it('reads nested snapshot from Planet key when planet is absent', () => {
     const raw = {
       analyticId: 'base-map',

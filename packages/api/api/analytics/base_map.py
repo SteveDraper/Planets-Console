@@ -1,5 +1,6 @@
 """Core base-map analytic."""
 
+from api.concepts.warp_well import WarpWellKind, map_cell_indices_in_warp_well
 from api.models.game import TurnInfo
 from api.serialization.planet import planet_to_public_json
 
@@ -17,6 +18,10 @@ def get_base_map(turn: TurnInfo) -> dict:
     nodes = []
     for planet in turn.planets:
         pid = f"p{planet.id}"
+        normal_well_cells = [
+            {"x": gx, "y": gy}
+            for gx, gy in map_cell_indices_in_warp_well(planet, WarpWellKind.NORMAL)
+        ]
         nodes.append(
             {
                 "id": pid,
@@ -25,6 +30,7 @@ def get_base_map(turn: TurnInfo) -> dict:
                 "y": planet.y,
                 "planet": planet_to_public_json(planet),
                 "ownerName": owner_name(planet.ownerid),
+                "normalWellCells": normal_well_cells,
             }
         )
     return {"analyticId": ANALYTIC_ID, "nodes": nodes, "edges": []}

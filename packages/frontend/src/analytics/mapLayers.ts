@@ -22,11 +22,15 @@ export function combineMapData(
         x: n.x,
         y: n.y,
       }
+      const node: CombinedMapData['nodes'][number] = { ...base }
       if (n.planet != null) {
-        nodes.push({ ...base, planet: n.planet, ownerName: n.ownerName ?? null })
-      } else {
-        nodes.push(base)
+        node.planet = n.planet
+        node.ownerName = n.ownerName ?? null
       }
+      if (n.normalWellCells != null) {
+        node.normalWellCells = n.normalWellCells
+      }
+      nodes.push(node)
     })
     data.edges.forEach((e) => {
       const edge: MapEdge = {

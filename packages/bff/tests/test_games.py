@@ -12,8 +12,8 @@ from api.storage import clear_backend_cache, get_storage
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
+from bff.core_client import clear_sector_title_cache
 from bff.diagnostics_buffer import get_diagnostics_buffer
-from bff.routers import games as games_router
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -24,7 +24,7 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "api" / "api" / "st
 @pytest.fixture(autouse=True)
 def _reset_storage():
     clear_backend_cache()
-    games_router._sector_title_by_stored_game_id.clear()
+    clear_sector_title_cache()
     set_bff_config(BffConfig())
     get_diagnostics_buffer().clear()
     set_api_config(
@@ -98,7 +98,7 @@ def test_list_games_does_not_re_read_info_when_sector_titles_are_cached():
     assert info_reads == ["games/111/info", "games/222/info"]
 
 
-@patch("bff.routers.games.PlanetsNuClient")
+@patch("bff.core_client.PlanetsNuClient")
 def test_post_game_info_refresh_with_cached_key(mock_pc_class):
     """POST /games/{id}/info delegates to Core refresh; Planets client is used for loadinfo."""
     with open(ASSETS_DIR / "game_info_sample.json") as f:
@@ -120,7 +120,7 @@ def test_post_game_info_refresh_with_cached_key(mock_pc_class):
     mock_instance.login.assert_not_called()
 
 
-@patch("bff.routers.games.PlanetsNuClient")
+@patch("bff.core_client.PlanetsNuClient")
 def test_post_game_info_refresh_401_without_credentials(mock_pc_class):
     mock_pc_class.from_config.return_value = object()
     response = client.post(
@@ -130,7 +130,7 @@ def test_post_game_info_refresh_401_without_credentials(mock_pc_class):
     assert response.status_code == 401
 
 
-@patch("bff.routers.games.PlanetsNuClient")
+@patch("bff.core_client.PlanetsNuClient")
 def test_post_turns_ensure_uses_loadturn_when_missing(mock_pc_class):
     with open(ASSETS_DIR / "turn_sample.json") as f:
         rst = json.load(f)
@@ -185,7 +185,19 @@ def test_get_stored_turn_perspectives_empty_when_missing():
     assert response.json() == {"perspectives": []}
 
 
-@patch("bff.routers.games.PlanetsNuClient")
+def test_get_stored_turn_perspectives_includes_diagnostics_when_requested():
+    storage = get_storage()
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+    response = client.get("/games/628580/turns/111/stored-perspectives?includeDiagnostics=true")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["perspectives"] == [1]
+    assert "diagnostics" in body
+    assert body["diagnostics"]["name"] == ("GET /games/628580/turns/111/stored-perspectives")
+
+
+@patch("bff.core_client.PlanetsNuClient")
 def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     mock_instance = mock_pc_class.from_config.return_value
     storage = get_storage()
@@ -207,7 +219,7 @@ def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     mock_instance.load_turn.assert_not_called()
 
 
-@patch("bff.routers.games.PlanetsNuClient")
+@patch("bff.core_client.PlanetsNuClient")
 def test_post_turns_ensure_empty_username_when_turn_in_storage(mock_pc_class):
     """Turn already in storage: no username and no Planets.nu loadturn."""
     mock_instance = mock_pc_class.from_config.return_value

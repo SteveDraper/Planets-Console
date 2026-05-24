@@ -1,7 +1,15 @@
 """BFF Connections map analytic handler."""
 
 from api.diagnostics import Diagnostics
+from api.transport.connections_options import (
+    FLARE_DEPTH_QUERY,
+    FLARE_MODE_QUERY,
+    GRAVITONIC_MOVEMENT_QUERY,
+    INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
+    WARP_SPEED_QUERY,
+)
 
+from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import (
     ConnectionsMapQuery,
     CoreAnalyticsLoader,
@@ -11,22 +19,14 @@ from bff.analytics.models import (
 
 ANALYTIC_ID = "connections"
 
-METADATA = {
-    "id": ANALYTIC_ID,
-    "name": "Connections",
-    "supportsTable": False,
-    "supportsMap": True,
-    "type": "selectable",
-}
-
 
 def diagnostic_values(query: ConnectionsMapQuery) -> dict:
     return {
-        "warpSpeed": query.warp_speed,
-        "gravitonicMovement": query.gravitonic_movement,
-        "flareMode": str(query.flare_mode.value),
-        "flareDepth": query.flare_depth,
-        "includeIllustrativeRoutes": query.include_illustrative_routes,
+        WARP_SPEED_QUERY: query.warp_speed,
+        GRAVITONIC_MOVEMENT_QUERY: query.gravitonic_movement,
+        FLARE_MODE_QUERY: str(query.flare_mode.value),
+        FLARE_DEPTH_QUERY: query.flare_depth,
+        INCLUDE_ILLUSTRATIVE_ROUTES_QUERY: query.include_illustrative_routes,
     }
 
 
@@ -47,3 +47,14 @@ def get_map(
         connection_flare_depth=query.flare_depth,
         connection_include_illustrative_routes=query.include_illustrative_routes,
     )
+
+
+DESCRIPTOR = AnalyticDescriptor(
+    id=ANALYTIC_ID,
+    name="Connections",
+    supports_table=False,
+    supports_map=True,
+    type="selectable",
+    get_map=get_map,
+    map_diagnostic_values=diagnostic_values,
+)

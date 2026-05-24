@@ -9,21 +9,24 @@ from pathlib import Path
 import pytest
 from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.planet_connections import (
-    FlareConnectionMode,
-    _max_flare_arrival_extent,
-    _pair_has_direct_connection,
-    _PlanetSpatialIndex,
-    _reachable_via_flare_limited_depth,
     connection_routes_for_planets,
     connection_routes_with_options,
-    max_travel_distance,
-    min_distance_point_to_simplified_normal_well,
+)
+from api.concepts.planet_connections.flare_pathfind import (
+    _max_flare_arrival_extent,
+    _reachable_via_flare_limited_depth,
     validate_illustrative_flare_route,
 )
-from api.concepts.warp_well import NORMAL_RADIUS
+from api.concepts.planet_connections.spatial_index import _PlanetSpatialIndex
+from api.concepts.planet_connections.wells import (
+    _pair_has_direct_connection,
+    max_travel_distance,
+)
+from api.concepts.warp_well import NORMAL_RADIUS, min_distance_to_reachability_well
 from api.models.flare_point import FlarePoint
-from api.services.game_service import GameService
+from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
+from api.transport.connections_options import FlareConnectionMode
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -35,8 +38,8 @@ def sample_planet():
         backend.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
         backend.put("games/628580/1/turns/111", json.load(f))
-    svc = GameService(backend)
-    return svc.get_planet_from_turn(628580, 1, 111, 1)
+    _, turns, _, _ = build_service_stack(backend)
+    return turns.get_planet_from_turn(628580, 1, 111, 1)
 
 
 def _p(base, pid: int, x: int, y: int, debris: int = 0):
@@ -52,23 +55,23 @@ class TestMaxTravelDistance:
         assert max_travel_distance(9, True) == 162.0
 
 
-class TestMinDistanceSimplifiedWell:
+class TestMinDistanceReachabilityWell:
     def test_debris_is_point_distance(self, sample_planet):
         debris = _p(sample_planet, 1, 10, 10, debris=1)
-        assert min_distance_point_to_simplified_normal_well(10.0, 10.0, debris) == 0.0
-        assert min_distance_point_to_simplified_normal_well(11.0, 10.0, debris) == 1.0
+        assert min_distance_to_reachability_well(10.0, 10.0, debris) == 0.0
+        assert min_distance_to_reachability_well(11.0, 10.0, debris) == 1.0
 
     def test_normal_well_shrinks_by_radius(self, sample_planet):
         p = _p(sample_planet, 1, 0, 0, debris=0)
-        assert min_distance_point_to_simplified_normal_well(3.0, 0.0, p) == 0.0
-        assert min_distance_point_to_simplified_normal_well(10.0, 0.0, p) == 7.0
+        assert min_distance_to_reachability_well(3.0, 0.0, p) == 0.0
+        assert min_distance_to_reachability_well(10.0, 0.0, p) == 7.0
 
 
 def _brute_force_direct(a, b, max_travel: float) -> bool:
     ax, ay = float(a.x), float(a.y)
     bx, by = float(b.x), float(b.y)
-    return min_distance_point_to_simplified_normal_well(ax, ay, b) <= max_travel + 1e-9 or (
-        min_distance_point_to_simplified_normal_well(bx, by, a) <= max_travel + 1e-9
+    return min_distance_to_reachability_well(ax, ay, b) <= max_travel + 1e-9 or (
+        min_distance_to_reachability_well(bx, by, a) <= max_travel + 1e-9
     )
 
 

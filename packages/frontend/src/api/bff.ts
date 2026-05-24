@@ -161,6 +161,12 @@ export type TableDataResponse = {
   rows: string[][]
 }
 
+/** Map cell whose center lies in a planet's normal warp well (from base-map). */
+export type NormalWellMapCell = {
+  x: number
+  y: number
+}
+
 /** Node position in the map's fixed Cartesian coordinate system. */
 export type MapNode = {
   id: string
@@ -171,6 +177,8 @@ export type MapNode = {
   planet?: Record<string, unknown>
   /** Resolved from turn players when `planet` is present. */
   ownerName?: string | null
+  /** Normal warp well cells from base-map; empty for debris-disk planets. */
+  normalWellCells?: NormalWellMapCell[]
 }
 
 /** Edge in map wire format or after combining route pairs onto base-map node ids. */
@@ -221,6 +229,13 @@ function parseJsonFiniteNumber(value: unknown): number | null {
     return Number.isFinite(n) ? n : null
   }
   return null
+}
+
+/** Parse a map grid cell index; must be a finite integer (no boolean/null/`""` coercion). */
+function parseJsonInteger(value: unknown): number | null {
+  const n = parseJsonFiniteNumber(value)
+  if (n == null || !Number.isInteger(n)) return null
+  return n
 }
 
 /**
@@ -353,6 +368,19 @@ function normalizeMapNode(raw: unknown): MapNode {
   }
   if (Object.prototype.hasOwnProperty.call(n, 'ownerName')) {
     base.ownerName = n.ownerName as string | null | undefined
+  }
+  const rawCells = n.normalWellCells ?? n.normal_well_cells
+  if (Array.isArray(rawCells)) {
+    base.normalWellCells = rawCells
+      .map((cell) => {
+        if (cell == null || typeof cell !== 'object') return null
+        const c = cell as Record<string, unknown>
+        const x = parseJsonInteger(c.x)
+        const y = parseJsonInteger(c.y)
+        if (x == null || y == null) return null
+        return { x, y }
+      })
+      .filter((cell): cell is NormalWellMapCell => cell != null)
   }
   return base
 }

@@ -33,8 +33,9 @@ TanStack Query owns **data fetched from the BFF** (the SPA never calls the Core 
 |---------|---------|----------|
 | `['bff', '<resource>']` | BFF lists or singleton metadata | `['bff', 'analytics']`, `['bff', 'games']` |
 | `['analytic', <id>, 'table', <scope>]` | Tabular analytic for a **game + turn + perspective** | Scope is `AnalyticShellScope` (or equivalent fields) so changing shell context **refetches** without manual `invalidateQueries`. |
-| `['analytic', <id>, 'map', ...]` | Map analytic. **base-map** uses key `['analytic', 'base-map', 'map', <scope>, 'planet']` (scope object). **connections** uses a **primitive** key tail so warp and flare settings invalidate cache: `['analytic','connections','map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode]`. |
-| `['bff', 'turnData', gameId, turn, perspective, loginName]` | **Turn presence in storage** (see below) | One logical ensure per distinct shell + identity; not used for analytic payloads. |
+| `['analytic', <id>, 'map', <scope>, 'planet-v2']` | Generic map fetch in `MainArea.tsx` (**base-map** and other map analytics except **connections**). `<scope>` is `AnalyticShellScope \| null`. The `'planet-v2'` suffix invalidates cache when base-map node shape changes (e.g. `normalWellCells`). |
+| `['analytic', 'connections', 'map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth]` | **Connections** map overlay (`MainArea.tsx`). Primitive scope + sidebar params so changing warp/flare settings refetches. When scope is not ready, the key uses `'idle', 0, 0` in place of `gameId, turn, perspective`. |
+| `['bff', 'turnData', gameId, turn, perspective, loginName, credentialsRevision]` | **Turn presence in storage** (see below) | One logical ensure per distinct shell + identity; `credentialsRevision` bumps on login/clear (not the password). |
 
 **Mutations** (`useMutation`) are for operations that **change server-side** data (e.g. `POST /bff/games/{id}/info`). They may call `queryClient.invalidateQueries` for related lists (e.g. games) when needed.
 
@@ -58,12 +59,12 @@ Rationale: **planets.nu** sometimes returns **502** for **non-transient** failur
 
 Turn blobs live in **Core storage** (`games/{gameId}/{perspective}/turns/{turn}`). The SPA must not fire turn-scoped **analytics** BFF GETs until that path is populated (either already present or loaded from Planets.nu **loadturn** via the ensure endpoint).
 
-**Ensure query (`App.tsx`):**
+**Ensure query (`useShellContext`):**
 
 - **Endpoint:** `POST /bff/games/{gameId}/turns/ensure` with `{ turn, perspective, username, password? }` (same credential pattern as game info refresh). Username may be empty **only** when the turn is **already** in storage (no Planets.nu loadturn); the shell enables this path when the selected game matches **`bff.show_initial_game`** from bootstrap config (dev/demo).
-- **Query key:** `['bff', 'turnData', gameId, turn, perspective, loginName]` (primitives only; **do not** put the session password in the key).
-- **Enabled** when shell scope is complete **and** either a non-empty login name is set **or** the “initial game without login” path applies (see `App.tsx` `turnAllowWithoutLogin`). If ensure is disabled because login is missing and the path above does not apply, the main area explains that turn data cannot be loaded.
-- **Caching:** `staleTime: Infinity` and `refetchOnWindowFocus: false` so a stable scope does not trigger duplicate ensure POSTs; changing game, turn, perspective, or login name changes the key and runs **at most one** new ensure for that key.
+- **Query key:** `['bff', 'turnData', gameId, turn, perspective, loginName, credentialsRevision]` (primitives only; **do not** put the session password in the key). `credentialsRevision` increments in the session store on `setCredentials` / `clearSession` so a corrected password refetches ensure even when the username is unchanged.
+- **Enabled** when shell scope is complete **and** either a non-empty login name is set **or** the “initial game without login” path applies (see `useShellContext` `turnEnsureEnabled`). If ensure is disabled because login is missing and the path above does not apply, the main area explains that turn data cannot be loaded.
+- **Caching:** `staleTime: Infinity` and `refetchOnWindowFocus: false` so a stable scope does not trigger duplicate ensure POSTs; changing game, turn, perspective, login name, or credentials revision changes the key and runs **at most one** new ensure for that key.
 
 **Why this yields a single ensure when turn and perspective change together (e.g. new game selection):**
 

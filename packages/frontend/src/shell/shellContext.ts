@@ -1,0 +1,177 @@
+import type { AnalyticShellScope } from '../api/bff'
+import type { GameInfoShellContext } from '../stores/shell'
+import {
+  perspectiveOrdinalForName,
+  perspectiveNameForOrdinal,
+  viewpointNameForLogin,
+  type PerspectiveRow,
+} from '../lib/gameInfoShell'
+
+export type ShellViewpointRow = {
+  name: string
+  raceName: string | null
+  disabled: boolean
+}
+
+export type ShellContextInputs = {
+  selectedGameId: string | null
+  gameInfoContext: GameInfoShellContext | null
+  selectedTurn: number | null
+  perspectiveOverrideName: string | null
+  loginName: string | null
+  storageOnlyLoad: boolean
+  storageAvailablePerspectives: number[] | null
+}
+
+export function deriveShellTurnMax(gameInfoContext: GameInfoShellContext | null): number | null {
+  const t = gameInfoContext?.turn
+  if (t == null || !Number.isFinite(t) || t < 1) return null
+  return Math.floor(t)
+}
+
+export function deriveShellDefaultViewpointName(
+  gameInfoContext: GameInfoShellContext | null,
+  loginName: string | null
+): string | null {
+  return gameInfoContext ? viewpointNameForLogin(gameInfoContext.perspectives, loginName) : null
+}
+
+export function deriveShellViewpoints(inputs: ShellContextInputs): ShellViewpointRow[] {
+  const perspectives = inputs.gameInfoContext?.perspectives ?? []
+  if (perspectives.length === 0) {
+    return []
+  }
+  const loginTrimmed = inputs.loginName?.trim() ?? ''
+  const storageSlots =
+    inputs.storageOnlyLoad && loginTrimmed === ''
+      ? new Set(inputs.storageAvailablePerspectives ?? [])
+      : null
+  if (storageSlots != null) {
+    return perspectives.map((row) => ({
+      name: row.name,
+      raceName: row.raceName,
+      disabled: !storageSlots.has(row.ordinal),
+    }))
+  }
+  const finished = inputs.gameInfoContext?.isGameFinished ?? true
+  if (finished) {
+    return perspectives.map((row) => ({
+      name: row.name,
+      raceName: row.raceName,
+      disabled: false,
+    }))
+  }
+  const allowed = deriveShellDefaultViewpointName(inputs.gameInfoContext, inputs.loginName)
+  return perspectives.map((row) => ({
+    name: row.name,
+    raceName: row.raceName,
+    disabled: allowed == null ? true : row.name !== allowed,
+  }))
+}
+
+export function deriveSelectedViewpointName(inputs: ShellContextInputs): string | null {
+  const perspectives = inputs.gameInfoContext?.perspectives ?? []
+  const shellPerspectiveNames = perspectives.map((p) => p.name)
+  if (shellPerspectiveNames.length === 0) return null
+
+  const loginTrimmed = inputs.loginName?.trim() ?? ''
+  if (inputs.storageOnlyLoad && loginTrimmed === '') {
+    const preferred = inputs.perspectiveOverrideName
+    if (preferred && shellPerspectiveNames.includes(preferred)) return preferred
+    const firstStored = inputs.storageAvailablePerspectives?.[0]
+    if (firstStored != null) {
+      const name = perspectiveNameForOrdinal(perspectives, firstStored)
+      if (name && shellPerspectiveNames.includes(name)) return name
+    }
+    return shellPerspectiveNames[0] ?? null
+  }
+
+  const finished = inputs.gameInfoContext?.isGameFinished ?? true
+  const shellDefaultViewpointName = deriveShellDefaultViewpointName(
+    inputs.gameInfoContext,
+    inputs.loginName
+  )
+  if (!finished) {
+    if (shellDefaultViewpointName && shellPerspectiveNames.includes(shellDefaultViewpointName)) {
+      return shellDefaultViewpointName
+    }
+    return shellPerspectiveNames[0] ?? null
+  }
+
+  const preferred = inputs.perspectiveOverrideName ?? shellDefaultViewpointName
+  if (preferred && shellPerspectiveNames.includes(preferred)) return preferred
+  return shellPerspectiveNames[0] ?? null
+}
+
+export function deriveAnalyticScope(inputs: ShellContextInputs): AnalyticShellScope | null {
+  if (!inputs.selectedGameId || inputs.selectedTurn == null) return null
+  const selectedViewpointName = deriveSelectedViewpointName(inputs)
+  const ordinal = perspectiveOrdinalForName(
+    inputs.gameInfoContext?.perspectives ?? [],
+    selectedViewpointName
+  )
+  if (ordinal == null) return null
+  return {
+    gameId: inputs.selectedGameId,
+    turn: inputs.selectedTurn,
+    perspective: ordinal,
+  }
+}
+
+export function deriveTurnEnsureEnabled(
+  analyticScope: AnalyticShellScope | null,
+  loginName: string | null,
+  storageOnlyLoad: boolean
+): boolean {
+  const loginTrimmed = loginName?.trim() ?? ''
+  return analyticScope != null && (loginTrimmed !== '' || storageOnlyLoad)
+}
+
+export function deriveTurnBlockedNoLogin(
+  analyticScope: AnalyticShellScope | null,
+  loginName: string | null,
+  storageOnlyLoad: boolean
+): boolean {
+  const loginTrimmed = loginName?.trim() ?? ''
+  return analyticScope != null && loginTrimmed === '' && !storageOnlyLoad
+}
+
+export function deriveTurnDataReady(turnEnsureEnabled: boolean, turnEnsureSuccess: boolean): boolean {
+  return turnEnsureEnabled && turnEnsureSuccess
+}
+
+/** Whether an in-progress override should be cleared after login change. */
+export function shouldClearInProgressPerspectiveOverride(
+  gameInfoContext: GameInfoShellContext | null,
+  loginName: string | null,
+  perspectiveOverrideName: string | null
+): boolean {
+  if (!gameInfoContext || gameInfoContext.isGameFinished) {
+    return false
+  }
+  const allowed = viewpointNameForLogin(gameInfoContext.perspectives, loginName)
+  if (perspectiveOverrideName == null || allowed == null) {
+    return false
+  }
+  return perspectiveOverrideName.toLowerCase() !== allowed.toLowerCase()
+}
+
+export function isViewpointChangeAllowed(
+  name: string,
+  gameInfoContext: GameInfoShellContext | null,
+  loginName: string | null,
+  storageOnlyLoad: boolean,
+  storageAvailablePerspectives: number[] | null,
+  perspectives: PerspectiveRow[]
+): boolean {
+  const loginTrimmed = loginName?.trim() ?? ''
+  if (storageOnlyLoad && loginTrimmed === '') {
+    const ordinal = perspectiveOrdinalForName(perspectives, name)
+    return ordinal != null && (storageAvailablePerspectives ?? []).includes(ordinal)
+  }
+  if (gameInfoContext && !gameInfoContext.isGameFinished) {
+    const allowed = viewpointNameForLogin(gameInfoContext.perspectives, loginName)
+    return allowed != null && name.trim().toLowerCase() === allowed.trim().toLowerCase()
+  }
+  return true
+}

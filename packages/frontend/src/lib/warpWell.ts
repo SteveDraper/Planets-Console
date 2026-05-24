@@ -1,97 +1,19 @@
 /**
- * Warp wells in map coordinates. Distance is Cartesian (Euclidean) in the map plane.
+ * Render server-provided normal warp well cells on the map (no well geometry math).
  */
 
-export type WarpWellType = 'normal' | 'hyperjump'
-
-const NORMAL_RADIUS = 3
-const HYPERJUMP_EXCLUSIVE_RADIUS = 3
-
-/**
- * Reads planets.nu-style `debrisdisk`; non-zero means the planet sits in a debris disk
- * and has no warp wells.
- */
-export function planetIsInDebrisDisk(planet: Record<string, unknown> | undefined): boolean {
-  if (planet == null) return false
-  const raw = planet.debrisdisk ?? planet.debrisDisk
-  const n = typeof raw === 'number' ? raw : Number(raw)
-  return Number.isFinite(n) && n !== 0
+export type WarpWellMapCell = {
+  x: number
+  y: number
 }
 
-export function warpWellCartesianDistance(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number
-): number {
-  return Math.hypot(ax - bx, ay - by)
+/** Map cell coordinates as they may appear before validation (e.g. JSON from the BFF). */
+export type UntrustedWarpWellMapCell = {
+  x: unknown
+  y: unknown
 }
 
-/**
- * Whether `(queryX, queryY)` lies in the given warp well around the planet at `(planetX, planetY)`.
- * Debris-disk planets never have a well.
- */
-export function isCoordinateInWarpWell(
-  planetX: number,
-  planetY: number,
-  planet: Record<string, unknown> | undefined,
-  queryX: number,
-  queryY: number,
-  wellType: WarpWellType
-): boolean {
-  if (planetIsInDebrisDisk(planet)) return false
-  const d = warpWellCartesianDistance(planetX, planetY, queryX, queryY)
-  if (wellType === 'normal') {
-    return d <= NORMAL_RADIUS
-  }
-  return d < HYPERJUMP_EXCLUSIVE_RADIUS
-}
-
-/**
- * Map cells whose center lies in the given warp well. When ``planet`` is set and the planet is
- * in a debris disk, returns no cells (matches ``api.concepts.warp_well``).
- */
-export function mapCellsInWarpWell(
-  planetMapX: number,
-  planetMapY: number,
-  wellType: WarpWellType,
-  planet?: Record<string, unknown>
-): { gx: number; gy: number }[] {
-  if (!Number.isFinite(planetMapX) || !Number.isFinite(planetMapY)) return []
-  if (planetIsInDebrisDisk(planet)) return []
-  const px = planetMapX
-  const py = planetMapY
-  const out: { gx: number; gy: number }[] = []
-  for (let dgx = -NORMAL_RADIUS; dgx <= NORMAL_RADIUS; dgx++) {
-    for (let dgy = -NORMAL_RADIUS; dgy <= NORMAL_RADIUS; dgy++) {
-      const gx = px + dgx
-      const gy = py + dgy
-      const d = warpWellCartesianDistance(px, py, gx, gy)
-      if (wellType === 'normal') {
-        if (d <= NORMAL_RADIUS) out.push({ gx, gy })
-      } else if (d < HYPERJUMP_EXCLUSIVE_RADIUS) {
-        out.push({ gx, gy })
-      }
-    }
-  }
-  return out
-}
-
-/**
- * Map cells whose center lies in the normal warp well (Euclidean distance from planet map cell
- * index `(planetMapX, planetMapY)` to `(gx, gy)` at most `NORMAL_RADIUS`). Same as distance
- * between cell centers because the offset is identical on both axes.
- *
- * Does not take planet snapshot: debris filtering is done by callers (e.g. map overlay).
- */
-export function mapCellsWithCenterInNormalWarpWell(
-  planetMapX: number,
-  planetMapY: number
-): { gx: number; gy: number }[] {
-  return mapCellsInWarpWell(planetMapX, planetMapY, 'normal', undefined)
-}
-
-/** Axis-aligned bounds in React Flow space for culling (see `normalWarpWellFlowBoundingBox`). */
+/** Axis-aligned bounds in React Flow space for culling. */
 export type NormalWarpWellFlowBounds = {
   flowXMin: number
   flowXMax: number
@@ -99,25 +21,59 @@ export type NormalWarpWellFlowBounds = {
   flowYMax: number
 }
 
+/** Axis-aligned segment in React Flow coordinates (same space as the coordinate grid). */
+export type WarpWellGridSegmentFlow = {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+/** Validate wire cells into integer map indices; empty when input is missing or invalid. */
+export function normalizeWarpWellMapCells(
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
+): WarpWellMapCell[] {
+  if (!Array.isArray(cells)) return []
+  const out: WarpWellMapCell[] = []
+  for (const c of cells) {
+    if (c == null || typeof c !== 'object') continue
+    const { x, y } = c
+    if (typeof x !== 'number' || typeof y !== 'number') continue
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    if (!Number.isInteger(x) || !Number.isInteger(y)) continue
+    out.push({ x, y })
+  }
+  return out
+}
+
 /**
  * Tight axis-aligned box in flow coordinates that contains every normal-well grid segment.
- * Map cells in the well have gx in [px - R, px + R] and gy in [py - R, py + R]; cell edges match
- * `CoordinateGridOverlay` (x from gx to gx+1, y from -(gy+1) to -gy).
+ * Map cells use gx/gy; cell edges match `CoordinateGridOverlay` (x from gx to gx+1, y from -(gy+1) to -gy).
  */
-export function normalWarpWellFlowBoundingBox(
-  planetMapX: number,
-  planetMapY: number
+export function flowBoundingBoxFromNormalizedWellCells(
+  normalized: readonly WarpWellMapCell[]
 ): NormalWarpWellFlowBounds | null {
-  if (!Number.isFinite(planetMapX) || !Number.isFinite(planetMapY)) return null
-  const px = planetMapX
-  const py = planetMapY
-  const r = NORMAL_RADIUS
-  return {
-    flowXMin: px - r,
-    flowXMax: px + r + 1,
-    flowYMin: -(py + r + 1),
-    flowYMax: -(py - r),
+  if (normalized.length === 0) return null
+  let flowXMin = Infinity
+  let flowXMax = -Infinity
+  let flowYMin = Infinity
+  let flowYMax = -Infinity
+  for (const { x: gx, y: gy } of normalized) {
+    flowXMin = Math.min(flowXMin, gx)
+    flowXMax = Math.max(flowXMax, gx + 1)
+    const yTop = -(gy + 1)
+    const yBottom = -gy
+    flowYMin = Math.min(flowYMin, yTop)
+    flowYMax = Math.max(flowYMax, yBottom)
   }
+  if (![flowXMin, flowXMax, flowYMin, flowYMax].every(Number.isFinite)) return null
+  return { flowXMin, flowXMax, flowYMin, flowYMax }
+}
+
+export function flowBoundingBoxFromWellCells(
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
+): NormalWarpWellFlowBounds | null {
+  return flowBoundingBoxFromNormalizedWellCells(normalizeWarpWellMapCells(cells))
 }
 
 /** Whether two closed flow-axis rectangles overlap (same convention as segment clipping). */
@@ -134,14 +90,6 @@ export function flowBoundsIntersect(
     a.flowYMin <= flowYMax &&
     a.flowYMax >= flowYMin
   )
-}
-
-/** Axis-aligned segment in React Flow coordinates (same space as the coordinate grid). */
-export type WarpWellGridSegmentFlow = {
-  x1: number
-  y1: number
-  x2: number
-  y2: number
 }
 
 function warpWellGridSegmentKey(s: WarpWellGridSegmentFlow): string {
@@ -179,14 +127,13 @@ function keyToSegment(key: string): WarpWellGridSegmentFlow | null {
  * Every coordinate edge of each map cell in the normal warp well (same integer lines as
  * `CoordinateGridOverlay`), with shared edges between adjacent well cells deduplicated.
  */
-export function normalWarpWellGridSegmentsFlow(
-  planetMapX: number,
-  planetMapY: number
+export function normalWellGridSegmentsFromNormalizedWellCells(
+  normalized: readonly WarpWellMapCell[]
 ): WarpWellGridSegmentFlow[] {
-  if (!Number.isFinite(planetMapX) || !Number.isFinite(planetMapY)) return []
+  if (normalized.length === 0) return []
   const keySet = new Set<string>()
 
-  for (const { gx, gy } of mapCellsWithCenterInNormalWarpWell(planetMapX, planetMapY)) {
+  for (const { x: gx, y: gy } of normalized) {
     const yTop = -(gy + 1)
     const yBottom = -gy
     const edges: WarpWellGridSegmentFlow[] = [
@@ -206,4 +153,10 @@ export function normalWarpWellGridSegmentsFlow(
     if (seg != null) out.push(seg)
   }
   return out
+}
+
+export function normalWellGridSegmentsFromCells(
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
+): WarpWellGridSegmentFlow[] {
+  return normalWellGridSegmentsFromNormalizedWellCells(normalizeWarpWellMapCells(cells))
 }

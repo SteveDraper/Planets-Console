@@ -8,6 +8,7 @@ import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
 from api.storage import clear_backend_cache, get_storage
+from bff.analytics import ANALYTICS_LIST
 from bff.app import app
 from fastapi.testclient import TestClient
 
@@ -47,7 +48,7 @@ def test_list_analytics_returns_analytics_list():
     assert "analytics" in data
     analytics = data["analytics"]
     assert isinstance(analytics, list)
-    assert len(analytics) >= 1
+    assert analytics == ANALYTICS_LIST
     for a in analytics:
         assert "id" in a
         assert "name" in a
@@ -115,24 +116,28 @@ def test_base_map_returns_planets_and_no_edges():
     first = nodes[0]
     assert "planet" in first and isinstance(first["planet"], dict)
     assert "ownerName" in first
+    assert "normalWellCells" in first
+    assert len(first["normalWellCells"]) == 29
 
 
-def test_get_analytic_map_returns_expected_structure():
-    """GET /analytics/{id}/map returns analyticId, nodes, edges."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
-    assert response.status_code == 200
-    data = response.json()
-    assert "analyticId" in data
-    assert data["analyticId"] == "placeholder-2"
-    assert "nodes" in data
-    assert "edges" in data
-    assert isinstance(data["nodes"], list)
-    assert isinstance(data["edges"], list)
+def test_get_analytic_map_unknown_id_returns_422():
+    response = client.get(f"/analytics/unknown-analytic/map?{SCOPE_QS}")
+    assert response.status_code == 422
+
+
+def test_get_analytic_table_unknown_id_returns_422():
+    response = client.get(f"/analytics/unknown-analytic/table?{SCOPE_QS}")
+    assert response.status_code == 422
+
+
+def test_get_analytic_table_unsupported_mode_returns_422():
+    response = client.get(f"/analytics/base-map/table?{SCOPE_QS}")
+    assert response.status_code == 422
 
 
 def test_get_analytic_map_nodes_have_id_label_x_y():
     """Map response nodes must have id, label, x, y with numeric x and y."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
+    response = client.get(f"/analytics/base-map/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     nodes = data["nodes"]
@@ -149,30 +154,6 @@ def test_get_analytic_map_nodes_have_id_label_x_y():
         assert not (isinstance(y, float) and math.isnan(y)), f"node {i} y must not be NaN"
 
 
-def test_get_analytic_map_placeholder_has_four_nodes_with_distinct_coordinates():
-    """Placeholder map returns 4 nodes with distinct (x,y) in a 200x200 square."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
-    assert response.status_code == 200
-    data = response.json()
-    nodes = data["nodes"]
-    assert len(nodes) == 4, "placeholder map must return exactly 4 nodes"
-    coords = [(n["x"], n["y"]) for n in nodes]
-    expected = {(0, 0), (200, 0), (200, 200), (0, 200)}
-    assert set(coords) == expected, f"expected nodes at {expected}, got {coords}"
-
-
-def test_get_analytic_map_edges_reference_node_ids():
-    """Map edges source/target must match node ids."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
-    assert response.status_code == 200
-    data = response.json()
-    node_ids = {n["id"] for n in data["nodes"]}
-    for edge in data["edges"]:
-        assert "source" in edge and "target" in edge
-        assert edge["source"] in node_ids, f"edge source {edge['source']} not in node ids"
-        assert edge["target"] in node_ids, f"edge target {edge['target']} not in node ids"
-
-
 def test_connections_map_returns_routes_not_nodes():
     """Connections analytic returns route pairs for the SPA to bind to base-map planet ids."""
     qs = f"{SCOPE_QS}&warpSpeed=9&gravitonicMovement=false&flareMode=off&flareDepth=1"
@@ -187,3 +168,16 @@ def test_connections_map_returns_routes_not_nodes():
     for row in data["routes"]:
         assert row["fromPlanetId"] < row["toPlanetId"]
         assert isinstance(row["viaFlare"], bool)
+
+
+def test_connections_map_accepts_full_query_contract():
+    """BFF accepts the same Connections query params as Core, including illustrative routes."""
+    qs = (
+        f"{SCOPE_QS}&warpSpeed=8&gravitonicMovement=true&flareMode=include&flareDepth=2"
+        "&includeIllustrativeRoutes=true"
+    )
+    response = client.get(f"/analytics/connections/map?{qs}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "connections"
+    assert isinstance(data["routes"], list)

@@ -63,4 +63,25 @@ describe('combineMapData', () => {
       },
     ])
   })
+
+  it('keeps normalWellCells on combined base-map nodes for the warp-well overlay', () => {
+    const cells = [{ x: 10, y: 20 }]
+    const baseMap: MapDataResponse = {
+      analyticId: 'base-map',
+      nodes: [
+        {
+          id: 'p1',
+          label: 'p1',
+          x: 10,
+          y: 20,
+          planet: { id: 1, debrisdisk: 0 },
+          normalWellCells: cells,
+        },
+      ],
+      edges: [],
+    }
+
+    const combined = combineMapData(['base-map'], [{ data: baseMap }], null)
+    expect(combined.nodes[0].normalWellCells).toEqual(cells)
+  })
 })

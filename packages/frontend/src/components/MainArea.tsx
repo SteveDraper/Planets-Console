@@ -208,7 +208,7 @@ export function MainArea({
         }
       }
       return {
-        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet'] as const,
+        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
         queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
         enabled: analyticFetchEnabled,
         structuralSharing: false as const,
