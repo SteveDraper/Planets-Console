@@ -72,31 +72,37 @@ class CoreClient:
             ) from exc
 
     def list_stored_games(self) -> dict[str, list[dict[str, str]]]:
-        try:
-            shallow = self._store.read_shallow("games")
-        except NotFoundError:
-            return {"games": []}
-        children = shallow.get("children") or []
-        games: list[dict[str, str]] = []
-        for child in children:
-            game_id = str(child)
-            entry: dict[str, str] = {"id": game_id}
-            sector = self._resolved_sector_title_for_listed_game(game_id)
-            if sector is not None:
-                entry["sectorName"] = sector
-            games.append(entry)
-        return {"games": games}
+        def work() -> dict[str, list[dict[str, str]]]:
+            try:
+                shallow = self._store.read_shallow("games")
+            except NotFoundError:
+                return {"games": []}
+            children = shallow.get("children") or []
+            games: list[dict[str, str]] = []
+            for child in children:
+                game_id = str(child)
+                entry: dict[str, str] = {"id": game_id}
+                sector = self._resolved_sector_title_for_listed_game(game_id)
+                if sector is not None:
+                    entry["sectorName"] = sector
+                games.append(entry)
+            return {"games": games}
+
+        return self._invoke(work)
 
     def _resolved_sector_title_for_listed_game(self, game_id: str) -> str | None:
         cached = _sector_title_by_stored_game_id.get(game_id)
         if cached is not None or game_id in _sector_title_by_stored_game_id:
             return cached
-        try:
-            raw = self._store.read(f"games/{game_id}/info")
-        except NotFoundError:
-            _sector_title_by_stored_game_id[game_id] = None
-            return None
-        title = sector_display_name_from_stored_payload(raw)
+
+        def read_title() -> str | None:
+            try:
+                raw = self._store.read(f"games/{game_id}/info")
+            except NotFoundError:
+                return None
+            return sector_display_name_from_stored_payload(raw)
+
+        title = self._invoke(read_title)
         _sector_title_by_stored_game_id[game_id] = title
         return title
 

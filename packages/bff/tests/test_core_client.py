@@ -39,6 +39,30 @@ def test_list_stored_games_returns_empty_when_games_path_missing():
     assert client.list_stored_games() == {"games": []}
 
 
+def test_list_stored_games_maps_store_errors_to_http():
+    store = MagicMock()
+    store.read_shallow.side_effect = ValidationError("bad games path")
+    client = CoreClient(store_service=store)
+
+    with pytest.raises(HTTPException) as exc:
+        client.list_stored_games()
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "bad games path"
+
+
+def test_resolved_sector_title_maps_store_read_errors_to_http():
+    store = MagicMock()
+    store.read.side_effect = ValidationError("bad info payload")
+    client = CoreClient(store_service=store)
+
+    with pytest.raises(HTTPException) as exc:
+        client._resolved_sector_title_for_listed_game("628580")
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "bad info payload"
+
+
 def test_warp_well_coordinate_in_well_delegates_to_shared_handler():
     concepts = MagicMock()
     concepts.warp_well_coordinate_in_well.return_value = True
