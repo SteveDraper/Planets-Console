@@ -19,14 +19,14 @@ Related docs:
 ## Core API
 
 - Shared route: `GET /api/v1/games/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}`.
-- Turn loading stays in `TurnLoadService`; analytics dispatch in `GameService.get_turn_analytics(...)`.
+- Turn loading stays in `TurnLoadService`; analytics dispatch in `TurnAnalyticService.get_turn_analytics(...)` (`packages/api/api/services/turn_analytic_service.py`).
 - Per-analytic response construction lives under `packages/api/api/analytics/`:
   - `base_map.py`
   - `scores.py`
   - `connections.py`
   - `registry.py` -- `TURN_ANALYTICS` id-to-handler map
 
-`get_turn_analytic(...)` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to the registry.
+`TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
 
 **Core registry shape:** a flat `TURN_ANALYTICS` dict (id → handler). Core does not use BFF-style descriptors -- it only computes from `TurnInfo`. Catalog metadata and response shaping stay in BFF. The parity test in `test_analytics_registry.py` keeps Core ids aligned with BFF `REGISTERED_ANALYTICS`.
 
