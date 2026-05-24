@@ -39,6 +39,17 @@ describe('normalWellGridSegmentsFromCells', () => {
     )
     expect(hasSharedWall).toBe(true)
   })
+
+  it('drops cells with non-numeric or non-finite coordinates (no coercion)', () => {
+    const segs = normalWellGridSegmentsFromCells([
+      { x: 0, y: 0 },
+      { x: '1', y: 0 },
+      { x: 1, y: Number.NaN },
+      { x: 1, y: 0 },
+    ])
+    expect(segs.length).toBeGreaterThan(0)
+    expect(normalWellGridSegmentsFromCells([{ x: '0', y: 0 }])).toEqual([])
+  })
 })
 
 describe('flowBoundingBoxFromWellCells', () => {

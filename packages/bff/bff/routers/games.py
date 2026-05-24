@@ -37,7 +37,11 @@ from bff.diagnostics_dep import (
     optional_request_root,
     with_timed_child,
 )
-from bff.transport.game_responses import BffGameInfoResponse, BffTurnInfoResponse
+from bff.transport.game_responses import (
+    BffGameInfoResponse,
+    BffTurnInfoResponse,
+    StoredTurnPerspectivesResponse,
+)
 
 router = APIRouter()
 
@@ -58,7 +62,10 @@ def list_stored_games(
     return finish_response(body, root)
 
 
-@router.get("/{game_id}/turns/{turn_number}/stored-perspectives")
+@router.get(
+    "/{game_id}/turns/{turn_number}/stored-perspectives",
+    response_model=StoredTurnPerspectivesResponse,
+)
 def get_stored_turn_perspectives(
     game_id: int,
     turn_number: int = Path(..., ge=1),

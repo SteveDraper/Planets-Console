@@ -7,6 +7,12 @@ export type WarpWellMapCell = {
   y: number
 }
 
+/** Map cell coordinates as they may appear before validation (e.g. JSON from the BFF). */
+export type UntrustedWarpWellMapCell = {
+  x: unknown
+  y: unknown
+}
+
 /** Axis-aligned bounds in React Flow space for culling. */
 export type NormalWarpWellFlowBounds = {
   flowXMin: number
@@ -23,15 +29,17 @@ export type WarpWellGridSegmentFlow = {
   y2: number
 }
 
-function normalizeWellCells(cells: WarpWellMapCell[] | undefined): WarpWellMapCell[] {
+function normalizeWellCells(
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
+): WarpWellMapCell[] {
   if (!Array.isArray(cells)) return []
   const out: WarpWellMapCell[] = []
   for (const c of cells) {
-    const x = typeof c.x === 'number' ? c.x : Number(c.x)
-    const y = typeof c.y === 'number' ? c.y : Number(c.y)
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      out.push({ x, y })
-    }
+    if (c == null || typeof c !== 'object') continue
+    const { x, y } = c
+    if (typeof x !== 'number' || typeof y !== 'number') continue
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    out.push({ x, y })
   }
   return out
 }
@@ -41,7 +49,7 @@ function normalizeWellCells(cells: WarpWellMapCell[] | undefined): WarpWellMapCe
  * Map cells use gx/gy; cell edges match `CoordinateGridOverlay` (x from gx to gx+1, y from -(gy+1) to -gy).
  */
 export function flowBoundingBoxFromWellCells(
-  cells: WarpWellMapCell[] | undefined
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
 ): NormalWarpWellFlowBounds | null {
   const normalized = normalizeWellCells(cells)
   if (normalized.length === 0) return null
@@ -113,7 +121,7 @@ function keyToSegment(key: string): WarpWellGridSegmentFlow | null {
  * `CoordinateGridOverlay`), with shared edges between adjacent well cells deduplicated.
  */
 export function normalWellGridSegmentsFromCells(
-  cells: WarpWellMapCell[] | undefined
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
 ): WarpWellGridSegmentFlow[] {
   const normalized = normalizeWellCells(cells)
   if (normalized.length === 0) return []
