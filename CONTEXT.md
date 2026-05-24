@@ -124,6 +124,10 @@ _Avoid_: per-turn helper
 A **game concept** that does not depend on loaded game state (e.g. flare-point offset tables keyed by warp speed). Exposed under Core `/v1/concepts/...` without a turn path.
 _Avoid_: static lookup, catalog endpoint
 
+**Connections engine**:
+The public entry for planet-pair reachability in one turn (`connection_engine.py` under `planet_connections/`). The **Connections** turn analytic calls `connection_routes_with_options`; spatial index, annuli, and flare BFS stay private to the package.
+_Avoid_: planet_connections module (when meaning the engine entry only)
+
 ### Storage
 
 **Logical store path**:

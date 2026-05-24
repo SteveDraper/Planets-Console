@@ -6,7 +6,8 @@ This document describes the **Connections** analytic: **one-turn ship reachabili
 
 | Layer | Location |
 |--------|----------|
-| Reachability + flare pairing | `packages/api/api/concepts/planet_connections.py` |
+| Connections engine (public entry) | `packages/api/api/concepts/planet_connections/connection_engine.py` |
+| Engine internals (private) | `packages/api/api/concepts/planet_connections/` (`annuli`, `flare_pathfind`, `spatial_index`, …) |
 | Flare offset tables (per warp, regular vs gravitonic) | `packages/api/api/concepts/flare_points.py`, `flare_point_quadrant_seeds.py` |
 | Warp well geometry (shared with other features) | `packages/api/api/concepts/warp_well.py` |
 | Core analytics adapter | `packages/api/api/analytics/connections.py` |
@@ -29,7 +30,7 @@ Output is a list of **routes** (unordered pairs with flags), not a full pathfind
 
 ## 2. Domain model (simplified Host alignment)
 
-- **Max travel distance** in map units: `warp_speed ** 2`, or **twice** that when **gravitonic movement** is on (`max_travel_distance` in `planet_connections.py`).
+- **Max travel distance** in map units: `warp_speed ** 2`, or **twice** that when **gravitonic movement** is on (`max_travel_distance` in `planet_connections/wells.py`).
 - **Normal warp well** around each planet (non--debris-disk): Euclidean distance from planet map cell to query point **≤ 3** (`NORMAL_RADIUS` in `warp_well.py`). Debris-disk planets use a **point-only** well for distance checks (see `planet_connections` helpers).
 - **Direct connection:** From planet A, the **minimum distance** from A’s position to planet B’s **well** (or point, for debris) is **≤ max travel**. Undirected edge if either direction qualifies.
 - **Flare connection:** Uses a **static table** of **flare points** per warp and movement kind. Each row gives:
@@ -65,7 +66,7 @@ Strings on the wire match the enum values: `off`, `include`, `only`.
   - `connection_flare_depth` (int 1--3, default **1**): **hop budget** for mixed normal-move + flare BFS. Each hop is a normal well move (within max travel) or a flare from the static table; a valid path must use **at least one** flare. This is not a "flares in a row" count. Pair discovery also unions **per-k** center-distance **annuli** (k = 1…depth), so increasing depth can only add candidate pairs and longer mixed paths, not remove pairs that were already eligible at a smaller depth.
   - Optional: `connection_include_illustrative_routes` when the client wants per-hop `illustrativeRoute` steps on flare rows (BFF may set this from the SPA when depth ≥2 and flares are on).
 
-Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`connection_routes_with_options`** (`planet_connections` package) through the Core analytics adapter.
+Implementation loads **`TurnInfo`**, takes `list(turn.planets)`, and calls **`connection_routes_with_options`** on the Connections engine through the Core analytics adapter.
 
 ---
 

@@ -9,21 +9,24 @@ from pathlib import Path
 import pytest
 from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.planet_connections import (
-    FlareConnectionMode,
-    _max_flare_arrival_extent,
-    _pair_has_direct_connection,
-    _PlanetSpatialIndex,
-    _reachable_via_flare_limited_depth,
     connection_routes_for_planets,
     connection_routes_with_options,
-    max_travel_distance,
-    min_distance_to_reachability_well,
+)
+from api.concepts.planet_connections.flare_pathfind import (
+    _max_flare_arrival_extent,
+    _reachable_via_flare_limited_depth,
     validate_illustrative_flare_route,
 )
-from api.concepts.warp_well import NORMAL_RADIUS
+from api.concepts.planet_connections.spatial_index import _PlanetSpatialIndex
+from api.concepts.planet_connections.wells import (
+    _pair_has_direct_connection,
+    max_travel_distance,
+)
+from api.concepts.warp_well import NORMAL_RADIUS, min_distance_to_reachability_well
 from api.models.flare_point import FlarePoint
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
+from api.transport.connections_options import FlareConnectionMode
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 

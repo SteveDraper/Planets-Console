@@ -1,4 +1,8 @@
-"""Assemble connection route rows: direct and flare-assisted pairs (canonical public API)."""
+"""Public entry for the Connections game concept engine (one-turn planet-pair reachability).
+
+Callers outside this package should use :func:`connection_routes_with_options` only.
+Implementation modules (spatial index, annuli, flare BFS, lattice enumeration) are private.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +26,27 @@ from api.concepts.warp_well import NORMAL_RADIUS
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
 from api.models.planet import Planet
 from api.transport.connections_options import FlareConnectionMode
+
+
+def _seed_engine_diagnostics(
+    engine: Diagnostics,
+    *,
+    planets: list[Planet],
+    warp_speed: int,
+    gravitonic_movement: bool,
+    flare_mode: FlareConnectionMode,
+    flare_depth: int,
+    include_illustrative_routes: bool,
+    flare_bfs_use_distance_prune: bool,
+) -> None:
+    """Record request-scoped inputs at the engine boundary (no-op when diagnostics disabled)."""
+    engine.values["planetCount"] = len(planets)
+    engine.values["warpSpeed"] = warp_speed
+    engine.values["gravitonicMovement"] = gravitonic_movement
+    engine.values["flareMode"] = flare_mode.value
+    engine.values["flareDepth"] = flare_depth
+    engine.values["includeIllustrativeRoutes"] = include_illustrative_routes
+    engine.values["flareBfsUseDistancePrune"] = flare_bfs_use_distance_prune
 
 
 def _iter_flare_candidate_edges(
@@ -91,8 +116,8 @@ def connection_routes_with_options(
 
     Flare **pair discovery** uses per-*k* center-distance annuli
     ``(k*max_travel, k*hop_loose + NORMAL_RADIUS]`` (see
-    :func:`_build_flare_eligible_per_depth_center_annuli`); results for k ≤ ``flare_depth`` are
-    unioned so larger ``flare_depth`` only adds candidates.
+    :func:`api.concepts.planet_connections.annuli._build_flare_eligible_per_depth_center_annuli`);
+    results for k ≤ ``flare_depth`` are unioned so larger ``flare_depth`` only adds candidates.
 
     **Candidates:** the spatial index is queried for inner disc and outer flare reach; expensive
     flare BFS runs only for annulus pairs. Set ``flare_bfs_use_distance_prune`` to False only
@@ -101,7 +126,22 @@ def connection_routes_with_options(
     if flare_depth < 1 or flare_depth > _MAX_FLARE_CHAIN_DEPTH:
         msg = f"flare_depth must be 1, 2, or 3, got {flare_depth}"
         raise ValueError(msg)
+
+    engine = diagnostics.child("connection_engine")
+    _seed_engine_diagnostics(
+        engine,
+        planets=planets,
+        warp_speed=warp_speed,
+        gravitonic_movement=gravitonic_movement,
+        flare_mode=flare_mode,
+        flare_depth=flare_depth,
+        include_illustrative_routes=include_illustrative_routes,
+        flare_bfs_use_distance_prune=flare_bfs_use_distance_prune,
+    )
+
     max_travel = max_travel_distance(warp_speed, gravitonic_movement)
+    engine.values["maxTravel"] = max_travel
+
     movement = FlareMovementKind.GRAVITONIC if gravitonic_movement else FlareMovementKind.REGULAR
     use_flare_geometry = flare_mode is not FlareConnectionMode.OFF
     flares = flare_points_for_warp(warp_speed, movement) if use_flare_geometry else []
@@ -118,7 +158,7 @@ def connection_routes_with_options(
 
     index = _PlanetSpatialIndex(planets)
     sorted_planets = sorted(planets, key=lambda p: p.id)
-    cr = diagnostics.child("connection_routes")
+    cr = engine.child("connection_routes")
     hop_loose = max_travel
     if use_flare_geometry and flares:
         hop_loose = max(max_travel, _max_flare_arrival_extent(flares))
@@ -242,7 +282,7 @@ def connection_routes_for_planets(
     flare_bfs_use_distance_prune: bool = True,
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
 ) -> list[dict[str, bool | int]]:
-    """Same as :func:`connection_routes_with_options` without illustrative routes or diagnostics."""
+    """Same as :func:`connection_routes_with_options` without illustrative routes."""
     return connection_routes_with_options(
         planets,
         warp_speed=warp_speed,
