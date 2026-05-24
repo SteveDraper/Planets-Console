@@ -101,9 +101,30 @@ def test_refresh_game_info_updates_sector_title_cache():
     assert client._resolved_sector_title_for_listed_game("628580") == "Cached Sector"
 
 
+def test_ensure_turn_returns_stored_turn_without_planets_client():
+    turns = MagicMock()
+    turn = MagicMock()
+    turns.get_turn_info.return_value = turn
+    factory = MagicMock()
+    client = CoreClient(
+        turn_load_service=turns,
+        store_service=MagicMock(),
+        planets_client_factory=factory,
+    )
+    body = TurnEnsureRequest(turn=111, perspective=1, username="player1")
+
+    result = client.ensure_turn(628580, body)
+
+    assert result is turn
+    turns.get_turn_info.assert_called_once_with(628580, 1, 111)
+    turns.ensure_turn_loaded.assert_not_called()
+    factory.assert_not_called()
+
+
 def test_ensure_turn_delegates_with_refresh_params():
     turns = MagicMock()
     turn = MagicMock()
+    turns.get_turn_info.side_effect = NotFoundError("missing")
     turns.ensure_turn_loaded.return_value = turn
     planets = MagicMock()
     client = CoreClient(
@@ -116,5 +137,6 @@ def test_ensure_turn_delegates_with_refresh_params():
     result = client.ensure_turn(628580, body)
 
     assert result is turn
+    turns.get_turn_info.assert_called_once_with(628580, 1, 111)
     turns.ensure_turn_loaded.assert_called_once()
     assert turns.ensure_turn_loaded.call_args[0][4] is planets

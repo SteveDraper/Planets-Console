@@ -134,17 +134,20 @@ class CoreClient:
         return updated
 
     def ensure_turn(self, game_id: int, body: TurnEnsureRequest) -> TurnInfo:
-        planets = self._planets_client_factory()
         params = RefreshGameInfoParams(username=body.username, password=body.password)
 
         def work() -> TurnInfo:
-            return self._turns.ensure_turn_loaded(
-                game_id,
-                body.perspective,
-                body.turn,
-                params,
-                planets,
-            )
+            try:
+                return self._turns.get_turn_info(game_id, body.perspective, body.turn)
+            except NotFoundError:
+                planets = self._planets_client_factory()
+                return self._turns.ensure_turn_loaded(
+                    game_id,
+                    body.perspective,
+                    body.turn,
+                    params,
+                    planets,
+                )
 
         return self._invoke(work)
 

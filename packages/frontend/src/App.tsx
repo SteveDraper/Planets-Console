@@ -155,7 +155,7 @@ function ConsoleShell() {
       refreshGameMutation.mutate({
         gameId,
         username: name?.trim() ?? '',
-        password: password?.trim() ? password : undefined,
+        password: password || undefined,
       })
     },
     [refreshGameMutation]

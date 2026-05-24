@@ -14,6 +14,12 @@ type SessionState = {
 export const useSessionStore = create<SessionState>((set) => ({
   name: null,
   password: null,
-  setCredentials: (name, password) => set({ name, password }),
+  setCredentials: (name, password) => {
+    const trimmedPassword = password.trim()
+    set({
+      name,
+      password: trimmedPassword === '' ? null : trimmedPassword,
+    })
+  },
   clearSession: () => set({ name: null, password: null }),
 }))

@@ -164,7 +164,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
         turn: analyticScope.turn,
         perspective: analyticScope.perspective,
         username: user,
-        password: password?.trim() ? password : undefined,
+        password: password || undefined,
       })
     },
     enabled: turnEnsureEnabled,

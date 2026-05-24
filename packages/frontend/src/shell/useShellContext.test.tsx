@@ -88,6 +88,34 @@ describe('useShellContext', () => {
     })
   })
 
+  it('sends trimmed password to ensureTurnData', async () => {
+    useSessionStore.getState().setCredentials('Alice', '  secret  ')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
+        isGameFinished: true,
+        sectorDisplayName: null,
+      },
+      selectedTurn: 5,
+    })
+
+    renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(ensureTurnData).toHaveBeenCalledWith('628580', {
+        turn: 5,
+        perspective: 1,
+        username: 'Alice',
+        password: 'secret',
+      })
+    })
+  })
+
   it('sets turnBlockedNoLogin when scope exists without login or storage-only path', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useSessionStore.setState({ name: '', password: '' })
