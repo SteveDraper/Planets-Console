@@ -1,4 +1,14 @@
-"""Warp well geometry in map coordinates (Euclidean / Cartesian distance on the map plane)."""
+"""Warp well geometry in map coordinates (Euclidean / Cartesian distance on the map plane).
+
+**Canonical geometry** (``coordinate_in_warp_well``, ``map_cell_indices_in_warp_well``):
+point-in-well and cell enumeration for map overlay and concept HTTP routes. Debris-disk
+planets have no well (empty cell list).
+
+**Reachability geometry** (``point_in_reachability_well``, ``min_distance_to_reachability_well``):
+fast helpers for Connections and pathfinding. Non-debris discs match canonical normal-well
+rules; debris-disk planets use a point-only well at the planet map cell, which is
+reachability-equivalent to having no extended well.
+"""
 
 import math
 from enum import StrEnum
@@ -7,6 +17,7 @@ from api.models.planet import Planet
 
 NORMAL_RADIUS = 3
 HYPERJUMP_EXCLUSIVE_RADIUS = 3
+NORMAL_WELL_CELL_COUNT = 29
 
 
 class WarpWellKind(StrEnum):
@@ -15,7 +26,7 @@ class WarpWellKind(StrEnum):
 
 
 def planet_is_in_debris_disk(planet: Planet) -> bool:
-    """Non-zero ``debrisdisk`` means the planet has no warp wells."""
+    """Non-zero ``debrisdisk`` means the planet has no warp wells for map/concept geometry."""
     return planet.debrisdisk != 0
 
 
@@ -60,3 +71,18 @@ def map_cell_indices_in_warp_well(planet: Planet, well_kind: WarpWellKind) -> li
                 if d < HYPERJUMP_EXCLUSIVE_RADIUS:
                     out.append((gx, gy))
     return sorted(out)
+
+
+def min_distance_to_reachability_well(qx: float, qy: float, planet: Planet) -> float:
+    """Minimum Euclidean distance from ``(qx, qy)`` to the planet's reachability well."""
+    px, py = float(planet.x), float(planet.y)
+    if planet_is_in_debris_disk(planet):
+        return warp_well_cartesian_distance(px, py, qx, qy)
+    return max(0.0, warp_well_cartesian_distance(px, py, qx, qy) - NORMAL_RADIUS)
+
+
+def point_in_reachability_well(planet: Planet, qx: float, qy: float) -> bool:
+    """Whether ``(qx, qy)`` lies in the planet's reachability well."""
+    if planet_is_in_debris_disk(planet):
+        return round(qx) == planet.x and round(qy) == planet.y
+    return coordinate_in_warp_well(planet, qx, qy, WarpWellKind.NORMAL)

@@ -14,7 +14,9 @@ from api.concepts.warp_well import (
     WarpWellKind,
     coordinate_in_warp_well,
     map_cell_indices_in_warp_well,
+    min_distance_to_reachability_well,
     planet_is_in_debris_disk,
+    point_in_reachability_well,
     warp_well_cartesian_distance,
 )
 
@@ -26,6 +28,8 @@ __all__ = [
     "coordinate_in_warp_well",
     "flare_points_for_warp",
     "map_cell_indices_in_warp_well",
+    "min_distance_to_reachability_well",
     "planet_is_in_debris_disk",
+    "point_in_reachability_well",
     "warp_well_cartesian_distance",
 ]

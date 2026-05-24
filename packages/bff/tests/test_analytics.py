@@ -115,6 +115,8 @@ def test_base_map_returns_planets_and_no_edges():
     first = nodes[0]
     assert "planet" in first and isinstance(first["planet"], dict)
     assert "ownerName" in first
+    assert "normalWellCells" in first
+    assert len(first["normalWellCells"]) == 29
 
 
 def test_get_analytic_map_returns_expected_structure():

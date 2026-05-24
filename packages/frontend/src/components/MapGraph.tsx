@@ -39,12 +39,9 @@ import {
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
 import {
-  flowBoundsIntersect,
-  normalWarpWellFlowBoundingBox,
-  normalWarpWellGridSegmentsFlow,
-  planetIsInDebrisDisk,
-  type WarpWellGridSegmentFlow,
-} from '../lib/warpWell'
+  buildWarpWellOverlayPaneLines,
+  WARP_WELL_OVERLAY_ZOOM_THRESHOLD,
+} from '../lib/warpWellOverlay'
 
 type MapNodeData = {
   label?: string
@@ -447,9 +444,6 @@ function FlowCoordinateReadout() {
 /** Show grid when zoom >= this (pixels per flow unit). */
 const GRID_ZOOM_THRESHOLD = 15
 
-/** Show normal warp well outlines when zoom >= this (pixels per flow unit). */
-const WARP_WELL_OVERLAY_ZOOM_THRESHOLD = 5
-
 /** Light grey at 30% opacity so the warp-well overlay reads stronger when lines coincide. */
 const GRID_STROKE = 'rgba(107, 114, 128, 0.3)'
 
@@ -530,42 +524,6 @@ function CoordinateGridOverlay() {
   )
 }
 
-function clipWarpWellSegmentToFlowViewport(
-  s: WarpWellGridSegmentFlow,
-  fxMin: number,
-  fxMax: number,
-  fyMin: number,
-  fyMax: number
-): WarpWellGridSegmentFlow | null {
-  const { x1, y1, x2, y2 } = s
-  if (x1 === x2) {
-    const x = x1
-    if (x < fxMin || x > fxMax) return null
-    const yLo = Math.min(y1, y2)
-    const yHi = Math.max(y1, y2)
-    const cl = Math.max(yLo, fyMin)
-    const ch = Math.min(yHi, fyMax)
-    if (ch < cl) return null
-    return { x1: x, y1: cl, x2: x, y2: ch }
-  }
-  if (y1 === y2) {
-    const y = y1
-    if (y < fyMin || y > fyMax) return null
-    const xLo = Math.min(x1, x2)
-    const xHi = Math.max(x1, x2)
-    const cl = Math.max(xLo, fxMin)
-    const ch = Math.min(xHi, fxMax)
-    if (ch < cl) return null
-    return { x1: cl, y1: y, x2: ch, y2: y }
-  }
-  return null
-}
-
-/**
- * Per-planet full grid for map cells whose center lies in the normal warp well (every cell
- * edge, deduped on shared sides; same integer-line placement as `CoordinateGridOverlay`).
- * Only nodes with a planet turn snapshot get wells; omitted for debris-disk planets.
- */
 function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: CombinedMapData['nodes'] }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
@@ -592,36 +550,11 @@ function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: CombinedMapData
   if (scale < WARP_WELL_OVERLAY_ZOOM_THRESHOLD) return null
 
   const { width, height } = size
-  const flowXMin = -tx / scale
-  const flowXMax = (width - tx) / scale
-  const flowYMin = -ty / scale
-  const flowYMax = (height - ty) / scale
-
-  const lines: { key: string; x1: number; y1: number; x2: number; y2: number }[] = []
-  for (const n of mapNodes) {
-    if (n.planet == null) continue
-    if (planetIsInDebrisDisk(n.planet)) continue
-    const px = Number(n.x)
-    const py = Number(n.y)
-    const wellBounds = normalWarpWellFlowBoundingBox(px, py)
-    if (
-      wellBounds == null ||
-      !flowBoundsIntersect(wellBounds, flowXMin, flowXMax, flowYMin, flowYMax)
-    ) {
-      continue
-    }
-    const segs = normalWarpWellGridSegmentsFlow(px, py)
-    segs.forEach((s, i) => {
-      const clipped = clipWarpWellSegmentToFlowViewport(s, flowXMin, flowXMax, flowYMin, flowYMax)
-      if (clipped == null) return
-      const x1 = clipped.x1 * scale + tx
-      const y1 = clipped.y1 * scale + ty
-      const x2 = clipped.x2 * scale + tx
-      const y2 = clipped.y2 * scale + ty
-      if (![x1, y1, x2, y2].every((v) => Number.isFinite(v))) return
-      lines.push({ key: `${n.id}-${i}`, x1, y1, x2, y2 })
-    })
-  }
+  const lines = buildWarpWellOverlayPaneLines(
+    mapNodes,
+    { width, height, tx, ty, scale },
+    WARP_WELL_OVERLAY_ZOOM_THRESHOLD
+  )
 
   if (lines.length === 0) return null
 

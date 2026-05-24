@@ -35,6 +35,9 @@ class TestTurnAnalytics:
         assert isinstance(first["planet"], dict)
         assert first["planet"]["id"] == 1
         assert "ownerName" in first
+        assert "normalWellCells" in first
+        assert isinstance(first["normalWellCells"], list)
+        assert len(first["normalWellCells"]) == 29
         assert data["edges"] == []
 
     def test_base_map_not_found_turn_raises(self, analytics_service):

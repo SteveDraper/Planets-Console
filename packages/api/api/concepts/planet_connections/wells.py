@@ -1,32 +1,11 @@
-"""Simplified well geometry and direct reachability in map cell coordinates."""
+"""Direct travel reachability between planets (uses :mod:`api.concepts.warp_well`)."""
 
 from __future__ import annotations
 
 import math
 
-from api.concepts.warp_well import (
-    NORMAL_RADIUS,
-    WarpWellKind,
-    coordinate_in_warp_well,
-    planet_is_in_debris_disk,
-    warp_well_cartesian_distance,
-)
+from api.concepts.warp_well import min_distance_to_reachability_well
 from api.models.planet import Planet
-
-
-def min_distance_point_to_simplified_normal_well(qx: float, qy: float, planet: Planet) -> float:
-    """Minimum Euclidean distance from ``(qx, qy)`` to the other planet's simplified normal well."""
-    px, py = float(planet.x), float(planet.y)
-    if planet_is_in_debris_disk(planet):
-        return warp_well_cartesian_distance(px, py, qx, qy)
-    return max(0.0, warp_well_cartesian_distance(px, py, qx, qy) - NORMAL_RADIUS)
-
-
-def point_in_simplified_normal_well(planet: Planet, qx: float, qy: float) -> bool:
-    """Whether ``(qx, qy)`` lies in the simplified normal well (or planet cell for debris)."""
-    if planet_is_in_debris_disk(planet):
-        return round(qx) == planet.x and round(qy) == planet.y
-    return coordinate_in_warp_well(planet, qx, qy, WarpWellKind.NORMAL)
 
 
 def max_travel_distance(warp_speed: int, gravitonic_movement: bool) -> float:
@@ -38,7 +17,7 @@ def max_travel_distance(warp_speed: int, gravitonic_movement: bool) -> float:
 
 def _is_direct(from_planet: Planet, to_planet: Planet, max_travel: float) -> bool:
     ax, ay = float(from_planet.x), float(from_planet.y)
-    return min_distance_point_to_simplified_normal_well(ax, ay, to_planet) <= max_travel + 1e-9
+    return min_distance_to_reachability_well(ax, ay, to_planet) <= max_travel + 1e-9
 
 
 def _pair_has_direct_connection(planet_a: Planet, planet_b: Planet, max_travel: float) -> bool:
@@ -58,10 +37,6 @@ def _pair_reachable_in_k_normal_moves(
     if k < 1 or not math.isfinite(max_travel) or max_travel <= 0.0:
         return False
     limit = k * max_travel + 1e-9
-    d_from_a = min_distance_point_to_simplified_normal_well(
-        float(planet_a.x), float(planet_a.y), planet_b
-    )
-    d_from_b = min_distance_point_to_simplified_normal_well(
-        float(planet_b.x), float(planet_b.y), planet_a
-    )
+    d_from_a = min_distance_to_reachability_well(float(planet_a.x), float(planet_a.y), planet_b)
+    d_from_b = min_distance_to_reachability_well(float(planet_b.x), float(planet_b.y), planet_a)
     return d_from_a <= limit or d_from_b <= limit

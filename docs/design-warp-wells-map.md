@@ -1,52 +1,55 @@
 # Warp wells on the map
 
-This document describes how the console models **warp wells** in code: **Core API** (`api.concepts`), **HTTP** (turn-scoped routes), **BFF** (shallow `GameService` calls), and the **React Flow** map (grid overlays, zoom thresholds).
+This document describes how the console models **warp wells** in code: **Core API** (`api.concepts`), **HTTP** (turn-scoped routes), **BFF** (base-map batch + concept routes), and the **React Flow** map (grid overlays, zoom thresholds).
 
 **Code (primary):**
 
 | Area | Location |
 |------|----------|
-| Canonical well rules (Python) | `packages/api/api/concepts/warp_well.py` |
-| Turn lookup + service API | `packages/api/api/services/game_service.py` (`get_planet_from_turn`, `warp_well_*`) |
+| Well rules (Python, single module) | `packages/api/api/concepts/warp_well.py` |
+| Turn lookup + service API | `packages/api/api/services/turn_concept_service.py` |
+| Base-map batch cells | `packages/api/api/analytics/base_map.py` (`normalWellCells` per node) |
 | Core REST routes | `packages/api/api/routers/game_concepts.py` |
 | HTTP request/response shapes | `packages/api/api/transport/concept_warp_well.py` |
 | BFF mirror routes | `packages/bff/bff/routers/games.py` |
-| Frontend (map UI only) | `packages/frontend/src/lib/warpWell.ts`, `MapGraph.tsx` |
+| Frontend (render only) | `packages/frontend/src/lib/warpWell.ts`, `MapGraph.tsx` |
 | Planet `debrisdisk` on map nodes | Turn snapshot on `MapNode.planet` (see `packages/frontend/src/api/bff.ts` normalization) |
 
 Related domain context: [vga-planets-domain-context.md](vga-planets-domain-context.md) (tactics / routing). This doc is about **console behavior**, not host rules.
 
 ---
 
-## 1. Warp well types (logic)
+## 1. Warp well module (`api.concepts.warp_well`)
 
-Two logical kinds, used by **`isCoordinateInWarpWell`**:
+Two logical well kinds for **canonical geometry** (map overlay, concept HTTP):
 
 | Type | Rule (Cartesian / Euclidean in map coordinates) |
 |------|--------------------------------------------------|
-| **normal** | Distance from planet map cell index `(planetX, planetY)` to query `(queryX, queryY)` is **≤ 3** |
+| **normal** | Distance from planet map cell index to query point is **≤ 3** |
 | **hyperjump** | Same distance is **strictly &lt; 3** |
 
-Distance is **`Math.hypot(Δx, Δy)`** on the map plane. The planet and query coordinates are whatever the caller passes (typically integer cell indices from map data).
+Distance is **`hypot(Δx, Δy)`** on the map plane. A non-debris **normal** well contains exactly **29** map cells.
 
-**Debris disk:** If the planet snapshot has non-zero **`debrisdisk`** (or camelCase **`debrisDisk`**), the planet has **no** warp wells: **`planetIsInDebrisDisk`** is true and **`isCoordinateInWarpWell`** always returns false.
+**Debris disk:** Non-zero **`debrisdisk`** means no extended well for map/concept geometry (empty **`normalWellCells`** on base-map nodes). Reachability uses a point-only well at the planet cell; see **`point_in_reachability_well`** / **`min_distance_to_reachability_well`** (same module, fast path for Connections).
 
-Exported helpers:
+Canonical helpers:
 
-- **`planetIsInDebrisDisk(planet)`**
-- **`warpWellCartesianDistance`**
-- **`isCoordinateInWarpWell(planetX, planetY, planet, queryX, queryY, wellType)`**
-- **`mapCellsWithCenterInNormalWarpWell(planetMapX, planetMapY)`** -- map cells `(gx, gy)` whose center is in the normal well: `hypot(gx - px, gy - py) ≤ 3` (equivalent to Euclidean distance between cell centers `(gx+0.5, gy+0.5)` and `(px+0.5, py+0.5)`).
+- **`coordinate_in_warp_well`**, **`map_cell_indices_in_warp_well`**
+- **`point_in_reachability_well`**, **`min_distance_to_reachability_well`**
 
 ---
 
 ## 2. Map visualization (normal well only)
 
-Only the **normal** well is drawn today. The overlay:
+Only the **normal** well is drawn today. Cell lists are **precomputed on the server** and included on each base-map node as **`normalWellCells`** (batch fetch with the starmap). The SPA does not recompute well geometry.
 
-1. Collects every map cell whose **center** lies in the normal well (same rule as **`mapCellsWithCenterInNormalWarpWell`**).
-2. For each such cell, adds **all four** cell edges in **React Flow space** (same integer **x** / **y** lines as the main coordinate grid).
+The overlay:
+
+1. Reads **`normalWellCells`** from each map node (empty for debris-disk planets).
+2. For each cell, adds **all four** cell edges in **React Flow space** (same integer **x** / **y** lines as the main coordinate grid).
 3. **Deduplicates** edges shared by two well cells so each line is drawn once.
+
+Rendering helpers live in **`warpWell.ts`** (`normalWellGridSegmentsFromCells`, etc.); they operate on server-provided cells only.
 
 Cell geometry matches **`CoordinateGridOverlay`**: for map cell `(gx, gy)`, flow **y** runs from **`-(gy + 1)`** (top) to **`-gy`** (bottom); flow **x** runs from **`gx`** to **`gx + 1`**.
 
@@ -78,50 +81,49 @@ Warp segments are clipped to the visible flow rectangle (same bounds derivation 
 
 ## 3. Tests
 
-**Cross-language consistency:** [`test-fixtures/warp-well-consistency.json`](../test-fixtures/warp-well-consistency.json) holds golden **coordinate** and **cell** cases. Both implementations must agree:
+**Golden fixture:** [`test-fixtures/warp-well-consistency.json`](../test-fixtures/warp-well-consistency.json) holds coordinate and cell cases for **`api.concepts.warp_well`** (`test_warp_well_consistency.py`).
 
-- **`packages/api/tests/test_warp_well_consistency.py`** -- asserts `api.concepts.warp_well` against the fixture.
-- **`packages/frontend/src/lib/warpWell.consistency.test.ts`** -- asserts `warpWell.ts` against the same file.
+**`packages/frontend/src/lib/warpWell.test.ts`** covers segment deduplication and bounding-box helpers (render path only).
 
-When changing rules, update the fixture once and fix any failing suite.
-
-**`packages/frontend/src/lib/warpWell.test.ts`** additionally covers full-grid segments (internal shared edges), axis-aligned integer segments, and other UI-adjacent helpers.
-
-**`packages/api/tests/test_warp_well_concepts.py`** covers concept behavior with sample turn data (independent of the shared fixture).
+**`packages/api/tests/test_warp_well_concepts.py`** covers concept behavior, reachability equivalence, and the fixed normal-well cell count.
 
 ---
 
 ## 4. Changelog notes
 
-When changing well rules or thresholds, update this doc and the [user guide](user-guide.md) map section so zoom behavior stays accurate for players. When changing **domain** rules, update **`api/concepts/warp_well.py`** first and keep **`warpWell.ts`** aligned (or drive the SPA from Core/BFF later).
+When changing well rules or thresholds, update this doc and the [user guide](user-guide.md) map section. Change **`api/concepts/warp_well.py`** first; base-map and concept routes follow automatically.
 
 ---
 
-## 5. Core API and BFF (analytics and future clients)
+## 5. Core API and BFF
 
-**Source of truth** for distance math is **`api.concepts.warp_well`**: `WarpWellKind`, `coordinate_in_warp_well`, `map_cell_indices_in_warp_well`, `planet_is_in_debris_disk`. No HTTP or storage inside `concepts/`.
+**Source of truth** for well math is **`api.concepts.warp_well`**. No HTTP or storage inside `concepts/`.
 
-**GameService** resolves a **`Planet`** from stored turn JSON by numeric **`planet_id`**, then calls those functions.
+**TurnConceptService** resolves a **`Planet`** from stored turn JSON by numeric **`planet_id`**, then calls those functions.
 
-### 5.1 HTTP (mounted at `/api` on the root server)
+### 5.1 Base-map batch delivery
+
+**`GET /bff/analytics/base-map/map`** (and Core **`.../analytics/base-map`**) returns each planet node with **`normalWellCells`**: `[{ "x", "y" }, ...]`. Loaded with the starmap regardless of zoom; the overlay renders only above the zoom threshold.
+
+### 5.2 Per-planet concept HTTP (mounted at `/api` on the root server)
 
 | Method | Path (after `/api`) | Purpose |
 |--------|----------------------|---------|
 | `POST` | `/v1/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/coordinate-in-well` | Body: `planet_id`, `map_x`, `map_y`, `well_type` (`normal` \| `hyperjump`). Response: `{ "inside": bool }`. |
-| `GET` | `/v1/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/cells` | Query: `planet_id`, `well_type`. Response: `{ "cells": [ { "x", "y" }, ... ] }` (map cell indices whose centers lie in the well). |
+| `GET` | `/v1/games/{game_id}/{perspective}/turns/{turn_number}/concepts/warp-wells/cells` | Query: `planet_id`, `well_type`. Response: `{ "cells": [ { "x", "y" }, ... ] }`. Use for hyperjump or ad hoc clients; map overlay uses base-map normal cells. |
 
 Unknown **`planet_id`** for that turn returns **404**.
 
-### 5.2 BFF
+### 5.3 BFF concept mirror
 
-Same paths under the BFF prefix (e.g. **`/bff/games/...`** when the BFF is mounted at `/bff`): handlers call **`GameService`** directly today so they can later be swapped for HTTP to Core without changing contracts.
+Same concept paths under **`/bff/games/...`** via **`CoreClient`** (shared handlers with Core REST).
 
-### 5.3 Connections analytic (reachability)
+### 5.4 Connections analytic (reachability)
 
-**Warp well** distance rules in this doc also drive **simplified wells** in **`planet_connections`**: whether a movement **ends** inside another planet’s well, and whether a pair has a **direct** edge. The **Connections** map analytic (`GET /bff/analytics/connections/map`) does **not** draw well outlines; it returns **route pairs** for the map edges layer. Full behavior (flare tables, `flareMode`, merge with base map) is documented in [design-connections-analytic.md](design-connections-analytic.md).
+**Reachability** helpers in **`warp_well.py`** drive **`planet_connections`**: direct edges, flare arrival tests, and spatial pruning. The Connections map analytic does **not** draw well outlines. See [design-connections-analytic.md](design-connections-analytic.md).
 
-### 5.4 Tests
+### 5.5 Tests
 
-- **`packages/api/tests/test_warp_well_concepts.py`** -- pure concept behavior.
+- **`packages/api/tests/test_warp_well_concepts.py`** -- pure concept + reachability behavior.
 - **`packages/api/tests/test_game_concepts_router.py`** -- Core routes.
-- **`packages/bff/tests/test_games.py`** -- BFF warp-well routes.
+- **`packages/bff/tests/test_games.py`** -- BFF warp-well concept routes.

@@ -17,11 +17,12 @@ from api.concepts.planet_connections.lattice_enumeration import (
     _iter_normal_one_hop_integer_lattice,
 )
 from api.concepts.planet_connections.spatial_index import _PlanetSpatialIndex
-from api.concepts.planet_connections.wells import (
-    min_distance_point_to_simplified_normal_well,
-    point_in_simplified_normal_well,
+from api.concepts.warp_well import (
+    NORMAL_RADIUS,
+    min_distance_to_reachability_well,
+    planet_is_in_debris_disk,
+    point_in_reachability_well,
 )
-from api.concepts.warp_well import NORMAL_RADIUS, planet_is_in_debris_disk
 from api.models.flare_point import FlarePoint
 from api.models.planet import Planet
 
@@ -51,7 +52,7 @@ def _point_lies_in_any_planet_well(
     t0 = time.perf_counter() if hotspot_time is not None else 0.0
     r = float(NORMAL_RADIUS)
     for p in well_index.iter_planets_within_radius(qx, qy, r):
-        if point_in_simplified_normal_well(p, qx, qy):
+        if point_in_reachability_well(p, qx, qy):
             if hotspot_time is not None:
                 hotspot_time.well_index_sec += time.perf_counter() - t0
             return True
@@ -82,7 +83,7 @@ def _flare_path_state_exceeds_distance_bound(
     if not use_distance_prune or step_max <= 0.0:
         return False
     rem = max_hops - hops_completed
-    d_to_well = min_distance_point_to_simplified_normal_well(float(x), float(y), to_planet)
+    d_to_well = min_distance_to_reachability_well(float(x), float(y), to_planet)
     return d_to_well > rem * step_max + _FLARE_DISTANCE_BOUND_SLACK
 
 
@@ -145,7 +146,7 @@ def _reachable_via_flare_limited_depth(
     def _in_destination_well(fx: float, fy: float) -> bool:
         if hotspot_timings is not None:
             t0 = time.perf_counter()
-        out = point_in_simplified_normal_well(to_planet, fx, fy)
+        out = point_in_reachability_well(to_planet, fx, fy)
         if hotspot_timings is not None:
             hotspot_timings.dest_well_test_sec += time.perf_counter() - t0
         return out
@@ -238,8 +239,8 @@ def _reachable_via_flare_limited_depth(
     return False
 
 
-def _same_simplified_normal_well_type(planet_a: Planet, planet_b: Planet) -> bool:
-    """True if both planets use the same simplified-well geometry (debris cell vs normal disc).
+def _same_reachability_well_geometry(planet_a: Planet, planet_b: Planet) -> bool:
+    """True if both planets use the same reachability-well geometry (debris cell vs normal disc).
 
     When this holds, flare-assisted reachability at a given hop budget is symmetric: a path
     from A to B exists iff one from B to A exists, so only one BFS direction is needed.
@@ -273,7 +274,7 @@ def _pair_reachable_via_flare_either_direction(
         hotspot_timings=hotspot_timings,
         lattice_diagnostics=lattice_diagnostics,
     )
-    if ab or _same_simplified_normal_well_type(planet_a, planet_b):
+    if ab or _same_reachability_well_geometry(planet_a, planet_b):
         return ab
     return _reachable_via_flare_limited_depth(
         planet_b,
@@ -367,10 +368,10 @@ def _reachable_flare_bfs_path(
                     continue
                 fnx, fny = float(nx), float(ny)
                 nxt: _State4 = (nx, ny, nd, used_flare)
-                if point_in_simplified_normal_well(to_planet, fnx, fny) and used_flare:
+                if point_in_reachability_well(to_planet, fnx, fny) and used_flare:
                     parent[nxt] = (cur, "n", (nx, ny))
                     return _reconstruct_flare_bfs_path(parent, nxt, start, flares)
-                if point_in_simplified_normal_well(to_planet, fnx, fny) and not used_flare:
+                if point_in_reachability_well(to_planet, fnx, fny) and not used_flare:
                     continue
                 if nd >= max_depth:
                     continue
@@ -393,7 +394,7 @@ def _reachable_flare_bfs_path(
                 continue
             fex, fey = float(ex), float(ey)
             nxtf: _State4 = (ex, ey, nd, True)
-            if point_in_simplified_normal_well(to_planet, fex, fey) and nd <= max_depth:
+            if point_in_reachability_well(to_planet, fex, fey) and nd <= max_depth:
                 parent[nxtf] = (cur, "f", (fi, ex, ey))
                 return _reconstruct_flare_bfs_path(parent, nxtf, start, flares)
             if nd < max_depth and nxtf not in seen:
@@ -426,7 +427,7 @@ def _pair_flare_path_either_direction(
     )
     if p is not None:
         return p
-    if _same_simplified_normal_well_type(planet_a, planet_b):
+    if _same_reachability_well_geometry(planet_a, planet_b):
         return None
     return _reachable_flare_bfs_path(
         planet_b,
@@ -455,14 +456,14 @@ def _greedy_normal_reaches_in_hops(
         for nx, ny, _ in _iter_normal_one_hop_integer_lattice(
             px, py, max_travel, to_planet=to_planet
         ):
-            d = min_distance_point_to_simplified_normal_well(float(nx), float(ny), to_planet)
+            d = min_distance_to_reachability_well(float(nx), float(ny), to_planet)
             if best is None or d < best_d - 1e-12 or (abs(d - best_d) <= 1e-12 and (nx, ny) < best):
                 best_d = d
                 best = (nx, ny)
         if best is None:
             return False
         px, py = best
-    return point_in_simplified_normal_well(to_planet, float(px), float(py))
+    return point_in_reachability_well(to_planet, float(px), float(py))
 
 
 def validate_illustrative_flare_route(

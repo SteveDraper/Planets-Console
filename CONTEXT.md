@@ -200,7 +200,7 @@ Use **perspective** in storage paths and API path segments; use **viewpoint** in
 **Expert:** Logical path `games/628580/1/turns/111` -- a **breakpoint** match -- so one JSON **document** with the whole **TurnInfo**. Settings under `games/628580/info/settings` share the same file as `games/628580/info` because there is no deeper breakpoint.
 
 **Dev:** Should warp-well math live in the BFF or a new analytic module?  
-**Expert:** In Core as a **game concept** (`api.concepts`). **Turn analytics** like **Connections** call that logic; the **BFF** only shapes the response for the map layer. The BFF never implements host rules itself.
+**Expert:** In Core as a **game concept** (`api.concepts.warp_well`). **Normal** well cells ship on **base-map** nodes as `normalWellCells`; **hyperjump** stays on turn-scoped concept routes. The SPA renders server cells only -- no duplicate geometry in TypeScript. **Connections** uses the same module's reachability helpers.
 
 **Dev:** Can the frontend call `GET /api/v1/games/.../analytics/connections` directly?  
 **Expert:** No. The SPA talks only to the **BFF**. Core owns **turn analytics**; the shell never bypasses that layer.

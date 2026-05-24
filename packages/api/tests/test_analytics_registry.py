@@ -24,6 +24,7 @@ def test_base_map_module_returns_nodes(sample_turn):
     assert data["analyticId"] == "base-map"
     assert data["edges"] == []
     assert data["nodes"][0]["id"].startswith("p")
+    assert len(data["nodes"][0]["normalWellCells"]) == 29
 
 
 def test_scores_module_returns_structured_score_rows(sample_turn):

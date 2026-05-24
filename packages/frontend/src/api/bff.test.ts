@@ -146,6 +146,26 @@ describe('normalizeMapDataResponse', () => {
     expect(out.nodes[0].planet).not.toBe((raw.nodes[0] as { planet: object }).planet)
   })
 
+  it('preserves normalWellCells on base-map nodes', () => {
+    const cells = [{ x: 10, y: 20 }, { x: 11, y: 20 }]
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        {
+          id: 'p1',
+          label: 'p1',
+          x: 10,
+          y: 20,
+          planet: { id: 1 },
+          normalWellCells: cells,
+        },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].normalWellCells).toEqual(cells)
+  })
+
   it('reads nested snapshot from Planet key when planet is absent', () => {
     const raw = {
       analyticId: 'base-map',

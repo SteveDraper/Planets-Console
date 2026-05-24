@@ -208,7 +208,7 @@ export function MainArea({
         }
       }
       return {
-        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet'] as const,
+        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
         queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
         enabled: analyticFetchEnabled,
         structuralSharing: false as const,
@@ -220,6 +220,11 @@ export function MainArea({
   const mapQueriesStateSignature = mapQueries
     .map((q) => `${q.dataUpdatedAt}:${q.fetchStatus}:${q.status}`)
     .join('|')
+  const mapWellCellCount = mapQueries.reduce((total, q) => {
+    const nodes = q.data?.nodes
+    if (!nodes) return total
+    return total + nodes.reduce((sum, node) => sum + (node.normalWellCells?.length ?? 0), 0)
+  }, 0)
   const liveConnectionsParams =
     mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
   const mapIdsKey = mapIds.join('\0')
@@ -233,6 +238,7 @@ export function MainArea({
     [
       mapIdsKey,
       mapQueriesStateSignature,
+      mapWellCellCount,
       liveConnectionsParams,
       analyticFetchEnabled,
       connectionsMapParams.flareMode,

@@ -1,5 +1,5 @@
 {
-  "description": "Shared golden vectors for warp-well math; Python (api.concepts) and TypeScript (warpWell.ts) must agree.",
+  "description": "Golden vectors for api.concepts.warp_well; Python tests assert against this fixture.",
   "coordinateCases": [
     {
       "planetX": 10,

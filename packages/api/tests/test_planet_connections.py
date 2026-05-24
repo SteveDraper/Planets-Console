@@ -17,7 +17,7 @@ from api.concepts.planet_connections import (
     connection_routes_for_planets,
     connection_routes_with_options,
     max_travel_distance,
-    min_distance_point_to_simplified_normal_well,
+    min_distance_to_reachability_well,
     validate_illustrative_flare_route,
 )
 from api.concepts.warp_well import NORMAL_RADIUS
@@ -52,23 +52,23 @@ class TestMaxTravelDistance:
         assert max_travel_distance(9, True) == 162.0
 
 
-class TestMinDistanceSimplifiedWell:
+class TestMinDistanceReachabilityWell:
     def test_debris_is_point_distance(self, sample_planet):
         debris = _p(sample_planet, 1, 10, 10, debris=1)
-        assert min_distance_point_to_simplified_normal_well(10.0, 10.0, debris) == 0.0
-        assert min_distance_point_to_simplified_normal_well(11.0, 10.0, debris) == 1.0
+        assert min_distance_to_reachability_well(10.0, 10.0, debris) == 0.0
+        assert min_distance_to_reachability_well(11.0, 10.0, debris) == 1.0
 
     def test_normal_well_shrinks_by_radius(self, sample_planet):
         p = _p(sample_planet, 1, 0, 0, debris=0)
-        assert min_distance_point_to_simplified_normal_well(3.0, 0.0, p) == 0.0
-        assert min_distance_point_to_simplified_normal_well(10.0, 0.0, p) == 7.0
+        assert min_distance_to_reachability_well(3.0, 0.0, p) == 0.0
+        assert min_distance_to_reachability_well(10.0, 0.0, p) == 7.0
 
 
 def _brute_force_direct(a, b, max_travel: float) -> bool:
     ax, ay = float(a.x), float(a.y)
     bx, by = float(b.x), float(b.y)
-    return min_distance_point_to_simplified_normal_well(ax, ay, b) <= max_travel + 1e-9 or (
-        min_distance_point_to_simplified_normal_well(bx, by, a) <= max_travel + 1e-9
+    return min_distance_to_reachability_well(ax, ay, b) <= max_travel + 1e-9 or (
+        min_distance_to_reachability_well(bx, by, a) <= max_travel + 1e-9
     )
 
 
