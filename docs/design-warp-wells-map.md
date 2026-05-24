@@ -12,7 +12,7 @@ This document describes how the console models **warp wells** in code: **Core AP
 | Core REST routes | `packages/api/api/routers/game_concepts.py` |
 | HTTP request/response shapes | `packages/api/api/transport/concept_warp_well.py` |
 | BFF mirror routes | `packages/bff/bff/routers/games.py` |
-| Frontend (render only) | `packages/frontend/src/lib/warpWell.ts`, `MapGraph.tsx` |
+| Frontend (render only) | `packages/frontend/src/lib/warpWellOverlay.ts` (overlay entry: `buildWarpWellOverlayPaneLines`), `packages/frontend/src/lib/warpWell.ts` (cell normalization and grid segments), `MapGraph.tsx` |
 | Planet `debrisdisk` on map nodes | Turn snapshot on `MapNode.planet` (see `packages/frontend/src/api/bff.ts` normalization) |
 
 Related domain context: [vga-planets-domain-context.md](vga-planets-domain-context.md) (tactics / routing). This doc is about **console behavior**, not host rules.
@@ -49,7 +49,7 @@ The overlay:
 2. For each cell, adds **all four** cell edges in **React Flow space** (same integer **x** / **y** lines as the main coordinate grid).
 3. **Deduplicates** edges shared by two well cells so each line is drawn once.
 
-Rendering helpers live in **`warpWell.ts`** (`normalWellGridSegmentsFromCells`, etc.); they operate on server-provided cells only.
+The overlay pipeline starts in **`warpWellOverlay.ts`**: **`buildWarpWellOverlayPaneLines`** reads each node’s **`normalWellCells`**, clips segments to the viewport, and returns pane-pixel lines for **`MapGraph`**. Lower-level helpers in **`warpWell.ts`** (`normalizeWarpWellMapCells`, `normalWellGridSegmentsFromNormalizedWellCells`, etc.) turn server-provided cells into deduplicated flow-space segments; they do not recompute well geometry.
 
 Cell geometry matches **`CoordinateGridOverlay`**: for map cell `(gx, gy)`, flow **y** runs from **`-(gy + 1)`** (top) to **`-gy`** (bottom); flow **x** runs from **`gx`** to **`gx + 1`**.
 
@@ -83,7 +83,9 @@ Warp segments are clipped to the visible flow rectangle (same bounds derivation 
 
 **Golden fixture:** [`test-fixtures/warp-well-consistency.json`](../test-fixtures/warp-well-consistency.json) holds coordinate and cell cases for **`api.concepts.warp_well`** (`test_warp_well_consistency.py`).
 
-**`packages/frontend/src/lib/warpWell.test.ts`** covers segment deduplication and bounding-box helpers (render path only).
+**`packages/frontend/src/lib/warpWell.test.ts`** covers cell normalization, segment deduplication, and bounding-box helpers.
+
+**`packages/frontend/src/lib/warpWellOverlay.test.ts`** covers **`buildWarpWellOverlayPaneLines`** (viewport clipping and zoom threshold).
 
 **`packages/api/tests/test_warp_well_concepts.py`** covers concept behavior, reachability equivalence, and the fixed normal-well cell count.
 

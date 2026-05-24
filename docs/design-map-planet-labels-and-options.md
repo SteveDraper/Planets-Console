@@ -11,7 +11,8 @@ This document describes the **map options** UI and **planet hover/pin labels** o
 | Label model (options, availability, title line, minerals) | `packages/frontend/src/components/planetMapLabelModel.ts` |
 | Label rendering | `packages/frontend/src/components/PlanetMapLabel.tsx` |
 | Map graph (dots, overlay, hover, pin, grid, warp wells) | `packages/frontend/src/components/MapGraph.tsx` |
-| Warp well geometry and predicates | `packages/frontend/src/lib/warpWell.ts` |
+| Warp well overlay (viewport clip, pane lines) | `packages/frontend/src/lib/warpWellOverlay.ts` |
+| Warp well cell/segment helpers | `packages/frontend/src/lib/warpWell.ts` |
 | Wiring + combined map data | `packages/frontend/src/components/MainArea.tsx` |
 | BFF map node normalization | `packages/frontend/src/api/bff.ts` (`normalizeMapDataResponse`, `normalizeMapNode`) |
 
@@ -137,4 +138,4 @@ For **`detailsLevel` other than `debug`**, the **properties** section is **maske
 
 ## 9. Query / cache notes
 
-Map fetches use the `['analytic', id, 'map', scope]` pattern with a **version segment** (e.g. `'planet'`) in the key where needed so merged node payloads refetch when the contract changes. See [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).
+Map fetches use the `['analytic', id, 'map', scope]` pattern with a **version segment** (currently `'planet-v2'`) in the key where needed so merged node payloads refetch when the contract changes. See [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).
