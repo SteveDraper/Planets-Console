@@ -15,7 +15,7 @@ vi.mock('../api/bff', async (importOriginal) => {
   }
 })
 
-import { ensureTurnData } from '../api/bff'
+import { ensureTurnData, fetchStoredTurnPerspectives } from '../api/bff'
 
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -28,7 +28,7 @@ describe('useShellContext', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    useSessionStore.setState({ name: 'Alice', password: '' })
+    useSessionStore.setState({ name: 'Alice', password: '', credentialsRevision: 0 })
     useShellStore.setState({
       selectedGameId: null,
       gameInfoContext: null,
@@ -138,6 +138,88 @@ describe('useShellContext', () => {
     expect(result.current.analyticScope).not.toBeNull()
     expect(result.current.turnBlockedNoLogin).toBe(true)
     expect(result.current.turnEnsureEnabled).toBe(false)
+  })
+
+  it('retries storage perspective resync after effect cleanup before fetch completes', async () => {
+    useSessionStore.setState({ name: '', password: '', credentialsRevision: 0 })
+    let resolveFetch!: (value: { perspectives: number[] }) => void
+    vi.mocked(fetchStoredTurnPerspectives).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve
+        })
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
+        isGameFinished: true,
+        sectorDisplayName: null,
+      },
+      selectedTurn: 5,
+      storageOnlyLoad: true,
+      storageAvailablePerspectives: null,
+    })
+
+    const { unmount } = renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(fetchStoredTurnPerspectives).toHaveBeenCalledTimes(1)
+    })
+    unmount()
+
+    renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(fetchStoredTurnPerspectives).toHaveBeenCalledTimes(2)
+    })
+    resolveFetch({ perspectives: [1] })
+  })
+
+  it('refetches turn ensure when credentials revision changes', async () => {
+    useSessionStore.setState({ name: 'Alice', password: 'wrong', credentialsRevision: 1 })
+    vi.mocked(ensureTurnData)
+      .mockRejectedValueOnce(new Error('Bad password'))
+      .mockResolvedValueOnce({ ready: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
+        isGameFinished: true,
+        sectorDisplayName: null,
+      },
+      selectedTurn: 5,
+    })
+
+    const { result } = renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(result.current.turnEnsureIsError).toBe(true)
+    })
+    expect(ensureTurnData).toHaveBeenCalledTimes(1)
+
+    useSessionStore.getState().setCredentials('Alice', 'correct')
+
+    await waitFor(() => {
+      expect(result.current.turnDataReady).toBe(true)
+    })
+    expect(ensureTurnData).toHaveBeenCalledTimes(2)
+    expect(ensureTurnData).toHaveBeenLastCalledWith('628580', {
+      turn: 5,
+      perspective: 1,
+      username: 'Alice',
+      password: 'correct',
+    })
   })
 
   it('reports turn ensure failures via reportShellError', async () => {

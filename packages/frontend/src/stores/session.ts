@@ -7,6 +7,8 @@ import { create } from 'zustand'
 type SessionState = {
   name: string | null
   password: string | null
+  /** Bumps on setCredentials/clearSession so turn-ensure queries refetch without password in the key. */
+  credentialsRevision: number
   setCredentials: (name: string, password: string) => void
   clearSession: () => void
 }
@@ -14,12 +16,19 @@ type SessionState = {
 export const useSessionStore = create<SessionState>((set) => ({
   name: null,
   password: null,
+  credentialsRevision: 0,
   setCredentials: (name, password) => {
     const trimmedPassword = password.trim()
-    set({
+    set((state) => ({
       name,
       password: trimmedPassword === '' ? null : trimmedPassword,
-    })
+      credentialsRevision: state.credentialsRevision + 1,
+    }))
   },
-  clearSession: () => set({ name: null, password: null }),
+  clearSession: () =>
+    set((state) => ({
+      name: null,
+      password: null,
+      credentialsRevision: state.credentialsRevision + 1,
+    })),
 }))

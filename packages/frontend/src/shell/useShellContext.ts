@@ -47,6 +47,7 @@ export type ShellContext = {
 
 export function useShellContext({ reportShellError }: UseShellContextOptions): ShellContext {
   const loginName = useSessionStore((s) => s.name)
+  const credentialsRevision = useSessionStore((s) => s.credentialsRevision)
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
@@ -153,6 +154,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       analyticScope?.turn ?? 0,
       analyticScope?.perspective ?? 0,
       loginTrimmed,
+      credentialsRevision,
     ] as const,
     queryFn: () => {
       const { name, password } = useSessionStore.getState()
@@ -198,9 +200,9 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     if (seen?.gameId === selectedGameId && seen.turn === selectedTurn) {
       return
     }
-    storageTurnResyncSeen.current = { gameId: selectedGameId, turn: selectedTurn }
 
     let cancelled = false
+    const resyncKey = { gameId: selectedGameId, turn: selectedTurn }
     void fetchStoredTurnPerspectives(selectedGameId, selectedTurn)
       .then(({ perspectives }) => {
         if (cancelled) return
@@ -226,6 +228,11 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
         reportShellError(
           err instanceof Error ? err.message : LOGIN_REQUIRED_FOR_GAME_SELECTION
         )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          storageTurnResyncSeen.current = resyncKey
+        }
       })
 
     return () => {
