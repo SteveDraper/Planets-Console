@@ -47,7 +47,7 @@ def test_list_analytics_returns_analytics_list():
     assert "analytics" in data
     analytics = data["analytics"]
     assert isinstance(analytics, list)
-    assert len(analytics) >= 1
+    assert len(analytics) == 3
     for a in analytics:
         assert "id" in a
         assert "name" in a
@@ -119,22 +119,24 @@ def test_base_map_returns_planets_and_no_edges():
     assert len(first["normalWellCells"]) == 29
 
 
-def test_get_analytic_map_returns_expected_structure():
-    """GET /analytics/{id}/map returns analyticId, nodes, edges."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
-    assert response.status_code == 200
-    data = response.json()
-    assert "analyticId" in data
-    assert data["analyticId"] == "placeholder-2"
-    assert "nodes" in data
-    assert "edges" in data
-    assert isinstance(data["nodes"], list)
-    assert isinstance(data["edges"], list)
+def test_get_analytic_map_unknown_id_returns_422():
+    response = client.get(f"/analytics/unknown-analytic/map?{SCOPE_QS}")
+    assert response.status_code == 422
+
+
+def test_get_analytic_table_unknown_id_returns_422():
+    response = client.get(f"/analytics/unknown-analytic/table?{SCOPE_QS}")
+    assert response.status_code == 422
+
+
+def test_get_analytic_table_unsupported_mode_returns_422():
+    response = client.get(f"/analytics/base-map/table?{SCOPE_QS}")
+    assert response.status_code == 422
 
 
 def test_get_analytic_map_nodes_have_id_label_x_y():
     """Map response nodes must have id, label, x, y with numeric x and y."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
+    response = client.get(f"/analytics/base-map/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
     nodes = data["nodes"]
@@ -149,30 +151,6 @@ def test_get_analytic_map_nodes_have_id_label_x_y():
         assert isinstance(y, (int, float)), f"node {i} y must be numeric, got {type(y)}"
         assert not (isinstance(x, float) and math.isnan(x)), f"node {i} x must not be NaN"
         assert not (isinstance(y, float) and math.isnan(y)), f"node {i} y must not be NaN"
-
-
-def test_get_analytic_map_placeholder_has_four_nodes_with_distinct_coordinates():
-    """Placeholder map returns 4 nodes with distinct (x,y) in a 200x200 square."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
-    assert response.status_code == 200
-    data = response.json()
-    nodes = data["nodes"]
-    assert len(nodes) == 4, "placeholder map must return exactly 4 nodes"
-    coords = [(n["x"], n["y"]) for n in nodes]
-    expected = {(0, 0), (200, 0), (200, 200), (0, 200)}
-    assert set(coords) == expected, f"expected nodes at {expected}, got {coords}"
-
-
-def test_get_analytic_map_edges_reference_node_ids():
-    """Map edges source/target must match node ids."""
-    response = client.get(f"/analytics/placeholder-2/map?{SCOPE_QS}")
-    assert response.status_code == 200
-    data = response.json()
-    node_ids = {n["id"] for n in data["nodes"]}
-    for edge in data["edges"]:
-        assert "source" in edge and "target" in edge
-        assert edge["source"] in node_ids, f"edge source {edge['source']} not in node ids"
-        assert edge["target"] in node_ids, f"edge target {edge['target']} not in node ids"
 
 
 def test_connections_map_returns_routes_not_nodes():

@@ -58,7 +58,7 @@ def _turn_analytics_from_core(
 def list_analytics(
     include: IncludeDiagnostics = False,
 ):
-    """Return analytics available to the console (placeholder list)."""
+    """Return analytics available to the console."""
     body = {"analytics": ANALYTICS_LIST}
     root = optional_request_root(include, "GET", "/analytics", handler="list_analytics")
     with_timed_child(root, "list_analytics", "total", lambda: body)
@@ -118,7 +118,6 @@ def get_analytic_map(
     """Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
 
     **connections** returns route pairs for the SPA to draw as edges on those nodes.
-    Other analytic ids return placeholder shapes until implemented.
 
     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).

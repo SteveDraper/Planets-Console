@@ -1,5 +1,6 @@
 """Tests for BFF analytics modules and registry dispatch."""
 
+import pytest
 from api.diagnostics import NOOP_DIAGNOSTICS
 from api.transport.connections_options import derive_include_illustrative_routes
 from bff.analytics import (
@@ -11,6 +12,30 @@ from bff.analytics import (
     get_table_response,
     map_diagnostic_values,
 )
+from bff.analytics.registry import REGISTERED_ANALYTICS
+from bff.errors import BFFValidationError
+
+
+def test_registered_analytics_have_unique_ids_and_handlers():
+    ids = [descriptor.id for descriptor in REGISTERED_ANALYTICS]
+    assert len(ids) == len(set(ids))
+    for descriptor in REGISTERED_ANALYTICS:
+        if descriptor.supports_table:
+            assert descriptor.get_table is not None
+        if descriptor.supports_map:
+            assert descriptor.get_map is not None
+
+
+def test_bff_descriptors_match_core_turn_analytics_registry():
+    """BFF catalog ids must match Core TURN_ANALYTICS keys (both directions)."""
+    from api.analytics.registry import TURN_ANALYTICS
+
+    bff_ids = {descriptor.id for descriptor in REGISTERED_ANALYTICS}
+    core_ids = set(TURN_ANALYTICS)
+    assert bff_ids == core_ids, (
+        f"Registry mismatch: BFF-only={sorted(bff_ids - core_ids)!r}, "
+        f"Core-only={sorted(core_ids - bff_ids)!r}"
+    )
 
 
 def test_registry_metadata_keeps_scores_selectable_table_only():
@@ -103,3 +128,15 @@ def test_include_illustrative_routes_spa_rule():
     assert derive_include_illustrative_routes(FlareConnectionMode.INCLUDE, 1) is False
     assert derive_include_illustrative_routes(FlareConnectionMode.INCLUDE, 2) is True
     assert derive_include_illustrative_routes(FlareConnectionMode.ONLY, 2) is True
+
+
+def test_unknown_analytic_table_dispatch_raises_validation_error():
+    scope = TurnScope(628580, 1, 111)
+    with pytest.raises(BFFValidationError, match="Unknown analytic_id"):
+        get_table_response("missing", scope, lambda *a, **k: {}, NOOP_DIAGNOSTICS)
+
+
+def test_unsupported_table_mode_raises_validation_error():
+    scope = TurnScope(628580, 1, 111)
+    with pytest.raises(BFFValidationError, match="does not support table"):
+        get_table_response("base-map", scope, lambda *a, **k: {}, NOOP_DIAGNOSTICS)

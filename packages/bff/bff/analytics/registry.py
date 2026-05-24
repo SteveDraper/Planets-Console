@@ -1,28 +1,31 @@
-"""BFF analytics metadata and dispatch."""
+"""BFF analytics catalog and dispatch."""
 
 from api.diagnostics import Diagnostics
 
+from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import ConnectionsMapQuery, CoreAnalyticsLoader, TurnScope
+from bff.errors import BFFValidationError
 
-from . import base_map, connections, placeholder, scores
+from . import base_map, connections, scores
 
-ANALYTICS_LIST = [
-    base_map.METADATA,
-    scores.METADATA,
-    placeholder.TABLE_METADATA,
-    connections.METADATA,
-    placeholder.MAP_METADATA,
-    placeholder.BOTH_METADATA,
-]
+REGISTERED_ANALYTICS: tuple[AnalyticDescriptor, ...] = (
+    base_map.DESCRIPTOR,
+    scores.DESCRIPTOR,
+    connections.DESCRIPTOR,
+)
 
-TABLE_HANDLERS = {
-    scores.ANALYTIC_ID: scores.get_table,
+_BY_ID: dict[str, AnalyticDescriptor] = {
+    descriptor.id: descriptor for descriptor in REGISTERED_ANALYTICS
 }
 
-MAP_HANDLERS = {
-    base_map.ANALYTIC_ID: base_map.get_map,
-    connections.ANALYTIC_ID: connections.get_map,
-}
+ANALYTICS_LIST = [descriptor.metadata() for descriptor in REGISTERED_ANALYTICS]
+
+
+def _require_descriptor(analytic_id: str) -> AnalyticDescriptor:
+    try:
+        return _BY_ID[analytic_id]
+    except KeyError as err:
+        raise BFFValidationError(f"Unknown analytic_id: {analytic_id!r}") from err
 
 
 def get_table_response(
@@ -31,22 +34,24 @@ def get_table_response(
     load_core: CoreAnalyticsLoader,
     diagnostics: Diagnostics,
 ) -> dict:
-    handler = TABLE_HANDLERS.get(analytic_id)
-    if handler is None:
-        return placeholder.get_table(analytic_id)
-    return handler(scope, load_core, diagnostics)
+    descriptor = _require_descriptor(analytic_id)
+    if descriptor.get_table is None:
+        raise BFFValidationError(f"Analytic {analytic_id!r} does not support table view")
+    return descriptor.get_table(scope, load_core, diagnostics)
 
 
 def map_diagnostic_values(analytic_id: str, query: ConnectionsMapQuery) -> dict:
-    if analytic_id == connections.ANALYTIC_ID:
-        return connections.diagnostic_values(query)
-    return {}
+    descriptor = _BY_ID.get(analytic_id)
+    if descriptor is None or descriptor.map_diagnostic_values is None:
+        return {}
+    return descriptor.map_diagnostic_values(query)
 
 
 def map_timing_section(analytic_id: str) -> str:
-    if analytic_id in MAP_HANDLERS:
-        return "turn_analytics_from_core"
-    return "total"
+    descriptor = _BY_ID.get(analytic_id)
+    if descriptor is None or descriptor.get_map is None:
+        return "total"
+    return descriptor.map_timing_section
 
 
 def get_map_response(
@@ -56,8 +61,7 @@ def get_map_response(
     load_core: CoreAnalyticsLoader,
     diagnostics: Diagnostics,
 ) -> dict:
-    if analytic_id == base_map.ANALYTIC_ID:
-        return base_map.get_map(scope, load_core, diagnostics)
-    if analytic_id == connections.ANALYTIC_ID:
-        return connections.get_map(scope, query, load_core, diagnostics)
-    return placeholder.get_map(analytic_id)
+    descriptor = _require_descriptor(analytic_id)
+    if descriptor.get_map is None:
+        raise BFFValidationError(f"Analytic {analytic_id!r} does not support map view")
+    return descriptor.get_map(scope, query, load_core, diagnostics)

@@ -2,17 +2,10 @@
 
 from api.diagnostics import Diagnostics
 
+from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import CoreAnalyticsLoader, TurnScope, load_core_analytic
 
 ANALYTIC_ID = "scores"
-
-METADATA = {
-    "id": ANALYTIC_ID,
-    "name": "Scores",
-    "supportsTable": True,
-    "supportsMap": False,
-    "type": "selectable",
-}
 
 TABLE_COLUMNS = [
     "Race (player)",
@@ -67,3 +60,13 @@ def table_from_core(core_data: dict) -> dict:
 def get_table(scope: TurnScope, load_core: CoreAnalyticsLoader, diagnostics: Diagnostics) -> dict:
     core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
     return table_from_core(core_data)
+
+
+DESCRIPTOR = AnalyticDescriptor(
+    id=ANALYTIC_ID,
+    name="Scores",
+    supports_table=True,
+    supports_map=False,
+    type="selectable",
+    get_table=get_table,
+)

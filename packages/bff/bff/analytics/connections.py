@@ -9,6 +9,7 @@ from api.transport.connections_options import (
     WARP_SPEED_QUERY,
 )
 
+from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import (
     ConnectionsMapQuery,
     CoreAnalyticsLoader,
@@ -17,14 +18,6 @@ from bff.analytics.models import (
 )
 
 ANALYTIC_ID = "connections"
-
-METADATA = {
-    "id": ANALYTIC_ID,
-    "name": "Connections",
-    "supportsTable": False,
-    "supportsMap": True,
-    "type": "selectable",
-}
 
 
 def diagnostic_values(query: ConnectionsMapQuery) -> dict:
@@ -54,3 +47,14 @@ def get_map(
         connection_flare_depth=query.flare_depth,
         connection_include_illustrative_routes=query.include_illustrative_routes,
     )
+
+
+DESCRIPTOR = AnalyticDescriptor(
+    id=ANALYTIC_ID,
+    name="Connections",
+    supports_table=False,
+    supports_map=True,
+    type="selectable",
+    get_map=get_map,
+    map_diagnostic_values=diagnostic_values,
+)

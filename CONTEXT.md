@@ -88,6 +88,10 @@ _Avoid_: widget, report, metric
 An **analytic** computed from **TurnInfo** for a specific game, turn, and **perspective**. Invoked through the shared Core route `.../turns/{turn}/analytics/{analytic_id}` and corresponding BFF routes.
 _Avoid_: query, dashboard tile
 
+**Analytic descriptor**:
+The single BFF registration object for one **turn analytic** -- catalog fields plus optional table/map handlers and diagnostic hooks. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.
+_Avoid_: METADATA dict, handler registry (when meaning the consolidated descriptor)
+
 **Base map**:
 The always-on map layer (`type: base`, id `base-map`) that renders planet nodes from **TurnInfo**. Fetched automatically in **map mode** and omitted from the analytics sidebar; other map analytics overlay it.
 _Avoid_: background layer, planet layer (without "base map")
