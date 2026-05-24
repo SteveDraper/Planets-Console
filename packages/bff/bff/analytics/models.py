@@ -2,9 +2,9 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
+from api.transport.connections_options import FlareConnectionMode
 
 
 @dataclass(frozen=True)
@@ -12,12 +12,6 @@ class TurnScope:
     game_id: int
     perspective: int
     turn: int
-
-
-class FlareConnectionMode(StrEnum):
-    OFF = "off"
-    INCLUDE = "include"
-    ONLY = "only"
 
 
 @dataclass(frozen=True)

@@ -4,12 +4,23 @@ from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
 from api.errors import PlanetsConsoleError
 from api.services.game_service import GameService
 from api.storage import get_storage
+from api.transport.connections_options import (
+    DEFAULT_FLARE_DEPTH,
+    DEFAULT_WARP_SPEED,
+    FLARE_DEPTH_DESCRIPTION,
+    FLARE_DEPTH_QUERY,
+    FLARE_MODE_QUERY,
+    GRAVITONIC_MOVEMENT_QUERY,
+    INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
+    INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
+    WARP_SPEED_QUERY,
+    FlareConnectionMode,
+)
 from fastapi import APIRouter, HTTPException, Query
 
 from bff.analytics import (
     ANALYTICS_LIST,
     ConnectionsMapQuery,
-    FlareConnectionMode,
     TurnScope,
     get_map_response,
     get_table_response,
@@ -97,23 +108,20 @@ def get_analytic_map(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=1),
-    warp_speed: int = Query(9, ge=1, le=9, alias="warpSpeed"),
-    gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
-    flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
+    warp_speed: int = Query(DEFAULT_WARP_SPEED, ge=1, le=9, alias=WARP_SPEED_QUERY),
+    gravitonic_movement: bool = Query(False, alias=GRAVITONIC_MOVEMENT_QUERY),
+    flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias=FLARE_MODE_QUERY),
     flare_depth: int = Query(
-        1,
+        DEFAULT_FLARE_DEPTH,
         ge=1,
         le=3,
-        alias="flareDepth",
-        description=(
-            "Max hops (1–3) for mixed normal-move + flare paths; at least one hop must be a flare. "
-            "Larger values add annulus pair candidates. Ignored when flareMode is off."
-        ),
+        alias=FLARE_DEPTH_QUERY,
+        description=FLARE_DEPTH_DESCRIPTION,
     ),
     include_illustrative_routes: bool = Query(
         False,
-        alias="includeIllustrativeRoutes",
-        description="When true, flare routes may include per-hop illustrativeRoute steps (Core).",
+        alias=INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
+        description=INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
     ),
     include: IncludeDiagnostics = False,
 ):

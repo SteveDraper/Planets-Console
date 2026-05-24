@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import StrEnum
 
 from api.concepts.flare_points import FlareMovementKind, flare_points_for_warp
 from api.concepts.planet_connections._constants import _MAX_FLARE_CHAIN_DEPTH
@@ -22,14 +21,7 @@ from api.concepts.planet_connections.wells import (
 from api.concepts.warp_well import NORMAL_RADIUS
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
 from api.models.planet import Planet
-
-
-class FlareConnectionMode(StrEnum):
-    """How flare-assisted routes are combined with direct warp-well reachability."""
-
-    OFF = "off"
-    INCLUDE = "include"
-    ONLY = "only"
+from api.transport.connections_options import FlareConnectionMode
 
 
 def _iter_flare_candidate_edges(

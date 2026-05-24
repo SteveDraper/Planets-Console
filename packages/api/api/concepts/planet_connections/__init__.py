@@ -13,7 +13,6 @@ from api.concepts.planet_connections.flare_pathfind import (
 )
 from api.concepts.planet_connections.routes import (
     ConnectionRoutesOutcome,
-    FlareConnectionMode,
     connection_routes_for_planets,
     connection_routes_with_options,
 )
@@ -23,6 +22,7 @@ from api.concepts.planet_connections.wells import (
     max_travel_distance,
     min_distance_point_to_simplified_normal_well,
 )
+from api.transport.connections_options import FlareConnectionMode
 
 __all__ = [
     "ConnectionRoutesOutcome",

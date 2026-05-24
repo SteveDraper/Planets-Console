@@ -1,9 +1,10 @@
 """Core Connections analytic adapter."""
 
 from api.analytics.options import TurnAnalyticsOptions
-from api.concepts.planet_connections import FlareConnectionMode, connection_routes_with_options
+from api.concepts.planet_connections import connection_routes_with_options
 from api.errors import ValidationError
 from api.models.game import TurnInfo
+from api.transport.connections_options import FlareConnectionMode
 
 ANALYTIC_ID = "connections"
 

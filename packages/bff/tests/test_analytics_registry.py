@@ -1,6 +1,7 @@
 """Tests for BFF analytics modules and registry dispatch."""
 
 from api.diagnostics import NOOP_DIAGNOSTICS
+from api.transport.connections_options import derive_include_illustrative_routes
 from bff.analytics import (
     ANALYTICS_LIST,
     ConnectionsMapQuery,
@@ -95,3 +96,10 @@ def test_connections_diagnostics_include_connection_query_values():
         "flareDepth": 3,
         "includeIllustrativeRoutes": True,
     }
+
+
+def test_include_illustrative_routes_spa_rule():
+    assert derive_include_illustrative_routes(FlareConnectionMode.OFF, 3) is False
+    assert derive_include_illustrative_routes(FlareConnectionMode.INCLUDE, 1) is False
+    assert derive_include_illustrative_routes(FlareConnectionMode.INCLUDE, 2) is True
+    assert derive_include_illustrative_routes(FlareConnectionMode.ONLY, 2) is True

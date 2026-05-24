@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 
-from api.concepts.planet_connections import FlareConnectionMode
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
+from api.transport.connections_options import FlareConnectionMode
 
 
 @dataclass(frozen=True)

@@ -203,6 +203,17 @@ class TestGetTurnAnalyticsConnections:
             assert "viaFlare" in row
             assert row["fromPlanetId"] < row["toPlanetId"]
 
+    def test_accepts_include_illustrative_routes_query(self, client):
+        resp = client.get(
+            "/v1/games/628580/1/turns/111/analytics/connections"
+            "?warpSpeed=9&gravitonicMovement=false&flareMode=include&flareDepth=2"
+            "&includeIllustrativeRoutes=true"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["analyticId"] == "connections"
+        assert isinstance(data["routes"], list)
+
 
 class TestGetTurnAnalyticsScores:
     def test_returns_score_rows(self, client):

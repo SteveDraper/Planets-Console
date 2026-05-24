@@ -7,7 +7,6 @@ from dacite.exceptions import DaciteError
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.base_map import get_base_map
 from api.analytics.scores import get_scores_table
-from api.concepts.planet_connections import FlareConnectionMode
 from api.concepts.warp_well import (
     WarpWellKind,
     coordinate_in_warp_well,
@@ -27,6 +26,7 @@ from api.planets_nu import PlanetsNuClient
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
 from api.storage.base import JSONValue, StorageBackend
+from api.transport.connections_options import FlareConnectionMode
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 
 _USERNAME_SAFE = re.compile(r"^[a-zA-Z0-9_.-]+$")

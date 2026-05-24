@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendConnectionsMapQueryParams } from './api'
+import { appendConnectionsMapQueryParams, deriveIncludeIllustrativeRoutes } from './api'
 
 describe('appendConnectionsMapQueryParams', () => {
   it('adds connections map query params and illustrative route flag when useful', () => {
@@ -28,5 +28,12 @@ describe('appendConnectionsMapQueryParams', () => {
     })
 
     expect(params.get('includeIllustrativeRoutes')).toBeNull()
+  })
+
+  it('deriveIncludeIllustrativeRoutes matches Core transport rule', () => {
+    expect(deriveIncludeIllustrativeRoutes('off', 3)).toBe(false)
+    expect(deriveIncludeIllustrativeRoutes('include', 1)).toBe(false)
+    expect(deriveIncludeIllustrativeRoutes('include', 2)).toBe(true)
+    expect(deriveIncludeIllustrativeRoutes('only', 2)).toBe(true)
   })
 })

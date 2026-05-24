@@ -2,11 +2,21 @@
 
 from fastapi import APIRouter, Depends, Query
 
-from api.concepts.planet_connections import FlareConnectionMode
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
 from api.storage import StorageBackend, get_storage
+from api.transport.connections_options import (
+    DEFAULT_FLARE_DEPTH,
+    FLARE_DEPTH_DESCRIPTION,
+    FLARE_DEPTH_QUERY,
+    FLARE_MODE_QUERY,
+    GRAVITONIC_MOVEMENT_QUERY,
+    INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
+    INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
+    WARP_SPEED_QUERY,
+    FlareConnectionMode,
+)
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 
 router = APIRouter(prefix="/v1/games", tags=["games"])
@@ -70,18 +80,20 @@ def get_turn_analytics(
     perspective: int,
     turn_number: int,
     analytic_id: str,
-    warp_speed: int | None = Query(None, ge=1, le=9, alias="warpSpeed"),
-    gravitonic_movement: bool = Query(False, alias="gravitonicMovement"),
-    flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias="flareMode"),
+    warp_speed: int | None = Query(None, ge=1, le=9, alias=WARP_SPEED_QUERY),
+    gravitonic_movement: bool = Query(False, alias=GRAVITONIC_MOVEMENT_QUERY),
+    flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias=FLARE_MODE_QUERY),
     flare_depth: int = Query(
-        1,
+        DEFAULT_FLARE_DEPTH,
         ge=1,
         le=3,
-        alias="flareDepth",
-        description=(
-            "Max hops (1–3) for mixed normal-move + flare paths; at least one hop must be a flare. "
-            "Larger values add annulus pair candidates. Ignored when flareMode is off."
-        ),
+        alias=FLARE_DEPTH_QUERY,
+        description=FLARE_DEPTH_DESCRIPTION,
+    ),
+    include_illustrative_routes: bool = Query(
+        False,
+        alias=INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
+        description=INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
     ),
     svc: GameService = Depends(get_game_service),
 ):
@@ -95,4 +107,5 @@ def get_turn_analytics(
         connection_gravitonic_movement=gravitonic_movement,
         connection_flare_mode=flare_mode,
         connection_flare_depth=flare_depth,
+        connection_include_illustrative_routes=include_illustrative_routes,
     )

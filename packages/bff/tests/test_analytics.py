@@ -187,3 +187,16 @@ def test_connections_map_returns_routes_not_nodes():
     for row in data["routes"]:
         assert row["fromPlanetId"] < row["toPlanetId"]
         assert isinstance(row["viaFlare"], bool)
+
+
+def test_connections_map_accepts_full_query_contract():
+    """BFF accepts the same Connections query params as Core, including illustrative routes."""
+    qs = (
+        f"{SCOPE_QS}&warpSpeed=8&gravitonicMovement=true&flareMode=include&flareDepth=2"
+        "&includeIllustrativeRoutes=true"
+    )
+    response = client.get(f"/analytics/connections/map?{qs}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "connections"
+    assert isinstance(data["routes"], list)

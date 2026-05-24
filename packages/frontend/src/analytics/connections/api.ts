@@ -7,6 +7,18 @@ export type ConnectionsFlareMode = 'off' | 'include' | 'only'
  */
 export type ConnectionsFlareDepth = 1 | 2 | 3
 
+/**
+ * Wire query names for Connections map GETs.
+ * Keep in sync with `api.transport.connections_options` in Core.
+ */
+export const CONNECTIONS_QUERY_WIRE = {
+  warpSpeed: 'warpSpeed',
+  gravitonicMovement: 'gravitonicMovement',
+  flareMode: 'flareMode',
+  flareDepth: 'flareDepth',
+  includeIllustrativeRoutes: 'includeIllustrativeRoutes',
+} as const
+
 /** Query parameters for the Connections map analytic (BFF forwards to Core). */
 export type ConnectionsMapParams = {
   warpSpeed: number
@@ -15,16 +27,24 @@ export type ConnectionsMapParams = {
   flareDepth: ConnectionsFlareDepth
 }
 
+/** Must match `api.transport.connections_options.derive_include_illustrative_routes`. */
+export function deriveIncludeIllustrativeRoutes(
+  flareMode: ConnectionsFlareMode,
+  flareDepth: number
+): boolean {
+  return flareMode !== 'off' && flareDepth >= 2
+}
+
 export function appendConnectionsMapQueryParams(
   params: URLSearchParams,
   connectionsParams: ConnectionsMapParams
 ): void {
-  params.set('warpSpeed', String(connectionsParams.warpSpeed))
-  params.set('gravitonicMovement', connectionsParams.gravitonicMovement ? 'true' : 'false')
-  params.set('flareMode', connectionsParams.flareMode)
-  params.set('flareDepth', String(connectionsParams.flareDepth))
-  // Illustrative routes (per-hop waypoints) are only useful when the hop budget can exceed one.
-  if (connectionsParams.flareMode !== 'off' && connectionsParams.flareDepth >= 2) {
-    params.set('includeIllustrativeRoutes', 'true')
+  const wire = CONNECTIONS_QUERY_WIRE
+  params.set(wire.warpSpeed, String(connectionsParams.warpSpeed))
+  params.set(wire.gravitonicMovement, connectionsParams.gravitonicMovement ? 'true' : 'false')
+  params.set(wire.flareMode, connectionsParams.flareMode)
+  params.set(wire.flareDepth, String(connectionsParams.flareDepth))
+  if (deriveIncludeIllustrativeRoutes(connectionsParams.flareMode, connectionsParams.flareDepth)) {
+    params.set(wire.includeIllustrativeRoutes, 'true')
   }
 }
