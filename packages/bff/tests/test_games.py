@@ -185,6 +185,18 @@ def test_get_stored_turn_perspectives_empty_when_missing():
     assert response.json() == {"perspectives": []}
 
 
+def test_get_stored_turn_perspectives_includes_diagnostics_when_requested():
+    storage = get_storage()
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+    response = client.get("/games/628580/turns/111/stored-perspectives?includeDiagnostics=true")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["perspectives"] == [1]
+    assert "diagnostics" in body
+    assert body["diagnostics"]["name"] == ("GET /games/628580/turns/111/stored-perspectives")
+
+
 @patch("bff.core_client.PlanetsNuClient")
 def test_post_turns_ensure_skips_planets_when_present(mock_pc_class):
     mock_instance = mock_pc_class.from_config.return_value

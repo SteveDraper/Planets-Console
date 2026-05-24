@@ -8,6 +8,7 @@ import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
 from api.storage import clear_backend_cache, get_storage
+from bff.analytics import ANALYTICS_LIST
 from bff.app import app
 from fastapi.testclient import TestClient
 
@@ -47,7 +48,7 @@ def test_list_analytics_returns_analytics_list():
     assert "analytics" in data
     analytics = data["analytics"]
     assert isinstance(analytics, list)
-    assert len(analytics) == 3
+    assert analytics == ANALYTICS_LIST
     for a in analytics:
         assert "id" in a
         assert "name" in a
