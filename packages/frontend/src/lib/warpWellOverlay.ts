@@ -1,8 +1,9 @@
 import type { MapNode } from '../api/bff'
 import {
-  flowBoundingBoxFromWellCells,
+  flowBoundingBoxFromNormalizedWellCells,
   flowBoundsIntersect,
-  normalWellGridSegmentsFromCells,
+  normalWellGridSegmentsFromNormalizedWellCells,
+  normalizeWarpWellMapCells,
   type WarpWellGridSegmentFlow,
 } from './warpWell'
 
@@ -76,14 +77,16 @@ export function buildWarpWellOverlayPaneLines(
   for (const n of mapNodes) {
     const cells = n.normalWellCells
     if (cells == null || cells.length === 0) continue
-    const wellBounds = flowBoundingBoxFromWellCells(cells)
+    const normalizedCells = normalizeWarpWellMapCells(cells)
+    if (normalizedCells.length === 0) continue
+    const wellBounds = flowBoundingBoxFromNormalizedWellCells(normalizedCells)
     if (
       wellBounds == null ||
       !flowBoundsIntersect(wellBounds, flowXMin, flowXMax, flowYMin, flowYMax)
     ) {
       continue
     }
-    const segs = normalWellGridSegmentsFromCells(cells)
+    const segs = normalWellGridSegmentsFromNormalizedWellCells(normalizedCells)
     segs.forEach((s, i) => {
       const clipped = clipWarpWellSegmentToFlowViewport(s, flowXMin, flowXMax, flowYMin, flowYMax)
       if (clipped == null) return

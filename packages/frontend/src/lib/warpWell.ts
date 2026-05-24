@@ -29,7 +29,8 @@ export type WarpWellGridSegmentFlow = {
   y2: number
 }
 
-function normalizeWellCells(
+/** Validate wire cells into integer map indices; empty when input is missing or invalid. */
+export function normalizeWarpWellMapCells(
   cells: readonly UntrustedWarpWellMapCell[] | undefined
 ): WarpWellMapCell[] {
   if (!Array.isArray(cells)) return []
@@ -49,10 +50,9 @@ function normalizeWellCells(
  * Tight axis-aligned box in flow coordinates that contains every normal-well grid segment.
  * Map cells use gx/gy; cell edges match `CoordinateGridOverlay` (x from gx to gx+1, y from -(gy+1) to -gy).
  */
-export function flowBoundingBoxFromWellCells(
-  cells: readonly UntrustedWarpWellMapCell[] | undefined
+export function flowBoundingBoxFromNormalizedWellCells(
+  normalized: readonly WarpWellMapCell[]
 ): NormalWarpWellFlowBounds | null {
-  const normalized = normalizeWellCells(cells)
   if (normalized.length === 0) return null
   let flowXMin = Infinity
   let flowXMax = -Infinity
@@ -68,6 +68,12 @@ export function flowBoundingBoxFromWellCells(
   }
   if (![flowXMin, flowXMax, flowYMin, flowYMax].every(Number.isFinite)) return null
   return { flowXMin, flowXMax, flowYMin, flowYMax }
+}
+
+export function flowBoundingBoxFromWellCells(
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
+): NormalWarpWellFlowBounds | null {
+  return flowBoundingBoxFromNormalizedWellCells(normalizeWarpWellMapCells(cells))
 }
 
 /** Whether two closed flow-axis rectangles overlap (same convention as segment clipping). */
@@ -121,10 +127,9 @@ function keyToSegment(key: string): WarpWellGridSegmentFlow | null {
  * Every coordinate edge of each map cell in the normal warp well (same integer lines as
  * `CoordinateGridOverlay`), with shared edges between adjacent well cells deduplicated.
  */
-export function normalWellGridSegmentsFromCells(
-  cells: readonly UntrustedWarpWellMapCell[] | undefined
+export function normalWellGridSegmentsFromNormalizedWellCells(
+  normalized: readonly WarpWellMapCell[]
 ): WarpWellGridSegmentFlow[] {
-  const normalized = normalizeWellCells(cells)
   if (normalized.length === 0) return []
   const keySet = new Set<string>()
 
@@ -148,4 +153,10 @@ export function normalWellGridSegmentsFromCells(
     if (seg != null) out.push(seg)
   }
   return out
+}
+
+export function normalWellGridSegmentsFromCells(
+  cells: readonly UntrustedWarpWellMapCell[] | undefined
+): WarpWellGridSegmentFlow[] {
+  return normalWellGridSegmentsFromNormalizedWellCells(normalizeWarpWellMapCells(cells))
 }
