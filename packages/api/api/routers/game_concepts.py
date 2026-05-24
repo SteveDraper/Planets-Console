@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Depends, Query
 
 from api.handlers.warp_well import coordinate_in_well, warp_well_cells
-from api.services.game_service import GameService
-from api.storage import StorageBackend, get_storage
+from api.services.deps import get_turn_concept_service
+from api.services.turn_concept_service import TurnConceptService
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
     CoordinateInWarpWellResponse,
@@ -13,10 +13,6 @@ from api.transport.concept_warp_well import (
 )
 
 router = APIRouter(prefix="/v1/games", tags=["game-concepts"])
-
-
-def get_game_service(storage: StorageBackend = Depends(get_storage)) -> GameService:
-    return GameService(storage)
 
 
 @router.post(
@@ -28,7 +24,7 @@ def post_warp_well_coordinate_in_well(
     perspective: int,
     turn_number: int,
     body: CoordinateInWarpWellRequest,
-    svc: GameService = Depends(get_game_service),
+    svc: TurnConceptService = Depends(get_turn_concept_service),
 ) -> CoordinateInWarpWellResponse:
     """Return whether ``(map_x, map_y)`` lies in the given warp well of the planet."""
     return coordinate_in_well(svc, game_id, perspective, turn_number, body)
@@ -44,7 +40,7 @@ def get_warp_well_cells(
     turn_number: int,
     planet_id: int = Query(..., ge=1),
     well_type: WarpWellTypeParam = Query(...),
-    svc: GameService = Depends(get_game_service),
+    svc: TurnConceptService = Depends(get_turn_concept_service),
 ) -> WarpWellCellsResponse:
     """Return map cell indices whose centers lie in the given warp well."""
     return warp_well_cells(svc, game_id, perspective, turn_number, planet_id, well_type)

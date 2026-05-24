@@ -4,8 +4,14 @@ from fastapi import APIRouter, Depends, Query
 
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
+from api.services.deps import (
+    get_game_service,
+    get_turn_analytic_service,
+    get_turn_load_service,
+)
 from api.services.game_service import GameService
-from api.storage import StorageBackend, get_storage
+from api.services.turn_analytic_service import TurnAnalyticService
+from api.services.turn_load_service import TurnLoadService
 from api.transport.connections_options import (
     DEFAULT_FLARE_DEPTH,
     FLARE_DEPTH_DESCRIPTION,
@@ -24,10 +30,6 @@ router = APIRouter(prefix="/v1/games", tags=["games"])
 
 def get_planets_client() -> PlanetsNuClient:
     return PlanetsNuClient.from_config()
-
-
-def get_game_service(storage: StorageBackend = Depends(get_storage)) -> GameService:
-    return GameService(storage)
 
 
 @router.get("/{game_id}/info")
@@ -56,11 +58,11 @@ def post_ensure_turn(
     perspective: int,
     turn_number: int,
     body: RefreshGameInfoParams,
-    svc: GameService = Depends(get_game_service),
+    turns: TurnLoadService = Depends(get_turn_load_service),
     planets: PlanetsNuClient = Depends(get_planets_client),
 ) -> TurnInfo:
     """Load turn from Planets.nu when missing in storage; return stored turn data."""
-    return svc.ensure_turn_loaded(game_id, perspective, turn_number, body, planets)
+    return turns.ensure_turn_loaded(game_id, perspective, turn_number, body, planets)
 
 
 @router.get("/{game_id}/{perspective}/turns/{turn_number}")
@@ -68,10 +70,10 @@ def get_turn_info(
     game_id: int,
     perspective: int,
     turn_number: int,
-    svc: GameService = Depends(get_game_service),
+    turns: TurnLoadService = Depends(get_turn_load_service),
 ) -> TurnInfo:
     """Return turn data for the given game, player perspective, and turn."""
-    return svc.get_turn_info(game_id, perspective, turn_number)
+    return turns.get_turn_info(game_id, perspective, turn_number)
 
 
 @router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}")
@@ -95,10 +97,10 @@ def get_turn_analytics(
         alias=INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
         description=INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
     ),
-    svc: GameService = Depends(get_game_service),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ):
     """Return per-analytic map data derived from turn state."""
-    return svc.get_turn_analytics(
+    return analytics.get_turn_analytics(
         game_id,
         perspective,
         turn_number,

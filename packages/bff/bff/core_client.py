@@ -11,8 +11,13 @@ from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
+from api.services.stack import build_service_stack
 from api.services.store_service import StoreService
+from api.services.turn_analytic_service import TurnAnalyticService
+from api.services.turn_concept_service import TurnConceptService
+from api.services.turn_load_service import TurnLoadService
 from api.storage import get_storage
+from api.storage.base import StorageBackend
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
     CoordinateInWarpWellResponse,
@@ -41,12 +46,20 @@ class CoreClient:
         self,
         *,
         game_service: GameService | None = None,
+        turn_load_service: TurnLoadService | None = None,
+        turn_concept_service: TurnConceptService | None = None,
+        turn_analytic_service: TurnAnalyticService | None = None,
         store_service: StoreService | None = None,
         planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
+        storage: StorageBackend | None = None,
     ) -> None:
-        storage = get_storage()
-        self._games = game_service or GameService(storage)
-        self._store = store_service or StoreService(storage)
+        backend = storage or get_storage()
+        games, turns, concepts, analytics = build_service_stack(backend)
+        self._games = game_service or games
+        self._turns = turn_load_service or turns
+        self._concepts = turn_concept_service or concepts
+        self._analytics = turn_analytic_service or analytics
+        self._store = store_service or StoreService(backend)
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
 
     def _invoke(self, fn: Callable[[], T]) -> T:
@@ -97,7 +110,7 @@ class CoreClient:
         turn_number: int,
     ) -> StoredTurnPerspectivesResponse:
         perspectives = self._invoke(
-            lambda: self._games.list_stored_turn_perspectives(game_id, turn_number)
+            lambda: self._turns.list_stored_turn_perspectives(game_id, turn_number)
         )
         return StoredTurnPerspectivesResponse(perspectives=perspectives)
 
@@ -119,7 +132,7 @@ class CoreClient:
         params = RefreshGameInfoParams(username=body.username, password=body.password)
 
         def work() -> TurnInfo:
-            return self._games.ensure_turn_loaded(
+            return self._turns.ensure_turn_loaded(
                 game_id,
                 body.perspective,
                 body.turn,
@@ -137,7 +150,7 @@ class CoreClient:
         body: CoordinateInWarpWellRequest,
     ) -> CoordinateInWarpWellResponse:
         return self._invoke(
-            lambda: coordinate_in_well(self._games, game_id, perspective, turn_number, body)
+            lambda: coordinate_in_well(self._concepts, game_id, perspective, turn_number, body)
         )
 
     def warp_well_cells(
@@ -150,7 +163,7 @@ class CoreClient:
     ) -> WarpWellCellsResponse:
         return self._invoke(
             lambda: warp_well_cells(
-                self._games,
+                self._concepts,
                 game_id,
                 perspective,
                 turn_number,
@@ -170,7 +183,7 @@ class CoreClient:
         **kwargs: object,
     ) -> dict:
         return self._invoke(
-            lambda: self._games.get_turn_analytics(
+            lambda: self._analytics.get_turn_analytics(
                 game_id,
                 perspective,
                 turn_number,

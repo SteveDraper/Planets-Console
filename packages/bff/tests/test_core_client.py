@@ -20,9 +20,9 @@ def _clear_sector_cache():
 
 
 def test_get_turn_analytics_maps_core_errors_to_http():
-    games = MagicMock()
-    games.get_turn_analytics.side_effect = ValidationError("bad scope")
-    client = CoreClient(game_service=games, store_service=MagicMock())
+    analytics = MagicMock()
+    analytics.get_turn_analytics.side_effect = ValidationError("bad scope")
+    client = CoreClient(turn_analytic_service=analytics, store_service=MagicMock())
 
     with pytest.raises(HTTPException) as exc:
         client.get_turn_analytics(1, 1, 1, "connections")
@@ -34,15 +34,15 @@ def test_get_turn_analytics_maps_core_errors_to_http():
 def test_list_stored_games_returns_empty_when_games_path_missing():
     store = MagicMock()
     store.read_shallow.side_effect = NotFoundError("missing")
-    client = CoreClient(game_service=MagicMock(), store_service=store)
+    client = CoreClient(store_service=store)
 
     assert client.list_stored_games() == {"games": []}
 
 
 def test_warp_well_coordinate_in_well_delegates_to_shared_handler():
-    games = MagicMock()
-    games.warp_well_coordinate_in_well.return_value = True
-    client = CoreClient(game_service=games, store_service=MagicMock())
+    concepts = MagicMock()
+    concepts.warp_well_coordinate_in_well.return_value = True
+    client = CoreClient(turn_concept_service=concepts, store_service=MagicMock())
     body = CoordinateInWarpWellRequest(
         planet_id=1,
         map_x=10.0,
@@ -53,7 +53,7 @@ def test_warp_well_coordinate_in_well_delegates_to_shared_handler():
     result = client.warp_well_coordinate_in_well(628580, 1, 111, body)
 
     assert result.inside is True
-    games.warp_well_coordinate_in_well.assert_called_once()
+    concepts.warp_well_coordinate_in_well.assert_called_once()
 
 
 def test_refresh_game_info_updates_sector_title_cache():
@@ -78,12 +78,12 @@ def test_refresh_game_info_updates_sector_title_cache():
 
 
 def test_ensure_turn_delegates_with_refresh_params():
-    games = MagicMock()
+    turns = MagicMock()
     turn = MagicMock()
-    games.ensure_turn_loaded.return_value = turn
+    turns.ensure_turn_loaded.return_value = turn
     planets = MagicMock()
     client = CoreClient(
-        game_service=games,
+        turn_load_service=turns,
         store_service=MagicMock(),
         planets_client_factory=lambda: planets,
     )
@@ -92,5 +92,5 @@ def test_ensure_turn_delegates_with_refresh_params():
     result = client.ensure_turn(628580, body)
 
     assert result is turn
-    games.ensure_turn_loaded.assert_called_once()
-    assert games.ensure_turn_loaded.call_args[0][4] is planets
+    turns.ensure_turn_loaded.assert_called_once()
+    assert turns.ensure_turn_loaded.call_args[0][4] is planets

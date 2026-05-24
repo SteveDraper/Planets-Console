@@ -22,7 +22,7 @@ from api.concepts.planet_connections import (
 )
 from api.concepts.warp_well import NORMAL_RADIUS
 from api.models.flare_point import FlarePoint
-from api.services.game_service import GameService
+from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -35,8 +35,8 @@ def sample_planet():
         backend.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
         backend.put("games/628580/1/turns/111", json.load(f))
-    svc = GameService(backend)
-    return svc.get_planet_from_turn(628580, 1, 111, 1)
+    _, turns, _, _ = build_service_stack(backend)
+    return turns.get_planet_from_turn(628580, 1, 111, 1)
 
 
 def _p(base, pid: int, x: int, y: int, debris: int = 0):
