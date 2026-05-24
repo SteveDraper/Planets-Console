@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query
 
-from api.concepts.warp_well import WarpWellKind
+from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.services.game_service import GameService
 from api.storage import StorageBackend, get_storage
 from api.transport.concept_warp_well import (
@@ -31,17 +31,7 @@ def post_warp_well_coordinate_in_well(
     svc: GameService = Depends(get_game_service),
 ) -> CoordinateInWarpWellResponse:
     """Return whether ``(map_x, map_y)`` lies in the given warp well of the planet."""
-    kind = WarpWellKind(body.well_type.value)
-    inside = svc.warp_well_coordinate_in_well(
-        game_id,
-        perspective,
-        turn_number,
-        body.planet_id,
-        body.map_x,
-        body.map_y,
-        kind,
-    )
-    return CoordinateInWarpWellResponse(inside=inside)
+    return coordinate_in_well(svc, game_id, perspective, turn_number, body)
 
 
 @router.get(
@@ -57,6 +47,4 @@ def get_warp_well_cells(
     svc: GameService = Depends(get_game_service),
 ) -> WarpWellCellsResponse:
     """Return map cell indices whose centers lie in the given warp well."""
-    kind = WarpWellKind(well_type.value)
-    cells = svc.warp_well_cells(game_id, perspective, turn_number, planet_id, kind)
-    return WarpWellCellsResponse(cells=cells)
+    return warp_well_cells(svc, game_id, perspective, turn_number, planet_id, well_type)

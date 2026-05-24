@@ -1,9 +1,6 @@
 """Analytics endpoints for the console shell."""
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
-from api.errors import PlanetsConsoleError
-from api.services.game_service import GameService
-from api.storage import get_storage
 from api.transport.connections_options import (
     DEFAULT_FLARE_DEPTH,
     DEFAULT_WARP_SPEED,
@@ -16,7 +13,7 @@ from api.transport.connections_options import (
     WARP_SPEED_QUERY,
     FlareConnectionMode,
 )
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from bff.analytics import (
     ANALYTICS_LIST,
@@ -27,6 +24,7 @@ from bff.analytics import (
     map_diagnostic_values,
     map_timing_section,
 )
+from bff.core_client import get_core_client
 from bff.diagnostics_dep import (
     IncludeDiagnostics,
     finish_response,
@@ -46,22 +44,14 @@ def _turn_analytics_from_core(
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     **kwargs: object,
 ) -> dict:
-    storage = get_storage()
-    svc = GameService(storage)
-    try:
-        return svc.get_turn_analytics(
-            game_id,
-            perspective,
-            turn_number,
-            analytic_id,
-            diagnostics=diagnostics,
-            **kwargs,
-        )
-    except PlanetsConsoleError as e:
-        raise HTTPException(
-            status_code=getattr(e, "http_error", 500),
-            detail=str(e),
-        ) from e
+    return get_core_client().get_turn_analytics(
+        game_id,
+        perspective,
+        turn_number,
+        analytic_id,
+        diagnostics=diagnostics,
+        **kwargs,
+    )
 
 
 @router.get("")
