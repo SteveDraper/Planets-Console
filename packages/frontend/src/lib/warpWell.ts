@@ -39,6 +39,7 @@ function normalizeWellCells(
     const { x, y } = c
     if (typeof x !== 'number' || typeof y !== 'number') continue
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    if (!Number.isInteger(x) || !Number.isInteger(y)) continue
     out.push({ x, y })
   }
   return out

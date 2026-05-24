@@ -231,6 +231,13 @@ function parseJsonFiniteNumber(value: unknown): number | null {
   return null
 }
 
+/** Parse a map grid cell index; must be a finite integer (no boolean/null/`""` coercion). */
+function parseJsonInteger(value: unknown): number | null {
+  const n = parseJsonFiniteNumber(value)
+  if (n == null || !Number.isInteger(n)) return null
+  return n
+}
+
 /**
  * 2D offset tuple from the wire. Each element must be a finite `number` or a non-empty
  * numeric string — never `Number()` on arbitrary values (avoids `null`/`""` → `0`).
@@ -368,9 +375,9 @@ function normalizeMapNode(raw: unknown): MapNode {
       .map((cell) => {
         if (cell == null || typeof cell !== 'object') return null
         const c = cell as Record<string, unknown>
-        const x = typeof c.x === 'number' ? c.x : Number(c.x)
-        const y = typeof c.y === 'number' ? c.y : Number(c.y)
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+        const x = parseJsonInteger(c.x)
+        const y = parseJsonInteger(c.y)
+        if (x == null || y == null) return null
         return { x, y }
       })
       .filter((cell): cell is NormalWellMapCell => cell != null)
