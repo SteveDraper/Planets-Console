@@ -151,7 +151,9 @@ class TestGetTurnInfo:
         turns.get_turn_info(628580, 1, 50)
         turns.get_turn_info(628580, 1, 51)
 
-        info_fetches = [call for call in storage.get.call_args_list if call.args[0] == "games/628580/info"]
+        info_fetches = [
+            call for call in storage.get.call_args_list if call.args[0] == "games/628580/info"
+        ]
         assert len(info_fetches) == 1
 
     def test_not_found_game(self, turn_load_service):
