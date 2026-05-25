@@ -109,6 +109,18 @@ describe('deriveShellViewpoints', () => {
     expect(rows.find((r) => r.name === 'Bob')?.disabled).toBe(false)
     expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(true)
   })
+
+  it('includes spectator row when pseudo perspective 0 is stored', () => {
+    const rows = deriveShellViewpoints(
+      baseInputs({
+        loginName: '',
+        storageOnlyLoad: true,
+        storageAvailablePerspectives: [0],
+      })
+    )
+    expect(rows[0]).toEqual({ name: '<Spectator>', raceName: null, disabled: false })
+    expect(rows.every((r) => r.name === '<Spectator>' || r.disabled)).toBe(true)
+  })
 })
 
 describe('deriveSelectedViewpointName', () => {
@@ -179,6 +191,32 @@ describe('deriveSelectedViewpointName', () => {
       )
     ).toBe('Carol')
   })
+
+  it('selects spectator when only pseudo perspective 0 is stored', () => {
+    expect(
+      deriveSelectedViewpointName(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [0],
+          perspectiveOverrideName: null,
+        })
+      )
+    ).toBe('<Spectator>')
+  })
+
+  it('honours spectator override in storage-only mode when slot 0 is stored', () => {
+    expect(
+      deriveSelectedViewpointName(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [0, 2],
+          perspectiveOverrideName: '<Spectator>',
+        })
+      )
+    ).toBe('<Spectator>')
+  })
 })
 
 describe('deriveAnalyticScope', () => {
@@ -223,6 +261,23 @@ describe('deriveAnalyticScope', () => {
     expect(
       deriveAnalyticScope(
         baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
+      )
+    ).toEqual({
+      gameId: '628580',
+      turn: 5,
+      perspective: 0,
+    })
+  })
+
+  it('resolves spectator scope in storage-only mode when slot 0 is stored', () => {
+    expect(
+      deriveAnalyticScope(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [0],
+          perspectiveOverrideName: null,
+        })
       )
     ).toEqual({
       gameId: '628580',
@@ -321,6 +376,15 @@ describe('isViewpointChangeAllowed', () => {
     ).toBe(true)
     expect(
       isViewpointChangeAllowed('Alice', baseInputs().gameInfoContext, '', true, [2], perspectives)
+    ).toBe(false)
+  })
+
+  it('allows spectator in storage-only mode when slot 0 is stored', () => {
+    expect(
+      isViewpointChangeAllowed('<Spectator>', baseInputs().gameInfoContext, '', true, [0], perspectives)
+    ).toBe(true)
+    expect(
+      isViewpointChangeAllowed('Alice', baseInputs().gameInfoContext, '', true, [0], perspectives)
     ).toBe(false)
   })
 

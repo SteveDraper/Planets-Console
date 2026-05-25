@@ -10,6 +10,7 @@ import {
   shouldUsePseudoViewpointForLogin,
   selectableTurnMaxForShell,
   SPECTATOR_VIEWPOINT_NAME,
+  viewpointNameForStoredPerspective,
   viewpointNameForLogin,
 } from './gameInfoShell'
 import type { GameInfoResponse } from '../api/bff'
@@ -151,6 +152,21 @@ describe('perspectiveOrdinalForName', () => {
 
   it('returns 0 for spectator pseudo-viewpoint', () => {
     expect(perspectiveOrdinalForName(p, SPECTATOR_VIEWPOINT_NAME)).toBe(0)
+  })
+})
+
+describe('viewpointNameForStoredPerspective', () => {
+  const p = [
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
+  ]
+
+  it('returns spectator label for pseudo slot 0', () => {
+    expect(viewpointNameForStoredPerspective(0, p)).toBe(SPECTATOR_VIEWPOINT_NAME)
+  })
+
+  it('returns player name for 1-based slots', () => {
+    expect(viewpointNameForStoredPerspective(2, p)).toBe('Beta')
   })
 })
 

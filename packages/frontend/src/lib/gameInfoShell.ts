@@ -190,6 +190,17 @@ export function perspectiveNameForOrdinal(
   return hit?.name ?? null
 }
 
+/** Viewpoint label for a stored perspective slot (including pseudo-viewpoint 0). */
+export function viewpointNameForStoredPerspective(
+  ordinal: number,
+  perspectives: PerspectiveRow[]
+): string | null {
+  if (ordinal === PSEUDO_VIEWPOINT_PERSPECTIVE) {
+    return SPECTATOR_VIEWPOINT_NAME
+  }
+  return perspectiveNameForOrdinal(perspectives, ordinal)
+}
+
 /** Shown when a game or turn must be fetched from Planets.nu but login is missing. */
 export const LOGIN_REQUIRED_FOR_GAME_SELECTION =
   'Set login name in the header before selecting a game.'

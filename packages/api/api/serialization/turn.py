@@ -15,6 +15,20 @@ def _backfill_turn_settings_from_defaults(settings: dict, defaults: dict) -> Non
             settings[key] = copy.deepcopy(value)
 
 
+def _payload_with_backfilled_settings(data: dict, settings_defaults: dict) -> dict:
+    """Shallow-copy only when missing settings keys must be filled from defaults."""
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return data
+    if not any(key not in settings for key in settings_defaults):
+        return data
+    payload = data.copy()
+    settings_copy = settings.copy()
+    _backfill_turn_settings_from_defaults(settings_copy, settings_defaults)
+    payload["settings"] = settings_copy
+    return payload
+
+
 def turn_info_from_json(data: dict, *, settings_defaults: dict | None = None) -> TurnInfo:
     """Deserialize a raw JSON dict (rst object) into a TurnInfo dataclass.
 
@@ -22,9 +36,10 @@ def turn_info_from_json(data: dict, *, settings_defaults: dict | None = None) ->
     ``settings_defaults`` is provided (typically from stored game info for the same
     game), missing keys are filled before deserialization. Does not mutate ``data``.
     """
-    payload = copy.deepcopy(data)
-    if settings_defaults and isinstance(payload.get("settings"), dict):
-        _backfill_turn_settings_from_defaults(payload["settings"], settings_defaults)
+    if settings_defaults is None:
+        payload = data
+    else:
+        payload = _payload_with_backfilled_settings(data, settings_defaults)
     return dacite.from_dict(data_class=TurnInfo, data=payload, config=DACITE_CONFIG)
 
 

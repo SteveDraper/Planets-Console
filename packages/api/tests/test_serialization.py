@@ -178,6 +178,26 @@ class TestTurnInfoSerialization:
         turn_info_from_json(data, settings_defaults=data["settings"])
         assert data == before
 
+    def test_turn_info_from_json_without_defaults_does_not_mutate_input(self, turn_sample_data):
+        data = copy.deepcopy(turn_sample_data)
+        before = copy.deepcopy(data)
+        turn_info_from_json(data)
+        assert data == before
+
+    def test_turn_info_from_json_skips_copy_when_settings_already_complete(
+        self, turn_sample_data, monkeypatch
+    ):
+        deepcopy_calls: list[object] = []
+        original_deepcopy = copy.deepcopy
+
+        def counting_deepcopy(value):
+            deepcopy_calls.append(value)
+            return original_deepcopy(value)
+
+        monkeypatch.setattr("api.serialization.turn.copy.deepcopy", counting_deepcopy)
+        turn_info_from_json(turn_sample_data, settings_defaults=turn_sample_data["settings"])
+        assert deepcopy_calls == []
+
 
 class TestGameInfoSerialization:
     def test_deserialize(self, game_info_sample_data):

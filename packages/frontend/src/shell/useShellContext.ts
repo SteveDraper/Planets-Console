@@ -7,8 +7,8 @@ import {
 } from '../api/bff'
 import {
   LOGIN_REQUIRED_FOR_GAME_SELECTION,
-  perspectiveNameForOrdinal,
   perspectiveOrdinalForName,
+  viewpointNameForStoredPerspective,
 } from '../lib/gameInfoShell'
 import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
@@ -228,7 +228,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
         if (currentOrdinal != null && perspectives.includes(currentOrdinal)) {
           return
         }
-        const nextName = perspectiveNameForOrdinal(perspectivesRows, perspectives[0])
+        const nextName = viewpointNameForStoredPerspective(perspectives[0], perspectivesRows)
         if (nextName) {
           setPerspectiveOverrideName(nextName)
         }

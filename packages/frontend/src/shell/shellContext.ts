@@ -2,11 +2,12 @@ import type { AnalyticShellScope } from '../api/bff'
 import type { GameInfoShellContext } from '../stores/shell'
 import {
   perspectiveOrdinalForName,
-  perspectiveNameForOrdinal,
+  PSEUDO_VIEWPOINT_PERSPECTIVE,
   selectableTurnMaxForShell,
   shouldUsePseudoViewpointForLogin,
   SPECTATOR_VIEWPOINT_NAME,
   viewpointNameForLogin,
+  viewpointNameForStoredPerspective,
   type PerspectiveRow,
 } from '../lib/gameInfoShell'
 
@@ -62,11 +63,18 @@ export function deriveShellViewpoints(inputs: ShellContextInputs): ShellViewpoin
       ? new Set(inputs.storageAvailablePerspectives ?? [])
       : null
   if (storageSlots != null) {
-    return perspectives.map((row) => ({
-      name: row.name,
-      raceName: row.raceName,
-      disabled: !storageSlots.has(row.ordinal),
-    }))
+    const rows: ShellViewpointRow[] = []
+    if (storageSlots.has(PSEUDO_VIEWPOINT_PERSPECTIVE)) {
+      rows.push({ name: SPECTATOR_VIEWPOINT_NAME, raceName: null, disabled: false })
+    }
+    rows.push(
+      ...perspectives.map((row) => ({
+        name: row.name,
+        raceName: row.raceName,
+        disabled: !storageSlots.has(row.ordinal),
+      }))
+    )
+    return rows
   }
   const finished = inputs.gameInfoContext?.isGameFinished ?? true
   if (finished) {
@@ -107,14 +115,19 @@ export function deriveSelectedViewpointName(inputs: ShellContextInputs): string 
 
   const loginTrimmed = inputs.loginName?.trim() ?? ''
   if (inputs.storageOnlyLoad && loginTrimmed === '') {
+    const stored = inputs.storageAvailablePerspectives ?? []
     const preferred = inputs.perspectiveOverrideName
-    if (preferred && shellPerspectiveNames.includes(preferred)) return preferred
-    const firstStored = inputs.storageAvailablePerspectives?.[0]
-    if (firstStored != null) {
-      const name = perspectiveNameForOrdinal(perspectives, firstStored)
-      if (name && shellPerspectiveNames.includes(name)) return name
+    if (preferred != null) {
+      const preferredOrdinal = perspectiveOrdinalForName(perspectives, preferred)
+      if (preferredOrdinal != null && stored.includes(preferredOrdinal)) {
+        return preferred
+      }
     }
-    return shellPerspectiveNames[0] ?? null
+    const firstStored = stored[0]
+    if (firstStored != null) {
+      return viewpointNameForStoredPerspective(firstStored, perspectives)
+    }
+    return null
   }
 
   const finished = inputs.gameInfoContext?.isGameFinished ?? true

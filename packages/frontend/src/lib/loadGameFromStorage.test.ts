@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LOGIN_REQUIRED_FOR_GAME_SELECTION } from './gameInfoShell'
+import { LOGIN_REQUIRED_FOR_GAME_SELECTION, SPECTATOR_VIEWPOINT_NAME } from './gameInfoShell'
 import { loadGameFromStorage } from './loadGameFromStorage'
 
 vi.mock('../api/bff', async (importOriginal) => {
@@ -30,6 +30,16 @@ describe('loadGameFromStorage', () => {
     expect(result.storedPerspectives).toEqual([2])
     expect(result.defaultViewpointName).toBe('beta')
     expect(fetchStoredTurnPerspectives).toHaveBeenCalledWith('628580', 111)
+  })
+
+  it('defaults to spectator when only pseudo perspective 0 is stored', async () => {
+    vi.mocked(fetchStoredGameInfo).mockResolvedValue(sampleGameInfo as never)
+    vi.mocked(fetchStoredTurnPerspectives).mockResolvedValue({ perspectives: [0] })
+
+    const result = await loadGameFromStorage('628580')
+
+    expect(result.storedPerspectives).toEqual([0])
+    expect(result.defaultViewpointName).toBe(SPECTATOR_VIEWPOINT_NAME)
   })
 
   it('throws login required when game info is missing from storage', async () => {

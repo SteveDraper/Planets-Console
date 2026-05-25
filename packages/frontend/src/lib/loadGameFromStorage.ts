@@ -3,7 +3,8 @@ import { fetchStoredGameInfo, fetchStoredTurnPerspectives, isBffNotFoundError } 
 import {
   LOGIN_REQUIRED_FOR_GAME_SELECTION,
   getLatestTurnFromGameInfo,
-  perspectiveNameForOrdinal,
+  SPECTATOR_VIEWPOINT_NAME,
+  viewpointNameForStoredPerspective,
   buildPerspectivesFromGameInfo,
 } from './gameInfoShell'
 
@@ -40,9 +41,9 @@ export async function loadGameFromStorage(gameId: string): Promise<StorageGameLo
   }
 
   const playerPerspectives = buildPerspectivesFromGameInfo(gameInfo)
-  const defaultViewpointName = perspectiveNameForOrdinal(
-    playerPerspectives,
-    storedPerspectives[0]
+  const defaultViewpointName = viewpointNameForStoredPerspective(
+    storedPerspectives[0],
+    playerPerspectives
   )
   if (defaultViewpointName == null) {
     throw new Error(LOGIN_REQUIRED_FOR_GAME_SELECTION)
