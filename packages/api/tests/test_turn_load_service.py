@@ -114,6 +114,46 @@ class TestGetTurnInfo:
         ti = turn_load_service.get_turn_info(628580, 1, 111)
         assert len(ti.ships) > 0
 
+    def test_skips_game_info_fetch_when_turn_settings_complete(self, turn_rst):
+        storage = MagicMock()
+        storage.get.return_value = turn_rst
+        credentials = CredentialService(storage)
+        games = GameService(storage, credentials)
+        turns = TurnLoadService(storage, credentials, games)
+
+        turns.get_turn_info(628580, 1, 111)
+
+        storage.get.assert_called_once_with("games/628580/1/turns/111")
+
+    def test_settings_defaults_fetched_once_for_multiple_historical_turns(self, turn_rst):
+        storage = MagicMock()
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            game_info = json.load(f)
+        historical_a = copy.deepcopy(turn_rst)
+        historical_b = copy.deepcopy(turn_rst)
+        del historical_a["settings"]["allplanetsvisible"]
+        del historical_b["settings"]["spectatormode"]
+
+        def get_side_effect(key: str):
+            if key == "games/628580/info":
+                return game_info
+            if key == "games/628580/1/turns/50":
+                return historical_a
+            if key == "games/628580/1/turns/51":
+                return historical_b
+            raise NotFoundError(key)
+
+        storage.get.side_effect = get_side_effect
+        credentials = CredentialService(storage)
+        games = GameService(storage, credentials)
+        turns = TurnLoadService(storage, credentials, games)
+
+        turns.get_turn_info(628580, 1, 50)
+        turns.get_turn_info(628580, 1, 51)
+
+        info_fetches = [call for call in storage.get.call_args_list if call.args[0] == "games/628580/info"]
+        assert len(info_fetches) == 1
+
     def test_not_found_game(self, turn_load_service):
         with pytest.raises(NotFoundError):
             turn_load_service.get_turn_info(999999, 1, 111)

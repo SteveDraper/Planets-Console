@@ -1,6 +1,6 @@
 """Turn document reads, enumeration, and Planets.nu ensure."""
 
-from dacite.exceptions import DaciteError
+from dacite.exceptions import DaciteError, MissingValueError
 
 from api.errors import (
     LoginCredentialsRequiredError,
@@ -32,29 +32,65 @@ class TurnLoadService:
         self._storage = storage
         self._credentials = credentials
         self._games = games
+        self._settings_defaults_by_game: dict[int, dict | None] = {}
+
+    @staticmethod
+    def _missing_settings_field_error(err: DaciteError) -> bool:
+        if not isinstance(err, MissingValueError):
+            return False
+        path = err.field_path or ""
+        return path == "settings" or path.startswith("settings.")
 
     def _game_settings_defaults(self, game_id: int) -> dict | None:
         """Settings from stored game info, used to backfill historical turn snapshots."""
+        if game_id in self._settings_defaults_by_game:
+            return self._settings_defaults_by_game[game_id]
         try:
             info = self._storage.get(f"games/{game_id}/info")
         except NotFoundError:
-            return None
-        if not isinstance(info, dict):
-            return None
-        settings = info.get("settings")
-        return settings if isinstance(settings, dict) else None
+            defaults = None
+        else:
+            if not isinstance(info, dict):
+                defaults = None
+            else:
+                settings = info.get("settings")
+                defaults = settings if isinstance(settings, dict) else None
+        self._settings_defaults_by_game[game_id] = defaults
+        return defaults
+
+    def _deserialize_turn_json(
+        self,
+        game_id: int,
+        data: dict,
+        *,
+        settings_defaults: dict | None = None,
+        error_prefix: str,
+    ) -> TurnInfo:
+        try:
+            return turn_info_from_json(data, settings_defaults=settings_defaults)
+        except DaciteError as first_err:
+            if settings_defaults is not None or not self._missing_settings_field_error(first_err):
+                raise ValidationError(
+                    dataclass_deserialization_detail(error_prefix, first_err)
+                ) from first_err
+            defaults = self._game_settings_defaults(game_id)
+            if defaults is None:
+                raise ValidationError(
+                    dataclass_deserialization_detail(error_prefix, first_err)
+                ) from first_err
+            try:
+                return turn_info_from_json(data, settings_defaults=defaults)
+            except DaciteError as err:
+                raise ValidationError(
+                    dataclass_deserialization_detail(error_prefix, err)
+                ) from err
 
     def _turn_info_from_stored_json(self, game_id: int, data: dict) -> TurnInfo:
-        try:
-            return turn_info_from_json(
-                data, settings_defaults=self._game_settings_defaults(game_id)
-            )
-        except DaciteError as err:
-            raise ValidationError(
-                dataclass_deserialization_detail(
-                    "Stored turn payload did not match the expected shape", err
-                )
-            ) from err
+        return self._deserialize_turn_json(
+            game_id,
+            data,
+            error_prefix="Stored turn payload did not match the expected shape",
+        )
 
     @staticmethod
     def _validate_turn_loaded_matches_request(
@@ -182,14 +218,11 @@ class TurnLoadService:
                 "Planets.nu loadturn response did not include an rst object."
             )
 
-        try:
-            turn = turn_info_from_json(rst, settings_defaults=self._game_settings_defaults(game_id))
-        except DaciteError as err:
-            raise ValidationError(
-                dataclass_deserialization_detail(
-                    "Load turn rst payload did not match the expected shape", err
-                )
-            ) from err
+        turn = self._deserialize_turn_json(
+            game_id,
+            rst,
+            error_prefix="Load turn rst payload did not match the expected shape",
+        )
 
         self._validate_turn_loaded_matches_request(game_id, turn_number, turn)
 
