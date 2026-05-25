@@ -93,7 +93,7 @@ export function getSectorDisplayNameFromGameInfo(data: GameInfoResponse): string
   return null
 }
 
-/** 1-based perspective slot for Core/BFF, or null if unknown. */
+/** 1-based perspective slot for Core/BFF; 0 for spectator pseudo-view. */
 export function perspectiveOrdinalForName(
   perspectives: PerspectiveRow[],
   name: string | null
@@ -101,8 +101,66 @@ export function perspectiveOrdinalForName(
   if (name == null || name.trim() === '') {
     return null
   }
+  if (isSpectatorViewpointName(name)) {
+    return PSEUDO_VIEWPOINT_PERSPECTIVE
+  }
   const hit = perspectives.find((p) => p.name === name)
   return hit?.ordinal ?? null
+}
+
+/** Perspective slot used when login is not a game player on an in-progress game. */
+export const PSEUDO_VIEWPOINT_PERSPECTIVE = 0
+
+/** Shell viewpoint label for pseudo-viewpoint 0 (host/spectator). */
+export const SPECTATOR_VIEWPOINT_NAME = '<Spectator>'
+
+export function isSpectatorViewpointName(name: string | null): boolean {
+  return name === SPECTATOR_VIEWPOINT_NAME
+}
+
+/** True when login name matches a player in the game (case-insensitive). */
+export function isLoginAmongGamePlayers(
+  perspectives: PerspectiveRow[],
+  loginName: string | null
+): boolean {
+  const n = loginName?.trim().toLowerCase() ?? ''
+  if (!n) {
+    return false
+  }
+  return perspectives.some((p) => p.name.toLowerCase() === n)
+}
+
+/** Use pseudo-viewpoint 0 for turn load when login is set but not among game players. */
+export function shouldUsePseudoViewpointForLogin(
+  perspectives: PerspectiveRow[],
+  loginName: string | null,
+  isGameFinished: boolean
+): boolean {
+  const loginTrimmed = loginName?.trim() ?? ''
+  if (isGameFinished || loginTrimmed === '' || perspectives.length === 0) {
+    return false
+  }
+  return !isLoginAmongGamePlayers(perspectives, loginName)
+}
+
+/**
+ * Highest turn selectable in the shell. For host pseudo-view (perspective 0) on in-progress
+ * games, Planets.nu loadturn accepts playerid=0 only for turns before the current one.
+ */
+export function selectableTurnMaxForShell(
+  latestTurn: number | null,
+  perspectives: PerspectiveRow[],
+  loginName: string | null,
+  isGameFinished: boolean
+): number | null {
+  if (latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1) {
+    return null
+  }
+  const max = Math.floor(latestTurn)
+  if (shouldUsePseudoViewpointForLogin(perspectives, loginName, isGameFinished) && max > 1) {
+    return max - 1
+  }
+  return max
 }
 
 /** Match logged-in name to a player (case-insensitive); otherwise first perspective. */

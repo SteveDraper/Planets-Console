@@ -41,6 +41,8 @@ export type ApplyGameInfoRefreshOptions = {
   perspectiveOverrideName?: string | null
   storageOnlyLoad?: boolean
   storageAvailablePerspectives?: number[] | null
+  /** Caps initial/clamped selected turn (host pseudo-view on in-progress games). */
+  selectableTurnMax?: number | null
 }
 
 export const useShellStore = create<ShellState>((set, get) => ({
@@ -77,15 +79,26 @@ export const useShellStore = create<ShellState>((set, get) => ({
       }))
     }
 
+    const rawCap =
+      latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1
+        ? null
+        : Math.floor(latestTurn)
+    const optionCap = options?.selectableTurnMax
+    const turnCap =
+      rawCap == null
+        ? null
+        : optionCap != null && Number.isFinite(optionCap)
+          ? Math.min(rawCap, Math.floor(optionCap))
+          : rawCap
+
     let nextTurn: number | null
-    if (latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1) {
+    if (turnCap == null || turnCap < 1) {
       nextTurn = null
     } else if (prevGameId !== gameId) {
-      nextTurn = Math.floor(latestTurn)
+      nextTurn = turnCap
     } else {
       const t = get().selectedTurn
-      nextTurn =
-        t == null ? Math.floor(latestTurn) : Math.min(Math.max(1, t), Math.floor(latestTurn))
+      nextTurn = t == null ? turnCap : Math.min(Math.max(1, t), turnCap)
     }
 
     const storageOnlyLoad = options?.storageOnlyLoad ?? false

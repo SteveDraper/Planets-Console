@@ -81,18 +81,18 @@ class PlanetsNuClient:
         player_id: int,
         api_key: str | None = None,
     ) -> dict[str, Any]:
-        """GET /game/loadturn; returns the full JSON body (success, rst, ...)."""
+        """POST /game/loadturn with form body; returns the full JSON body (success, rst, ...)."""
         url = f"{self._base_url}/game/loadturn"
-        params: dict[str, Any] = {
+        form: dict[str, Any] = {
             "gameid": game_id,
             "turn": turn,
             "playerid": player_id,
         }
         if api_key:
-            params["apikey"] = api_key
+            form["apikey"] = api_key
         try:
             with httpx.Client(timeout=self._timeout) as client:
-                response = client.get(url, params=params)
+                response = client.post(url, data=form)
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPError as exc:

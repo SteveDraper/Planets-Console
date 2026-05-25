@@ -7,7 +7,7 @@ class TurnEnsureRequest(BaseModel):
     """Parameters to ensure turn data exists in storage for a game and perspective slot."""
 
     turn: int = Field(ge=1)
-    perspective: int = Field(ge=1)
+    perspective: int = Field(ge=0)
     username: str = Field(
         default="",
         description=(

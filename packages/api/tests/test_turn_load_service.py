@@ -24,6 +24,12 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 
 
 @pytest.fixture
+def turn_rst():
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        return json.load(f)
+
+
+@pytest.fixture
 def seeded_backend():
     backend = MemoryAssetBackend(initial={})
     with open(ASSETS_DIR / "game_info_sample.json") as f:
@@ -67,12 +73,38 @@ class TestListStoredTurnPerspectives:
         storage.list.assert_any_call("games/628580/1/turns")
         storage.list.assert_any_call("games/628580/2/turns")
 
+    def test_includes_pseudo_perspective_zero(self):
+        storage = MagicMock()
+        storage.list.side_effect = [
+            ["0", "1"],
+            ["111"],
+            ["111"],
+        ]
+        credentials = CredentialService(storage)
+        games = GameService(storage, credentials)
+        turns = TurnLoadService(storage, credentials, games)
+
+        assert turns.list_stored_turn_perspectives(628580, 111) == [0, 1]
+
 
 class TestGetTurnInfo:
     def test_returns_turn_info(self, turn_load_service):
         ti = turn_load_service.get_turn_info(628580, 1, 111)
         assert isinstance(ti, TurnInfo)
         assert ti.settings.turn == 111
+
+    def test_backfills_historical_settings_from_stored_game_info(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        historical = copy.deepcopy(turn_rst)
+        del historical["settings"]["allplanetsvisible"]
+        del historical["settings"]["spectatormode"]
+        backend.put("games/628580/1/turns/50", historical)
+        _, turns, _, _ = build_service_stack(backend)
+        ti = turns.get_turn_info(628580, 1, 50)
+        assert ti.settings.allplanetsvisible is False
+        assert ti.settings.spectatormode is False
 
     def test_planets_populated(self, turn_load_service):
         ti = turn_load_service.get_turn_info(628580, 1, 111)
@@ -110,6 +142,15 @@ class TestMalformedTurnStoreData:
         with pytest.raises(ValidationError, match="Expected JSON object"):
             turns.get_turn_info(1, 1, 1)
 
+    def test_turn_info_shape_error_includes_field_detail(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        historical = copy.deepcopy(turn_rst)
+        del historical["settings"]["allplanetsvisible"]
+        backend.put("games/1/1/turns/1", historical)
+        _, turns, _, _ = build_service_stack(backend)
+        with pytest.raises(ValidationError, match="settings\\.allplanetsvisible"):
+            turns.get_turn_info(1, 1, 1)
+
 
 class FakePlanetsNu:
     def __init__(self, load_payload: dict, *, login_returns: str = "fake-api-key") -> None:
@@ -143,11 +184,6 @@ class FakePlanetsNuWithTurn(FakePlanetsNu):
 
 
 class TestEnsureTurnLoaded:
-    @pytest.fixture
-    def turn_rst(self):
-        with open(ASSETS_DIR / "turn_sample.json") as f:
-            return json.load(f)
-
     def test_returns_stored_turn_without_calling_planets(self, seeded_backend, turn_rst):
         _, turns, _, _ = build_service_stack(seeded_backend)
         planets = FakePlanetsNuWithTurn({}, turn_rst)
@@ -179,6 +215,21 @@ class TestEnsureTurnLoaded:
         assert ti.settings.turn == 111
         assert planets.load_turn_calls == [(628580, 111, 1)]
         backend.get("games/628580/1/turns/111")
+
+    def test_fetches_with_pseudo_perspective_zero(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _ = build_service_stack(backend)
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, turn_rst)
+        backend.put("credentials/accounts/host/api_key", "k")
+        params = RefreshGameInfoParams(username="host")
+        ti = turns.ensure_turn_loaded(628580, 0, 111, params, planets)
+        assert ti.settings.turn == 111
+        assert planets.load_turn_calls == [(628580, 111, 0)]
+        backend.get("games/628580/0/turns/111")
 
     def test_rejects_mismatched_settings_turn_without_storing(self, turn_rst):
         backend = MemoryAssetBackend(initial={})

@@ -3,6 +3,9 @@ import type { GameInfoShellContext } from '../stores/shell'
 import {
   perspectiveOrdinalForName,
   perspectiveNameForOrdinal,
+  selectableTurnMaxForShell,
+  shouldUsePseudoViewpointForLogin,
+  SPECTATOR_VIEWPOINT_NAME,
   viewpointNameForLogin,
   type PerspectiveRow,
 } from '../lib/gameInfoShell'
@@ -23,17 +26,29 @@ export type ShellContextInputs = {
   storageAvailablePerspectives: number[] | null
 }
 
-export function deriveShellTurnMax(gameInfoContext: GameInfoShellContext | null): number | null {
-  const t = gameInfoContext?.turn
-  if (t == null || !Number.isFinite(t) || t < 1) return null
-  return Math.floor(t)
+export function deriveShellTurnMax(
+  gameInfoContext: GameInfoShellContext | null,
+  loginName: string | null = null
+): number | null {
+  if (!gameInfoContext) return null
+  return selectableTurnMaxForShell(
+    gameInfoContext.turn,
+    gameInfoContext.perspectives,
+    loginName,
+    gameInfoContext.isGameFinished
+  )
 }
 
 export function deriveShellDefaultViewpointName(
   gameInfoContext: GameInfoShellContext | null,
   loginName: string | null
 ): string | null {
-  return gameInfoContext ? viewpointNameForLogin(gameInfoContext.perspectives, loginName) : null
+  if (!gameInfoContext) return null
+  const { perspectives, isGameFinished } = gameInfoContext
+  if (shouldUsePseudoViewpointForLogin(perspectives, loginName, isGameFinished)) {
+    return SPECTATOR_VIEWPOINT_NAME
+  }
+  return viewpointNameForLogin(perspectives, loginName)
 }
 
 export function deriveShellViewpoints(inputs: ShellContextInputs): ShellViewpointRow[] {
@@ -60,6 +75,22 @@ export function deriveShellViewpoints(inputs: ShellContextInputs): ShellViewpoin
       raceName: row.raceName,
       disabled: false,
     }))
+  }
+  if (
+    shouldUsePseudoViewpointForLogin(
+      perspectives,
+      inputs.loginName,
+      inputs.gameInfoContext?.isGameFinished ?? true
+    )
+  ) {
+    return [
+      { name: SPECTATOR_VIEWPOINT_NAME, raceName: null, disabled: false },
+      ...perspectives.map((row) => ({
+        name: row.name,
+        raceName: row.raceName,
+        disabled: true,
+      })),
+    ]
   }
   const allowed = deriveShellDefaultViewpointName(inputs.gameInfoContext, inputs.loginName)
   return perspectives.map((row) => ({
@@ -92,6 +123,15 @@ export function deriveSelectedViewpointName(inputs: ShellContextInputs): string 
     inputs.loginName
   )
   if (!finished) {
+    if (
+      shouldUsePseudoViewpointForLogin(
+        perspectives,
+        inputs.loginName,
+        inputs.gameInfoContext?.isGameFinished ?? true
+      )
+    ) {
+      return SPECTATOR_VIEWPOINT_NAME
+    }
     if (shellDefaultViewpointName && shellPerspectiveNames.includes(shellDefaultViewpointName)) {
       return shellDefaultViewpointName
     }
@@ -105,11 +145,9 @@ export function deriveSelectedViewpointName(inputs: ShellContextInputs): string 
 
 export function deriveAnalyticScope(inputs: ShellContextInputs): AnalyticShellScope | null {
   if (!inputs.selectedGameId || inputs.selectedTurn == null) return null
+  const perspectives = inputs.gameInfoContext?.perspectives ?? []
   const selectedViewpointName = deriveSelectedViewpointName(inputs)
-  const ordinal = perspectiveOrdinalForName(
-    inputs.gameInfoContext?.perspectives ?? [],
-    selectedViewpointName
-  )
+  const ordinal = perspectiveOrdinalForName(perspectives, selectedViewpointName)
   if (ordinal == null) return null
   return {
     gameId: inputs.selectedGameId,
@@ -149,7 +187,7 @@ export function shouldClearInProgressPerspectiveOverride(
   if (!gameInfoContext || gameInfoContext.isGameFinished) {
     return false
   }
-  const allowed = viewpointNameForLogin(gameInfoContext.perspectives, loginName)
+  const allowed = deriveShellDefaultViewpointName(gameInfoContext, loginName)
   if (perspectiveOverrideName == null || allowed == null) {
     return false
   }
@@ -170,7 +208,7 @@ export function isViewpointChangeAllowed(
     return ordinal != null && (storageAvailablePerspectives ?? []).includes(ordinal)
   }
   if (gameInfoContext && !gameInfoContext.isGameFinished) {
-    const allowed = viewpointNameForLogin(gameInfoContext.perspectives, loginName)
+    const allowed = deriveShellDefaultViewpointName(gameInfoContext, loginName)
     return allowed != null && name.trim().toLowerCase() === allowed.trim().toLowerCase()
   }
   return true

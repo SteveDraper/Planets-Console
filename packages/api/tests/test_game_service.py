@@ -17,6 +17,12 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 
 
 @pytest.fixture
+def game_info_sample_data():
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        return json.load(f)
+
+
+@pytest.fixture
 def seeded_backend():
     """Return a MemoryAssetBackend pre-seeded with the sample assets."""
     backend = MemoryAssetBackend(initial={})
@@ -46,6 +52,10 @@ class TestGetGameInfo:
         assert isinstance(pid, int)
         assert pid == gi.players[0].id
 
+    def test_player_id_for_pseudo_perspective_zero(self, service):
+        gi = service.get_game_info(628580)
+        assert GameService.player_id_for_perspective(gi, 0, 628580) == 0
+
     def test_player_id_invalid_perspective_raises(self, service):
         gi = service.get_game_info(628580)
         with pytest.raises(ValidationError, match="Invalid perspective"):
@@ -68,6 +78,15 @@ class TestMalformedGameInfoStoreData:
         games, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="Expected JSON object"):
             games.get_game_info(1)
+
+    def test_game_info_shape_error_includes_field_detail(self, game_info_sample_data):
+        backend = MemoryAssetBackend(initial={})
+        bad = copy.deepcopy(game_info_sample_data)
+        del bad["settings"]["id"]
+        backend.put("games/628580/info", bad)
+        games, _, _, _ = build_service_stack(backend)
+        with pytest.raises(ValidationError, match="settings\\.id"):
+            games.get_game_info(628580)
 
 
 class FakePlanetsNu:

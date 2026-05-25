@@ -80,7 +80,17 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     ]
   )
 
-  const shellTurnMax = useMemo(() => deriveShellTurnMax(gameInfoContext), [gameInfoContext])
+  useEffect(() => {
+    const cap = deriveShellTurnMax(gameInfoContext, loginName)
+    if (cap != null && selectedTurn != null && selectedTurn > cap) {
+      setSelectedTurn(cap)
+    }
+  }, [gameInfoContext, loginName, selectedTurn, setSelectedTurn])
+
+  const shellTurnMax = useMemo(
+    () => deriveShellTurnMax(gameInfoContext, loginName),
+    [gameInfoContext, loginName]
+  )
 
   const shellViewpoints = useMemo(() => deriveShellViewpoints(shellInputs), [shellInputs])
 

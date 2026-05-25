@@ -6,6 +6,7 @@ from api.errors import LoginCredentialsRequiredError, ValidationError
 from api.models.game import GameInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
 from api.planets_nu import PlanetsNuClient
+from api.serialization.codecs import dataclass_deserialization_detail
 from api.serialization.game import game_info_from_json
 from api.services.credential_service import CredentialService
 from api.services.storage_json import require_dict
@@ -26,6 +27,8 @@ class GameService:
 
     @staticmethod
     def player_id_for_perspective(info: GameInfo, perspective: int, game_id: int) -> int:
+        if perspective == 0:
+            return 0
         players = info.players
         if perspective < 1 or perspective > len(players):
             raise ValidationError(
@@ -67,7 +70,9 @@ class GameService:
             info = game_info_from_json(require_dict(remote, f"game info {game_id}"))
         except DaciteError as err:
             raise ValidationError(
-                "Loaded game info payload did not match the expected shape."
+                dataclass_deserialization_detail(
+                    "Loaded game info payload did not match the expected shape", err
+                )
             ) from err
 
         if info.game.id != game_id:
@@ -81,4 +86,11 @@ class GameService:
 
     def get_game_info(self, game_id: int) -> GameInfo:
         data = self._storage.get(f"games/{game_id}/info")
-        return game_info_from_json(require_dict(data, f"game info {game_id}"))
+        try:
+            return game_info_from_json(require_dict(data, f"game info {game_id}"))
+        except DaciteError as err:
+            raise ValidationError(
+                dataclass_deserialization_detail(
+                    "Stored game info did not match the expected shape", err
+                )
+            ) from err

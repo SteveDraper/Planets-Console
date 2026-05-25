@@ -70,7 +70,7 @@ def get_analytic_table(
     analytic_id: str,
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
     include: IncludeDiagnostics = False,
 ):
     """Tabular data scoped to the selected game, turn, and perspective."""
@@ -97,7 +97,7 @@ def get_analytic_map(
     analytic_id: str,
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
     warp_speed: int = Query(DEFAULT_WARP_SPEED, ge=1, le=9, alias=WARP_SPEED_QUERY),
     gravitonic_movement: bool = Query(False, alias=GRAVITONIC_MOVEMENT_QUERY),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias=FLARE_MODE_QUERY),

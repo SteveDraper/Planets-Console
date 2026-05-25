@@ -6,6 +6,10 @@ describe('formatViewpointRowLabel', () => {
     expect(formatViewpointRowLabel('player_names_only', 'alice', 'The Feds')).toBe('alice')
   })
 
+  it('keeps spectator label in all display modes', () => {
+    expect(formatViewpointRowLabel('race_names_only', '<Spectator>', null)).toBe('<Spectator>')
+  })
+
   it('shows race name or a placeholder when race is unknown in race_names_only mode', () => {
     expect(formatViewpointRowLabel('race_names_only', 'alice', 'The Feds')).toBe('The Feds')
     expect(formatViewpointRowLabel('race_names_only', 'alice', null)).toBe('—')
