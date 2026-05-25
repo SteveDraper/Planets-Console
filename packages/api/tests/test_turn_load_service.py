@@ -152,7 +152,9 @@ class TestGetTurnInfo:
         turns.get_turn_info(628580, 1, 51)
 
         info_fetches = [
-            call for call in storage.get.call_args_list if call.args[0] == "games/628580/info"
+            get_call
+            for get_call in storage.get.call_args_list
+            if get_call.args[0] == "games/628580/info"
         ]
         assert len(info_fetches) == 1
 

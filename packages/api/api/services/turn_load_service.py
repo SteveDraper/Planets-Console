@@ -81,9 +81,7 @@ class TurnLoadService:
             try:
                 return turn_info_from_json(data, settings_defaults=defaults)
             except DaciteError as err:
-                raise ValidationError(
-                    dataclass_deserialization_detail(error_prefix, err)
-                ) from err
+                raise ValidationError(dataclass_deserialization_detail(error_prefix, err)) from err
 
     def _turn_info_from_stored_json(self, game_id: int, data: dict) -> TurnInfo:
         return self._deserialize_turn_json(
