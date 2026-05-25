@@ -3,7 +3,6 @@ import { fetchStoredGameInfo, fetchStoredTurnPerspectives, isBffNotFoundError } 
 import {
   LOGIN_REQUIRED_FOR_GAME_SELECTION,
   getLatestTurnFromGameInfo,
-  SPECTATOR_VIEWPOINT_NAME,
   viewpointNameForStoredPerspective,
   buildPerspectivesFromGameInfo,
 } from './gameInfoShell'
