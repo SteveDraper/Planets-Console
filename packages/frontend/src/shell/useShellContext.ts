@@ -7,8 +7,8 @@ import {
 } from '../api/bff'
 import {
   LOGIN_REQUIRED_FOR_GAME_SELECTION,
-  perspectiveNameForOrdinal,
   perspectiveOrdinalForName,
+  viewpointNameForStoredPerspective,
 } from '../lib/gameInfoShell'
 import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
@@ -80,7 +80,17 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     ]
   )
 
-  const shellTurnMax = useMemo(() => deriveShellTurnMax(gameInfoContext), [gameInfoContext])
+  useEffect(() => {
+    const cap = deriveShellTurnMax(gameInfoContext, loginName)
+    if (cap != null && selectedTurn != null && selectedTurn > cap) {
+      setSelectedTurn(cap)
+    }
+  }, [gameInfoContext, loginName, selectedTurn, setSelectedTurn])
+
+  const shellTurnMax = useMemo(
+    () => deriveShellTurnMax(gameInfoContext, loginName),
+    [gameInfoContext, loginName]
+  )
 
   const shellViewpoints = useMemo(() => deriveShellViewpoints(shellInputs), [shellInputs])
 
@@ -218,7 +228,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
         if (currentOrdinal != null && perspectives.includes(currentOrdinal)) {
           return
         }
-        const nextName = perspectiveNameForOrdinal(perspectivesRows, perspectives[0])
+        const nextName = viewpointNameForStoredPerspective(perspectives[0], perspectivesRows)
         if (nextName) {
           setPerspectiveOverrideName(nextName)
         }

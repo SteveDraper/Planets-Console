@@ -7,10 +7,40 @@ from pathlib import Path
 import pytest
 from api.models.enums import GameStatus, MessageType, NativeType
 from api.models.ship import ShipHistory
+from api.serialization.codecs import (
+    dataclass_deserialization_detail,
+    describe_dacite_error,
+)
 from api.serialization.game import game_info_from_json, game_info_to_json
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
+from dacite.exceptions import DaciteError, MissingValueError, WrongTypeError
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+class TestDescribeDaciteError:
+    def test_missing_value(self):
+        err = MissingValueError("settings.allplanetsvisible")
+        assert describe_dacite_error(err) == "missing required field 'settings.allplanetsvisible'"
+
+    def test_wrong_type(self, turn_sample_data):
+        data = copy.deepcopy(turn_sample_data)
+        data["settings"]["id"] = "not-int"
+        try:
+            turn_info_from_json(data)
+        except WrongTypeError as err:
+            detail = describe_dacite_error(err)
+        else:
+            raise AssertionError("expected WrongTypeError")
+        assert "settings.id" in detail
+        assert "int" in detail
+        assert "str" in detail
+
+    def test_dataclass_deserialization_detail_includes_prefix(self):
+        err = MissingValueError("player.username")
+        assert dataclass_deserialization_detail("Turn payload invalid", err) == (
+            "Turn payload invalid (missing required field 'player.username')."
+        )
 
 
 @pytest.fixture
@@ -121,6 +151,52 @@ class TestTurnInfoSerialization:
     def test_badgechange_bool(self, turn_sample_data):
         ti = turn_info_from_json(turn_sample_data)
         assert isinstance(ti.badgechange, bool)
+
+    def test_historical_settings_backfilled_from_defaults(self, turn_sample_data):
+        """Older turn snapshots may omit newer settings keys; fill from game info defaults."""
+        historical = copy.deepcopy(turn_sample_data)
+        defaults = copy.deepcopy(turn_sample_data["settings"])
+        for key in (
+            "allplanetsvisible",
+            "planetownershipvisible",
+            "starbasesvisible",
+            "shipsatplanetsvisible",
+            "spectatormode",
+        ):
+            del historical["settings"][key]
+
+        with pytest.raises(DaciteError):
+            turn_info_from_json(historical)
+
+        ti = turn_info_from_json(historical, settings_defaults=defaults)
+        assert ti.settings.allplanetsvisible is defaults["allplanetsvisible"]
+        assert ti.settings.spectatormode is defaults["spectatormode"]
+
+    def test_turn_info_from_json_does_not_mutate_input(self, turn_sample_data):
+        data = copy.deepcopy(turn_sample_data)
+        before = copy.deepcopy(data)
+        turn_info_from_json(data, settings_defaults=data["settings"])
+        assert data == before
+
+    def test_turn_info_from_json_without_defaults_does_not_mutate_input(self, turn_sample_data):
+        data = copy.deepcopy(turn_sample_data)
+        before = copy.deepcopy(data)
+        turn_info_from_json(data)
+        assert data == before
+
+    def test_turn_info_from_json_skips_copy_when_settings_already_complete(
+        self, turn_sample_data, monkeypatch
+    ):
+        deepcopy_calls: list[object] = []
+        original_deepcopy = copy.deepcopy
+
+        def counting_deepcopy(value):
+            deepcopy_calls.append(value)
+            return original_deepcopy(value)
+
+        monkeypatch.setattr("api.serialization.turn.copy.deepcopy", counting_deepcopy)
+        turn_info_from_json(turn_sample_data, settings_defaults=turn_sample_data["settings"])
+        assert deepcopy_calls == []
 
 
 class TestGameInfoSerialization:

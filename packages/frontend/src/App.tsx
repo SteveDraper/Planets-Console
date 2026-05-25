@@ -4,6 +4,7 @@ import {
   getLatestTurnFromGameInfo,
   getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
+  selectableTurnMaxForShell,
 } from './lib/gameInfoShell'
 import { loadGameFromStorage, type StorageGameLoadResult } from './lib/loadGameFromStorage'
 import {
@@ -125,11 +126,19 @@ function ConsoleShell() {
         const { gameInfo } = data
         const latestTurn = getLatestTurnFromGameInfo(gameInfo)
         const perspectives = buildPerspectivesFromGameInfo(gameInfo)
+        const isGameFinished = isGameFinishedFromGameInfo(gameInfo)
         applyGameInfoRefresh(vars.gameId, {
           turn: latestTurn,
           perspectives,
-          isGameFinished: isGameFinishedFromGameInfo(gameInfo),
+          isGameFinished,
           sectorDisplayName: getSectorDisplayNameFromGameInfo(gameInfo),
+        }, {
+          selectableTurnMax: selectableTurnMaxForShell(
+            latestTurn,
+            perspectives,
+            vars.username,
+            isGameFinished
+          ),
         })
       }
 
@@ -223,13 +232,21 @@ function ConsoleShell() {
     const data = initialGameBootstrap.data
     const latestTurn = getLatestTurnFromGameInfo(data)
     const perspectives = buildPerspectivesFromGameInfo(data)
+    const isGameFinished = isGameFinishedFromGameInfo(data)
     applyGameInfoRefresh(configuredInitialGameId, {
       turn: latestTurn,
       perspectives,
-      isGameFinished: isGameFinishedFromGameInfo(data),
+      isGameFinished,
       sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
+    }, {
+      selectableTurnMax: selectableTurnMaxForShell(
+        latestTurn,
+        perspectives,
+        loginName,
+        isGameFinished
+      ),
     })
-  }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh])
+  }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh, loginName])
 
   const initialGameBootstrapFailureSeen = useRef(false)
   useEffect(() => {

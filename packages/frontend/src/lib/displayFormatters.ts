@@ -1,10 +1,14 @@
 import type { PlayerListLabelMode, SectorListLabelMode } from '../stores/displayPreferences'
+import { isSpectatorViewpointName } from './gameInfoShell'
 
 export function formatViewpointRowLabel(
   mode: PlayerListLabelMode,
   playerName: string,
   raceName: string | null
 ): string {
+  if (isSpectatorViewpointName(playerName)) {
+    return playerName
+  }
   const race = raceName?.trim() ?? ''
   switch (mode) {
     case 'player_names_only':

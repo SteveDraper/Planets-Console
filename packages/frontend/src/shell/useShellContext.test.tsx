@@ -244,4 +244,51 @@ describe('useShellContext', () => {
       expect(reportShellError).toHaveBeenCalledWith('Ensure failed')
     })
   })
+
+  it('resyncs to spectator when turn change stores only pseudo perspective 0', async () => {
+    useSessionStore.setState({ name: '', password: '', credentialsRevision: 0 })
+    vi.mocked(fetchStoredTurnPerspectives).mockImplementation((_gameId, turn) =>
+      Promise.resolve({ perspectives: turn === 5 ? [2] : [0] })
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [
+          { ordinal: 1, name: 'Alice', raceName: null },
+          { ordinal: 2, name: 'Bob', raceName: null },
+        ],
+        isGameFinished: false,
+        sectorDisplayName: null,
+      },
+      selectedTurn: 5,
+      storageOnlyLoad: true,
+      storageAvailablePerspectives: [2],
+      perspectiveOverrideName: 'Bob',
+    })
+
+    const { result, rerender } = renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(fetchStoredTurnPerspectives).toHaveBeenCalledWith('628580', 5)
+    })
+
+    useShellStore.setState({ selectedTurn: 6 })
+    rerender()
+
+    await waitFor(() => {
+      expect(fetchStoredTurnPerspectives).toHaveBeenCalledWith('628580', 6)
+    })
+    await waitFor(() => {
+      expect(result.current.selectedViewpointName).toBe('<Spectator>')
+      expect(result.current.analyticScope).toEqual({
+        gameId: '628580',
+        turn: 6,
+        perspective: 0,
+      })
+    })
+  })
 })

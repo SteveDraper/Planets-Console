@@ -4,8 +4,13 @@ import {
   getLatestTurnFromGameInfo,
   getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
+  isLoginAmongGamePlayers,
   perspectiveOrdinalForName,
   perspectiveNameForOrdinal,
+  shouldUsePseudoViewpointForLogin,
+  selectableTurnMaxForShell,
+  SPECTATOR_VIEWPOINT_NAME,
+  viewpointNameForStoredPerspective,
   viewpointNameForLogin,
 } from './gameInfoShell'
 import type { GameInfoResponse } from '../api/bff'
@@ -143,6 +148,91 @@ describe('perspectiveOrdinalForName', () => {
 
   it('returns null when name not in list', () => {
     expect(perspectiveOrdinalForName(p, 'Gamma')).toBeNull()
+  })
+
+  it('returns 0 for spectator pseudo-viewpoint', () => {
+    expect(perspectiveOrdinalForName(p, SPECTATOR_VIEWPOINT_NAME)).toBe(0)
+  })
+})
+
+describe('viewpointNameForStoredPerspective', () => {
+  const p = [
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
+  ]
+
+  it('returns spectator label for pseudo slot 0', () => {
+    expect(viewpointNameForStoredPerspective(0, p)).toBe(SPECTATOR_VIEWPOINT_NAME)
+  })
+
+  it('returns player name for 1-based slots', () => {
+    expect(viewpointNameForStoredPerspective(2, p)).toBe('Beta')
+  })
+})
+
+describe('isLoginAmongGamePlayers', () => {
+  const p = [
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
+  ]
+
+  it('is false when login empty', () => {
+    expect(isLoginAmongGamePlayers(p, null)).toBe(false)
+    expect(isLoginAmongGamePlayers(p, '   ')).toBe(false)
+  })
+
+  it('matches login case-insensitively', () => {
+    expect(isLoginAmongGamePlayers(p, 'beta')).toBe(true)
+  })
+
+  it('is false when login not in list', () => {
+    expect(isLoginAmongGamePlayers(p, 'nobody')).toBe(false)
+  })
+})
+
+describe('shouldUsePseudoViewpointForLogin', () => {
+  const p = [
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
+  ]
+
+  it('is true for in-progress game when login is not a player', () => {
+    expect(shouldUsePseudoViewpointForLogin(p, 'nobody', false)).toBe(true)
+  })
+
+  it('is false when login matches a player', () => {
+    expect(shouldUsePseudoViewpointForLogin(p, 'Beta', false)).toBe(false)
+  })
+
+  it('is false when game is finished', () => {
+    expect(shouldUsePseudoViewpointForLogin(p, 'nobody', true)).toBe(false)
+  })
+
+  it('is false when login is empty', () => {
+    expect(shouldUsePseudoViewpointForLogin(p, '', false)).toBe(false)
+  })
+})
+
+describe('selectableTurnMaxForShell', () => {
+  const p = [
+    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
+    { ordinal: 2, name: 'Beta', raceName: null as string | null },
+  ]
+
+  it('caps at latest minus one for host pseudo-view on in-progress games', () => {
+    expect(selectableTurnMaxForShell(50, p, 'nobody', false)).toBe(49)
+  })
+
+  it('uses full latest turn when login is a player', () => {
+    expect(selectableTurnMaxForShell(50, p, 'Beta', false)).toBe(50)
+  })
+
+  it('uses full latest turn when game is finished', () => {
+    expect(selectableTurnMaxForShell(50, p, 'nobody', true)).toBe(50)
+  })
+
+  it('returns null when latest turn is missing', () => {
+    expect(selectableTurnMaxForShell(null, p, 'nobody', false)).toBeNull()
   })
 })
 

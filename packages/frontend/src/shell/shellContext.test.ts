@@ -3,6 +3,7 @@ import type { GameInfoShellContext } from '../stores/shell'
 import {
   deriveAnalyticScope,
   deriveSelectedViewpointName,
+  deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
   deriveTurnDataReady,
@@ -35,6 +36,19 @@ function baseInputs(overrides: Partial<ShellContextInputs> = {}): ShellContextIn
     ...overrides,
   }
 }
+
+describe('deriveShellTurnMax', () => {
+  it('caps turn for host pseudo-view when login is not a player', () => {
+    const ctx: GameInfoShellContext = {
+      turn: 50,
+      perspectives,
+      isGameFinished: false,
+      sectorDisplayName: null,
+    }
+    expect(deriveShellTurnMax(ctx, 'Unknown')).toBe(49)
+    expect(deriveShellTurnMax(ctx, 'Bob')).toBe(50)
+  })
+})
 
 describe('deriveShellViewpoints', () => {
   it('returns empty when no perspectives', () => {
@@ -69,7 +83,7 @@ describe('deriveShellViewpoints', () => {
     expect(rows.find((r) => r.name === 'Carol')?.disabled).toBe(true)
   })
 
-  it('enables only first perspective when in-progress and login does not match any player', () => {
+  it('adds spectator viewpoint when in-progress and login is not a player', () => {
     const ctx: GameInfoShellContext = {
       turn: 10,
       perspectives,
@@ -79,7 +93,8 @@ describe('deriveShellViewpoints', () => {
     const rows = deriveShellViewpoints(
       baseInputs({ gameInfoContext: ctx, loginName: 'Unknown' })
     )
-    expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(false)
+    expect(rows[0]).toEqual({ name: '<Spectator>', raceName: null, disabled: false })
+    expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(true)
     expect(rows.find((r) => r.name === 'Bob')?.disabled).toBe(true)
   })
 
@@ -93,6 +108,18 @@ describe('deriveShellViewpoints', () => {
     )
     expect(rows.find((r) => r.name === 'Bob')?.disabled).toBe(false)
     expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(true)
+  })
+
+  it('includes spectator row when pseudo perspective 0 is stored', () => {
+    const rows = deriveShellViewpoints(
+      baseInputs({
+        loginName: '',
+        storageOnlyLoad: true,
+        storageAvailablePerspectives: [0],
+      })
+    )
+    expect(rows[0]).toEqual({ name: '<Spectator>', raceName: null, disabled: false })
+    expect(rows.every((r) => r.name === '<Spectator>' || r.disabled)).toBe(true)
   })
 })
 
@@ -117,6 +144,20 @@ describe('deriveSelectedViewpointName', () => {
         baseInputs({ gameInfoContext: ctx, loginName: 'Bob', perspectiveOverrideName: 'Alice' })
       )
     ).toBe('Bob')
+  })
+
+  it('selects spectator when in-progress and login is not a player', () => {
+    const ctx: GameInfoShellContext = {
+      turn: 10,
+      perspectives,
+      isGameFinished: false,
+      sectorDisplayName: null,
+    }
+    expect(
+      deriveSelectedViewpointName(
+        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
+      )
+    ).toBe('<Spectator>')
   })
 
   it('uses override when game is finished', () => {
@@ -150,6 +191,32 @@ describe('deriveSelectedViewpointName', () => {
       )
     ).toBe('Carol')
   })
+
+  it('selects spectator when only pseudo perspective 0 is stored', () => {
+    expect(
+      deriveSelectedViewpointName(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [0],
+          perspectiveOverrideName: null,
+        })
+      )
+    ).toBe('<Spectator>')
+  })
+
+  it('honours spectator override in storage-only mode when slot 0 is stored', () => {
+    expect(
+      deriveSelectedViewpointName(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [0, 2],
+          perspectiveOverrideName: '<Spectator>',
+        })
+      )
+    ).toBe('<Spectator>')
+  })
 })
 
 describe('deriveAnalyticScope', () => {
@@ -181,6 +248,41 @@ describe('deriveAnalyticScope', () => {
       gameId: '628580',
       turn: 5,
       perspective: 2,
+    })
+  })
+
+  it('uses pseudo-viewpoint 0 when in-progress and login is not a player', () => {
+    const ctx: GameInfoShellContext = {
+      turn: 10,
+      perspectives,
+      isGameFinished: false,
+      sectorDisplayName: null,
+    }
+    expect(
+      deriveAnalyticScope(
+        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
+      )
+    ).toEqual({
+      gameId: '628580',
+      turn: 5,
+      perspective: 0,
+    })
+  })
+
+  it('resolves spectator scope in storage-only mode when slot 0 is stored', () => {
+    expect(
+      deriveAnalyticScope(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [0],
+          perspectiveOverrideName: null,
+        })
+      )
+    ).toEqual({
+      gameId: '628580',
+      turn: 5,
+      perspective: 0,
     })
   })
 })
@@ -250,6 +352,15 @@ describe('isViewpointChangeAllowed', () => {
     sectorDisplayName: null,
   }
 
+  it('allows spectator only when login is not a player during in-progress game', () => {
+    expect(
+      isViewpointChangeAllowed('<Spectator>', inProgress, 'Unknown', false, null, perspectives)
+    ).toBe(true)
+    expect(
+      isViewpointChangeAllowed('Alice', inProgress, 'Unknown', false, null, perspectives)
+    ).toBe(false)
+  })
+
   it('allows login player only during in-progress game', () => {
     expect(
       isViewpointChangeAllowed('Bob', inProgress, 'Bob', false, null, perspectives)
@@ -265,6 +376,15 @@ describe('isViewpointChangeAllowed', () => {
     ).toBe(true)
     expect(
       isViewpointChangeAllowed('Alice', baseInputs().gameInfoContext, '', true, [2], perspectives)
+    ).toBe(false)
+  })
+
+  it('allows spectator in storage-only mode when slot 0 is stored', () => {
+    expect(
+      isViewpointChangeAllowed('<Spectator>', baseInputs().gameInfoContext, '', true, [0], perspectives)
+    ).toBe(true)
+    expect(
+      isViewpointChangeAllowed('Alice', baseInputs().gameInfoContext, '', true, [0], perspectives)
     ).toBe(false)
   })
 
