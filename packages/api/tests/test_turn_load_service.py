@@ -202,7 +202,7 @@ class FakePlanetsNu:
         self._login_returns = login_returns
         self.login_calls: list[tuple[str, str]] = []
         self.load_calls: list[int] = []
-        self.load_turn_calls: list[tuple[int, int, int]] = []
+        self.load_turn_calls: list[tuple[int, int | None, int]] = []
 
     def login(self, username: str, password: str) -> str:
         self.login_calls.append((username, password))
@@ -212,7 +212,9 @@ class FakePlanetsNu:
         self.load_calls.append(game_id)
         return copy.deepcopy(self._load_payload)
 
-    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+    def load_turn(
+        self, *, game_id: int, turn: int | None, player_id: int, api_key: str | None = None
+    ):
         self.load_turn_calls.append((game_id, turn, player_id))
         raise AssertionError("load_turn must be overridden when used")
 
@@ -222,7 +224,9 @@ class FakePlanetsNuWithTurn(FakePlanetsNu):
         super().__init__(load_payload, **kwargs)
         self._rst = rst_payload
 
-    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+    def load_turn(
+        self, *, game_id: int, turn: int | None, player_id: int, api_key: str | None = None
+    ):
         self.load_turn_calls.append((game_id, turn, player_id))
         return {"success": True, "rst": copy.deepcopy(self._rst)}
 
@@ -272,8 +276,45 @@ class TestEnsureTurnLoaded:
         params = RefreshGameInfoParams(username="host")
         ti = turns.ensure_turn_loaded(628580, 0, 111, params, planets)
         assert ti.settings.turn == 111
-        assert planets.load_turn_calls == [(628580, 111, 0)]
+        assert planets.load_turn_calls == [(628580, None, 0)]
         backend.get("games/628580/0/turns/111")
+
+    def test_fetches_historical_spectator_turn_with_explicit_turn(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _ = build_service_stack(backend)
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        historical = copy.deepcopy(turn_rst)
+        historical["settings"]["turn"] = 110
+        historical["game"]["turn"] = 110
+        planets = FakePlanetsNuWithTurn(info, historical)
+        backend.put("credentials/accounts/host/api_key", "k")
+        params = RefreshGameInfoParams(username="host")
+        ti = turns.ensure_turn_loaded(628580, 0, 110, params, planets)
+        assert ti.settings.turn == 110
+        assert planets.load_turn_calls == [(628580, 110, 0)]
+        backend.get("games/628580/0/turns/110")
+
+    def test_rejects_wrong_turn_from_turnless_spectator_load_without_storing(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        bad = copy.deepcopy(turn_rst)
+        bad["settings"]["turn"] = 110
+        bad["game"]["turn"] = 110
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurn(info, bad)
+        backend.put("credentials/accounts/host/api_key", "k")
+        params = RefreshGameInfoParams(username="host")
+        _, turns, _, _ = build_service_stack(backend)
+        with pytest.raises(UpstreamPlanetsError, match="settings.turn"):
+            turns.ensure_turn_loaded(628580, 0, 111, params, planets)
+        assert planets.load_turn_calls == [(628580, None, 0)]
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/0/turns/111")
 
     def test_rejects_mismatched_settings_turn_without_storing(self, turn_rst):
         backend = MemoryAssetBackend(initial={})

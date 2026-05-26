@@ -219,8 +219,8 @@ describe('selectableTurnMaxForShell', () => {
     { ordinal: 2, name: 'Beta', raceName: null as string | null },
   ]
 
-  it('caps at latest minus one for host pseudo-view on in-progress games', () => {
-    expect(selectableTurnMaxForShell(50, p, 'nobody', false)).toBe(49)
+  it('uses full latest turn for host pseudo-view on in-progress games', () => {
+    expect(selectableTurnMaxForShell(50, p, 'nobody', false)).toBe(50)
   })
 
   it('uses full latest turn when login is a player', () => {

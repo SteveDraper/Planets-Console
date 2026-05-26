@@ -161,6 +161,21 @@ class TurnLoadService:
         info = self._games.get_game_info(game_id)
         return GameService.player_id_for_perspective(info, perspective, game_id)
 
+    @staticmethod
+    def _upstream_turn_for_load(
+        perspective: int, turn_number: int, current_turn: int
+    ) -> int | None:
+        """Map a requested turn to the value sent to Planets.nu loadturn.
+
+        Spectator (perspective 0) on the current turn must omit ``turn`` from the upstream
+        request; ``playerid=0`` with an explicit current-turn number fails upstream (NRE),
+        but omitting ``turn`` returns the latest turn. Callers still pass ``turn_number`` as
+        usual; ``_validate_turn_loaded_matches_request`` checks the response matches it.
+        """
+        if perspective == 0 and turn_number == current_turn:
+            return None
+        return turn_number
+
     def ensure_turn_loaded(
         self,
         game_id: int,
@@ -187,7 +202,9 @@ class TurnLoadService:
                 "Login name is required to load turn data when it is not already in storage."
             )
 
-        player_id = self._player_id_for_perspective(game_id, perspective)
+        game_info = self._games.get_game_info(game_id)
+        player_id = GameService.player_id_for_perspective(game_info, perspective, game_id)
+        upstream_turn = self._upstream_turn_for_load(perspective, turn_number, game_info.game.turn)
 
         if self._credentials.get_stored_api_key(params.username) is None:
             if params.password is None:
@@ -203,7 +220,7 @@ class TurnLoadService:
 
         remote = planets.load_turn(
             game_id=game_id,
-            turn=turn_number,
+            turn=upstream_turn,
             player_id=player_id,
             api_key=api_key,
         )

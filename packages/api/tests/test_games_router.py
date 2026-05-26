@@ -79,7 +79,9 @@ class _FakePlanetsNu:
     def load_game_info(self, game_id: int) -> dict:
         return copy.deepcopy(self._load_payload)
 
-    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+    def load_turn(
+        self, *, game_id: int, turn: int | None, player_id: int, api_key: str | None = None
+    ):
         raise AssertionError("load_turn should not be called in this test")
 
 
@@ -235,7 +237,9 @@ class _FakePlanetsNuEnsure(_FakePlanetsNu):
         self._rst = copy.deepcopy(rst)
         self.load_turn_calls: list[tuple[int, int, int]] = []
 
-    def load_turn(self, *, game_id: int, turn: int, player_id: int, api_key: str | None = None):
+    def load_turn(
+        self, *, game_id: int, turn: int | None, player_id: int, api_key: str | None = None
+    ):
         self.load_turn_calls.append((game_id, turn, player_id))
         return {"success": True, "rst": copy.deepcopy(self._rst)}
 

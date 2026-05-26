@@ -77,17 +77,24 @@ class PlanetsNuClient:
         self,
         *,
         game_id: int,
-        turn: int,
+        turn: int | None,
         player_id: int,
         api_key: str | None = None,
     ) -> dict[str, Any]:
-        """POST /game/loadturn with form body; returns the full JSON body (success, rst, ...)."""
+        """POST /game/loadturn with form body; returns the full JSON body (success, rst, ...).
+
+        When ``turn`` is ``None``, the turn field is omitted from the form body. Planets.nu
+        then returns the latest turn. That path is required for spectator loads (``playerid=0``)
+        on the current turn: sending an explicit ``turn`` equal to the live turn NREs upstream,
+        while omitting ``turn`` succeeds.
+        """
         url = f"{self._base_url}/game/loadturn"
         form: dict[str, Any] = {
             "gameid": game_id,
-            "turn": turn,
             "playerid": player_id,
         }
+        if turn is not None:
+            form["turn"] = turn
         if api_key:
             form["apikey"] = api_key
         try:
