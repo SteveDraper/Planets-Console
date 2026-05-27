@@ -146,12 +146,7 @@ export function shouldUsePseudoViewpointForLogin(
 /**
  * Highest turn selectable in the shell (latest turn from game info when known).
  */
-export function selectableTurnMaxForShell(
-  latestTurn: number | null,
-  _perspectives: PerspectiveRow[],
-  _loginName: string | null,
-  _isGameFinished: boolean
-): number | null {
+export function selectableTurnMaxForShell(latestTurn: number | null): number | null {
   if (latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1) {
     return null
   }

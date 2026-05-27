@@ -214,25 +214,12 @@ describe('shouldUsePseudoViewpointForLogin', () => {
 })
 
 describe('selectableTurnMaxForShell', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
-
-  it('uses full latest turn for host pseudo-view on in-progress games', () => {
-    expect(selectableTurnMaxForShell(50, p, 'nobody', false)).toBe(50)
-  })
-
-  it('uses full latest turn when login is a player', () => {
-    expect(selectableTurnMaxForShell(50, p, 'Beta', false)).toBe(50)
-  })
-
-  it('uses full latest turn when game is finished', () => {
-    expect(selectableTurnMaxForShell(50, p, 'nobody', true)).toBe(50)
+  it('uses full latest turn when known', () => {
+    expect(selectableTurnMaxForShell(50)).toBe(50)
   })
 
   it('returns null when latest turn is missing', () => {
-    expect(selectableTurnMaxForShell(null, p, 'nobody', false)).toBeNull()
+    expect(selectableTurnMaxForShell(null)).toBeNull()
   })
 })
 

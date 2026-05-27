@@ -38,15 +38,14 @@ function baseInputs(overrides: Partial<ShellContextInputs> = {}): ShellContextIn
 }
 
 describe('deriveShellTurnMax', () => {
-  it('uses full latest turn for host pseudo-view when login is not a player', () => {
+  it('uses latest turn from game info context', () => {
     const ctx: GameInfoShellContext = {
       turn: 50,
       perspectives,
       isGameFinished: false,
       sectorDisplayName: null,
     }
-    expect(deriveShellTurnMax(ctx, 'Unknown')).toBe(50)
-    expect(deriveShellTurnMax(ctx, 'Bob')).toBe(50)
+    expect(deriveShellTurnMax(ctx)).toBe(50)
   })
 })
 

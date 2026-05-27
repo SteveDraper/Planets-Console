@@ -28,16 +28,10 @@ export type ShellContextInputs = {
 }
 
 export function deriveShellTurnMax(
-  gameInfoContext: GameInfoShellContext | null,
-  loginName: string | null = null
+  gameInfoContext: GameInfoShellContext | null
 ): number | null {
   if (!gameInfoContext) return null
-  return selectableTurnMaxForShell(
-    gameInfoContext.turn,
-    gameInfoContext.perspectives,
-    loginName,
-    gameInfoContext.isGameFinished
-  )
+  return selectableTurnMaxForShell(gameInfoContext.turn)
 }
 
 export function deriveShellDefaultViewpointName(

@@ -133,12 +133,7 @@ function ConsoleShell() {
           isGameFinished,
           sectorDisplayName: getSectorDisplayNameFromGameInfo(gameInfo),
         }, {
-          selectableTurnMax: selectableTurnMaxForShell(
-            latestTurn,
-            perspectives,
-            vars.username,
-            isGameFinished
-          ),
+          selectableTurnMax: selectableTurnMaxForShell(latestTurn),
         })
       }
 
@@ -239,12 +234,7 @@ function ConsoleShell() {
       isGameFinished,
       sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
     }, {
-      selectableTurnMax: selectableTurnMaxForShell(
-        latestTurn,
-        perspectives,
-        loginName,
-        isGameFinished
-      ),
+      selectableTurnMax: selectableTurnMaxForShell(latestTurn),
     })
   }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh, loginName])
 
