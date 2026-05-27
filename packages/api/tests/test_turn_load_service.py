@@ -231,6 +231,22 @@ class FakePlanetsNuWithTurn(FakePlanetsNu):
         return {"success": True, "rst": copy.deepcopy(self._rst)}
 
 
+class FakePlanetsNuWithTurnByUpstreamTurn(FakePlanetsNu):
+    def __init__(
+        self, load_payload: dict, rst_by_upstream_turn: dict[int | None, dict], **kwargs
+    ) -> None:
+        super().__init__(load_payload, **kwargs)
+        self._rst_by_upstream_turn = rst_by_upstream_turn
+
+    def load_turn(
+        self, *, game_id: int, turn: int | None, player_id: int, api_key: str | None = None
+    ):
+        self.load_turn_calls.append((game_id, turn, player_id))
+        if turn not in self._rst_by_upstream_turn:
+            return {"success": False, "error": f"No stub for turn={turn!r}"}
+        return {"success": True, "rst": copy.deepcopy(self._rst_by_upstream_turn[turn])}
+
+
 class TestEnsureTurnLoaded:
     def test_returns_stored_turn_without_calling_planets(self, seeded_backend, turn_rst):
         _, turns, _, _ = build_service_stack(seeded_backend)
@@ -306,15 +322,35 @@ class TestEnsureTurnLoaded:
         bad["game"]["turn"] = 110
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             info = json.load(f)
-        planets = FakePlanetsNuWithTurn(info, bad)
+        planets = FakePlanetsNuWithTurnByUpstreamTurn(info, {None: bad, 111: bad})
         backend.put("credentials/accounts/host/api_key", "k")
         params = RefreshGameInfoParams(username="host")
         _, turns, _, _ = build_service_stack(backend)
         with pytest.raises(UpstreamPlanetsError, match="settings.turn"):
             turns.ensure_turn_loaded(628580, 0, 111, params, planets)
-        assert planets.load_turn_calls == [(628580, None, 0)]
+        assert planets.load_turn_calls == [(628580, None, 0), (628580, 111, 0)]
         with pytest.raises(NotFoundError):
             backend.get("games/628580/0/turns/111")
+
+    def test_retries_turnless_spectator_load_with_explicit_turn_when_game_info_stale(
+        self, turn_rst
+    ):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        newer = copy.deepcopy(turn_rst)
+        newer["settings"]["turn"] = 112
+        newer["game"]["turn"] = 112
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+        planets = FakePlanetsNuWithTurnByUpstreamTurn(info, {None: newer, 111: turn_rst})
+        backend.put("credentials/accounts/host/api_key", "k")
+        params = RefreshGameInfoParams(username="host")
+        _, turns, _, _ = build_service_stack(backend)
+        ti = turns.ensure_turn_loaded(628580, 0, 111, params, planets)
+        assert ti.settings.turn == 111
+        assert planets.load_turn_calls == [(628580, None, 0), (628580, 111, 0)]
+        backend.get("games/628580/0/turns/111")
 
     def test_rejects_mismatched_settings_turn_without_storing(self, turn_rst):
         backend = MemoryAssetBackend(initial={})

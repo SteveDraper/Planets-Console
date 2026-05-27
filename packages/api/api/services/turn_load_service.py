@@ -165,13 +165,57 @@ class TurnLoadService:
 
         Spectator (perspective 0) on the current turn must omit ``turn`` from the upstream
         request; ``playerid=0`` with an explicit current-turn number fails upstream with a
-        server error, but omitting ``turn`` returns the latest turn. Callers still pass
-        ``turn_number`` as usual; ``_validate_turn_loaded_matches_request`` checks the response
-        matches it.
+        server error, but omitting ``turn`` returns the latest turn. When stored game info is
+        stale, that latest turn may not match ``turn_number``; ``ensure_turn_loaded`` then
+        retries once with an explicit ``turn_number`` (which succeeds for historical turns).
         """
         if perspective == 0 and turn_number == current_turn:
             return None
         return turn_number
+
+    def _load_turn_from_planets_upstream(
+        self,
+        *,
+        game_id: int,
+        player_id: int,
+        upstream_turn: int | None,
+        api_key: str,
+        planets: PlanetsNuClient,
+    ) -> tuple[dict, TurnInfo]:
+        """Fetch one turn from Planets.nu and deserialize it."""
+        remote = planets.load_turn(
+            game_id=game_id,
+            turn=upstream_turn,
+            player_id=player_id,
+            api_key=api_key,
+        )
+        if not remote.get("success"):
+            detail = remote.get("error") or remote.get("message") or "Load turn was not successful."
+            raise UpstreamPlanetsError(str(detail))
+        rst = remote.get("rst")
+        if not isinstance(rst, dict):
+            raise UpstreamPlanetsError(
+                "Planets.nu loadturn response did not include an rst object."
+            )
+        turn = self._deserialize_turn_json(
+            game_id,
+            rst,
+            error_prefix="Load turn rst payload did not match the expected shape",
+        )
+        return rst, turn
+
+    @staticmethod
+    def _should_retry_spectator_turnless_with_explicit_turn(
+        upstream_turn: int | None,
+        game_id: int,
+        turn_number: int,
+        turn: TurnInfo,
+    ) -> bool:
+        if upstream_turn is not None:
+            return False
+        if turn.game.id != game_id:
+            return False
+        return turn.settings.turn != turn_number or turn.game.turn != turn_number
 
     def ensure_turn_loaded(
         self,
@@ -215,26 +259,23 @@ class TurnLoadService:
         if not api_key:
             raise LoginCredentialsRequiredError("Login credentials are required.")
 
-        remote = planets.load_turn(
+        rst, turn = self._load_turn_from_planets_upstream(
             game_id=game_id,
-            turn=upstream_turn,
             player_id=player_id,
+            upstream_turn=upstream_turn,
             api_key=api_key,
+            planets=planets,
         )
-        if not remote.get("success"):
-            detail = remote.get("error") or remote.get("message") or "Load turn was not successful."
-            raise UpstreamPlanetsError(str(detail))
-        rst = remote.get("rst")
-        if not isinstance(rst, dict):
-            raise UpstreamPlanetsError(
-                "Planets.nu loadturn response did not include an rst object."
+        if self._should_retry_spectator_turnless_with_explicit_turn(
+            upstream_turn, game_id, turn_number, turn
+        ):
+            rst, turn = self._load_turn_from_planets_upstream(
+                game_id=game_id,
+                player_id=player_id,
+                upstream_turn=turn_number,
+                api_key=api_key,
+                planets=planets,
             )
-
-        turn = self._deserialize_turn_json(
-            game_id,
-            rst,
-            error_prefix="Load turn rst payload did not match the expected shape",
-        )
 
         self._validate_turn_loaded_matches_request(game_id, turn_number, turn)
 
