@@ -235,7 +235,7 @@ class _FakePlanetsNuEnsure(_FakePlanetsNu):
     def __init__(self, load_payload: dict, rst: dict) -> None:
         super().__init__(load_payload)
         self._rst = copy.deepcopy(rst)
-        self.load_turn_calls: list[tuple[int, int, int]] = []
+        self.load_turn_calls: list[tuple[int, int | None, int]] = []
 
     def load_turn(
         self, *, game_id: int, turn: int | None, player_id: int, api_key: str | None = None
