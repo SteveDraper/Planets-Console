@@ -236,7 +236,7 @@ function ConsoleShell() {
     }, {
       selectableTurnMax: selectableTurnMaxForShell(latestTurn),
     })
-  }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh, loginName])
+  }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh])
 
   const initialGameBootstrapFailureSeen = useRef(false)
   useEffect(() => {

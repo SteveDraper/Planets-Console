@@ -164,9 +164,10 @@ class TurnLoadService:
         """Map a requested turn to the value sent to Planets.nu loadturn.
 
         Spectator (perspective 0) on the current turn must omit ``turn`` from the upstream
-        request; ``playerid=0`` with an explicit current-turn number fails upstream (NRE),
-        but omitting ``turn`` returns the latest turn. Callers still pass ``turn_number`` as
-        usual; ``_validate_turn_loaded_matches_request`` checks the response matches it.
+        request; ``playerid=0`` with an explicit current-turn number fails upstream with a
+        server error, but omitting ``turn`` returns the latest turn. Callers still pass
+        ``turn_number`` as usual; ``_validate_turn_loaded_matches_request`` checks the response
+        matches it.
         """
         if perspective == 0 and turn_number == current_turn:
             return None

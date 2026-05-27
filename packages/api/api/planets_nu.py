@@ -85,8 +85,8 @@ class PlanetsNuClient:
 
         When ``turn`` is ``None``, the turn field is omitted from the form body. Planets.nu
         then returns the latest turn. That path is required for spectator loads (``playerid=0``)
-        on the current turn: sending an explicit ``turn`` equal to the live turn NREs upstream,
-        while omitting ``turn`` succeeds.
+        on the current turn: sending an explicit ``turn`` equal to the live turn errors
+        upstream, while omitting ``turn`` succeeds.
         """
         url = f"{self._base_url}/game/loadturn"
         form: dict[str, Any] = {
