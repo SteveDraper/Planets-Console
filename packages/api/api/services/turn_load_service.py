@@ -157,10 +157,6 @@ class TurnLoadService:
             f"(game {game_id}, perspective {perspective})."
         )
 
-    def _player_id_for_perspective(self, game_id: int, perspective: int) -> int:
-        info = self._games.get_game_info(game_id)
-        return GameService.player_id_for_perspective(info, perspective, game_id)
-
     @staticmethod
     def _upstream_turn_for_load(
         perspective: int, turn_number: int, current_turn: int
