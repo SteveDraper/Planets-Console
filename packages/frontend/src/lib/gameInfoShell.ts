@@ -144,23 +144,13 @@ export function shouldUsePseudoViewpointForLogin(
 }
 
 /**
- * Highest turn selectable in the shell. For host pseudo-view (perspective 0) on in-progress
- * games, Planets.nu loadturn accepts playerid=0 only for turns before the current one.
+ * Highest turn selectable in the shell (latest turn from game info when known).
  */
-export function selectableTurnMaxForShell(
-  latestTurn: number | null,
-  perspectives: PerspectiveRow[],
-  loginName: string | null,
-  isGameFinished: boolean
-): number | null {
+export function selectableTurnMaxForShell(latestTurn: number | null): number | null {
   if (latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1) {
     return null
   }
-  const max = Math.floor(latestTurn)
-  if (shouldUsePseudoViewpointForLogin(perspectives, loginName, isGameFinished) && max > 1) {
-    return max - 1
-  }
-  return max
+  return Math.floor(latestTurn)
 }
 
 /** Match logged-in name to a player (case-insensitive); otherwise first perspective. */
