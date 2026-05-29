@@ -434,10 +434,31 @@ export type CombinedMapData = {
   nuIonStorms?: boolean
 }
 
-export type StellarCartographySampleEntry = {
-  layer: CartographyOverlayLayerId | 'wormholes'
-  lines: string[]
+/** Wire `layer` values returned by Core sample-at (overlay layers plus wormholes). */
+export type StellarCartographySampleLayerId = CartographyOverlayLayerId | 'wormholes'
+
+const STELLAR_CARTOGRAPHY_SAMPLE_LAYER_IDS: readonly StellarCartographySampleLayerId[] = [
+  'debris-disks',
+  'nebulae',
+  'ion-storms',
+  'star-clusters',
+  'black-holes',
+  'wormholes',
+] as const
+
+export function isStellarCartographySampleLayerId(
+  layer: string
+): layer is StellarCartographySampleLayerId {
+  return (STELLAR_CARTOGRAPHY_SAMPLE_LAYER_IDS as readonly string[]).includes(layer)
 }
+
+export type StellarCartographySampleEntry =
+  | { layer: 'debris-disks'; lines: string[] }
+  | { layer: 'nebulae'; lines: string[] }
+  | { layer: 'ion-storms'; lines: string[] }
+  | { layer: 'star-clusters'; lines: string[] }
+  | { layer: 'black-holes'; lines: string[] }
+  | { layer: 'wormholes'; lines: string[] }
 
 export type StellarCartographySampleResponse = {
   x: number

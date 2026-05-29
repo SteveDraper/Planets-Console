@@ -15,7 +15,7 @@ import {
   boundaryPolygonFromOrigin,
   DEFAULT_ISO_CONTOUR_RAY_COUNT,
 } from './isoContourRayMarch'
-import { PLANET_CELL_CENTER_OFFSET } from './planetSpatialGrid'
+import { PLANET_CELL_CENTER_OFFSET } from '../planetSpatialGrid'
 import {
   buildScalarGrid,
   gridPointToMap,

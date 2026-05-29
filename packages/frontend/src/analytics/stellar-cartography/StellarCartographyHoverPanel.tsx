@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
-import type { AnalyticShellScope, StellarCartographySampleEntry } from '../../api/bff'
+import {
+  isStellarCartographySampleLayerId,
+  type AnalyticShellScope,
+  type StellarCartographySampleEntry,
+} from '../../api/bff'
 import { fetchStellarCartographySample } from '../../api/bff'
 import {
   isCartographyLayerShown,
@@ -38,12 +42,14 @@ function filterSampleEntries(
   settingsGates: StellarCartographySettingsGates,
   wormholeDisplayMode: WormholeDisplayMode
 ): StellarCartographySampleEntry[] {
-  return entries.filter((entry) =>
-    isCartographyLayerShown(entry.layer as CartographyLayerId, {
-      layerVisibility,
-      settingsGates,
-      wormholeDisplayMode,
-    })
+  return entries.filter(
+    (entry): entry is StellarCartographySampleEntry =>
+      isStellarCartographySampleLayerId(entry.layer) &&
+      isCartographyLayerShown(entry.layer, {
+        layerVisibility,
+        settingsGates,
+        wormholeDisplayMode,
+      })
   )
 }
 

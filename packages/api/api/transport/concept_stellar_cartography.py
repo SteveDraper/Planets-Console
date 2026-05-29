@@ -1,10 +1,21 @@
 """HTTP contracts for game concept: Stellar Cartography sampling."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+StellarCartographySampleLayerId = Literal[
+    "debris-disks",
+    "nebulae",
+    "ion-storms",
+    "star-clusters",
+    "black-holes",
+    "wormholes",
+]
 
 
 class StellarCartographySampleEntry(BaseModel):
-    layer: str
+    layer: StellarCartographySampleLayerId
     lines: list[str]
 
 

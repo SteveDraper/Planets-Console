@@ -23,9 +23,9 @@ export function formatStellarCartographySampleLine(entry: StellarCartographySamp
     }
     case 'black-holes':
       return `Black hole: ${entry.lines.join(' ')}`
-    case 'wormholes':
+    case 'debris-disks':
       return entry.lines.join(' ')
-    default:
+    case 'wormholes':
       return entry.lines.join(' ')
   }
 }

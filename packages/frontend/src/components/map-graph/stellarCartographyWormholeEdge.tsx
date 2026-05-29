@@ -4,7 +4,7 @@ import { shallow } from 'zustand/shallow'
 import {
   WORMHOLE_EDGE_OPACITY,
   WORMHOLE_LINE_STROKE,
-} from '../../lib/stellarCartographyTheme'
+} from '../../lib/cartography/stellarCartographyTheme'
 import { NODE_SIZE_FLOW, clientToFlowPosition, safeZoomScale } from './geometry'
 import {
   WormholeHoverContext,

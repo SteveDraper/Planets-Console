@@ -2,7 +2,7 @@ import {
   WORMHOLE_ENDPOINT_DISC_FILL,
   WORMHOLE_SPIRAL_BLUE,
   WORMHOLE_SPIRAL_ORANGE,
-} from './stellarCartographyTheme'
+} from './cartography/stellarCartographyTheme'
 
 /** Fills its container; container width/height set the map-scaled diameter in pane pixels. */
 export function WormholeEndpointIconMark() {

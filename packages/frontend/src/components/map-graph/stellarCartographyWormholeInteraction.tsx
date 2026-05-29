@@ -8,8 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { gameMapCellCenterToFlow } from '../../lib/cartographyOverlayGeometry'
-import { WORMHOLE_RECENTER_PULSE_MS } from '../../lib/stellarCartographyTheme'
+import { gameMapCellCenterToFlow } from '../../lib/cartography/cartographyOverlayGeometry'
+import { WORMHOLE_RECENTER_PULSE_MS } from '../../lib/cartography/stellarCartographyTheme'
 import { wormholeMapCellKey } from '../../lib/wormholeEndpointHover'
 import { recenterViewportOnFlowPoint } from './geometry'
 

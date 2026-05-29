@@ -1,4 +1,4 @@
-import type { CartographyRasterFieldPaneShape } from '../lib/cartographyRasterFieldOverlay'
+import type { CartographyRasterFieldPaneShape } from '../lib/cartography/cartographyRasterFieldOverlay'
 
 export type RasterFieldOverlayProps = CartographyRasterFieldPaneShape
 

@@ -1,4 +1,4 @@
-"""Cross-layer contract: Core ion voltage vs ion_voltage_contract.json.
+"""Cross-layer contract: Core ion voltage vs test-fixtures/ion_voltage_contract.json.
 
 Host-aligned math per docs/design-stellar-cartography-map-rendering.md and
 api/concepts/stellar_cartography/sample_at.py (_ion_voltage_at).
@@ -17,7 +17,8 @@ from api.concepts.stellar_cartography.sample_at import (
 )
 from api.models.space import IonStorm
 
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "ion_voltage_contract.json"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FIXTURE_PATH = REPO_ROOT / "test-fixtures" / "ion_voltage_contract.json"
 
 
 @pytest.fixture(scope="module")

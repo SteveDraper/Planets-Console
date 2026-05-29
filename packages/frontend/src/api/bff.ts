@@ -37,12 +37,16 @@ export type {
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
   StellarCartographySampleEntry,
+  StellarCartographySampleLayerId,
   StellarCartographySampleResponse,
   StellarCartographyTurnSummaryResponse,
   WormholeUnknownEntrance,
 } from './bffCartographyTypes'
 
-export { normalizeMapDataResponse } from './bffCartographyTypes'
+export {
+  isStellarCartographySampleLayerId,
+  normalizeMapDataResponse,
+} from './bffCartographyTypes'
 
 /** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
 export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const

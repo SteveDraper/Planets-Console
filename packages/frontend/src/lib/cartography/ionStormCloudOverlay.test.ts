@@ -14,10 +14,11 @@ import {
   ION_STORM_CLASS_VOLTAGE_THRESHOLDS,
   ION_STORM_OUTER_VOLTAGE_THRESHOLD,
 } from './stellarCartographyTheme'
-import contractFixture from '../test/fixtures/ion_voltage_contract.json'
+import { loadIonVoltageContractFixture } from './loadIonVoltageContractFixture'
 
-/** Host-aligned golden vectors; keep in sync with packages/api/tests/fixtures/ion_voltage_contract.json */
+/** Host-aligned golden vectors; single source at test-fixtures/ion_voltage_contract.json */
 describe('ion voltage contract fixture', () => {
+  const contractFixture = loadIonVoltageContractFixture()
   const gridTolerance = contractFixture.gridTolerance
 
   it('matches buildIonVoltageGrid and ionVoltageAt at fixture cells', () => {

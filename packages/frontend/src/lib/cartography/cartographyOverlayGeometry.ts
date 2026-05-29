@@ -1,4 +1,4 @@
-import { PLANET_CELL_CENTER_OFFSET } from './planetSpatialGrid'
+import { PLANET_CELL_CENTER_OFFSET } from '../planetSpatialGrid'
 
 export type CartographyOverlayViewport = {
   width: number
