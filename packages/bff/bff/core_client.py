@@ -7,6 +7,7 @@ from typing import TypeVar
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError, PlanetsConsoleError
+from api.handlers.stellar_cartography import sample_at as stellar_cartography_sample_at
 from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
@@ -18,6 +19,7 @@ from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
 from api.storage import get_storage
 from api.storage.base import StorageBackend
+from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
     CoordinateInWarpWellResponse,
@@ -178,6 +180,25 @@ class CoreClient:
                 turn_number,
                 planet_id,
                 well_type,
+            )
+        )
+
+    def stellar_cartography_sample(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        x: int,
+        y: int,
+    ) -> StellarCartographySampleResponse:
+        return self._invoke(
+            lambda: stellar_cartography_sample_at(
+                self._concepts,
+                game_id,
+                perspective,
+                turn_number,
+                x,
+                y,
             )
         )
 

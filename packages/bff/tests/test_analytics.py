@@ -181,3 +181,36 @@ def test_connections_map_accepts_full_query_contract():
     data = response.json()
     assert data["analyticId"] == "connections"
     assert isinstance(data["routes"], list)
+
+
+def test_stellar_cartography_map_returns_overlay_circles_and_wormhole_edges():
+    """Stellar Cartography map returns overlay geometry and deduped wormhole edges."""
+    storage = get_storage()
+    with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+    response = client.get(f"/analytics/stellar-cartography/map?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "stellar-cartography"
+    assert isinstance(data["overlayCircles"], list)
+    assert len(data["overlayCircles"]) > 0
+    layers = {circle["layer"] for circle in data["overlayCircles"]}
+    assert "nebulae" in layers
+    assert "ion-storms" in layers
+    assert "star-clusters" in layers
+    assert "black-holes" in layers
+    bidirectional = [edge for edge in data["edges"] if edge.get("isBidirectional")]
+    mono = [edge for edge in data["edges"] if not edge.get("isBidirectional")]
+    assert len(bidirectional) == 1
+    assert len(mono) == 1
+    assert data["meta"]["wormholeEdges"] == 2
+
+
+def test_list_analytics_includes_stellar_cartography_map_analytic():
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    analytics = response.json()["analytics"]
+    stellar = next(a for a in analytics if a["id"] == "stellar-cartography")
+    assert stellar["supportsTable"] is False
+    assert stellar["supportsMap"] is True
+    assert stellar["type"] == "selectable"

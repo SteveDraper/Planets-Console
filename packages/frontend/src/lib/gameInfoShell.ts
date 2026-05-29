@@ -1,5 +1,7 @@
 import type { GameInfoResponse } from '../api/bff'
+import type { GameInfoShellContext } from '../stores/shell'
 import { resolveRaceDisplayNameFromGameInfo } from './planetsNuRaceDisplayName'
+import { stellarCartographySettingsGatesFromGameInfo } from './stellarCartographySettings'
 
 /** 1-based player index in game info `players` order, with display name. */
 export type PerspectiveRow = {
@@ -194,3 +196,14 @@ export function viewpointNameForStoredPerspective(
 /** Shown when a game or turn must be fetched from Planets.nu but login is missing. */
 export const LOGIN_REQUIRED_FOR_GAME_SELECTION =
   'Set login name in the header before selecting a game.'
+
+/** Build shell snapshot fields from a game-info payload. */
+export function buildGameInfoShellContext(data: GameInfoResponse): GameInfoShellContext {
+  return {
+    turn: getLatestTurnFromGameInfo(data),
+    perspectives: buildPerspectivesFromGameInfo(data),
+    isGameFinished: isGameFinishedFromGameInfo(data),
+    sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
+    stellarCartographyGates: stellarCartographySettingsGatesFromGameInfo(data),
+  }
+}

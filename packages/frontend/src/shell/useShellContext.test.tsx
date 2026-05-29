@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { useShellContext } from './useShellContext'
 import { useShellStore } from '../stores/shell'
 import { useSessionStore } from '../stores/session'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 
 vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
@@ -63,6 +64,7 @@ describe('useShellContext', () => {
         perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
         isGameFinished: true,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
     })
@@ -98,6 +100,7 @@ describe('useShellContext', () => {
         perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
         isGameFinished: true,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
     })
@@ -126,6 +129,7 @@ describe('useShellContext', () => {
         perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
         isGameFinished: true,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
       storageOnlyLoad: false,
@@ -157,6 +161,7 @@ describe('useShellContext', () => {
         perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
         isGameFinished: true,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
       storageOnlyLoad: true,
@@ -195,6 +200,7 @@ describe('useShellContext', () => {
         perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
         isGameFinished: true,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
     })
@@ -232,6 +238,7 @@ describe('useShellContext', () => {
         perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
         isGameFinished: true,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
     })
@@ -261,6 +268,7 @@ describe('useShellContext', () => {
         ],
         isGameFinished: false,
         sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
       storageOnlyLoad: true,

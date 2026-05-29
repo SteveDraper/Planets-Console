@@ -2,9 +2,11 @@
 
 from fastapi import APIRouter, Depends, Query
 
+from api.handlers.stellar_cartography import sample_at
 from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.services.deps import get_turn_concept_service
 from api.services.turn_concept_service import TurnConceptService
+from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
     CoordinateInWarpWellResponse,
@@ -44,3 +46,19 @@ def get_warp_well_cells(
 ) -> WarpWellCellsResponse:
     """Return map cell indices whose centers lie in the given warp well."""
     return warp_well_cells(svc, game_id, perspective, turn_number, planet_id, well_type)
+
+
+@router.get(
+    "/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/sample",
+    response_model=StellarCartographySampleResponse,
+)
+def get_stellar_cartography_sample(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    x: int = Query(..., ge=0),
+    y: int = Query(..., ge=0),
+    svc: TurnConceptService = Depends(get_turn_concept_service),
+) -> StellarCartographySampleResponse:
+    """Return stacked Stellar Cartography tooltip entries at map cell ``(x, y)``."""
+    return sample_at(svc, game_id, perspective, turn_number, x, y)

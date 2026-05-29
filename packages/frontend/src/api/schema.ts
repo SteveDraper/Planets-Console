@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * List Analytics
-         * @description Return analytics available to the console (placeholder list).
+         * @description Return analytics available to the console.
          */
         get: operations["list_analytics_analytics_get"];
         put?: never;
@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Get Analytic Table
-         * @description Placeholder tabular data (scoped for cache invalidation; same shape for now).
+         * @description Tabular data scoped to the selected game, turn, and perspective.
          */
         get: operations["get_analytic_table_analytics__analytic_id__table_get"];
         put?: never;
@@ -56,12 +56,33 @@ export interface paths {
          * @description Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
          *
          *     **connections** returns route pairs for the SPA to draw as edges on those nodes.
-         *     Other analytic ids return placeholder shapes until implemented.
+         *
+         *     **stellar-cartography** returns overlay circles and wormhole graph geometry.
          *
          *     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
          *     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
          */
         get: operations["get_analytic_map_analytics__analytic_id__map_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recent Diagnostics
+         * @description Return entries captured when handlers were invoked with ``includeDiagnostics``.
+         */
+        get: operations["get_recent_diagnostics_diagnostics_recent_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -86,6 +107,26 @@ export interface paths {
          *     Uses the same shallow enumeration as GET /api/v1/store/games?view=shallow.
          */
         get: operations["list_stored_games_games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/turns/{turn_number}/stored-perspectives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stored Turn Perspectives
+         * @description Return perspective slots that already have turn data in storage (no Planets.nu).
+         */
+        get: operations["get_stored_turn_perspectives_games__game_id__turns__turn_number__stored_perspectives_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -149,7 +190,7 @@ export interface paths {
         put?: never;
         /**
          * Post Warp Well Coordinate In Well
-         * @description Shallow forward to Core ``GameService`` (same contract as Core REST).
+         * @description Turn-scoped warp-well point test via ``CoreClient`` (shared handler with Core REST).
          */
         post: operations["post_warp_well_coordinate_in_well_games__game_id___perspective__turns__turn_number__concepts_warp_wells_coordinate_in_well_post"];
         delete?: never;
@@ -167,7 +208,7 @@ export interface paths {
         };
         /**
          * Get Warp Well Cells
-         * @description Shallow forward to Core ``GameService`` (same contract as Core REST).
+         * @description Turn-scoped warp-well cells via ``CoreClient`` (shared handler with Core REST).
          */
         get: operations["get_warp_well_cells_games__game_id___perspective__turns__turn_number__concepts_warp_wells_cells_get"];
         put?: never;
@@ -219,6 +260,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        BffGameInfoResponse: unknown;
+        BffTurnInfoResponse: unknown;
         /** CoordinateInWarpWellRequest */
         CoordinateInWarpWellRequest: {
             /** Planet Id */
@@ -240,123 +283,6 @@ export interface components {
          * @enum {string}
          */
         FlareConnectionMode: "off" | "include" | "only";
-        /** Game */
-        Game: {
-            /** Id */
-            id: number;
-            /** Name */
-            name: string;
-            /** Description */
-            description: string;
-            /** Shortdescription */
-            shortdescription: string;
-            status: components["schemas"]["GameStatus"];
-            /** Datecreated */
-            datecreated: string;
-            /** Dateended */
-            dateended: string;
-            /** Maptype */
-            maptype: number;
-            /** Gametype */
-            gametype: number;
-            /** Wincondition */
-            wincondition: number;
-            /** Difficulty */
-            difficulty: number;
-            /** Tutorialid */
-            tutorialid: number;
-            /** Requiredlevelid */
-            requiredlevelid: number;
-            /** Maxlevelid */
-            maxlevelid: number;
-            /** Masterplanetid */
-            masterplanetid: number;
-            /** Quadrant */
-            quadrant: number;
-            /** Mintenacity */
-            mintenacity: number;
-            /** Faststart */
-            faststart: number;
-            /** Turnsperweek */
-            turnsperweek: number;
-            /** Yearstarted */
-            yearstarted: number;
-            /** Isprivate */
-            isprivate: boolean;
-            /** Scenarioid */
-            scenarioid: number;
-            /** Createdby */
-            createdby: string;
-            /** Turn */
-            turn: number;
-            /** Slots */
-            slots: number;
-            /** Turnstatus */
-            turnstatus: string;
-            /** Hostdays */
-            hostdays: string;
-            /** Slowhostdays */
-            slowhostdays: string;
-            /** Hosttime */
-            hosttime: string;
-            /** Lastbackuppath */
-            lastbackuppath: string;
-            /** Nexthost */
-            nexthost: string;
-            /** Allturnsin */
-            allturnsin: boolean;
-            /** Lastnotified */
-            lastnotified: boolean;
-            /** Ishosting */
-            ishosting: boolean;
-            /** Lastloadeddate */
-            lastloadeddate: string;
-            /** Deletedate */
-            deletedate: string;
-            /** Lasthostdate */
-            lasthostdate: string;
-            /** Password */
-            password: string;
-            /** Groups */
-            groups: string;
-            /** Leagueseason */
-            leagueseason: number;
-            /** Leaguetier */
-            leaguetier: number;
-            /** Leaguegametype */
-            leaguegametype: number;
-            /** Haspassword */
-            haspassword: boolean;
-            /** Statusname */
-            statusname: string;
-            /** Justended */
-            justended: boolean;
-            /** Iscustom */
-            iscustom: boolean;
-            /** Timetohostshort */
-            timetohostshort: string;
-            /** Timetohost */
-            timetohost: string;
-        };
-        /** GameInfo */
-        GameInfo: {
-            game: components["schemas"]["Game"];
-            /** Players */
-            players: components["schemas"]["Player"][];
-            /** Relations */
-            relations: components["schemas"]["Relation"][];
-            settings: components["schemas"]["GameSettings"];
-            /** Schedule */
-            schedule: string;
-            /** Timetohost */
-            timetohost: string;
-            /** Wincondition */
-            wincondition: string;
-            /** Yearfrom */
-            yearfrom?: number | null;
-            /** Yearto */
-            yearto?: number | null;
-        };
         /**
          * GameInfoUpdateOperation
          * @enum {string}
@@ -370,498 +296,6 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** GameSettings */
-        GameSettings: {
-            /** Id */
-            id: number;
-            /** Name */
-            name: string;
-            /** Turn */
-            turn: number;
-            /** Buildqueueplanetid */
-            buildqueueplanetid: number;
-            /** Victorycountdown */
-            victorycountdown: number;
-            /** Maxallies */
-            maxallies: number;
-            /** Maxshareintel */
-            maxshareintel: number;
-            /** Maxsafepassage */
-            maxsafepassage: number;
-            /** Alliessharefullinfo */
-            alliessharefullinfo: boolean;
-            /** Mapwidth */
-            mapwidth: number;
-            /** Mapheight */
-            mapheight: number;
-            /** Numplanets */
-            numplanets: number;
-            /** Shiplimit */
-            shiplimit: number;
-            /** Hoststart */
-            hoststart: string;
-            /** Hostcompleted */
-            hostcompleted: string;
-            /** Nexthost */
-            nexthost: string;
-            /** Lastinvite */
-            lastinvite: string;
-            /** Teamsize */
-            teamsize: number;
-            /** Planetscanrange */
-            planetscanrange: number;
-            /** Shipscanrange */
-            shipscanrange: number;
-            /** Allvisible */
-            allvisible: boolean;
-            /** Minefieldsvisible */
-            minefieldsvisible: boolean;
-            /** Allplanetsvisible */
-            allplanetsvisible: boolean;
-            /** Planetownershipvisible */
-            planetownershipvisible: boolean;
-            /** Starbasesvisible */
-            starbasesvisible: boolean;
-            /** Shipsatplanetsvisible */
-            shipsatplanetsvisible: boolean;
-            /** Noreducedpodscanrange */
-            noreducedpodscanrange: boolean;
-            /** Allnormalscannedshipsvisible */
-            allnormalscannedshipsvisible: boolean;
-            /** Oneseesshipallseeship */
-            oneseesshipallseeship: boolean;
-            /** Spectatormode */
-            spectatormode: boolean;
-            /** Allshareintel */
-            allshareintel: boolean;
-            /** Nebulas */
-            nebulas: number;
-            /** Stars */
-            stars: number;
-            /** Neutrinostars */
-            neutrinostars: number;
-            /** Blackholes */
-            blackholes: number;
-            /** Maxwormholes */
-            maxwormholes: number;
-            /** Wormholemix */
-            wormholemix: number;
-            /** Wormholescanrange */
-            wormholescanrange: number;
-            /** Discussionid */
-            discussionid: string;
-            /** Nuionstorms */
-            nuionstorms: boolean;
-            /** Maxions */
-            maxions: number;
-            /** Maxioncloudsperstorm */
-            maxioncloudsperstorm: number;
-            /** Debrisdiskpercent */
-            debrisdiskpercent: number;
-            /** Debrisdiskversion */
-            debrisdiskversion: number;
-            /** Cloakfail */
-            cloakfail: number;
-            /** Structuredecayrate */
-            structuredecayrate: number;
-            /** Mapshape */
-            mapshape: number;
-            /** Verycloseplanets */
-            verycloseplanets: number;
-            /** Closeplanets */
-            closeplanets: number;
-            /** Nextplanets */
-            nextplanets: number;
-            /** Otherplanetsminhomeworlddist */
-            otherplanetsminhomeworlddist: number;
-            /** Ncircles */
-            ncircles: number;
-            /** Hwdistribution */
-            hwdistribution: number;
-            /** Ndebrisdiscs */
-            ndebrisdiscs: number;
-            /** Balanceadjustment */
-            balanceadjustment: number;
-            /** Closeplanetrangeinc */
-            closeplanetrangeinc: number;
-            /** Levelid */
-            levelid: number;
-            /** Nextlevelid */
-            nextlevelid: number;
-            /** Storyid */
-            storyid: number;
-            /** Killrace */
-            killrace: boolean;
-            /** Runningstart */
-            runningstart: number;
-            /** Deadradius */
-            deadradius: number;
-            /** Playerselectrace */
-            playerselectrace: boolean;
-            /** Militaryscorepercent */
-            militaryscorepercent: number;
-            /** Hideraceselection */
-            hideraceselection: boolean;
-            /** Hideplayerselection */
-            hideplayerselection: boolean;
-            /** Fixedstartpositions */
-            fixedstartpositions: boolean;
-            /** Shuffleteampositions */
-            shuffleteampositions: boolean;
-            /** Interestsignup */
-            interestsignup: boolean;
-            /** Interestsignupracecount */
-            interestsignupracecount: number;
-            /** Minnativeclans */
-            minnativeclans: number;
-            /** Maxnativeclans */
-            maxnativeclans: number;
-            /** Nohomeworld */
-            nohomeworld: boolean;
-            /** Homeworldhasstarbase */
-            homeworldhasstarbase: boolean;
-            /** Homeworldclans */
-            homeworldclans: number;
-            /** Homeworldresources */
-            homeworldresources: number;
-            /** Hwlosthappinesslosscolonists */
-            hwlosthappinesslosscolonists: number;
-            /** Hwlosthappinesslossnatives */
-            hwlosthappinesslossnatives: number;
-            /** Gamepassword */
-            gamepassword: string;
-            /** Extraplanets */
-            extraplanets: number;
-            /** Extraships */
-            extraships: number;
-            /** Centerextraplanets */
-            centerextraplanets: number;
-            /** Centerextraships */
-            centerextraships: number;
-            /** Extraplanetsrandomloc */
-            extraplanetsrandomloc: boolean;
-            /** Extrashipsrandomloc */
-            extrashipsrandomloc: boolean;
-            /** Wanderingtribescount */
-            wanderingtribescount: number;
-            /** Wanderingtribesdist */
-            wanderingtribesdist: number;
-            /** Neutroniumlevel */
-            neutroniumlevel: number;
-            /** Duraniumlevel */
-            duraniumlevel: number;
-            /** Tritaniumlevel */
-            tritaniumlevel: number;
-            /** Molybdenumlevel */
-            molybdenumlevel: number;
-            /** Averagedensitypercent */
-            averagedensitypercent: number;
-            /** Developmentfactor */
-            developmentfactor: number;
-            /** Nativeprobability */
-            nativeprobability: number;
-            /** Nativegovernmentlevel */
-            nativegovernmentlevel: number;
-            /** Neusurfacemax */
-            neusurfacemax: number;
-            /** Dursurfacemax */
-            dursurfacemax: number;
-            /** Trisurfacemax */
-            trisurfacemax: number;
-            /** Molsurfacemax */
-            molsurfacemax: number;
-            /** Neugroundmax */
-            neugroundmax: number;
-            /** Durgroundmax */
-            durgroundmax: number;
-            /** Trigroundmax */
-            trigroundmax: number;
-            /** Molgroundmax */
-            molgroundmax: number;
-            /** Planetlevelmax */
-            planetlevelmax: number;
-            /** Computerbuildships */
-            computerbuildships: boolean;
-            /** Computerbuilddelay */
-            computerbuilddelay: number;
-            /** Computerreplacedrops */
-            computerreplacedrops: boolean;
-            /** Bringhomesectorships */
-            bringhomesectorships: boolean;
-            /** Homesectorshipvaluemin */
-            homesectorshipvaluemin: number;
-            /** Homesectorshipvaluemax */
-            homesectorshipvaluemax: number;
-            /** Entryportalplayers */
-            entryportalplayers: string;
-            /** Reinforcementsallowed */
-            reinforcementsallowed: boolean;
-            /** Fightorfail */
-            fightorfail: number;
-            /** Fofactiveturn */
-            fofactiveturn: number;
-            /** Fofincrement */
-            fofincrement: number;
-            /** Fofaccelrate */
-            fofaccelrate: number;
-            /** Fofaccelstartturn */
-            fofaccelstartturn: number;
-            /** Fofaccelstartdate */
-            fofaccelstartdate: string;
-            /** Fofbyteam */
-            fofbyteam: boolean;
-            /** Meteorshowerchance */
-            meteorshowerchance: number;
-            /** Computerplayerrangelimitation */
-            computerplayerrangelimitation: number;
-            /** Stealthmode */
-            stealthmode: boolean;
-            /** Sphere */
-            sphere: boolean;
-            /** Showallexplosions */
-            showallexplosions: boolean;
-            /** Highidfixchunnelusepodhullid */
-            highidfixchunnelusepodhullid: boolean;
-            /** Highidfixfightertransferoffset */
-            highidfixfightertransferoffset: number;
-            /** Nochunnelhives */
-            nochunnelhives: boolean;
-            /** Mining200Adjustment */
-            mining200adjustment: number;
-            /** Freestarbasefighters5Adjustment */
-            freestarbasefighters5adjustment: number;
-            /** Cyborgmaxnativetaxrateadjustment */
-            cyborgmaxnativetaxrateadjustment: number;
-            /** Assimilationrateadjustment */
-            assimilationrateadjustment: number;
-            /** Maxhissersperplanet */
-            maxhissersperplanet: number;
-            /** Chunnelstabilizationeverywhere */
-            chunnelstabilizationeverywhere: boolean;
-            /** Groundattackadjustments */
-            groundattackadjustments: string;
-            /** Colonisttaxrateadjustments */
-            colonisttaxrateadjustments: string;
-            /** Nativetaxrateadjustments */
-            nativetaxrateadjustments: string;
-            /** Campaignmode */
-            campaignmode: boolean;
-            /** Maxadvantage */
-            maxadvantage: number;
-            /** Fascistdoublebeams */
-            fascistdoublebeams: boolean;
-            /** Starbasefightertransfer */
-            starbasefightertransfer: boolean;
-            /** Superspyadvanced */
-            superspyadvanced: boolean;
-            /** Cloakandintercept */
-            cloakandintercept: boolean;
-            /** Quantumtorpedos */
-            quantumtorpedos: boolean;
-            /** Galacticpower */
-            galacticpower: boolean;
-            /** Hardenedmines */
-            hardenedmines: boolean;
-            /** Racehullsonlyfascistdoublebeams */
-            racehullsonlyfascistdoublebeams: boolean;
-            /** Racehullsonlycloakandintercept */
-            racehullsonlycloakandintercept: boolean;
-            /** Racehullsonlyhiss */
-            racehullsonlyhiss: boolean;
-            /** Repairshipreplacessagefrigate */
-            repairshipreplacessagefrigate: boolean;
-            /** Migtransportreplacesmigscout */
-            migtransportreplacesmigscout: boolean;
-            /** Saurianlightfrigatereplacessaurian */
-            saurianlightfrigatereplacessaurian: boolean;
-            /** Scorpiuscarrierreplacesscorpiuslight */
-            scorpiuscarrierreplacesscorpiuslight: boolean;
-            /** Sscruiseriireplacessscruiser */
-            sscruiseriireplacessscruiser: boolean;
-            /** Sscarrierplusreplacessscarrier */
-            sscarrierplusreplacessscarrier: boolean;
-            /** Skyfireplusreplacesskyfire */
-            skyfireplusreplacesskyfire: boolean;
-            /** D7Creplacesd7A */
-            d7creplacesd7a: boolean;
-            /** Quietusplusreplacesquietus */
-            quietusplusreplacesquietus: boolean;
-            /** Cybernautlightreplacescybernaut */
-            cybernautlightreplacescybernaut: boolean;
-            /** Birdshaveenlighten */
-            birdshaveenlighten: boolean;
-            /** Sscruiserinterceptinterference */
-            sscruiserinterceptinterference: boolean;
-            /** Moscowinterceptinterference */
-            moscowinterceptinterference: boolean;
-            /** Sapphirenowebimmunity */
-            sapphirenowebimmunity: boolean;
-            /** Destroyplanetcausesfear */
-            destroyplanetcausesfear: boolean;
-            /** Quantumtorpedomissrateforgravitonics */
-            quantumtorpedomissrateforgravitonics: number;
-            /** Torpedomissrateforsinglegunboats */
-            torpedomissrateforsinglegunboats: number;
-            /** Elusivefighterdefense */
-            elusivefighterdefense: number;
-            /** Fedfrigatefighterdefense */
-            fedfrigatefighterdefense: number;
-            /** Scoutsplanetimmunity */
-            scoutsplanetimmunity: boolean;
-            /** Hrossfightertransfer */
-            hrossfightertransfer: boolean;
-            /** Empirehasaggregator */
-            empirehasaggregator: boolean;
-            /** Fighterfactoryshipset */
-            fighterfactoryshipset: number;
-            /** Ironslavescoutreplacesironslave */
-            ironslavescoutreplacesironslave: boolean;
-            /** Diplomaticspiesnoambassador */
-            diplomaticspiesnoambassador: boolean;
-            /** Simplestealtharmordist */
-            simplestealtharmordist: number;
-            /** Simplestealtharmorsensorswwepdist */
-            simplestealtharmorsensorswwepdist: number;
-            /** Torpedoset */
-            torpedoset: number;
-            /** Shiplimittype */
-            shiplimittype: number;
-            /** Plsminships */
-            plsminships: number;
-            /** Plsextraships */
-            plsextraships: number;
-            /** Plsshipsperplanet */
-            plsshipsperplanet: number;
-            /** Productionqueue */
-            productionqueue: boolean;
-            /** Productionbasecost */
-            productionbasecost: number;
-            /** Productionstarbaseoutput */
-            productionstarbaseoutput: number;
-            /** Productionstarbasereward */
-            productionstarbasereward: number;
-            /** Productionsmallshipset */
-            productionsmallshipset: number;
-            /** Planetaryproductionqueue */
-            planetaryproductionqueue: boolean;
-            /** Fcodesrbx */
-            fcodesrbx: boolean;
-            /** Ppqminbuilds */
-            ppqminbuilds: number;
-            /** Endturn */
-            endturn: number;
-            /** Alwaysuseendturn */
-            alwaysuseendturn: boolean;
-            /** Maxplayersperrace */
-            maxplayersperrace: number;
-            /** Nowebfriendlycodes */
-            nowebfriendlycodes: boolean;
-            /** Nowebsinotherids */
-            nowebsinotherids: boolean;
-            /** Webdiplomacylevel */
-            webdiplomacylevel: number;
-            /** Webdraindiplomacylevel */
-            webdraindiplomacylevel: number;
-            /** Crystalwebimmunity */
-            crystalwebimmunity: number;
-            /** Fcodesmustmatchgsx */
-            fcodesmustmatchgsx: boolean;
-            /** Fcodesextraalchemy */
-            fcodesextraalchemy: boolean;
-            /** Fcodesbdx */
-            fcodesbdx: boolean;
-            /** Fcodesnogsx */
-            fcodesnogsx: boolean;
-            /** Fcodesnomix */
-            fcodesnomix: boolean;
-            /** Cloningenabled */
-            cloningenabled: boolean;
-            /** Supertransportfuelmod */
-            supertransportfuelmod: number;
-            /** Unlimitedfuel */
-            unlimitedfuel: boolean;
-            /** Unlimitedammo */
-            unlimitedammo: boolean;
-            /** Nominefields */
-            nominefields: boolean;
-            /** Nosupplies */
-            nosupplies: boolean;
-            /** Nowarpwells */
-            nowarpwells: boolean;
-            /** Directtransfermc */
-            directtransfermc: boolean;
-            /** Directtransferammo */
-            directtransferammo: boolean;
-            /** Transferoverloadprioritizeammo */
-            transferoverloadprioritizeammo: boolean;
-            /** Topadvancecount */
-            topadvancecount: number;
-            /** Snapgridsize */
-            snapgridsize: number;
-            /** Dumppartsdumpstorps */
-            dumppartsdumpstorps: boolean;
-            /** Burrowsimprovemining */
-            burrowsimprovemining: boolean;
-            /** Horwaspfighterlossclankill */
-            horwaspfighterlossclankill: number;
-            /** Hivesdetectlife */
-            hivesdetectlife: boolean;
-            /** Sensorsweepcombatpodscanrange */
-            sensorsweepcombatpodscanrange: number;
-            /** Sensorsweepnoncombatpodscanrange */
-            sensorsweepnoncombatpodscanrange: number;
-            /** Horwaspscanrobotmodifier */
-            horwaspscanrobotmodifier: number;
-            /** Isacademy */
-            isacademy: boolean;
-            /** Acceleratedturns */
-            acceleratedturns: number;
-            /** Disallowedraces */
-            disallowedraces: string;
-            /** Emorkslegacy */
-            emorkslegacy: boolean;
-            /** Combatrng */
-            combatrng: number;
-            /** Chainedintercept */
-            chainedintercept: boolean;
-            /** Randomplayerslots */
-            randomplayerslots: boolean;
-            /** Presethulls */
-            presethulls: boolean;
-            /** Presethullsbyrace */
-            presethullsbyrace: string;
-            /** Presetadvantages */
-            presetadvantages: boolean;
-            /** Orderedgroupjoindays */
-            orderedgroupjoindays: number;
-            /** Joininggroupindex */
-            joininggroupindex: number;
-            /** Aicanchangediplomacy */
-            aicanchangediplomacy: boolean;
-            /** Defensepostsblocksensorsweep */
-            defensepostsblocksensorsweep: boolean;
-            /** Victoryscorepointsneededsolo */
-            victoryscorepointsneededsolo: number;
-            /** Victoryscorepointsneededally */
-            victoryscorepointsneededally: number;
-            /** Victoryscorepointsperplanet */
-            victoryscorepointsperplanet: number;
-            /** Victoryscorepointsperstarbase */
-            victoryscorepointsperstarbase: number;
-            /** Victoryscorepointsperhighpop */
-            victoryscorepointsperhighpop: number;
-            /** Victoryscoreclansforhighpop */
-            victoryscoreclansforhighpop: number;
-            /** Victoryscorepointsperbonus */
-            victoryscorepointsperbonus: number;
-            /** Victoryscorebonusdetails */
-            victoryscorebonusdetails: boolean;
-        };
-        /**
-         * GameStatus
-         * @enum {integer}
-         */
-        GameStatus: -1 | 0 | 1 | 2 | 3;
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -874,6 +308,31 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** Message */
+        Message: {
+            /** Id */
+            id: number;
+            /** Ownerid */
+            ownerid: number;
+            messagetype: components["schemas"]["MessageType"];
+            /** Headline */
+            headline: string;
+            /** Body */
+            body: string;
+            /** Target */
+            target: number;
+            /** Turn */
+            turn: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /**
+         * MessageType
+         * @enum {integer}
+         */
+        MessageType: -1 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
         /** Player */
         Player: {
             /** Id */
@@ -945,31 +404,8 @@ export interface components {
             /** Activetorps */
             activetorps: string;
         };
-        /** Relation */
-        Relation: {
-            /** Id */
-            id: number;
-            /** Playerid */
-            playerid: number;
-            /** Playertoid */
-            playertoid: number;
-            /** Relationto */
-            relationto: number;
-            /** Relationfrom */
-            relationfrom: number;
-            /** Conflictlevel */
-            conflictlevel: number;
-            /** Color */
-            color: string;
-        };
-        /** ShellBootstrapResponse */
-        ShellBootstrapResponse: {
-            /**
-             * Showinitialgame
-             * @description Stored game id to load automatically without login, or null when disabled.
-             */
-            showInitialGame?: string | null;
-        };
+        ShellBootstrapResponse: unknown;
+        StoredTurnPerspectivesResponse: unknown;
         /**
          * TurnEnsureRequest
          * @description Parameters to ensure turn data exists in storage for a game and perspective slot.
@@ -1001,6 +437,59 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VcrSide */
+        VcrSide: {
+            /** Id */
+            id: number;
+            /** Vcrid */
+            vcrid: number;
+            /** Objectid */
+            objectid: number;
+            /** Name */
+            name: string;
+            /** Side */
+            side: number;
+            /** Beamcount */
+            beamcount: number;
+            /** Launchercount */
+            launchercount: number;
+            /** Baycount */
+            baycount: number;
+            /** Hullid */
+            hullid: number;
+            /** Beamid */
+            beamid: number;
+            /** Torpedoid */
+            torpedoid: number;
+            /** Shield */
+            shield: number;
+            /** Damage */
+            damage: number;
+            /** Crew */
+            crew: number;
+            /** Mass */
+            mass: number;
+            /** Raceid */
+            raceid: number;
+            /** Beamkillbonus */
+            beamkillbonus: number;
+            /** Beamchargerate */
+            beamchargerate: number;
+            /** Torpchargerate */
+            torpchargerate: number;
+            /** Torpmisspercent */
+            torpmisspercent: number;
+            /** Crewdefensepercent */
+            crewdefensepercent: number;
+            /** Torpedos */
+            torpedos: number;
+            /** Fighters */
+            fighters: number;
+            /** Temperature */
+            temperature: number;
+            /** Hasstarbase */
+            hasstarbase: boolean;
+        };
         /** WarpWellCellsResponse */
         WarpWellCellsResponse: {
             /** Cells */
@@ -1022,7 +511,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     list_analytics_analytics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                includeDiagnostics?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1038,6 +529,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_analytic_table_analytics__analytic_id__table_get: {
@@ -1046,6 +546,7 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                includeDiagnostics?: boolean;
             };
             header?: never;
             path: {
@@ -1084,6 +585,11 @@ export interface operations {
                 warpSpeed?: number;
                 gravitonicMovement?: boolean;
                 flareMode?: components["schemas"]["FlareConnectionMode"];
+                /** @description Max hops (1–3) for mixed normal-move + flare paths; at least one hop must be a flare. Larger values add annulus pair candidates. Ignored when flareMode is off. */
+                flareDepth?: number;
+                /** @description When true, flare routes may include per-hop illustrativeRoute steps (Core). */
+                includeIllustrativeRoutes?: boolean;
+                includeDiagnostics?: boolean;
             };
             header?: never;
             path: {
@@ -1113,7 +619,7 @@ export interface operations {
             };
         };
     };
-    list_stored_games_games_get: {
+    get_recent_diagnostics_diagnostics_recent_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1133,86 +639,16 @@ export interface operations {
             };
         };
     };
-    get_stored_game_info_games__game_id__info_get: {
+    list_stored_games_games_get: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                game_id: number;
+            query?: {
+                includeDiagnostics?: boolean;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GameInfo"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_game_info_games__game_id__info_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                game_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GameInfoUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GameInfo"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_ensure_turn_games__game_id__turns_ensure_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                game_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TurnEnsureRequest"];
-            };
-        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1234,9 +670,152 @@ export interface operations {
             };
         };
     };
+    get_stored_turn_perspectives_games__game_id__turns__turn_number__stored_perspectives_get: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+                turn_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredTurnPerspectivesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stored_game_info_games__game_id__info_get: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BffGameInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_game_info_games__game_id__info_post: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GameInfoUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BffGameInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_ensure_turn_games__game_id__turns_ensure_post: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnEnsureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BffTurnInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_warp_well_coordinate_in_well_games__game_id___perspective__turns__turn_number__concepts_warp_wells_coordinate_in_well_post: {
         parameters: {
-            query?: never;
+            query?: {
+                includeDiagnostics?: boolean;
+            };
             header?: never;
             path: {
                 game_id: number;
@@ -1276,6 +855,7 @@ export interface operations {
             query: {
                 planet_id: number;
                 well_type: components["schemas"]["WarpWellTypeParam"];
+                includeDiagnostics?: boolean;
             };
             header?: never;
             path: {
@@ -1309,7 +889,9 @@ export interface operations {
     };
     get_shell_bootstrap_shell_bootstrap_get: {
         parameters: {
-            query?: never;
+            query?: {
+                includeDiagnostics?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1323,6 +905,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ShellBootstrapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

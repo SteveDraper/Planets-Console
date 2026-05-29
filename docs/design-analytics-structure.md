@@ -24,6 +24,7 @@ Related docs:
   - `base_map.py`
   - `scores.py`
   - `connections.py`
+  - `stellar_cartography.py`
   - `registry.py` -- `TURN_ANALYTICS` id-to-handler map
 
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
@@ -108,3 +109,4 @@ This is deliberate for now (one special case, known location). **Re-examine when
 | `base-map` | `base_map.py` | `base_map.py` | no | yes (base layer) | none |
 | `scores` | `scores.py` | `scores.py` | yes | no | none |
 | `connections` | `connections.py` | `connections.py` | no | yes (overlay) | `src/analytics/connections/` |
+| `stellar-cartography` | `stellar_cartography.py` | `stellar_cartography.py` | no | yes (overlay + edges) | `src/analytics/stellar-cartography/` |

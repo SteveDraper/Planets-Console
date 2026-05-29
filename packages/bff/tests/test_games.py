@@ -276,3 +276,20 @@ def test_get_warp_well_cells_matches_core():
     assert response.status_code == 200
     data = response.json()
     assert {"x": 2078, "y": 1149} in data["cells"]
+
+
+def test_get_stellar_cartography_sample_matches_core():
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+
+    response = client.get(
+        "/games/628580/1/turns/111/concepts/stellar-cartography/sample",
+        params={"x": 100, "y": 200},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["x"] == 100
+    assert any(e["layer"] == "nebulae" for e in data["entries"])

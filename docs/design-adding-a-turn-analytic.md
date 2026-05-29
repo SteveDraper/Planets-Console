@@ -4,6 +4,8 @@ Step-by-step guide for registering a new **turn analytic** in Planets Console. R
 
 **Prerequisites:** the analytic computes from **TurnInfo** for a game id, **perspective**, and turn. The SPA must wait for **turn ensure** before fetching analytic data (see [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md)).
 
+**Worked example (map-only, layered UI, persisted toggles):** [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md). Map appearance: [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md).
+
 ---
 
 ## 1. Choose an `analytic_id`

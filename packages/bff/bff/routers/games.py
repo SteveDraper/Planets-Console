@@ -20,6 +20,7 @@ when missing), using the same credential rules as game info refresh.
 
 from __future__ import annotations
 
+from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
     CoordinateInWarpWellResponse,
@@ -226,5 +227,42 @@ def get_warp_well_cells(
         "get_warp_well_cells",
         "total",
         lambda: core.warp_well_cells(game_id, perspective, turn_number, planet_id, well_type),
+    )
+    return finish_response(result, root)
+
+
+@router.get(
+    "/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/sample",
+    response_model=StellarCartographySampleResponse,
+)
+def get_stellar_cartography_sample(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    x: int = Query(..., ge=0),
+    y: int = Query(..., ge=0),
+    include: IncludeDiagnostics = False,
+) -> object:
+    """Turn-scoped Stellar Cartography cell sample via ``CoreClient``."""
+    core = get_core_client()
+    bff_path = (
+        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/sample"
+    )
+    root = optional_request_root(
+        include,
+        "GET",
+        bff_path,
+        gameId=game_id,
+        perspective=perspective,
+        turn=turn_number,
+        x=x,
+        y=y,
+        handler="get_stellar_cartography_sample",
+    )
+    result = with_timed_child(
+        root,
+        "get_stellar_cartography_sample",
+        "total",
+        lambda: core.stellar_cartography_sample(game_id, perspective, turn_number, x, y),
     )
     return finish_response(result, root)

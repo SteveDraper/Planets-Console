@@ -92,7 +92,9 @@ The left column is titled **Analytics**. Each row is one analytic with a **check
 - Check an analytic to **include** it in the current view (tabular tables or map layers, depending on mode).
 - Analytics that **do not support** the current mode stay visible but look **greyed out**; their checkboxes are disabled until you switch mode.
 - The **base map** layer (planet positions as nodes) is **not** listed here; in **map** mode it is still fetched and combined automatically with whatever map-capable analytics you enable (see below).
+- Which analytics are enabled, and **Stellar Cartography** layer toggles when that analytic is used, are **remembered in the browser** and restored when you reload the page.
 - **Connections** is a separate **selectable** analytic: it adds **travel reachability** edges between planets. Enable its checkbox to load those edges; see [Connections analytic](#connections-analytic-map-mode).
+- **Stellar Cartography** is a **map-only** selectable analytic: it draws hazard overlays and wormhole links on the starmap. See [Stellar Cartography analytic](#stellar-cartography-analytic-map-mode).
 
 ![Analytics list with some enabled and one greyed for current mode](images/user-guide/08-analytics-bar.png)
 
@@ -113,6 +115,36 @@ While the list of analytics is loading from the server, the main area may show *
 
 Technical detail, API query parameters, and merge rules live in [design-connections-analytic.md](design-connections-analytic.md).
 
+### Stellar Cartography analytic (map mode)
+
+**Stellar Cartography** overlays NuHost cartography features on the map: debris disk borders, nebulae, ion storms, star clusters, black holes, and wormholes. It supports **map mode only**; in tabular mode the tile appears **greyed out** like other map-only analytics.
+
+- **Enable** it with the **Stellar Cartography** checkbox in the sidebar.
+- When enabled, use the **chevron** on the row to expand **layer controls**.
+- A layer control appears only when that feature is **enabled in the game settings** for the loaded game (for example, no **Wormholes** row when the game has no wormholes configured).
+- When you first see a layer control, it defaults to **on**. Layer choices persist across reloads.
+
+**Layer controls**
+
+| Control | What it shows on the map |
+|---------|--------------------------|
+| **Debris disk borders** | Red **outline** circles around debris-disk seed planets (radius in ly). **Planetoids** inside debris disks stay on the base map as ordinary planet dots; this layer is the towing / minefield context ring only. |
+| **Star clusters** | Orange radiation halos (one circle per cluster body). |
+| **Nebulae** | Indigo cloud fills with a visible outer boundary. |
+| **Ion storms** | Colored storm regions by danger class, with a **movement arrow** from each storm center showing drift direction and speed. If the game allows ion storms but **none exist on this turn**, the checkbox is **greyed out** with a hint (*No ion storms on this turn*). |
+| **Black holes** | Dark lethal core plus a purple ergosphere band. |
+| **Wormholes** | Three-way mode (**Off** / **On hover** / **Always**; default **Always**). See [Wormholes on the map](#wormholes-on-the-map) below. |
+
+Overlays are drawn **at every zoom level**, below planet dots and above the coordinate grid. **Connections** travel edges, when enabled, stay visually stronger than cartography lines.
+
+**Hover and tooltips**
+
+Move the pointer over open map space (not directly over a planet label) to see a **stacked tooltip** near the cursor. It lists **every enabled cartography feature** at that map cell, for example nebula name, ion storm class and voltage at the cell, star cluster name and radiation, or black hole status (*Lethal* in the core, *Max warp* in the ergosphere band). The same map cell indices appear in the **coordinate readout** at the bottom-left of the map.
+
+While a **planet hover or pinned label** is active, cartography tooltips are suppressed so planet info stays readable.
+
+Technical detail, layer gates, and API contracts live in [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md) and [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md).
+
 ---
 
 ## Main area -- tabular mode
@@ -131,7 +163,7 @@ With **Tabular** selected, the main area shows **one section per enabled analyti
 
 ## Main area -- map mode
 
-With **Map** selected, the main area shows an interactive **graph map** (React Flow): **planets as nodes**; **travel edges** appear when you enable the **Connections** analytic (see [Connections analytic](#connections-analytic-map-mode) in the sidebar section).
+With **Map** selected, the main area shows an interactive **graph map** (React Flow): **planets as nodes**. Optional layers come from enabled map analytics: **Connections** adds **travel edges** between planets; **Stellar Cartography** adds hazard overlays and wormhole links (see the [Analytics sidebar](#analytics-sidebar)).
 
 ### Pan and zoom
 
@@ -145,7 +177,25 @@ With **Map** selected, the main area shows an interactive **graph map** (React F
 
 ### Combining analytics
 
-Map layers combine the **base map** (planet nodes from the current turn) with every **enabled** analytic that supports the map. The **Connections** analytic adds **edges** between planet nodes using the same ids as the base map. If no map-capable analytic is enabled **and** the app cannot build a base map, you may see a message explaining that.
+Map layers combine the **base map** (planet nodes from the current turn) with every **enabled** analytic that supports the map:
+
+- **Connections** adds **edges** between planet nodes using the same ids as the base map.
+- **Stellar Cartography** adds SVG overlays (nebulae, storms, clusters, black holes, debris disk borders) plus **wormhole** edges and endpoint markers. You can turn individual cartography layers off in the sidebar without disabling the whole analytic.
+
+If no map-capable analytic is enabled **and** the app cannot build a base map, you may see a message explaining that. The base planet map still loads when only Stellar Cartography or Connections is enabled.
+
+### Wormholes on the map
+
+When **Stellar Cartography** is enabled and **Wormholes** is not **Off**:
+
+- A **known** wormhole draws a sky-blue line between its entrance and exit. **Bidirectional** pairs share one line; **one-way** wormholes show an **arrowhead** at the exit end.
+- An **unknown** target (entrance not yet linked in your data) shows as a **sky-blue dot** at the entrance only -- no line.
+- **Always** -- all known wormhole lines are visible.
+- **On hover** -- a wormhole line appears when the pointer is near either end of that wormhole (including the entrance dot for unknown targets).
+- **Hover** a wormhole line or entrance dot for a short label (destination coordinates, stability, *unexplored*, or one-way *exit* / *entry* wording).
+- **Click** a wormhole line (toward the end you mean) or a known entrance dot to **recenter the map** on the other end while **keeping the current zoom**.
+
+Wormhole display mode persists across reloads like the other Stellar Cartography controls.
 
 ### Loading states
 
@@ -163,9 +213,13 @@ The map can draw two kinds of **grid lines** aligned to map coordinates (the sam
 
 For exact rules, thresholds, and file locations, see [Warp wells on the map](design-warp-wells-map.md).
 
+### Coordinate readout
+
+The **bottom-left** corner of the map shows the pointer position in **map coordinates** (`x`, `y`) and the current **zoom**. Values update as you move the mouse over the map and match the cell used for Stellar Cartography hover sampling.
+
 ### Planet labels and hover
 
-Planet **dots** sit on the grid; **labels** (and optional detail) follow settings in **Map options** (see below). Moving the pointer near a planet can reveal or emphasize label content depending on implementation.
+Planet **dots** sit on the grid; **labels** (and optional detail) follow settings in **Map options** (see below). Moving the pointer near a planet can reveal or emphasize label content depending on implementation. Planet hover takes priority over Stellar Cartography tooltips.
 
 ![Map with planet labels visible](images/user-guide/11-map-labels.png)
 
@@ -211,9 +265,13 @@ Opening the login flow shows a centered dialog: **Log in to planets.nu**, fields
 | Viewpoint | Choose perspective player when allowed |
 | Tabular / Map | Switch main content |
 | Scale | Map zoom (map mode only) |
-| Analytics | Enable/disable each analytic; grey = wrong mode; **Connections** adds travel edges (see sidebar section) |
+| Analytics | Enable/disable each analytic (persisted); grey = wrong mode; **Connections** = travel edges; **Stellar Cartography** = hazard overlays and wormholes (map only) |
+| Stellar Cartography layers | Expand the analytic row in map mode; per-layer checkboxes gated by game settings; wormholes **Off** / **On hover** / **Always** |
 | Map options | Planet label content and detail level |
+| Map readout | Bottom-left: map `x`, `y`, and zoom under the pointer |
+| Cartography hover | Stacked tooltip at pointer cell for enabled layers (suppressed when a planet label is active) |
+| Wormholes | Click line or dot to recenter on the other end; **On hover** mode reveals lines near endpoints |
 | Zoom | Higher zoom shows warp well grid, then fainter full coordinate grid (see map section) |
 | Error bar | Read errors; dismiss per message |
 
-For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md). For the Connections reachability model and BFF contract, see [design-connections-analytic.md](design-connections-analytic.md).
+For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md). For the Connections reachability model and BFF contract, see [design-connections-analytic.md](design-connections-analytic.md). For Stellar Cartography registration, layers, and map rendering, see [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md) and [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md).

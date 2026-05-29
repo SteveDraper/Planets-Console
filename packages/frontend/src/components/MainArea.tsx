@@ -9,6 +9,9 @@ import type {
   MapDataResponse,
 } from '../api/bff'
 import { combineMapData } from '../analytics/mapLayers'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
+import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
+import { useShellStore } from '../stores/shell'
 import { MapGraph } from './MapGraph'
 import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from './PlanetMapInfoControls'
@@ -147,6 +150,12 @@ export function MainArea({
     [viewMode, analytics, enabledMapIds]
   )
 
+  const cartographyLayerVisibility = useStellarCartographyLayersStore((s) => s.layers)
+  const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
+  const cartographySettingsGates =
+    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
+    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
+
   const mapQueries = useQueries({
     queries: mapIds.map((analyticId) => {
       if (analyticId === 'connections') {
@@ -228,7 +237,12 @@ export function MainArea({
       combineMapData(
         mapIds,
         mapQueries.map((q) => ({ data: q.data })),
-        liveConnectionsParams
+        {
+          liveConnectionsParams,
+          cartographyLayerVisibility,
+          cartographySettingsGates,
+          wormholeDisplayMode,
+        }
       ),
     [
       mapIdsKey,
@@ -239,6 +253,9 @@ export function MainArea({
       connectionsMapParams.warpSpeed,
       connectionsMapParams.gravitonicMovement,
       connectionsMapParams.flareDepth,
+      cartographyLayerVisibility,
+      cartographySettingsGates,
+      wormholeDisplayMode,
     ]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
@@ -369,6 +386,11 @@ export function MainArea({
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           planetLabelOptions={planetLabelOptions}
+          analyticScope={analyticScope}
+          stellarCartographySampleEnabled={enabledMapIds.includes('stellar-cartography')}
+          cartographyLayerVisibility={cartographyLayerVisibility}
+          cartographySettingsGates={cartographySettingsGates}
+          wormholeDisplayMode={wormholeDisplayMode}
         />
       </MapPaneWithDisplayControls>
     </main>

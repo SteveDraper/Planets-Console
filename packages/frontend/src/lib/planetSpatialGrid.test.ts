@@ -3,6 +3,7 @@ import {
   buildPlanetSpatialGrid,
   findClosestPlanetWithinRadius,
   flowCenterToPlanet,
+  flowToMapCellIndices,
   PLANET_CELL_CENTER_OFFSET,
 } from './planetSpatialGrid'
 
@@ -15,6 +16,11 @@ describe('flowCenterToPlanet', () => {
     const back = flowCenterToPlanet(cx, cy)
     expect(back.px).toBeCloseTo(px)
     expect(back.py).toBeCloseTo(py)
+  })
+
+  it('rounds flow position to integer map cell indices for sample_at', () => {
+    expect(flowToMapCellIndices(1600.5, -2400.5)).toEqual({ mapX: 1600, mapY: 2400 })
+    expect(flowToMapCellIndices(1600.9, -2400.1)).toEqual({ mapX: 1600, mapY: 2400 })
   })
 })
 

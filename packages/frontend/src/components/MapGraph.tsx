@@ -1,6 +1,8 @@
 import {
   type CSSProperties,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -23,7 +25,39 @@ import {
   type EdgeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { CombinedMapData, RouteMapWaypoint } from '../api/bff'
+import type { CombinedMapData, RouteMapWaypoint, AnalyticShellScope } from '../api/bff'
+import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
+import { RasterFieldOverlay } from './RasterFieldOverlay'
+import type {
+  CartographyLayerVisibility,
+  StellarCartographySettingsGates,
+} from '../analytics/stellar-cartography/layers'
+import {
+  filterWormholeEdgesForDisplayMode,
+  type WormholeDisplayMode,
+} from '../analytics/stellar-cartography/wormholeDisplayMode'
+import {
+  buildStellarCartographyOverlayPaneShapes,
+  gameMapCellCenterToFlow,
+  type StellarCartographyOverlayRadialGradient,
+} from '../lib/stellarCartographyOverlay'
+import {
+  ionStormCloudPaneShapeToRasterField,
+  nebulaCloudPaneShapeToRasterField,
+} from '../lib/cartographyRasterFieldOverlay'
+import {
+  WORMHOLE_EDGE_OPACITY,
+  WORMHOLE_LINE_STROKE,
+  WORMHOLE_RECENTER_PULSE_MS,
+} from '../lib/stellarCartographyTheme'
+import { WormholeEndpointIconMark } from '../lib/wormholeEndpointIcon'
+import {
+  buildWormholeEndpointHoverIndex,
+  formatWormholeEndpointHoverLines,
+  type WormholeEndpointHoverInfo,
+  wormholeEndpointRecenterGameCoords,
+  wormholeMapCellKey,
+} from '../lib/wormholeEndpointHover'
 import {
   buildPlanetSpatialGrid,
   findClosestPlanetWithinRadius,
@@ -42,6 +76,31 @@ import {
   buildWarpWellOverlayPaneLines,
   WARP_WELL_OVERLAY_ZOOM_THRESHOLD,
 } from '../lib/warpWellOverlay'
+
+const STELLAR_CARTOGRAPHY_NODE_PREFIX = 'stellar-cartography:'
+
+function collectWormholeEndpoints(
+  nodes: CombinedMapData['nodes'],
+  unknownEntrances: CombinedMapData['wormholeUnknownEntrances']
+): { x: number; y: number }[] {
+  const seen = new Set<string>()
+  const endpoints: { x: number; y: number }[] = []
+  const add = (x: number, y: number) => {
+    const key = `${x},${y}`
+    if (seen.has(key)) return
+    seen.add(key)
+    endpoints.push({ x, y })
+  }
+  for (const node of nodes) {
+    if (node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_PREFIX)) {
+      add(Number(node.x), Number(node.y))
+    }
+  }
+  for (const entrance of unknownEntrances) {
+    add(entrance.x, entrance.y)
+  }
+  return endpoints
+}
 
 type MapNodeData = {
   label?: string
@@ -107,6 +166,43 @@ function DotNode() {
 }
 
 const nodeTypes = { dot: DotNode }
+
+const WormholeHoverContext = createContext<(lines: string[] | null) => void>(() => {})
+
+export type WormholeRecenterPulseTarget = {
+  mapX: number
+  mapY: number
+  token: number
+}
+
+const WormholeRecenterPulseContext = createContext<(mapX: number, mapY: number) => void>(() => {})
+
+const WORMHOLE_LINE_REVEAL_CLEAR_MS = 120
+
+type WormholeLineRevealApi = {
+  revealAt: (mapX: number, mapY: number) => void
+  scheduleClear: () => void
+  cancelClear: () => void
+}
+
+const WormholeLineRevealContext = createContext<WormholeLineRevealApi>({
+  revealAt: () => {},
+  scheduleClear: () => {},
+  cancelClear: () => {},
+})
+
+function recenterMapOnWormholeGameCell(
+  gameX: number,
+  gameY: number,
+  domNode: HTMLElement | null,
+  getViewport: () => { x: number; y: number; zoom: number },
+  setViewport: (vp: { x: number; y: number; zoom: number }) => void,
+  pulseAt: (mapX: number, mapY: number) => void
+): void {
+  const { cx, cy } = gameMapCellCenterToFlow(gameX, gameY)
+  recenterViewportOnFlowPoint(cx, cy, domNode, getViewport, setViewport)
+  pulseAt(gameX, gameY)
+}
 
 /** Custom edge keeps endpoints centered on dot nodes and stays visually 1px while zooming. */
 function StraightEdgeOnePixel(props: EdgeProps) {
@@ -178,7 +274,163 @@ function buildSvgPathThroughFlowPoints(
   return d
 }
 
-type MapEdgeData = { viaFlare?: boolean; waypointsInGame?: { x: number; y: number }[] }
+type MapEdgeData = {
+  viaFlare?: boolean
+  waypointsInGame?: { x: number; y: number }[]
+}
+
+type WormholeEdgeData = {
+  isBidirectional?: boolean
+  sourceGameX?: number
+  sourceGameY?: number
+  targetGameX?: number
+  targetGameY?: number
+  wormholeExitOnly?: boolean
+}
+
+function wormholeHoverLabel(
+  data: WormholeEdgeData | undefined,
+  nearSource: boolean
+): string | null {
+  if (data == null) return null
+  const sx = data.sourceGameX
+  const sy = data.sourceGameY
+  const tx = data.targetGameX
+  const ty = data.targetGameY
+  if (sx == null || sy == null || tx == null || ty == null) return null
+  if (data.isBidirectional === true) {
+    if (nearSource) return `goes to (${tx}, ${ty})`
+    return `goes to (${sx}, ${sy})`
+  }
+  if (nearSource) return `goes to (${tx}, ${ty})`
+  return `exit - entrance at (${sx}, ${sy})`
+}
+
+function recenterViewportOnFlowPoint(
+  flowX: number,
+  flowY: number,
+  domNode: HTMLElement | null,
+  getViewport: () => { x: number; y: number; zoom: number },
+  setViewport: (vp: { x: number; y: number; zoom: number }) => void
+): void {
+  if (!domNode) return
+  const rect = domNode.getBoundingClientRect()
+  const w = Math.max(rect.width, 1)
+  const h = Math.max(rect.height, 1)
+  const vp = getViewport()
+  const z = Math.max(Number(vp.zoom) || 0.2, 0.2)
+  setViewport({ x: w / 2 - flowX * z, y: h / 2 - flowY * z, zoom: z })
+}
+
+/** Stellar Cartography wormhole edge: sky line, mono arrowhead, click recenter, hover label. */
+function WormholeEdgeOnePixel(props: EdgeProps) {
+  const { setViewport, getViewport } = useReactFlow()
+  const { sourceNode, targetNode, zoom, domNode, transform } = useStore(
+    (s) => ({
+      sourceNode: s.nodeLookup.get(props.source),
+      targetNode: s.nodeLookup.get(props.target),
+      zoom: s.transform[2],
+      domNode: s.domNode ?? null,
+      transform: s.transform,
+    }),
+    shallow
+  )
+  const scale = safeZoomScale(zoom)
+  const half = NODE_SIZE_FLOW / 2
+  const sourceX = sourceNode ? sourceNode.position.x + half : props.sourceX
+  const sourceY = sourceNode ? sourceNode.position.y + half : props.sourceY
+  const targetX = targetNode ? targetNode.position.x + half : props.targetX
+  const targetY = targetNode ? targetNode.position.y + half : props.targetY
+  const [path] = getStraightPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  })
+  const data = props.data as WormholeEdgeData | undefined
+  const isBidirectional = data?.isBidirectional !== false
+  const setWormholeHover = useContext(WormholeHoverContext)
+  const pulseWormholeAt = useContext(WormholeRecenterPulseContext)
+  const lineReveal = useContext(WormholeLineRevealContext)
+
+  const handlePointer = useCallback(
+    (clientX: number, clientY: number): boolean => {
+      const flow = clientToFlowPosition(clientX, clientY, domNode, transform)
+      if (!flow) return false
+      const distSource = Math.hypot(flow.x - sourceX, flow.y - sourceY)
+      const distTarget = Math.hypot(flow.x - targetX, flow.y - targetY)
+      return distSource <= distTarget
+    },
+    [domNode, transform, sourceX, sourceY, targetX, targetY]
+  )
+
+  const arrowHeadLen = 8 / scale
+  const arrowAngle = Math.atan2(targetY - sourceY, targetX - sourceX)
+  const arrowA1 = arrowAngle + Math.PI - Math.PI / 7
+  const arrowA2 = arrowAngle + Math.PI + Math.PI / 7
+  const arrowHx1 = targetX + arrowHeadLen * Math.cos(arrowA1)
+  const arrowHy1 = targetY + arrowHeadLen * Math.sin(arrowA1)
+  const arrowHx2 = targetX + arrowHeadLen * Math.cos(arrowA2)
+  const arrowHy2 = targetY + arrowHeadLen * Math.sin(arrowA2)
+
+  return (
+    <>
+      <BaseEdge
+        path={path}
+        interactionWidth={12}
+        style={{
+          stroke: WORMHOLE_LINE_STROKE,
+          strokeWidth: 1 / scale,
+          opacity: WORMHOLE_EDGE_OPACITY,
+          strokeDasharray: `${5 / scale} ${4 / scale}`,
+        }}
+        onMouseMove={(e) => {
+          lineReveal.cancelClear()
+          const nearSource = handlePointer(e.clientX, e.clientY)
+          const sx = data?.sourceGameX
+          const sy = data?.sourceGameY
+          const tx = data?.targetGameX
+          const ty = data?.targetGameY
+          if (sx != null && sy != null && tx != null && ty != null) {
+            lineReveal.revealAt(nearSource ? tx : sx, nearSource ? ty : sy)
+          }
+          const label = wormholeHoverLabel(data, nearSource)
+          setWormholeHover(label != null ? [label] : null)
+        }}
+        onMouseLeave={() => {
+          setWormholeHover(null)
+          lineReveal.scheduleClear()
+        }}
+        onClick={(e) => {
+          const nearSource = handlePointer(e.clientX, e.clientY)
+          const sx = data?.sourceGameX
+          const sy = data?.sourceGameY
+          const tx = data?.targetGameX
+          const ty = data?.targetGameY
+          if (sx == null || sy == null || tx == null || ty == null) return
+          const recenterGame = nearSource ? { x: tx, y: ty } : { x: sx, y: sy }
+          recenterMapOnWormholeGameCell(
+            recenterGame.x,
+            recenterGame.y,
+            domNode,
+            getViewport,
+            setViewport,
+            pulseWormholeAt
+          )
+          e.stopPropagation()
+        }}
+      />
+      {!isBidirectional ? (
+        <polygon
+          points={`${targetX},${targetY} ${arrowHx1},${arrowHy1} ${arrowHx2},${arrowHy2}`}
+          fill={WORMHOLE_LINE_STROKE}
+          opacity={WORMHOLE_EDGE_OPACITY}
+          style={{ pointerEvents: 'none' }}
+        />
+      ) : null}
+    </>
+  )
+}
 
 /**
  * Multi-segment map edge: source → (optional game-cell waypoints) → target, 1px on screen, same style as `StraightEdgeOnePixel`.
@@ -242,7 +494,11 @@ function PolylineEdgeOnePixel(props: EdgeProps) {
   return <BaseEdge path={path} style={mapEdgeStrokeStyle} />
 }
 
-const edgeTypes = { straight: StraightEdgeOnePixel, polyline: PolylineEdgeOnePixel }
+const edgeTypes = {
+  straight: StraightEdgeOnePixel,
+  polyline: PolylineEdgeOnePixel,
+  wormhole: WormholeEdgeOnePixel,
+}
 
 /** Map coordinates (px, py) are cell indices; node geometry stays fixed and centered on the map cell. */
 function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
@@ -274,6 +530,24 @@ function toFlowNodes(nodes: CombinedMapData['nodes']): Node<MapNodeData>[] {
 
 function toEdges(edges: CombinedMapData['edges']): Edge[] {
   return edges.map((e, i) => {
+    if (e.layer === 'wormholes') {
+      return {
+        id: `e-${e.source}-${e.target}-${i}`,
+        source: e.source,
+        target: e.target,
+        sourceHandle: 's',
+        targetHandle: 't',
+        type: 'wormhole',
+        data: {
+          isBidirectional: e.isBidirectional,
+          sourceGameX: e.sourceGameX,
+          sourceGameY: e.sourceGameY,
+          targetGameX: e.targetGameX,
+          targetGameY: e.targetGameY,
+          wormholeExitOnly: e.wormholeExitOnly,
+        } satisfies WormholeEdgeData,
+      }
+    }
     const wps = e.waypointsInGame
     const hasPoly = Array.isArray(wps) && wps.length > 0
     return {
@@ -571,8 +845,263 @@ function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: CombinedMapData
   )
 }
 
+function StellarCartographyRadialGradientDef({
+  gradient,
+  variant,
+}: {
+  gradient: StellarCartographyOverlayRadialGradient
+  variant: 'core' | 'band'
+}) {
+  const innerStop = `${gradient.innerOffset * 100}%`
+  if (variant === 'core') {
+    return (
+      <radialGradient id={gradient.id} cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stopColor={gradient.color} stopOpacity={gradient.peakOpacity} />
+        <stop offset={innerStop} stopColor={gradient.color} stopOpacity={gradient.peakOpacity} />
+        <stop offset="100%" stopColor={gradient.color} stopOpacity={gradient.edgeOpacity} />
+      </radialGradient>
+    )
+  }
+  return (
+    <radialGradient id={gradient.id} cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stopColor={gradient.color} stopOpacity={0} />
+      <stop offset={innerStop} stopColor={gradient.color} stopOpacity={0} />
+      <stop offset={innerStop} stopColor={gradient.color} stopOpacity={gradient.peakOpacity} />
+      <stop offset="100%" stopColor={gradient.color} stopOpacity={gradient.edgeOpacity} />
+    </radialGradient>
+  )
+}
+
+function StellarCartographyOverlay({
+  overlayCircles,
+  wormholeEndpoints,
+  wormholeEndpointHoverByCell,
+  wormholeRecenterPulseTarget,
+  blockedByPlanetHover,
+  nuIonStorms,
+}: {
+  overlayCircles: CombinedMapData['overlayCircles']
+  wormholeEndpoints: { x: number; y: number }[]
+  wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
+  wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
+  blockedByPlanetHover: boolean
+  nuIonStorms?: boolean
+}) {
+  const { setViewport, getViewport } = useReactFlow()
+  const setWormholeHover = useContext(WormholeHoverContext)
+  const pulseWormholeAt = useContext(WormholeRecenterPulseContext)
+  const lineReveal = useContext(WormholeLineRevealContext)
+  const domNode = useStore((s) => s.domNode ?? null)
+  const transform = useStore((s) => s.transform)
+  const [size, setSize] = useState({ width: 0, height: 0 })
+
+  useEffect(() => {
+    if (!domNode) return
+    let raf = 0
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 }
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => setSize({ width, height }))
+    })
+    ro.observe(domNode)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [domNode])
+
+  if (!transform || size.width <= 0 || size.height <= 0) return null
+  if (overlayCircles.length === 0 && wormholeEndpoints.length === 0) return null
+
+  const [tx, ty, rawScale] = transform
+  const scale = safeZoomScale(rawScale)
+  const { width, height } = size
+  const shapes = buildStellarCartographyOverlayPaneShapes(overlayCircles, wormholeEndpoints, {
+    width,
+    height,
+    tx,
+    ty,
+    scale,
+  }, { cloudyIonStorms: nuIonStorms ?? true })
+
+  if (
+    shapes.circles.length === 0 &&
+    shapes.annuli.length === 0 &&
+    shapes.nebulaClouds.length === 0 &&
+    shapes.ionStormClouds.length === 0 &&
+    shapes.debrisDiskBorders.length === 0 &&
+    shapes.arrows.length === 0 &&
+    shapes.wormholeMarkers.length === 0
+  ) {
+    return null
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+      <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        {shapes.nebulaClouds.map((shape) => (
+          <RasterFieldOverlay key={shape.key} {...nebulaCloudPaneShapeToRasterField(shape)} />
+        ))}
+        {shapes.ionStormClouds.map((shape) => (
+          <RasterFieldOverlay key={shape.key} {...ionStormCloudPaneShapeToRasterField(shape)} />
+        ))}
+        {shapes.circles.map(({ key, cx, cy, r, fill, stroke, strokeWidth, fillGradient }) => (
+          <g key={key}>
+            {fillGradient != null && (
+              <defs>
+                <StellarCartographyRadialGradientDef gradient={fillGradient} variant="core" />
+              </defs>
+            )}
+            <circle
+              cx={cx}
+              cy={cy}
+              r={r}
+              fill={fillGradient != null ? `url(#${fillGradient.id})` : fill}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+            />
+          </g>
+        ))}
+        {shapes.annuli.map(
+          ({
+            key,
+            cx,
+            cy,
+            coreR,
+            bandR,
+            coreFill,
+            coreStroke,
+            coreGradient,
+            bandFill,
+            bandStroke,
+            strokeWidth,
+            bandGradient,
+          }) => (
+            <g key={key}>
+              {(bandGradient != null || coreGradient != null) && (
+                <defs>
+                  {bandGradient != null && (
+                    <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
+                  )}
+                  {coreGradient != null && (
+                    <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
+                  )}
+                </defs>
+              )}
+              <circle
+                cx={cx}
+                cy={cy}
+                r={bandR}
+                fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
+                stroke={bandStroke}
+                strokeWidth={strokeWidth}
+              />
+              <circle
+                cx={cx}
+                cy={cy}
+                r={coreR}
+                fill={
+                  coreGradient != null ? `url(#${coreGradient.id})` : coreFill
+                }
+                stroke={coreStroke ?? 'none'}
+                strokeWidth={coreStroke != null ? strokeWidth : 0}
+              />
+            </g>
+          )
+        )}
+        {shapes.debrisDiskBorders.map(({ key, cx, cy, r, fill, stroke, strokeWidth }) => (
+          <circle
+            key={key}
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+          />
+        ))}
+        {shapes.arrows.map(({ key, x1, y1, x2, y2, stroke, strokeWidth }) => {
+          const angle = Math.atan2(y2 - y1, x2 - x1)
+          const headLen = 6
+          const a1 = angle + Math.PI - Math.PI / 7
+          const a2 = angle + Math.PI + Math.PI / 7
+          const hx1 = x2 + headLen * Math.cos(a1)
+          const hy1 = y2 + headLen * Math.sin(a1)
+          const hx2 = x2 + headLen * Math.cos(a2)
+          const hy2 = y2 + headLen * Math.sin(a2)
+          return (
+            <g key={key}>
+              <line
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+              />
+              <polygon points={`${x2},${y2} ${hx1},${hy1} ${hx2},${hy2}`} fill={stroke} />
+            </g>
+          )
+        })}
+      </svg>
+      <div className="absolute inset-0" aria-hidden>
+        {shapes.wormholeMarkers.map(({ key, cx, cy, diameterPx, mapX, mapY }) => {
+          const half = diameterPx / 2
+          const hoverInfo = wormholeEndpointHoverByCell.get(wormholeMapCellKey(mapX, mapY))
+          const recenterGame =
+            hoverInfo != null ? wormholeEndpointRecenterGameCoords(hoverInfo) : null
+          const isPulseTarget =
+            wormholeRecenterPulseTarget != null &&
+            wormholeRecenterPulseTarget.mapX === mapX &&
+            wormholeRecenterPulseTarget.mapY === mapY
+          return (
+            <div
+              key={key}
+              className={`absolute pointer-events-auto${recenterGame != null ? ' cursor-pointer' : ''}`}
+              style={{
+                left: cx - half,
+                top: cy - half,
+                width: diameterPx,
+                height: diameterPx,
+              }}
+              onMouseEnter={() => {
+                lineReveal.cancelClear()
+                lineReveal.revealAt(mapX, mapY)
+                if (blockedByPlanetHover || hoverInfo == null) return
+                setWormholeHover(formatWormholeEndpointHoverLines(hoverInfo))
+              }}
+              onMouseLeave={() => {
+                setWormholeHover(null)
+                lineReveal.scheduleClear()
+              }}
+              onClick={(e) => {
+                if (recenterGame == null) return
+                recenterMapOnWormholeGameCell(
+                  recenterGame.x,
+                  recenterGame.y,
+                  domNode,
+                  getViewport,
+                  setViewport,
+                  pulseWormholeAt
+                )
+                e.stopPropagation()
+              }}
+            >
+              <div
+                key={isPulseTarget ? `pulse-${wormholeRecenterPulseTarget.token}` : 'idle'}
+                className={`h-full w-full${isPulseTarget ? ' wormhole-recenter-pulse' : ''}`}
+              >
+                <WormholeEndpointIconMark />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /**
- * Renders planet dots in screen (pane) space so they are always exactly DOT_PIXELS
  * in size regardless of zoom. Uses same flow->pane conversion as the grid.
  */
 const HOVER_CLIENT_MOVE_EPS_PX = 0.5
@@ -617,6 +1146,7 @@ function FixedSizeDotsOverlay({
   mapNodes,
   routeWaypoints,
   waypointGrid,
+  onPlanetLabelHoverActiveChange,
 }: {
   planetGrid: PlanetSpatialGrid | null
   planetLabelOptions: PlanetLabelOptions
@@ -625,6 +1155,7 @@ function FixedSizeDotsOverlay({
   routeWaypoints: readonly RouteMapWaypoint[]
   /** Sub-linear hover: same map-cell + radius model as :func:`buildPlanetSpatialGrid` for planets. */
   waypointGrid: PlanetSpatialGrid | null
+  onPlanetLabelHoverActiveChange?: (active: boolean) => void
 }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
@@ -645,6 +1176,13 @@ function FixedSizeDotsOverlay({
   }, [pinnedNodeId])
 
   const showAnyLabelOption = planetLabelOptionsShowAnyLabel(planetLabelOptions)
+
+  const planetLabelHoverActive =
+    pinnedNodeId != null || (showAnyLabelOption && hoveredNodeId != null)
+
+  useEffect(() => {
+    onPlanetLabelHoverActiveChange?.(planetLabelHoverActive)
+  }, [onPlanetLabelHoverActiveChange, planetLabelHoverActive])
 
   const mapNodeIdsKey = useMemo(() => mapNodes.map((n) => n.id).join('\0'), [mapNodes])
 
@@ -959,6 +1497,11 @@ type MapGraphProps = {
   /** Called once so the header slider can drive zoom (same as scroll wheel). */
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   planetLabelOptions?: PlanetLabelOptions
+  analyticScope?: AnalyticShellScope | null
+  stellarCartographySampleEnabled?: boolean
+  cartographyLayerVisibility?: CartographyLayerVisibility
+  cartographySettingsGates?: StellarCartographySettingsGates
+  wormholeDisplayMode?: WormholeDisplayMode
 }
 
 /** Mirrors React Flow zoom to the app (wheel, pinch, initial fit, slider). */
@@ -1043,8 +1586,70 @@ export function MapGraph({
   onMapZoomChange,
   onSetZoomReady,
   planetLabelOptions = DEFAULT_PLANET_LABEL_OPTIONS,
+  analyticScope = null,
+  stellarCartographySampleEnabled = false,
+  cartographyLayerVisibility,
+  cartographySettingsGates,
+  wormholeDisplayMode = 'always',
 }: MapGraphProps) {
   const [initialFitDone, setInitialFitDone] = useState(false)
+  const [wormholeHoverLines, setWormholeHoverLines] = useState<string[] | null>(null)
+  const [wormholeRecenterPulseTarget, setWormholeRecenterPulseTarget] =
+    useState<WormholeRecenterPulseTarget | null>(null)
+  const [wormholeLineRevealKey, setWormholeLineRevealKey] = useState<string | null>(null)
+  const wormholeLineRevealClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [planetLabelHoverActive, setPlanetLabelHoverActive] = useState(false)
+
+  const wormholeLineReveal = useMemo<WormholeLineRevealApi>(
+    () => ({
+      revealAt: (mapX, mapY) => {
+        if (wormholeLineRevealClearRef.current != null) {
+          clearTimeout(wormholeLineRevealClearRef.current)
+          wormholeLineRevealClearRef.current = null
+        }
+        setWormholeLineRevealKey(wormholeMapCellKey(mapX, mapY))
+      },
+      scheduleClear: () => {
+        if (wormholeLineRevealClearRef.current != null) {
+          clearTimeout(wormholeLineRevealClearRef.current)
+        }
+        wormholeLineRevealClearRef.current = setTimeout(() => {
+          wormholeLineRevealClearRef.current = null
+          setWormholeLineRevealKey(null)
+        }, WORMHOLE_LINE_REVEAL_CLEAR_MS)
+      },
+      cancelClear: () => {
+        if (wormholeLineRevealClearRef.current != null) {
+          clearTimeout(wormholeLineRevealClearRef.current)
+          wormholeLineRevealClearRef.current = null
+        }
+      },
+    }),
+    []
+  )
+
+  useEffect(() => {
+    return () => {
+      if (wormholeLineRevealClearRef.current != null) {
+        clearTimeout(wormholeLineRevealClearRef.current)
+      }
+    }
+  }, [])
+
+  const pulseWormholeAt = useCallback((mapX: number, mapY: number) => {
+    setWormholeRecenterPulseTarget({ mapX, mapY, token: Date.now() })
+  }, [])
+
+  useEffect(() => {
+    if (wormholeRecenterPulseTarget == null) return
+    const t = setTimeout(() => setWormholeRecenterPulseTarget(null), WORMHOLE_RECENTER_PULSE_MS)
+    return () => clearTimeout(t)
+  }, [wormholeRecenterPulseTarget])
+
+  const onPlanetLabelHoverActiveChange = useCallback((active: boolean) => {
+    setPlanetLabelHoverActive(active)
+    if (active) setWormholeHoverLines(null)
+  }, [])
 
   const onInitialFitDone = useCallback(() => setInitialFitDone(true), [])
 
@@ -1054,14 +1659,38 @@ export function MapGraph({
   }, [])
 
   const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
-  const edges = useMemo(() => toEdges(data.edges), [data.edges])
-  const planetGrid = useMemo(() => buildPlanetSpatialGrid(data.nodes), [data.nodes])
+  const visibleMapEdges = useMemo(
+    () =>
+      filterWormholeEdgesForDisplayMode(
+        data.edges,
+        wormholeDisplayMode,
+        wormholeLineRevealKey
+      ),
+    [data.edges, wormholeDisplayMode, wormholeLineRevealKey]
+  )
+  const edges = useMemo(() => toEdges(visibleMapEdges), [visibleMapEdges])
+  const planetMapNodes = useMemo(
+    () => data.nodes.filter((n) => n.planet != null),
+    [data.nodes]
+  )
+  const planetGrid = useMemo(() => buildPlanetSpatialGrid(planetMapNodes), [planetMapNodes])
   const waypointGrid = useMemo(() => {
     const wps = data.routeWaypoints
     if (wps.length === 0) return null
     return buildPlanetSpatialGrid(wps.map((w) => ({ id: w.id, x: w.gx, y: w.gy })))
   }, [data.routeWaypoints])
-  const labelSourceByNodeId = useMemo(() => buildLabelSourceByNodeId(data.nodes), [data.nodes])
+  const labelSourceByNodeId = useMemo(
+    () => buildLabelSourceByNodeId(planetMapNodes),
+    [planetMapNodes]
+  )
+  const wormholeEndpoints = useMemo(
+    () => collectWormholeEndpoints(data.nodes, data.wormholeUnknownEntrances),
+    [data.nodes, data.wormholeUnknownEntrances]
+  )
+  const wormholeEndpointHoverByCell = useMemo(
+    () => buildWormholeEndpointHoverIndex(data.edges, data.wormholeUnknownEntrances),
+    [data.edges, data.wormholeUnknownEntrances]
+  )
 
   return (
     <div
@@ -1088,24 +1717,51 @@ export function MapGraph({
           zoomOnScroll
           zoomOnPinch
         >
-          <InitialViewportFit
-            nodes={data.nodes}
-            onInitialFitDone={onInitialFitDone}
-            onMapZoomChange={onMapZoomChange}
-          />
-          <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
-          <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
-          <CoordinateGridOverlay />
-          <NormalWarpWellOutlinesOverlay mapNodes={data.nodes} />
-          <FixedSizeDotsOverlay
-            planetGrid={planetGrid}
-            planetLabelOptions={planetLabelOptions}
-            labelSourceByNodeId={labelSourceByNodeId}
-            mapNodes={data.nodes}
-            routeWaypoints={data.routeWaypoints}
-            waypointGrid={waypointGrid}
-          />
-          <FlowCoordinateReadout />
+          <WormholeHoverContext.Provider value={setWormholeHoverLines}>
+            <WormholeLineRevealContext.Provider value={wormholeLineReveal}>
+            <WormholeRecenterPulseContext.Provider value={pulseWormholeAt}>
+            <InitialViewportFit
+              nodes={data.nodes}
+              onInitialFitDone={onInitialFitDone}
+              onMapZoomChange={onMapZoomChange}
+            />
+            <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
+            <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
+            <CoordinateGridOverlay />
+            <StellarCartographyOverlay
+              overlayCircles={data.overlayCircles}
+              wormholeEndpoints={wormholeEndpoints}
+              wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
+              wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
+              blockedByPlanetHover={planetLabelHoverActive}
+              nuIonStorms={data.nuIonStorms}
+            />
+            <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
+            <FixedSizeDotsOverlay
+              planetGrid={planetGrid}
+              planetLabelOptions={planetLabelOptions}
+              labelSourceByNodeId={labelSourceByNodeId}
+              mapNodes={planetMapNodes}
+              routeWaypoints={data.routeWaypoints}
+              waypointGrid={waypointGrid}
+              onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
+            />
+            <FlowCoordinateReadout />
+            {cartographyLayerVisibility != null && cartographySettingsGates != null ? (
+              <StellarCartographyHoverPanel
+                analyticScope={analyticScope}
+                sampleEnabled={stellarCartographySampleEnabled}
+                layerVisibility={cartographyLayerVisibility}
+                settingsGates={cartographySettingsGates}
+                wormholeDisplayMode={wormholeDisplayMode}
+                wormholeHoverLines={wormholeHoverLines}
+                blockedByPlanetHover={planetLabelHoverActive}
+                clientToFlowPosition={clientToFlowPosition}
+              />
+            ) : null}
+            </WormholeRecenterPulseContext.Provider>
+            </WormholeLineRevealContext.Provider>
+          </WormholeHoverContext.Provider>
         </ReactFlow>
       </div>
     </div>

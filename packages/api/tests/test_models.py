@@ -203,16 +203,46 @@ class TestSpaceModels:
         assert m.isweb is False
 
     def test_nebula(self):
-        n = Nebula(id=1, x=50, y=60)
-        assert n.x == 50
+        n = Nebula(
+            id=1,
+            x=50,
+            y=60,
+            name="Zoie",
+            radius=101,
+            intensity=6,
+            gas=3,
+        )
+        assert n.radius == 101
 
     def test_star(self):
         s = Star(id=1, name="Sol", x=100, y=200, temp=5000, radius=10, mass=1000, planets=3)
         assert s.planets == 3
 
+    def test_blackhole(self):
+        bh = Blackhole(
+            id=1,
+            x=1952,
+            y=2679,
+            name="Solace",
+            coreradius=15,
+            bandradius=4,
+        )
+        assert bh.bandradius == 4
+
+    def test_wormhole(self):
+        wh = Wormhole(
+            id=1,
+            x=965,
+            y=2738,
+            name="",
+            targetx=3125,
+            targety=2288,
+            stability=65,
+            turn=0,
+        )
+        assert wh.targetx == 3125
+
     def test_stub_entities(self):
-        assert Blackhole(id=1, x=0, y=0).id == 1
-        assert Wormhole(id=1, x=0, y=0).id == 1
         assert Artifact(id=1).id == 1
         assert Cutscene(id=1).id == 1
 

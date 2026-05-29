@@ -33,6 +33,12 @@ export function flowCenterToPlanet(flowX: number, flowY: number): { px: number; 
   }
 }
 
+/** Integer map cell indices for turn JSON / Core sample_at (x, y must be whole ly cells). */
+export function flowToMapCellIndices(flowX: number, flowY: number): { mapX: number; mapY: number } {
+  const { px, py } = flowCenterToPlanet(flowX, flowY)
+  return { mapX: Math.round(px), mapY: Math.round(py) }
+}
+
 /** Minimum span (map units) used only for cell sizing when all planets coincide. */
 const MIN_EXTENT_FOR_CELL_SIZING = 1
 

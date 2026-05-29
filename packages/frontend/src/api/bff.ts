@@ -192,6 +192,85 @@ export type MapEdge = {
    * When set, the map draws a polyline A → waypoints → B instead of a single segment.
    */
   waypointsInGame?: { x: number; y: number }[]
+  /** Stellar Cartography wormhole edge metadata. */
+  layer?: 'wormholes'
+  isBidirectional?: boolean
+  stability?: number
+  name?: string
+  partnerId?: number
+  /** Game map cell coords at source/target endpoints (for wormhole hover and recenter). */
+  sourceGameX?: number
+  sourceGameY?: number
+  targetGameX?: number
+  targetGameY?: number
+  /** True when the source node is a mono-directional exit (not the entrance). */
+  wormholeExitOnly?: boolean
+}
+
+export type CartographyOverlayLayerId =
+  | 'debris-disks'
+  | 'nebulae'
+  | 'ion-storms'
+  | 'star-clusters'
+  | 'black-holes'
+
+type CartographyOverlayCircleBase = {
+  layer: CartographyOverlayLayerId
+  id: string
+  x: number
+  y: number
+  radius: number
+}
+
+export type DebrisDiskOverlayCircle = CartographyOverlayCircleBase & {
+  layer: 'debris-disks'
+  name?: string
+  planetId?: number
+}
+
+export type NebulaOverlayCircle = CartographyOverlayCircleBase & {
+  layer: 'nebulae'
+  name?: string
+  intensity?: number
+  gas?: number
+}
+
+export type IonStormOverlayCircle = CartographyOverlayCircleBase & {
+  layer: 'ion-storms'
+  voltage?: number
+  class: number
+  heading?: number
+  warp?: number
+  parentId?: number
+  isGrowing?: boolean
+}
+
+export type StarClusterOverlayCircle = CartographyOverlayCircleBase & {
+  layer: 'star-clusters'
+  name?: string
+  temp?: number
+  mass?: number
+  planets?: number
+}
+
+export type BlackHoleOverlayCircle = CartographyOverlayCircleBase & {
+  layer: 'black-holes'
+  name?: string
+  coreRadius: number
+  bandRadius: number
+}
+
+export type StellarCartographyOverlayCircle =
+  | DebrisDiskOverlayCircle
+  | NebulaOverlayCircle
+  | IonStormOverlayCircle
+  | StarClusterOverlayCircle
+  | BlackHoleOverlayCircle
+
+/** Unknown-target wormhole entrance rendered as a sky dot in the SVG overlay. */
+export type WormholeUnknownEntrance = {
+  x: number
+  y: number
 }
 
 /** One hop in a Core `illustrativeRoute` (normal move or flare). */
@@ -216,6 +295,17 @@ export type MapDataResponse = {
   nodes: MapNode[]
   edges: MapEdge[]
   routes?: PlanetPairRoute[]
+  overlayCircles?: StellarCartographyOverlayCircle[]
+  meta?: {
+    nebulae?: number
+    ionStorms?: number
+    /** When true, ion storm voltage falls off inside each sub-circle (Stellar Cartography). */
+    nuIonStorms?: boolean
+    starClusters?: number
+    blackHoles?: number
+    wormholes?: number
+    wormholeEdges?: number
+  }
 }
 
 /** Parse a single JSON number; rejects null, non-numeric, and `Number('')` → 0. */
@@ -318,7 +408,102 @@ function normalizeMapEdge(raw: unknown): MapEdge | null {
   if (source === '' || target === '') return null
   const edge: MapEdge = { source, target }
   if (e.viaFlare === true) edge.viaFlare = true
+  if (e.layer === 'wormholes') edge.layer = 'wormholes'
+  if (e.isBidirectional === true) edge.isBidirectional = true
+  else if (e.isBidirectional === false) edge.isBidirectional = false
+  const stability = parseJsonFiniteNumber(e.stability)
+  if (stability != null) edge.stability = stability
+  if (typeof e.name === 'string') edge.name = e.name
+  const partnerId = parseJsonInteger(e.partnerId ?? e.partner_id)
+  if (partnerId != null) edge.partnerId = partnerId
   return edge
+}
+
+function ionStormClassFromVoltage(voltage: number): number {
+  if (voltage >= 200) return 5
+  if (voltage >= 150) return 4
+  if (voltage >= 100) return 3
+  if (voltage >= 50) return 2
+  return 1
+}
+
+function normalizeOverlayCircle(raw: unknown): StellarCartographyOverlayCircle | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const layer = o.layer
+  const id = typeof o.id === 'string' ? o.id : String(o.id ?? '')
+  const x = parseJsonInteger(o.x)
+  const y = parseJsonInteger(o.y)
+  const radius = parseJsonFiniteNumber(o.radius)
+  if (id === '' || x == null || y == null || radius == null || radius < 0) return null
+
+  const base = { id, x, y, radius }
+
+  if (layer === 'debris-disks') {
+    const circle: DebrisDiskOverlayCircle = { ...base, layer: 'debris-disks' }
+    if (typeof o.name === 'string') circle.name = o.name
+    const planetId = parseJsonInteger(o.planetId ?? o.planet_id)
+    if (planetId != null) circle.planetId = planetId
+    return circle
+  }
+
+  if (layer === 'nebulae') {
+    const circle: NebulaOverlayCircle = { ...base, layer: 'nebulae' }
+    if (typeof o.name === 'string') circle.name = o.name
+    const intensity = parseJsonFiniteNumber(o.intensity)
+    if (intensity != null) circle.intensity = intensity
+    const gas = parseJsonFiniteNumber(o.gas)
+    if (gas != null) circle.gas = gas
+    return circle
+  }
+
+  if (layer === 'ion-storms') {
+    const voltage = parseJsonInteger(o.voltage) ?? 0
+    const stormClass =
+      parseJsonInteger(o.class) ?? ionStormClassFromVoltage(voltage)
+    const circle: IonStormOverlayCircle = {
+      ...base,
+      layer: 'ion-storms',
+      voltage,
+      class: stormClass,
+    }
+    const heading = parseJsonFiniteNumber(o.heading)
+    if (heading != null) circle.heading = heading
+    const warp = parseJsonInteger(o.warp)
+    if (warp != null) circle.warp = warp
+    const parentId = parseJsonInteger(o.parentId ?? o.parentid)
+    if (parentId != null) circle.parentId = parentId
+    if (o.isGrowing === true || o.isgrowing === true) circle.isGrowing = true
+    return circle
+  }
+
+  if (layer === 'star-clusters') {
+    const circle: StarClusterOverlayCircle = { ...base, layer: 'star-clusters' }
+    if (typeof o.name === 'string') circle.name = o.name
+    const temp = parseJsonFiniteNumber(o.temp)
+    if (temp != null) circle.temp = temp
+    const mass = parseJsonFiniteNumber(o.mass)
+    if (mass != null) circle.mass = mass
+    const planets = parseJsonInteger(o.planets)
+    if (planets != null) circle.planets = planets
+    return circle
+  }
+
+  if (layer === 'black-holes') {
+    const coreRadius = parseJsonFiniteNumber(o.coreRadius ?? o.coreradius)
+    const bandRadius = parseJsonFiniteNumber(o.bandRadius ?? o.bandradius)
+    if (coreRadius == null || bandRadius == null) return null
+    const circle: BlackHoleOverlayCircle = {
+      ...base,
+      layer: 'black-holes',
+      coreRadius,
+      bandRadius,
+    }
+    if (typeof o.name === 'string') circle.name = o.name
+    return circle
+  }
+
+  return null
 }
 
 export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
@@ -343,6 +528,16 @@ export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
   }
   if (routes != null) {
     out.routes = routes
+  }
+  const overlayCircles = o.overlayCircles
+  if (Array.isArray(overlayCircles)) {
+    out.overlayCircles = overlayCircles
+      .map(normalizeOverlayCircle)
+      .filter((c): c is StellarCartographyOverlayCircle => c != null)
+  }
+  const meta = o.meta
+  if (meta != null && typeof meta === 'object' && !Array.isArray(meta)) {
+    out.meta = meta as MapDataResponse['meta']
   }
   return out
 }
@@ -398,6 +593,23 @@ export type CombinedMapData = {
   edges: MapEdge[]
   /** Deduped intermediate cells for illustrated flare routes (when `includeIllustrativeRoutes` was requested). */
   routeWaypoints: RouteMapWaypoint[]
+  /** Filtered Stellar Cartography disc overlays (layer toggles + settings gates applied). */
+  overlayCircles: StellarCartographyOverlayCircle[]
+  /** Wormhole entrances with unknown targets (6px sky dots). */
+  wormholeUnknownEntrances: WormholeUnknownEntrance[]
+  /** Stellar Cartography ion storm mode from turn settings (`nuionstorms`). */
+  nuIonStorms?: boolean
+}
+
+export type StellarCartographySampleEntry = {
+  layer: CartographyOverlayLayerId | 'wormholes'
+  lines: string[]
+}
+
+export type StellarCartographySampleResponse = {
+  x: number
+  y: number
+  entries: StellarCartographySampleEntry[]
 }
 
 export type StoredGameItem = {
@@ -664,6 +876,21 @@ export async function fetchAnalyticMap(
   }
   const raw = await r.json()
   return normalizeMapDataResponse(raw)
+}
+
+export async function fetchStellarCartographySample(
+  scope: AnalyticShellScope,
+  x: number,
+  y: number
+): Promise<StellarCartographySampleResponse> {
+  const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/sample`
+  const params = new URLSearchParams({ x: String(x), y: String(y) })
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}?${params.toString()}`, { cache: 'no-store' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
 }
 
 // --- Server diagnostics (MRU buffer of request trees) ---

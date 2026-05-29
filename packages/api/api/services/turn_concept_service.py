@@ -5,6 +5,7 @@ from api.concepts.warp_well import (
     coordinate_in_warp_well,
     map_cell_indices_in_warp_well,
 )
+from api.models.game import TurnInfo
 from api.services.turn_load_service import TurnLoadService
 
 
@@ -13,6 +14,9 @@ class TurnConceptService:
 
     def __init__(self, turns: TurnLoadService) -> None:
         self._turns = turns
+
+    def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
+        return self._turns.get_turn_info(game_id, perspective, turn_number)
 
     def warp_well_coordinate_in_well(
         self,

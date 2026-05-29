@@ -10,12 +10,15 @@ For layering and packages, see [.cursor/rules/architecture.mdc](../.cursor/rules
 
 Zustand stores hold **session and shell context** that should not live in the TanStack Query cache: values that are **not** the direct JSON body of a single GET, or that must be **shared** across the tree without prop drilling.
 
-Stores are **in-memory** unless a store explicitly adds persistence middleware (none do today). Session passwords follow project rules: **never persisted** to localStorage, sessionStorage, cookies, or URLs.
+Stores are **in-memory** unless a store explicitly adds persistence middleware. Session passwords follow project rules: **never persisted** to localStorage, sessionStorage, cookies, or URLs.
 
 | Store | Path | Responsibility |
 |--------|------|----------------|
 | **Session** | `packages/frontend/src/stores/session.ts` | Login **name** and **password** for planets.nu-backed operations. Used by game refresh and related flows. |
-| **Shell** | `packages/frontend/src/stores/shell.ts` | **Selected game id**, snapshot from the last successful game-info refresh (**max turn**, **perspectives** / player order), **selected turn**, **viewpoint override**, and **`applyGameInfoRefresh`** (turn and override rules when game info updates). |
+| **Shell** | `packages/frontend/src/stores/shell.ts` | **Selected game id**, snapshot from the last successful game-info refresh (**max turn**, **perspectives** / player order, **Stellar Cartography settings gates**), **selected turn**, **viewpoint override**, and **`applyGameInfoRefresh`** (turn and override rules when game info updates). |
+| **Enabled analytics** | `packages/frontend/src/stores/enabledAnalytics.ts` | Persisted sidebar master enable toggles (`planets-console-enabled-analytics`; default none enabled). |
+| **Stellar Cartography layers** | `packages/frontend/src/stores/stellarCartographyLayers.ts` | Persisted per-layer map visibility toggles for the Stellar Cartography analytic (`planets-console-stellar-cartography-layers`; default all on). |
+| **Display preferences** | `packages/frontend/src/stores/displayPreferences.ts` | Player/sector list label modes (persisted). |
 
 **When to use Zustand:** identity or shell context needed in **multiple** places (header, main area, mutations), or **`getState()`** from outside React (e.g. inside a mutation callback).
 
@@ -84,7 +87,9 @@ Turn blobs live in **Core storage** (`games/{gameId}/{perspective}/turns/{turn}`
 
 Some state stays in **component state** when it is **local to the shell** or **ephemeral UI** rather than global client or server cache:
 
-- **View mode** (tabular vs map), **map zoom** and slider wiring, **enabled analytic ids** in the sidebar, **shell error bar** rows (`ShellErrorItem[]`), and similar.
+- **View mode** (tabular vs map), **map zoom** and slider wiring, **shell error bar** rows (`ShellErrorItem[]`), and similar.
+
+**Enabled analytic ids** and **Stellar Cartography layer toggles** live in persisted Zustand stores (see section 1), not in `App.tsx` local state.
 
 If a piece of UI state later needs to be shared widely, promote it to Zustand or derive it from query data rather than duplicating.
 

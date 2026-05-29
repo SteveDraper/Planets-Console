@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 
 /** Snapshot from the last successful game-info refresh (turn cap and player order). */
@@ -9,6 +10,8 @@ export type GameInfoShellContext = {
   isGameFinished: boolean
   /** `game.name` / `settings.name` from last refresh; drives sector display labels. */
   sectorDisplayName: string | null
+  /** NuHost settings gates for Stellar Cartography layer checkboxes. */
+  stellarCartographyGates: StellarCartographySettingsGates
 }
 
 type ShellState = {

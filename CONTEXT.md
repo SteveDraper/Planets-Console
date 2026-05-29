@@ -81,7 +81,7 @@ _Avoid_: offline mode, cached game
 ### Analytics
 
 **Analytic**:
-A registered analysis feature the user can enable -- tabular output, a map overlay, or both. Each has an `analytic_id`, Core computation, and BFF shaping for the SPA.
+A registered analysis feature the user can enable -- tabular output, a map overlay, or both. Each has an `analytic_id`, Core computation, and BFF shaping for the SPA. Which analytics are enabled is a **client preference** persisted globally in localStorage (survives reload; not scoped per game).
 _Avoid_: widget, report, metric
 
 **Turn analytic**:
@@ -103,6 +103,30 @@ _Avoid_: layout mode, display type
 **Map layer**:
 One analytic's contribution to the combined map graph -- nodes and/or edges merged with **base map** and other enabled map analytics via id-prefixing.
 _Avoid_: overlay (acceptable informally; prefer map layer in docs)
+
+**Stellar Cartography**:
+NuHost optional map geography (star clusters, nebulae, wormholes, black holes, debris disks, and related ion-storm behavior). Exposed in the console as one map-only **turn analytic** with per-element layer toggles.
+_Avoid_: SC (in user-facing copy), space hazards (too broad)
+
+**Ion storm layer**:
+A **Cartography layer** for `ionstorms[]` inside the **Stellar Cartography** analytic. Shown in the sidebar only when game settings enable ion storms; when shown but the current turn has no `ionstorms[]`, the toggle is inactive (greyed, with hint).
+_Avoid_: ion storms analytic (separate registration)
+
+**Cartography layer**:
+One toggleable element family inside the **Stellar Cartography** analytic (e.g. nebulae, wormholes). Layer on/off is a **client preference** persisted globally in localStorage (not per game). Geometry comes from **TurnInfo** via the analytic.
+_Avoid_: overlay type, map feature (without cartography context)
+
+**Cartography sample**:
+Host-aligned numeric or label values (ion voltage, star radiation, black hole max warp, etc.) at a map coordinate for the current turn. Computed in Core **game concepts**; the SPA requests a **batched** sample for hover and shows every applicable layer in one tooltip.
+_Avoid_: hover popup (generic)
+
+**Debris disk** (map):
+A destroyed-system field centered on a seed planet (`debrisdisk > 1` on the turn snapshot; value is border radius in ly). **Planetoids** (`debrisdisk == 1`) always render on the **base map**. The **Stellar Cartography** analytic adds an optional **Debris disk borders** layer (outline only) for towing and minefield context; warp-well rules unchanged.
+_Avoid_: debris disks checkbox (use **Debris disk borders**)
+
+**Star cluster** (map):
+A lethal core plus halo in `stars[]`, keyed by shared cluster `name` across one or more bodies. Radiation and neutron clusters share the same wire shape today; the console renders them under one **Cartography layer** until cluster kind can be classified reliably.
+_Avoid_: neutron star (as a separate layer id before classification exists)
 
 ### Observability
 

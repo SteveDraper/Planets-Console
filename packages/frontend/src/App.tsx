@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  buildPerspectivesFromGameInfo,
+  buildGameInfoShellContext,
   getLatestTurnFromGameInfo,
-  getSectorDisplayNameFromGameInfo,
-  isGameFinishedFromGameInfo,
   selectableTurnMaxForShell,
 } from './lib/gameInfoShell'
 import { loadGameFromStorage, type StorageGameLoadResult } from './lib/loadGameFromStorage'
@@ -20,14 +18,17 @@ import { AnalyticsBar } from './components/AnalyticsBar'
 import { MainArea } from './components/MainArea'
 import {
   fetchAnalytics,
+  fetchAnalyticMap,
   fetchShellBootstrap,
   fetchStoredGameInfo,
   refreshGameInfo,
   type ConnectionsMapParams,
   type GameInfoResponse,
 } from './api/bff'
+import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useShellContext } from './shell'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 
@@ -46,7 +47,9 @@ function ConsoleShell() {
   /** React Flow zoom (same as mousewheel); 1 = 100% on slider. Updated by MapGraph. */
   const [mapZoom, setMapZoom] = useState(1)
   const setMapZoomFromSlider = useRef<(z: number) => void | undefined>(undefined)
-  const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
+  const enabledIdsList = useEnabledAnalyticsStore((s) => s.enabledIds)
+  const toggleAnalytic = useEnabledAnalyticsStore((s) => s.toggleEnabled)
+  const enabledIds = useMemo(() => new Set(enabledIdsList), [enabledIdsList])
   const [connectionsMapParams, setConnectionsMapParams] = useState<ConnectionsMapParams>({
     warpSpeed: 9,
     gravitonicMovement: false,
@@ -106,15 +109,9 @@ function ConsoleShell() {
     onSuccess: (data, vars) => {
       if (data.source === 'storage') {
         const { load } = data
-        const perspectives = buildPerspectivesFromGameInfo(load.gameInfo)
         applyGameInfoRefresh(
           vars.gameId,
-          {
-            turn: load.turn,
-            perspectives,
-            isGameFinished: isGameFinishedFromGameInfo(load.gameInfo),
-            sectorDisplayName: getSectorDisplayNameFromGameInfo(load.gameInfo),
-          },
+          buildGameInfoShellContext(load.gameInfo),
           {
             storageOnlyLoad: true,
             storageAvailablePerspectives: load.storedPerspectives,
@@ -125,14 +122,7 @@ function ConsoleShell() {
         clearStorageOnlyLoad()
         const { gameInfo } = data
         const latestTurn = getLatestTurnFromGameInfo(gameInfo)
-        const perspectives = buildPerspectivesFromGameInfo(gameInfo)
-        const isGameFinished = isGameFinishedFromGameInfo(gameInfo)
-        applyGameInfoRefresh(vars.gameId, {
-          turn: latestTurn,
-          perspectives,
-          isGameFinished,
-          sectorDisplayName: getSectorDisplayNameFromGameInfo(gameInfo),
-        }, {
+        applyGameInfoRefresh(vars.gameId, buildGameInfoShellContext(gameInfo), {
           selectableTurnMax: selectableTurnMaxForShell(latestTurn),
         })
       }
@@ -207,15 +197,9 @@ function ConsoleShell() {
     if (useShellStore.getState().selectedGameId != null) return
     if (initialGameBootstrap.kind === 'storage-only') {
       const loaded = initialGameBootstrap.data
-      const perspectives = buildPerspectivesFromGameInfo(loaded.gameInfo)
       applyGameInfoRefresh(
         configuredInitialGameId,
-        {
-          turn: loaded.turn,
-          perspectives,
-          isGameFinished: isGameFinishedFromGameInfo(loaded.gameInfo),
-          sectorDisplayName: getSectorDisplayNameFromGameInfo(loaded.gameInfo),
-        },
+        buildGameInfoShellContext(loaded.gameInfo),
         {
           storageOnlyLoad: true,
           storageAvailablePerspectives: loaded.storedPerspectives,
@@ -226,14 +210,7 @@ function ConsoleShell() {
     }
     const data = initialGameBootstrap.data
     const latestTurn = getLatestTurnFromGameInfo(data)
-    const perspectives = buildPerspectivesFromGameInfo(data)
-    const isGameFinished = isGameFinishedFromGameInfo(data)
-    applyGameInfoRefresh(configuredInitialGameId, {
-      turn: latestTurn,
-      perspectives,
-      isGameFinished,
-      sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
-    }, {
+    applyGameInfoRefresh(configuredInitialGameId, buildGameInfoShellContext(data), {
       selectableTurnMax: selectableTurnMaxForShell(latestTurn),
     })
   }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh])
@@ -283,6 +260,26 @@ function ConsoleShell() {
     }
   }, [analyticsIsError, analyticsError, addShellError])
 
+  const stellarCartographyGates =
+    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
+    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
+
+  const { data: stellarCartographyMapData } = useQuery({
+    queryKey: ['analytic', 'stellar-cartography', 'map', analyticScope, 'planet-v2'] as const,
+    queryFn: () => fetchAnalyticMap('stellar-cartography', analyticScope!),
+    enabled:
+      turnDataReady &&
+      analyticScope != null &&
+      stellarCartographyGates.ionStorms,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  })
+
+  const ionStormCount =
+    stellarCartographyGates.ionStorms && turnDataReady && analyticScope != null
+      ? (stellarCartographyMapData?.meta?.ionStorms ?? null)
+      : null
+
   const analytics = analyticsData?.analytics ?? []
   const enabledAnalyticIds = useMemo(
     () => analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
@@ -297,15 +294,6 @@ function ConsoleShell() {
   const handleMapZoomSliderChange = useCallback((z: number) => {
     setMapZoomFromSlider.current?.(z)
   }, [])
-
-  const toggleAnalytic = (id: string) => {
-    setEnabledIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
 
   return (
     <div className="flex h-screen flex-col bg-black">
@@ -334,6 +322,8 @@ function ConsoleShell() {
           viewMode={viewMode}
           connectionsMapParams={connectionsMapParams}
           onConnectionsMapParamsChange={setConnectionsMapParams}
+          stellarCartographyGates={stellarCartographyGates}
+          ionStormCount={ionStormCount}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">

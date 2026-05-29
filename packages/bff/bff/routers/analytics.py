@@ -119,6 +119,8 @@ def get_analytic_map(
 
     **connections** returns route pairs for the SPA to draw as edges on those nodes.
 
+    **stellar-cartography** returns overlay circles and wormhole graph geometry.
+
     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
     """
