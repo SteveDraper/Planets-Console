@@ -25,7 +25,6 @@ import {
   ION_STORM_CLASS_VOLTAGE_THRESHOLDS,
   ION_STORM_MAX_RASTER_PX,
   ION_STORM_OUTER_VOLTAGE_THRESHOLD,
-  ionStormClassFromVoltage,
   ionStormFillOpacity,
   ionStormRimOpacity,
   ionStormStrokeColor,
@@ -71,6 +70,13 @@ const rasterCache = new Map<string, IonStormRasterCache>()
 
 export function clearIonStormCloudRasterCache(): void {
   rasterCache.clear()
+}
+
+function ionStormRasterClass(voltage: number): number {
+  for (const [index, threshold] of ION_STORM_CLASS_VOLTAGE_THRESHOLDS.entries()) {
+    if (voltage < threshold) return index + 1
+  }
+  return ION_STORM_CLASS_VOLTAGE_THRESHOLDS.length + 1
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -167,7 +173,7 @@ export function buildIonVoltageGrid(
 function gridClassAt(grid: DensityGrid, col: number, row: number): number {
   const voltage = gridValueAt(grid, col, row)
   if (voltage <= 0) return 0
-  return ionStormClassFromVoltage(Math.round(voltage))
+  return ionStormRasterClass(Math.round(voltage))
 }
 
 /** Components where sampled voltage >= threshold (outer storm edge). */
@@ -237,7 +243,7 @@ export function ionStormBoundaryPolygonsAtThreshold(
     components ??
     (threshold === ION_STORM_OUTER_VOLTAGE_THRESHOLD
       ? findComponentsAtThreshold(voltageGrid, threshold)
-      : findComponentsAtMinClass(voltageGrid, ionStormClassFromVoltage(threshold)))
+      : findComponentsAtMinClass(voltageGrid, ionStormRasterClass(threshold)))
 
   return ionStormBoundaryPolygonsForComponents(
     circles,
@@ -282,7 +288,7 @@ function buildClassBoundaryPaths(
 
   for (const threshold of ION_STORM_CLASS_VOLTAGE_THRESHOLDS) {
     if (maxVoltage < threshold) continue
-    const stormClass = ionStormClassFromVoltage(threshold)
+    const stormClass = ionStormRasterClass(threshold)
     const stroke = hexWithAlpha(ionStormStrokeColor(stormClass), ionStormRimOpacity(stormClass))
     const boundaryPaths = ionStormBoundaryPathsAtThreshold(
       circles,
@@ -320,7 +326,7 @@ function rasterizeIonStormMapSpace(
     if (voltage <= 0) {
       return { r: 0, g: 0, b: 0, a: 0 }
     }
-    const stormClass = ionStormClassFromVoltage(Math.round(voltage))
+    const stormClass = ionStormRasterClass(Math.round(voltage))
     const color = ionStormStrokeColor(stormClass)
     const [r, g, b] = hexToRgb(color)
     const alpha = Math.round(Math.min(1, ionStormFillOpacity(stormClass)) * 255)
@@ -379,9 +385,7 @@ export function buildIonStormCloudPaneShape(
     ION_STORM_OUTER_VOLTAGE_THRESHOLD,
     voltageGrid
   )
-  const outerClass = ionStormClassFromVoltage(
-    Math.round(maxVoltageInGroup(circles, cloudy))
-  )
+  const outerClass = ionStormRasterClass(Math.round(maxVoltageInGroup(circles, cloudy)))
 
   return {
     key,

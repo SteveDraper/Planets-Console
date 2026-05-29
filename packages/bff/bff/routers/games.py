@@ -41,6 +41,7 @@ from bff.diagnostics_dep import (
 from bff.transport.game_responses import (
     BffGameInfoResponse,
     BffTurnInfoResponse,
+    StellarCartographyTurnSummaryResponse,
     StoredTurnPerspectivesResponse,
 )
 
@@ -264,5 +265,46 @@ def get_stellar_cartography_sample(
         "get_stellar_cartography_sample",
         "total",
         lambda: core.stellar_cartography_sample(game_id, perspective, turn_number, x, y),
+    )
+    return finish_response(result, root)
+
+
+@router.get(
+    "/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/summary",
+    response_model=StellarCartographyTurnSummaryResponse,
+)
+def get_stellar_cartography_turn_summary(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    include: IncludeDiagnostics = False,
+) -> object:
+    """Turn-scoped lightweight Stellar Cartography facts via ``CoreClient``."""
+    core = get_core_client()
+    bff_path = (
+        f"/games/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/summary"
+    )
+    root = optional_request_root(
+        include,
+        "GET",
+        bff_path,
+        gameId=game_id,
+        perspective=perspective,
+        turn=turn_number,
+        handler="get_stellar_cartography_turn_summary",
+    )
+
+    def load_summary() -> StellarCartographyTurnSummaryResponse:
+        summary = core.stellar_cartography_turn_summary(game_id, perspective, turn_number)
+        return StellarCartographyTurnSummaryResponse(
+            ionStormCount=summary.ion_storm_count,
+            nuIonStorms=summary.nu_ion_storms,
+        )
+
+    result = with_timed_child(
+        root,
+        "get_stellar_cartography_turn_summary",
+        "total",
+        load_summary,
     )
     return finish_response(result, root)

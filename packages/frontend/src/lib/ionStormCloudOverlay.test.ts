@@ -12,7 +12,6 @@ import {
 import {
   ION_STORM_CLASS_VOLTAGE_THRESHOLDS,
   ION_STORM_OUTER_VOLTAGE_THRESHOLD,
-  ionStormClassFromVoltage,
 } from './stellarCartographyTheme'
 
 describe('ionStormCloudOverlay', () => {
@@ -46,11 +45,6 @@ describe('ionStormCloudOverlay', () => {
     expect(ionVoltageAt(circles, 0, 0, false)).toBe(130)
     expect(ionVoltageAt(circles, 19, 0, false)).toBe(130)
     expect(ionVoltageAt(circles, 21, 0, false)).toBe(0)
-  })
-
-  it('assigns class from rounded voltage like hover sampling', () => {
-    expect(ionStormClassFromVoltage(Math.round(49.4))).toBe(1)
-    expect(ionStormClassFromVoltage(Math.round(50.2))).toBe(2)
   })
 
   it('builds smooth outer and class iso-contours for cloudy storms', () => {

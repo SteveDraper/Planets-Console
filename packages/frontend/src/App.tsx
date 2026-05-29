@@ -18,7 +18,6 @@ import { AnalyticsBar } from './components/AnalyticsBar'
 import { MainArea } from './components/MainArea'
 import {
   fetchAnalytics,
-  fetchAnalyticMap,
   fetchShellBootstrap,
   fetchStoredGameInfo,
   refreshGameInfo,
@@ -29,6 +28,7 @@ import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
+import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
 import { useShellContext } from './shell'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 
@@ -264,20 +264,15 @@ function ConsoleShell() {
     useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
     EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
 
-  const { data: stellarCartographyMapData } = useQuery({
-    queryKey: ['analytic', 'stellar-cartography', 'map', analyticScope, 'planet-v2'] as const,
-    queryFn: () => fetchAnalyticMap('stellar-cartography', analyticScope!),
-    enabled:
-      turnDataReady &&
-      analyticScope != null &&
-      stellarCartographyGates.ionStorms,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
+  const { data: stellarCartographyTurnSummary } = useStellarCartographyTurnSummary({
+    analyticScope,
+    turnDataReady,
+    ionStormsGate: stellarCartographyGates.ionStorms,
   })
 
   const ionStormCount =
     stellarCartographyGates.ionStorms && turnDataReady && analyticScope != null
-      ? (stellarCartographyMapData?.meta?.ionStorms ?? null)
+      ? (stellarCartographyTurnSummary?.ionStormCount ?? null)
       : null
 
   const analytics = analyticsData?.analytics ?? []

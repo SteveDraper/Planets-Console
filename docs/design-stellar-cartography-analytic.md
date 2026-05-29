@@ -135,8 +135,9 @@ Use existing `createLocalStorageOrMemoryStateStorage()` + zustand `persist` (sam
 - Add `src/analytics/stellar-cartography/StellarCartographyMapTile.tsx` (mirror `ConnectionsMapTile`):
   - Master checkbox + expandable body with per-layer checkboxes
   - Hide checkbox when settings gate is false (props from shell `GameInfo` / settings)
-  - Ion storm row: `disabled` + `title`/hint when `ionstorms.length === 0`
+  - Ion storm row: `disabled` + `title`/hint when the turn summary reports `ionStormCount === 0`
 - Wire in `AnalyticsBar.tsx` for `id === 'stellar-cartography' && viewMode === 'map'`.
+- `App.tsx`: use the lightweight Stellar Cartography turn-summary endpoint for `ionStormCount`; do not fetch the full map analytic only to disable the sidebar row.
 
 #### Fetch and merge
 

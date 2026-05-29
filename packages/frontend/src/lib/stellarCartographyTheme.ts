@@ -9,15 +9,6 @@ export const ION_STORM_MAX_RASTER_PX = 512
 export const ION_STORM_BOUNDARY_MAX_GRID_CELLS = 512
 export const ION_STORM_BOUNDARY_RAY_COUNT = 512
 
-/** Ion storm hazard class (1..5) from center voltage. */
-export function ionStormClassFromVoltage(voltage: number): number {
-  if (voltage >= 200) return 5
-  if (voltage >= 150) return 4
-  if (voltage >= 100) return 3
-  if (voltage >= 50) return 2
-  return 1
-}
-
 export const NEBULA_CLOUD_COLOR = '#7d8f7b'
 export const NEBULA_STROKE_COLOR = '#8fa08d'
 export const NEBULA_CLOUD_COLOR_RGB: readonly [number, number, number] = [125, 143, 123]

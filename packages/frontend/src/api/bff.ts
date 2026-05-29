@@ -419,14 +419,6 @@ function normalizeMapEdge(raw: unknown): MapEdge | null {
   return edge
 }
 
-function ionStormClassFromVoltage(voltage: number): number {
-  if (voltage >= 200) return 5
-  if (voltage >= 150) return 4
-  if (voltage >= 100) return 3
-  if (voltage >= 50) return 2
-  return 1
-}
-
 function normalizeOverlayCircle(raw: unknown): StellarCartographyOverlayCircle | null {
   if (raw == null || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -458,9 +450,9 @@ function normalizeOverlayCircle(raw: unknown): StellarCartographyOverlayCircle |
   }
 
   if (layer === 'ion-storms') {
-    const voltage = parseJsonInteger(o.voltage) ?? 0
-    const stormClass =
-      parseJsonInteger(o.class) ?? ionStormClassFromVoltage(voltage)
+    const voltage = parseJsonInteger(o.voltage)
+    const stormClass = parseJsonInteger(o.class)
+    if (voltage == null || stormClass == null) return null
     const circle: IonStormOverlayCircle = {
       ...base,
       layer: 'ion-storms',
@@ -610,6 +602,11 @@ export type StellarCartographySampleResponse = {
   x: number
   y: number
   entries: StellarCartographySampleEntry[]
+}
+
+export type StellarCartographyTurnSummaryResponse = {
+  ionStormCount: number
+  nuIonStorms: boolean
 }
 
 export type StoredGameItem = {
@@ -887,6 +884,18 @@ export async function fetchStellarCartographySample(
   const params = new URLSearchParams({ x: String(x), y: String(y) })
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(`${path}?${params.toString()}`, { cache: 'no-store' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function fetchStellarCartographyTurnSummary(
+  scope: AnalyticShellScope
+): Promise<StellarCartographyTurnSummaryResponse> {
+  const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/summary`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ionStormClassFromVoltage,
   ionStormFillOpacity,
   ionStormStrokeColor,
   starClusterBandEdgeOpacity,
@@ -24,19 +23,6 @@ function parseHexRgb(hex: string): [number, number, number] {
 }
 
 describe('stellarCartographyTheme', () => {
-  it('maps voltage to wiki hazard classes 1..5', () => {
-    expect(ionStormClassFromVoltage(0)).toBe(1)
-    expect(ionStormClassFromVoltage(49)).toBe(1)
-    expect(ionStormClassFromVoltage(50)).toBe(2)
-    expect(ionStormClassFromVoltage(99)).toBe(2)
-    expect(ionStormClassFromVoltage(100)).toBe(3)
-    expect(ionStormClassFromVoltage(149)).toBe(3)
-    expect(ionStormClassFromVoltage(150)).toBe(4)
-    expect(ionStormClassFromVoltage(199)).toBe(4)
-    expect(ionStormClassFromVoltage(200)).toBe(5)
-    expect(ionStormClassFromVoltage(500)).toBe(5)
-  })
-
   it('uses warmer stroke colors for classes 4 and 5', () => {
     expect(ionStormStrokeColor(3)).toBe('#eab308')
     expect(ionStormStrokeColor(4)).toBe('#f97316')

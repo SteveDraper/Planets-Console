@@ -206,6 +206,46 @@ describe('normalizeMapDataResponse', () => {
     expect(out.nodes[0].planet?.name).toBe('Alt')
   })
 
+  it('keeps ion storm overlay class only when Core sends it on the wire', () => {
+    const raw = {
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      overlayCircles: [
+        {
+          layer: 'ion-storms',
+          id: 'is-1',
+          x: 10,
+          y: 20,
+          radius: 30,
+          voltage: 120,
+          class: 3,
+        },
+        {
+          layer: 'ion-storms',
+          id: 'is-2',
+          x: 40,
+          y: 50,
+          radius: 60,
+          voltage: 220,
+        },
+      ],
+    }
+
+    const out = normalizeMapDataResponse(raw)
+    expect(out.overlayCircles).toEqual([
+      {
+        layer: 'ion-storms',
+        id: 'is-1',
+        x: 10,
+        y: 20,
+        radius: 30,
+        voltage: 120,
+        class: 3,
+      },
+    ])
+  })
+
   it('keeps flare illustrativeRoute waypointOffset and arrivalOffset when valid', () => {
     const raw = {
       analyticId: 'connections',

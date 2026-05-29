@@ -3,15 +3,12 @@ import { useStore } from '@xyflow/react'
 import type { AnalyticShellScope, StellarCartographySampleEntry } from '../../api/bff'
 import { fetchStellarCartographySample } from '../../api/bff'
 import {
-  isCartographyLayerGateEnabled,
+  isCartographyLayerShown,
   type CartographyLayerId,
   type CartographyLayerVisibility,
   type StellarCartographySettingsGates,
 } from './layers'
-import {
-  isWormholeCartographyActive,
-  type WormholeDisplayMode,
-} from './wormholeDisplayMode'
+import type { WormholeDisplayMode } from './wormholeDisplayMode'
 import { flowToMapCellIndices } from '../../lib/planetSpatialGrid'
 import { formatStellarCartographySampleLine } from './sampleTooltipFormat'
 
@@ -35,24 +32,6 @@ type StellarCartographyHoverPanelProps = {
   ) => { x: number; y: number } | null
 }
 
-function isLayerActive(
-  layerId: CartographyLayerId,
-  layerVisibility: CartographyLayerVisibility,
-  settingsGates: StellarCartographySettingsGates,
-  wormholeDisplayMode: WormholeDisplayMode
-): boolean {
-  if (layerId === 'wormholes') {
-    return (
-      isCartographyLayerGateEnabled(settingsGates, 'wormholes') &&
-      isWormholeCartographyActive(wormholeDisplayMode)
-    )
-  }
-  return (
-    isCartographyLayerGateEnabled(settingsGates, layerId) &&
-    (layerVisibility[layerId] ?? true)
-  )
-}
-
 function filterSampleEntries(
   entries: StellarCartographySampleEntry[],
   layerVisibility: CartographyLayerVisibility,
@@ -60,7 +39,11 @@ function filterSampleEntries(
   wormholeDisplayMode: WormholeDisplayMode
 ): StellarCartographySampleEntry[] {
   return entries.filter((entry) =>
-    isLayerActive(entry.layer as CartographyLayerId, layerVisibility, settingsGates, wormholeDisplayMode)
+    isCartographyLayerShown(entry.layer as CartographyLayerId, {
+      layerVisibility,
+      settingsGates,
+      wormholeDisplayMode,
+    })
   )
 }
 
@@ -81,7 +64,11 @@ export function buildStellarCartographyHoverLines(
   if (
     wormholeHoverLines != null &&
     wormholeHoverLines.length > 0 &&
-    isLayerActive('wormholes', layerVisibility, settingsGates, wormholeDisplayMode)
+    isCartographyLayerShown('wormholes', {
+      layerVisibility,
+      settingsGates,
+      wormholeDisplayMode,
+    })
   ) {
     lines.push(...wormholeHoverLines)
   }

@@ -18,17 +18,19 @@ describe('combineMapData', () => {
 
   const cartographyOptions = {
     liveConnectionsParams: null,
-    cartographyLayerVisibility: defaultCartographyLayerVisibility(),
-    cartographySettingsGates: {
-      ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-      debrisDiskBorders: true,
-      nebulae: true,
-      ionStorms: true,
-      starClusters: true,
-      wormholes: true,
-      blackHoles: true,
+    stellarCartography: {
+      layerVisibility: defaultCartographyLayerVisibility(),
+      settingsGates: {
+        ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+        debrisDiskBorders: true,
+        nebulae: true,
+        ionStorms: true,
+        starClusters: true,
+        wormholes: true,
+        blackHoles: true,
+      },
+      wormholeDisplayMode: 'always' as const,
     },
-    wormholeDisplayMode: 'always' as const,
   }
 
   it('binds Connections routes onto base-map planet node ids', () => {
@@ -104,7 +106,9 @@ describe('combineMapData', () => {
       edges: [],
     }
 
-    const combined = combineMapData(['base-map'], [{ data: baseMapWithWells }], null)
+    const combined = combineMapData(['base-map'], [{ data: baseMapWithWells }], {
+      liveConnectionsParams: null,
+    })
     expect(combined.nodes[0].normalWellCells).toEqual(cells)
   })
 
@@ -186,9 +190,12 @@ describe('combineMapData', () => {
       [{ data: sc }],
       {
         ...cartographyOptions,
-        cartographyLayerVisibility: {
-          ...defaultCartographyLayerVisibility(),
-          nebulae: false,
+        stellarCartography: {
+          ...cartographyOptions.stellarCartography,
+          layerVisibility: {
+            ...defaultCartographyLayerVisibility(),
+            nebulae: false,
+          },
         },
       }
     )
@@ -240,9 +247,12 @@ describe('combineMapData', () => {
       [{ data: sc }],
       {
         ...cartographyOptions,
-        cartographySettingsGates: {
-          ...cartographyOptions.cartographySettingsGates,
-          debrisDiskBorders: false,
+        stellarCartography: {
+          ...cartographyOptions.stellarCartography,
+          settingsGates: {
+            ...cartographyOptions.stellarCartography.settingsGates,
+            debrisDiskBorders: false,
+          },
         },
       }
     )
@@ -284,10 +294,29 @@ describe('combineMapData', () => {
     const combined = combineMapData(
       ['stellar-cartography'],
       [{ data: sc }],
-      { ...cartographyOptions, wormholeDisplayMode: 'off' }
+      {
+        ...cartographyOptions,
+        stellarCartography: {
+          ...cartographyOptions.stellarCartography,
+          wormholeDisplayMode: 'off',
+        },
+      }
     )
 
     expect(combined.edges.filter((edge) => edge.layer === 'wormholes')).toHaveLength(0)
     expect(combined.wormholeUnknownEntrances).toHaveLength(0)
+  })
+
+  it('requires Stellar Cartography merge options when merging that layer', () => {
+    const sc: MapDataResponse = {
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      overlayCircles: [],
+    }
+
+    expect(() =>
+      combineMapData(['stellar-cartography'], [{ data: sc }], { liveConnectionsParams: null })
+    ).toThrow('Stellar Cartography map merge requires stellarCartography options')
   })
 })

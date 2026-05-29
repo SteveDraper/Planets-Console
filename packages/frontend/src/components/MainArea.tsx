@@ -239,9 +239,11 @@ export function MainArea({
         mapQueries.map((q) => ({ data: q.data })),
         {
           liveConnectionsParams,
-          cartographyLayerVisibility,
-          cartographySettingsGates,
-          wormholeDisplayMode,
+          stellarCartography: {
+            layerVisibility: cartographyLayerVisibility,
+            settingsGates: cartographySettingsGates,
+            wormholeDisplayMode,
+          },
         }
       ),
     [

@@ -6,15 +6,11 @@ import type {
   WormholeUnknownEntrance,
 } from '../../api/bff'
 import {
-  isCartographyLayerGateEnabled,
-  type CartographyLayerId,
+  isCartographyLayerShown,
   type CartographyLayerVisibility,
   type StellarCartographySettingsGates,
 } from './layers'
-import {
-  isWormholeCartographyActive,
-  type WormholeDisplayMode,
-} from './wormholeDisplayMode'
+import type { WormholeDisplayMode } from './wormholeDisplayMode'
 
 const STELLAR_CARTOGRAPHY_PREFIX = 'stellar-cartography'
 
@@ -29,23 +25,18 @@ export type AppendStellarCartographyMapLayerArgs = {
   wormholeDisplayMode: WormholeDisplayMode
 }
 
-function isLayerVisible(
-  layerId: CartographyLayerId,
-  layerVisibility: CartographyLayerVisibility,
-  settingsGates: StellarCartographySettingsGates
-): boolean {
-  if (!isCartographyLayerGateEnabled(settingsGates, layerId)) return false
-  if (layerId === 'wormholes') return true
-  return layerVisibility[layerId]
-}
-
 function filterOverlayCircles(
   circles: StellarCartographyOverlayCircle[],
   layerVisibility: CartographyLayerVisibility,
-  settingsGates: StellarCartographySettingsGates
+  settingsGates: StellarCartographySettingsGates,
+  wormholeDisplayMode: WormholeDisplayMode
 ): StellarCartographyOverlayCircle[] {
   return circles.filter((circle) =>
-    isLayerVisible(circle.layer, layerVisibility, settingsGates)
+    isCartographyLayerShown(circle.layer, {
+      layerVisibility,
+      settingsGates,
+      wormholeDisplayMode,
+    })
   )
 }
 
@@ -68,9 +59,11 @@ export function appendStellarCartographyMapLayer({
   settingsGates,
   wormholeDisplayMode,
 }: AppendStellarCartographyMapLayerArgs): void {
-  const wormholesEnabled =
-    isWormholeCartographyActive(wormholeDisplayMode) &&
-    isCartographyLayerGateEnabled(settingsGates, 'wormholes')
+  const wormholesEnabled = isCartographyLayerShown('wormholes', {
+    layerVisibility,
+    settingsGates,
+    wormholeDisplayMode,
+  })
   const positions = nodePositionById(data.nodes)
   const connectedNodeIds = new Set<string>()
 
@@ -120,5 +113,7 @@ export function appendStellarCartographyMapLayer({
   }
 
   const rawCircles = data.overlayCircles ?? []
-  overlayCircles.push(...filterOverlayCircles(rawCircles, layerVisibility, settingsGates))
+  overlayCircles.push(
+    ...filterOverlayCircles(rawCircles, layerVisibility, settingsGates, wormholeDisplayMode)
+  )
 }

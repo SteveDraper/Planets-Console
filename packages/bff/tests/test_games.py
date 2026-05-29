@@ -293,3 +293,15 @@ def test_get_stellar_cartography_sample_matches_core():
     data = response.json()
     assert data["x"] == 100
     assert any(e["layer"] == "nebulae" for e in data["entries"])
+
+
+def test_get_stellar_cartography_turn_summary_shapes_for_spa():
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
+        storage.put("games/628580/1/turns/111", json.load(f))
+
+    response = client.get("/games/628580/1/turns/111/concepts/stellar-cartography/summary")
+    assert response.status_code == 200
+    assert response.json() == {"ionStormCount": 3, "nuIonStorms": True}

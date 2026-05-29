@@ -1,3 +1,5 @@
+import type { WormholeDisplayMode } from './wormholeDisplayMode'
+
 /** Wire ids for persisted cartography layer toggles (match Core/BFF `layer` values). */
 export type CartographyLayerId =
   | 'debris-disks'
@@ -85,4 +87,19 @@ export function isCartographyLayerGateEnabled(
     default:
       return false
   }
+}
+
+export type CartographyLayerShownOptions = {
+  layerVisibility: CartographyLayerVisibility
+  settingsGates: StellarCartographySettingsGates
+  wormholeDisplayMode?: WormholeDisplayMode
+}
+
+export function isCartographyLayerShown(
+  layerId: CartographyLayerId,
+  { layerVisibility, settingsGates, wormholeDisplayMode }: CartographyLayerShownOptions
+): boolean {
+  if (!isCartographyLayerGateEnabled(settingsGates, layerId)) return false
+  if (layerId === 'wormholes') return wormholeDisplayMode == null || wormholeDisplayMode !== 'off'
+  return layerVisibility[layerId] ?? true
 }

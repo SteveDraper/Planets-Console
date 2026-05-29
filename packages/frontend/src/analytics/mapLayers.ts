@@ -7,43 +7,85 @@ import type { WormholeDisplayMode } from './stellar-cartography/wormholeDisplayM
 import { appendStellarCartographyMapLayer } from './stellar-cartography/mapLayer'
 import { appendConnectionsMapLayer, routeWaypointsFromMap } from './connections/mapLayer'
 
+export type StellarCartographyMapMergeOptions = {
+  layerVisibility: CartographyLayerVisibility
+  settingsGates: StellarCartographySettingsGates
+  wormholeDisplayMode: WormholeDisplayMode
+}
+
 export type CombineMapDataOptions = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
-  cartographyLayerVisibility?: CartographyLayerVisibility
-  cartographySettingsGates?: StellarCartographySettingsGates
-  wormholeDisplayMode?: WormholeDisplayMode
+  stellarCartography?: StellarCartographyMapMergeOptions
+}
+
+type MapLayerMergeContext = {
+  baseMapAnalyticId: string | null
+  nodes: CombinedMapData['nodes']
+  edges: MapEdge[]
+  overlayCircles: CombinedMapData['overlayCircles']
+  wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
+  waypointsByKey: Map<string, { x: number; y: number }>
+  nuIonStorms: boolean | undefined
+}
+
+type MapLayerMerger = (
+  data: MapDataResponse,
+  context: MapLayerMergeContext,
+  options: CombineMapDataOptions
+) => void
+
+const mapLayerMergeRegistry: Record<string, MapLayerMerger> = {
+  connections: (data, context, options) => {
+    if (context.baseMapAnalyticId == null) return
+    appendConnectionsMapLayer({
+      data,
+      baseMapAnalyticId: context.baseMapAnalyticId,
+      liveConnectionsParams: options.liveConnectionsParams,
+      edges: context.edges,
+      waypointsByKey: context.waypointsByKey,
+    })
+  },
+  'stellar-cartography': (data, context, options) => {
+    const stellarCartography = options.stellarCartography
+    if (stellarCartography == null) {
+      throw new Error('Stellar Cartography map merge requires stellarCartography options')
+    }
+    if (data.meta?.nuIonStorms != null) {
+      context.nuIonStorms = data.meta.nuIonStorms
+    }
+    appendStellarCartographyMapLayer({
+      data,
+      nodes: context.nodes,
+      edges: context.edges,
+      overlayCircles: context.overlayCircles,
+      wormholeUnknownEntrances: context.wormholeUnknownEntrances,
+      layerVisibility: stellarCartography.layerVisibility,
+      settingsGates: stellarCartography.settingsGates,
+      wormholeDisplayMode: stellarCartography.wormholeDisplayMode,
+    })
+  },
 }
 
 export function combineMapData(
   analyticIds: string[],
   results: { data?: MapDataResponse }[],
-  options: CombineMapDataOptions | ConnectionsMapParams | null
+  options: CombineMapDataOptions
 ): CombinedMapData {
-  const liveConnectionsParams =
-    options != null && 'liveConnectionsParams' in options
-      ? options.liveConnectionsParams
-      : options
-  const cartographyLayerVisibility =
-    options != null && 'cartographyLayerVisibility' in options
-      ? options.cartographyLayerVisibility
-      : undefined
-  const cartographySettingsGates =
-    options != null && 'cartographySettingsGates' in options
-      ? options.cartographySettingsGates
-      : undefined
-  const wormholeDisplayMode =
-    options != null && 'wormholeDisplayMode' in options
-      ? options.wormholeDisplayMode
-      : undefined
-
   const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
   const nodes: CombinedMapData['nodes'] = []
   const edges: MapEdge[] = []
   const overlayCircles: CombinedMapData['overlayCircles'] = []
   const wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances'] = []
-  let nuIonStorms: boolean | undefined
-  const waypointsByKey = new Map<string, { x: number; y: number }>()
+  const context: MapLayerMergeContext = {
+    baseMapAnalyticId,
+    nodes,
+    edges,
+    overlayCircles,
+    wormholeUnknownEntrances,
+    waypointsByKey: new Map<string, { x: number; y: number }>(),
+    nuIonStorms: undefined,
+  }
   results.forEach((result, idx) => {
     const data = result.data
     const prefix = analyticIds[idx] ?? ''
@@ -77,42 +119,14 @@ export function combineMapData(
         edges.push(edge)
       })
     }
-    if (data.analyticId === 'connections' && baseMapAnalyticId != null) {
-      appendConnectionsMapLayer({
-        data,
-        baseMapAnalyticId,
-        liveConnectionsParams,
-        edges,
-        waypointsByKey,
-      })
-    }
-    if (
-      data.analyticId === 'stellar-cartography' &&
-      cartographyLayerVisibility != null &&
-      cartographySettingsGates != null &&
-      wormholeDisplayMode != null
-    ) {
-      if (data.meta?.nuIonStorms != null) {
-        nuIonStorms = data.meta.nuIonStorms
-      }
-      appendStellarCartographyMapLayer({
-        data,
-        nodes,
-        edges,
-        overlayCircles,
-        wormholeUnknownEntrances,
-        layerVisibility: cartographyLayerVisibility,
-        settingsGates: cartographySettingsGates,
-        wormholeDisplayMode,
-      })
-    }
+    mapLayerMergeRegistry[data.analyticId]?.(data, context, options)
   })
   return {
     nodes,
     edges,
-    routeWaypoints: routeWaypointsFromMap(waypointsByKey),
+    routeWaypoints: routeWaypointsFromMap(context.waypointsByKey),
     overlayCircles,
     wormholeUnknownEntrances,
-    nuIonStorms,
+    nuIonStorms: context.nuIonStorms,
   }
 }
