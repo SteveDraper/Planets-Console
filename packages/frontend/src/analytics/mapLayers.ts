@@ -13,10 +13,14 @@ export type StellarCartographyMapMergeOptions = {
   wormholeDisplayMode: WormholeDisplayMode
 }
 
-export type CombineMapDataOptions = {
+export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
   stellarCartography?: StellarCartographyMapMergeOptions
+}
+
+export type CombineMapDataOptionsWithStellarCartography = CombineMapDataOptionsBase & {
+  stellarCartography: StellarCartographyMapMergeOptions
 }
 
 type MapLayerMergeContext = {
@@ -32,10 +36,53 @@ type MapLayerMergeContext = {
 type MapLayerMerger = (
   data: MapDataResponse,
   context: MapLayerMergeContext,
-  options: CombineMapDataOptions
+  options: CombineMapDataOptionsBase,
+  prefix: string
 ) => void
 
+function prefixMapNodes(
+  data: MapDataResponse,
+  nodes: CombinedMapData['nodes'],
+  prefix: string
+): void {
+  data.nodes.forEach((n) => {
+    const base = {
+      id: `${prefix}:${n.id}`,
+      label: n.label,
+      x: n.x,
+      y: n.y,
+    }
+    const node: CombinedMapData['nodes'][number] = { ...base }
+    if (n.planet != null) {
+      node.planet = n.planet
+      node.ownerName = n.ownerName ?? null
+    }
+    if (n.normalWellCells != null) {
+      node.normalWellCells = n.normalWellCells
+    }
+    nodes.push(node)
+  })
+}
+
+function prefixMapEdges(data: MapDataResponse, edges: MapEdge[], prefix: string): void {
+  data.edges.forEach((e) => {
+    const edge: MapEdge = {
+      source: `${prefix}:${e.source}`,
+      target: `${prefix}:${e.target}`,
+    }
+    if (e.viaFlare) edge.viaFlare = true
+    edges.push(edge)
+  })
+}
+
+/** Prefix nodes and edges with the analytic slot id (base map and unknown analytics). */
+const defaultMapLayerMerger: MapLayerMerger = (data, context, _options, prefix) => {
+  prefixMapNodes(data, context.nodes, prefix)
+  prefixMapEdges(data, context.edges, prefix)
+}
+
 const mapLayerMergeRegistry: Record<string, MapLayerMerger> = {
+  'base-map': defaultMapLayerMerger,
   connections: (data, context, options) => {
     if (context.baseMapAnalyticId == null) return
     appendConnectionsMapLayer({
@@ -67,10 +114,26 @@ const mapLayerMergeRegistry: Record<string, MapLayerMerger> = {
   },
 }
 
+function mapLayerMergerFor(analyticId: string): MapLayerMerger {
+  return mapLayerMergeRegistry[analyticId] ?? defaultMapLayerMerger
+}
+
 export function combineMapData(
-  analyticIds: string[],
+  analyticIds: readonly string[],
   results: { data?: MapDataResponse }[],
-  options: CombineMapDataOptions
+  options: CombineMapDataOptionsBase
+): CombinedMapData
+export function combineMapData<T extends readonly string[]>(
+  analyticIds: T,
+  results: { data?: MapDataResponse }[],
+  options: 'stellar-cartography' extends T[number]
+    ? CombineMapDataOptionsWithStellarCartography
+    : CombineMapDataOptionsBase
+): CombinedMapData
+export function combineMapData(
+  analyticIds: readonly string[],
+  results: { data?: MapDataResponse }[],
+  options: CombineMapDataOptionsBase
 ): CombinedMapData {
   const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
   const nodes: CombinedMapData['nodes'] = []
@@ -90,36 +153,7 @@ export function combineMapData(
     const data = result.data
     const prefix = analyticIds[idx] ?? ''
     if (!data) return
-    if (data.analyticId !== 'stellar-cartography') {
-      data.nodes.forEach((n) => {
-        const base = {
-          id: `${prefix}:${n.id}`,
-          label: n.label,
-          x: n.x,
-          y: n.y,
-        }
-        const node: CombinedMapData['nodes'][number] = { ...base }
-        if (n.planet != null) {
-          node.planet = n.planet
-          node.ownerName = n.ownerName ?? null
-        }
-        if (n.normalWellCells != null) {
-          node.normalWellCells = n.normalWellCells
-        }
-        nodes.push(node)
-      })
-    }
-    if (data.analyticId !== 'connections' && data.analyticId !== 'stellar-cartography') {
-      data.edges.forEach((e) => {
-        const edge: MapEdge = {
-          source: `${prefix}:${e.source}`,
-          target: `${prefix}:${e.target}`,
-        }
-        if (e.viaFlare) edge.viaFlare = true
-        edges.push(edge)
-      })
-    }
-    mapLayerMergeRegistry[data.analyticId]?.(data, context, options)
+    mapLayerMergerFor(data.analyticId)(data, context, options, prefix)
   })
   return {
     nodes,

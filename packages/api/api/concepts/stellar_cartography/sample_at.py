@@ -6,13 +6,15 @@ import math
 from collections import defaultdict
 
 from api.analytics.stellar_cartography import ion_storm_class
+from api.concepts.stellar_cartography.layers import (
+    LAYER_BLACK_HOLES,
+    LAYER_ION_STORMS,
+    LAYER_NEBULAE,
+    LAYER_STAR_CLUSTERS,
+    PAINT_ORDER,
+)
 from api.models.game import TurnInfo
 from api.models.space import IonStorm, Nebula
-
-LAYER_NEBULAE = "nebulae"
-LAYER_ION_STORMS = "ion-storms"
-LAYER_STAR_CLUSTERS = "star-clusters"
-LAYER_BLACK_HOLES = "black-holes"
 
 ION_CLASS_NAMES: dict[int, str] = {
     1: "Harmless",
@@ -21,13 +23,6 @@ ION_CLASS_NAMES: dict[int, str] = {
     4: "Dangerous",
     5: "Very dangerous",
 }
-
-PAINT_ORDER = (
-    LAYER_NEBULAE,
-    LAYER_ION_STORMS,
-    LAYER_STAR_CLUSTERS,
-    LAYER_BLACK_HOLES,
-)
 
 # Host-aligned tooltip math (Planets.nu client / Meteor's Library).
 NEBULA_VISIBILITY_NUMERATOR = 4000

@@ -232,25 +232,29 @@ export function MainArea({
   const liveConnectionsParams =
     mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
   const mapIdsKey = mapIds.join('\0')
+  const includesStellarCartography = mapIds.includes('stellar-cartography')
   const combined = useMemo(
     () =>
       combineMapData(
         mapIds,
         mapQueries.map((q) => ({ data: q.data })),
-        {
-          liveConnectionsParams,
-          stellarCartography: {
-            layerVisibility: cartographyLayerVisibility,
-            settingsGates: cartographySettingsGates,
-            wormholeDisplayMode,
-          },
-        }
+        includesStellarCartography
+          ? {
+              liveConnectionsParams,
+              stellarCartography: {
+                layerVisibility: cartographyLayerVisibility,
+                settingsGates: cartographySettingsGates,
+                wormholeDisplayMode,
+              },
+            }
+          : { liveConnectionsParams }
       ),
     [
       mapIdsKey,
       mapQueriesStateSignature,
       liveConnectionsParams,
       analyticFetchEnabled,
+      includesStellarCartography,
       connectionsMapParams.flareMode,
       connectionsMapParams.warpSpeed,
       connectionsMapParams.gravitonicMovement,
@@ -388,11 +392,13 @@ export function MainArea({
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           planetLabelOptions={planetLabelOptions}
-          analyticScope={analyticScope}
-          stellarCartographySampleEnabled={enabledMapIds.includes('stellar-cartography')}
-          cartographyLayerVisibility={cartographyLayerVisibility}
-          cartographySettingsGates={cartographySettingsGates}
-          wormholeDisplayMode={wormholeDisplayMode}
+          stellarCartography={{
+            layerVisibility: cartographyLayerVisibility,
+            settingsGates: cartographySettingsGates,
+            wormholeDisplayMode,
+            sampleEnabled: enabledMapIds.includes('stellar-cartography'),
+            analyticScope,
+          }}
         />
       </MapPaneWithDisplayControls>
     </main>

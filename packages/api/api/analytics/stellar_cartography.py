@@ -1,17 +1,18 @@
 """Core Stellar Cartography map analytic."""
 
 from api.analytics.options import TurnAnalyticsOptions
+from api.concepts.stellar_cartography.layers import (
+    LAYER_BLACK_HOLES,
+    LAYER_DEBRIS_DISKS,
+    LAYER_ION_STORMS,
+    LAYER_NEBULAE,
+    LAYER_STAR_CLUSTERS,
+    LAYER_WORMHOLES,
+)
 from api.models.game import TurnInfo
 from api.models.space import IonStorm, Wormhole
 
 ANALYTIC_ID = "stellar-cartography"
-
-LAYER_NEBULAE = "nebulae"
-LAYER_ION_STORMS = "ion-storms"
-LAYER_STAR_CLUSTERS = "star-clusters"
-LAYER_BLACK_HOLES = "black-holes"
-LAYER_DEBRIS_DISKS = "debris-disks"
-LAYER_WORMHOLES = "wormholes"
 
 
 def ion_storm_class(voltage: int) -> int:

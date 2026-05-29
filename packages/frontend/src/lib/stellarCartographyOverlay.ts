@@ -5,12 +5,16 @@ import type {
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../api/bff'
+import {
+  flowToPane,
+  gameMapCellCenterToFlow,
+  type CartographyOverlayViewport,
+} from './cartographyOverlayGeometry'
 import { buildNebulaCloudPaneShapes, type NebulaCloudPaneShape } from './nebulaCloudOverlay'
 import {
   buildIonStormCloudPaneShapes,
   type IonStormCloudPaneShape,
 } from './ionStormCloudOverlay'
-import { PLANET_CELL_CENTER_OFFSET } from './planetSpatialGrid'
 import {
   BLACK_HOLE_BAND_FILL,
   BLACK_HOLE_BAND_FILL_ALPHA,
@@ -34,13 +38,7 @@ import {
   WORMHOLE_ENDPOINT_MIN_DIAMETER_PX,
 } from './stellarCartographyTheme'
 
-export type StellarCartographyOverlayViewport = {
-  width: number
-  height: number
-  tx: number
-  ty: number
-  scale: number
-}
+export type StellarCartographyOverlayViewport = CartographyOverlayViewport
 
 export type StellarCartographyOverlayCircleShape = {
   key: string
@@ -137,23 +135,7 @@ export type StellarCartographyOverlayPaneShapes = {
   wormholeMarkers: StellarCartographyOverlayWormholeMarkerShape[]
 }
 
-/** Game map cell center to React Flow coordinates (y grows downward). */
-export function gameMapCellCenterToFlow(gx: number, gy: number): { cx: number; cy: number } {
-  return {
-    cx: gx + PLANET_CELL_CENTER_OFFSET,
-    cy: -(gy + PLANET_CELL_CENTER_OFFSET),
-  }
-}
-
-/** Flow coordinates to pane pixel coordinates. */
-export function flowToPane(
-  cx: number,
-  cy: number,
-  viewport: StellarCartographyOverlayViewport
-): { px: number; py: number } {
-  const { tx, ty, scale } = viewport
-  return { px: cx * scale + tx, py: cy * scale + ty }
-}
+export { gameMapCellCenterToFlow } from './cartographyOverlayGeometry'
 
 function ionStormMovementLengthLy(warp: number | undefined): number {
   const w = warp ?? 0

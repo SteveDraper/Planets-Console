@@ -1,0 +1,74 @@
+{
+  "description": "Cross-layer contract for host-aligned ion voltage sampling. Values follow Planets.nu cloudy/classic ion storm math (Meteor's Library / client parity) as specified in docs/design-stellar-cartography-map-rendering.md. Core implements sampling in api/concepts/stellar_cartography/sample_at.py (_ion_voltage_at); the frontend raster uses ionVoltageAt / buildIonVoltageGrid in ionStormCloudOverlay.ts. Keep both packages in sync with packages/api/tests/fixtures/ion_voltage_contract.json.",
+  "tolerance": 1e-9,
+  "gridTolerance": 1e-5,
+  "cases": [
+    {
+      "id": "cloudy-single-disc",
+      "cloudy": true,
+      "circles": [
+        { "x": 0, "y": 0, "radius": 50, "voltage": 120 }
+      ],
+      "bounds": { "minX": 0, "minY": 0, "maxX": 50, "maxY": 50 },
+      "gridStep": 1,
+      "samples": [
+        { "x": 0, "y": 0, "expectedVoltage": 120, "expectedClass": 3 },
+        { "x": 25, "y": 0, "expectedVoltage": 60, "expectedClass": 2 },
+        { "x": 50, "y": 0, "expectedVoltage": 0 }
+      ]
+    },
+    {
+      "id": "classic-flat-disc",
+      "cloudy": false,
+      "circles": [
+        { "x": 0, "y": 0, "radius": 20, "voltage": 130 }
+      ],
+      "bounds": { "minX": 0, "minY": 0, "maxX": 20, "maxY": 20 },
+      "gridStep": 1,
+      "samples": [
+        { "x": 0, "y": 0, "expectedVoltage": 130, "expectedClass": 3 },
+        { "x": 19, "y": 0, "expectedVoltage": 130, "expectedClass": 3 },
+        { "x": 21, "y": 0, "expectedVoltage": 0 }
+      ]
+    },
+    {
+      "id": "cloudy-grouped-subcircles",
+      "cloudy": true,
+      "circles": [
+        { "x": 100, "y": 200, "radius": 50, "voltage": 120 },
+        { "x": 130, "y": 210, "radius": 40, "voltage": 160 }
+      ],
+      "storms": [
+        {
+          "id": 17,
+          "x": 100,
+          "y": 200,
+          "radius": 50,
+          "voltage": 120,
+          "warp": 8,
+          "heading": 90,
+          "isgrowing": false,
+          "parentid": 0
+        },
+        {
+          "id": 19,
+          "x": 130,
+          "y": 210,
+          "radius": 40,
+          "voltage": 160,
+          "warp": 6,
+          "heading": 45,
+          "isgrowing": false,
+          "parentid": 17
+        }
+      ],
+      "bounds": { "minX": 50, "minY": 150, "maxX": 180, "maxY": 260 },
+      "gridStep": 1,
+      "samples": [
+        { "x": 100, "y": 200, "expectedVoltage": 153.50889359326482, "expectedClass": 4 },
+        { "x": 130, "y": 210, "expectedVoltage": 204.1053361559589, "expectedClass": 5 },
+        { "x": 1000, "y": 1000, "expectedVoltage": 0 }
+      ]
+    }
+  ]
+}

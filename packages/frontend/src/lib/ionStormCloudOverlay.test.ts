@@ -9,10 +9,40 @@ import {
   ionStormBoundaryPolygonsAtThreshold,
   ionVoltageAt,
 } from './ionStormCloudOverlay'
+import { gridValueAt } from './scalarFieldGrid'
 import {
   ION_STORM_CLASS_VOLTAGE_THRESHOLDS,
   ION_STORM_OUTER_VOLTAGE_THRESHOLD,
 } from './stellarCartographyTheme'
+import contractFixture from '../test/fixtures/ion_voltage_contract.json'
+
+/** Host-aligned golden vectors; keep in sync with packages/api/tests/fixtures/ion_voltage_contract.json */
+describe('ion voltage contract fixture', () => {
+  const gridTolerance = contractFixture.gridTolerance
+
+  it('matches buildIonVoltageGrid and ionVoltageAt at fixture cells', () => {
+    for (const testCase of contractFixture.cases) {
+      const grid = buildIonVoltageGrid(
+        testCase.circles,
+        testCase.bounds,
+        testCase.gridStep,
+        testCase.cloudy
+      )
+
+      for (const sample of testCase.samples) {
+        const direct = ionVoltageAt(testCase.circles, sample.x, sample.y, testCase.cloudy)
+        expect(direct).toBeCloseTo(sample.expectedVoltage, 10)
+
+        const col = Math.round((sample.x - testCase.bounds.minX) / testCase.gridStep)
+        const row = Math.round((sample.y - testCase.bounds.minY) / testCase.gridStep)
+        if (col >= 0 && row >= 0 && col < grid.cols && row < grid.rows) {
+          const gridVoltage = gridValueAt(grid, col, row)
+          expect(Math.abs(gridVoltage - sample.expectedVoltage)).toBeLessThanOrEqual(gridTolerance)
+        }
+      }
+    }
+  })
+})
 
 describe('ionStormCloudOverlay', () => {
   beforeEach(() => {

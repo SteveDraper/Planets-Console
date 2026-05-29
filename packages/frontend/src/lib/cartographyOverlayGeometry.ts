@@ -1,3 +1,5 @@
+import { PLANET_CELL_CENTER_OFFSET } from './planetSpatialGrid'
+
 export type CartographyOverlayViewport = {
   width: number
   height: number
@@ -23,6 +25,11 @@ export type MapCircle = {
 
 export function mapLyToFlow(mapX: number, mapY: number): { cx: number; cy: number } {
   return { cx: mapX, cy: -mapY }
+}
+
+/** Integer game map cell coordinates to React Flow center (y grows downward). */
+export function gameMapCellCenterToFlow(gx: number, gy: number): { cx: number; cy: number } {
+  return mapLyToFlow(gx + PLANET_CELL_CENTER_OFFSET, gy + PLANET_CELL_CENTER_OFFSET)
 }
 
 export function flowToPane(
