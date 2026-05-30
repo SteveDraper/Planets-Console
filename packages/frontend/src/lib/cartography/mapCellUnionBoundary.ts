@@ -4,13 +4,11 @@ import {
   type MapBounds,
   type MapPoint,
 } from './cartographyOverlayGeometry'
-import { stitchMapSegmentsToPolylines } from './nebulaCloudOverlay'
+import { stitchMapSegmentsToPolylines, type MapSegment } from './cartographyPathUtils'
 import { starClusterRadiationSumAt, type StarClusterRadiationBody } from './starClusterRadiation'
 
 /** Side length of a map ly cell (integer cell ``cx`` spans ``[cx, cx + 1]``). */
 export const MAP_CELL_SIZE_LY = 1
-
-type MapSegment = [MapPoint, MapPoint]
 
 function cellKey(cellX: number, cellY: number): string {
   return `${cellX},${cellY}`

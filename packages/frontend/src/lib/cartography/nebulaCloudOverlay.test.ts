@@ -16,10 +16,9 @@ import {
   nebulaVisibilityAt,
   isPointInsideMapPolygon,
   soloNebulaBoundaryRadius,
-  stitchMapSegmentsToPolylines,
   type NebulaCloudCenter,
 } from './nebulaCloudOverlay'
-import type { MapPoint } from './cartographyOverlayGeometry'
+import { stitchMapSegmentsToPolylines, type MapSegment } from './cartographyPathUtils'
 import {
   NEBULA_BOUNDARY_DENSITY_THRESHOLD,
   NEBULA_DENSE_VISIBILITY_LY,
@@ -173,7 +172,6 @@ describe('nebulaCloudOverlay', () => {
   })
 
   it('stitches shared endpoints into one polyline path', () => {
-    type MapSegment = [MapPoint, MapPoint]
     const segments: MapSegment[] = [
       [{ x: 0, y: 0 }, { x: 1, y: 0 }],
       [{ x: 1, y: 0 }, { x: 1, y: 1 }],
