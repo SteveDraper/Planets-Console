@@ -12,7 +12,10 @@ from api.analytics.stellar_cartography import (
     get_stellar_cartography_map,
     ion_storm_class,
 )
-from api.concepts.stellar_cartography.star_clusters import neutron_cluster_names, stars_grouped_by_name
+from api.concepts.stellar_cartography.star_clusters import (
+    neutron_cluster_names,
+    stars_grouped_by_name,
+)
 from api.models.space import Star
 from api.serialization.turn import turn_info_from_json
 
