@@ -87,32 +87,36 @@ def _ion_storm_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
     return entries
 
 
-def _star_cluster_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
+def _star_cluster_entries(turn: TurnInfo, x: int, y: int) -> tuple[list[dict], list[dict]]:
     by_name = stars_grouped_by_name(turn.stars)
     neutron_names = neutron_cluster_names(turn.stars)
 
-    entries: list[dict] = []
+    star_entries: list[dict] = []
+    neutron_entries: list[dict] = []
     for name, bodies in by_name.items():
-        layer = LAYER_NEUTRON_CLUSTERS if name in neutron_names else LAYER_STAR_CLUSTERS
+        is_neutron = name in neutron_names
+        layer = LAYER_NEUTRON_CLUSTERS if is_neutron else LAYER_STAR_CLUSTERS
+        bucket = neutron_entries if is_neutron else star_entries
+
         lethal_lines = [
             f"{name} — lethal — temp {body.temp}" for body in bodies if is_lethal_at(x, y, body)
         ]
         if lethal_lines:
             for line in lethal_lines:
-                entries.append({"layer": layer, "lines": [line]})
+                bucket.append({"layer": layer, "lines": [line]})
             continue
 
         total_radiation = sum_radiation_at(x, y, bodies)
         if total_radiation <= 0:
             continue
-        if layer == LAYER_NEUTRON_CLUSTERS:
+        if is_neutron:
             bonus = format_neutrino_movement_bonus(total_radiation)
             warp_9 = format_neutrino_warp_9_max_range(total_radiation)
             line = f"{name} — neutrino flux {total_radiation} — movement {bonus} ({warp_9})"
         else:
             line = f"{name} — radiation {total_radiation}"
-        entries.append({"layer": layer, "lines": [line]})
-    return entries
+        bucket.append({"layer": layer, "lines": [line]})
+    return star_entries, neutron_entries
 
 
 def _black_hole_max_warp(coreradius: int, bandradius: int, dist: float) -> int | None:
@@ -188,16 +192,12 @@ def _nebula_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
 
 def sample_at(turn: TurnInfo, x: int, y: int) -> dict:
     """Return stacked tooltip entries at map cell ``(x, y)`` in paint order."""
-    star_entries = _star_cluster_entries(turn, x, y)
+    star_cluster_entries, neutron_cluster_entries = _star_cluster_entries(turn, x, y)
     by_layer: dict[str, list[dict]] = {
         LAYER_NEBULAE: _nebula_entries(turn, x, y),
         LAYER_ION_STORMS: _ion_storm_entries(turn, x, y),
-        LAYER_STAR_CLUSTERS: [
-            entry for entry in star_entries if entry["layer"] == LAYER_STAR_CLUSTERS
-        ],
-        LAYER_NEUTRON_CLUSTERS: [
-            entry for entry in star_entries if entry["layer"] == LAYER_NEUTRON_CLUSTERS
-        ],
+        LAYER_STAR_CLUSTERS: star_cluster_entries,
+        LAYER_NEUTRON_CLUSTERS: neutron_cluster_entries,
         LAYER_BLACK_HOLES: _black_hole_entries(turn, x, y),
     }
     entries: list[dict] = []
