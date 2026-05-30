@@ -260,8 +260,9 @@ function ConsoleShell() {
     }
   }, [analyticsIsError, analyticsError, addShellError])
 
+  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const stellarCartographyGates =
-    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
+    gameInfoContext?.stellarCartographyGates ??
     EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
 
   const { data: stellarCartographyTurnSummary } = useStellarCartographyTurnSummary({
@@ -318,6 +319,7 @@ function ConsoleShell() {
           connectionsMapParams={connectionsMapParams}
           onConnectionsMapParamsChange={setConnectionsMapParams}
           stellarCartographyGates={stellarCartographyGates}
+          cartographySettingsKnown={gameInfoContext != null}
           ionStormCount={ionStormCount}
         />
         {isPending ? (

@@ -15,6 +15,7 @@ type AnalyticsBarProps = {
   connectionsMapParams: ConnectionsMapParams
   onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
   stellarCartographyGates: StellarCartographySettingsGates
+  cartographySettingsKnown: boolean
   ionStormCount: number | null
 }
 
@@ -35,6 +36,7 @@ export function AnalyticsBar({
   connectionsMapParams,
   onConnectionsMapParamsChange,
   stellarCartographyGates,
+  cartographySettingsKnown,
   ionStormCount,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
@@ -77,6 +79,7 @@ export function AnalyticsBar({
                   depressed={depressed}
                   onToggle={() => onToggle(a.id)}
                   settingsGates={stellarCartographyGates}
+                  cartographySettingsKnown={cartographySettingsKnown}
                   ionStormCount={ionStormCount}
                 />
               </li>

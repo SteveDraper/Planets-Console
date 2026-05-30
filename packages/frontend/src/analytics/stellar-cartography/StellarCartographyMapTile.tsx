@@ -30,6 +30,8 @@ type StellarCartographyMapTileProps = {
   depressed: boolean
   onToggle: () => void
   settingsGates: StellarCartographySettingsGates
+  /** When false, game settings are not loaded yet; show all layer controls. */
+  cartographySettingsKnown: boolean
   /** When null, turn ion storm count is not known yet. */
   ionStormCount: number | null
 }
@@ -81,6 +83,7 @@ export function StellarCartographyMapTile({
   depressed,
   onToggle,
   settingsGates,
+  cartographySettingsKnown,
   ionStormCount,
 }: StellarCartographyMapTileProps) {
   const [expanded, setExpanded] = useState(false)
@@ -106,9 +109,11 @@ export function StellarCartographyMapTile({
     }
   }, [canExpand])
 
-  const visibleLayerDefinitions = CARTOGRAPHY_LAYER_DEFINITIONS.filter((layer) =>
-    isCartographyLayerGateEnabled(settingsGates, layer.id)
-  )
+  const visibleLayerDefinitions = cartographySettingsKnown
+    ? CARTOGRAPHY_LAYER_DEFINITIONS.filter((layer) =>
+        isCartographyLayerGateEnabled(settingsGates, layer.id)
+      )
+    : CARTOGRAPHY_LAYER_DEFINITIONS
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
 
@@ -197,6 +202,7 @@ export function StellarCartographyMapTile({
               )
             }
             const layerDisabled =
+              cartographySettingsKnown &&
               layer.id === 'ion-storms' &&
               settingsGates.ionStorms &&
               ionStormCount === 0

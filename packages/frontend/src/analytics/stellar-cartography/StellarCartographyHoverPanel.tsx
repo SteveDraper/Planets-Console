@@ -8,7 +8,6 @@ import {
 import { fetchStellarCartographySample } from '../../api/bff'
 import {
   isCartographyLayerShown,
-  type CartographyLayerId,
   type CartographyLayerVisibility,
   type StellarCartographySettingsGates,
 } from './layers'

@@ -5,7 +5,7 @@ import type {
   NeutronClusterOverlayCircle,
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
-} from '../api/bff'
+} from '../../api/bff'
 import {
   flowToPane,
   gameMapCellCenterToFlow,

@@ -197,9 +197,7 @@ def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) 
         "nebulae": len(turn.nebulas),
         "ionStorms": len(turn.ionstorms),
         "nuIonStorms": turn.settings.nuionstorms,
-        "starClusters": sum(
-            1 for star in turn.stars if star.name not in neutron_names
-        ),
+        "starClusters": sum(1 for star in turn.stars if star.name not in neutron_names),
         "neutronClusters": sum(1 for star in turn.stars if star.name in neutron_names),
         "blackHoles": len(turn.blackholes),
         "wormholes": len(turn.wormholes),

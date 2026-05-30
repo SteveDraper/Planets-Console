@@ -1,4 +1,4 @@
-import type { NebulaOverlayCircle } from '../api/bff'
+import type { NebulaOverlayCircle } from '../../api/bff'
 import {
   boundaryPathFromMapPolygons,
   boundsIntersectsViewport,

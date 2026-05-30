@@ -32,6 +32,7 @@ function renderTile(
       depressed
       onToggle={() => {}}
       settingsGates={allGatesEnabled}
+      cartographySettingsKnown
       ionStormCount={3}
       {...overrides}
     />
@@ -51,6 +52,32 @@ describe('StellarCartographyMapTile', () => {
   it('hides layer checkboxes until expanded', () => {
     renderTile()
     expect(screen.queryByLabelText('Nebulae')).not.toBeInTheDocument()
+  })
+
+  it('shows all layer controls when game settings are not loaded yet', async () => {
+    const user = userEvent.setup()
+    renderTile({
+      cartographySettingsKnown: false,
+      settingsGates: {
+        debrisDiskBorders: false,
+        starClusters: false,
+        neutronClusters: false,
+        nebulae: false,
+        ionStorms: false,
+        wormholes: false,
+        blackHoles: false,
+      },
+    })
+    await user.click(
+      screen.getByRole('button', { name: /expand stellar cartography layers/i })
+    )
+    expect(screen.getByText('Debris disk borders')).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Star clusters display mode' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Neutron clusters display mode' })).toBeInTheDocument()
+    expect(screen.getByText('Nebulae')).toBeInTheDocument()
+    expect(screen.getByText('Ion storms')).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Wormhole display mode' })).toBeInTheDocument()
+    expect(screen.getByText('Black holes')).toBeInTheDocument()
   })
 
   it('shows only settings-gated layers when expanded', async () => {

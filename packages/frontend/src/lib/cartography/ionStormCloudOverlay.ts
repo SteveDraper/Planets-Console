@@ -1,4 +1,4 @@
-import type { IonStormOverlayCircle } from '../api/bff'
+import type { IonStormOverlayCircle } from '../../api/bff'
 import {
   boundaryPathsFromMapPolygons,
   boundsIntersectsViewport,

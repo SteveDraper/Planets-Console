@@ -6,12 +6,12 @@ import math
 from collections import defaultdict
 from typing import Literal
 
+from api.concepts.planet_connections.wells import max_travel_distance
 from api.concepts.stellar_cartography.layers import (
     LAYER_NEUTRON_CLUSTERS,
     LAYER_STAR_CLUSTERS,
 )
 from api.models.space import Star
-from api.concepts.planet_connections.wells import max_travel_distance
 
 # Planets.nu client identifies neutron star bodies by lethal core radius (ly).
 NEUTRON_STAR_CORE_RADIUS_MIN = 5

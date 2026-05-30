@@ -11,6 +11,8 @@ export function loadIonVoltageContractFixture(): {
     id: string
     cloudy: boolean
     circles: Array<{ x: number; y: number; radius: number; voltage: number }>
+    bounds: { minX: number; minY: number; maxX: number; maxY: number }
+    gridStep: number
     storms?: Array<Record<string, unknown>>
     samples: Array<{
       x: number

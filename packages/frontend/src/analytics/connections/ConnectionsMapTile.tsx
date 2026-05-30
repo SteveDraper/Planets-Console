@@ -97,9 +97,9 @@ export function ConnectionsMapTile({
           />
         </button>
       </div>
-      {enabled && supportsMode ? (
+      {showExpandedBody ? (
         <div
-          className="flex min-w-0 flex-col gap-1 border-b border-[#52575d]/40 px-2 pb-2 text-xs text-slate-300"
+          className="flex min-w-0 flex-col gap-1.5 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
           onClick={(e) => e.stopPropagation()}
         >
           <label className="flex min-w-0 w-full items-center gap-1.5">
@@ -146,13 +146,6 @@ export function ConnectionsMapTile({
               ))}
             </select>
           </label>
-        </div>
-      ) : null}
-      {showExpandedBody ? (
-        <div
-          className="flex min-w-0 flex-col gap-1.5 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
-          onClick={(e) => e.stopPropagation()}
-        >
           <label className="flex min-w-0 w-full items-center gap-1.5">
             <span className="w-11 shrink-0 text-slate-400">Warp</span>
             <select

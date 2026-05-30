@@ -93,13 +93,9 @@ def _star_cluster_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
 
     entries: list[dict] = []
     for name, bodies in by_name.items():
-        layer = (
-            LAYER_NEUTRON_CLUSTERS if name in neutron_names else LAYER_STAR_CLUSTERS
-        )
+        layer = LAYER_NEUTRON_CLUSTERS if name in neutron_names else LAYER_STAR_CLUSTERS
         lethal_lines = [
-            f"{name} — lethal — temp {body.temp}"
-            for body in bodies
-            if is_lethal_at(x, y, body)
+            f"{name} — lethal — temp {body.temp}" for body in bodies if is_lethal_at(x, y, body)
         ]
         if lethal_lines:
             for line in lethal_lines:
@@ -112,9 +108,7 @@ def _star_cluster_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
         if layer == LAYER_NEUTRON_CLUSTERS:
             bonus = format_neutrino_movement_bonus(total_radiation)
             warp_9 = format_neutrino_warp_9_max_range(total_radiation)
-            line = (
-                f"{name} — neutrino flux {total_radiation} — movement {bonus} ({warp_9})"
-            )
+            line = f"{name} — neutrino flux {total_radiation} — movement {bonus} ({warp_9})"
         else:
             line = f"{name} — radiation {total_radiation}"
         entries.append({"layer": layer, "lines": [line]})

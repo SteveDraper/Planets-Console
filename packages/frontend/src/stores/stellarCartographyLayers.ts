@@ -42,7 +42,12 @@ type StellarCartographyLayersState = {
   setNeutronClusterDisplayMode: (mode: ClusterOutlineDisplayMode) => void
 }
 
-function migratePersistedState(persisted: unknown, version: number): StellarCartographyLayersState {
+type StellarCartographyLayersPersisted = Pick<
+  StellarCartographyLayersState,
+  'layers' | 'wormholeDisplayMode' | 'starClusterDisplayMode' | 'neutronClusterDisplayMode'
+>
+
+function migratePersistedState(persisted: unknown, version: number): StellarCartographyLayersPersisted {
   const raw = persisted as {
     layers?: Record<string, unknown>
     wormholeDisplayMode?: WormholeDisplayMode
@@ -121,7 +126,7 @@ export const useStellarCartographyLayersStore = create<StellarCartographyLayersS
         neutronClusterDisplayMode: state.neutronClusterDisplayMode,
       }),
       migrate: (persisted, version) => {
-        if (version >= PERSIST_VERSION) return persisted as StellarCartographyLayersState
+        if (version >= PERSIST_VERSION) return persisted as StellarCartographyLayersPersisted
         return migratePersistedState(persisted, version)
       },
     }
