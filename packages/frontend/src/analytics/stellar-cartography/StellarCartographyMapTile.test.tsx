@@ -9,6 +9,7 @@ import {
   defaultStarClusterDisplayMode,
 } from './clusterOutlineDisplayMode'
 import { defaultWormholeDisplayMode } from './wormholeDisplayMode'
+import { useShellStore } from '../../stores/shell'
 import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
 
 const allGatesEnabled = {
@@ -32,7 +33,6 @@ function renderTile(
       depressed
       onToggle={() => {}}
       settingsGates={allGatesEnabled}
-      cartographySettingsKnown
       ionStormCount={3}
       {...overrides}
     />
@@ -41,6 +41,15 @@ function renderTile(
 
 describe('StellarCartographyMapTile', () => {
   beforeEach(() => {
+    useShellStore.setState({
+      gameInfoContext: {
+        turn: 1,
+        perspectives: [],
+        isGameFinished: true,
+        sectorDisplayName: null,
+        stellarCartographyGates: allGatesEnabled,
+      },
+    })
     useStellarCartographyLayersStore.setState({
       layers: defaultCartographyLayerVisibility(),
       wormholeDisplayMode: defaultWormholeDisplayMode(),
@@ -56,8 +65,8 @@ describe('StellarCartographyMapTile', () => {
 
   it('shows all layer controls when game settings are not loaded yet', async () => {
     const user = userEvent.setup()
+    useShellStore.setState({ gameInfoContext: null })
     renderTile({
-      cartographySettingsKnown: false,
       settingsGates: {
         debrisDiskBorders: false,
         starClusters: false,

@@ -319,7 +319,6 @@ function ConsoleShell() {
           connectionsMapParams={connectionsMapParams}
           onConnectionsMapParamsChange={setConnectionsMapParams}
           stellarCartographyGates={stellarCartographyGates}
-          cartographySettingsKnown={gameInfoContext != null}
           ionStormCount={ionStormCount}
         />
         {isPending ? (

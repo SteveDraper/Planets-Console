@@ -19,6 +19,7 @@ import {
   WORMHOLE_DISPLAY_MODES,
   type WormholeDisplayMode,
 } from './wormholeDisplayMode'
+import { useShellStore } from '../../stores/shell'
 import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
 
 const ION_STORMS_EMPTY_HINT = 'No ion storms on this turn'
@@ -30,8 +31,6 @@ type StellarCartographyMapTileProps = {
   depressed: boolean
   onToggle: () => void
   settingsGates: StellarCartographySettingsGates
-  /** When false, game settings are not loaded yet; show all layer controls. */
-  cartographySettingsKnown: boolean
   /** When null, turn ion storm count is not known yet. */
   ionStormCount: number | null
 }
@@ -83,9 +82,9 @@ export function StellarCartographyMapTile({
   depressed,
   onToggle,
   settingsGates,
-  cartographySettingsKnown,
   ionStormCount,
 }: StellarCartographyMapTileProps) {
+  const cartographySettingsKnown = useShellStore((s) => s.gameInfoContext != null)
   const [expanded, setExpanded] = useState(false)
   const canExpand = supportsMode && enabled
   const layers = useStellarCartographyLayersStore((s) => s.layers)
