@@ -12,6 +12,8 @@ from api.analytics.stellar_cartography import (
     get_stellar_cartography_map,
     ion_storm_class,
 )
+from api.concepts.stellar_cartography.star_clusters import neutron_cluster_names, stars_grouped_by_name
+from api.models.space import Star
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -111,6 +113,44 @@ def test_overlay_circle_counts(stellar_cartography_turn):
     assert layers.count("star-clusters") == len(stellar_cartography_turn.stars)
     assert layers.count("neutron-clusters") == 0
     assert layers.count("black-holes") == 1
+    clusters_by_name = stars_grouped_by_name(stellar_cartography_turn.stars)
+    neutron_names = neutron_cluster_names(stellar_cartography_turn.stars)
+    assert data["meta"]["starClusters"] == len(clusters_by_name) - len(neutron_names)
+    assert data["meta"]["neutronClusters"] == len(neutron_names)
+
+
+def _star(**kwargs) -> Star:
+    defaults = {
+        "id": 1,
+        "name": "Solo",
+        "x": 100,
+        "y": 200,
+        "temp": 10_000,
+        "radius": 5,
+        "mass": 10_000,
+        "planets": 0,
+    }
+    defaults.update(kwargs)
+    return Star(**defaults)
+
+
+def test_meta_cluster_counts_use_distinct_names_not_bodies(stellar_cartography_turn):
+    """Meta starClusters/neutronClusters count cluster names, not star bodies."""
+    turn = copy.deepcopy(stellar_cartography_turn)
+    turn.stars = [
+        _star(id=1, name="Bith", x=10, y=10, radius=5),
+        _star(id=2, name="Bith", x=12, y=11, radius=5),
+        _star(id=3, name="Fortuitous", x=50, y=50, radius=40),
+        _star(id=4, name="SoloNeutron", x=60, y=60, radius=7),
+        _star(id=5, name="WideRadiation", x=70, y=70, radius=40),
+        _star(id=6, name="WideRadiation", x=71, y=71, radius=41),
+        _star(id=7, name="Mixed", x=80, y=80, radius=5),
+        _star(id=8, name="Mixed", x=81, y=81, radius=40),
+    ]
+    data = get_stellar_cartography_map(turn, TurnAnalyticsOptions())
+    assert len(turn.stars) == 8
+    assert data["meta"]["neutronClusters"] == 3
+    assert data["meta"]["starClusters"] == 2
 
 
 def test_nebula_and_blackhole_overlay_fields(stellar_cartography_turn):

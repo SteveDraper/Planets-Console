@@ -152,7 +152,9 @@ export type MapDataResponse = {
     ionStorms?: number
     /** When true, ion storm voltage falls off inside each sub-circle (Stellar Cartography). */
     nuIonStorms?: boolean
+    /** Distinct cluster names (not star body count). */
     starClusters?: number
+    /** Distinct neutron cluster names (not star body count). */
     neutronClusters?: number
     blackHoles?: number
     wormholes?: number
