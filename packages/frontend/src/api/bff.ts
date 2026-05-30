@@ -4,6 +4,12 @@
 
 import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
 import type { ConnectionsMapParams } from '../analytics/connections/api'
+import type {
+  MapDataResponse,
+  StellarCartographySampleResponse,
+  StellarCartographyTurnSummaryResponse,
+} from './bffCartographyTypes'
+import { normalizeMapDataResponse } from './bffCartographyTypes'
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 
@@ -12,6 +18,36 @@ export type {
   ConnectionsFlareMode,
   ConnectionsMapParams,
 } from '../analytics/connections/api'
+
+export type {
+  BlackHoleOverlayCircle,
+  CartographyOverlayLayerId,
+  CombinedMapData,
+  DebrisDiskOverlayCircle,
+  IllustrativeRouteStep,
+  IonStormOverlayCircle,
+  MapCell,
+  MapDataResponse,
+  MapEdge,
+  MapNode,
+  NebulaOverlayCircle,
+  NormalWellMapCell,
+  PlanetPairRoute,
+  RouteMapWaypoint,
+  NeutronClusterOverlayCircle,
+  StarClusterOverlayCircle,
+  StellarCartographyOverlayCircle,
+  StellarCartographySampleEntry,
+  StellarCartographySampleLayerId,
+  StellarCartographySampleResponse,
+  StellarCartographyTurnSummaryResponse,
+  WormholeUnknownEntrance,
+} from './bffCartographyTypes'
+
+export {
+  isStellarCartographySampleLayerId,
+  normalizeMapDataResponse,
+} from './bffCartographyTypes'
 
 /** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
 export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const
@@ -159,245 +195,6 @@ export type TableDataResponse = {
   analyticId: string
   columns: string[]
   rows: string[][]
-}
-
-/** Map cell whose center lies in a planet's normal warp well (from base-map). */
-export type NormalWellMapCell = {
-  x: number
-  y: number
-}
-
-/** Node position in the map's fixed Cartesian coordinate system. */
-export type MapNode = {
-  id: string
-  label: string
-  x: number
-  y: number
-  /** Present for base-map planets; full turn snapshot fields for map labels. */
-  planet?: Record<string, unknown>
-  /** Resolved from turn players when `planet` is present. */
-  ownerName?: string | null
-  /** Normal warp well cells from base-map; empty for debris-disk planets. */
-  normalWellCells?: NormalWellMapCell[]
-}
-
-/** Edge in map wire format or after combining route pairs onto base-map node ids. */
-export type MapEdge = {
-  source: string
-  target: string
-  /** True when reachability uses a flare (dashed edge on the map). */
-  viaFlare?: boolean
-  /**
-   * Intermediate map cells (game integer coordinates) between source and target.
-   * When set, the map draws a polyline A → waypoints → B instead of a single segment.
-   */
-  waypointsInGame?: { x: number; y: number }[]
-}
-
-/** One hop in a Core `illustrativeRoute` (normal move or flare). */
-export type IllustrativeRouteStep = {
-  kind: 'normal' | 'flare'
-  to: { x: number; y: number }
-  waypointOffset?: [number, number]
-  arrivalOffset?: [number, number]
-}
-
-/** UI-independent planet pair from the Connections analytic (Core/BFF). */
-export type PlanetPairRoute = {
-  fromPlanetId: number
-  toPlanetId: number
-  viaFlare: boolean
-  /** Present when the server was asked for illustrative paths (multi-hop flares). */
-  illustrativeRoute?: IllustrativeRouteStep[]
-}
-
-export type MapDataResponse = {
-  analyticId: string
-  nodes: MapNode[]
-  edges: MapEdge[]
-  routes?: PlanetPairRoute[]
-}
-
-/** Parse a single JSON number; rejects null, non-numeric, and `Number('')` → 0. */
-function parseJsonFiniteNumber(value: unknown): number | null {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null
-  }
-  if (typeof value === 'string') {
-    if (value.trim() === '') return null
-    const n = Number(value)
-    return Number.isFinite(n) ? n : null
-  }
-  return null
-}
-
-/** Parse a map grid cell index; must be a finite integer (no boolean/null/`""` coercion). */
-function parseJsonInteger(value: unknown): number | null {
-  const n = parseJsonFiniteNumber(value)
-  if (n == null || !Number.isInteger(n)) return null
-  return n
-}
-
-/**
- * 2D offset tuple from the wire. Each element must be a finite `number` or a non-empty
- * numeric string — never `Number()` on arbitrary values (avoids `null`/`""` → `0`).
- */
-function parseFiniteNumberPair(
-  s: Record<string, unknown>,
-  camelKey: string,
-  snakeKey: string
-): [number, number] | undefined {
-  const raw = s[camelKey] ?? s[snakeKey]
-  if (raw == null) return undefined
-  if (!Array.isArray(raw) || raw.length !== 2) return undefined
-  const a = parseJsonFiniteNumber(raw[0])
-  const b = parseJsonFiniteNumber(raw[1])
-  if (a == null || b == null) return undefined
-  return [a, b]
-}
-
-function normalizeIllustrativeRouteStep(raw: unknown): IllustrativeRouteStep | null {
-  if (raw == null || typeof raw !== 'object') return null
-  const s = raw as Record<string, unknown>
-  const kind = s.kind === 'flare' ? 'flare' : s.kind === 'normal' ? 'normal' : null
-  if (kind == null) return null
-  const toRaw = s.to
-  if (toRaw == null || typeof toRaw !== 'object') return null
-  const t = toRaw as Record<string, unknown>
-  const x = parseJsonFiniteNumber(t.x)
-  const y = parseJsonFiniteNumber(t.y)
-  if (x == null || y == null) return null
-  const out: IllustrativeRouteStep = { kind, to: { x, y } }
-  const wp = parseFiniteNumberPair(s, 'waypointOffset', 'waypoint_offset')
-  if (wp != null) {
-    out.waypointOffset = wp
-  }
-  const ar = parseFiniteNumberPair(s, 'arrivalOffset', 'arrival_offset')
-  if (ar != null) {
-    out.arrivalOffset = ar
-  }
-  return out
-}
-
-/**
- * Parses each node so `planet` / `ownerName` are plain objects (not lost to reference sharing).
- * Accepts `Planet` as an alternate key for the nested snapshot (defensive).
- */
-function normalizePlanetPairRoute(raw: unknown): PlanetPairRoute | null {
-  if (raw == null || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  const fromRaw = r.fromPlanetId ?? r.from_planet_id
-  const toRaw = r.toPlanetId ?? r.to_planet_id
-  const fromPlanetId = typeof fromRaw === 'number' ? fromRaw : Number(fromRaw)
-  const toPlanetId = typeof toRaw === 'number' ? toRaw : Number(toRaw)
-  if (!Number.isFinite(fromPlanetId) || !Number.isFinite(toPlanetId)) return null
-  let illustrativeRoute: IllustrativeRouteStep[] | undefined
-  const irRaw = r.illustrativeRoute ?? r.illustrative_route
-  if (Array.isArray(irRaw) && irRaw.length > 0) {
-    const steps = irRaw
-      .map(normalizeIllustrativeRouteStep)
-      .filter((s): s is IllustrativeRouteStep => s != null)
-    if (steps.length > 0) illustrativeRoute = steps
-  }
-  const o: PlanetPairRoute = {
-    fromPlanetId,
-    toPlanetId,
-    viaFlare: r.viaFlare === true,
-  }
-  if (illustrativeRoute != null) {
-    o.illustrativeRoute = illustrativeRoute
-  }
-  return o
-}
-
-function normalizeMapEdge(raw: unknown): MapEdge | null {
-  if (raw == null || typeof raw !== 'object') return null
-  const e = raw as Record<string, unknown>
-  const source = typeof e.source === 'string' ? e.source : String(e.source ?? '')
-  const target = typeof e.target === 'string' ? e.target : String(e.target ?? '')
-  if (source === '' || target === '') return null
-  const edge: MapEdge = { source, target }
-  if (e.viaFlare === true) edge.viaFlare = true
-  return edge
-}
-
-export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
-  if (raw == null || typeof raw !== 'object') {
-    return { analyticId: '', nodes: [], edges: [] }
-  }
-  const o = raw as Record<string, unknown>
-  const nodesRaw = o.nodes
-  const edgesRaw = o.edges
-  const routesRaw = o.routes
-  const nodes = Array.isArray(nodesRaw) ? nodesRaw.map(normalizeMapNode) : []
-  const edges = Array.isArray(edgesRaw)
-    ? (edgesRaw.map(normalizeMapEdge).filter((e) => e != null) as MapEdge[])
-    : []
-  const routes = Array.isArray(routesRaw)
-    ? (routesRaw.map(normalizePlanetPairRoute).filter((r) => r != null) as PlanetPairRoute[])
-    : undefined
-  const out: MapDataResponse = {
-    analyticId: typeof o.analyticId === 'string' ? o.analyticId : String(o.analyticId ?? ''),
-    nodes,
-    edges,
-  }
-  if (routes != null) {
-    out.routes = routes
-  }
-  return out
-}
-
-function normalizeMapNode(raw: unknown): MapNode {
-  if (raw == null || typeof raw !== 'object') {
-    return { id: '', label: '', x: 0, y: 0 }
-  }
-  const n = raw as Record<string, unknown>
-  const nested = n.planet ?? n.Planet
-  const planet =
-    nested != null && typeof nested === 'object' && !Array.isArray(nested)
-      ? ({ ...(nested as Record<string, unknown>) } as Record<string, unknown>)
-      : undefined
-  const base: MapNode = {
-    id: typeof n.id === 'string' ? n.id : String(n.id ?? ''),
-    label: typeof n.label === 'string' ? n.label : String(n.label ?? ''),
-    x: typeof n.x === 'number' ? n.x : Number(n.x) || 0,
-    y: typeof n.y === 'number' ? n.y : Number(n.y) || 0,
-  }
-  if (planet != null) {
-    base.planet = planet
-  }
-  if (Object.prototype.hasOwnProperty.call(n, 'ownerName')) {
-    base.ownerName = n.ownerName as string | null | undefined
-  }
-  const rawCells = n.normalWellCells ?? n.normal_well_cells
-  if (Array.isArray(rawCells)) {
-    base.normalWellCells = rawCells
-      .map((cell) => {
-        if (cell == null || typeof cell !== 'object') return null
-        const c = cell as Record<string, unknown>
-        const x = parseJsonInteger(c.x)
-        const y = parseJsonInteger(c.y)
-        if (x == null || y == null) return null
-        return { x, y }
-      })
-      .filter((cell): cell is NormalWellMapCell => cell != null)
-  }
-  return base
-}
-
-/** Intermediate cell along a multi-hop flare (game map integer coordinates), for subtle markers. */
-export type RouteMapWaypoint = {
-  id: string
-  gx: number
-  gy: number
-}
-
-/** Combined nodes/edges from multiple analytics for the single shared map. */
-export type CombinedMapData = {
-  nodes: MapDataResponse['nodes']
-  edges: MapEdge[]
-  /** Deduped intermediate cells for illustrated flare routes (when `includeIllustrativeRoutes` was requested). */
-  routeWaypoints: RouteMapWaypoint[]
 }
 
 export type StoredGameItem = {
@@ -664,6 +461,33 @@ export async function fetchAnalyticMap(
   }
   const raw = await r.json()
   return normalizeMapDataResponse(raw)
+}
+
+export async function fetchStellarCartographySample(
+  scope: AnalyticShellScope,
+  x: number,
+  y: number
+): Promise<StellarCartographySampleResponse> {
+  const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/sample`
+  const params = new URLSearchParams({ x: String(x), y: String(y) })
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}?${params.toString()}`, { cache: 'no-store' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function fetchStellarCartographyTurnSummary(
+  scope: AnalyticShellScope
+): Promise<StellarCartographyTurnSummaryResponse> {
+  const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/summary`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, { cache: 'no-store' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
 }
 
 // --- Server diagnostics (MRU buffer of request trees) ---

@@ -1,6 +1,8 @@
 import { cn } from '../lib/utils'
 import { ConnectionsMapTile } from '../analytics/connections/ConnectionsMapTile'
+import { StellarCartographyMapTile } from '../analytics/stellar-cartography/StellarCartographyMapTile'
 import { tileClassName } from '../analytics/tileChrome'
+import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
 import type { AnalyticItem, ConnectionsMapParams } from '../api/bff'
 
 type ViewMode = 'tabular' | 'map'
@@ -12,6 +14,8 @@ type AnalyticsBarProps = {
   viewMode: ViewMode
   connectionsMapParams: ConnectionsMapParams
   onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
+  stellarCartographyGates: StellarCartographySettingsGates
+  ionStormCount: number | null
 }
 
 function supportsCurrentMode(a: AnalyticItem, viewMode: ViewMode): boolean {
@@ -30,6 +34,8 @@ export function AnalyticsBar({
   viewMode,
   connectionsMapParams,
   onConnectionsMapParamsChange,
+  stellarCartographyGates,
+  ionStormCount,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
@@ -43,6 +49,7 @@ export function AnalyticsBar({
           const supportsMode = supportsCurrentMode(a, viewMode)
           const depressed = enabled && supportsMode
           const isConnectionsMap = a.id === 'connections' && viewMode === 'map'
+          const isStellarCartographyMap = a.id === 'stellar-cartography' && viewMode === 'map'
 
           if (isConnectionsMap) {
             return (
@@ -55,6 +62,22 @@ export function AnalyticsBar({
                   onToggle={() => onToggle(a.id)}
                   connectionsMapParams={connectionsMapParams}
                   onConnectionsMapParamsChange={onConnectionsMapParamsChange}
+                />
+              </li>
+            )
+          }
+
+          if (isStellarCartographyMap) {
+            return (
+              <li key={a.id} className="min-w-0">
+                <StellarCartographyMapTile
+                  name={a.name}
+                  enabled={enabled}
+                  supportsMode={supportsMode}
+                  depressed={depressed}
+                  onToggle={() => onToggle(a.id)}
+                  settingsGates={stellarCartographyGates}
+                  ionStormCount={ionStormCount}
                 />
               </li>
             )

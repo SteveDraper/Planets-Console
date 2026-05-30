@@ -9,6 +9,8 @@ from api.analytics.connections import get_connections_map
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores import ANALYTIC_ID as SCORES_ID
 from api.analytics.scores import get_scores_table
+from api.analytics.stellar_cartography import ANALYTIC_ID as STELLAR_CARTOGRAPHY_ID
+from api.analytics.stellar_cartography import get_stellar_cartography_map
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 
@@ -27,6 +29,7 @@ TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
     BASE_MAP_ID: _base_map_handler,
     SCORES_ID: _scores_handler,
     CONNECTIONS_ID: get_connections_map,
+    STELLAR_CARTOGRAPHY_ID: get_stellar_cartography_map,
 }
 
 

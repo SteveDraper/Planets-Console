@@ -35,6 +35,10 @@ class Nebula:
     id: int
     x: int
     y: int
+    name: str = ""
+    radius: int = 0
+    intensity: int = 0
+    gas: int = 0
 
 
 @dataclass
@@ -54,6 +58,9 @@ class Blackhole:
     id: int
     x: int
     y: int
+    name: str = ""
+    coreradius: int = 0
+    bandradius: int = 0
 
 
 @dataclass
@@ -66,6 +73,11 @@ class Wormhole:
     id: int
     x: int
     y: int
+    name: str = ""
+    targetx: int = 0
+    targety: int = 0
+    stability: int = 0
+    turn: int = 0
 
 
 @dataclass

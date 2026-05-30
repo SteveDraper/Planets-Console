@@ -199,6 +199,28 @@ class TestTurnInfoSerialization:
         assert deepcopy_calls == []
 
 
+class TestStellarCartographySpatialSerialization:
+    def test_nebula_blackhole_wormhole_round_trip(self):
+        with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
+            data = json.load(f)
+        turn = turn_info_from_json(data)
+        nebula = turn.nebulas[0]
+        assert nebula.name == "Zoie"
+        assert nebula.radius == 50
+        assert nebula.intensity == 6
+        assert nebula.gas == 3
+        blackhole = turn.blackholes[0]
+        assert blackhole.coreradius == 15
+        assert blackhole.bandradius == 40
+        wormhole = turn.wormholes[0]
+        assert wormhole.targetx == 20
+        assert wormhole.stability == 80
+        restored = turn_info_from_json(turn_info_to_json(turn))
+        assert restored.nebulas[0] == nebula
+        assert restored.blackholes[0] == blackhole
+        assert restored.wormholes[0] == wormhole
+
+
 class TestGameInfoSerialization:
     def test_deserialize(self, game_info_sample_data):
         gi = game_info_from_json(game_info_sample_data)

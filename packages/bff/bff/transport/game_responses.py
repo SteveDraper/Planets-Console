@@ -53,3 +53,10 @@ class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
     """1-based perspective slots that already have turn data in storage."""
 
     perspectives: list[int] = Field(default_factory=list)
+
+
+class StellarCartographyTurnSummaryResponse(OmitNullDiagnosticsBase):
+    """Lightweight turn facts for Stellar Cartography sidebar state."""
+
+    ionStormCount: int
+    nuIonStorms: bool

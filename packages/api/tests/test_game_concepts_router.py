@@ -96,3 +96,28 @@ class TestWarpWellCells:
             params={"planet_id": 999999999, "well_type": "normal"},
         )
         assert resp.status_code == 404
+
+
+class TestStellarCartographySample:
+    @pytest.fixture(autouse=True)
+    def _stellar_turn(self):
+        storage = get_storage()
+        with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
+            storage.put("games/628580/1/turns/111", json.load(f))
+
+    def test_returns_nebula_at_center(self, client):
+        resp = client.get(
+            "/v1/games/628580/1/turns/111/concepts/stellar-cartography/sample",
+            params={"x": 100, "y": 200},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["x"] == 100
+        assert data["y"] == 200
+        layers = [e["layer"] for e in data["entries"]]
+        assert "nebulae" in layers
+
+    def test_turn_summary_returns_ion_storm_availability(self, client):
+        resp = client.get("/v1/games/628580/1/turns/111/concepts/stellar-cartography/summary")
+        assert resp.status_code == 200
+        assert resp.json() == {"ion_storm_count": 3, "nu_ion_storms": True}

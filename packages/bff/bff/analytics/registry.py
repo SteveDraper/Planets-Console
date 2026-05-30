@@ -6,12 +6,13 @@ from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import ConnectionsMapQuery, CoreAnalyticsLoader, TurnScope
 from bff.errors import BFFValidationError
 
-from . import base_map, connections, scores
+from . import base_map, connections, scores, stellar_cartography
 
 REGISTERED_ANALYTICS: tuple[AnalyticDescriptor, ...] = (
     base_map.DESCRIPTOR,
     scores.DESCRIPTOR,
     connections.DESCRIPTOR,
+    stellar_cartography.DESCRIPTOR,
 )
 
 _BY_ID: dict[str, AnalyticDescriptor] = {

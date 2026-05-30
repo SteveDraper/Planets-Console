@@ -27,3 +27,18 @@ body {
 .map-graph-cursor-default .react-flow__pane.dragging {
   cursor: default !important;
 }
+
+@keyframes wormhole-recenter-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.4);
+  }
+}
+
+.wormhole-recenter-pulse {
+  animation: wormhole-recenter-pulse 0.75s ease-in-out 4;
+  transform-origin: center center;
+}

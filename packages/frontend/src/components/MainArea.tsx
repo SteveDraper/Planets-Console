@@ -9,6 +9,9 @@ import type {
   MapDataResponse,
 } from '../api/bff'
 import { combineMapData } from '../analytics/mapLayers'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
+import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
+import { useShellStore } from '../stores/shell'
 import { MapGraph } from './MapGraph'
 import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from './PlanetMapInfoControls'
@@ -147,6 +150,16 @@ export function MainArea({
     [viewMode, analytics, enabledMapIds]
   )
 
+  const cartographyLayerVisibility = useStellarCartographyLayersStore((s) => s.layers)
+  const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
+  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
+  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
+    (s) => s.neutronClusterDisplayMode
+  )
+  const cartographySettingsGates =
+    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
+    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
+
   const mapQueries = useQueries({
     queries: mapIds.map((analyticId) => {
       if (analyticId === 'connections') {
@@ -223,22 +236,40 @@ export function MainArea({
   const liveConnectionsParams =
     mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
   const mapIdsKey = mapIds.join('\0')
+  const includesStellarCartography = mapIds.includes('stellar-cartography')
   const combined = useMemo(
     () =>
       combineMapData(
         mapIds,
         mapQueries.map((q) => ({ data: q.data })),
-        liveConnectionsParams
+        includesStellarCartography
+          ? {
+              liveConnectionsParams,
+              stellarCartography: {
+                layerVisibility: cartographyLayerVisibility,
+                settingsGates: cartographySettingsGates,
+                wormholeDisplayMode,
+                starClusterDisplayMode,
+                neutronClusterDisplayMode,
+              },
+            }
+          : { liveConnectionsParams }
       ),
     [
       mapIdsKey,
       mapQueriesStateSignature,
       liveConnectionsParams,
       analyticFetchEnabled,
+      includesStellarCartography,
       connectionsMapParams.flareMode,
       connectionsMapParams.warpSpeed,
       connectionsMapParams.gravitonicMovement,
       connectionsMapParams.flareDepth,
+      cartographyLayerVisibility,
+      cartographySettingsGates,
+      wormholeDisplayMode,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode,
     ]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
@@ -369,6 +400,15 @@ export function MainArea({
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           planetLabelOptions={planetLabelOptions}
+          stellarCartography={{
+            layerVisibility: cartographyLayerVisibility,
+            settingsGates: cartographySettingsGates,
+            wormholeDisplayMode,
+            starClusterDisplayMode,
+            neutronClusterDisplayMode,
+            sampleEnabled: enabledMapIds.includes('stellar-cartography'),
+            analyticScope,
+          }}
         />
       </MapPaneWithDisplayControls>
     </main>

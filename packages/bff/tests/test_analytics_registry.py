@@ -44,6 +44,55 @@ def test_registry_metadata_keeps_scores_selectable_table_only():
     assert scores["supportsMap"] is False
 
 
+def test_registry_metadata_keeps_stellar_cartography_selectable_map_only():
+    stellar = next(a for a in ANALYTICS_LIST if a["id"] == "stellar-cartography")
+    assert stellar == {
+        "id": "stellar-cartography",
+        "name": "Stellar Cartography",
+        "supportsTable": False,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
+def test_stellar_cartography_map_dispatch_forwards_to_core():
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return {
+            "analyticId": "stellar-cartography",
+            "overlayCircles": [],
+            "nodes": [],
+            "edges": [],
+            "meta": {"wormholeEdges": 0},
+        }
+
+    data = get_map_response(
+        "stellar-cartography",
+        TurnScope(628580, 1, 111),
+        ConnectionsMapQuery(
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.OFF,
+            flare_depth=1,
+            include_illustrative_routes=False,
+        ),
+        load_core,
+        NOOP_DIAGNOSTICS,
+    )
+    assert data["analyticId"] == "stellar-cartography"
+    assert calls == [
+        (
+            628580,
+            1,
+            111,
+            "stellar-cartography",
+            {"diagnostics": NOOP_DIAGNOSTICS},
+        )
+    ]
+
+
 def test_scores_table_dispatch_shapes_core_rows():
     def load_core(game_id, perspective, turn, analytic_id, **kwargs):
         assert (game_id, perspective, turn, analytic_id) == (628580, 1, 111, "scores")

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { GameInfoShellContext } from '../stores/shell'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import {
   deriveAnalyticScope,
   deriveSelectedViewpointName,
@@ -19,15 +20,21 @@ const perspectives = [
   { ordinal: 3, name: 'Carol', raceName: null as string | null },
 ]
 
+function shellContext(overrides: Partial<GameInfoShellContext> = {}): GameInfoShellContext {
+  return {
+    turn: 10,
+    perspectives,
+    isGameFinished: true,
+    sectorDisplayName: 'Test Sector',
+    stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+    ...overrides,
+  }
+}
+
 function baseInputs(overrides: Partial<ShellContextInputs> = {}): ShellContextInputs {
   return {
     selectedGameId: '628580',
-    gameInfoContext: {
-      turn: 10,
-      perspectives,
-      isGameFinished: true,
-      sectorDisplayName: 'Test Sector',
-    },
+    gameInfoContext: shellContext(),
     selectedTurn: 5,
     perspectiveOverrideName: null,
     loginName: 'Alice',
@@ -39,12 +46,7 @@ function baseInputs(overrides: Partial<ShellContextInputs> = {}): ShellContextIn
 
 describe('deriveShellTurnMax', () => {
   it('uses latest turn from game info context', () => {
-    const ctx: GameInfoShellContext = {
-      turn: 50,
-      perspectives,
-      isGameFinished: false,
-      sectorDisplayName: null,
-    }
+    const ctx = shellContext({ turn: 50, isGameFinished: false, sectorDisplayName: null })
     expect(deriveShellTurnMax(ctx)).toBe(50)
   })
 })
@@ -68,12 +70,7 @@ describe('deriveShellViewpoints', () => {
   })
 
   it('disables non-login viewpoints when game is in progress', () => {
-    const ctx: GameInfoShellContext = {
-      turn: 10,
-      perspectives,
-      isGameFinished: false,
-      sectorDisplayName: null,
-    }
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     const rows = deriveShellViewpoints(
       baseInputs({ gameInfoContext: ctx, loginName: 'Bob' })
     )
@@ -83,12 +80,7 @@ describe('deriveShellViewpoints', () => {
   })
 
   it('adds spectator viewpoint when in-progress and login is not a player', () => {
-    const ctx: GameInfoShellContext = {
-      turn: 10,
-      perspectives,
-      isGameFinished: false,
-      sectorDisplayName: null,
-    }
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     const rows = deriveShellViewpoints(
       baseInputs({ gameInfoContext: ctx, loginName: 'Unknown' })
     )
@@ -132,12 +124,7 @@ describe('deriveSelectedViewpointName', () => {
   })
 
   it('uses login-matched player for in-progress games', () => {
-    const ctx: GameInfoShellContext = {
-      turn: 10,
-      perspectives,
-      isGameFinished: false,
-      sectorDisplayName: null,
-    }
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveSelectedViewpointName(
         baseInputs({ gameInfoContext: ctx, loginName: 'Bob', perspectiveOverrideName: 'Alice' })
@@ -146,12 +133,7 @@ describe('deriveSelectedViewpointName', () => {
   })
 
   it('selects spectator when in-progress and login is not a player', () => {
-    const ctx: GameInfoShellContext = {
-      turn: 10,
-      perspectives,
-      isGameFinished: false,
-      sectorDisplayName: null,
-    }
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveSelectedViewpointName(
         baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
@@ -231,12 +213,9 @@ describe('deriveAnalyticScope', () => {
     expect(
       deriveAnalyticScope(
         baseInputs({
-          gameInfoContext: {
-            turn: 10,
+          gameInfoContext: shellContext({
             perspectives: [],
-            isGameFinished: true,
-            sectorDisplayName: null,
-          },
+          }),
         })
       )
     ).toBeNull()
@@ -251,12 +230,7 @@ describe('deriveAnalyticScope', () => {
   })
 
   it('uses pseudo-viewpoint 0 when in-progress and login is not a player', () => {
-    const ctx: GameInfoShellContext = {
-      turn: 10,
-      perspectives,
-      isGameFinished: false,
-      sectorDisplayName: null,
-    }
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveAnalyticScope(
         baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
@@ -317,12 +291,7 @@ describe('turn ensure gating', () => {
 })
 
 describe('shouldClearInProgressPerspectiveOverride', () => {
-  const inProgress: GameInfoShellContext = {
-    turn: 10,
-    perspectives,
-    isGameFinished: false,
-    sectorDisplayName: null,
-  }
+  const inProgress = shellContext({ isGameFinished: false, sectorDisplayName: null })
 
   it('clears override that does not match login for in-progress game', () => {
     expect(
@@ -344,12 +313,7 @@ describe('shouldClearInProgressPerspectiveOverride', () => {
 })
 
 describe('isViewpointChangeAllowed', () => {
-  const inProgress: GameInfoShellContext = {
-    turn: 10,
-    perspectives,
-    isGameFinished: false,
-    sectorDisplayName: null,
-  }
+  const inProgress = shellContext({ isGameFinished: false, sectorDisplayName: null })
 
   it('allows spectator only when login is not a player during in-progress game', () => {
     expect(
