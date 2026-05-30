@@ -19,6 +19,7 @@ import {
   type ScalarFieldComponent,
 } from './scalarFieldGrid'
 import { rasterizeMapField } from './rasterizeMapField'
+import { hexToRgb, hexWithAlpha } from './cartographyColor'
 import {
   ION_STORM_BOUNDARY_MAX_GRID_CELLS,
   ION_STORM_BOUNDARY_RAY_COUNT,
@@ -85,16 +86,6 @@ function ionStormRasterClass(voltage: number): number {
     if (voltage < threshold) return index + 1
   }
   return ION_STORM_CLASS_VOLTAGE_THRESHOLDS.length + 1
-}
-
-function hexToRgb(hex: string): [number, number, number] {
-  const value = parseInt(hex.slice(1), 16)
-  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
-}
-
-function hexWithAlpha(hex: string, alpha: number): string {
-  const [r, g, b] = hexToRgb(hex)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 /** Summed ion voltage at a map point; matches Core sample_at. */

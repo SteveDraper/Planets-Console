@@ -43,6 +43,37 @@ export function flowToPane(
   }
 }
 
+export type FlowBounds = {
+  fxMin: number
+  fxMax: number
+  fyMin: number
+  fyMax: number
+}
+
+/** Visible region in flow coordinates for a cartography overlay viewport. */
+export function flowBoundsFromViewport(viewport: CartographyOverlayViewport): FlowBounds {
+  const { scale } = viewport
+  return {
+    fxMin: -viewport.tx / scale,
+    fxMax: (viewport.width - viewport.tx) / scale,
+    fyMin: -viewport.ty / scale,
+    fyMax: (viewport.height - viewport.ty) / scale,
+  }
+}
+
+/** True when a flow-space circle intersects the given flow bounds. */
+export function circleIntersectsFlowBounds(
+  cx: number,
+  cy: number,
+  r: number,
+  bounds: FlowBounds
+): boolean {
+  const closestX = Math.max(bounds.fxMin, Math.min(cx, bounds.fxMax))
+  const closestY = Math.max(bounds.fyMin, Math.min(cy, bounds.fyMax))
+  const distSq = (cx - closestX) ** 2 + (cy - closestY) ** 2
+  return distSq <= r * r
+}
+
 export function mapToPane(
   mapX: number,
   mapY: number,

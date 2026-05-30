@@ -7,10 +7,13 @@ import type {
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
 import {
+  circleIntersectsFlowBounds,
+  flowBoundsFromViewport,
   flowToPane,
   gameMapCellCenterToFlow,
   type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
+import { hexWithAlpha } from './cartographyColor'
 import { buildNebulaCloudPaneShapes, type NebulaCloudPaneShape } from './nebulaCloudOverlay'
 import {
   buildIonStormCloudPaneShapes,
@@ -173,21 +176,6 @@ export function ionStormArrowEndpointFlow(
   }
 }
 
-function circleIntersectsViewport(
-  cx: number,
-  cy: number,
-  r: number,
-  fxMin: number,
-  fxMax: number,
-  fyMin: number,
-  fyMax: number
-): boolean {
-  const closestX = Math.max(fxMin, Math.min(cx, fxMax))
-  const closestY = Math.max(fyMin, Math.min(cy, fyMax))
-  const distSq = (cx - closestX) ** 2 + (cy - closestY) ** 2
-  return distSq <= r * r
-}
-
 function sortOverlayCircles(
   circles: readonly StellarCartographyOverlayCircle[]
 ): StellarCartographyOverlayCircle[] {
@@ -211,15 +199,11 @@ function buildCircleShape(
 ): StellarCartographyOverlayCircleShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
   const r = circle.radius
-  const { scale } = viewport
-  const fxMin = -viewport.tx / scale
-  const fxMax = (viewport.width - viewport.tx) / scale
-  const fyMin = -viewport.ty / scale
-  const fyMax = (viewport.height - viewport.ty) / scale
-  if (!circleIntersectsViewport(cx, cy, r, fxMin, fxMax, fyMin, fyMax)) return null
+  const flowBounds = flowBoundsFromViewport(viewport)
+  if (!circleIntersectsFlowBounds(cx, cy, r, flowBounds)) return null
 
   const { px, py } = flowToPane(cx, cy, viewport)
-  const paneR = r * scale
+  const paneR = r * viewport.scale
 
   if (circle.layer === 'debris-disks') {
     return {
@@ -236,6 +220,81 @@ function buildCircleShape(
   return null
 }
 
+type ClusterCoreGradientTheme = {
+  colorFromTemp: (temp: number) => string
+  hotspotOpacity: () => number
+  edgeOpacity: () => number
+  strokeOpacity: () => number
+}
+
+function buildClusterCoreGradient(
+  temp: number,
+  gradientId: string,
+  theme: ClusterCoreGradientTheme
+): {
+  color: string
+  coreGradient: StellarCartographyOverlayRadialGradient
+  coreStroke: string
+} {
+  const color = theme.colorFromTemp(temp)
+  return {
+    color,
+    coreGradient: {
+      id: gradientId,
+      color,
+      innerOffset: starClusterCoreHotspotRadiusFraction(),
+      peakOpacity: theme.hotspotOpacity(),
+      edgeOpacity: theme.edgeOpacity(),
+    },
+    coreStroke: hexWithAlpha(color, theme.strokeOpacity()),
+  }
+}
+
+const starClusterCoreTheme: ClusterCoreGradientTheme = {
+  colorFromTemp: starClusterColorFromTemp,
+  hotspotOpacity: starClusterCoreHotspotOpacity,
+  edgeOpacity: starClusterCoreEdgeOpacity,
+  strokeOpacity: starClusterCoreStrokeOpacity,
+}
+
+const neutronClusterCoreTheme: ClusterCoreGradientTheme = {
+  colorFromTemp: neutronClusterCoreColorFromTemp,
+  hotspotOpacity: neutronClusterCoreHotspotOpacity,
+  edgeOpacity: neutronClusterCoreEdgeOpacity,
+  strokeOpacity: neutronClusterCoreStrokeOpacity,
+}
+
+function buildClusterCoreCircle(
+  circle: { id: string; x: number; y: number; radius: number; temp?: number },
+  viewport: StellarCartographyOverlayViewport,
+  strokeWidth: number,
+  showOutlines: boolean,
+  gradientIdPrefix: string,
+  theme: ClusterCoreGradientTheme
+): StellarCartographyOverlayCircleShape | null {
+  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
+  const r = circle.radius
+  const flowBounds = flowBoundsFromViewport(viewport)
+  if (!circleIntersectsFlowBounds(cx, cy, r, flowBounds)) return null
+
+  const { px, py } = flowToPane(cx, cy, viewport)
+  const { coreGradient, coreStroke } = buildClusterCoreGradient(
+    circle.temp ?? 0,
+    `${gradientIdPrefix}-core-grad-${circle.id}`,
+    theme
+  )
+  return {
+    key: circle.id,
+    cx: px,
+    cy: py,
+    r: r * viewport.scale,
+    fill: '',
+    fillGradient: coreGradient,
+    stroke: showOutlines ? coreStroke : 'none',
+    strokeWidth: showOutlines ? strokeWidth : 0,
+  }
+}
+
 function buildStarClusterCoreGradient(
   circle: StarClusterOverlayCircle,
   gradientId: string
@@ -244,18 +303,7 @@ function buildStarClusterCoreGradient(
   coreGradient: StellarCartographyOverlayRadialGradient
   coreStroke: string
 } {
-  const color = starClusterColorFromTemp(circle.temp ?? 0)
-  return {
-    color,
-    coreGradient: {
-      id: gradientId,
-      color,
-      innerOffset: starClusterCoreHotspotRadiusFraction(),
-      peakOpacity: starClusterCoreHotspotOpacity(),
-      edgeOpacity: starClusterCoreEdgeOpacity(),
-    },
-    coreStroke: hexWithAlpha(color, starClusterCoreStrokeOpacity()),
-  }
+  return buildClusterCoreGradient(circle.temp ?? 0, gradientId, starClusterCoreTheme)
 }
 
 function buildStarClusterAnnulus(
@@ -269,12 +317,8 @@ function buildStarClusterAnnulus(
   if (haloRadius <= coreRadius) return null
 
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const { scale } = viewport
-  const fxMin = -viewport.tx / scale
-  const fxMax = (viewport.width - viewport.tx) / scale
-  const fyMin = -viewport.ty / scale
-  const fyMax = (viewport.height - viewport.ty) / scale
-  if (!circleIntersectsViewport(cx, cy, haloRadius, fxMin, fxMax, fyMin, fyMax)) return null
+  const flowBounds = flowBoundsFromViewport(viewport)
+  if (!circleIntersectsFlowBounds(cx, cy, haloRadius, flowBounds)) return null
 
   const { px, py } = flowToPane(cx, cy, viewport)
   const temp = circle.temp ?? 0
@@ -291,8 +335,8 @@ function buildStarClusterAnnulus(
     key: circle.id,
     cx: px,
     cy: py,
-    coreR: coreRadius * scale,
-    bandR: haloRadius * scale,
+    coreR: coreRadius * viewport.scale,
+    bandR: haloRadius * viewport.scale,
     coreFill: '',
     coreStroke: showOutlines ? coreStroke : undefined,
     coreGradient,
@@ -309,58 +353,20 @@ function buildStarClusterAnnulus(
   }
 }
 
-function buildNeutronClusterCoreGradient(
-  circle: NeutronClusterOverlayCircle,
-  gradientId: string
-): {
-  color: string
-  coreGradient: StellarCartographyOverlayRadialGradient
-  coreStroke: string
-} {
-  const color = neutronClusterCoreColorFromTemp(circle.temp ?? 0)
-  return {
-    color,
-    coreGradient: {
-      id: gradientId,
-      color,
-      innerOffset: starClusterCoreHotspotRadiusFraction(),
-      peakOpacity: neutronClusterCoreHotspotOpacity(),
-      edgeOpacity: neutronClusterCoreEdgeOpacity(),
-    },
-    coreStroke: hexWithAlpha(color, neutronClusterCoreStrokeOpacity()),
-  }
-}
-
 function buildNeutronClusterCoreCircle(
   circle: NeutronClusterOverlayCircle,
   viewport: StellarCartographyOverlayViewport,
   strokeWidth: number,
   showOutlines: boolean
 ): StellarCartographyOverlayCircleShape | null {
-  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const r = circle.radius
-  const { scale } = viewport
-  const fxMin = -viewport.tx / scale
-  const fxMax = (viewport.width - viewport.tx) / scale
-  const fyMin = -viewport.ty / scale
-  const fyMax = (viewport.height - viewport.ty) / scale
-  if (!circleIntersectsViewport(cx, cy, r, fxMin, fxMax, fyMin, fyMax)) return null
-
-  const { px, py } = flowToPane(cx, cy, viewport)
-  const { coreGradient, coreStroke } = buildNeutronClusterCoreGradient(
+  return buildClusterCoreCircle(
     circle,
-    `nc-core-grad-${circle.id}`
+    viewport,
+    strokeWidth,
+    showOutlines,
+    'nc',
+    neutronClusterCoreTheme
   )
-  return {
-    key: circle.id,
-    cx: px,
-    cy: py,
-    r: r * scale,
-    fill: '',
-    fillGradient: coreGradient,
-    stroke: showOutlines ? coreStroke : 'none',
-    strokeWidth: showOutlines ? strokeWidth : 0,
-  }
 }
 
 function buildStarClusterCoreCircle(
@@ -369,30 +375,14 @@ function buildStarClusterCoreCircle(
   strokeWidth: number,
   showOutlines: boolean
 ): StellarCartographyOverlayCircleShape | null {
-  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const r = circle.radius
-  const { scale } = viewport
-  const fxMin = -viewport.tx / scale
-  const fxMax = (viewport.width - viewport.tx) / scale
-  const fyMin = -viewport.ty / scale
-  const fyMax = (viewport.height - viewport.ty) / scale
-  if (!circleIntersectsViewport(cx, cy, r, fxMin, fxMax, fyMin, fyMax)) return null
-
-  const { px, py } = flowToPane(cx, cy, viewport)
-  const { coreGradient, coreStroke } = buildStarClusterCoreGradient(
+  return buildClusterCoreCircle(
     circle,
-    `sc-core-grad-${circle.id}`
+    viewport,
+    strokeWidth,
+    showOutlines,
+    'sc',
+    starClusterCoreTheme
   )
-  return {
-    key: circle.id,
-    cx: px,
-    cy: py,
-    r: r * scale,
-    fill: '',
-    fillGradient: coreGradient,
-    stroke: showOutlines ? coreStroke : 'none',
-    strokeWidth: showOutlines ? strokeWidth : 0,
-  }
 }
 
 function buildBlackHoleAnnulus(
@@ -402,20 +392,16 @@ function buildBlackHoleAnnulus(
 ): StellarCartographyOverlayAnnulusShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
   const bandR = circle.bandRadius
-  const { scale } = viewport
-  const fxMin = -viewport.tx / scale
-  const fxMax = (viewport.width - viewport.tx) / scale
-  const fyMin = -viewport.ty / scale
-  const fyMax = (viewport.height - viewport.ty) / scale
-  if (!circleIntersectsViewport(cx, cy, bandR, fxMin, fxMax, fyMin, fyMax)) return null
+  const flowBounds = flowBoundsFromViewport(viewport)
+  if (!circleIntersectsFlowBounds(cx, cy, bandR, flowBounds)) return null
 
   const { px, py } = flowToPane(cx, cy, viewport)
   return {
     key: circle.id,
     cx: px,
     cy: py,
-    coreR: circle.coreRadius * scale,
-    bandR: bandR * scale,
+    coreR: circle.coreRadius * viewport.scale,
+    bandR: bandR * viewport.scale,
     coreFill: BLACK_HOLE_CORE_FILL,
     bandFill: hexWithAlpha(BLACK_HOLE_BAND_FILL, BLACK_HOLE_BAND_FILL_ALPHA),
     bandStroke: hexWithAlpha(BLACK_HOLE_BAND_STROKE, BLACK_HOLE_BAND_RIM_ALPHA),
@@ -447,14 +433,6 @@ function buildIonStormArrow(
     stroke: ionStormStrokeColor(stormClass),
     strokeWidth,
   }
-}
-
-function hexWithAlpha(hex: string, alpha: number): string {
-  const h = hex.replace('#', '')
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 /** Build pane-pixel SVG shapes for Stellar Cartography overlays at the given zoom. */

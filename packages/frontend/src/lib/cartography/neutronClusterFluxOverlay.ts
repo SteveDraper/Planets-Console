@@ -16,6 +16,7 @@ import {
   starClusterRadiationSumAt,
   type StarClusterRadiationBody,
 } from './starClusterRadiation'
+import { hexWithAlpha } from './cartographyColor'
 import {
   DISC_RIM_ALPHA,
   NEUTRON_CLUSTER_FLUX_MAX_RASTER_PX,
@@ -71,14 +72,6 @@ function haloSearchCircles(bodies: readonly StarClusterRadiationBody[]) {
 
 function rasterSignature(clusterName: string, bodies: readonly StarClusterRadiationBody[]): string {
   return `cell-union-v4:${clusterName}:${bodies.map((body) => `${body.x},${body.y},${body.radius},${body.temp},${body.mass}`).join('|')}`
-}
-
-function hexWithAlpha(hex: string, alpha: number): string {
-  const h = hex.replace('#', '')
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 function neutronClusterBoundaryStroke(bodies: readonly StarClusterRadiationBody[]): string {
