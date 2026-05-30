@@ -1,8 +1,7 @@
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
 import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
-import type { ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
-import { defaultNeutronClusterDisplayMode, defaultStarClusterDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
+import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
@@ -42,8 +41,6 @@ export function StellarCartographyOverlayPane({
   wormholeRecenterPulseTarget,
   blockedByPlanetHover,
   nuIonStorms,
-  starClusterDisplayMode = defaultStarClusterDisplayMode(),
-  neutronClusterDisplayMode = defaultNeutronClusterDisplayMode(),
 }: {
   overlayCircles: CombinedMapData['overlayCircles']
   wormholeEndpoints: { x: number; y: number }[]
@@ -51,9 +48,11 @@ export function StellarCartographyOverlayPane({
   wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
   blockedByPlanetHover: boolean
   nuIonStorms?: boolean
-  starClusterDisplayMode?: ClusterOutlineDisplayMode
-  neutronClusterDisplayMode?: ClusterOutlineDisplayMode
 }) {
+  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
+  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
+    (s) => s.neutronClusterDisplayMode
+  )
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)

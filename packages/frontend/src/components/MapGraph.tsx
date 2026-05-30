@@ -13,10 +13,6 @@ import {
   type WormholeDisplayMode,
 } from '../analytics/stellar-cartography/wormholeDisplayMode'
 import {
-  defaultNeutronClusterDisplayMode,
-  defaultStarClusterDisplayMode,
-} from '../analytics/stellar-cartography/clusterOutlineDisplayMode'
-import {
   buildWormholeEndpointHoverIndex,
 } from '../lib/wormholeEndpointHover'
 import { buildPlanetSpatialGrid } from '../lib/planetSpatialGrid'
@@ -222,12 +218,6 @@ function MapGraphFlow({
         wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
         blockedByPlanetHover={blockedByPlanetHover}
         nuIonStorms={data.nuIonStorms}
-        starClusterDisplayMode={
-          stellarCartography?.starClusterDisplayMode ?? defaultStarClusterDisplayMode()
-        }
-        neutronClusterDisplayMode={
-          stellarCartography?.neutronClusterDisplayMode ?? defaultNeutronClusterDisplayMode()
-        }
       />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <FixedSizeDotsOverlay
