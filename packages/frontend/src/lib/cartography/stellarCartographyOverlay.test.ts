@@ -150,4 +150,72 @@ describe('stellarCartographyOverlay', () => {
     expect(shapes.annuli[0]?.coreStroke).toBeTruthy()
     expect(shapes.annuli[0]?.bandR).toBeGreaterThan(shapes.annuli[0]?.coreR ?? 0)
   })
+
+  it('omits star cluster rim strokes in no-outline display mode', () => {
+    const viewport = {
+      width: 800,
+      height: 600,
+      tx: 400,
+      ty: 300,
+      scale: 4,
+    }
+    const shapes = buildStellarCartographyOverlayPaneShapes(
+      [
+        {
+          layer: 'star-clusters',
+          id: 'star-1',
+          x: 0,
+          y: 0,
+          radius: 42,
+          temp: 28601,
+          mass: 6256,
+          name: 'Gores',
+        },
+      ],
+      [],
+      viewport,
+      { starClusterDisplayMode: 'no-outline' }
+    )
+    expect(shapes.annuli[0]?.coreStroke).toBeUndefined()
+    expect(shapes.annuli[0]?.bandStroke).toBe('none')
+  })
+
+  it('draws neutron cluster flux as raster and blue cores without per-star annuli', () => {
+    const viewport = {
+      width: 800,
+      height: 600,
+      tx: 400,
+      ty: 300,
+      scale: 4,
+    }
+    const shapes = buildStellarCartographyOverlayPaneShapes(
+      [
+        {
+          layer: 'neutron-clusters',
+          id: 'star-1',
+          name: 'Bith',
+          x: 0,
+          y: 0,
+          radius: 5,
+          temp: 10_000,
+          mass: 10_000,
+        },
+        {
+          layer: 'neutron-clusters',
+          id: 'star-2',
+          name: 'Bith',
+          x: 3,
+          y: 0,
+          radius: 5,
+          temp: 10_000,
+          mass: 10_000,
+        },
+      ],
+      [],
+      viewport
+    )
+    expect(shapes.annuli).toHaveLength(0)
+    expect(shapes.circles).toHaveLength(2)
+    expect(shapes.circles[0]?.fillGradient?.color.startsWith('#')).toBe(true)
+  })
 })

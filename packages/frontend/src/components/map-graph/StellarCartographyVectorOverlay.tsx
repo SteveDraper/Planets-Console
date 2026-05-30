@@ -4,6 +4,7 @@ import {
   ionStormCloudPaneShapeToRasterField,
   nebulaCloudPaneShapeToRasterField,
 } from '../../lib/cartography/cartographyRasterFieldOverlay'
+import { neutronClusterFluxPaneShapeToRasterField } from '../../lib/cartography/neutronClusterFluxOverlay'
 import { RasterFieldOverlay } from '../RasterFieldOverlay'
 
 function StellarCartographyRadialGradientDef({
@@ -40,7 +41,7 @@ export function StellarCartographyVectorOverlay({
 }: {
   shapes: Pick<
     StellarCartographyOverlayPaneShapes,
-    'nebulaClouds' | 'ionStormClouds' | 'circles' | 'annuli' | 'debrisDiskBorders' | 'arrows'
+    'nebulaClouds' | 'ionStormClouds' | 'neutronFluxClouds' | 'circles' | 'annuli' | 'debrisDiskBorders' | 'arrows'
   >
   width: number
   height: number
@@ -52,6 +53,9 @@ export function StellarCartographyVectorOverlay({
       ))}
       {shapes.ionStormClouds.map((shape) => (
         <RasterFieldOverlay key={shape.key} {...ionStormCloudPaneShapeToRasterField(shape)} />
+      ))}
+      {shapes.neutronFluxClouds.map((shape) => (
+        <RasterFieldOverlay key={shape.key} {...neutronClusterFluxPaneShapeToRasterField(shape)} />
       ))}
       {shapes.circles.map(({ key, cx, cy, r, fill, stroke, strokeWidth, fillGradient }) => (
         <g key={key}>

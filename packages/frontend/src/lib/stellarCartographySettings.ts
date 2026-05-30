@@ -26,6 +26,7 @@ export function stellarCartographySettingsGatesFromGameInfo(
   return {
     debrisDiskBorders: settingsCount(data, 'ndebrisdiscs') > 0,
     starClusters: settingsCount(data, 'stars') > 0,
+    neutronClusters: settingsCount(data, 'neutrinostars') > 0,
     nebulae: settingsCount(data, 'nebulas') > 0,
     ionStorms: settingsCount(data, 'maxions') > 0,
     wormholes: settingsCount(data, 'maxwormholes') > 0,

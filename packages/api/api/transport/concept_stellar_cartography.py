@@ -9,6 +9,7 @@ StellarCartographySampleLayerId = Literal[
     "nebulae",
     "ion-storms",
     "star-clusters",
+    "neutron-clusters",
     "black-holes",
     "wormholes",
 ]

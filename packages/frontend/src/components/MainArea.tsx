@@ -152,6 +152,10 @@ export function MainArea({
 
   const cartographyLayerVisibility = useStellarCartographyLayersStore((s) => s.layers)
   const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
+  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
+  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
+    (s) => s.neutronClusterDisplayMode
+  )
   const cartographySettingsGates =
     useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
     EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
@@ -245,6 +249,8 @@ export function MainArea({
                 layerVisibility: cartographyLayerVisibility,
                 settingsGates: cartographySettingsGates,
                 wormholeDisplayMode,
+                starClusterDisplayMode,
+                neutronClusterDisplayMode,
               },
             }
           : { liveConnectionsParams }
@@ -262,6 +268,8 @@ export function MainArea({
       cartographyLayerVisibility,
       cartographySettingsGates,
       wormholeDisplayMode,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode,
     ]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
@@ -396,6 +404,8 @@ export function MainArea({
             layerVisibility: cartographyLayerVisibility,
             settingsGates: cartographySettingsGates,
             wormholeDisplayMode,
+            starClusterDisplayMode,
+            neutronClusterDisplayMode,
             sampleEnabled: enabledMapIds.includes('stellar-cartography'),
             analyticScope,
           }}

@@ -2,6 +2,7 @@ import type {
   BlackHoleOverlayCircle,
   IonStormOverlayCircle,
   NebulaOverlayCircle,
+  NeutronClusterOverlayCircle,
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../api/bff'
@@ -16,6 +17,11 @@ import {
   type IonStormCloudPaneShape,
 } from './ionStormCloudOverlay'
 import {
+  buildNeutronClusterFluxPaneShapes,
+  type NeutronClusterFluxPaneShape,
+} from './neutronClusterFluxOverlay'
+import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
+import {
   BLACK_HOLE_BAND_FILL,
   BLACK_HOLE_BAND_FILL_ALPHA,
   BLACK_HOLE_BAND_RIM_ALPHA,
@@ -25,6 +31,10 @@ import {
   DEBRIS_DISK_BORDER_STROKE_WIDTH,
   DISC_RIM_ALPHA,
   ionStormStrokeColor,
+  neutronClusterCoreColorFromTemp,
+  neutronClusterCoreEdgeOpacity,
+  neutronClusterCoreHotspotOpacity,
+  neutronClusterCoreStrokeOpacity,
   starClusterBandEdgeOpacity,
   starClusterBandPeakOpacity,
   starClusterColorFromTemp,
@@ -129,6 +139,7 @@ export type StellarCartographyOverlayPaneShapes = {
   annuli: StellarCartographyOverlayAnnulusShape[]
   nebulaClouds: NebulaCloudPaneShape[]
   ionStormClouds: IonStormCloudPaneShape[]
+  neutronFluxClouds: NeutronClusterFluxPaneShape[]
   /** Debris disk outlines; painted above annuli so borders stay visible. */
   debrisDiskBorders: StellarCartographyOverlayCircleShape[]
   arrows: StellarCartographyOverlayArrowShape[]
@@ -185,6 +196,7 @@ function sortOverlayCircles(
     nebulae: 0,
     'ion-storms': 1,
     'star-clusters': 2,
+    'neutron-clusters': 2,
     'black-holes': 3,
   }
   return [...circles].sort(
@@ -249,7 +261,8 @@ function buildStarClusterCoreGradient(
 function buildStarClusterAnnulus(
   circle: StarClusterOverlayCircle,
   viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number
+  strokeWidth: number,
+  showOutlines: boolean
 ): StellarCartographyOverlayAnnulusShape | null {
   const coreRadius = circle.radius
   const haloRadius = starClusterHaloRadiusLy(circle.mass ?? 0)
@@ -281,10 +294,10 @@ function buildStarClusterAnnulus(
     coreR: coreRadius * scale,
     bandR: haloRadius * scale,
     coreFill: '',
-    coreStroke,
+    coreStroke: showOutlines ? coreStroke : undefined,
     coreGradient,
     bandFill: '',
-    bandStroke: hexWithAlpha(color, DISC_RIM_ALPHA),
+    bandStroke: showOutlines ? hexWithAlpha(color, DISC_RIM_ALPHA) : 'none',
     strokeWidth,
     bandGradient: {
       id: `sc-band-grad-${circle.id}`,
@@ -296,10 +309,65 @@ function buildStarClusterAnnulus(
   }
 }
 
+function buildNeutronClusterCoreGradient(
+  circle: NeutronClusterOverlayCircle,
+  gradientId: string
+): {
+  color: string
+  coreGradient: StellarCartographyOverlayRadialGradient
+  coreStroke: string
+} {
+  const color = neutronClusterCoreColorFromTemp(circle.temp ?? 0)
+  return {
+    color,
+    coreGradient: {
+      id: gradientId,
+      color,
+      innerOffset: starClusterCoreHotspotRadiusFraction(),
+      peakOpacity: neutronClusterCoreHotspotOpacity(),
+      edgeOpacity: neutronClusterCoreEdgeOpacity(),
+    },
+    coreStroke: hexWithAlpha(color, neutronClusterCoreStrokeOpacity()),
+  }
+}
+
+function buildNeutronClusterCoreCircle(
+  circle: NeutronClusterOverlayCircle,
+  viewport: StellarCartographyOverlayViewport,
+  strokeWidth: number,
+  showOutlines: boolean
+): StellarCartographyOverlayCircleShape | null {
+  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
+  const r = circle.radius
+  const { scale } = viewport
+  const fxMin = -viewport.tx / scale
+  const fxMax = (viewport.width - viewport.tx) / scale
+  const fyMin = -viewport.ty / scale
+  const fyMax = (viewport.height - viewport.ty) / scale
+  if (!circleIntersectsViewport(cx, cy, r, fxMin, fxMax, fyMin, fyMax)) return null
+
+  const { px, py } = flowToPane(cx, cy, viewport)
+  const { coreGradient, coreStroke } = buildNeutronClusterCoreGradient(
+    circle,
+    `nc-core-grad-${circle.id}`
+  )
+  return {
+    key: circle.id,
+    cx: px,
+    cy: py,
+    r: r * scale,
+    fill: '',
+    fillGradient: coreGradient,
+    stroke: showOutlines ? coreStroke : 'none',
+    strokeWidth: showOutlines ? strokeWidth : 0,
+  }
+}
+
 function buildStarClusterCoreCircle(
   circle: StarClusterOverlayCircle,
   viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number
+  strokeWidth: number,
+  showOutlines: boolean
 ): StellarCartographyOverlayCircleShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
   const r = circle.radius
@@ -322,8 +390,8 @@ function buildStarClusterCoreCircle(
     r: r * scale,
     fill: '',
     fillGradient: coreGradient,
-    stroke: coreStroke,
-    strokeWidth,
+    stroke: showOutlines ? coreStroke : 'none',
+    strokeWidth: showOutlines ? strokeWidth : 0,
   }
 }
 
@@ -394,7 +462,11 @@ export function buildStellarCartographyOverlayPaneShapes(
   overlayCircles: readonly StellarCartographyOverlayCircle[],
   wormholeEndpoints: readonly { x: number; y: number }[],
   viewport: StellarCartographyOverlayViewport,
-  options?: { cloudyIonStorms?: boolean }
+  options?: {
+    cloudyIonStorms?: boolean
+    starClusterDisplayMode?: ClusterOutlineDisplayMode
+    neutronClusterDisplayMode?: ClusterOutlineDisplayMode
+  }
 ): StellarCartographyOverlayPaneShapes {
   const { width, height, scale } = viewport
   const empty: StellarCartographyOverlayPaneShapes = {
@@ -402,6 +474,7 @@ export function buildStellarCartographyOverlayPaneShapes(
     annuli: [],
     nebulaClouds: [],
     ionStormClouds: [],
+    neutronFluxClouds: [],
     debrisDiskBorders: [],
     arrows: [],
     wormholeMarkers: [],
@@ -411,6 +484,12 @@ export function buildStellarCartographyOverlayPaneShapes(
   }
 
   const strokeWidth = 1
+  const starClusterOutlines = areClusterOutlinesShown(
+    options?.starClusterDisplayMode ?? 'outlined'
+  )
+  const neutronClusterOutlines = areClusterOutlinesShown(
+    options?.neutronClusterDisplayMode ?? 'outlined'
+  )
   const nebulaCircles = overlayCircles.filter(
     (circle): circle is NebulaOverlayCircle => circle.layer === 'nebulae'
   )
@@ -423,6 +502,12 @@ export function buildStellarCartographyOverlayPaneShapes(
     viewport,
     options?.cloudyIonStorms ?? true
   )
+  const neutronClusterCircles = overlayCircles.filter(
+    (circle): circle is NeutronClusterOverlayCircle => circle.layer === 'neutron-clusters'
+  )
+  const neutronFluxClouds = buildNeutronClusterFluxPaneShapes(neutronClusterCircles, viewport, {
+    showOutlines: areClusterOutlinesShown(options?.neutronClusterDisplayMode ?? 'outlined'),
+  })
   const circles: StellarCartographyOverlayCircleShape[] = []
   const annuli: StellarCartographyOverlayAnnulusShape[] = []
   const debrisDiskBorders: StellarCartographyOverlayCircleShape[] = []
@@ -433,7 +518,8 @@ export function buildStellarCartographyOverlayPaneShapes(
       (entry) =>
         entry.layer !== 'nebulae' &&
         entry.layer !== 'debris-disks' &&
-        entry.layer !== 'ion-storms'
+        entry.layer !== 'ion-storms' &&
+        entry.layer !== 'neutron-clusters'
     )
   )) {
     if (circle.layer === 'black-holes') {
@@ -443,17 +529,37 @@ export function buildStellarCartographyOverlayPaneShapes(
     }
     if (circle.layer === 'star-clusters') {
       const star = circle as StarClusterOverlayCircle
-      const annulus = buildStarClusterAnnulus(star, viewport, STAR_CLUSTER_STROKE_WIDTH)
+      const annulus = buildStarClusterAnnulus(
+        star,
+        viewport,
+        STAR_CLUSTER_STROKE_WIDTH,
+        starClusterOutlines
+      )
       if (annulus != null) {
         annuli.push(annulus)
         continue
       }
-      const core = buildStarClusterCoreCircle(star, viewport, STAR_CLUSTER_STROKE_WIDTH)
+      const core = buildStarClusterCoreCircle(
+        star,
+        viewport,
+        STAR_CLUSTER_STROKE_WIDTH,
+        starClusterOutlines
+      )
       if (core != null) circles.push(core)
       continue
     }
     const shape = buildCircleShape(circle, viewport, strokeWidth)
     if (shape != null) circles.push(shape)
+  }
+
+  for (const circle of neutronClusterCircles) {
+    const core = buildNeutronClusterCoreCircle(
+      circle,
+      viewport,
+      STAR_CLUSTER_STROKE_WIDTH,
+      neutronClusterOutlines
+    )
+    if (core != null) circles.push(core)
   }
 
   for (const circle of ionStormCircles) {
@@ -487,5 +593,14 @@ export function buildStellarCartographyOverlayPaneShapes(
     })
   }
 
-  return { circles, annuli, nebulaClouds, ionStormClouds, debrisDiskBorders, arrows, wormholeMarkers }
+  return {
+    circles,
+    annuli,
+    nebulaClouds,
+    ionStormClouds,
+    neutronFluxClouds,
+    debrisDiskBorders,
+    arrows,
+    wormholeMarkers,
+  }
 }

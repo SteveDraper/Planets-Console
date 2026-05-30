@@ -8,6 +8,12 @@ import {
   type CartographyLayerId,
   type StellarCartographySettingsGates,
 } from './layers'
+import { CartographyDisplayModeControl } from './CartographyDisplayModeControl'
+import {
+  CLUSTER_OUTLINE_DISPLAY_MODE_LABELS,
+  CLUSTER_OUTLINE_DISPLAY_MODES,
+  type ClusterOutlineDisplayMode,
+} from './clusterOutlineDisplayMode'
 import {
   WORMHOLE_DISPLAY_MODE_LABELS,
   WORMHOLE_DISPLAY_MODES,
@@ -36,35 +42,35 @@ function WormholeDisplayModeControl({
   onChange: (mode: WormholeDisplayMode) => void
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <span>Wormholes</span>
-      <div
-        role="radiogroup"
-        aria-label="Wormhole display mode"
-        className="flex min-w-0 rounded border border-[#52575d] bg-slate-800/80 p-0.5"
-      >
-        {WORMHOLE_DISPLAY_MODES.map((mode) => {
-          const selected = value === mode
-          return (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              onClick={() => onChange(mode)}
-              className={cn(
-                'min-w-0 flex-1 rounded px-1.5 py-0.5 text-[11px] leading-tight transition-colors',
-                selected
-                  ? 'bg-slate-600 text-slate-100'
-                  : 'text-slate-400 hover:bg-black/20 hover:text-slate-200'
-              )}
-            >
-              {WORMHOLE_DISPLAY_MODE_LABELS[mode]}
-            </button>
-          )
-        })}
-      </div>
-    </div>
+    <CartographyDisplayModeControl
+      label="Wormholes"
+      ariaLabel="Wormhole display mode"
+      modes={WORMHOLE_DISPLAY_MODES}
+      modeLabels={WORMHOLE_DISPLAY_MODE_LABELS}
+      value={value}
+      onChange={onChange}
+    />
+  )
+}
+
+function ClusterOutlineDisplayModeControl({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: ClusterOutlineDisplayMode
+  onChange: (mode: ClusterOutlineDisplayMode) => void
+}) {
+  return (
+    <CartographyDisplayModeControl
+      label={label}
+      ariaLabel={`${label} display mode`}
+      modes={CLUSTER_OUTLINE_DISPLAY_MODES}
+      modeLabels={CLUSTER_OUTLINE_DISPLAY_MODE_LABELS}
+      value={value}
+      onChange={onChange}
+    />
   )
 }
 
@@ -83,6 +89,16 @@ export function StellarCartographyMapTile({
   const setLayerEnabled = useStellarCartographyLayersStore((s) => s.setLayerEnabled)
   const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
   const setWormholeDisplayMode = useStellarCartographyLayersStore((s) => s.setWormholeDisplayMode)
+  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
+  const setStarClusterDisplayMode = useStellarCartographyLayersStore(
+    (s) => s.setStarClusterDisplayMode
+  )
+  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
+    (s) => s.neutronClusterDisplayMode
+  )
+  const setNeutronClusterDisplayMode = useStellarCartographyLayersStore(
+    (s) => s.setNeutronClusterDisplayMode
+  )
 
   useEffect(() => {
     if (!canExpand) {
@@ -160,6 +176,26 @@ export function StellarCartographyMapTile({
                 />
               )
             }
+            if (layer.id === 'star-clusters') {
+              return (
+                <ClusterOutlineDisplayModeControl
+                  key={layer.id}
+                  label={layer.label}
+                  value={starClusterDisplayMode}
+                  onChange={setStarClusterDisplayMode}
+                />
+              )
+            }
+            if (layer.id === 'neutron-clusters') {
+              return (
+                <ClusterOutlineDisplayModeControl
+                  key={layer.id}
+                  label={layer.label}
+                  value={neutronClusterDisplayMode}
+                  onChange={setNeutronClusterDisplayMode}
+                />
+              )
+            }
             const layerDisabled =
               layer.id === 'ion-storms' &&
               settingsGates.ionStorms &&
@@ -175,10 +211,16 @@ export function StellarCartographyMapTile({
               >
                 <input
                   type="checkbox"
-                  checked={layers[layer.id as Exclude<CartographyLayerId, 'wormholes'>] ?? true}
+                  checked={layers[layer.id as Exclude<
+                    CartographyLayerId,
+                    'wormholes' | 'star-clusters' | 'neutron-clusters'
+                  >] ?? true}
                   onChange={(e) =>
                     setLayerEnabled(
-                      layer.id as Exclude<CartographyLayerId, 'wormholes'>,
+                      layer.id as Exclude<
+                        CartographyLayerId,
+                        'wormholes' | 'star-clusters' | 'neutron-clusters'
+                      >,
                       e.target.checked
                     )
                   }

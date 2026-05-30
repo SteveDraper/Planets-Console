@@ -233,16 +233,19 @@ Each phase should be a reviewable PR. Run `make test` before merge.
 
 ### Neutron vs radiation star clusters
 
-**v1** uses one **Star clusters** layer for the entire `stars[]` array. The API does not expose a per-cluster kind field; `settings.neutrinostars` counts clusters but does not identify which names are neutron.
+Classification is implemented in Core (`star_clusters.py`) at map-build time. Each logical cluster (shared `stars[].name`) is assigned **`star-clusters`** or **`neutron-clusters`** from constituent body **lethal core radius**:
 
-**Follow-up (required before splitting layers):**
+| Condition | Layer |
+|-----------|--------|
+| Every body has `5 <= radius <= 10` | **Neutron clusters** |
+| No body has `5 <= radius <= 10` | **Star clusters** |
+| Some bodies in range, some not | **Ambiguous** — host docs do not say which halo rules apply; console treats as **neutron** for now |
 
-1. Use a game that has **both** radiation and neutron clusters enabled (candidate: **673864** with `stars: 13`, `neutrinostars: 2`, nine cluster names in turn 49).
-2. Determine discrimination rules (host docs, cluster metadata, temperature/radius heuristics, or upstream field if added).
-3. Implement classification in **Core** at map-build time; expose `layer: 'star-clusters' | 'neutron-clusters'` (or separate arrays).
-4. Add **Neutron clusters** checkbox gated on `settings.neutrinostars > 0`.
+This replaces the earlier incorrect heuristic (multiple bodies with the same name). A solo body with neutron-radius core is a neutron cluster. Multiple bodies with radiation-radius cores stay on the star cluster layer regardless of count.
 
-Record findings in this doc and in the vault wiki concept pages; do not ship arbitrary ordering heuristics without validation.
+**Open validation:** compare against games with both kinds enabled (e.g. **673864** turn 49) and record findings in the vault wiki concept pages.
+
+**Previously deferred (now done):** split layers gated on `settings.neutrinostars > 0`.
 
 ### Other future enhancements
 
@@ -258,7 +261,7 @@ Record findings in this doc and in the vault wiki concept pages; do not ship arb
 | # | Topic | Choice |
 |---|--------|--------|
 | 1 | Structure | One analytic **A** |
-| 2 | Star/neutron split | **A** for v1; follow-up in §6 |
+| 2 | Star/neutron split | Core radius **5–10 ly** per body; ambiguous mixed → neutron; see §6 |
 | 3 | Ion storms UI | **C** (visible when settings enable; grey when empty) |
 | 4 | Persistence | Global localStorage for layers + **all** enabled analytics |
 | 5 | Tile greying | **A**; hide layer checkboxes when settings disable feature |

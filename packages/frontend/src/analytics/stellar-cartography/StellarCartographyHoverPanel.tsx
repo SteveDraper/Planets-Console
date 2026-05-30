@@ -13,6 +13,7 @@ import {
   type StellarCartographySettingsGates,
 } from './layers'
 import type { WormholeDisplayMode } from './wormholeDisplayMode'
+import type { ClusterOutlineDisplayMode } from './clusterOutlineDisplayMode'
 import { flowToMapCellIndices } from '../../lib/planetSpatialGrid'
 import { formatStellarCartographySampleLine } from './sampleTooltipFormat'
 
@@ -24,6 +25,8 @@ type StellarCartographyHoverPanelProps = {
   layerVisibility: CartographyLayerVisibility
   settingsGates: StellarCartographySettingsGates
   wormholeDisplayMode: WormholeDisplayMode
+  starClusterDisplayMode: ClusterOutlineDisplayMode
+  neutronClusterDisplayMode: ClusterOutlineDisplayMode
   wormholeHoverLines: string[] | null
   /** When a planet hover/pin label is showing, suppress cartography hover entirely. */
   blockedByPlanetHover?: boolean
@@ -40,7 +43,9 @@ function filterSampleEntries(
   entries: StellarCartographySampleEntry[],
   layerVisibility: CartographyLayerVisibility,
   settingsGates: StellarCartographySettingsGates,
-  wormholeDisplayMode: WormholeDisplayMode
+  wormholeDisplayMode: WormholeDisplayMode,
+  starClusterDisplayMode: ClusterOutlineDisplayMode,
+  neutronClusterDisplayMode: ClusterOutlineDisplayMode
 ): StellarCartographySampleEntry[] {
   return entries.filter(
     (entry): entry is StellarCartographySampleEntry =>
@@ -49,6 +54,8 @@ function filterSampleEntries(
         layerVisibility,
         settingsGates,
         wormholeDisplayMode,
+        starClusterDisplayMode,
+        neutronClusterDisplayMode,
       })
   )
 }
@@ -59,13 +66,17 @@ export function buildStellarCartographyHoverLines(
   wormholeHoverLines: string[] | null,
   layerVisibility: CartographyLayerVisibility,
   settingsGates: StellarCartographySettingsGates,
-  wormholeDisplayMode: WormholeDisplayMode
+  wormholeDisplayMode: WormholeDisplayMode,
+  starClusterDisplayMode: ClusterOutlineDisplayMode,
+  neutronClusterDisplayMode: ClusterOutlineDisplayMode
 ): string[] {
   const lines = filterSampleEntries(
     entries,
     layerVisibility,
     settingsGates,
-    wormholeDisplayMode
+    wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode
   ).map(formatStellarCartographySampleLine)
   if (
     wormholeHoverLines != null &&
@@ -74,6 +85,8 @@ export function buildStellarCartographyHoverLines(
       layerVisibility,
       settingsGates,
       wormholeDisplayMode,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode,
     })
   ) {
     lines.push(...wormholeHoverLines)
@@ -88,6 +101,8 @@ export function StellarCartographyHoverPanel({
   layerVisibility,
   settingsGates,
   wormholeDisplayMode,
+  starClusterDisplayMode,
+  neutronClusterDisplayMode,
   wormholeHoverLines,
   blockedByPlanetHover = false,
   clientToFlowPosition,
@@ -145,7 +160,14 @@ export function StellarCartographyHoverPanel({
         .then((data) => {
           if (seq !== requestSeqRef.current) return
           setEntries(
-            filterSampleEntries(data.entries, layerVisibility, settingsGates, wormholeDisplayMode)
+            filterSampleEntries(
+              data.entries,
+              layerVisibility,
+              settingsGates,
+              wormholeDisplayMode,
+              starClusterDisplayMode,
+              neutronClusterDisplayMode
+            )
           )
         })
         .catch(() => {
@@ -168,6 +190,8 @@ export function StellarCartographyHoverPanel({
     sampleEnabled,
     settingsGates,
     wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode,
     blockedByPlanetHover,
     transform,
   ])
@@ -177,7 +201,9 @@ export function StellarCartographyHoverPanel({
     wormholeHoverLines,
     layerVisibility,
     settingsGates,
-    wormholeDisplayMode
+    wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode
   )
   if (
     blockedByPlanetHover ||

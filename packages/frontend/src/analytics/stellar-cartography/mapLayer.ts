@@ -10,6 +10,7 @@ import {
   type CartographyLayerVisibility,
   type StellarCartographySettingsGates,
 } from './layers'
+import type { ClusterOutlineDisplayMode } from './clusterOutlineDisplayMode'
 import type { WormholeDisplayMode } from './wormholeDisplayMode'
 
 const STELLAR_CARTOGRAPHY_PREFIX = 'stellar-cartography'
@@ -23,19 +24,25 @@ export type AppendStellarCartographyMapLayerArgs = {
   layerVisibility: CartographyLayerVisibility
   settingsGates: StellarCartographySettingsGates
   wormholeDisplayMode: WormholeDisplayMode
+  starClusterDisplayMode: ClusterOutlineDisplayMode
+  neutronClusterDisplayMode: ClusterOutlineDisplayMode
 }
 
 function filterOverlayCircles(
   circles: StellarCartographyOverlayCircle[],
   layerVisibility: CartographyLayerVisibility,
   settingsGates: StellarCartographySettingsGates,
-  wormholeDisplayMode: WormholeDisplayMode
+  wormholeDisplayMode: WormholeDisplayMode,
+  starClusterDisplayMode: ClusterOutlineDisplayMode,
+  neutronClusterDisplayMode: ClusterOutlineDisplayMode
 ): StellarCartographyOverlayCircle[] {
   return circles.filter((circle) =>
     isCartographyLayerShown(circle.layer, {
       layerVisibility,
       settingsGates,
       wormholeDisplayMode,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode,
     })
   )
 }
@@ -58,11 +65,15 @@ export function appendStellarCartographyMapLayer({
   layerVisibility,
   settingsGates,
   wormholeDisplayMode,
+  starClusterDisplayMode,
+  neutronClusterDisplayMode,
 }: AppendStellarCartographyMapLayerArgs): void {
   const wormholesEnabled = isCartographyLayerShown('wormholes', {
     layerVisibility,
     settingsGates,
     wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode,
   })
   const positions = nodePositionById(data.nodes)
   const connectedNodeIds = new Set<string>()
@@ -114,6 +125,13 @@ export function appendStellarCartographyMapLayer({
 
   const rawCircles = data.overlayCircles ?? []
   overlayCircles.push(
-    ...filterOverlayCircles(rawCircles, layerVisibility, settingsGates, wormholeDisplayMode)
+    ...filterOverlayCircles(
+      rawCircles,
+      layerVisibility,
+      settingsGates,
+      wormholeDisplayMode,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode
+    )
   )
 }

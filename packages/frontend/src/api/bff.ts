@@ -34,6 +34,7 @@ export type {
   NormalWellMapCell,
   PlanetPairRoute,
   RouteMapWaypoint,
+  NeutronClusterOverlayCircle,
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
   StellarCartographySampleEntry,

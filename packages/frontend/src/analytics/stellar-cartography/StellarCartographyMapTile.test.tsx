@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ComponentProps } from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StellarCartographyMapTile } from './StellarCartographyMapTile'
 import { defaultCartographyLayerVisibility } from './layers'
+import {
+  defaultNeutronClusterDisplayMode,
+  defaultStarClusterDisplayMode,
+} from './clusterOutlineDisplayMode'
 import { defaultWormholeDisplayMode } from './wormholeDisplayMode'
 import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
 
 const allGatesEnabled = {
   debrisDiskBorders: true,
   starClusters: true,
+  neutronClusters: true,
   nebulae: true,
   ionStorms: true,
   wormholes: true,
@@ -38,6 +43,8 @@ describe('StellarCartographyMapTile', () => {
     useStellarCartographyLayersStore.setState({
       layers: defaultCartographyLayerVisibility(),
       wormholeDisplayMode: defaultWormholeDisplayMode(),
+      starClusterDisplayMode: defaultStarClusterDisplayMode(),
+      neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
     })
   })
 
@@ -52,6 +59,7 @@ describe('StellarCartographyMapTile', () => {
       settingsGates: {
         debrisDiskBorders: false,
         starClusters: true,
+        neutronClusters: false,
         nebulae: false,
         ionStorms: true,
         wormholes: false,
@@ -61,7 +69,8 @@ describe('StellarCartographyMapTile', () => {
     await user.click(
       screen.getByRole('button', { name: /expand stellar cartography layers/i })
     )
-    expect(screen.getByText('Star clusters')).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Star clusters display mode' })).toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'Neutron clusters display mode' })).not.toBeInTheDocument()
     expect(screen.queryByText('Nebulae')).not.toBeInTheDocument()
     expect(screen.getByText('Ion storms')).toBeInTheDocument()
     expect(screen.queryByText('Wormholes')).not.toBeInTheDocument()
@@ -77,6 +86,20 @@ describe('StellarCartographyMapTile', () => {
     )
     expect(screen.getByRole('radiogroup', { name: 'Wormhole display mode' })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Always' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('renders independent star and neutron cluster display mode controls', async () => {
+    const user = userEvent.setup()
+    renderTile()
+    await user.click(
+      screen.getByRole('button', { name: /expand stellar cartography layers/i })
+    )
+    expect(screen.getByRole('radiogroup', { name: 'Star clusters display mode' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Neutron clusters display mode' })).toBeInTheDocument()
+    const starGroup = screen.getByRole('radiogroup', { name: 'Star clusters display mode' })
+    await user.click(within(starGroup).getByRole('radio', { name: 'Off' }))
+    expect(useStellarCartographyLayersStore.getState().starClusterDisplayMode).toBe('off')
+    expect(useStellarCartographyLayersStore.getState().neutronClusterDisplayMode).toBe('outlined')
   })
 
   it('disables ion storms layer when turn has no storms', async () => {

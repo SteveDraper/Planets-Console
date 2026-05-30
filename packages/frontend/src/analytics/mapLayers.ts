@@ -4,6 +4,7 @@ import type {
   StellarCartographySettingsGates,
 } from './stellar-cartography/layers'
 import type { WormholeDisplayMode } from './stellar-cartography/wormholeDisplayMode'
+import type { ClusterOutlineDisplayMode } from './stellar-cartography/clusterOutlineDisplayMode'
 import { appendStellarCartographyMapLayer } from './stellar-cartography/mapLayer'
 import { appendConnectionsMapLayer, routeWaypointsFromMap } from './connections/mapLayer'
 
@@ -11,6 +12,8 @@ export type StellarCartographyMapMergeOptions = {
   layerVisibility: CartographyLayerVisibility
   settingsGates: StellarCartographySettingsGates
   wormholeDisplayMode: WormholeDisplayMode
+  starClusterDisplayMode: ClusterOutlineDisplayMode
+  neutronClusterDisplayMode: ClusterOutlineDisplayMode
 }
 
 export type CombineMapDataOptionsBase = {
@@ -110,6 +113,8 @@ const mapLayerMergeRegistry: Record<string, MapLayerMerger> = {
       layerVisibility: stellarCartography.layerVisibility,
       settingsGates: stellarCartography.settingsGates,
       wormholeDisplayMode: stellarCartography.wormholeDisplayMode,
+      starClusterDisplayMode: stellarCartography.starClusterDisplayMode,
+      neutronClusterDisplayMode: stellarCartography.neutronClusterDisplayMode,
     })
   },
 }

@@ -68,6 +68,7 @@ def test_empty_turn_returns_empty_geometry(empty_spatial_turn):
         "ionStorms": 0,
         "nuIonStorms": True,
         "starClusters": 0,
+        "neutronClusters": 0,
         "blackHoles": 0,
         "wormholes": 0,
         "wormholeEdges": 0,
@@ -108,6 +109,7 @@ def test_overlay_circle_counts(stellar_cartography_turn):
     assert layers.count("nebulae") == 1
     assert layers.count("ion-storms") == len(stellar_cartography_turn.ionstorms)
     assert layers.count("star-clusters") == len(stellar_cartography_turn.stars)
+    assert layers.count("neutron-clusters") == 0
     assert layers.count("black-holes") == 1
 
 

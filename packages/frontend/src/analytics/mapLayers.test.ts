@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { combineMapData } from './mapLayers'
 import type { MapDataResponse } from '../api/bff'
+import { defaultCartographyLayerVisibility, EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './stellar-cartography/layers'
 import {
-  defaultCartographyLayerVisibility,
-  EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-} from './stellar-cartography/layers'
+  defaultNeutronClusterDisplayMode,
+  defaultStarClusterDisplayMode,
+} from './stellar-cartography/clusterOutlineDisplayMode'
 
 describe('combineMapData', () => {
   const baseMap: MapDataResponse = {
@@ -30,6 +31,8 @@ describe('combineMapData', () => {
         blackHoles: true,
       },
       wormholeDisplayMode: 'always' as const,
+      starClusterDisplayMode: defaultStarClusterDisplayMode(),
+      neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
     },
   }
 
@@ -305,6 +308,40 @@ describe('combineMapData', () => {
 
     expect(combined.edges.filter((edge) => edge.layer === 'wormholes')).toHaveLength(0)
     expect(combined.wormholeUnknownEntrances).toHaveLength(0)
+  })
+
+  it('omits star cluster overlay circles when display mode is off', () => {
+    const sc: MapDataResponse = {
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      overlayCircles: [
+        {
+          layer: 'star-clusters',
+          id: 'star-1',
+          x: 100,
+          y: 200,
+          radius: 5,
+          temp: 10000,
+          mass: 10000,
+          name: 'Solo',
+        },
+      ],
+    }
+
+    const combined = combineMapData(
+      ['stellar-cartography'],
+      [{ data: sc }],
+      {
+        ...cartographyOptions,
+        stellarCartography: {
+          ...cartographyOptions.stellarCartography,
+          starClusterDisplayMode: 'off',
+        },
+      }
+    )
+
+    expect(combined.overlayCircles).toHaveLength(0)
   })
 
   it('requires Stellar Cartography merge options when merging that layer', () => {

@@ -6,8 +6,11 @@ from api.concepts.stellar_cartography.layers import (
     LAYER_DEBRIS_DISKS,
     LAYER_ION_STORMS,
     LAYER_NEBULAE,
-    LAYER_STAR_CLUSTERS,
     LAYER_WORMHOLES,
+)
+from api.concepts.stellar_cartography.star_clusters import (
+    neutron_cluster_names,
+    star_cluster_layer,
 )
 from api.models.game import TurnInfo
 from api.models.space import IonStorm, Wormhole
@@ -157,10 +160,11 @@ def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) 
     for storm in turn.ionstorms:
         overlay_circles.append(_ion_storm_overlay(storm))
 
+    neutron_names = neutron_cluster_names(turn.stars)
     for star in turn.stars:
         overlay_circles.append(
             {
-                "layer": LAYER_STAR_CLUSTERS,
+                "layer": star_cluster_layer(star.name, neutron_names),
                 "id": f"star-{star.id}",
                 "x": star.x,
                 "y": star.y,
@@ -193,7 +197,10 @@ def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) 
         "nebulae": len(turn.nebulas),
         "ionStorms": len(turn.ionstorms),
         "nuIonStorms": turn.settings.nuionstorms,
-        "starClusters": len(turn.stars),
+        "starClusters": sum(
+            1 for star in turn.stars if star.name not in neutron_names
+        ),
+        "neutronClusters": sum(1 for star in turn.stars if star.name in neutron_names),
         "blackHoles": len(turn.blackholes),
         "wormholes": len(turn.wormholes),
         "wormholeEdges": len(wormhole_edges),

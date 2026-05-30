@@ -56,6 +56,7 @@ export type CartographyOverlayLayerId =
   | 'nebulae'
   | 'ion-storms'
   | 'star-clusters'
+  | 'neutron-clusters'
   | 'black-holes'
 
 type CartographyOverlayCircleBase = {
@@ -97,6 +98,14 @@ export type StarClusterOverlayCircle = CartographyOverlayCircleBase & {
   planets?: number
 }
 
+export type NeutronClusterOverlayCircle = CartographyOverlayCircleBase & {
+  layer: 'neutron-clusters'
+  name?: string
+  temp?: number
+  mass?: number
+  planets?: number
+}
+
 export type BlackHoleOverlayCircle = CartographyOverlayCircleBase & {
   layer: 'black-holes'
   name?: string
@@ -109,6 +118,7 @@ export type StellarCartographyOverlayCircle =
   | NebulaOverlayCircle
   | IonStormOverlayCircle
   | StarClusterOverlayCircle
+  | NeutronClusterOverlayCircle
   | BlackHoleOverlayCircle
 
 /** Unknown-target wormhole entrance rendered as a sky dot in the SVG overlay. */
@@ -143,6 +153,7 @@ export type MapDataResponse = {
     /** When true, ion storm voltage falls off inside each sub-circle (Stellar Cartography). */
     nuIonStorms?: boolean
     starClusters?: number
+    neutronClusters?: number
     blackHoles?: number
     wormholes?: number
     wormholeEdges?: number
@@ -310,8 +321,11 @@ function normalizeOverlayCircle(raw: unknown): StellarCartographyOverlayCircle |
     return circle
   }
 
-  if (layer === 'star-clusters') {
-    const circle: StarClusterOverlayCircle = { ...base, layer: 'star-clusters' }
+  if (layer === 'star-clusters' || layer === 'neutron-clusters') {
+    const circle: StarClusterOverlayCircle | NeutronClusterOverlayCircle = {
+      ...base,
+      layer,
+    }
     if (typeof o.name === 'string') circle.name = o.name
     const temp = parseJsonFiniteNumber(o.temp)
     if (temp != null) circle.temp = temp
@@ -442,6 +456,7 @@ const STELLAR_CARTOGRAPHY_SAMPLE_LAYER_IDS: readonly StellarCartographySampleLay
   'nebulae',
   'ion-storms',
   'star-clusters',
+  'neutron-clusters',
   'black-holes',
   'wormholes',
 ] as const
@@ -457,6 +472,7 @@ export type StellarCartographySampleEntry =
   | { layer: 'nebulae'; lines: string[] }
   | { layer: 'ion-storms'; lines: string[] }
   | { layer: 'star-clusters'; lines: string[] }
+  | { layer: 'neutron-clusters'; lines: string[] }
   | { layer: 'black-holes'; lines: string[] }
   | { layer: 'wormholes'; lines: string[] }
 

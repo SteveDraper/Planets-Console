@@ -10,6 +10,7 @@ import {
   type MapPoint,
 } from './cartographyOverlayGeometry'
 import { boundaryPolygonFromOrigin } from './isoContourRayMarch'
+import { boundaryPolygonsAtThreshold } from './scalarFieldBoundary'
 import {
   buildScalarGrid,
   findComponentsInGrid,
@@ -60,16 +61,23 @@ export type IonStormCloudPaneShape = {
   strokeWidth: number
 }
 
-type IonStormRasterCache = {
+type IonStormClassBoundary = {
+  stormClass: number
+  polygons: MapPoint[][]
+}
+
+type IonStormGeometryCache = {
   signature: string
   bounds: { minX: number; minY: number; maxX: number; maxY: number }
   imageDataUrl: string
+  outerPolygons: MapPoint[][]
+  classBoundaries: IonStormClassBoundary[]
 }
 
-const rasterCache = new Map<string, IonStormRasterCache>()
+const geometryCache = new Map<string, IonStormGeometryCache>()
 
 export function clearIonStormCloudRasterCache(): void {
-  rasterCache.clear()
+  geometryCache.clear()
 }
 
 function ionStormRasterClass(voltage: number): number {
@@ -207,25 +215,6 @@ export function ionStormBoundaryPolygonFromOrigin(
   )
 }
 
-function ionStormBoundaryPolygonsForComponents(
-  circles: readonly IonStormCircle[],
-  cloudy: boolean,
-  threshold: number,
-  components: readonly IonStormComponent[]
-): MapPoint[][] {
-  return components
-    .map((component) =>
-      ionStormBoundaryPolygonFromOrigin(
-        circles,
-        cloudy,
-        threshold,
-        component.origin,
-        component.maxSearchRadius
-      )
-    )
-    .filter((polygon) => polygon.length >= 3)
-}
-
 /** All iso-contours at a threshold: one ray-marched polygon per disjoint component. */
 export function ionStormBoundaryPolygonsAtThreshold(
   circles: readonly IonStormCircle[],
@@ -239,17 +228,25 @@ export function ionStormBoundaryPolygonsAtThreshold(
 
   const gridStep = scalarGridStepForBounds(bounds, ION_STORM_BOUNDARY_MAX_GRID_CELLS)
   const voltageGrid = grid ?? buildIonVoltageGrid(circles, bounds, gridStep, cloudy)
-  const resolvedComponents =
-    components ??
-    (threshold === ION_STORM_OUTER_VOLTAGE_THRESHOLD
-      ? findComponentsAtThreshold(voltageGrid, threshold)
-      : findComponentsAtMinClass(voltageGrid, ionStormRasterClass(threshold)))
+  const fieldAt = (mapX: number, mapY: number): number => ionVoltageAt(circles, mapX, mapY, cloudy)
+  const isActive =
+    threshold === ION_STORM_OUTER_VOLTAGE_THRESHOLD
+      ? (col: number, row: number, activeGrid: DensityGrid) =>
+          gridValueAt(activeGrid, col, row) >= threshold
+      : (col: number, row: number, activeGrid: DensityGrid) =>
+          gridClassAt(activeGrid, col, row) >= ionStormRasterClass(threshold)
 
-  return ionStormBoundaryPolygonsForComponents(
-    circles,
-    cloudy,
+  return boundaryPolygonsAtThreshold(
+    bounds,
+    ION_STORM_BOUNDARY_MAX_GRID_CELLS,
+    fieldAt,
     threshold,
-    resolvedComponents
+    circles,
+    {
+      grid: voltageGrid,
+      components,
+      isActive,
+    }
   )
 }
 
@@ -260,58 +257,57 @@ export function ionStormBoundaryPathFromPolygons(
   return boundaryPathsFromMapPolygons(polygons, viewport)
 }
 
-function ionStormBoundaryPathsAtThreshold(
-  circles: readonly IonStormCircle[],
-  bounds: { minX: number; minY: number; maxX: number; maxY: number },
-  viewport: IonStormCloudViewport,
-  cloudy: boolean,
-  threshold: number,
-  grid: DensityGrid
-): string[] {
-  return ionStormBoundaryPathFromPolygons(
-    ionStormBoundaryPolygonsAtThreshold(circles, bounds, cloudy, threshold, grid),
-    viewport
-  )
-}
-
-function buildClassBoundaryPaths(
+function buildClassBoundaryPolygons(
   grid: DensityGrid,
   circles: readonly IonStormCircle[],
   bounds: { minX: number; minY: number; maxX: number; maxY: number },
-  viewport: IonStormCloudViewport,
   cloudy: boolean
-): IonStormClassBoundaryPath[] {
+): IonStormClassBoundary[] {
   if (!cloudy) return []
 
   const maxVoltage = maxVoltageInGroup(circles, cloudy)
-  const paths: IonStormClassBoundaryPath[] = []
+  const boundaries: IonStormClassBoundary[] = []
 
   for (const threshold of ION_STORM_CLASS_VOLTAGE_THRESHOLDS) {
     if (maxVoltage < threshold) continue
-    const stormClass = ionStormRasterClass(threshold)
-    const stroke = hexWithAlpha(ionStormStrokeColor(stormClass), ionStormRimOpacity(stormClass))
-    const boundaryPaths = ionStormBoundaryPathsAtThreshold(
-      circles,
-      bounds,
-      viewport,
-      cloudy,
-      threshold,
-      grid
+    boundaries.push({
+      stormClass: ionStormRasterClass(threshold),
+      polygons: ionStormBoundaryPolygonsAtThreshold(
+        circles,
+        bounds,
+        cloudy,
+        threshold,
+        grid
+      ),
+    })
+  }
+
+  return boundaries
+}
+
+function projectClassBoundaryPaths(
+  classBoundaries: readonly IonStormClassBoundary[],
+  viewport: IonStormCloudViewport
+): IonStormClassBoundaryPath[] {
+  const paths: IonStormClassBoundaryPath[] = []
+  for (const boundary of classBoundaries) {
+    const stroke = hexWithAlpha(
+      ionStormStrokeColor(boundary.stormClass),
+      ionStormRimOpacity(boundary.stormClass)
     )
-    for (const path of boundaryPaths) {
+    for (const path of boundaryPathsFromMapPolygons(boundary.polygons, viewport)) {
       paths.push({
-        stormClass,
+        stormClass: boundary.stormClass,
         path,
         stroke,
       })
     }
   }
-
   return paths
 }
 
 function stormSignature(rootId: number, circles: readonly IonStormCircle[], cloudy: boolean): string {
-  return `ion-v4-bounded:${cloudy ? 'cloudy' : 'classic'}:${rootId}:${circles
+  return `ion-v5-cached-boundaries:${cloudy ? 'cloudy' : 'classic'}:${rootId}:${circles
     .map((circle) => `${circle.x},${circle.y},${circle.radius},${circle.voltage}`)
     .join('|')}`
 }
@@ -335,15 +331,15 @@ function rasterizeIonStormMapSpace(
   return raster != null ? { imageDataUrl: raster.imageDataUrl } : null
 }
 
-function getOrBuildIonStormRasterCache(
+function getOrBuildIonStormGeometryCache(
   rootId: number,
   circles: readonly IonStormCircle[],
   cloudy: boolean
-): IonStormRasterCache | null {
+): IonStormGeometryCache | null {
   if (circles.length === 0) return null
 
   const signature = stormSignature(rootId, circles, cloudy)
-  const cached = rasterCache.get(signature)
+  const cached = geometryCache.get(signature)
   if (cached != null) return cached
 
   const bounds = mapBoundsFromCircles(circles)
@@ -352,12 +348,25 @@ function getOrBuildIonStormRasterCache(
   const raster = rasterizeIonStormMapSpace(circles, bounds, cloudy)
   if (raster == null) return null
 
-  const entry: IonStormRasterCache = {
+  const gridStep = scalarGridStepForBounds(bounds, ION_STORM_BOUNDARY_MAX_GRID_CELLS)
+  const voltageGrid = buildIonVoltageGrid(circles, bounds, gridStep, cloudy)
+  const outerPolygons = ionStormBoundaryPolygonsAtThreshold(
+    circles,
+    bounds,
+    cloudy,
+    ION_STORM_OUTER_VOLTAGE_THRESHOLD,
+    voltageGrid
+  )
+  const classBoundaries = buildClassBoundaryPolygons(voltageGrid, circles, bounds, cloudy)
+
+  const entry: IonStormGeometryCache = {
     signature,
     bounds,
     imageDataUrl: raster.imageDataUrl,
+    outerPolygons,
+    classBoundaries,
   }
-  rasterCache.set(signature, entry)
+  geometryCache.set(signature, entry)
   return entry
 }
 
@@ -367,24 +376,22 @@ export function buildIonStormCloudPaneShape(
   viewport: IonStormCloudViewport,
   cloudy: boolean
 ): IonStormCloudPaneShape | null {
-  const cache = getOrBuildIonStormRasterCache(rootId, circles, cloudy)
-  if (cache == null) return null
-  if (!boundsIntersectsViewport(cache.bounds.minX, cache.bounds.minY, cache.bounds.maxX, cache.bounds.maxY, viewport)) {
+  const geometry = getOrBuildIonStormGeometryCache(rootId, circles, cloudy)
+  if (geometry == null) return null
+  if (
+    !boundsIntersectsViewport(
+      geometry.bounds.minX,
+      geometry.bounds.minY,
+      geometry.bounds.maxX,
+      geometry.bounds.maxY,
+      viewport
+    )
+  ) {
     return null
   }
 
-  const { left, top, width, height } = paneRectFromBounds(cache.bounds, viewport)
+  const { left, top, width, height } = paneRectFromBounds(geometry.bounds, viewport)
   const key = `ion-cloud-${rootId}`
-  const gridStep = scalarGridStepForBounds(cache.bounds, ION_STORM_BOUNDARY_MAX_GRID_CELLS)
-  const voltageGrid = buildIonVoltageGrid(circles, cache.bounds, gridStep, cloudy)
-  const outerBoundaryPaths = ionStormBoundaryPathsAtThreshold(
-    circles,
-    cache.bounds,
-    viewport,
-    cloudy,
-    ION_STORM_OUTER_VOLTAGE_THRESHOLD,
-    voltageGrid
-  )
   const outerClass = ionStormRasterClass(Math.round(maxVoltageInGroup(circles, cloudy)))
 
   return {
@@ -393,17 +400,11 @@ export function buildIonStormCloudPaneShape(
     top,
     width,
     height,
-    imageDataUrl: cache.imageDataUrl,
+    imageDataUrl: geometry.imageDataUrl,
     fillClipPathId: `${key}-fill-clip`,
-    outerBoundaryPaths,
+    outerBoundaryPaths: boundaryPathsFromMapPolygons(geometry.outerPolygons, viewport),
     outerStroke: hexWithAlpha(ionStormStrokeColor(outerClass), ionStormRimOpacity(outerClass)),
-    classBoundaryPaths: buildClassBoundaryPaths(
-      voltageGrid,
-      circles,
-      cache.bounds,
-      viewport,
-      cloudy
-    ),
+    classBoundaryPaths: projectClassBoundaryPaths(geometry.classBoundaries, viewport),
     strokeWidth: ION_STORM_BOUNDARY_STROKE_WIDTH,
   }
 }
@@ -423,9 +424,9 @@ export function buildIonStormCloudPaneShapes(
     if (shape != null) shapes.push(shape)
   }
 
-  for (const signature of rasterCache.keys()) {
+  for (const signature of geometryCache.keys()) {
     if (!activeSignatures.has(signature)) {
-      rasterCache.delete(signature)
+      geometryCache.delete(signature)
     }
   }
 

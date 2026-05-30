@@ -7,6 +7,7 @@ describe('stellarCartographySettingsGatesFromGameInfo', () => {
     expect(stellarCartographySettingsGatesFromGameInfo({ game: { id: 1 } })).toEqual({
       debrisDiskBorders: false,
       starClusters: false,
+      neutronClusters: false,
       nebulae: false,
       ionStorms: false,
       wormholes: false,
@@ -20,6 +21,7 @@ describe('stellarCartographySettingsGatesFromGameInfo', () => {
       settings: {
         ndebrisdiscs: 2,
         stars: 13,
+        neutrinostars: 2,
         nebulas: 91,
         maxions: 5,
         maxwormholes: 56,
@@ -29,6 +31,7 @@ describe('stellarCartographySettingsGatesFromGameInfo', () => {
     expect(stellarCartographySettingsGatesFromGameInfo(data)).toEqual({
       debrisDiskBorders: true,
       starClusters: true,
+      neutronClusters: true,
       nebulae: true,
       ionStorms: true,
       wormholes: true,

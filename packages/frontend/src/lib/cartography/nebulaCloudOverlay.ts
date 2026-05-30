@@ -15,7 +15,9 @@ import {
   boundaryPolygonFromOrigin,
   DEFAULT_ISO_CONTOUR_RAY_COUNT,
 } from './isoContourRayMarch'
-import { PLANET_CELL_CENTER_OFFSET } from '../planetSpatialGrid'
+import { mapLyToSampleCell } from '../planetSpatialGrid'
+
+export { mapLyToSampleCell } from '../planetSpatialGrid'
 import {
   buildScalarGrid,
   gridPointToMap,
@@ -72,14 +74,6 @@ const rasterCache = new Map<string, NebulaCloudRasterCache>()
 
 export function clearNebulaCloudRasterCache(): void {
   rasterCache.clear()
-}
-
-/** Integer map cell for Core sample_at / host density (matches hover sampling). */
-export function mapLyToSampleCell(mapX: number, mapY: number): { cellX: number; cellY: number } {
-  return {
-    cellX: Math.round(mapX - PLANET_CELL_CENTER_OFFSET),
-    cellY: Math.round(mapY - PLANET_CELL_CENTER_OFFSET),
-  }
 }
 
 /** Continuous falloff sum for boundary iso-contours. */

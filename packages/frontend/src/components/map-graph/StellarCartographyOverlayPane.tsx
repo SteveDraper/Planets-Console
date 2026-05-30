@@ -1,6 +1,8 @@
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
 import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
+import type { ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
+import { defaultNeutronClusterDisplayMode, defaultStarClusterDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
@@ -40,6 +42,8 @@ export function StellarCartographyOverlayPane({
   wormholeRecenterPulseTarget,
   blockedByPlanetHover,
   nuIonStorms,
+  starClusterDisplayMode = defaultStarClusterDisplayMode(),
+  neutronClusterDisplayMode = defaultNeutronClusterDisplayMode(),
 }: {
   overlayCircles: CombinedMapData['overlayCircles']
   wormholeEndpoints: { x: number; y: number }[]
@@ -47,6 +51,8 @@ export function StellarCartographyOverlayPane({
   wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
   blockedByPlanetHover: boolean
   nuIonStorms?: boolean
+  starClusterDisplayMode?: ClusterOutlineDisplayMode
+  neutronClusterDisplayMode?: ClusterOutlineDisplayMode
 }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
@@ -61,7 +67,11 @@ export function StellarCartographyOverlayPane({
     overlayCircles,
     wormholeEndpoints,
     { width, height, tx, ty, scale },
-    { cloudyIonStorms: nuIonStorms ?? true }
+    {
+      cloudyIonStorms: nuIonStorms ?? true,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode,
+    }
   )
 
   const hasVector =
@@ -69,6 +79,7 @@ export function StellarCartographyOverlayPane({
     shapes.annuli.length > 0 ||
     shapes.nebulaClouds.length > 0 ||
     shapes.ionStormClouds.length > 0 ||
+    shapes.neutronFluxClouds.length > 0 ||
     shapes.debrisDiskBorders.length > 0 ||
     shapes.arrows.length > 0
   const hasMarkers = shapes.wormholeMarkers.length > 0
@@ -82,6 +93,7 @@ export function StellarCartographyOverlayPane({
           shapes={{
             nebulaClouds: shapes.nebulaClouds,
             ionStormClouds: shapes.ionStormClouds,
+            neutronFluxClouds: shapes.neutronFluxClouds,
             circles: shapes.circles,
             annuli: shapes.annuli,
             debrisDiskBorders: shapes.debrisDiskBorders,

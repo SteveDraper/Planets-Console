@@ -68,6 +68,16 @@ export const STAR_CLUSTER_COOL_COLOR = '#dc2626'
 /** Hot star body color (high temp). */
 export const STAR_CLUSTER_HOT_COLOR = '#f8fafc'
 
+/** Neutron cluster lethal core and flux palette (game client blue). */
+export const NEUTRON_CLUSTER_CORE_COLOR = '#7dd3fc'
+export const NEUTRON_CLUSTER_CORE_HOT_COLOR = '#e0f2fe'
+export const NEUTRON_CLUSTER_FLUX_RGB: readonly [number, number, number] = [56, 189, 248]
+export const NEUTRON_CLUSTER_FLUX_MAX_RASTER_PX = 512
+export const NEUTRON_CLUSTER_BOUNDARY_MAX_GRID_CELLS = 512
+
+const NEUTRON_CLUSTER_CORE_RGB: readonly [number, number, number] = [125, 211, 252]
+const NEUTRON_CLUSTER_CORE_HOT_RGB: readonly [number, number, number] = [224, 242, 254]
+
 /** Log-scale temperature anchors for red (low) to white (high) fill color. */
 export const STAR_CLUSTER_TEMP_COLOR_MIN = 10_000
 export const STAR_CLUSTER_TEMP_COLOR_MAX = 50_000
@@ -229,6 +239,43 @@ export function starClusterBandPeakOpacity(
     STAR_CLUSTER_BAND_EDGE_OPACITY +
     intensity * (STAR_CLUSTER_BAND_MAX_OPACITY - STAR_CLUSTER_BAND_EDGE_OPACITY)
   )
+}
+
+/** Map summed halo flux to raster alpha for neutron cluster overlays. */
+export function neutronClusterFluxOpacityFromTotal(totalFlux: number): number {
+  if (totalFlux <= 0) return 0
+  const intensity = Math.min(1, totalFlux / 150)
+  return (
+    STAR_CLUSTER_BAND_EDGE_OPACITY +
+    intensity * (STAR_CLUSTER_BAND_MAX_OPACITY - STAR_CLUSTER_BAND_EDGE_OPACITY)
+  )
+}
+
+/** Fixed blue gradient for neutron cluster lethal cores. */
+export function neutronClusterCoreColorFromTemp(_temp: number): string {
+  const min = STAR_CLUSTER_TEMP_COLOR_MIN
+  const max = STAR_CLUSTER_TEMP_COLOR_MAX
+  const safeTemp = Math.max(min, Math.min(max, _temp > 0 ? _temp : min))
+  const t = clamp01(
+    (Math.log(safeTemp) - Math.log(min)) / (Math.log(max) - Math.log(min))
+  )
+  return rgbToHex(
+    lerpChannel(NEUTRON_CLUSTER_CORE_RGB[0], NEUTRON_CLUSTER_CORE_HOT_RGB[0], t),
+    lerpChannel(NEUTRON_CLUSTER_CORE_RGB[1], NEUTRON_CLUSTER_CORE_HOT_RGB[1], t),
+    lerpChannel(NEUTRON_CLUSTER_CORE_RGB[2], NEUTRON_CLUSTER_CORE_HOT_RGB[2], t)
+  )
+}
+
+export function neutronClusterCoreHotspotOpacity(): number {
+  return STAR_CLUSTER_CORE_HOTSPOT_OPACITY
+}
+
+export function neutronClusterCoreEdgeOpacity(): number {
+  return STAR_CLUSTER_CORE_EDGE_OPACITY
+}
+
+export function neutronClusterCoreStrokeOpacity(): number {
+  return STAR_CLUSTER_CORE_STROKE_ALPHA
 }
 
 export const BLACK_HOLE_BAND_FILL_ALPHA = 0.25
