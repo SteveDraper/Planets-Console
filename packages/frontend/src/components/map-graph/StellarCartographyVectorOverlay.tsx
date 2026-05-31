@@ -216,11 +216,11 @@ export function StellarCartographyVectorOverlay({
           <circle cx={halo.cx} cy={halo.cy} r={halo.r} fill={`url(#${halo.key}-grad)`} stroke="none" />
         </g>
       ))}
-      {shapes.annuli.map((annulus) =>
+      {shapes.annuli.map(({ key, ...annulus }) =>
         annulus.bandGradient != null || annulus.coreGradient != null ? (
-          <GradientAnnulusOverlay key={annulus.key} {...annulus} />
+          <GradientAnnulusOverlay key={key} {...annulus} />
         ) : (
-          <BlackHoleBandOverlay key={annulus.key} shapeKey={annulus.key} {...annulus} />
+          <BlackHoleBandOverlay key={key} shapeKey={key} {...annulus} />
         )
       )}
       {shapes.debrisDiskBorders.map(({ key, cx, cy, r, fill, stroke, strokeWidth }) => (

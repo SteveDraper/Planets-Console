@@ -34,15 +34,16 @@ export function useRetainedMapDisplay({
   }, [gameId])
 
   useEffect(() => {
-    if (hasDisplayableMapData(combined)) {
+    if (combined != null && hasDisplayableMapData(combined)) {
       retainedMapDataRef.current = combined
     }
   }, [combined])
 
   const retainDuringLoad = shouldRetainMapDuringLoad(viewMode, retainedMapDataRef.current)
-  const displayMapData = hasDisplayableMapData(combined)
-    ? combined
-    : retainedMapDataRef.current
+  const displayMapData: CombinedMapData | null =
+    combined != null && hasDisplayableMapData(combined)
+      ? combined
+      : retainedMapDataRef.current
 
   return { displayMapData, retainDuringLoad }
 }

@@ -59,7 +59,12 @@ describe('useRetainedMapDisplay', () => {
         viewMode: 'tabular' | 'map'
       }) =>
         useRetainedMapDisplay({ combined, gameId: 'g1', viewMode }),
-      { initialProps: { combined: sampleMap, viewMode: 'map' as const } }
+      {
+        initialProps: {
+          combined: sampleMap,
+          viewMode: 'map' as 'tabular' | 'map',
+        },
+      }
     )
 
     rerender({ combined: emptyCombined, viewMode: 'tabular' })
