@@ -37,37 +37,27 @@ const initialMapLoad = {
   mapHasAnyData: false,
 }
 
+function showingMap(
+  displayMapData: CombinedMapData,
+  showDeferredPending = false
+) {
+  return {
+    phase: 'showing-map' as const,
+    displayMapData,
+    showDeferredPending,
+  }
+}
+
 describe('useRetainedMapDisplay', () => {
-  it('returns combined when displayable', () => {
+  it('returns showing-map when combined is displayable', () => {
     const { result } = renderHook(() =>
       useRetainedMapDisplay({
         combined: sampleMap,
         ...defaultScope,
-        viewMode: 'map',
         ...idleMapLoad,
       })
     )
-    expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'ready',
-      displayMapData: sampleMap,
-    })
-  })
-
-  it('reports full-loading on initial map load with no retained frame', () => {
-    const { result } = renderHook(() =>
-      useRetainedMapDisplay({
-        combined: emptyCombined,
-        ...defaultScope,
-        viewMode: 'map',
-        ...initialMapLoad,
-      })
-    )
-    expect(result.current.displayMapData).toBeNull()
-    expect(result.current.mapShellView).toEqual({
-      phase: 'full-loading',
-      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
-    })
+    expect(result.current.mapShellView).toEqual(showingMap(sampleMap))
   })
 
   it('retains prior map across empty combined within the same game and perspective', () => {
@@ -89,7 +79,6 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
-          viewMode: 'map',
           turnDataReady: true,
           turnEnsurePending: false,
           mapPending,
@@ -113,11 +102,7 @@ describe('useRetainedMapDisplay', () => {
       mapHasAnyData: false,
     })
 
-    expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'retained',
-      displayMapData: sampleMap,
-    })
+    expect(result.current.mapShellView).toEqual(showingMap(sampleMap))
   })
 
   it('retains across turn step when game and perspective are unchanged', () => {
@@ -139,7 +124,6 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
-          viewMode: 'map',
           turnDataReady: true,
           turnEnsurePending: false,
           mapPending,
@@ -162,11 +146,7 @@ describe('useRetainedMapDisplay', () => {
       mapPending: true,
       mapHasAnyData: false,
     })
-    expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'retained',
-      displayMapData: sampleMap,
-    })
+    expect(result.current.mapShellView).toEqual(showingMap(sampleMap))
 
     rerender({
       combined: turnTwoMap,
@@ -174,11 +154,7 @@ describe('useRetainedMapDisplay', () => {
       mapPending: false,
       mapHasAnyData: true,
     })
-    expect(result.current.displayMapData).toBe(turnTwoMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'ready',
-      displayMapData: turnTwoMap,
-    })
+    expect(result.current.mapShellView).toEqual(showingMap(turnTwoMap))
   })
 
   it('retains only within the current game and perspective key', () => {
@@ -205,7 +181,6 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
-          viewMode: 'map',
           turnDataReady: true,
           turnEnsurePending: false,
           mapPending,
@@ -229,7 +204,7 @@ describe('useRetainedMapDisplay', () => {
       mapPending: false,
       mapHasAnyData: true,
     })
-    expect(result.current.displayMapData).toBe(otherGameMap)
+    expect(result.current.mapShellView).toEqual(showingMap(otherGameMap))
 
     rerender({
       combined: emptyCombined,
@@ -238,12 +213,7 @@ describe('useRetainedMapDisplay', () => {
       mapPending: true,
       mapHasAnyData: false,
     })
-    expect(result.current.displayMapData).toBe(otherGameMap)
-    expect(result.current.displayMapData).not.toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'retained',
-      displayMapData: otherGameMap,
-    })
+    expect(result.current.mapShellView).toEqual(showingMap(otherGameMap))
   })
 
   it('clears retention after gameId changes', () => {
@@ -261,7 +231,6 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
-          viewMode: 'map',
           ...initialMapLoad,
         }),
       { initialProps: { combined: sampleMap, ...defaultScope } }
@@ -269,7 +238,6 @@ describe('useRetainedMapDisplay', () => {
 
     rerender({ combined: emptyCombined, gameId: 'g2', perspective: 1 })
 
-    expect(result.current.displayMapData).toBeNull()
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
@@ -291,7 +259,6 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
-          viewMode: 'map',
           ...initialMapLoad,
         }),
       { initialProps: { combined: sampleMap, ...defaultScope } }
@@ -299,147 +266,9 @@ describe('useRetainedMapDisplay', () => {
 
     rerender({ combined: emptyCombined, gameId: 'g1', perspective: 2 })
 
-    expect(result.current.displayMapData).toBeNull()
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
-    })
-  })
-
-  it('does not retain during load in tabular mode', () => {
-    const { result, rerender } = renderHook(
-      ({
-        combined,
-        viewMode,
-      }: {
-        combined: CombinedMapData | null
-        viewMode: 'tabular' | 'map'
-      }) =>
-        useRetainedMapDisplay({
-          combined,
-          ...defaultScope,
-          viewMode,
-          turnDataReady: true,
-          turnEnsurePending: false,
-          mapPending: true,
-          mapHasError: false,
-          mapHasAnyData: false,
-        }),
-      {
-        initialProps: {
-          combined: sampleMap,
-          viewMode: 'map' as 'tabular' | 'map',
-        },
-      }
-    )
-
-    rerender({ combined: emptyCombined, viewMode: 'tabular' })
-
-    expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({ phase: 'inactive' })
-  })
-
-  it('keeps phase retained (not full-loading) when turn ensure fails after a prior frame', () => {
-    // Hook phase stays retained; MainArea.tsx replaces the map pane with a turn-error placeholder
-    // when turnEnsureIsError && !turnDataReady (see design-frontend-and-backend-state.md).
-    const { result, rerender } = renderHook(
-      ({
-        combined,
-        turnDataReady,
-        turnEnsurePending,
-        mapPending,
-        mapHasAnyData,
-      }: {
-        combined: CombinedMapData | null
-        turnDataReady: boolean
-        turnEnsurePending: boolean
-        mapPending: boolean
-        mapHasAnyData: boolean
-      }) =>
-        useRetainedMapDisplay({
-          combined,
-          ...defaultScope,
-          viewMode: 'map',
-          turnDataReady,
-          turnEnsurePending,
-          mapPending,
-          mapHasError: false,
-          mapHasAnyData,
-        }),
-      {
-        initialProps: {
-          combined: sampleMap,
-          turnDataReady: true,
-          turnEnsurePending: false,
-          mapPending: false,
-          mapHasAnyData: true,
-        },
-      }
-    )
-
-    rerender({
-      combined: emptyCombined,
-      turnDataReady: false,
-      turnEnsurePending: false,
-      mapPending: true,
-      mapHasAnyData: false,
-    })
-
-    expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'retained',
-      displayMapData: sampleMap,
-    })
-  })
-
-  it('keeps retained map visible while turn ensure runs in map mode', () => {
-    const { result, rerender } = renderHook(
-      ({
-        combined,
-        turnDataReady,
-        turnEnsurePending,
-        mapPending,
-        mapHasAnyData,
-      }: {
-        combined: CombinedMapData | null
-        turnDataReady: boolean
-        turnEnsurePending: boolean
-        mapPending: boolean
-        mapHasAnyData: boolean
-      }) =>
-        useRetainedMapDisplay({
-          combined,
-          ...defaultScope,
-          viewMode: 'map',
-          turnDataReady,
-          turnEnsurePending,
-          mapPending,
-          mapHasError: false,
-          mapHasAnyData,
-        }),
-      {
-        initialProps: {
-          combined: sampleMap,
-          turnDataReady: true,
-          turnEnsurePending: false,
-          mapPending: false,
-          mapHasAnyData: true,
-        },
-      }
-    )
-
-    rerender({
-      combined: emptyCombined,
-      turnDataReady: false,
-      turnEnsurePending: true,
-      mapPending: true,
-      mapHasAnyData: false,
-    })
-
-    expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellView).toEqual({
-      phase: 'retained',
-      displayMapData: sampleMap,
     })
   })
 })

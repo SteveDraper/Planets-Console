@@ -4,6 +4,7 @@ import {
   MAP_SHELL_MAP_LOADING_MESSAGE,
   MAP_SHELL_TURN_LOADING_MESSAGE,
   deriveMapShellView,
+  deriveTurnEnsureLoadingView,
   hasDisplayableMapData,
   shouldRetainMapDuringLoad,
 } from './mapDisplayRetention'
@@ -29,16 +30,38 @@ describe('hasDisplayableMapData', () => {
 })
 
 describe('shouldRetainMapDuringLoad', () => {
-  it('retains only in map mode with prior map data', () => {
-    expect(shouldRetainMapDuringLoad('map', sampleMap)).toBe(true)
-    expect(shouldRetainMapDuringLoad('tabular', sampleMap)).toBe(false)
-    expect(shouldRetainMapDuringLoad('map', null)).toBe(false)
+  it('retains when prior map data exists', () => {
+    expect(shouldRetainMapDuringLoad(sampleMap)).toBe(true)
+    expect(shouldRetainMapDuringLoad(null)).toBe(false)
+  })
+})
+
+describe('deriveTurnEnsureLoadingView', () => {
+  it('shows turn loading when scope is set and ensure is pending', () => {
+    expect(
+      deriveTurnEnsureLoadingView({
+        hasAnalyticScope: true,
+        turnDataReady: false,
+        turnEnsurePending: true,
+        suppressTurnEnsureLoading: false,
+      })
+    ).toEqual({ show: true, loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE })
+  })
+
+  it('suppresses turn loading while map retention keeps the prior frame', () => {
+    expect(
+      deriveTurnEnsureLoadingView({
+        hasAnalyticScope: true,
+        turnDataReady: false,
+        turnEnsurePending: true,
+        suppressTurnEnsureLoading: true,
+      })
+    ).toEqual({ show: false })
   })
 })
 
 describe('deriveMapShellView', () => {
   const baseInput = {
-    viewMode: 'map' as const,
     displayMapData: sampleMap,
     retainDuringLoad: false,
     hasAnalyticScope: true,
@@ -49,10 +72,24 @@ describe('deriveMapShellView', () => {
     mapHasAnyData: true,
   }
 
-  it('returns ready with displayMapData when live map data is available', () => {
+  it('returns showing-map with deferred pending off when live map data is available', () => {
     expect(deriveMapShellView(baseInput)).toEqual({
-      phase: 'ready',
+      phase: 'showing-map',
       displayMapData: sampleMap,
+      showDeferredPending: false,
+    })
+  })
+
+  it('returns showing-map with deferred pending when additional map data is loading', () => {
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        mapPending: true,
+      })
+    ).toEqual({
+      phase: 'showing-map',
+      displayMapData: sampleMap,
+      showDeferredPending: true,
     })
   })
 
@@ -70,7 +107,7 @@ describe('deriveMapShellView', () => {
     })
   })
 
-  it('returns retained with displayMapData while a prior frame is shown during reload', () => {
+  it('returns showing-map without deferred pending while a prior frame is shown during reload', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
@@ -79,8 +116,9 @@ describe('deriveMapShellView', () => {
         mapHasAnyData: false,
       })
     ).toEqual({
-      phase: 'retained',
+      phase: 'showing-map',
       displayMapData: sampleMap,
+      showDeferredPending: false,
     })
   })
 
@@ -95,7 +133,7 @@ describe('deriveMapShellView', () => {
     ).toEqual({ phase: 'error' })
   })
 
-  it('returns retained (not turn-loading) during turn ensure when a prior frame is kept', () => {
+  it('returns showing-map (not turn-loading) during turn ensure when a prior frame is kept', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
@@ -107,8 +145,9 @@ describe('deriveMapShellView', () => {
         mapHasAnyData: false,
       })
     ).toEqual({
-      phase: 'retained',
+      phase: 'showing-map',
       displayMapData: sampleMap,
+      showDeferredPending: false,
     })
   })
 
@@ -117,21 +156,6 @@ describe('deriveMapShellView', () => {
       deriveMapShellView({
         ...baseInput,
         displayMapData: null,
-        turnDataReady: false,
-        turnEnsurePending: true,
-      })
-    ).toEqual({
-      phase: 'full-loading',
-      loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE,
-    })
-  })
-
-  it('returns turn-loading in tabular mode during turn ensure', () => {
-    expect(
-      deriveMapShellView({
-        ...baseInput,
-        viewMode: 'tabular',
-        displayMapData: sampleMap,
         turnDataReady: false,
         turnEnsurePending: true,
       })
@@ -154,14 +178,5 @@ describe('deriveMapShellView', () => {
       phase: 'full-loading',
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
     })
-  })
-
-  it('returns inactive in tabular mode when not loading', () => {
-    expect(
-      deriveMapShellView({
-        ...baseInput,
-        viewMode: 'tabular',
-      })
-    ).toEqual({ phase: 'inactive' })
   })
 })

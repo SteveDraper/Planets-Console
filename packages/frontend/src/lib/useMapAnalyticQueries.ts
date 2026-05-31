@@ -1,10 +1,5 @@
 import { useMemo } from 'react'
-import {
-  useQueries,
-  type FetchStatus,
-  type QueryStatus,
-  type UseQueryResult,
-} from '@tanstack/react-query'
+import { useQueries, type UseQueryResult } from '@tanstack/react-query'
 import { fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
@@ -20,9 +15,9 @@ export type ConnectionsMapQueryKey = readonly [
   'analytic',
   'connections',
   'map',
-  string | number,
-  number,
-  number,
+  string | null,
+  number | null,
+  number | null,
   number,
   boolean,
   ConnectionsFlareMode,
@@ -73,84 +68,23 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
   return base ? [base, ...withoutBase] : withoutBase
 }
 
-export type MapQueryCombineRevisionEntry = readonly [number, FetchStatus, QueryStatus]
-
-export type MapQueryCombineRevision = readonly MapQueryCombineRevisionEntry[]
-
-type MapQueryRevisionSource = ReadonlyArray<
-  Pick<UseQueryResult<unknown, Error>, 'dataUpdatedAt' | 'fetchStatus' | 'status'>
->
-
-/** Serializable revision of map query fetch state used to invalidate combined map data. */
-export function mapQueryCombineRevision(mapQueries: MapQueryRevisionSource): MapQueryCombineRevision {
-  return mapQueries.map((q) => [q.dataUpdatedAt, q.fetchStatus, q.status] as const)
-}
-
-/** Stable string key for `useMemo` deps derived from {@link mapQueryCombineRevision}. */
-export function mapQueryCombineRevisionKey(revision: MapQueryCombineRevision): string {
-  return revision.map(([dataUpdatedAt, fetchStatus, status]) =>
-    `${dataUpdatedAt}:${fetchStatus}:${status}`
-  ).join('|')
-}
-
-/** Stable query key for the Connections map analytic; uses `idle` placeholders when scope is null. */
+/** Stable query key for the Connections map analytic. */
 export function connectionsMapQueryKey(
   analyticScope: AnalyticShellScope | null,
   connectionsMapParams: ConnectionsMapParams
 ): ConnectionsMapQueryKey {
-  if (analyticScope != null) {
-    return [
-      'analytic',
-      'connections',
-      'map',
-      analyticScope.gameId,
-      analyticScope.turn,
-      analyticScope.perspective,
-      connectionsMapParams.warpSpeed,
-      connectionsMapParams.gravitonicMovement,
-      connectionsMapParams.flareMode,
-      connectionsMapParams.flareDepth,
-    ]
-  }
   return [
     'analytic',
     'connections',
     'map',
-    'idle',
-    0,
-    0,
+    analyticScope?.gameId ?? null,
+    analyticScope?.turn ?? null,
+    analyticScope?.perspective ?? null,
     connectionsMapParams.warpSpeed,
     connectionsMapParams.gravitonicMovement,
     connectionsMapParams.flareMode,
     connectionsMapParams.flareDepth,
   ]
-}
-
-async function fetchConnectionsMapFromQueryKey(
-  queryKey: ConnectionsMapQueryKey
-): Promise<MapDataResponse> {
-  if (queryKey[3] === 'idle') {
-    return {
-      analyticId: 'connections',
-      nodes: [],
-      edges: [],
-      routes: [],
-    }
-  }
-  const [, , , gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth] =
-    queryKey
-  const scope: AnalyticShellScope = {
-    gameId: String(gameId),
-    turn: Number(turn),
-    perspective: Number(perspective),
-  }
-  const params: ConnectionsMapParams = {
-    warpSpeed: Number(warpSpeed),
-    gravitonicMovement: Boolean(gravitonicMovement),
-    flareMode: flareMode as ConnectionsFlareMode,
-    flareDepth: Number(flareDepth) as ConnectionsMapParams['flareDepth'],
-  }
-  return fetchAnalyticMap('connections', scope, params)
 }
 
 export function useMapAnalyticQueries({
@@ -174,12 +108,10 @@ export function useMapAnalyticQueries({
   const mapQueries = useQueries({
     queries: mapIds.map((analyticId) => {
       if (analyticId === 'connections') {
-        const queryKey = connectionsMapQueryKey(analyticScope, connectionsMapParams)
         return {
-          queryKey,
-          queryFn: ({ queryKey: qk }: { queryKey: ConnectionsMapQueryKey }) =>
-            fetchConnectionsMapFromQueryKey(qk),
-          enabled: analyticFetchEnabled,
+          queryKey: connectionsMapQueryKey(analyticScope, connectionsMapParams),
+          queryFn: () => fetchAnalyticMap('connections', analyticScope!, connectionsMapParams),
+          enabled: analyticFetchEnabled && analyticScope != null,
           structuralSharing: false as const,
         }
       }
@@ -194,42 +126,37 @@ export function useMapAnalyticQueries({
 
   const pending = mapQueries.some((q) => q.isPending)
   const hasError = mapQueries.some((q) => q.error)
-  const liveConnectionsParams =
-    mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
-  const mapIdsKey = mapIds.join('\0')
   const includesStellarCartography = mapIds.includes('stellar-cartography')
-  const mapQueryRevisionKey = mapQueryCombineRevisionKey(mapQueryCombineRevision(mapQueries))
+
+  const mergeOptions = useMemo(() => {
+    const base = {
+      liveConnectionsParams:
+        mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null,
+      futureTurnOffset,
+    }
+    if (includesStellarCartography) {
+      return { ...base, stellarCartography }
+    }
+    return base
+  }, [
+    mapIds,
+    analyticFetchEnabled,
+    connectionsMapParams,
+    futureTurnOffset,
+    includesStellarCartography,
+    stellarCartography,
+  ])
+
+  const mapQueryResults = mapQueries.map((q) => q.data)
 
   const combined = useMemo(
     () =>
       combineMapData(
         mapIds,
         mapQueries.map((q) => ({ data: q.data })),
-        includesStellarCartography
-          ? {
-              liveConnectionsParams,
-              futureTurnOffset,
-              stellarCartography,
-            }
-          : { liveConnectionsParams, futureTurnOffset }
+        mergeOptions
       ),
-    [
-      mapIdsKey,
-      mapQueryRevisionKey,
-      liveConnectionsParams,
-      analyticFetchEnabled,
-      includesStellarCartography,
-      connectionsMapParams.flareMode,
-      connectionsMapParams.warpSpeed,
-      connectionsMapParams.gravitonicMovement,
-      connectionsMapParams.flareDepth,
-      futureTurnOffset,
-      stellarCartography.layerVisibility,
-      stellarCartography.settingsGates,
-      stellarCartography.wormholeDisplayMode,
-      stellarCartography.starClusterDisplayMode,
-      stellarCartography.neutronClusterDisplayMode,
-    ]
+    [mapIds, mapQueryResults, mergeOptions]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
 

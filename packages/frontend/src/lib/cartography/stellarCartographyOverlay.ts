@@ -460,19 +460,20 @@ export function buildStellarCartographyOverlayPaneShapes(
   const debrisDiskBorders: StellarCartographyOverlayCircleShape[] = []
   const arrows: StellarCartographyOverlayArrowShape[] = []
 
-  for (const circle of sortOverlayCircles(
-    overlayCircles.filter(
-      (entry) =>
-        entry.layer !== 'nebulae' &&
-        entry.layer !== 'debris-disks' &&
-        entry.layer !== 'ion-storms' &&
-        entry.layer !== 'neutron-clusters'
-    )
-  )) {
+  type OverlayCirclePaneTarget = {
+    circles: StellarCartographyOverlayCircleShape[]
+    annuli: StellarCartographyOverlayAnnulusShape[]
+    blackHoles: BlackHolePaneShape[]
+  }
+
+  const appendOverlayCirclePaneShape = (
+    circle: StellarCartographyOverlayCircle,
+    target: OverlayCirclePaneTarget
+  ): void => {
     if (isBlackHoleOverlayCircle(circle)) {
       const blackHole = buildBlackHolePaneShape(BLACK_HOLE_CONCEPT_CONSTANTS, circle, viewport)
-      if (blackHole != null) blackHoles.push(blackHole)
-      continue
+      if (blackHole != null) target.blackHoles.push(blackHole)
+      return
     }
     if (isStarClusterOverlayCircle(circle)) {
       const annulus = buildStarClusterAnnulus(
@@ -482,8 +483,8 @@ export function buildStellarCartographyOverlayPaneShapes(
         starClusterOutlines
       )
       if (annulus != null) {
-        annuli.push(annulus)
-        continue
+        target.annuli.push(annulus)
+        return
       }
       const core = buildStarClusterCoreCircle(
         circle,
@@ -491,11 +492,21 @@ export function buildStellarCartographyOverlayPaneShapes(
         STAR_CLUSTER_STROKE_WIDTH,
         starClusterOutlines
       )
-      if (core != null) circles.push(core)
-      continue
+      if (core != null) target.circles.push(core)
     }
-    const shape = buildCircleShape(circle, viewport, strokeWidth)
-    if (shape != null) circles.push(shape)
+  }
+
+  const paneTarget: OverlayCirclePaneTarget = { circles, annuli, blackHoles }
+  for (const circle of sortOverlayCircles(
+    overlayCircles.filter(
+      (entry) =>
+        entry.layer !== 'nebulae' &&
+        entry.layer !== 'debris-disks' &&
+        entry.layer !== 'ion-storms' &&
+        entry.layer !== 'neutron-clusters'
+    )
+  )) {
+    appendOverlayCirclePaneShape(circle, paneTarget)
   }
 
   for (const circle of neutronClusterCircles) {

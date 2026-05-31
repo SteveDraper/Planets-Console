@@ -16,7 +16,6 @@ export type UseRetainedMapDisplayInput = {
   combined: CombinedMapData | null | undefined
   gameId: string | null
   perspective: number | null
-  viewMode: 'tabular' | 'map'
   turnDataReady: boolean
   turnEnsurePending: boolean
   mapPending: boolean
@@ -25,7 +24,6 @@ export type UseRetainedMapDisplayInput = {
 }
 
 export type UseRetainedMapDisplayResult = {
-  displayMapData: CombinedMapData | null
   mapShellView: MapShellView
 }
 
@@ -54,7 +52,6 @@ export function useRetainedMapDisplay({
   combined,
   gameId,
   perspective,
-  viewMode,
   turnDataReady,
   turnEnsurePending,
   mapPending,
@@ -89,12 +86,10 @@ export function useRetainedMapDisplay({
     ? combined
     : retainedForCurrentKey
   const retainDuringLoad = shouldRetainMapDuringLoad(
-    viewMode,
     showingLiveCombined ? null : retainedForCurrentKey
   )
   const hasAnalyticScope = gameId != null && perspective != null
   const mapShellView = deriveMapShellView({
-    viewMode,
     displayMapData,
     retainDuringLoad,
     hasAnalyticScope,
@@ -105,5 +100,5 @@ export function useRetainedMapDisplay({
     mapHasAnyData,
   })
 
-  return { displayMapData, mapShellView }
+  return { mapShellView }
 }

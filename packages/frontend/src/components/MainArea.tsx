@@ -14,10 +14,12 @@ import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
+import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
 import {
-  MAP_SHELL_TURN_LOADING_MESSAGE,
+  deriveTurnEnsureLoadingView,
   type MapShellView,
 } from '../lib/mapDisplayRetention'
+import { errorDetailFromUnknown } from '../lib/queryRetry'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
@@ -68,10 +70,9 @@ function TableTile({
   }
   if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
   if (error) {
-    const detail = error instanceof Error ? error.message : String(error)
     return (
       <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-        Error loading data. {detail}
+        Error loading data. {errorDetailFromUnknown(error)}
       </div>
     )
   }
@@ -158,7 +159,6 @@ function MapMainArea({
     combined,
     gameId: analyticScope?.gameId ?? null,
     perspective: analyticScope?.perspective ?? null,
-    viewMode: 'map',
     turnDataReady,
     turnEnsurePending,
     mapPending: pending,
@@ -168,17 +168,13 @@ function MapMainArea({
 
   if (analyticScope == null) {
     return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Load game info and choose a turn and viewpoint to load the map.
-      </main>
+      <ShellCenterPane message="Load game info and choose a turn and viewpoint to load the map." />
     )
   }
 
   if (mapIds.length === 0) {
     return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        No base map available. Enable at least one map-capable analytic to see the map.
-      </main>
+      <ShellCenterPane message="No base map available. Enable at least one map-capable analytic to see the map." />
     )
   }
 
@@ -188,7 +184,6 @@ function MapMainArea({
     setPlanetLabelOptions: onPlanetLabelOptionsChange,
     onMapZoomChange,
     onSetZoomReady,
-    pending,
     enabledMapIds,
     analyticScope,
   })
@@ -215,44 +210,35 @@ export function MainArea({
   )
 
   if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Enable at least one analytic in the left bar.
-      </main>
-    )
+    return <ShellCenterPane message="Enable at least one analytic in the left bar." />
   }
 
   if (analyticScope != null && turnBlockedNoLogin) {
     return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Set login name in the header to load turn data for analytics.
-      </main>
+      <ShellCenterPane message="Set login name in the header to load turn data for analytics." />
     )
   }
 
   if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
-    const detail =
-      turnEnsureError instanceof Error
-        ? turnEnsureError.message
-        : turnEnsureError != null
-          ? String(turnEnsureError)
-          : 'Unknown error'
     return (
-      <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
-        <p className="text-center font-medium">Failed to load turn data</p>
-        <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
-          {detail}
-        </p>
-        <p className="text-center text-sm text-gray-500">
-          See the error bar, or try another turn or viewpoint.
-        </p>
-      </main>
+      <ShellErrorPane
+        title="Failed to load turn data"
+        error={turnEnsureError}
+        footer="See the error bar, or try another turn or viewpoint."
+      />
     )
   }
 
+  const turnEnsureLoading = deriveTurnEnsureLoadingView({
+    hasAnalyticScope: analyticScope != null,
+    turnDataReady,
+    turnEnsurePending,
+    suppressTurnEnsureLoading: false,
+  })
+
   if (viewMode === 'tabular') {
-    if (analyticScope != null && !turnDataReady && turnEnsurePending) {
-      return mapShellCenterMain(MAP_SHELL_TURN_LOADING_MESSAGE)
+    if (turnEnsureLoading.show) {
+      return <ShellCenterPane message={turnEnsureLoading.loadingMessage} />
     }
 
     return (
@@ -299,7 +285,6 @@ type RenderMapShellViewArgs = {
   setPlanetLabelOptions: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
-  pending: boolean
   enabledMapIds: string[]
   analyticScope: AnalyticShellScope | null
 }
@@ -312,28 +297,24 @@ function renderMapShellView(
     setPlanetLabelOptions: onPlanetLabelOptionsChange,
     onMapZoomChange,
     onSetZoomReady,
-    pending,
     enabledMapIds,
     analyticScope,
   }: RenderMapShellViewArgs
 ) {
   switch (mapShellView.phase) {
-    case 'inactive':
-      throw new Error('renderMapShellView called with inactive map shell view')
     case 'full-loading':
-      return mapShellCenterMain(mapShellView.loadingMessage)
+      return <ShellCenterPane message={mapShellView.loadingMessage} />
     case 'error': {
       const firstErr = mapQueries.find((q) => q.error)?.error
-      const detail =
-        firstErr instanceof Error
-          ? firstErr.message
-          : firstErr != null
-            ? String(firstErr)
-            : 'Failed to load map data'
-      return mapShellErrorMain(detail)
+      return (
+        <ShellErrorPane
+          title="Failed to load map data"
+          error={firstErr}
+          fallbackDetail="Failed to load map data"
+        />
+      )
     }
-    case 'retained':
-    case 'ready':
+    case 'showing-map':
       return (
         <main className="relative flex min-h-0 flex-1 flex-col bg-black">
           <MapPaneWithDisplayControls
@@ -356,29 +337,10 @@ function renderMapShellView(
               }}
             />
           </MapPaneWithDisplayControls>
-          <DeferredPendingMessage pending={mapShellView.phase === 'ready' && pending} />
+          <DeferredPendingMessage pending={mapShellView.showDeferredPending} />
         </main>
       )
   }
-}
-
-function mapShellCenterMain(message: string) {
-  return (
-    <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-      {message}
-    </main>
-  )
-}
-
-function mapShellErrorMain(detail: string) {
-  return (
-    <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
-      <p className="text-center font-medium">Failed to load map data</p>
-      <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
-        {detail}
-      </p>
-    </main>
-  )
 }
 
 /** Shows "Loading additional map data…" after a short delay. Overlays the map so the pane size never changes. */
@@ -390,7 +352,6 @@ function DeferredPendingMessage({ pending }: { pending: boolean }) {
     if (pending) {
       timeoutId = setTimeout(() => setShow(true), 400)
     } else {
-      // Reset `show` when no longer pending so a future pending state is delayed again.
       setShow(false)
     }
 

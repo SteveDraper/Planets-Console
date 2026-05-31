@@ -4,14 +4,43 @@ export const MAP_SHELL_TURN_LOADING_MESSAGE = 'Loading turn data…'
 export const MAP_SHELL_MAP_LOADING_MESSAGE = 'Loading map…'
 
 export type MapShellView =
-  | { phase: 'inactive' }
   | { phase: 'full-loading'; loadingMessage: string }
-  | { phase: 'retained'; displayMapData: CombinedMapData }
-  | { phase: 'ready'; displayMapData: CombinedMapData }
+  | {
+      phase: 'showing-map'
+      displayMapData: CombinedMapData
+      showDeferredPending: boolean
+    }
   | { phase: 'error' }
 
+export type DeriveTurnEnsureLoadingInput = {
+  hasAnalyticScope: boolean
+  turnDataReady: boolean
+  turnEnsurePending: boolean
+  /** When true, turn-ensure loading is suppressed (map retention keeps the prior frame). */
+  suppressTurnEnsureLoading: boolean
+}
+
+export type TurnEnsureLoadingView =
+  | { show: false }
+  | { show: true; loadingMessage: string }
+
+/** Shared turn-ensure loading gate for tabular and map shell paths. */
+export function deriveTurnEnsureLoadingView({
+  hasAnalyticScope,
+  turnDataReady,
+  turnEnsurePending,
+  suppressTurnEnsureLoading,
+}: DeriveTurnEnsureLoadingInput): TurnEnsureLoadingView {
+  if (suppressTurnEnsureLoading) {
+    return { show: false }
+  }
+  if (hasAnalyticScope && !turnDataReady && turnEnsurePending) {
+    return { show: true, loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE }
+  }
+  return { show: false }
+}
+
 export type DeriveMapShellViewInput = {
-  viewMode: 'tabular' | 'map'
   displayMapData: CombinedMapData | null
   retainDuringLoad: boolean
   hasAnalyticScope: boolean
@@ -28,17 +57,13 @@ export function hasDisplayableMapData(data: CombinedMapData | null | undefined):
   return (data?.nodes.length ?? 0) > 0
 }
 
-/** Keep the map pane mounted (preserving React Flow viewport) while turn or map data reloads. */
-export function shouldRetainMapDuringLoad(
-  viewMode: 'tabular' | 'map',
-  retainedMapData: CombinedMapData | null
-): boolean {
-  return viewMode === 'map' && hasDisplayableMapData(retainedMapData)
+/** Keep the map pane mounted (preserving React Flow viewport) while map data reloads. */
+export function shouldRetainMapDuringLoad(retainedMapData: CombinedMapData | null): boolean {
+  return hasDisplayableMapData(retainedMapData)
 }
 
-/** Unified map-shell view for MainArea loading, retention, and error UI. */
+/** Map-mode shell view for loading, retention, and error UI. */
 export function deriveMapShellView({
-  viewMode,
   displayMapData,
   retainDuringLoad,
   hasAnalyticScope,
@@ -49,15 +74,21 @@ export function deriveMapShellView({
   mapHasAnyData,
 }: DeriveMapShellViewInput): MapShellView {
   if (retainDuringLoad && displayMapData != null) {
-    return { phase: 'retained', displayMapData }
+    return {
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+    }
   }
 
-  if (hasAnalyticScope && !turnDataReady && turnEnsurePending) {
-    return { phase: 'full-loading', loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE }
-  }
-
-  if (viewMode !== 'map') {
-    return { phase: 'inactive' }
+  const turnEnsureLoading = deriveTurnEnsureLoadingView({
+    hasAnalyticScope,
+    turnDataReady,
+    turnEnsurePending,
+    suppressTurnEnsureLoading: false,
+  })
+  if (turnEnsureLoading.show) {
+    return { phase: 'full-loading', loadingMessage: turnEnsureLoading.loadingMessage }
   }
 
   if (mapHasError && !mapHasAnyData) {
@@ -68,5 +99,9 @@ export function deriveMapShellView({
     return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
   }
 
-  return { phase: 'ready', displayMapData }
+  return {
+    phase: 'showing-map',
+    displayMapData,
+    showDeferredPending: mapPending,
+  }
 }

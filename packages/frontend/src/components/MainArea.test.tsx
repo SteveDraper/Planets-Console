@@ -85,7 +85,6 @@ describe('MainArea map hook mounting', () => {
       mapQueries: [],
     })
     vi.mocked(useRetainedMapDisplay).mockReturnValue({
-      displayMapData: null,
       mapShellView: { phase: 'full-loading', loadingMessage: 'Loading map…' },
     })
   })

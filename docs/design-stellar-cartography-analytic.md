@@ -223,7 +223,7 @@ Host-aligned math that must stay in sync across Core and the SPA uses repo-root 
 | Fixture | Core | Frontend |
 |---------|------|----------|
 | [`ion_voltage_contract.json`](../test-fixtures/ion_voltage_contract.json) | `test_ion_voltage_contract.py` | `loadIonVoltageContractFixture.ts`, `ionStormCloudOverlay.test.ts` |
-| [`black-hole-ergosphere-contract.json`](../test-fixtures/black-hole-ergosphere-contract.json) | `test_black_holes.py` | — (Core-only; overlay trusts BFF `radius`) |
+| [`black-hole-ergosphere-contract.json`](../test-fixtures/black-hole-ergosphere-contract.json) | `test_black_holes.py` | `blackHoleConceptConstants.test.ts` (band count + halo ly; overlay trusts BFF `radius`) |
 
 ### Black hole ergosphere (host `getBlackHoleBand`)
 
