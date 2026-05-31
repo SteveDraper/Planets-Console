@@ -202,7 +202,7 @@ export type CombinedMapData = {
   edges: MapEdge[]
   /** Deduped intermediate cells for illustrated flare routes (when `includeIllustrativeRoutes` was requested). */
   routeWaypoints: RouteMapWaypoint[]
-  /** Filtered Stellar Cartography disc overlays (layer toggles + settings gates applied). */
+  /** Unfiltered merged Stellar Cartography disc overlays; visibility applied at render time. */
   overlayCircles: StellarCartographyOverlayCircle[]
   /** Wormhole entrances with unknown targets (6px sky dots). */
   wormholeUnknownEntrances: WormholeUnknownEntrance[]

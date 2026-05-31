@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { MAP_ZOOM_MAX, MAP_ZOOM_MIN } from '../../lib/utils'
+import { MAP_ZOOM_MAX, MAP_ZOOM_MIN } from '../../lib/mapZoom'
 import { useCenteredViewportZoom } from './mapZoomKeyboardShortcuts'
 
 const setViewport = vi.fn()

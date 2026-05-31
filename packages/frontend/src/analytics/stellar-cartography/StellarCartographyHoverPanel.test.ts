@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from '../mapLayers'
 import { buildStellarCartographyHoverLines } from './StellarCartographyHoverPanel'
 import { defaultCartographyLayerVisibility } from './layers'
 import {
@@ -17,6 +18,14 @@ const settingsGates = {
   blackHoles: true,
 }
 
+const baseConfig = {
+  ...DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
+  settingsGates,
+  wormholeDisplayMode: defaultWormholeDisplayMode(),
+  starClusterDisplayMode: defaultStarClusterDisplayMode(),
+  neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
+}
+
 describe('buildStellarCartographyHoverLines', () => {
   it('combines overlapping cartography features into one stacked line list', () => {
     const lines = buildStellarCartographyHoverLines(
@@ -25,11 +34,10 @@ describe('buildStellarCartographyHoverLines', () => {
         { layer: 'star-clusters', lines: ['Gores — radiation 42'] },
       ],
       null,
-      defaultCartographyLayerVisibility(),
-      settingsGates,
-      defaultWormholeDisplayMode(),
-      defaultStarClusterDisplayMode(),
-      defaultNeutronClusterDisplayMode()
+      {
+        ...baseConfig,
+        layerVisibility: defaultCartographyLayerVisibility(),
+      }
     )
     expect(lines).toEqual(['Zoie nebula, visibility 72 ly', 'Gores star cluster — radiation 42'])
   })
@@ -38,11 +46,10 @@ describe('buildStellarCartographyHoverLines', () => {
     const lines = buildStellarCartographyHoverLines(
       [{ layer: 'nebulae', lines: ['Zoie', '80 ly'] }],
       ['stability: 80', 'wormhole to (1200, 2400)'],
-      defaultCartographyLayerVisibility(),
-      settingsGates,
-      defaultWormholeDisplayMode(),
-      defaultStarClusterDisplayMode(),
-      defaultNeutronClusterDisplayMode()
+      {
+        ...baseConfig,
+        layerVisibility: defaultCartographyLayerVisibility(),
+      }
     )
     expect(lines).toEqual([
       'Zoie nebula, visibility 80 ly',
@@ -55,11 +62,10 @@ describe('buildStellarCartographyHoverLines', () => {
     const lines = buildStellarCartographyHoverLines(
       [{ layer: 'star-clusters', lines: ['Gores — radiation 42'] }],
       null,
-      defaultCartographyLayerVisibility(),
-      settingsGates,
-      defaultWormholeDisplayMode(),
-      'off',
-      defaultNeutronClusterDisplayMode()
+      {
+        ...baseConfig,
+        starClusterDisplayMode: 'off',
+      }
     )
     expect(lines).toEqual([])
   })

@@ -8,10 +8,7 @@ import { ReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
-import {
-  filterWormholeEdgesForDisplayMode,
-  type WormholeDisplayMode,
-} from '../analytics/stellar-cartography/wormholeDisplayMode'
+import { filterWormholeEdgesForCartographyConfig } from '../analytics/stellar-cartography/overlayDisplayFilter'
 import {
   buildWormholeEndpointHoverIndex,
 } from '../lib/wormholeEndpointHover'
@@ -60,8 +57,6 @@ type MapGraphProps = {
 /** Max time to wait for initial viewport fit before showing the map anyway (avoids staying invisible if fit never runs). */
 const INITIAL_FIT_REVEAL_MS = 250
 
-const DEFAULT_WORMHOLE_DISPLAY_MODE: WormholeDisplayMode = 'always'
-
 export function MapGraph({
   data,
   className,
@@ -103,9 +98,6 @@ export function MapGraph({
     [data.edges, data.wormholeUnknownEntrances]
   )
 
-  const wormholeDisplayMode =
-    cartographyConfig.wormholeDisplayMode ?? DEFAULT_WORMHOLE_DISPLAY_MODE
-
   return (
     <div
       className={`map-graph-cursor-default relative min-h-0 overflow-hidden bg-black ${className ?? 'h-[320px] w-full min-w-0'}`}
@@ -124,7 +116,6 @@ export function MapGraph({
             labelSourceByNodeId={labelSourceByNodeId}
             wormholeEndpoints={wormholeEndpoints}
             wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
-            wormholeDisplayMode={wormholeDisplayMode}
             planetLabelOptions={planetLabelOptions}
             cartographyConfig={cartographyConfig}
             stellarCartography={stellarCartography}
@@ -147,7 +138,6 @@ type MapGraphFlowProps = {
   labelSourceByNodeId: ReturnType<typeof buildLabelSourceByNodeId>
   wormholeEndpoints: { x: number; y: number }[]
   wormholeEndpointHoverByCell: ReturnType<typeof buildWormholeEndpointHoverIndex>
-  wormholeDisplayMode: WormholeDisplayMode
   planetLabelOptions: PlanetLabelOptions
   cartographyConfig: StellarCartographyMapUiConfig
   stellarCartography?: StellarCartographyMapUi
@@ -165,7 +155,6 @@ function MapGraphFlow({
   labelSourceByNodeId,
   wormholeEndpoints,
   wormholeEndpointHoverByCell,
-  wormholeDisplayMode,
   planetLabelOptions,
   cartographyConfig,
   stellarCartography,
@@ -183,12 +172,12 @@ function MapGraphFlow({
 
   const visibleMapEdges = useMemo(
     () =>
-      filterWormholeEdgesForDisplayMode(
+      filterWormholeEdgesForCartographyConfig(
         data.edges,
-        wormholeDisplayMode,
+        cartographyConfig,
         wormholeLineRevealKey
       ),
-    [data.edges, wormholeDisplayMode, wormholeLineRevealKey]
+    [data.edges, cartographyConfig, wormholeLineRevealKey]
   )
   const edges = useMemo(() => toEdges(visibleMapEdges), [visibleMapEdges])
 
@@ -243,11 +232,7 @@ function MapGraphFlow({
         <StellarCartographyHoverPanel
           analyticScope={stellarCartography.analyticScope}
           sampleEnabled={stellarCartography.sampleEnabled}
-          layerVisibility={cartographyConfig.layerVisibility}
-          settingsGates={cartographyConfig.settingsGates}
-          wormholeDisplayMode={cartographyConfig.wormholeDisplayMode}
-          starClusterDisplayMode={cartographyConfig.starClusterDisplayMode}
-          neutronClusterDisplayMode={cartographyConfig.neutronClusterDisplayMode}
+          cartographyConfig={cartographyConfig}
           wormholeHoverLines={wormholeHoverLines}
           blockedByPlanetHover={blockedByPlanetHover}
           clientToFlowPosition={clientToFlowPosition}

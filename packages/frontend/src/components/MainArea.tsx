@@ -7,10 +7,6 @@ import type {
   ConnectionsMapParams,
 } from '../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
-import {
-  DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
-  type StellarCartographyMapUiConfig,
-} from '../analytics/mapLayers'
 import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
@@ -20,10 +16,7 @@ import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
 import { MapShellContent } from './shell/MapShellContent'
 import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
 import { errorDetailFromUnknown } from '../lib/queryRetry'
-import {
-  useMapAnalyticQueries,
-  type UseMapAnalyticQueriesResult,
-} from '../lib/useMapAnalyticQueries'
+import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
 type ViewMode = 'tabular' | 'map'
@@ -123,67 +116,36 @@ type MapMainAreaProps = {
 }
 
 /** Map queries and retention run only while this component is mounted (map view). */
-const MapMainArea = memo(function MapMainArea(props: MapMainAreaProps) {
-  const analyticFetchEnabled = props.analyticScope != null && props.turnDataReady
-  const mapQueries = useMapAnalyticQueries({
-    enabledAnalyticIds: props.enabledAnalyticIds,
-    analytics: props.analytics,
-    analyticScope: props.analyticScope,
-    analyticFetchEnabled,
-    connectionsMapParams: props.connectionsMapParams,
-    futureTurnOffset: props.futureTurnOffset,
-  })
-
-  const needsCartography = mapQueries.enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
-  if (needsCartography) {
-    return <MapMainAreaWithCartography {...props} mapQueries={mapQueries} />
-  }
-
-  return (
-    <MapMainAreaInner
-      {...props}
-      mapQueries={mapQueries}
-      cartographyConfig={DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG}
-      cartographySampleEnabled={false}
-    />
-  )
-})
-
-function MapMainAreaWithCartography(
-  props: MapMainAreaProps & { mapQueries: UseMapAnalyticQueriesResult }
-) {
-  const cartographyConfig = useStellarCartographyMapConfig()
-  return (
-    <MapMainAreaInner
-      {...props}
-      cartographyConfig={cartographyConfig}
-      cartographySampleEnabled
-    />
-  )
-}
-
-type MapMainAreaInnerProps = MapMainAreaProps & {
-  mapQueries: UseMapAnalyticQueriesResult
-  cartographyConfig: StellarCartographyMapUiConfig
-  cartographySampleEnabled: boolean
-}
-
-function MapMainAreaInner({
-  mapQueries,
+const MapMainArea = memo(function MapMainArea({
+  enabledAnalyticIds,
+  analytics,
   analyticScope,
   turnDataReady,
   turnEnsurePending,
+  connectionsMapParams,
+  futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
-  cartographyConfig,
-  cartographySampleEnabled,
-}: MapMainAreaInnerProps) {
-  const { mapIds, combined, pending, hasError, hasAnyData, mapQueries: queries } = mapQueries
+}: MapMainAreaProps) {
+  const analyticFetchEnabled = analyticScope != null && turnDataReady
+  const mapQueries = useMapAnalyticQueries({
+    enabledAnalyticIds,
+    analytics,
+    analyticScope,
+    analyticFetchEnabled,
+    connectionsMapParams,
+    futureTurnOffset,
+  })
+
+  const cartographyEnabled = mapQueries.enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
+  const cartographyConfig = useStellarCartographyMapConfig({ enabled: cartographyEnabled })
+
+  const { mapIds, pending, hasError, hasAnyData, mapQueries: queries } = mapQueries
 
   const { mapShellView } = useRetainedMapDisplay({
-    combined,
+    combined: mapQueries.combined,
     gameId: analyticScope?.gameId ?? null,
     perspective: analyticScope?.perspective ?? null,
     turnDataReady,
@@ -213,12 +175,12 @@ function MapMainAreaInner({
       onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
       onMapZoomChange={onMapZoomChange}
       onSetZoomReady={onSetZoomReady}
-      cartographySampleEnabled={cartographySampleEnabled}
+      cartographySampleEnabled={cartographyEnabled}
       analyticScope={analyticScope}
       cartographyConfig={cartographyConfig}
     />
   )
-}
+})
 
 export function MainArea({
   viewMode,

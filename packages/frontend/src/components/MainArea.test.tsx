@@ -110,6 +110,7 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).not.toHaveBeenCalled()
     expect(useRetainedMapDisplay).not.toHaveBeenCalled()
+    expect(useStellarCartographyMapConfig).not.toHaveBeenCalled()
   })
 
   it('runs map hooks only in map mode', () => {
@@ -117,7 +118,7 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).toHaveBeenCalledTimes(1)
     expect(useRetainedMapDisplay).toHaveBeenCalledTimes(1)
-    expect(useStellarCartographyMapConfig).not.toHaveBeenCalled()
+    expect(useStellarCartographyMapConfig).toHaveBeenCalledWith({ enabled: false })
   })
 
   it('subscribes to cartography config only when that analytic is enabled', () => {
@@ -139,7 +140,7 @@ describe('MainArea map hook mounting', () => {
       { wrapper: createWrapper() }
     )
 
-    expect(useStellarCartographyMapConfig).toHaveBeenCalledTimes(1)
+    expect(useStellarCartographyMapConfig).toHaveBeenCalledWith({ enabled: true })
   })
 
   it('shows turn-loading in tabular mode without map hooks', () => {

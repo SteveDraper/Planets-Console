@@ -8,7 +8,7 @@ import {
   mapZoomToSlider,
   stepMapZoomBySliderSteps,
   viewportZoomFromTransform,
-} from './utils'
+} from './mapZoom'
 
 describe('viewportZoomFromTransform', () => {
   it('reads zoom from transform and clamps to map bounds', () => {

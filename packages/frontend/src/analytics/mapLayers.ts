@@ -31,9 +31,6 @@ export type StellarCartographyMapUiConfig = {
   neutronClusterDisplayMode: ClusterOutlineDisplayMode
 }
 
-/** @deprecated Use {@link StellarCartographyMapUiConfig}. */
-export type StellarCartographyMapMergeOptions = StellarCartographyMapUiConfig
-
 export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
@@ -41,7 +38,7 @@ export type CombineMapDataOptionsBase = {
   futureTurnOffset?: number
 }
 
-export function defaultStellarCartographyMapMergeOptions(): StellarCartographyMapUiConfig {
+export function defaultStellarCartographyMapUiConfig(): StellarCartographyMapUiConfig {
   return {
     layerVisibility: defaultCartographyLayerVisibility(),
     settingsGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
@@ -53,7 +50,7 @@ export function defaultStellarCartographyMapMergeOptions(): StellarCartographyMa
 
 /** Stable default for map render paths when Stellar Cartography is not enabled. */
 export const DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG: StellarCartographyMapUiConfig =
-  defaultStellarCartographyMapMergeOptions()
+  defaultStellarCartographyMapUiConfig()
 
 export function combineMapData(
   analyticIds: readonly string[],

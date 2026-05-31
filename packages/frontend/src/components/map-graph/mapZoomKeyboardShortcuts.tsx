@@ -8,7 +8,7 @@ import {
   mapZoomKeyboardStepsPerRepeatTick,
   stepMapZoomBySliderSteps,
   viewportZoomFromTransform,
-} from '../../lib/utils'
+} from '../../lib/mapZoom'
 import { useWindowKeydown } from '../../lib/keyboardShortcuts'
 
 export function useCenteredViewportZoom(onMapZoomChange: (z: number) => void) {

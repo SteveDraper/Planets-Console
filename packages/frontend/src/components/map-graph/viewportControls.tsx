@@ -5,7 +5,7 @@ import {
   CELL_CENTER_OFFSET,
   gameMapYToFlowCenterY,
 } from './geometry'
-import { viewportZoomFromTransform } from '../../lib/utils'
+import { viewportZoomFromTransform } from '../../lib/mapZoom'
 import {
   MapZoomKeyboardShortcuts,
   useCenteredViewportZoom,

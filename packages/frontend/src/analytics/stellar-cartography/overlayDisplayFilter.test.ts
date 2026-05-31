@@ -11,6 +11,7 @@ import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from '../mapLayers'
 import {
   areCartographyWormholesShown,
   filterCartographyOverlayCircles,
+  filterWormholeEdgesForCartographyConfig,
 } from './overlayDisplayFilter'
 
 const baseConfig = {
@@ -123,5 +124,38 @@ describe('areCartographyWormholesShown', () => {
 
   it('returns true when wormholes are enabled', () => {
     expect(areCartographyWormholesShown(baseConfig)).toBe(true)
+  })
+})
+
+describe('filterWormholeEdgesForCartographyConfig', () => {
+  const wormholeEdge = {
+    source: 'stellar-cartography:wh-1',
+    target: 'stellar-cartography:wh-2',
+    layer: 'wormholes' as const,
+  }
+  const normalEdge = { source: 'base:1', target: 'base:2' }
+
+  it('removes wormhole edges when the settings gate is off', () => {
+    const edges = filterWormholeEdgesForCartographyConfig(
+      [normalEdge, wormholeEdge],
+      {
+        ...baseConfig,
+        settingsGates: {
+          ...baseConfig.settingsGates,
+          wormholes: false,
+        },
+      },
+      null
+    )
+    expect(edges).toEqual([normalEdge])
+  })
+
+  it('keeps wormhole edges when the gate is on and display mode is always', () => {
+    const edges = filterWormholeEdgesForCartographyConfig(
+      [normalEdge, wormholeEdge],
+      baseConfig,
+      null
+    )
+    expect(edges).toEqual([normalEdge, wormholeEdge])
   })
 })
