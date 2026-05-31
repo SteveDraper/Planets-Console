@@ -211,6 +211,11 @@ function normalizeOverlayCircle(raw: unknown): StellarCartographyOverlayCircle |
   return null
 }
 
+function normalizeMapNodeCoordinate(value: unknown): number {
+  if (value === undefined) return 0
+  return parseJsonFiniteNumber(value) ?? 0
+}
+
 function normalizeMapNode(raw: unknown): MapNode {
   if (raw == null || typeof raw !== 'object') {
     return { id: '', label: '', x: 0, y: 0 }
@@ -224,8 +229,8 @@ function normalizeMapNode(raw: unknown): MapNode {
   const base: MapNode = {
     id: typeof n.id === 'string' ? n.id : String(n.id ?? ''),
     label: typeof n.label === 'string' ? n.label : String(n.label ?? ''),
-    x: typeof n.x === 'number' ? n.x : Number(n.x) || 0,
-    y: typeof n.y === 'number' ? n.y : Number(n.y) || 0,
+    x: normalizeMapNodeCoordinate(n.x),
+    y: normalizeMapNodeCoordinate(n.y),
   }
   if (planet != null) {
     base.planet = planet

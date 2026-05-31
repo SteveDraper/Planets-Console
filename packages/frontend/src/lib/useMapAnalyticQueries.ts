@@ -9,7 +9,11 @@ import type {
   ConnectionsMapParams,
   MapDataResponse,
 } from '../api/bff'
-import { combineMapData, type StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
+import {
+  combineMapData,
+  type CombineMapDataOptionsBase,
+  type StellarCartographyMapMergeOptions,
+} from '../analytics/mapLayers'
 
 export type ConnectionsMapQueryKey = readonly [
   'analytic',
@@ -43,6 +47,23 @@ export type UseMapAnalyticQueriesResult = {
   hasAnyData: boolean
   mapQueries: UseQueryResult<MapDataResponse, Error>[]
 }
+
+/** Merges per-analytic map payloads in fetch order. Pure; unit-tested separately. */
+export function combineMapResultsFromQueries(
+  mapIds: readonly string[],
+  mapQueryData: readonly (MapDataResponse | undefined)[],
+  mergeOptions: CombineMapDataOptionsBase
+): CombinedMapData {
+  return combineMapData(
+    mapIds,
+    mapQueryData.map((data) => ({ data })),
+    mergeOptions
+  )
+}
+
+// TanStack structural sharing reuses nested objects by reference; normalizeMapDataResponse
+// clones node.planet snapshots so merged label fields are not dropped across refetches.
+const MAP_QUERY_STRUCTURAL_SHARING = false as const
 
 /** Id of the base map analytic (planets + edges), if present. */
 export function baseMapId(analytics: AnalyticItem[]): string | null {
@@ -112,14 +133,14 @@ export function useMapAnalyticQueries({
           queryKey: connectionsMapQueryKey(analyticScope, connectionsMapParams),
           queryFn: () => fetchAnalyticMap('connections', analyticScope!, connectionsMapParams),
           enabled: analyticFetchEnabled && analyticScope != null,
-          structuralSharing: false as const,
+          structuralSharing: MAP_QUERY_STRUCTURAL_SHARING,
         }
       }
       return {
         queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
         queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
         enabled: analyticFetchEnabled,
-        structuralSharing: false as const,
+        structuralSharing: MAP_QUERY_STRUCTURAL_SHARING,
       }
     }),
   })
@@ -147,17 +168,8 @@ export function useMapAnalyticQueries({
     stellarCartography,
   ])
 
-  const mapQueryResults = mapQueries.map((q) => q.data)
-
-  const combined = useMemo(
-    () =>
-      combineMapData(
-        mapIds,
-        mapQueries.map((q) => ({ data: q.data })),
-        mergeOptions
-      ),
-    [mapIds, mapQueryResults, mergeOptions]
-  )
+  const mapQueryData = mapQueries.map((q) => q.data)
+  const combined = combineMapResultsFromQueries(mapIds, mapQueryData, mergeOptions)
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
   return {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
 import {
+  combineMapResultsFromQueries,
   connectionsMapQueryKey,
   enabledMapAnalyticIds,
   mapIdsToFetch,
@@ -30,6 +31,30 @@ const sampleAnalytics: AnalyticItem[] = [
     type: 'selectable',
   },
 ]
+
+describe('combineMapResultsFromQueries', () => {
+  it('merges map payloads in analytic id order', () => {
+    const combined = combineMapResultsFromQueries(
+      ['base-map', 'connections'],
+      [
+        {
+          analyticId: 'base-map',
+          nodes: [{ id: '1', label: 'A', x: 0, y: 0 }],
+          edges: [],
+        },
+        {
+          analyticId: 'connections',
+          nodes: [],
+          edges: [],
+          routes: [],
+        },
+      ],
+      { liveConnectionsParams: null, futureTurnOffset: 0 }
+    )
+    expect(combined.nodes).toHaveLength(1)
+    expect(combined.nodes[0].id).toBe('base-map:1')
+  })
+})
 
 describe('connectionsMapQueryKey', () => {
   it('uses null scope fields when scope is unset', () => {

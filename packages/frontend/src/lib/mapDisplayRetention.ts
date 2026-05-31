@@ -16,8 +16,6 @@ export type DeriveTurnEnsureLoadingInput = {
   hasAnalyticScope: boolean
   turnDataReady: boolean
   turnEnsurePending: boolean
-  /** When true, turn-ensure loading is suppressed (map retention keeps the prior frame). */
-  suppressTurnEnsureLoading: boolean
 }
 
 export type TurnEnsureLoadingView =
@@ -29,11 +27,7 @@ export function deriveTurnEnsureLoadingView({
   hasAnalyticScope,
   turnDataReady,
   turnEnsurePending,
-  suppressTurnEnsureLoading,
 }: DeriveTurnEnsureLoadingInput): TurnEnsureLoadingView {
-  if (suppressTurnEnsureLoading) {
-    return { show: false }
-  }
   if (hasAnalyticScope && !turnDataReady && turnEnsurePending) {
     return { show: true, loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE }
   }
@@ -55,11 +49,6 @@ export type DeriveMapShellViewInput = {
 
 export function hasDisplayableMapData(data: CombinedMapData | null | undefined): boolean {
   return (data?.nodes.length ?? 0) > 0
-}
-
-/** Keep the map pane mounted (preserving React Flow viewport) while map data reloads. */
-export function shouldRetainMapDuringLoad(retainedMapData: CombinedMapData | null): boolean {
-  return hasDisplayableMapData(retainedMapData)
 }
 
 /** Map-mode shell view for loading, retention, and error UI. */
@@ -85,7 +74,6 @@ export function deriveMapShellView({
     hasAnalyticScope,
     turnDataReady,
     turnEnsurePending,
-    suppressTurnEnsureLoading: false,
   })
   if (turnEnsureLoading.show) {
     return { phase: 'full-loading', loadingMessage: turnEnsureLoading.loadingMessage }

@@ -146,6 +146,22 @@ describe('normalizeMapDataResponse', () => {
     expect(out.nodes[0].planet).not.toBe((raw.nodes[0] as { planet: object }).planet)
   })
 
+  it('parses node coordinates with parseJsonFiniteNumber (no boolean coercion)', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        { id: 'a', label: 'a', x: true, y: false },
+        { id: 'b', label: 'b', x: '12', y: '-3' },
+        { id: 'c', label: 'c', x: null, y: '' },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0]).toMatchObject({ x: 0, y: 0 })
+    expect(out.nodes[1]).toMatchObject({ x: 12, y: -3 })
+    expect(out.nodes[2]).toMatchObject({ x: 0, y: 0 })
+  })
+
   it('preserves normalWellCells on base-map nodes', () => {
     const cells = [{ x: 10, y: 20 }, { x: 11, y: 20 }]
     const raw = {

@@ -6,7 +6,6 @@ import {
   deriveMapShellView,
   deriveTurnEnsureLoadingView,
   hasDisplayableMapData,
-  shouldRetainMapDuringLoad,
 } from './mapDisplayRetention'
 
 const sampleMap: CombinedMapData = {
@@ -29,13 +28,6 @@ describe('hasDisplayableMapData', () => {
   })
 })
 
-describe('shouldRetainMapDuringLoad', () => {
-  it('retains when prior map data exists', () => {
-    expect(shouldRetainMapDuringLoad(sampleMap)).toBe(true)
-    expect(shouldRetainMapDuringLoad(null)).toBe(false)
-  })
-})
-
 describe('deriveTurnEnsureLoadingView', () => {
   it('shows turn loading when scope is set and ensure is pending', () => {
     expect(
@@ -43,18 +35,23 @@ describe('deriveTurnEnsureLoadingView', () => {
         hasAnalyticScope: true,
         turnDataReady: false,
         turnEnsurePending: true,
-        suppressTurnEnsureLoading: false,
       })
     ).toEqual({ show: true, loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE })
   })
 
-  it('suppresses turn loading while map retention keeps the prior frame', () => {
+  it('does not show turn loading when scope is unset or ensure is idle', () => {
+    expect(
+      deriveTurnEnsureLoadingView({
+        hasAnalyticScope: false,
+        turnDataReady: false,
+        turnEnsurePending: true,
+      })
+    ).toEqual({ show: false })
     expect(
       deriveTurnEnsureLoadingView({
         hasAnalyticScope: true,
-        turnDataReady: false,
-        turnEnsurePending: true,
-        suppressTurnEnsureLoading: true,
+        turnDataReady: true,
+        turnEnsurePending: false,
       })
     ).toEqual({ show: false })
   })

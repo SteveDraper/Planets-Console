@@ -3,7 +3,6 @@ import type { CombinedMapData } from '../api/bff'
 import {
   deriveMapShellView,
   hasDisplayableMapData,
-  shouldRetainMapDuringLoad,
   type MapShellView,
 } from './mapDisplayRetention'
 
@@ -85,9 +84,9 @@ export function useRetainedMapDisplay({
   const displayMapData: CombinedMapData | null = showingLiveCombined
     ? combined
     : retainedForCurrentKey
-  const retainDuringLoad = shouldRetainMapDuringLoad(
-    showingLiveCombined ? null : retainedForCurrentKey
-  )
+  const retainDuringLoad = showingLiveCombined
+    ? false
+    : hasDisplayableMapData(retainedForCurrentKey)
   const hasAnalyticScope = gameId != null && perspective != null
   const mapShellView = deriveMapShellView({
     displayMapData,

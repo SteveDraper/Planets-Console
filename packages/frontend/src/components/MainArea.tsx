@@ -233,7 +233,6 @@ export function MainArea({
     hasAnalyticScope: analyticScope != null,
     turnDataReady,
     turnEnsurePending,
-    suppressTurnEnsureLoading: false,
   })
 
   if (viewMode === 'tabular') {

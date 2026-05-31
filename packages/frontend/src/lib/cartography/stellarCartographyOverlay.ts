@@ -1,4 +1,5 @@
 import type {
+  DebrisDiskOverlayCircle,
   IonStormOverlayCircle,
   NeutronClusterOverlayCircle,
   StarClusterOverlayCircle,
@@ -6,6 +7,7 @@ import type {
 } from '../../api/bff'
 import {
   isBlackHoleOverlayCircle,
+  isDebrisDiskOverlayCircle,
   isIonStormOverlayCircle,
   isNebulaOverlayCircle,
   isNeutronClusterOverlayCircle,
@@ -189,10 +191,9 @@ function sortOverlayCircles(
   )
 }
 
-function buildCircleShape(
-  circle: StellarCartographyOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
-  _strokeWidth: number
+function buildDebrisDiskBorderShape(
+  circle: DebrisDiskOverlayCircle,
+  viewport: StellarCartographyOverlayViewport
 ): StellarCartographyOverlayCircleShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
   const r = circle.radius
@@ -202,19 +203,27 @@ function buildCircleShape(
   const { px, py } = flowToPane(cx, cy, viewport)
   const paneR = r * viewport.scale
 
-  if (circle.layer === 'debris-disks') {
-    return {
-      key: circle.id,
-      cx: px,
-      cy: py,
-      r: paneR,
-      fill: 'none',
-      stroke: DEBRIS_DISK_BORDER_STROKE,
-      strokeWidth: DEBRIS_DISK_BORDER_STROKE_WIDTH,
-    }
+  return {
+    key: circle.id,
+    cx: px,
+    cy: py,
+    r: paneR,
+    fill: 'none',
+    stroke: DEBRIS_DISK_BORDER_STROKE,
+    strokeWidth: DEBRIS_DISK_BORDER_STROKE_WIDTH,
   }
+}
 
-  return null
+/** Circles rendered by raster clouds, debris borders, or ion-storm arrows -- not annuli/black holes. */
+function isRasterCloudOrBorderOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): boolean {
+  return (
+    isNebulaOverlayCircle(circle) ||
+    isDebrisDiskOverlayCircle(circle) ||
+    isIonStormOverlayCircle(circle) ||
+    isNeutronClusterOverlayCircle(circle)
+  )
 }
 
 type ClusterCoreGradientTheme = {
@@ -498,13 +507,7 @@ export function buildStellarCartographyOverlayPaneShapes(
 
   const paneTarget: OverlayCirclePaneTarget = { circles, annuli, blackHoles }
   for (const circle of sortOverlayCircles(
-    overlayCircles.filter(
-      (entry) =>
-        entry.layer !== 'nebulae' &&
-        entry.layer !== 'debris-disks' &&
-        entry.layer !== 'ion-storms' &&
-        entry.layer !== 'neutron-clusters'
-    )
+    overlayCircles.filter((entry) => !isRasterCloudOrBorderOverlayCircle(entry))
   )) {
     appendOverlayCirclePaneShape(circle, paneTarget)
   }
@@ -525,9 +528,8 @@ export function buildStellarCartographyOverlayPaneShapes(
     if (arrow != null) arrows.push(arrow)
   }
 
-  for (const circle of overlayCircles) {
-    if (circle.layer !== 'debris-disks') continue
-    const shape = buildCircleShape(circle, viewport, DEBRIS_DISK_BORDER_STROKE_WIDTH)
+  for (const circle of overlayCircles.filter(isDebrisDiskOverlayCircle)) {
+    const shape = buildDebrisDiskBorderShape(circle, viewport)
     if (shape != null) debrisDiskBorders.push(shape)
   }
 
