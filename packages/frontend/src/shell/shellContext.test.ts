@@ -3,13 +3,11 @@ import type { GameInfoShellContext } from '../stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import {
   deriveAnalyticScope,
-  deriveFutureTurnOffset,
   deriveSelectedViewpointName,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
   deriveTurnDataReady,
-  deriveTurnDataTurn,
   deriveTurnEnsureEnabled,
   deriveTurnView,
   isFutureTurn,
@@ -99,18 +97,14 @@ describe('deriveTurnView', () => {
   })
 })
 
-describe('future turn helpers', () => {
-  it('uses latest stored turn for data when viewing the future', () => {
-    expect(deriveTurnDataTurn(12, 10)).toBe(10)
-    expect(deriveFutureTurnOffset(12, 10)).toBe(2)
+describe('isFutureTurn', () => {
+  it('returns true when selected turn exceeds shell turn max', () => {
     expect(isFutureTurn(12, 10)).toBe(true)
     expect(isFutureTurn(10, 10)).toBe(false)
   })
 
   it('delegates to deriveTurnView', () => {
     const view = deriveTurnView(12, 10)
-    expect(deriveTurnDataTurn(12, 10)).toBe(view.dataTurn)
-    expect(deriveFutureTurnOffset(12, 10)).toBe(view.futureOffset)
     expect(isFutureTurn(12, 10)).toBe(view.isFuture)
   })
 })

@@ -70,21 +70,6 @@ export function deriveTurnView(
   }
 }
 
-/** Turn whose stored data is loaded (latest game turn when viewing the future). */
-export function deriveTurnDataTurn(
-  selectedTurn: number | null,
-  shellTurnMax: number | null
-): number | null {
-  return deriveTurnView(selectedTurn, shellTurnMax).dataTurn
-}
-
-export function deriveFutureTurnOffset(
-  selectedTurn: number | null,
-  shellTurnMax: number | null
-): number {
-  return deriveTurnView(selectedTurn, shellTurnMax).futureOffset
-}
-
 export function isFutureTurn(
   selectedTurn: number | null,
   shellTurnMax: number | null

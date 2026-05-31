@@ -1,8 +1,8 @@
 import type {
   StellarCartographyOverlayBlackHoleHaloShape,
+  StellarCartographyOverlayPaneShapes,
   StellarCartographyOverlayRadialGradient,
 } from '../../lib/cartography/stellarCartographyOverlay'
-import type { StellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
 import {
   BLACK_HOLE_HALO_CYAN,
   BLACK_HOLE_HALO_CYAN_OPACITY,

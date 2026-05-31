@@ -10,7 +10,7 @@ import { LoginModal } from './LoginModal'
 import { AboutModal } from './AboutModal'
 import { DiagnosticsModal } from './DiagnosticsModal'
 import { SettingsModal } from './SettingsModal'
-import { isFutureTurn } from '../shell/shellContext'
+import { isFutureTurn } from '../shell'
 
 type ViewMode = 'tabular' | 'map'
 
