@@ -106,21 +106,34 @@ function TableTile({
   )
 }
 
-export function MainArea({
-  viewMode,
+type MapMainAreaProps = {
+  enabledAnalyticIds: string[]
+  analytics: AnalyticItem[]
+  analyticScope: AnalyticShellScope | null
+  turnDataReady: boolean
+  turnEnsurePending: boolean
+  connectionsMapParams: ConnectionsMapParams
+  futureTurnOffset: number
+  planetLabelOptions: PlanetLabelOptions
+  onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
+  onMapZoomChange: (zoom: number) => void
+  onSetZoomReady: (setZoom: (zoom: number) => void) => void
+}
+
+/** Map queries and retention run only while this component is mounted (map view). */
+function MapMainArea({
   enabledAnalyticIds,
   analytics,
   analyticScope,
   turnDataReady,
   turnEnsurePending,
-  turnEnsureIsError,
-  turnEnsureError,
-  turnBlockedNoLogin,
   connectionsMapParams,
   futureTurnOffset,
+  planetLabelOptions,
+  onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
-}: MainAreaProps) {
+}: MapMainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
 
   const cartographyLayerVisibility = useStellarCartographyLayersStore((s) => s.layers)
@@ -142,7 +155,7 @@ export function MainArea({
     hasAnyData,
     mapQueries,
   } = useMapAnalyticQueries({
-    viewMode,
+    viewMode: 'map',
     enabledAnalyticIds,
     analytics,
     analyticScope,
@@ -162,7 +175,7 @@ export function MainArea({
     combined,
     gameId: analyticScope?.gameId ?? null,
     perspective: analyticScope?.perspective ?? null,
-    viewMode,
+    viewMode: 'map',
     turnDataReady,
     turnEnsurePending,
     mapPending: pending,
@@ -170,6 +183,55 @@ export function MainArea({
     mapHasAnyData: hasAnyData,
   })
 
+  if (analyticScope == null) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        Load game info and choose a turn and viewpoint to load the map.
+      </main>
+    )
+  }
+
+  if (mapIds.length === 0) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        No base map available. Enable at least one map-capable analytic to see the map.
+      </main>
+    )
+  }
+
+  return renderMapShellView(mapShellView, {
+    mapQueries,
+    planetLabelOptions,
+    setPlanetLabelOptions: onPlanetLabelOptionsChange,
+    onMapZoomChange,
+    onSetZoomReady,
+    pending,
+    cartographyLayerVisibility,
+    cartographySettingsGates,
+    wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode,
+    enabledMapIds,
+    analyticScope,
+  })
+}
+
+export function MainArea({
+  viewMode,
+  enabledAnalyticIds,
+  analytics,
+  analyticScope,
+  turnDataReady,
+  turnEnsurePending,
+  turnEnsureIsError,
+  turnEnsureError,
+  turnBlockedNoLogin,
+  connectionsMapParams,
+  futureTurnOffset,
+  onMapZoomChange,
+  onSetZoomReady,
+}: MainAreaProps) {
+  const analyticFetchEnabled = analyticScope != null && turnDataReady
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
     DEFAULT_PLANET_LABEL_OPTIONS
   )
@@ -188,27 +250,6 @@ export function MainArea({
         Set login name in the header to load turn data for analytics.
       </main>
     )
-  }
-
-  if (
-    mapShellView.phase === 'full-loading' &&
-    mapShellView.loadingMessage === MAP_SHELL_TURN_LOADING_MESSAGE
-  ) {
-    return renderMapShellView(mapShellView, {
-      mapQueries,
-      planetLabelOptions,
-      setPlanetLabelOptions,
-      onMapZoomChange,
-      onSetZoomReady,
-      pending,
-      cartographyLayerVisibility,
-      cartographySettingsGates,
-      wormholeDisplayMode,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode,
-      enabledMapIds,
-      analyticScope,
-    })
   }
 
   if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
@@ -232,6 +273,10 @@ export function MainArea({
   }
 
   if (viewMode === 'tabular') {
+    if (analyticScope != null && !turnDataReady && turnEnsurePending) {
+      return mapShellCenterMain(MAP_SHELL_TURN_LOADING_MESSAGE)
+    }
+
     return (
       <main className="flex flex-1 flex-col gap-4 overflow-auto bg-black p-4">
         {enabledAnalyticIds.map((id) => (
@@ -253,37 +298,21 @@ export function MainArea({
     )
   }
 
-  if (viewMode === 'map' && analyticScope == null) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Load game info and choose a turn and viewpoint to load the map.
-      </main>
-    )
-  }
-
-  if (viewMode === 'map' && mapIds.length === 0) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        No base map available. Enable at least one map-capable analytic to see the map.
-      </main>
-    )
-  }
-
-  return renderMapShellView(mapShellView, {
-    mapQueries,
-    planetLabelOptions,
-    setPlanetLabelOptions,
-    onMapZoomChange,
-    onSetZoomReady,
-    pending,
-    cartographyLayerVisibility,
-    cartographySettingsGates,
-    wormholeDisplayMode,
-    starClusterDisplayMode,
-    neutronClusterDisplayMode,
-    enabledMapIds,
-    analyticScope,
-  })
+  return (
+    <MapMainArea
+      enabledAnalyticIds={enabledAnalyticIds}
+      analytics={analytics}
+      analyticScope={analyticScope}
+      turnDataReady={turnDataReady}
+      turnEnsurePending={turnEnsurePending}
+      connectionsMapParams={connectionsMapParams}
+      futureTurnOffset={futureTurnOffset}
+      planetLabelOptions={planetLabelOptions}
+      onPlanetLabelOptionsChange={setPlanetLabelOptions}
+      onMapZoomChange={onMapZoomChange}
+      onSetZoomReady={onSetZoomReady}
+    />
+  )
 }
 
 type RenderMapShellViewArgs = {
@@ -315,7 +344,7 @@ function renderMapShellView(
   {
     mapQueries,
     planetLabelOptions,
-    setPlanetLabelOptions,
+    setPlanetLabelOptions: onPlanetLabelOptionsChange,
     onMapZoomChange,
     onSetZoomReady,
     pending,
