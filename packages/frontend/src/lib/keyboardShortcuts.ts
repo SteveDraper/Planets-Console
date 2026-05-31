@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+
 const TEXT_ENTRY_INPUT_TYPES = new Set([
   'text',
   'number',
@@ -23,4 +25,32 @@ export function keyboardTargetBlocksShortcut(target: EventTarget | null): boolea
 
 export function isModalDialogOpen(): boolean {
   return document.querySelector('[aria-modal="true"]') != null
+}
+
+export type UseWindowKeydownOptions = {
+  enabled?: boolean
+  guard?: () => boolean
+}
+
+export function useWindowKeydown(
+  handler: (e: KeyboardEvent) => void,
+  options?: UseWindowKeydownOptions
+): void {
+  const enabled = options?.enabled ?? true
+  const guard = options?.guard
+
+  useEffect(() => {
+    if (!enabled) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (keyboardTargetBlocksShortcut(e.target)) return
+      if (isModalDialogOpen()) return
+      if (guard != null && !guard()) return
+      handler(e)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [enabled, guard, handler])
 }
