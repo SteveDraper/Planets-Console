@@ -14,15 +14,13 @@ import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
 import {
   deriveAnalyticScope,
-  deriveFutureTurnOffset,
   deriveSelectedViewpointName,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
   deriveTurnDataReady,
-  deriveTurnDataTurn,
   deriveTurnEnsureEnabled,
-  isFutureTurn,
+  deriveTurnView,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
   type ShellViewpointRow,
@@ -47,8 +45,8 @@ export type ShellContext = {
   selectedTurn: number | null
   isFutureTurn: boolean
   futureTurnOffset: number
-  onTurnChange: (turn: number) => void
-  onTurnStep: (delta: number) => void
+  setTurn: (turn: number) => void
+  stepTurn: (delta: number) => void
 }
 
 export function useShellContext({ reportShellError }: UseShellContextOptions): ShellContext {
@@ -97,20 +95,12 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     [gameInfoContext]
   )
 
-  const futureTurnOffset = useMemo(
-    () => deriveFutureTurnOffset(selectedTurn, shellTurnMax),
+  const turnView = useMemo(
+    () => deriveTurnView(selectedTurn, shellTurnMax),
     [selectedTurn, shellTurnMax]
   )
 
-  const futureTurnActive = useMemo(
-    () => isFutureTurn(selectedTurn, shellTurnMax),
-    [selectedTurn, shellTurnMax]
-  )
-
-  const dataTurn = useMemo(
-    () => deriveTurnDataTurn(selectedTurn, shellTurnMax),
-    [selectedTurn, shellTurnMax]
-  )
+  const { dataTurn, futureOffset: futureTurnOffset, isFuture: futureTurnActive } = turnView
 
   const shellViewpoints = useMemo(() => deriveShellViewpoints(shellInputs), [shellInputs])
 
@@ -157,24 +147,20 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     ]
   )
 
-  const onTurnChange = useCallback(
-    (n: number) => {
+  const setTurn = useCallback(
+    (absolute: number) => {
       if (shellTurnMax == null) return
-      setSelectedTurn(Math.max(1, Math.round(n)))
+      setSelectedTurn(Math.max(1, Math.round(absolute)))
     },
     [shellTurnMax, setSelectedTurn]
   )
 
-  const onTurnStep = useCallback(
+  const stepTurn = useCallback(
     (delta: number) => {
       if (shellTurnMax == null || selectedTurn == null) return
-      if (delta < 0) {
-        setSelectedTurn(Math.max(1, selectedTurn + delta))
-        return
-      }
-      setSelectedTurn(selectedTurn + delta)
+      setTurn(selectedTurn + delta)
     },
-    [shellTurnMax, selectedTurn, setSelectedTurn]
+    [shellTurnMax, selectedTurn, setTurn]
   )
 
   const analyticScope = useMemo(() => deriveAnalyticScope(shellInputs), [shellInputs])
@@ -307,7 +293,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     selectedTurn,
     isFutureTurn: futureTurnActive,
     futureTurnOffset,
-    onTurnChange,
-    onTurnStep,
+    setTurn,
+    stepTurn,
   }
 }

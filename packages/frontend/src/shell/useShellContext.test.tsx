@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useShellContext } from './useShellContext'
@@ -250,6 +250,66 @@ describe('useShellContext', () => {
     await waitFor(() => {
       expect(reportShellError).toHaveBeenCalledWith('Ensure failed')
     })
+  })
+
+  it('setTurn clamps to minimum 1 and allows future turns beyond shellTurnMax', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
+        isGameFinished: true,
+        sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+      },
+      selectedTurn: 5,
+    })
+
+    const { result } = renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    act(() => {
+      result.current.setTurn(0)
+    })
+    expect(useShellStore.getState().selectedTurn).toBe(1)
+
+    act(() => {
+      result.current.setTurn(12)
+    })
+    expect(useShellStore.getState().selectedTurn).toBe(12)
+    expect(result.current.isFutureTurn).toBe(true)
+    expect(result.current.futureTurnOffset).toBe(2)
+  })
+
+  it('stepTurn delegates to setTurn and clamps decrement at 1', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
+        isGameFinished: true,
+        sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+      },
+      selectedTurn: 5,
+    })
+
+    const { result } = renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    act(() => {
+      result.current.stepTurn(1)
+    })
+    expect(useShellStore.getState().selectedTurn).toBe(6)
+
+    act(() => {
+      result.current.stepTurn(-10)
+    })
+    expect(useShellStore.getState().selectedTurn).toBe(1)
   })
 
   it('resyncs to spectator when turn change stores only pseudo perspective 0', async () => {
