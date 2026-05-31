@@ -144,6 +144,7 @@ const MapMainArea = memo(function MapMainArea(props: MapMainAreaProps) {
       {...props}
       mapQueries={mapQueries}
       cartographyConfig={DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG}
+      cartographySampleEnabled={false}
     />
   )
 })
@@ -152,12 +153,19 @@ function MapMainAreaWithCartography(
   props: MapMainAreaProps & { mapQueries: UseMapAnalyticQueriesResult }
 ) {
   const cartographyConfig = useStellarCartographyMapConfig()
-  return <MapMainAreaInner {...props} cartographyConfig={cartographyConfig} />
+  return (
+    <MapMainAreaInner
+      {...props}
+      cartographyConfig={cartographyConfig}
+      cartographySampleEnabled
+    />
+  )
 }
 
 type MapMainAreaInnerProps = MapMainAreaProps & {
   mapQueries: UseMapAnalyticQueriesResult
   cartographyConfig: StellarCartographyMapUiConfig
+  cartographySampleEnabled: boolean
 }
 
 function MapMainAreaInner({
@@ -170,9 +178,9 @@ function MapMainAreaInner({
   onMapZoomChange,
   onSetZoomReady,
   cartographyConfig,
+  cartographySampleEnabled,
 }: MapMainAreaInnerProps) {
-  const { enabledMapIds, mapIds, combined, pending, hasError, hasAnyData, mapQueries: queries } =
-    mapQueries
+  const { mapIds, combined, pending, hasError, hasAnyData, mapQueries: queries } = mapQueries
 
   const { mapShellView } = useRetainedMapDisplay({
     combined,
@@ -205,7 +213,7 @@ function MapMainAreaInner({
       onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
       onMapZoomChange={onMapZoomChange}
       onSetZoomReady={onSetZoomReady}
-      enabledMapIds={enabledMapIds}
+      cartographySampleEnabled={cartographySampleEnabled}
       analyticScope={analyticScope}
       cartographyConfig={cartographyConfig}
     />

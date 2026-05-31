@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { AnalyticShellScope, MapDataResponse } from '../../api/bff'
-import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
 import type { StellarCartographyMapUiConfig } from '../../analytics/mapLayers'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
@@ -17,7 +16,7 @@ type MapShellContentProps = {
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
-  enabledMapIds: string[]
+  cartographySampleEnabled: boolean
   analyticScope: AnalyticShellScope | null
   cartographyConfig: StellarCartographyMapUiConfig
 }
@@ -30,7 +29,7 @@ export function MapShellContent({
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
-  enabledMapIds,
+  cartographySampleEnabled,
   analyticScope,
   cartographyConfig,
 }: MapShellContentProps) {
@@ -66,7 +65,7 @@ export function MapShellContent({
               planetLabelOptions={planetLabelOptions}
               cartographyConfig={cartographyConfig}
               stellarCartography={{
-                sampleEnabled: enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID),
+                sampleEnabled: cartographySampleEnabled,
                 analyticScope,
               }}
             />

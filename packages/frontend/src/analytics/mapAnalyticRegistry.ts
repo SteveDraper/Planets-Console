@@ -104,6 +104,19 @@ const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: stellarCartographyMapAnalytic,
 }
 
+/** Canonical map analytic ids with explicit registry entries. */
+export const REGISTERED_MAP_ANALYTIC_IDS = [
+  BASE_MAP_ANALYTIC_ID,
+  CONNECTIONS_ANALYTIC_ID,
+  STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+] as const satisfies readonly string[]
+
+export type RegisteredMapAnalyticId = (typeof REGISTERED_MAP_ANALYTIC_IDS)[number]
+
+export function isRegisteredMapAnalytic(analyticId: string): analyticId is RegisteredMapAnalyticId {
+  return (REGISTERED_MAP_ANALYTIC_IDS as readonly string[]).includes(analyticId)
+}
+
 export function mapAnalyticRegistrationFor(analyticId: string): MapAnalyticRegistration {
   return mapAnalyticRegistry[analyticId] ?? defaultMapAnalyticRegistration
 }
