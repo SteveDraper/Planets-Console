@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
-  CombinedMapData,
   ConnectionsFlareMode,
   ConnectionsMapParams,
   MapDataResponse,
@@ -20,10 +19,7 @@ import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
-import {
-  hasDisplayableMapData,
-  shouldRetainMapDuringLoad,
-} from '../lib/mapDisplayRetention'
+import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -285,28 +281,11 @@ export function MainArea({
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
-  const retainedMapDataRef = useRef<CombinedMapData | null>(null)
-  const retainedMapGameIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    const gameId = analyticScope?.gameId ?? null
-    if (gameId !== retainedMapGameIdRef.current) {
-      retainedMapDataRef.current = null
-      retainedMapGameIdRef.current = gameId
-    }
-  }, [analyticScope?.gameId])
-  useEffect(() => {
-    if (hasDisplayableMapData(combined)) {
-      retainedMapDataRef.current = combined
-    }
-  }, [combined])
-
-  const retainMapDuringLoad = shouldRetainMapDuringLoad(
+  const { displayMapData, retainDuringLoad } = useRetainedMapDisplay({
+    combined,
+    gameId: analyticScope?.gameId ?? null,
     viewMode,
-    retainedMapDataRef.current
-  )
-  const displayMapData = hasDisplayableMapData(combined)
-    ? combined
-    : retainedMapDataRef.current
+  })
 
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
     DEFAULT_PLANET_LABEL_OPTIONS
@@ -328,7 +307,7 @@ export function MainArea({
     )
   }
 
-  if (analyticScope != null && !turnDataReady && turnEnsurePending && !retainMapDuringLoad) {
+  if (analyticScope != null && !turnDataReady && turnEnsurePending && !retainDuringLoad) {
     return (
       <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading turn data…
@@ -395,14 +374,14 @@ export function MainArea({
   }
   // Only show loading when we have no data yet (initial load). While fetching another turn,
   // keep rendering the map so React Flow stays mounted and viewport is preserved.
-  if (!hasAnyData && pending && !retainMapDuringLoad) {
+  if (!hasAnyData && pending && !retainDuringLoad) {
     return (
       <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading map…
       </main>
     )
   }
-  if (hasError && !hasAnyData && !retainMapDuringLoad) {
+  if (hasError && !hasAnyData && !retainDuringLoad) {
     const firstErr = mapQueries.find((q) => q.error)?.error
     const detail =
       firstErr instanceof Error
@@ -452,7 +431,7 @@ export function MainArea({
           }}
         />
       </MapPaneWithDisplayControls>
-      <DeferredPendingMessage pending={pending && !retainMapDuringLoad} />
+      <DeferredPendingMessage pending={pending && !retainDuringLoad} />
     </main>
   )
 }
