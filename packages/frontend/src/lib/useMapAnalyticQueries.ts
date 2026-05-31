@@ -26,12 +26,6 @@ export type ConnectionsMapQueryKey = readonly [
   number,
 ]
 
-export type MapAnalyticQuerySnapshot = {
-  dataUpdatedAt: number
-  fetchStatus: string
-  status: string
-}
-
 export type UseMapAnalyticQueriesInput = {
   viewMode: ViewMode
   enabledAnalyticIds: string[]
@@ -110,50 +104,6 @@ export function connectionsMapQueryKey(
   ]
 }
 
-export function mapQueriesStateSignature(queries: readonly MapAnalyticQuerySnapshot[]): string {
-  return queries.map((q) => `${q.dataUpdatedAt}:${q.fetchStatus}:${q.status}`).join('|')
-}
-
-/** Inputs that drive the combined-map useMemo; exported for dependency tests. */
-export function combinedMapDataMemoDeps(input: {
-  mapIdsKey: string
-  mapQueriesStateSignature: string
-  liveConnectionsParams: ConnectionsMapParams | null
-  analyticFetchEnabled: boolean
-  includesStellarCartography: boolean
-  connectionsMapParams: ConnectionsMapParams
-  futureTurnOffset: number
-  stellarCartography: StellarCartographyMapMergeOptions
-}): readonly unknown[] {
-  const {
-    mapIdsKey,
-    mapQueriesStateSignature: queriesSignature,
-    liveConnectionsParams,
-    analyticFetchEnabled,
-    includesStellarCartography,
-    connectionsMapParams,
-    futureTurnOffset,
-    stellarCartography,
-  } = input
-  return [
-    mapIdsKey,
-    queriesSignature,
-    liveConnectionsParams,
-    analyticFetchEnabled,
-    includesStellarCartography,
-    connectionsMapParams.flareMode,
-    connectionsMapParams.warpSpeed,
-    connectionsMapParams.gravitonicMovement,
-    connectionsMapParams.flareDepth,
-    futureTurnOffset,
-    stellarCartography.layerVisibility,
-    stellarCartography.settingsGates,
-    stellarCartography.wormholeDisplayMode,
-    stellarCartography.starClusterDisplayMode,
-    stellarCartography.neutronClusterDisplayMode,
-  ]
-}
-
 async function fetchConnectionsMapFromQueryKey(
   queryKey: ConnectionsMapQueryKey
 ): Promise<MapDataResponse> {
@@ -223,7 +173,6 @@ export function useMapAnalyticQueries({
 
   const pending = mapQueries.some((q) => q.isPending)
   const hasError = mapQueries.some((q) => q.error)
-  const queriesSignature = mapQueriesStateSignature(mapQueries)
   const liveConnectionsParams =
     mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
   const mapIdsKey = mapIds.join('\0')
@@ -242,16 +191,23 @@ export function useMapAnalyticQueries({
             }
           : { liveConnectionsParams, futureTurnOffset }
       ),
-    combinedMapDataMemoDeps({
+    [
       mapIdsKey,
-      mapQueriesStateSignature: queriesSignature,
+      mapQueries.map((q) => `${q.dataUpdatedAt}:${q.fetchStatus}:${q.status}`).join('|'),
       liveConnectionsParams,
       analyticFetchEnabled,
       includesStellarCartography,
-      connectionsMapParams,
+      connectionsMapParams.flareMode,
+      connectionsMapParams.warpSpeed,
+      connectionsMapParams.gravitonicMovement,
+      connectionsMapParams.flareDepth,
       futureTurnOffset,
-      stellarCartography,
-    })
+      stellarCartography.layerVisibility,
+      stellarCartography.settingsGates,
+      stellarCartography.wormholeDisplayMode,
+      stellarCartography.starClusterDisplayMode,
+      stellarCartography.neutronClusterDisplayMode,
+    ]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
