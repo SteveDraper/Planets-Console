@@ -31,7 +31,9 @@ import {
   WormholeInteractionProvider,
   useWormholeInteractionState,
 } from './map-graph/stellarCartographyWormholeInteraction'
+import type { StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
 import type { StellarCartographyMapUi } from './map-graph/stellarCartographyMapUi'
+import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import {
   buildLabelSourceByNodeId,
   FixedSizeDotsOverlay,
@@ -70,6 +72,7 @@ export function MapGraph({
 }: MapGraphProps) {
   const [initialFitDone, setInitialFitDone] = useState(false)
   const onInitialFitDone = useCallback(() => setInitialFitDone(true), [])
+  const cartographyConfig = useStellarCartographyMapConfig()
 
   useEffect(() => {
     const t = setTimeout(() => setInitialFitDone(true), INITIAL_FIT_REVEAL_MS)
@@ -101,7 +104,7 @@ export function MapGraph({
   )
 
   const wormholeDisplayMode =
-    stellarCartography?.wormholeDisplayMode ?? DEFAULT_WORMHOLE_DISPLAY_MODE
+    cartographyConfig.wormholeDisplayMode ?? DEFAULT_WORMHOLE_DISPLAY_MODE
 
   return (
     <div
@@ -123,6 +126,7 @@ export function MapGraph({
             wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
             wormholeDisplayMode={wormholeDisplayMode}
             planetLabelOptions={planetLabelOptions}
+            cartographyConfig={cartographyConfig}
             stellarCartography={stellarCartography}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
@@ -145,6 +149,7 @@ type MapGraphFlowProps = {
   wormholeEndpointHoverByCell: ReturnType<typeof buildWormholeEndpointHoverIndex>
   wormholeDisplayMode: WormholeDisplayMode
   planetLabelOptions: PlanetLabelOptions
+  cartographyConfig: StellarCartographyMapMergeOptions
   stellarCartography?: StellarCartographyMapUi
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
@@ -162,6 +167,7 @@ function MapGraphFlow({
   wormholeEndpointHoverByCell,
   wormholeDisplayMode,
   planetLabelOptions,
+  cartographyConfig,
   stellarCartography,
   onMapZoomChange,
   onSetZoomReady,
@@ -236,11 +242,11 @@ function MapGraphFlow({
         <StellarCartographyHoverPanel
           analyticScope={stellarCartography.analyticScope}
           sampleEnabled={stellarCartography.sampleEnabled}
-          layerVisibility={stellarCartography.layerVisibility}
-          settingsGates={stellarCartography.settingsGates}
-          wormholeDisplayMode={stellarCartography.wormholeDisplayMode}
-          starClusterDisplayMode={stellarCartography.starClusterDisplayMode}
-          neutronClusterDisplayMode={stellarCartography.neutronClusterDisplayMode}
+          layerVisibility={cartographyConfig.layerVisibility}
+          settingsGates={cartographyConfig.settingsGates}
+          wormholeDisplayMode={cartographyConfig.wormholeDisplayMode}
+          starClusterDisplayMode={cartographyConfig.starClusterDisplayMode}
+          neutronClusterDisplayMode={cartographyConfig.neutronClusterDisplayMode}
           wormholeHoverLines={wormholeHoverLines}
           blockedByPlanetHover={blockedByPlanetHover}
           clientToFlowPosition={clientToFlowPosition}

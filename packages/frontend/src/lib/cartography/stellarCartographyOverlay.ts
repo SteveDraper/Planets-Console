@@ -1,11 +1,16 @@
 import type {
-  BlackHoleOverlayCircle,
   IonStormOverlayCircle,
-  NebulaOverlayCircle,
   NeutronClusterOverlayCircle,
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
+import {
+  isBlackHoleOverlayCircle,
+  isIonStormOverlayCircle,
+  isNebulaOverlayCircle,
+  isNeutronClusterOverlayCircle,
+  isStarClusterOverlayCircle,
+} from '../../api/bffCartographyTypes'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
@@ -437,21 +442,15 @@ export function buildStellarCartographyOverlayPaneShapes(
   const neutronClusterOutlines = areClusterOutlinesShown(
     options?.neutronClusterDisplayMode ?? 'outlined'
   )
-  const nebulaCircles = overlayCircles.filter(
-    (circle): circle is NebulaOverlayCircle => circle.layer === 'nebulae'
-  )
+  const nebulaCircles = overlayCircles.filter(isNebulaOverlayCircle)
   const nebulaClouds = buildNebulaCloudPaneShapes(nebulaCircles, viewport)
-  const ionStormCircles = overlayCircles.filter(
-    (circle): circle is IonStormOverlayCircle => circle.layer === 'ion-storms'
-  )
+  const ionStormCircles = overlayCircles.filter(isIonStormOverlayCircle)
   const ionStormClouds = buildIonStormCloudPaneShapes(
     ionStormCircles,
     viewport,
     options?.cloudyIonStorms ?? true
   )
-  const neutronClusterCircles = overlayCircles.filter(
-    (circle): circle is NeutronClusterOverlayCircle => circle.layer === 'neutron-clusters'
-  )
+  const neutronClusterCircles = overlayCircles.filter(isNeutronClusterOverlayCircle)
   const neutronFluxClouds = buildNeutronClusterFluxPaneShapes(neutronClusterCircles, viewport, {
     showOutlines: areClusterOutlinesShown(options?.neutronClusterDisplayMode ?? 'outlined'),
   })
@@ -470,15 +469,14 @@ export function buildStellarCartographyOverlayPaneShapes(
         entry.layer !== 'neutron-clusters'
     )
   )) {
-    if (circle.layer === 'black-holes') {
-      const blackHole = buildBlackHolePaneShape(circle as BlackHoleOverlayCircle, viewport)
+    if (isBlackHoleOverlayCircle(circle)) {
+      const blackHole = buildBlackHolePaneShape(circle, viewport)
       if (blackHole != null) blackHoles.push(blackHole)
       continue
     }
-    if (circle.layer === 'star-clusters') {
-      const star = circle as StarClusterOverlayCircle
+    if (isStarClusterOverlayCircle(circle)) {
       const annulus = buildStarClusterAnnulus(
-        star,
+        circle,
         viewport,
         STAR_CLUSTER_STROKE_WIDTH,
         starClusterOutlines
@@ -488,7 +486,7 @@ export function buildStellarCartographyOverlayPaneShapes(
         continue
       }
       const core = buildStarClusterCoreCircle(
-        star,
+        circle,
         viewport,
         STAR_CLUSTER_STROKE_WIDTH,
         starClusterOutlines

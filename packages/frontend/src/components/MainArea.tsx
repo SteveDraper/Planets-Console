@@ -6,10 +6,8 @@ import type {
   AnalyticShellScope,
   ConnectionsMapParams,
 } from '../api/bff'
-import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
-import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
-import { useShellStore } from '../stores/shell'
 import { MapGraph } from './MapGraph'
+import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from './PlanetMapInfoControls'
 import {
@@ -136,15 +134,7 @@ function MapMainArea({
 }: MapMainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
 
-  const cartographyLayerVisibility = useStellarCartographyLayersStore((s) => s.layers)
-  const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
-  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
-  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
-    (s) => s.neutronClusterDisplayMode
-  )
-  const cartographySettingsGates =
-    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
-    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
+  const stellarCartography = useStellarCartographyMapConfig()
 
   const {
     enabledMapIds,
@@ -162,13 +152,7 @@ function MapMainArea({
     analyticFetchEnabled,
     connectionsMapParams,
     futureTurnOffset,
-    stellarCartography: {
-      layerVisibility: cartographyLayerVisibility,
-      settingsGates: cartographySettingsGates,
-      wormholeDisplayMode,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode,
-    },
+    stellarCartography,
   })
 
   const { mapShellView } = useRetainedMapDisplay({
@@ -206,11 +190,6 @@ function MapMainArea({
     onMapZoomChange,
     onSetZoomReady,
     pending,
-    cartographyLayerVisibility,
-    cartographySettingsGates,
-    wormholeDisplayMode,
-    starClusterDisplayMode,
-    neutronClusterDisplayMode,
     enabledMapIds,
     analyticScope,
   })
@@ -322,19 +301,6 @@ type RenderMapShellViewArgs = {
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   pending: boolean
-  cartographyLayerVisibility: ReturnType<
-    typeof useStellarCartographyLayersStore.getState
-  >['layers']
-  cartographySettingsGates: typeof EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
-  wormholeDisplayMode: ReturnType<
-    typeof useStellarCartographyLayersStore.getState
-  >['wormholeDisplayMode']
-  starClusterDisplayMode: ReturnType<
-    typeof useStellarCartographyLayersStore.getState
-  >['starClusterDisplayMode']
-  neutronClusterDisplayMode: ReturnType<
-    typeof useStellarCartographyLayersStore.getState
-  >['neutronClusterDisplayMode']
   enabledMapIds: string[]
   analyticScope: AnalyticShellScope | null
 }
@@ -348,11 +314,6 @@ function renderMapShellView(
     onMapZoomChange,
     onSetZoomReady,
     pending,
-    cartographyLayerVisibility,
-    cartographySettingsGates,
-    wormholeDisplayMode,
-    starClusterDisplayMode,
-    neutronClusterDisplayMode,
     enabledMapIds,
     analyticScope,
   }: RenderMapShellViewArgs
@@ -380,7 +341,7 @@ function renderMapShellView(
             controls={
               <PlanetMapInfoControls
                 value={planetLabelOptions}
-                onChange={setPlanetLabelOptions}
+                onChange={onPlanetLabelOptionsChange}
               />
             }
           >
@@ -391,11 +352,6 @@ function renderMapShellView(
               onSetZoomReady={onSetZoomReady}
               planetLabelOptions={planetLabelOptions}
               stellarCartography={{
-                layerVisibility: cartographyLayerVisibility,
-                settingsGates: cartographySettingsGates,
-                wormholeDisplayMode,
-                starClusterDisplayMode,
-                neutronClusterDisplayMode,
                 sampleEnabled: enabledMapIds.includes('stellar-cartography'),
                 analyticScope,
               }}

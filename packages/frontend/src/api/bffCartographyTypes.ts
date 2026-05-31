@@ -121,6 +121,42 @@ export type StellarCartographyOverlayCircle =
   | NeutronClusterOverlayCircle
   | BlackHoleOverlayCircle
 
+export function isDebrisDiskOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): circle is DebrisDiskOverlayCircle {
+  return circle.layer === 'debris-disks'
+}
+
+export function isNebulaOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): circle is NebulaOverlayCircle {
+  return circle.layer === 'nebulae'
+}
+
+export function isIonStormOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): circle is IonStormOverlayCircle {
+  return circle.layer === 'ion-storms'
+}
+
+export function isStarClusterOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): circle is StarClusterOverlayCircle {
+  return circle.layer === 'star-clusters'
+}
+
+export function isNeutronClusterOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): circle is NeutronClusterOverlayCircle {
+  return circle.layer === 'neutron-clusters'
+}
+
+export function isBlackHoleOverlayCircle(
+  circle: StellarCartographyOverlayCircle
+): circle is BlackHoleOverlayCircle {
+  return circle.layer === 'black-holes'
+}
+
 /** Unknown-target wormhole entrance rendered as a sky dot in the SVG overlay. */
 export type WormholeUnknownEntrance = MapCell
 
