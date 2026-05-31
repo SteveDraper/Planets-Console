@@ -278,6 +278,22 @@ describe('normalizeMapDataResponse', () => {
     ])
   })
 
+  it('drops planet pair routes when planet ids are null, empty string, or non-integer', () => {
+    const raw = {
+      analyticId: 'connections',
+      nodes: [],
+      edges: [],
+      routes: [
+        { fromPlanetId: null, toPlanetId: 2, viaFlare: false },
+        { fromPlanetId: 1, toPlanetId: '', viaFlare: false },
+        { fromPlanetId: 1.5, toPlanetId: 2, viaFlare: false },
+        { fromPlanetId: '3', toPlanetId: '4', viaFlare: false },
+      ],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.routes).toEqual([{ fromPlanetId: 3, toPlanetId: 4, viaFlare: false }])
+  })
+
   it('keeps flare illustrativeRoute waypointOffset and arrivalOffset when valid', () => {
     const raw = {
       analyticId: 'connections',

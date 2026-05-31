@@ -53,23 +53,41 @@ export function hasDisplayableMapData(data: CombinedMapData | null | undefined):
   return (data?.nodes.length ?? 0) > 0
 }
 
-/** Map-mode shell view for loading, retention, and error UI. */
-export function deriveMapShellView({
-  displayMapData,
-  mapFrameSource,
-  hasAnalyticScope,
-  turnDataReady,
-  turnEnsurePending,
-  mapPending,
-  mapHasError,
-  mapHasAnyData,
-}: DeriveMapShellViewInput): MapShellView {
+function showingMapView(
+  displayMapData: CombinedMapData,
+  showDeferredPending: boolean
+): MapShellView {
+  return {
+    phase: 'showing-map',
+    displayMapData,
+    showDeferredPending,
+  }
+}
+
+/**
+ * Map-mode shell view for loading, retention, and error UI.
+ *
+ * Phase priority (first match wins):
+ * 1. retained frame -- show prior map during turn step or refetch
+ * 2. turn ensure loading -- no stored turn yet for the selected scope
+ * 3. error -- fetch failed with nothing displayable
+ * 4. initial map loading -- first paint or no displayable data yet
+ * 5. live frame -- map visible; optional deferred pending overlay
+ */
+export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView {
+  const {
+    displayMapData,
+    mapFrameSource,
+    hasAnalyticScope,
+    turnDataReady,
+    turnEnsurePending,
+    mapPending,
+    mapHasError,
+    mapHasAnyData,
+  } = input
+
   if (mapFrameSource === 'retained' && displayMapData != null) {
-    return {
-      phase: 'showing-map',
-      displayMapData,
-      showDeferredPending: false,
-    }
+    return showingMapView(displayMapData, false)
   }
 
   const turnEnsureLoading = deriveTurnEnsureLoadingView({
@@ -89,9 +107,5 @@ export function deriveMapShellView({
     return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
   }
 
-  return {
-    phase: 'showing-map',
-    displayMapData,
-    showDeferredPending: mapPending && mapFrameSource === 'live',
-  }
+  return showingMapView(displayMapData, mapPending && mapFrameSource === 'live')
 }

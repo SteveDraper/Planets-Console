@@ -1,11 +1,9 @@
 import { useMemo } from 'react'
 import { useQueries, type UseQueryResult } from '@tanstack/react-query'
-import { fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
   CombinedMapData,
-  ConnectionsFlareMode,
   ConnectionsMapParams,
   MapDataResponse,
 } from '../api/bff'
@@ -14,19 +12,13 @@ import {
   type CombineMapDataOptionsBase,
   type StellarCartographyMapMergeOptions,
 } from '../analytics/mapLayers'
+import {
+  mapAnalyticQuerySpecFor,
+  type MapAnalyticQueryContext,
+} from '../analytics/mapAnalyticRegistry'
 
-export type ConnectionsMapQueryKey = readonly [
-  'analytic',
-  'connections',
-  'map',
-  string | null,
-  number | null,
-  number | null,
-  number,
-  boolean,
-  ConnectionsFlareMode,
-  number,
-]
+export type { ConnectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
+export { connectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
 
 export type UseMapAnalyticQueriesInput = {
   enabledAnalyticIds: string[]
@@ -65,18 +57,6 @@ export function combineMapResultsFromQueries(
 // clones node.planet snapshots so merged label fields are not dropped across refetches.
 const MAP_QUERY_STRUCTURAL_SHARING = false as const
 
-type MapAnalyticQueryContext = {
-  analyticScope: AnalyticShellScope | null
-  analyticFetchEnabled: boolean
-  connectionsMapParams: ConnectionsMapParams
-}
-
-type MapAnalyticQuerySpec = {
-  queryKey: readonly unknown[]
-  queryFn: () => Promise<MapDataResponse>
-  enabled: boolean
-}
-
 /** Id of the base map analytic (planets + edges), if present. */
 export function baseMapId(analytics: AnalyticItem[]): string | null {
   const a = analytics.find((x) => x.type === 'base' && x.supportsMap)
@@ -99,67 +79,6 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
   const base = baseMapId(analytics)
   const withoutBase = enabledMapIds.filter((id) => id !== base)
   return base ? [base, ...withoutBase] : withoutBase
-}
-
-/** Stable query key for the Connections map analytic. */
-export function connectionsMapQueryKey(
-  analyticScope: AnalyticShellScope | null,
-  connectionsMapParams: ConnectionsMapParams
-): ConnectionsMapQueryKey {
-  return [
-    'analytic',
-    'connections',
-    'map',
-    analyticScope?.gameId ?? null,
-    analyticScope?.turn ?? null,
-    analyticScope?.perspective ?? null,
-    connectionsMapParams.warpSpeed,
-    connectionsMapParams.gravitonicMovement,
-    connectionsMapParams.flareMode,
-    connectionsMapParams.flareDepth,
-  ]
-}
-
-function defaultMapAnalyticQuerySpec(
-  analyticId: string,
-  context: MapAnalyticQueryContext
-): MapAnalyticQuerySpec {
-  return {
-    queryKey: ['analytic', analyticId, 'map', context.analyticScope, 'planet-v2'] as const,
-    queryFn: () => fetchAnalyticMap(analyticId, context.analyticScope!, undefined),
-    enabled: context.analyticFetchEnabled,
-  }
-}
-
-function connectionsMapAnalyticQuerySpec(context: MapAnalyticQueryContext): MapAnalyticQuerySpec {
-  return {
-    queryKey: connectionsMapQueryKey(context.analyticScope, context.connectionsMapParams),
-    queryFn: () =>
-      fetchAnalyticMap('connections', context.analyticScope!, context.connectionsMapParams),
-    enabled: context.analyticFetchEnabled && context.analyticScope != null,
-  }
-}
-
-/**
- * Map analytics whose BFF GET depends on UI params beyond shell scope (game, turn,
- * perspective). Each entry supplies a custom query key and fetch args so TanStack
- * refetches when those params change. Client-only merge options (e.g. Stellar
- * Cartography layer toggles) stay in `combineMapResultsFromQueries` -- no registry entry.
- * Expect more analytics here as map endpoints gain query parameters like Connections.
- */
-const mapAnalyticQueryRegistry: Record<
-  string,
-  (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
-> = {
-  connections: connectionsMapAnalyticQuerySpec,
-}
-
-function mapAnalyticQuerySpecFor(
-  analyticId: string,
-  context: MapAnalyticQueryContext
-): MapAnalyticQuerySpec {
-  const builder = mapAnalyticQueryRegistry[analyticId]
-  return builder ? builder(context) : defaultMapAnalyticQuerySpec(analyticId, context)
 }
 
 export function useMapAnalyticQueries({

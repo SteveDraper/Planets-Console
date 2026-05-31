@@ -275,7 +275,7 @@ This replaces the earlier incorrect heuristic (multiple bodies with the same nam
 ### Other future enhancements
 
 - Persist **Connections** map params (out of scope here).
-- Descriptor-driven map fetch in `MainArea` (trigger per [design-analytics-structure.md](design-analytics-structure.md) when a second parametric map analytic appears).
+- ~~Descriptor-driven map fetch in `MainArea`~~ **Done:** map-capable analytics register query spec + merge layer together in `packages/frontend/src/analytics/mapAnalyticRegistry.ts` (per-analytic modules under `analytics/<id>/mapAnalytic.ts`). Add new parametric map endpoints there, not in separate query and merge registries.
 - Nebula interior raster if `maps[]` gains usable tiles.
 - Spectator / `allwormholesvisible` styling for unknown wormhole ends.
 
