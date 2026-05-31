@@ -359,7 +359,7 @@ describe('combineMapData', () => {
     expect(combined.overlayCircles).toHaveLength(0)
   })
 
-  it('requires Stellar Cartography merge options when merging that layer', () => {
+  it('merges Stellar Cartography with default options when merge config is omitted', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',
       nodes: [],
@@ -367,9 +367,12 @@ describe('combineMapData', () => {
       overlayCircles: [],
     }
 
-    expect(() =>
-      combineMapData(['stellar-cartography'], [{ data: sc }], { liveConnectionsParams: null })
-    ).toThrow('Stellar Cartography map merge requires stellarCartography options')
+    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
+      liveConnectionsParams: null,
+    })
+
+    expect(combined.overlayCircles).toHaveLength(0)
+    expect(combined.nodes).toHaveLength(0)
   })
 
   it('extrapolates ion storm overlay positions for future turns', () => {

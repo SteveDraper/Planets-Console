@@ -27,8 +27,11 @@ export type UseMapAnalyticQueriesInput = {
   analyticFetchEnabled: boolean
   connectionsMapParams: ConnectionsMapParams
   futureTurnOffset: number
-  /** Layer visibility and display modes applied during map merge. */
-  stellarCartography: StellarCartographyMapMergeOptions
+  /**
+   * Layer visibility and display modes applied during map merge.
+   * Omit when Stellar Cartography is not among the enabled map analytics.
+   */
+  stellarCartography?: StellarCartographyMapMergeOptions | null
 }
 
 export type UseMapAnalyticQueriesResult = {
@@ -105,14 +108,16 @@ export function useMapAnalyticQueries({
     [analyticScope, analyticFetchEnabled, connectionsMapParams]
   )
 
-  const mergeOptions = useMemo(
-    (): CombineMapDataOptionsBase => ({
+  const mergeOptions = useMemo((): CombineMapDataOptionsBase => {
+    const base: CombineMapDataOptionsBase = {
       liveConnectionsParams: analyticFetchEnabled ? connectionsMapParams : null,
       futureTurnOffset,
-      stellarCartography,
-    }),
-    [analyticFetchEnabled, connectionsMapParams, futureTurnOffset, stellarCartography]
-  )
+    }
+    if (stellarCartography != null) {
+      base.stellarCartography = stellarCartography
+    }
+    return base
+  }, [analyticFetchEnabled, connectionsMapParams, futureTurnOffset, stellarCartography])
 
   const combineMapQueries = useCallback(
     (results: UseQueryResult<MapDataResponse, Error>[]) => ({

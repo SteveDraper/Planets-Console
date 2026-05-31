@@ -1,10 +1,19 @@
 import type { CombinedMapData, ConnectionsMapParams, MapDataResponse, MapEdge } from '../api/bff'
-import type {
-  CartographyLayerVisibility,
-  StellarCartographySettingsGates,
+import {
+  defaultCartographyLayerVisibility,
+  EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+  type CartographyLayerVisibility,
+  type StellarCartographySettingsGates,
 } from './stellar-cartography/layers'
-import type { WormholeDisplayMode } from './stellar-cartography/wormholeDisplayMode'
-import type { ClusterOutlineDisplayMode } from './stellar-cartography/clusterOutlineDisplayMode'
+import {
+  defaultWormholeDisplayMode,
+  type WormholeDisplayMode,
+} from './stellar-cartography/wormholeDisplayMode'
+import {
+  defaultNeutronClusterDisplayMode,
+  defaultStarClusterDisplayMode,
+  type ClusterOutlineDisplayMode,
+} from './stellar-cartography/clusterOutlineDisplayMode'
 import { routeWaypointsFromMap } from './connections/mapLayer'
 import { applyFutureIonStormOverlayPositions } from '../lib/cartography/futureTurnIonStorms'
 import {
@@ -26,7 +35,22 @@ export type CombineMapDataOptionsBase = {
   liveConnectionsParams: ConnectionsMapParams | null
   /** Extrapolate ion storm positions forward from the latest stored turn. */
   futureTurnOffset?: number
+  /**
+   * Layer visibility and display modes for the Stellar Cartography merge.
+   * When omitted, the cartography merger uses {@link defaultStellarCartographyMapMergeOptions}.
+   */
   stellarCartography?: StellarCartographyMapMergeOptions
+}
+
+/** Static defaults used when cartography merge options are not supplied by the caller. */
+export function defaultStellarCartographyMapMergeOptions(): StellarCartographyMapMergeOptions {
+  return {
+    layerVisibility: defaultCartographyLayerVisibility(),
+    settingsGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+    wormholeDisplayMode: defaultWormholeDisplayMode(),
+    starClusterDisplayMode: defaultStarClusterDisplayMode(),
+    neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
+  }
 }
 
 export function combineMapData(

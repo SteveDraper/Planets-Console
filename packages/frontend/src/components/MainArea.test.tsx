@@ -6,13 +6,22 @@ import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../
 import { MainArea } from './MainArea'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
+import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 
-vi.mock('../lib/useMapAnalyticQueries', () => ({
-  useMapAnalyticQueries: vi.fn(),
-}))
+vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/useMapAnalyticQueries')>()
+  return {
+    ...actual,
+    useMapAnalyticQueries: vi.fn(),
+  }
+})
 
 vi.mock('../lib/useRetainedMapDisplay', () => ({
   useRetainedMapDisplay: vi.fn(),
+}))
+
+vi.mock('../lib/useStellarCartographyMapConfig', () => ({
+  useStellarCartographyMapConfig: vi.fn(),
 }))
 
 const defaultConnectionsParams: ConnectionsMapParams = {
@@ -28,6 +37,13 @@ const sampleAnalytics: AnalyticItem[] = [
     id: 'connections',
     name: 'Connections',
     supportsTable: true,
+    supportsMap: true,
+    type: 'selectable',
+  },
+  {
+    id: 'stellar-cartography',
+    name: 'Stellar Cartography',
+    supportsTable: false,
     supportsMap: true,
     type: 'selectable',
   },
@@ -101,7 +117,19 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).toHaveBeenCalledTimes(1)
     expect(useRetainedMapDisplay).toHaveBeenCalledTimes(1)
-    expect(useMapAnalyticQueries).toHaveBeenCalledTimes(1)
+    expect(useStellarCartographyMapConfig).not.toHaveBeenCalled()
+  })
+
+  it('subscribes to cartography config only when that analytic is enabled', () => {
+    render(
+      <MainArea
+        {...defaultMainAreaProps('map')}
+        enabledAnalyticIds={['connections', 'stellar-cartography']}
+      />,
+      { wrapper: createWrapper() }
+    )
+
+    expect(useStellarCartographyMapConfig).toHaveBeenCalledTimes(1)
   })
 
   it('shows turn-loading in tabular mode without map hooks', () => {

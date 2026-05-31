@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable } from '../api/bff'
 import type {
@@ -6,6 +6,11 @@ import type {
   AnalyticShellScope,
   ConnectionsMapParams,
 } from '../api/bff'
+import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import {
+  defaultStellarCartographyMapMergeOptions,
+  type StellarCartographyMapMergeOptions,
+} from '../analytics/mapLayers'
 import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
@@ -15,7 +20,10 @@ import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
 import { MapShellContent } from './shell/MapShellContent'
 import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
 import { errorDetailFromUnknown } from '../lib/queryRetry'
-import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
+import {
+  enabledMapAnalyticIds,
+  useMapAnalyticQueries,
+} from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
 type ViewMode = 'tabular' | 'map'
@@ -115,7 +123,40 @@ type MapMainAreaProps = {
 }
 
 /** Map queries and retention run only while this component is mounted (map view). */
-const MapMainArea = memo(function MapMainArea({
+const MapMainArea = memo(function MapMainArea(props: MapMainAreaProps) {
+  const enabledMapIds = useMemo(
+    () => enabledMapAnalyticIds(props.enabledAnalyticIds, props.analytics),
+    [props.enabledAnalyticIds, props.analytics]
+  )
+  const needsCartography = enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
+
+  if (needsCartography) {
+    return <MapMainAreaWithCartography {...props} enabledMapIds={enabledMapIds} />
+  }
+
+  return (
+    <MapMainAreaInner
+      {...props}
+      enabledMapIds={enabledMapIds}
+      cartographyConfig={defaultStellarCartographyMapMergeOptions()}
+    />
+  )
+})
+
+function MapMainAreaWithCartography(
+  props: MapMainAreaProps & { enabledMapIds: string[] }
+) {
+  const cartographyConfig = useStellarCartographyMapConfig()
+  return <MapMainAreaInner {...props} cartographyConfig={cartographyConfig} />
+}
+
+type MapMainAreaInnerProps = MapMainAreaProps & {
+  enabledMapIds: string[]
+  cartographyConfig: StellarCartographyMapMergeOptions
+}
+
+function MapMainAreaInner({
+  enabledMapIds,
   enabledAnalyticIds,
   analytics,
   analyticScope,
@@ -127,12 +168,12 @@ const MapMainArea = memo(function MapMainArea({
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
-}: MapMainAreaProps) {
+  cartographyConfig,
+}: MapMainAreaInnerProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
-  const cartographyConfig = useStellarCartographyMapConfig()
+  const needsCartography = enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
 
   const {
-    enabledMapIds,
     mapIds,
     combined,
     pending,
@@ -146,7 +187,7 @@ const MapMainArea = memo(function MapMainArea({
     analyticFetchEnabled,
     connectionsMapParams,
     futureTurnOffset,
-    stellarCartography: cartographyConfig,
+    stellarCartography: needsCartography ? cartographyConfig : null,
   })
 
   const { mapShellView } = useRetainedMapDisplay({
@@ -185,7 +226,7 @@ const MapMainArea = memo(function MapMainArea({
       cartographyConfig={cartographyConfig}
     />
   )
-})
+}
 
 export function MainArea({
   viewMode,

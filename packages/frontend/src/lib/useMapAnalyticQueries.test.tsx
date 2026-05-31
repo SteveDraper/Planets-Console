@@ -199,6 +199,28 @@ describe('useMapAnalyticQueries', () => {
     ])
   })
 
+  it('omits stellarCartography from merge options when not supplied', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    vi.mocked(combineMapData).mockClear()
+
+    renderHook(
+      () =>
+        useMapAnalyticQueries(
+          defaultHookInput({
+            stellarCartography: null,
+          })
+        ),
+      { wrapper: createWrapper(client) }
+    )
+
+    await waitFor(() => {
+      expect(combineMapData).toHaveBeenCalled()
+    })
+    expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[2]).not.toHaveProperty(
+      'stellarCartography'
+    )
+  })
+
   it('passes null liveConnectionsParams when fetch is disabled', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     vi.mocked(combineMapData).mockClear()

@@ -1,12 +1,11 @@
 import type { MapAnalyticRegistration } from '../mapAnalyticRegistry'
+import { defaultStellarCartographyMapMergeOptions } from '../mapLayers'
 import { appendStellarCartographyMapLayer } from './mapLayer'
 
 export const stellarCartographyMapAnalytic: MapAnalyticRegistration = {
   mergeLayer(data, context, options) {
-    const stellarCartography = options.stellarCartography
-    if (stellarCartography == null) {
-      throw new Error('Stellar Cartography map merge requires stellarCartography options')
-    }
+    const stellarCartography =
+      options.stellarCartography ?? defaultStellarCartographyMapMergeOptions()
     if (data.meta?.nuIonStorms != null) {
       context.nuIonStorms = data.meta.nuIonStorms
     }

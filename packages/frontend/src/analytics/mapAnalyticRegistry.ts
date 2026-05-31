@@ -118,8 +118,13 @@ export function defaultMapAnalyticQuerySpec(
 ): MapAnalyticQuerySpec {
   return {
     queryKey: ['analytic', analyticId, 'map', context.analyticScope, 'planet-v2'] as const,
-    queryFn: () => fetchAnalyticMap(analyticId, context.analyticScope!, undefined),
-    enabled: context.analyticFetchEnabled,
+    queryFn: () => {
+      if (context.analyticScope == null) {
+        throw new Error('Map analytic query requires analytic scope')
+      }
+      return fetchAnalyticMap(analyticId, context.analyticScope, undefined)
+    },
+    enabled: context.analyticFetchEnabled && context.analyticScope != null,
   }
 }
 
