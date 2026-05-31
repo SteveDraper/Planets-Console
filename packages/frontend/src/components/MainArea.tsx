@@ -279,11 +279,16 @@ export function MainArea({
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
-  const { displayMapData, retainDuringLoad } = useRetainedMapDisplay({
+  const { displayMapData, mapShellPhase } = useRetainedMapDisplay({
     combined,
     gameId: analyticScope?.gameId ?? null,
     perspective: analyticScope?.perspective ?? null,
     viewMode,
+    turnDataReady,
+    turnEnsurePending,
+    mapPending: pending,
+    mapHasError: hasError,
+    mapHasAnyData: hasAnyData,
   })
 
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
@@ -306,7 +311,7 @@ export function MainArea({
     )
   }
 
-  if (analyticScope != null && !turnDataReady && turnEnsurePending && !retainDuringLoad) {
+  if (analyticScope != null && !turnDataReady && turnEnsurePending && mapShellPhase === 'full-loading') {
     return (
       <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading turn data…
@@ -371,16 +376,15 @@ export function MainArea({
       </main>
     )
   }
-  // Only show loading when we have no data yet (initial load). While fetching another turn,
-  // keep rendering the map so React Flow stays mounted and viewport is preserved.
-  if (!hasAnyData && pending && !retainDuringLoad) {
+  if (mapShellPhase === 'full-loading') {
     return (
       <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading map…
       </main>
     )
   }
-  if (hasError && !hasAnyData && !retainDuringLoad) {
+
+  if (mapShellPhase === 'error') {
     const firstErr = mapQueries.find((q) => q.error)?.error
     const detail =
       firstErr instanceof Error
@@ -394,14 +398,6 @@ export function MainArea({
         <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
           {detail}
         </p>
-      </main>
-    )
-  }
-
-  if (displayMapData == null) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Loading map…
       </main>
     )
   }
@@ -430,7 +426,7 @@ export function MainArea({
           }}
         />
       </MapPaneWithDisplayControls>
-      <DeferredPendingMessage pending={pending && !retainDuringLoad} />
+      <DeferredPendingMessage pending={mapShellPhase === 'ready' && pending} />
     </main>
   )
 }

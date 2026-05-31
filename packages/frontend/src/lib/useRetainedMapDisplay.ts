@@ -1,6 +1,11 @@
 import { useRef } from 'react'
 import type { CombinedMapData } from '../api/bff'
-import { hasDisplayableMapData, shouldRetainMapDuringLoad } from './mapDisplayRetention'
+import {
+  deriveMapShellPhase,
+  hasDisplayableMapData,
+  shouldRetainMapDuringLoad,
+  type MapShellPhase,
+} from './mapDisplayRetention'
 
 export type MapDisplayRetentionKey = {
   gameId: string
@@ -12,11 +17,17 @@ export type UseRetainedMapDisplayInput = {
   gameId: string | null
   perspective: number | null
   viewMode: 'tabular' | 'map'
+  turnDataReady: boolean
+  turnEnsurePending: boolean
+  mapPending: boolean
+  mapHasError: boolean
+  mapHasAnyData: boolean
 }
 
 export type UseRetainedMapDisplayResult = {
   displayMapData: CombinedMapData | null
   retainDuringLoad: boolean
+  mapShellPhase: MapShellPhase
 }
 
 function mapDisplayRetentionKey(
@@ -45,6 +56,11 @@ export function useRetainedMapDisplay({
   gameId,
   perspective,
   viewMode,
+  turnDataReady,
+  turnEnsurePending,
+  mapPending,
+  mapHasError,
+  mapHasAnyData,
 }: UseRetainedMapDisplayInput): UseRetainedMapDisplayResult {
   const retainedMapDataRef = useRef<CombinedMapData | null>(null)
   const retentionKeyRef = useRef<MapDisplayRetentionKey | null>(null)
@@ -68,6 +84,16 @@ export function useRetainedMapDisplay({
     viewMode,
     showingLiveCombined ? null : retainedMapDataRef.current
   )
+  const mapShellPhase = deriveMapShellPhase({
+    viewMode,
+    displayMapData,
+    retainDuringLoad,
+    turnDataReady,
+    turnEnsurePending,
+    mapPending,
+    mapHasError,
+    mapHasAnyData,
+  })
 
-  return { displayMapData, retainDuringLoad }
+  return { displayMapData, retainDuringLoad, mapShellPhase }
 }

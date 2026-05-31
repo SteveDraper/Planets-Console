@@ -20,13 +20,49 @@ const emptyCombined: CombinedMapData = { ...sampleMap, nodes: [] }
 
 const defaultScope = { gameId: 'g1', perspective: 1 }
 
+const idleMapLoad = {
+  turnDataReady: true,
+  turnEnsurePending: false,
+  mapPending: false,
+  mapHasError: false,
+  mapHasAnyData: true,
+}
+
+const initialMapLoad = {
+  turnDataReady: true,
+  turnEnsurePending: false,
+  mapPending: true,
+  mapHasError: false,
+  mapHasAnyData: false,
+}
+
 describe('useRetainedMapDisplay', () => {
   it('returns combined when displayable', () => {
     const { result } = renderHook(() =>
-      useRetainedMapDisplay({ combined: sampleMap, ...defaultScope, viewMode: 'map' })
+      useRetainedMapDisplay({
+        combined: sampleMap,
+        ...defaultScope,
+        viewMode: 'map',
+        ...idleMapLoad,
+      })
     )
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(false)
+    expect(result.current.mapShellPhase).toBe('ready')
+  })
+
+  it('reports full-loading on initial map load with no retained frame', () => {
+    const { result } = renderHook(() =>
+      useRetainedMapDisplay({
+        combined: emptyCombined,
+        ...defaultScope,
+        viewMode: 'map',
+        ...initialMapLoad,
+      })
+    )
+    expect(result.current.displayMapData).toBeNull()
+    expect(result.current.retainDuringLoad).toBe(false)
+    expect(result.current.mapShellPhase).toBe('full-loading')
   })
 
   it('retains prior map across empty combined within the same game and perspective', () => {
@@ -35,18 +71,46 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapPending,
+        mapHasAnyData,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
-      }) => useRetainedMapDisplay({ combined, gameId, perspective, viewMode: 'map' }),
-      { initialProps: { combined: sampleMap, ...defaultScope } }
+        mapPending: boolean
+        mapHasAnyData: boolean
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          gameId,
+          perspective,
+          viewMode: 'map',
+          turnDataReady: true,
+          turnEnsurePending: false,
+          mapPending,
+          mapHasError: false,
+          mapHasAnyData,
+        }),
+      {
+        initialProps: {
+          combined: sampleMap,
+          ...defaultScope,
+          mapPending: false,
+          mapHasAnyData: true,
+        },
+      }
     )
 
-    rerender({ combined: emptyCombined, ...defaultScope })
+    rerender({
+      combined: emptyCombined,
+      ...defaultScope,
+      mapPending: true,
+      mapHasAnyData: false,
+    })
 
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(true)
+    expect(result.current.mapShellPhase).toBe('retained')
   })
 
   it('retains across turn step when game and perspective are unchanged', () => {
@@ -55,21 +119,55 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapPending,
+        mapHasAnyData,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
-      }) => useRetainedMapDisplay({ combined, gameId, perspective, viewMode: 'map' }),
-      { initialProps: { combined: sampleMap, ...defaultScope } }
+        mapPending: boolean
+        mapHasAnyData: boolean
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          gameId,
+          perspective,
+          viewMode: 'map',
+          turnDataReady: true,
+          turnEnsurePending: false,
+          mapPending,
+          mapHasError: false,
+          mapHasAnyData,
+        }),
+      {
+        initialProps: {
+          combined: sampleMap,
+          ...defaultScope,
+          mapPending: false,
+          mapHasAnyData: true,
+        },
+      }
     )
 
-    rerender({ combined: emptyCombined, ...defaultScope })
+    rerender({
+      combined: emptyCombined,
+      ...defaultScope,
+      mapPending: true,
+      mapHasAnyData: false,
+    })
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(true)
+    expect(result.current.mapShellPhase).toBe('retained')
 
-    rerender({ combined: turnTwoMap, ...defaultScope })
+    rerender({
+      combined: turnTwoMap,
+      ...defaultScope,
+      mapPending: false,
+      mapHasAnyData: true,
+    })
     expect(result.current.displayMapData).toBe(turnTwoMap)
     expect(result.current.retainDuringLoad).toBe(false)
+    expect(result.current.mapShellPhase).toBe('ready')
   })
 
   it('clears retention after gameId changes', () => {
@@ -82,7 +180,14 @@ describe('useRetainedMapDisplay', () => {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
-      }) => useRetainedMapDisplay({ combined, gameId, perspective, viewMode: 'map' }),
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          gameId,
+          perspective,
+          viewMode: 'map',
+          ...initialMapLoad,
+        }),
       { initialProps: { combined: sampleMap, ...defaultScope } }
     )
 
@@ -90,6 +195,7 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBeNull()
     expect(result.current.retainDuringLoad).toBe(false)
+    expect(result.current.mapShellPhase).toBe('full-loading')
   })
 
   it('clears retention after perspective changes', () => {
@@ -102,7 +208,14 @@ describe('useRetainedMapDisplay', () => {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
-      }) => useRetainedMapDisplay({ combined, gameId, perspective, viewMode: 'map' }),
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          gameId,
+          perspective,
+          viewMode: 'map',
+          ...initialMapLoad,
+        }),
       { initialProps: { combined: sampleMap, ...defaultScope } }
     )
 
@@ -110,6 +223,7 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBeNull()
     expect(result.current.retainDuringLoad).toBe(false)
+    expect(result.current.mapShellPhase).toBe('full-loading')
   })
 
   it('does not retain during load in tabular mode', () => {
@@ -121,7 +235,16 @@ describe('useRetainedMapDisplay', () => {
         combined: CombinedMapData | null
         viewMode: 'tabular' | 'map'
       }) =>
-        useRetainedMapDisplay({ combined, ...defaultScope, viewMode }),
+        useRetainedMapDisplay({
+          combined,
+          ...defaultScope,
+          viewMode,
+          turnDataReady: true,
+          turnEnsurePending: false,
+          mapPending: true,
+          mapHasError: false,
+          mapHasAnyData: false,
+        }),
       {
         initialProps: {
           combined: sampleMap,
@@ -134,5 +257,54 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(false)
+    expect(result.current.mapShellPhase).toBe('ready')
+  })
+
+  it('keeps retained map visible while turn ensure runs in map mode', () => {
+    const { result, rerender } = renderHook(
+      ({
+        combined,
+        turnDataReady,
+        turnEnsurePending,
+        mapPending,
+        mapHasAnyData,
+      }: {
+        combined: CombinedMapData | null
+        turnDataReady: boolean
+        turnEnsurePending: boolean
+        mapPending: boolean
+        mapHasAnyData: boolean
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          ...defaultScope,
+          viewMode: 'map',
+          turnDataReady,
+          turnEnsurePending,
+          mapPending,
+          mapHasError: false,
+          mapHasAnyData,
+        }),
+      {
+        initialProps: {
+          combined: sampleMap,
+          turnDataReady: true,
+          turnEnsurePending: false,
+          mapPending: false,
+          mapHasAnyData: true,
+        },
+      }
+    )
+
+    rerender({
+      combined: emptyCombined,
+      turnDataReady: false,
+      turnEnsurePending: true,
+      mapPending: true,
+      mapHasAnyData: false,
+    })
+
+    expect(result.current.displayMapData).toBe(sampleMap)
+    expect(result.current.mapShellPhase).toBe('retained')
   })
 })

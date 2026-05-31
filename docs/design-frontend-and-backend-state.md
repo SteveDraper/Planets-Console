@@ -89,9 +89,9 @@ While map analytic queries reload, the SPA keeps **MapGraph** mounted and may sh
 
 **Retention key:** `{ gameId, perspective }`. Clears **synchronously** when either changes so another viewpoint's planets never flash on screen. **Turn** is not part of the key -- stepping turns within the same game and viewpoint keeps the prior frame until fresh data arrives.
 
-**Display rule:** When live `combined` has nodes, show it; otherwise show the retained snapshot if the retention key still matches. **`retainDuringLoad`** is true only in **map** view mode when a retained snapshot exists; it suppresses full-screen loading placeholders and keeps the map pane mounted. No loading overlay is shown while a retained map is visible.
+**Display rule:** When live `combined` has nodes, show it; otherwise show the retained snapshot if the retention key still matches. **`mapShellPhase`** (`'full-loading' | 'retained' | 'ready' | 'error'`) is derived in `useRetainedMapDisplay` via `deriveMapShellPhase` in `mapDisplayRetention.ts` from retention state plus turn-ensure and map-query loading inputs. **`retained`** keeps **MapGraph** mounted with the prior frame and suppresses full-screen loading placeholders; **`ready`** shows live combined data and may show the deferred "Loading additional map data…" overlay when secondary map queries are still pending; **`full-loading`** and **`error`** drive the full-pane placeholders in `MainArea.tsx`. No loading overlay is shown while phase is **`retained`**.
 
-**Predicates:** `hasDisplayableMapData` and `shouldRetainMapDuringLoad` in `mapDisplayRetention.ts` (unit-tested separately).
+**Predicates:** `hasDisplayableMapData`, `shouldRetainMapDuringLoad`, and `deriveMapShellPhase` in `mapDisplayRetention.ts` (unit-tested separately).
 
 ---
 
