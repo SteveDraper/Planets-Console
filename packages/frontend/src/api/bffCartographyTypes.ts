@@ -257,10 +257,4 @@ export type StellarCartographyTurnSummaryResponse = {
   nuIonStorms: boolean
 }
 
-/** Static black-hole geometry for map overlay (ergosphere bands, cosmetic halo). */
-export type BlackHoleConceptConstants = {
-  ergosphereBandCount: number
-  haloExtraLy: number
-}
-
 export { normalizeMapDataResponse } from './normalizeMapDataResponse'

@@ -1,8 +1,6 @@
 import type {
   DebrisDiskOverlayCircle,
   IonStormOverlayCircle,
-  NeutronClusterOverlayCircle,
-  StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
 import {
@@ -20,7 +18,11 @@ import {
   gameMapCellCenterToFlow,
   type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
-import { hexWithAlpha } from './cartographyColor'
+import {
+  buildNeutronClusterCoreCircle,
+  buildStarClusterAnnulus,
+  buildStarClusterCoreCircle,
+} from './clusterOverlay'
 import { BLACK_HOLE_CONCEPT_CONSTANTS, buildBlackHolePaneShape, type BlackHolePaneShape } from './blackHoleOverlay'
 import { ionStormStepDeltaGameLy } from './ionStormMovement'
 import { buildNebulaCloudPaneShapes, type NebulaCloudPaneShape } from './nebulaCloudOverlay'
@@ -36,20 +38,7 @@ import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../a
 import {
   DEBRIS_DISK_BORDER_STROKE,
   DEBRIS_DISK_BORDER_STROKE_WIDTH,
-  DISC_RIM_ALPHA,
   ionStormStrokeColor,
-  neutronClusterCoreColorFromTemp,
-  neutronClusterCoreEdgeOpacity,
-  neutronClusterCoreHotspotOpacity,
-  neutronClusterCoreStrokeOpacity,
-  starClusterBandEdgeOpacity,
-  starClusterBandPeakOpacity,
-  starClusterColorFromTemp,
-  starClusterCoreEdgeOpacity,
-  starClusterCoreHotspotOpacity,
-  starClusterCoreHotspotRadiusFraction,
-  starClusterCoreStrokeOpacity,
-  starClusterHaloRadiusLy,
   STAR_CLUSTER_STROKE_WIDTH,
   WORMHOLE_ENDPOINT_DIAMETER_LY,
   WORMHOLE_ENDPOINT_MIN_DIAMETER_PX,
@@ -223,171 +212,6 @@ function isRasterCloudOrBorderOverlayCircle(
     isDebrisDiskOverlayCircle(circle) ||
     isIonStormOverlayCircle(circle) ||
     isNeutronClusterOverlayCircle(circle)
-  )
-}
-
-type ClusterCoreGradientTheme = {
-  colorFromTemp: (temp: number) => string
-  hotspotOpacity: () => number
-  edgeOpacity: () => number
-  strokeOpacity: () => number
-}
-
-function buildClusterCoreGradient(
-  temp: number,
-  gradientId: string,
-  theme: ClusterCoreGradientTheme
-): {
-  color: string
-  coreGradient: StellarCartographyOverlayRadialGradient
-  coreStroke: string
-} {
-  const color = theme.colorFromTemp(temp)
-  return {
-    color,
-    coreGradient: {
-      id: gradientId,
-      color,
-      innerOffset: starClusterCoreHotspotRadiusFraction(),
-      peakOpacity: theme.hotspotOpacity(),
-      edgeOpacity: theme.edgeOpacity(),
-    },
-    coreStroke: hexWithAlpha(color, theme.strokeOpacity()),
-  }
-}
-
-const starClusterCoreTheme: ClusterCoreGradientTheme = {
-  colorFromTemp: starClusterColorFromTemp,
-  hotspotOpacity: starClusterCoreHotspotOpacity,
-  edgeOpacity: starClusterCoreEdgeOpacity,
-  strokeOpacity: starClusterCoreStrokeOpacity,
-}
-
-const neutronClusterCoreTheme: ClusterCoreGradientTheme = {
-  colorFromTemp: neutronClusterCoreColorFromTemp,
-  hotspotOpacity: neutronClusterCoreHotspotOpacity,
-  edgeOpacity: neutronClusterCoreEdgeOpacity,
-  strokeOpacity: neutronClusterCoreStrokeOpacity,
-}
-
-function buildClusterCoreCircle(
-  circle: { id: string; x: number; y: number; radius: number; temp?: number },
-  viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number,
-  showOutlines: boolean,
-  gradientIdPrefix: string,
-  theme: ClusterCoreGradientTheme
-): StellarCartographyOverlayCircleShape | null {
-  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const r = circle.radius
-  const flowBounds = flowBoundsFromViewport(viewport)
-  if (!circleIntersectsFlowBounds(cx, cy, r, flowBounds)) return null
-
-  const { px, py } = flowToPane(cx, cy, viewport)
-  const { coreGradient, coreStroke } = buildClusterCoreGradient(
-    circle.temp ?? 0,
-    `${gradientIdPrefix}-core-grad-${circle.id}`,
-    theme
-  )
-  return {
-    key: circle.id,
-    cx: px,
-    cy: py,
-    r: r * viewport.scale,
-    fill: '',
-    fillGradient: coreGradient,
-    stroke: showOutlines ? coreStroke : 'none',
-    strokeWidth: showOutlines ? strokeWidth : 0,
-  }
-}
-
-function buildStarClusterCoreGradient(
-  circle: StarClusterOverlayCircle,
-  gradientId: string
-): {
-  color: string
-  coreGradient: StellarCartographyOverlayRadialGradient
-  coreStroke: string
-} {
-  return buildClusterCoreGradient(circle.temp ?? 0, gradientId, starClusterCoreTheme)
-}
-
-function buildStarClusterAnnulus(
-  circle: StarClusterOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number,
-  showOutlines: boolean
-): StellarCartographyOverlayAnnulusShape | null {
-  const coreRadius = circle.radius
-  const haloRadius = starClusterHaloRadiusLy(circle.mass ?? 0)
-  if (haloRadius <= coreRadius) return null
-
-  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const flowBounds = flowBoundsFromViewport(viewport)
-  if (!circleIntersectsFlowBounds(cx, cy, haloRadius, flowBounds)) return null
-
-  const { px, py } = flowToPane(cx, cy, viewport)
-  const temp = circle.temp ?? 0
-  const peakOpacity = starClusterBandPeakOpacity(temp, coreRadius, haloRadius)
-  const edgeOpacity = starClusterBandEdgeOpacity()
-  if (peakOpacity <= edgeOpacity) return null
-
-  const { color, coreGradient, coreStroke } = buildStarClusterCoreGradient(
-    circle,
-    `sc-core-grad-${circle.id}`
-  )
-
-  return {
-    key: circle.id,
-    cx: px,
-    cy: py,
-    coreR: coreRadius * viewport.scale,
-    bandR: haloRadius * viewport.scale,
-    coreFill: '',
-    coreStroke: showOutlines ? coreStroke : undefined,
-    coreGradient,
-    bandFill: '',
-    bandStroke: showOutlines ? hexWithAlpha(color, DISC_RIM_ALPHA) : 'none',
-    strokeWidth,
-    bandGradient: {
-      id: `sc-band-grad-${circle.id}`,
-      color,
-      innerOffset: coreRadius / haloRadius,
-      peakOpacity,
-      edgeOpacity,
-    },
-  }
-}
-
-function buildNeutronClusterCoreCircle(
-  circle: NeutronClusterOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number,
-  showOutlines: boolean
-): StellarCartographyOverlayCircleShape | null {
-  return buildClusterCoreCircle(
-    circle,
-    viewport,
-    strokeWidth,
-    showOutlines,
-    'nc',
-    neutronClusterCoreTheme
-  )
-}
-
-function buildStarClusterCoreCircle(
-  circle: StarClusterOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number,
-  showOutlines: boolean
-): StellarCartographyOverlayCircleShape | null {
-  return buildClusterCoreCircle(
-    circle,
-    viewport,
-    strokeWidth,
-    showOutlines,
-    'sc',
-    starClusterCoreTheme
   )
 }
 

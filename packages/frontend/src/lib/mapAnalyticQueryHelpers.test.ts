@@ -1,36 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
 import {
   combineMapResultsFromQueries,
   connectionsMapQueryKey,
   enabledMapAnalyticIds,
   mapIdsToFetch,
 } from './useMapAnalyticQueries'
-
-const defaultConnectionsParams: ConnectionsMapParams = {
-  warpSpeed: 9,
-  gravitonicMovement: false,
-  flareMode: 'off',
-  flareDepth: 2,
-}
-
-const sampleScope: AnalyticShellScope = {
-  gameId: '628580',
-  turn: 5,
-  perspective: 1,
-}
-
-const sampleAnalytics: AnalyticItem[] = [
-  { id: 'base-map', name: 'Base', supportsTable: false, supportsMap: true, type: 'base' },
-  { id: 'connections', name: 'Connections', supportsTable: true, supportsMap: true, type: 'selectable' },
-  {
-    id: 'stellar-cartography',
-    name: 'Stellar Cartography',
-    supportsTable: false,
-    supportsMap: true,
-    type: 'selectable',
-  },
-]
+import {
+  defaultConnectionsParams,
+  sampleAnalytics,
+  sampleScope,
+} from './mapAnalyticQueryTestFixtures'
 
 describe('combineMapResultsFromQueries', () => {
   it('merges map payloads in analytic id order', () => {

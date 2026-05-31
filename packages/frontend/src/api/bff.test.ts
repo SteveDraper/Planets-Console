@@ -381,4 +381,42 @@ describe('normalizeMapDataResponse', () => {
     expect(steps[1].waypointOffset).toBeUndefined()
     expect(steps[2].waypointOffset).toBeUndefined()
   })
+
+  it('parses stellar cartography meta counts and nuIonStorms flag', () => {
+    const out = normalizeMapDataResponse({
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      meta: {
+        nebulae: '3',
+        ion_storms: 2,
+        nuionstorms: true,
+        star_clusters: 4,
+        neutronClusters: 1,
+        black_holes: 2,
+        wormholes: 5,
+        wormhole_edges: 10,
+      },
+    })
+    expect(out.meta).toEqual({
+      nebulae: 3,
+      ionStorms: 2,
+      nuIonStorms: true,
+      starClusters: 4,
+      neutronClusters: 1,
+      blackHoles: 2,
+      wormholes: 5,
+      wormholeEdges: 10,
+    })
+  })
+
+  it('omits meta when wire payload has no recognized fields', () => {
+    const out = normalizeMapDataResponse({
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      meta: { unknownField: 1, nebulae: null },
+    })
+    expect(out.meta).toBeUndefined()
+  })
 })

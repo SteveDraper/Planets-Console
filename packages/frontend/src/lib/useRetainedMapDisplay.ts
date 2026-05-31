@@ -3,6 +3,7 @@ import type { CombinedMapData } from '../api/bff'
 import {
   deriveMapShellView,
   hasDisplayableMapData,
+  type MapFrameSource,
   type MapShellView,
 } from './mapDisplayRetention'
 
@@ -43,6 +44,19 @@ function retentionKeysEqual(
   return a?.gameId === b?.gameId && a?.perspective === b?.perspective
 }
 
+function deriveMapFrameSource(
+  showingLiveCombined: boolean,
+  retainedForCurrentKey: CombinedMapData | null
+): MapFrameSource {
+  if (showingLiveCombined) {
+    return 'live'
+  }
+  if (hasDisplayableMapData(retainedForCurrentKey)) {
+    return 'retained'
+  }
+  return 'none'
+}
+
 /**
  * Retains the last displayable combined map while map queries reload.
  * Clears synchronously when game id or perspective changes; retains across turn steps.
@@ -81,16 +95,17 @@ export function useRetainedMapDisplay({
 
   const showingLiveCombined =
     combined != null && hasDisplayableMapData(combined)
-  const displayMapData: CombinedMapData | null = showingLiveCombined
-    ? combined
-    : retainedForCurrentKey
-  const retainDuringLoad = showingLiveCombined
-    ? false
-    : hasDisplayableMapData(retainedForCurrentKey)
+  const mapFrameSource = deriveMapFrameSource(showingLiveCombined, retainedForCurrentKey)
+  const displayMapData: CombinedMapData | null =
+    mapFrameSource === 'live'
+      ? combined!
+      : mapFrameSource === 'retained'
+        ? retainedForCurrentKey
+        : null
   const hasAnalyticScope = gameId != null && perspective != null
   const mapShellView = deriveMapShellView({
     displayMapData,
-    retainDuringLoad,
+    mapFrameSource,
     hasAnalyticScope,
     turnDataReady,
     turnEnsurePending,

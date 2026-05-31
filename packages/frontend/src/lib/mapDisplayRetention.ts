@@ -3,6 +3,8 @@ import type { CombinedMapData } from '../api/bff'
 export const MAP_SHELL_TURN_LOADING_MESSAGE = 'Loading turn data…'
 export const MAP_SHELL_MAP_LOADING_MESSAGE = 'Loading map…'
 
+export type MapFrameSource = 'live' | 'retained' | 'none'
+
 export type MapShellView =
   | { phase: 'full-loading'; loadingMessage: string }
   | {
@@ -36,7 +38,7 @@ export function deriveTurnEnsureLoadingView({
 
 export type DeriveMapShellViewInput = {
   displayMapData: CombinedMapData | null
-  retainDuringLoad: boolean
+  mapFrameSource: MapFrameSource
   hasAnalyticScope: boolean
   turnDataReady: boolean
   turnEnsurePending: boolean
@@ -54,7 +56,7 @@ export function hasDisplayableMapData(data: CombinedMapData | null | undefined):
 /** Map-mode shell view for loading, retention, and error UI. */
 export function deriveMapShellView({
   displayMapData,
-  retainDuringLoad,
+  mapFrameSource,
   hasAnalyticScope,
   turnDataReady,
   turnEnsurePending,
@@ -62,7 +64,7 @@ export function deriveMapShellView({
   mapHasError,
   mapHasAnyData,
 }: DeriveMapShellViewInput): MapShellView {
-  if (retainDuringLoad && displayMapData != null) {
+  if (mapFrameSource === 'retained' && displayMapData != null) {
     return {
       phase: 'showing-map',
       displayMapData,
@@ -90,6 +92,6 @@ export function deriveMapShellView({
   return {
     phase: 'showing-map',
     displayMapData,
-    showDeferredPending: mapPending,
+    showDeferredPending: mapPending && mapFrameSource === 'live',
   }
 }

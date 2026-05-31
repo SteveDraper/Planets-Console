@@ -2,8 +2,13 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
+import {
+  defaultConnectionsParams,
+  defaultStellarCartography,
+  sampleAnalytics,
+  sampleScope,
+} from './mapAnalyticQueryTestFixtures'
 import { useMapAnalyticQueries, type UseMapAnalyticQueriesInput } from './useMapAnalyticQueries'
 
 vi.mock('../api/bff', async (importOriginal) => {
@@ -28,44 +33,6 @@ vi.mock('../analytics/mapLayers', async (importOriginal) => {
     combineMapData: vi.fn(actual.combineMapData),
   }
 })
-
-const defaultConnectionsParams: ConnectionsMapParams = {
-  warpSpeed: 9,
-  gravitonicMovement: false,
-  flareMode: 'off',
-  flareDepth: 2,
-}
-
-const sampleAnalytics: AnalyticItem[] = [
-  { id: 'base-map', name: 'Base', supportsTable: false, supportsMap: true, type: 'base' },
-  { id: 'connections', name: 'Connections', supportsTable: true, supportsMap: true, type: 'selectable' },
-  {
-    id: 'stellar-cartography',
-    name: 'Stellar Cartography',
-    supportsTable: false,
-    supportsMap: true,
-    type: 'selectable',
-  },
-]
-
-const sampleScope: AnalyticShellScope = {
-  gameId: '628580',
-  turn: 5,
-  perspective: 1,
-}
-
-const defaultStellarCartography = {
-  layerVisibility: {
-    'debris-disks': true,
-    nebulae: true,
-    'ion-storms': true,
-    'black-holes': true,
-  },
-  settingsGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
-  wormholeDisplayMode: 'off' as const,
-  starClusterDisplayMode: 'off' as const,
-  neutronClusterDisplayMode: 'off' as const,
-}
 
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {

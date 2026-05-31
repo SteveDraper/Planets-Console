@@ -254,6 +254,39 @@ function normalizeMapNode(raw: unknown): MapNode {
   return base
 }
 
+function normalizeMapMeta(raw: unknown): MapDataResponse['meta'] | undefined {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const meta = raw as Record<string, unknown>
+  const out: NonNullable<MapDataResponse['meta']> = {}
+
+  const nebulae = parseJsonInteger(meta.nebulae)
+  if (nebulae != null) out.nebulae = nebulae
+
+  const ionStorms = parseJsonInteger(meta.ionStorms ?? meta.ion_storms)
+  if (ionStorms != null) out.ionStorms = ionStorms
+
+  if (meta.nuIonStorms === true || meta.nuionstorms === true) {
+    out.nuIonStorms = true
+  }
+
+  const starClusters = parseJsonInteger(meta.starClusters ?? meta.star_clusters)
+  if (starClusters != null) out.starClusters = starClusters
+
+  const neutronClusters = parseJsonInteger(meta.neutronClusters ?? meta.neutron_clusters)
+  if (neutronClusters != null) out.neutronClusters = neutronClusters
+
+  const blackHoles = parseJsonInteger(meta.blackHoles ?? meta.black_holes)
+  if (blackHoles != null) out.blackHoles = blackHoles
+
+  const wormholes = parseJsonInteger(meta.wormholes)
+  if (wormholes != null) out.wormholes = wormholes
+
+  const wormholeEdges = parseJsonInteger(meta.wormholeEdges ?? meta.wormhole_edges)
+  if (wormholeEdges != null) out.wormholeEdges = wormholeEdges
+
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
   if (raw == null || typeof raw !== 'object') {
     return { analyticId: '', nodes: [], edges: [] }
@@ -283,9 +316,10 @@ export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
       .map(normalizeOverlayCircle)
       .filter((c): c is StellarCartographyOverlayCircle => c != null)
   }
-  const meta = o.meta
-  if (meta != null && typeof meta === 'object' && !Array.isArray(meta)) {
-    out.meta = meta as MapDataResponse['meta']
+  const metaRaw = o.meta
+  const meta = normalizeMapMeta(metaRaw)
+  if (meta != null) {
+    out.meta = meta
   }
   return out
 }

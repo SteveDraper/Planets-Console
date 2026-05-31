@@ -65,6 +65,18 @@ export function combineMapResultsFromQueries(
 // clones node.planet snapshots so merged label fields are not dropped across refetches.
 const MAP_QUERY_STRUCTURAL_SHARING = false as const
 
+type MapAnalyticQueryContext = {
+  analyticScope: AnalyticShellScope | null
+  analyticFetchEnabled: boolean
+  connectionsMapParams: ConnectionsMapParams
+}
+
+type MapAnalyticQuerySpec = {
+  queryKey: readonly unknown[]
+  queryFn: () => Promise<MapDataResponse>
+  enabled: boolean
+}
+
 /** Id of the base map analytic (planets + edges), if present. */
 export function baseMapId(analytics: AnalyticItem[]): string | null {
   const a = analytics.find((x) => x.type === 'base' && x.supportsMap)
@@ -108,6 +120,41 @@ export function connectionsMapQueryKey(
   ]
 }
 
+function defaultMapAnalyticQuerySpec(
+  analyticId: string,
+  context: MapAnalyticQueryContext
+): MapAnalyticQuerySpec {
+  return {
+    queryKey: ['analytic', analyticId, 'map', context.analyticScope, 'planet-v2'] as const,
+    queryFn: () => fetchAnalyticMap(analyticId, context.analyticScope!, undefined),
+    enabled: context.analyticFetchEnabled,
+  }
+}
+
+function connectionsMapAnalyticQuerySpec(context: MapAnalyticQueryContext): MapAnalyticQuerySpec {
+  return {
+    queryKey: connectionsMapQueryKey(context.analyticScope, context.connectionsMapParams),
+    queryFn: () =>
+      fetchAnalyticMap('connections', context.analyticScope!, context.connectionsMapParams),
+    enabled: context.analyticFetchEnabled && context.analyticScope != null,
+  }
+}
+
+const mapAnalyticQueryRegistry: Record<
+  string,
+  (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
+> = {
+  connections: connectionsMapAnalyticQuerySpec,
+}
+
+function mapAnalyticQuerySpecFor(
+  analyticId: string,
+  context: MapAnalyticQueryContext
+): MapAnalyticQuerySpec {
+  const builder = mapAnalyticQueryRegistry[analyticId]
+  return builder ? builder(context) : defaultMapAnalyticQuerySpec(analyticId, context)
+}
+
 export function useMapAnalyticQueries({
   enabledAnalyticIds,
   analytics,
@@ -126,20 +173,20 @@ export function useMapAnalyticQueries({
     [analytics, enabledMapIds]
   )
 
+  const queryContext = useMemo(
+    (): MapAnalyticQueryContext => ({
+      analyticScope,
+      analyticFetchEnabled,
+      connectionsMapParams,
+    }),
+    [analyticScope, analyticFetchEnabled, connectionsMapParams]
+  )
+
   const mapQueries = useQueries({
     queries: mapIds.map((analyticId) => {
-      if (analyticId === 'connections') {
-        return {
-          queryKey: connectionsMapQueryKey(analyticScope, connectionsMapParams),
-          queryFn: () => fetchAnalyticMap('connections', analyticScope!, connectionsMapParams),
-          enabled: analyticFetchEnabled && analyticScope != null,
-          structuralSharing: MAP_QUERY_STRUCTURAL_SHARING,
-        }
-      }
+      const spec = mapAnalyticQuerySpecFor(analyticId, queryContext)
       return {
-        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
-        queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
-        enabled: analyticFetchEnabled,
+        ...spec,
         structuralSharing: MAP_QUERY_STRUCTURAL_SHARING,
       }
     }),

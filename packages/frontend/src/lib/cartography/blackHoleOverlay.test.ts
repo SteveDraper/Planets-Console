@@ -5,9 +5,18 @@ import {
   buildBlackHoleErgosphereGradientStops,
   buildBlackHolePaneShape,
 } from './blackHoleOverlay'
+import { loadBlackHoleErgosphereContractFixture } from './loadBlackHoleErgosphereContractFixture'
 import { blackHoleErgosphereBandGrey } from './stellarCartographyTheme'
 
 const blackHoleConstants = BLACK_HOLE_CONCEPT_CONSTANTS
+
+describe('BLACK_HOLE_CONCEPT_CONSTANTS', () => {
+  it('matches test-fixtures/black-hole-ergosphere-contract.json', () => {
+    const contract = loadBlackHoleErgosphereContractFixture()
+    expect(BLACK_HOLE_CONCEPT_CONSTANTS.ergosphereBandCount).toBe(contract.ergosphereBandCount)
+    expect(BLACK_HOLE_CONCEPT_CONSTANTS.haloExtraLy).toBe(contract.haloExtraLy)
+  })
+})
 
 describe('buildBlackHoleErgosphereGradientStops', () => {
   it('places band boundaries at host radii with inner and outer greys', () => {

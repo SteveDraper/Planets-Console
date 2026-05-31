@@ -1,6 +1,4 @@
 import type { BlackHoleOverlayCircle } from '../../api/bff'
-import type { BlackHoleConceptConstants } from '../../api/bffCartographyTypes'
-import { BLACK_HOLE_CONCEPT_CONSTANTS } from './blackHoleConceptConstants'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
@@ -14,8 +12,17 @@ import {
   blackHoleErgosphereBandGrey,
 } from './stellarCartographyTheme'
 
-export { BLACK_HOLE_CONCEPT_CONSTANTS }
-export type { BlackHoleConceptConstants }
+/** Planets.nu-aligned black hole overlay geometry (ergosphere bands, cosmetic halo). */
+export type BlackHoleConceptConstants = {
+  ergosphereBandCount: number
+  haloExtraLy: number
+}
+
+/** Contract: test-fixtures/black-hole-ergosphere-contract.json */
+export const BLACK_HOLE_CONCEPT_CONSTANTS = {
+  ergosphereBandCount: 9,
+  haloExtraLy: 5,
+} satisfies BlackHoleConceptConstants
 
 export type BlackHoleErgosphereGradientStop = {
   /** Fraction of ergosphere radius from center (0–1). */

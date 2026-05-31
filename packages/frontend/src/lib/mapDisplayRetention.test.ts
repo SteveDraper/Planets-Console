@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { CombinedMapData } from '../api/bff'
 import {
   MAP_SHELL_MAP_LOADING_MESSAGE,
   MAP_SHELL_TURN_LOADING_MESSAGE,
@@ -7,14 +6,7 @@ import {
   deriveTurnEnsureLoadingView,
   hasDisplayableMapData,
 } from './mapDisplayRetention'
-
-const sampleMap: CombinedMapData = {
-  nodes: [{ id: 'base-map:1', label: 'A', x: 1, y: 2 }],
-  edges: [],
-  routeWaypoints: [],
-  overlayCircles: [],
-  wormholeUnknownEntrances: [],
-}
+import { sampleMap } from './mapDisplayTestFixtures'
 
 describe('hasDisplayableMapData', () => {
   it('is false for null, undefined, or empty nodes', () => {
@@ -60,7 +52,7 @@ describe('deriveTurnEnsureLoadingView', () => {
 describe('deriveMapShellView', () => {
   const baseInput = {
     displayMapData: sampleMap,
-    retainDuringLoad: false,
+    mapFrameSource: 'live' as const,
     hasAnalyticScope: true,
     turnDataReady: true,
     turnEnsurePending: false,
@@ -95,6 +87,7 @@ describe('deriveMapShellView', () => {
       deriveMapShellView({
         ...baseInput,
         displayMapData: null,
+        mapFrameSource: 'none',
         mapPending: true,
         mapHasAnyData: false,
       })
@@ -108,7 +101,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        retainDuringLoad: true,
+        mapFrameSource: 'retained',
         mapPending: true,
         mapHasAnyData: false,
       })
@@ -124,6 +117,7 @@ describe('deriveMapShellView', () => {
       deriveMapShellView({
         ...baseInput,
         displayMapData: null,
+        mapFrameSource: 'none',
         mapHasError: true,
         mapHasAnyData: false,
       })
@@ -134,8 +128,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        displayMapData: sampleMap,
-        retainDuringLoad: true,
+        mapFrameSource: 'retained',
         turnDataReady: false,
         turnEnsurePending: true,
         mapPending: true,
@@ -153,6 +146,7 @@ describe('deriveMapShellView', () => {
       deriveMapShellView({
         ...baseInput,
         displayMapData: null,
+        mapFrameSource: 'none',
         turnDataReady: false,
         turnEnsurePending: true,
       })
@@ -167,6 +161,7 @@ describe('deriveMapShellView', () => {
       deriveMapShellView({
         ...baseInput,
         displayMapData: null,
+        mapFrameSource: 'none',
         hasAnalyticScope: false,
         turnDataReady: false,
         turnEnsurePending: true,
