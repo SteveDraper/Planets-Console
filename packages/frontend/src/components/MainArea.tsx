@@ -4,6 +4,7 @@ import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
+  CombinedMapData,
   ConnectionsFlareMode,
   ConnectionsMapParams,
   MapDataResponse,
@@ -19,6 +20,7 @@ import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
+import type { MapShellPhase } from '../lib/mapDisplayRetention'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
 type ViewMode = 'tabular' | 'map'
@@ -311,12 +313,13 @@ export function MainArea({
     )
   }
 
-  if (analyticScope != null && !turnDataReady && turnEnsurePending && mapShellPhase === 'full-loading') {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Loading turn data…
-      </main>
-    )
+  const turnLoadingMessage = turnEnsureLoadingMessage(
+    analyticScope,
+    turnDataReady,
+    turnEnsurePending
+  )
+  if (mapShellPhase === 'full-loading' && turnLoadingMessage != null) {
+    return mapShellCenterMain(turnLoadingMessage)
   }
 
   if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
@@ -376,67 +379,145 @@ export function MainArea({
       </main>
     )
   }
-  if (mapShellPhase === 'full-loading') {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Loading map…
-      </main>
-    )
-  }
 
-  if (mapShellPhase === 'error') {
-    const firstErr = mapQueries.find((q) => q.error)?.error
-    const detail =
-      firstErr instanceof Error
-        ? firstErr.message
-        : firstErr != null
-          ? String(firstErr)
-          : 'Failed to load map data'
-    return (
-      <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
-        <p className="text-center font-medium">Failed to load map data</p>
-        <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
-          {detail}
-        </p>
-      </main>
-    )
-  }
+  return renderMapShellBody({
+    mapShellPhase,
+    displayMapData,
+    mapQueries,
+    planetLabelOptions,
+    setPlanetLabelOptions,
+    onMapZoomChange,
+    onSetZoomReady,
+    pending,
+    cartographyLayerVisibility,
+    cartographySettingsGates,
+    wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode,
+    enabledMapIds,
+    analyticScope,
+  })
+}
 
-  if (displayMapData == null) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Loading map…
-      </main>
-    )
-  }
+type RenderMapShellBodyArgs = {
+  mapShellPhase: MapShellPhase
+  displayMapData: CombinedMapData | null
+  mapQueries: { error: unknown }[]
+  planetLabelOptions: PlanetLabelOptions
+  setPlanetLabelOptions: (value: PlanetLabelOptions) => void
+  onMapZoomChange: (zoom: number) => void
+  onSetZoomReady: (setZoom: (zoom: number) => void) => void
+  pending: boolean
+  cartographyLayerVisibility: ReturnType<
+    typeof useStellarCartographyLayersStore.getState
+  >['layers']
+  cartographySettingsGates: typeof EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
+  wormholeDisplayMode: ReturnType<
+    typeof useStellarCartographyLayersStore.getState
+  >['wormholeDisplayMode']
+  starClusterDisplayMode: ReturnType<
+    typeof useStellarCartographyLayersStore.getState
+  >['starClusterDisplayMode']
+  neutronClusterDisplayMode: ReturnType<
+    typeof useStellarCartographyLayersStore.getState
+  >['neutronClusterDisplayMode']
+  enabledMapIds: string[]
+  analyticScope: AnalyticShellScope | null
+}
 
+function renderMapShellBody({
+  mapShellPhase,
+  displayMapData,
+  mapQueries,
+  planetLabelOptions,
+  setPlanetLabelOptions,
+  onMapZoomChange,
+  onSetZoomReady,
+  pending,
+  cartographyLayerVisibility,
+  cartographySettingsGates,
+  wormholeDisplayMode,
+  starClusterDisplayMode,
+  neutronClusterDisplayMode,
+  enabledMapIds,
+  analyticScope,
+}: RenderMapShellBodyArgs) {
+  switch (mapShellPhase) {
+    case 'full-loading':
+      return mapShellCenterMain('Loading map…')
+    case 'error': {
+      const firstErr = mapQueries.find((q) => q.error)?.error
+      const detail =
+        firstErr instanceof Error
+          ? firstErr.message
+          : firstErr != null
+            ? String(firstErr)
+            : 'Failed to load map data'
+      return mapShellErrorMain(detail)
+    }
+    case 'retained':
+    case 'ready':
+      return (
+        <main className="relative flex min-h-0 flex-1 flex-col bg-black">
+          <MapPaneWithDisplayControls
+            controls={
+              <PlanetMapInfoControls
+                value={planetLabelOptions}
+                onChange={setPlanetLabelOptions}
+              />
+            }
+          >
+            <MapGraph
+              data={displayMapData!}
+              className="h-full w-full min-h-0"
+              onMapZoomChange={onMapZoomChange}
+              onSetZoomReady={onSetZoomReady}
+              planetLabelOptions={planetLabelOptions}
+              stellarCartography={{
+                layerVisibility: cartographyLayerVisibility,
+                settingsGates: cartographySettingsGates,
+                wormholeDisplayMode,
+                starClusterDisplayMode,
+                neutronClusterDisplayMode,
+                sampleEnabled: enabledMapIds.includes('stellar-cartography'),
+                analyticScope,
+              }}
+            />
+          </MapPaneWithDisplayControls>
+          <DeferredPendingMessage pending={mapShellPhase === 'ready' && pending} />
+        </main>
+      )
+  }
+}
+
+function mapShellCenterMain(message: string) {
   return (
-    <main className="relative flex min-h-0 flex-1 flex-col bg-black">
-      <MapPaneWithDisplayControls
-        controls={
-          <PlanetMapInfoControls value={planetLabelOptions} onChange={setPlanetLabelOptions} />
-        }
-      >
-        <MapGraph
-          data={displayMapData}
-          className="h-full w-full min-h-0"
-          onMapZoomChange={onMapZoomChange}
-          onSetZoomReady={onSetZoomReady}
-          planetLabelOptions={planetLabelOptions}
-          stellarCartography={{
-            layerVisibility: cartographyLayerVisibility,
-            settingsGates: cartographySettingsGates,
-            wormholeDisplayMode,
-            starClusterDisplayMode,
-            neutronClusterDisplayMode,
-            sampleEnabled: enabledMapIds.includes('stellar-cartography'),
-            analyticScope,
-          }}
-        />
-      </MapPaneWithDisplayControls>
-      <DeferredPendingMessage pending={mapShellPhase === 'ready' && pending} />
+    <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+      {message}
     </main>
   )
+}
+
+function mapShellErrorMain(detail: string) {
+  return (
+    <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
+      <p className="text-center font-medium">Failed to load map data</p>
+      <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
+        {detail}
+      </p>
+    </main>
+  )
+}
+
+function turnEnsureLoadingMessage(
+  analyticScope: AnalyticShellScope | null,
+  turnDataReady: boolean,
+  turnEnsurePending: boolean
+): string | null {
+  if (analyticScope != null && !turnDataReady && turnEnsurePending) {
+    return 'Loading turn data…'
+  }
+  return null
 }
 
 /** Shows "Loading additional map data…" after a short delay. Overlays the map so the pane size never changes. */
