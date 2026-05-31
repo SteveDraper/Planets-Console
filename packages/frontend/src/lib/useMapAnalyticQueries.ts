@@ -14,8 +14,6 @@ import {
 } from '../analytics/mapLayers'
 import {
   mapAnalyticQuerySpecFor,
-  mapIdsNeedLiveConnectionsParams,
-  mapIdsNeedStellarCartographyMergeOptions,
   type MapAnalyticQueryContext,
 } from '../analytics/mapAnalyticRegistry'
 
@@ -29,8 +27,8 @@ export type UseMapAnalyticQueriesInput = {
   analyticFetchEnabled: boolean
   connectionsMapParams: ConnectionsMapParams
   futureTurnOffset: number
-  /** Required when a registered map analytic needs Stellar Cartography merge options. */
-  stellarCartography?: StellarCartographyMapMergeOptions
+  /** Layer visibility and display modes applied during map merge. */
+  stellarCartography: StellarCartographyMapMergeOptions
 }
 
 export type UseMapAnalyticQueriesResult = {
@@ -80,29 +78,6 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
   return base ? [base, ...withoutBase] : withoutBase
 }
 
-function buildMergeOptions(
-  mapIds: readonly string[],
-  analyticFetchEnabled: boolean,
-  connectionsMapParams: ConnectionsMapParams,
-  futureTurnOffset: number,
-  stellarCartography: StellarCartographyMapMergeOptions | undefined
-): CombineMapDataOptionsBase {
-  const base: CombineMapDataOptionsBase = {
-    liveConnectionsParams:
-      mapIdsNeedLiveConnectionsParams(mapIds) && analyticFetchEnabled
-        ? connectionsMapParams
-        : null,
-    futureTurnOffset,
-  }
-  if (mapIdsNeedStellarCartographyMergeOptions(mapIds)) {
-    if (stellarCartography == null) {
-      throw new Error('Stellar Cartography map merge requires stellarCartography options')
-    }
-    return { ...base, stellarCartography }
-  }
-  return base
-}
-
 export function useMapAnalyticQueries({
   enabledAnalyticIds,
   analytics,
@@ -131,15 +106,12 @@ export function useMapAnalyticQueries({
   )
 
   const mergeOptions = useMemo(
-    () =>
-      buildMergeOptions(
-        mapIds,
-        analyticFetchEnabled,
-        connectionsMapParams,
-        futureTurnOffset,
-        stellarCartography
-      ),
-    [mapIds, analyticFetchEnabled, connectionsMapParams, futureTurnOffset, stellarCartography]
+    (): CombineMapDataOptionsBase => ({
+      liveConnectionsParams: analyticFetchEnabled ? connectionsMapParams : null,
+      futureTurnOffset,
+      stellarCartography,
+    }),
+    [analyticFetchEnabled, connectionsMapParams, futureTurnOffset, stellarCartography]
   )
 
   const combineMapQueries = useCallback(

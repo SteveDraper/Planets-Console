@@ -218,6 +218,7 @@ describe('useMapAnalyticQueries', () => {
     })
     expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[2]).toMatchObject({
       liveConnectionsParams: null,
+      stellarCartography: defaultStellarCartography,
     })
   })
 

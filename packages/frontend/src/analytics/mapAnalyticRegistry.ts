@@ -51,10 +51,6 @@ export type MapLayerMerger = (
 export type MapAnalyticRegistration = {
   buildQuerySpec?: (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
   mergeLayer: MapLayerMerger
-  /** When true, `combineMapData` needs `stellarCartography` merge options. */
-  needsStellarCartographyMergeOptions?: boolean
-  /** When true, `combineMapData` needs live Connections params for stale-route clipping. */
-  needsLiveConnectionsParams?: boolean
 }
 
 function prefixMapNodes(
@@ -104,14 +100,8 @@ export const defaultMapAnalyticRegistration: MapAnalyticRegistration = {
 
 const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [BASE_MAP_ANALYTIC_ID]: defaultMapAnalyticRegistration,
-  [CONNECTIONS_ANALYTIC_ID]: {
-    ...connectionsMapAnalytic,
-    needsLiveConnectionsParams: true,
-  },
-  [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: {
-    ...stellarCartographyMapAnalytic,
-    needsStellarCartographyMergeOptions: true,
-  },
+  [CONNECTIONS_ANALYTIC_ID]: connectionsMapAnalytic,
+  [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: stellarCartographyMapAnalytic,
 }
 
 export function mapAnalyticRegistrationFor(analyticId: string): MapAnalyticRegistration {
@@ -139,12 +129,4 @@ export function mapAnalyticQuerySpecFor(
 ): MapAnalyticQuerySpec {
   const registration = mapAnalyticRegistrationFor(analyticId)
   return registration.buildQuerySpec?.(context) ?? defaultMapAnalyticQuerySpec(analyticId, context)
-}
-
-export function mapIdsNeedStellarCartographyMergeOptions(mapIds: readonly string[]): boolean {
-  return mapIds.some((id) => mapAnalyticRegistrationFor(id).needsStellarCartographyMergeOptions)
-}
-
-export function mapIdsNeedLiveConnectionsParams(mapIds: readonly string[]): boolean {
-  return mapIds.some((id) => mapAnalyticRegistrationFor(id).needsLiveConnectionsParams)
 }

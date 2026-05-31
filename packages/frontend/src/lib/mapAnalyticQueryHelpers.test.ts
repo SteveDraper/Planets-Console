@@ -6,10 +6,6 @@ import {
   mapIdsToFetch,
 } from './useMapAnalyticQueries'
 import {
-  mapIdsNeedLiveConnectionsParams,
-  mapIdsNeedStellarCartographyMergeOptions,
-} from '../analytics/mapAnalyticRegistry'
-import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
@@ -86,14 +82,5 @@ describe('enabledMapAnalyticIds and mapIdsToFetch', () => {
       CONNECTIONS_ANALYTIC_ID,
       STELLAR_CARTOGRAPHY_ANALYTIC_ID,
     ])
-  })
-})
-
-describe('map analytic merge requirements', () => {
-  it('flags stellar cartography and connections from registry metadata', () => {
-    expect(mapIdsNeedStellarCartographyMergeOptions([STELLAR_CARTOGRAPHY_ANALYTIC_ID])).toBe(true)
-    expect(mapIdsNeedStellarCartographyMergeOptions([CONNECTIONS_ANALYTIC_ID])).toBe(false)
-    expect(mapIdsNeedLiveConnectionsParams([CONNECTIONS_ANALYTIC_ID])).toBe(true)
-    expect(mapIdsNeedLiveConnectionsParams([BASE_MAP_ANALYTIC_ID])).toBe(false)
   })
 })
