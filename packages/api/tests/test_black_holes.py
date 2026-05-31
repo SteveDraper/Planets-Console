@@ -1,5 +1,9 @@
-"""Tests for black hole ergosphere helpers (Planets.nu client alignment)."""
+"""Golden vectors: ``api.concepts.stellar_cartography.black_holes`` vs fixture."""
 
+import json
+from pathlib import Path
+
+import pytest
 from api.concepts.stellar_cartography.black_holes import (
     ERGOSPHERE_BAND_COUNT,
     black_hole_band_at,
@@ -8,38 +12,37 @@ from api.concepts.stellar_cartography.black_holes import (
     ergosphere_outer_radius,
 )
 
-
-def test_ergosphere_outer_radius():
-    assert ergosphere_outer_radius(15, 4) == 15 + 9 * 4
-
-
-def test_band_at_core_lethal():
-    assert black_hole_band_at(15, 4, 15) == 0
-    assert black_hole_band_at(15, 4, 10) == 0
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FIXTURE_PATH = REPO_ROOT / "test-fixtures" / "black-hole-ergosphere-contract.json"
 
 
-def test_band_at_outside_ergosphere():
-    outer = ergosphere_outer_radius(15, 4)
-    assert black_hole_band_at(15, 4, outer + 0.1) is None
+@pytest.fixture(scope="module")
+def contract_fixture() -> dict:
+    with open(FIXTURE_PATH) as f:
+        return json.load(f)
 
 
-def test_band_numbering_inner_to_outer():
-    # Solace-shaped: coreradius=15, bandradius=4
-    assert black_hole_band_at(15, 4, 16) == 1
-    assert black_hole_band_at(15, 4, 19) == 1
-    assert black_hole_band_at(15, 4, 20) == 2
-    assert black_hole_band_at(15, 4, ergosphere_outer_radius(15, 4)) == ERGOSPHERE_BAND_COUNT
+class TestBlackHoleErgosphereContract:
+    def test_constants_match_fixture(self, contract_fixture):
+        assert ERGOSPHERE_BAND_COUNT == contract_fixture["ergosphereBandCount"]
 
+    def test_geometry_radii(self, contract_fixture):
+        halo_extra = contract_fixture["haloExtraLy"]
+        for case in contract_fixture["cases"]:
+            assert (
+                ergosphere_outer_radius(case["coreradius"], case["bandradius"])
+                == case["outerRadiusLy"]
+            ), case["id"]
+            assert case["outerRadiusLy"] + halo_extra == case["haloRadiusLy"], case["id"]
 
-def test_max_warp_equals_band_number():
-    assert black_hole_max_warp_at(15, 4, 16) == 1
-    assert black_hole_max_warp_at(15, 4, 20) == 2
-    assert black_hole_max_warp_at(15, 4, ergosphere_outer_radius(15, 4)) == 9
-    assert black_hole_max_warp_at(15, 4, 15) is None
-
-
-def test_fuel_saving_percent():
-    assert black_hole_fuel_saving_percent_at(15, 4, 16) == 9
-    assert black_hole_fuel_saving_percent_at(15, 4, 20) == 8
-    assert black_hole_fuel_saving_percent_at(15, 4, ergosphere_outer_radius(15, 4)) == 1
-    assert black_hole_fuel_saving_percent_at(15, 4, 15) is None
+    def test_band_max_warp_and_fuel_saving(self, contract_fixture):
+        for case in contract_fixture["cases"]:
+            cr = case["coreradius"]
+            br = case["bandradius"]
+            for sample in case["samples"]:
+                dist = sample["dist"]
+                assert black_hole_band_at(cr, br, dist) == sample["band"], case["id"]
+                assert black_hole_max_warp_at(cr, br, dist) == sample["maxWarp"], case["id"]
+                assert (
+                    black_hole_fuel_saving_percent_at(cr, br, dist) == sample["fuelSavingPercent"]
+                ), case["id"]

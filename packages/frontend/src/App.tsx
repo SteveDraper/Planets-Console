@@ -85,6 +85,7 @@ function ConsoleShell() {
     onViewpointChange: handleShellViewpointChange,
     shellTurnMax,
     selectedTurn,
+    isFutureTurn,
     futureTurnOffset,
     setTurn,
     stepTurn,
@@ -311,6 +312,7 @@ function ConsoleShell() {
         reportShellError={addShellError}
         shellTurnMax={shellTurnMax}
         shellTurnValue={selectedTurn}
+        isFutureTurn={isFutureTurn}
         setTurn={setTurn}
         shellViewpoints={shellViewpoints}
         shellSelectedViewpointName={shellSelectedViewpointName}

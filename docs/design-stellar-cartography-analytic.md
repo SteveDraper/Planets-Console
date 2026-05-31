@@ -216,6 +216,31 @@ Each phase should be a reviewable PR. Run `make test` before merge.
 
 ## 5. Testing strategy
 
+### Cross-layer golden fixtures
+
+Host-aligned math that must stay in sync across Core and the SPA uses repo-root JSON under `test-fixtures/`:
+
+| Fixture | Core | Frontend |
+|---------|------|----------|
+| [`ion_voltage_contract.json`](../test-fixtures/ion_voltage_contract.json) | `test_ion_voltage_contract.py` | `loadIonVoltageContractFixture.ts`, `ionStormCloudOverlay.test.ts` |
+| [`black-hole-ergosphere-contract.json`](../test-fixtures/black-hole-ergosphere-contract.json) | `test_black_holes.py` | `loadBlackHoleErgosphereContractFixture.ts`, `blackHoles.contract.test.ts` |
+
+### Black hole ergosphere (host `getBlackHoleBand`)
+
+Turn JSON supplies `coreradius` (lethal core) and `bandradius` (width of each of nine bands). Geometry is **not** a single annulus to `bandradius`; the ergosphere spans **`coreradius + 9 * bandradius`** ly, with band index `1` innermost through `9` at the outer edge. Band `0` is the core (`dist <= coreradius`). Outside the ergosphere, sampling returns nothing.
+
+| Quantity | Rule |
+|----------|------|
+| Outer ergosphere ly | `coreradius + 9 * bandradius` |
+| Band at distance `d` | `0` in core; else `ceil((d - coreradius) / bandradius)` clamped to `1..9`; `null` if `bandradius <= 0` or `d` beyond outer |
+| Max warp in band | Same as band index (`1`..`9`) |
+| Fuel saving % in band | `10 - band` |
+| Map overlay halo | Outer ergosphere + **5 ly** cosmetic cyan glow (Planets.nu client) |
+
+Core: `api/concepts/stellar_cartography/black_holes.py` and `sample_at` tooltip lines. Frontend: `lib/cartography/blackHoles.ts` (sampling) and `stellarCartographyTheme.ts` (grey ramp + radii). `ERGOSPHERE_BAND_COUNT` is duplicated in both packages and asserted via the fixture.
+
+**Map rendering (black holes):** Pane geometry lives in `lib/cartography/blackHoleOverlay.ts` (`buildBlackHolePaneShape`, `buildBlackHoleErgosphereGradientStops`). Each hole is one `BlackHolePaneShape` rendered by `BlackHoleOverlay` in `StellarCartographyVectorOverlay.tsx`: a radial gradient with hard stops at each host band boundary (nine greys from `blackHoleErgosphereBandGrey`, opacity `BLACK_HOLE_ERGOSPHERE_BAND_OPACITY`) over a lethal core, then a separate halo circle with the cosmetic cyan ramp beyond the ergosphere (+5 ly). This replaces nine masked annulus primitives per hole.
+
 | Area | Tests |
 |------|--------|
 | Core deserialization | Extended nebula/blackhole/wormhole round-trip |

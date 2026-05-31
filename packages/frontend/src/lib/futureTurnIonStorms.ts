@@ -1,17 +1,17 @@
 import type { StellarCartographyOverlayCircle } from '../api/bff'
+import { ionStormStepDeltaGameLy } from './cartography/ionStormMovement'
 
-/** Per-turn ion storm travel in game light-years (warp squared, heading 0 = north). */
+/** Ion storm travel in game light-years over multiple turns (heading 0 = north). */
 export function ionStormGamePositionDeltaLy(
   heading: number,
   warp: number | undefined,
   forwardTurns: number
 ): { dx: number; dy: number } {
   if (forwardTurns <= 0) return { dx: 0, dy: 0 }
-  const stepLy = (warp ?? 0) * (warp ?? 0)
-  const theta = (heading * Math.PI) / 180
+  const { dx, dy } = ionStormStepDeltaGameLy(heading, warp)
   return {
-    dx: forwardTurns * stepLy * Math.sin(theta),
-    dy: forwardTurns * stepLy * Math.cos(theta),
+    dx: forwardTurns * dx,
+    dy: forwardTurns * dy,
   }
 }
 

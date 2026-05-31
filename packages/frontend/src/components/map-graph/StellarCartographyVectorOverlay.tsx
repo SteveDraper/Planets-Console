@@ -1,8 +1,8 @@
 import type {
-  StellarCartographyOverlayBlackHoleHaloShape,
   StellarCartographyOverlayPaneShapes,
   StellarCartographyOverlayRadialGradient,
 } from '../../lib/cartography/stellarCartographyOverlay'
+import type { BlackHolePaneShape } from '../../lib/cartography/blackHoleOverlay'
 import {
   BLACK_HOLE_HALO_CYAN,
   BLACK_HOLE_HALO_CYAN_OPACITY,
@@ -43,42 +43,60 @@ function StellarCartographyRadialGradientDef({
   )
 }
 
-function BlackHoleBandOverlay({
-  shapeKey,
-  cx,
-  cy,
-  coreR,
-  bandR,
-  coreFill,
-  bandFill,
-}: {
-  shapeKey: string
-  cx: number
-  cy: number
-  coreR: number
-  bandR: number
-  coreFill: string
-  bandFill: string
-}) {
+function BlackHoleErgosphereGradientDef({ shape }: { shape: BlackHolePaneShape }) {
+  return (
+    <radialGradient id={shape.ergosphereGradientId} cx="50%" cy="50%" r="50%">
+      {shape.ergosphereStops.map((stop, index) => (
+        <stop
+          key={`${shape.key}-stop-${index}`}
+          offset={`${stop.offset * 100}%`}
+          stopColor={stop.color}
+          stopOpacity={stop.opacity}
+        />
+      ))}
+    </radialGradient>
+  )
+}
+
+function BlackHoleHaloGradientDef({ shape }: { shape: BlackHolePaneShape }) {
+  const edgeStop = `${shape.ergosphereEdgeOffset * 100}%`
+  const gradientId = `${shape.key}-halo-grad`
+  return (
+    <radialGradient id={gradientId} cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stopColor="#000000" stopOpacity={0} />
+      <stop offset={edgeStop} stopColor="#000000" stopOpacity={0} />
+      <stop offset={edgeStop} stopColor={BLACK_HOLE_HALO_CYAN} stopOpacity={BLACK_HOLE_HALO_CYAN_OPACITY} />
+      <stop
+        offset="100%"
+        stopColor={BLACK_HOLE_HALO_OUTER}
+        stopOpacity={BLACK_HOLE_HALO_OUTER_OPACITY}
+      />
+    </radialGradient>
+  )
+}
+
+function BlackHoleOverlay({ shape }: { shape: BlackHolePaneShape }) {
+  const haloGradientId = `${shape.key}-halo-grad`
   return (
     <g>
       <defs>
-        <mask id={`${shapeKey}-ring-mask`}>
-          <circle cx={cx} cy={cy} r={bandR} fill="white" />
-          <circle cx={cx} cy={cy} r={coreR} fill="black" />
-        </mask>
+        <BlackHoleHaloGradientDef shape={shape} />
+        <BlackHoleErgosphereGradientDef shape={shape} />
       </defs>
       <circle
-        cx={cx}
-        cy={cy}
-        r={bandR}
-        fill={bandFill}
-        mask={`url(#${shapeKey}-ring-mask)`}
+        cx={shape.cx}
+        cy={shape.cy}
+        r={shape.haloR}
+        fill={`url(#${haloGradientId})`}
         stroke="none"
       />
-      {coreFill !== 'transparent' ? (
-        <circle cx={cx} cy={cy} r={coreR} fill={coreFill} stroke="none" />
-      ) : null}
+      <circle
+        cx={shape.cx}
+        cy={shape.cy}
+        r={shape.ergosphereR}
+        fill={`url(#${shape.ergosphereGradientId})`}
+        stroke="none"
+      />
     </g>
   )
 }
@@ -140,27 +158,6 @@ function GradientAnnulusOverlay({
   )
 }
 
-function BlackHoleHaloGradientDef({
-  halo,
-}: {
-  halo: StellarCartographyOverlayBlackHoleHaloShape
-}) {
-  const edgeStop = `${halo.ergosphereEdgeOffset * 100}%`
-  const gradientId = `${halo.key}-grad`
-  return (
-    <radialGradient id={gradientId} cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stopColor="#000000" stopOpacity={0} />
-      <stop offset={edgeStop} stopColor="#000000" stopOpacity={0} />
-      <stop offset={edgeStop} stopColor={BLACK_HOLE_HALO_CYAN} stopOpacity={BLACK_HOLE_HALO_CYAN_OPACITY} />
-      <stop
-        offset="100%"
-        stopColor={BLACK_HOLE_HALO_OUTER}
-        stopOpacity={BLACK_HOLE_HALO_OUTER_OPACITY}
-      />
-    </radialGradient>
-  )
-}
-
 export function StellarCartographyVectorOverlay({
   shapes,
   width,
@@ -172,7 +169,7 @@ export function StellarCartographyVectorOverlay({
     | 'ionStormClouds'
     | 'neutronFluxClouds'
     | 'circles'
-    | 'blackHoleHalos'
+    | 'blackHoles'
     | 'annuli'
     | 'debrisDiskBorders'
     | 'arrows'
@@ -208,21 +205,12 @@ export function StellarCartographyVectorOverlay({
           />
         </g>
       ))}
-      {shapes.blackHoleHalos.map((halo) => (
-        <g key={halo.key}>
-          <defs>
-            <BlackHoleHaloGradientDef halo={halo} />
-          </defs>
-          <circle cx={halo.cx} cy={halo.cy} r={halo.r} fill={`url(#${halo.key}-grad)`} stroke="none" />
-        </g>
+      {shapes.blackHoles.map((shape) => (
+        <BlackHoleOverlay key={shape.key} shape={shape} />
       ))}
-      {shapes.annuli.map(({ key, ...annulus }) =>
-        annulus.bandGradient != null || annulus.coreGradient != null ? (
-          <GradientAnnulusOverlay key={key} {...annulus} />
-        ) : (
-          <BlackHoleBandOverlay key={key} shapeKey={key} {...annulus} />
-        )
-      )}
+      {shapes.annuli.map(({ key, ...annulus }) => (
+        <GradientAnnulusOverlay key={key} {...annulus} />
+      ))}
       {shapes.debrisDiskBorders.map(({ key, cx, cy, r, fill, stroke, strokeWidth }) => (
         <circle
           key={key}

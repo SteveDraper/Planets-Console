@@ -26,6 +26,7 @@ function renderHeader() {
         reportShellError={() => {}}
         shellTurnMax={null}
         shellTurnValue={null}
+        isFutureTurn={false}
         setTurn={() => {}}
         shellViewpoints={[]}
         shellSelectedViewpointName={null}
@@ -107,6 +108,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
+          isFutureTurn={false}
           setTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
@@ -138,6 +140,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
+          isFutureTurn={false}
           setTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
@@ -170,6 +173,7 @@ describe('Header', () => {
             reportShellError={() => {}}
             shellTurnMax={max}
             shellTurnValue={t}
+            isFutureTurn={t > max}
             setTurn={setT}
             shellViewpoints={[]}
             shellSelectedViewpointName={null}
@@ -194,6 +198,57 @@ describe('Header', () => {
     expect(screen.queryByLabelText(/^turn number$/i)).not.toBeInTheDocument()
     expect(screen.getByLabelText(/turn number 4 \(future\)/i)).toHaveTextContent('4 (future)')
     expect(inc).not.toBeDisabled()
+  })
+
+  it('shows future turn label when isFutureTurn is true', () => {
+    render(
+      <QueryClientProvider client={headerQueryClient}>
+        <Header
+          viewMode="tabular"
+          onViewModeChange={() => {}}
+          mapZoom={1}
+          onMapZoomSliderChange={() => {}}
+          selectedGameId={null}
+          onCommitGameSelection={() => {}}
+          isGameRefreshPending={false}
+          reportShellError={() => {}}
+          shellTurnMax={10}
+          shellTurnValue={12}
+          isFutureTurn={true}
+          setTurn={() => {}}
+          shellViewpoints={[]}
+          shellSelectedViewpointName={null}
+          onShellViewpointChange={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    expect(screen.getByLabelText(/turn number 12 \(future\)/i)).toHaveTextContent('12 (future)')
+    expect(screen.queryByLabelText(/^turn number$/i)).not.toBeInTheDocument()
+  })
+
+  it('shows turn input when isFutureTurn is false even at max turn', () => {
+    render(
+      <QueryClientProvider client={headerQueryClient}>
+        <Header
+          viewMode="tabular"
+          onViewModeChange={() => {}}
+          mapZoom={1}
+          onMapZoomSliderChange={() => {}}
+          selectedGameId={null}
+          onCommitGameSelection={() => {}}
+          isGameRefreshPending={false}
+          reportShellError={() => {}}
+          shellTurnMax={10}
+          shellTurnValue={10}
+          isFutureTurn={false}
+          setTurn={() => {}}
+          shellViewpoints={[]}
+          shellSelectedViewpointName={null}
+          onShellViewpointChange={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    expect(screen.getByLabelText(/^turn number$/i)).toHaveValue(10)
   })
 
   it('prefills name from localStorage when opening login modal', async () => {

@@ -1,0 +1,118 @@
+import type { BlackHoleOverlayCircle } from '../../api/bff'
+import {
+  circleIntersectsFlowBounds,
+  flowBoundsFromViewport,
+  flowToPane,
+  gameMapCellCenterToFlow,
+  type CartographyOverlayViewport,
+} from './cartographyOverlayGeometry'
+import { blackHoleBandRadiiLy, blackHoleErgosphereOuterLy, blackHoleHaloRadiusLy } from './blackHoles'
+import {
+  BLACK_HOLE_CORE_FILL,
+  BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+  blackHoleErgosphereBandGrey,
+  ERGOSPHERE_BAND_COUNT,
+} from './stellarCartographyTheme'
+
+export type BlackHoleErgosphereGradientStop = {
+  /** Fraction of ergosphere radius from center (0–1). */
+  offset: number
+  color: string
+  opacity: number
+}
+
+/** One pane-pixel black hole: ergosphere radial gradient plus outer cyan halo. */
+export type BlackHolePaneShape = {
+  key: string
+  cx: number
+  cy: number
+  coreR: number
+  ergosphereR: number
+  haloR: number
+  /** Fraction of halo radius where ergosphere ends and cyan glow begins. */
+  ergosphereEdgeOffset: number
+  ergosphereGradientId: string
+  ergosphereStops: readonly BlackHoleErgosphereGradientStop[]
+}
+
+/** Radial gradient stops matching the nine host ergosphere band greys. */
+export function buildBlackHoleErgosphereGradientStops(
+  coreRadiusLy: number,
+  bandWidthLy: number
+): BlackHoleErgosphereGradientStop[] {
+  const outerLy = blackHoleErgosphereOuterLy(coreRadiusLy, bandWidthLy)
+  if (outerLy <= 0) {
+    return []
+  }
+
+  const stops: BlackHoleErgosphereGradientStop[] = [
+    { offset: 0, color: BLACK_HOLE_CORE_FILL, opacity: 1 },
+  ]
+
+  const coreOffset = Math.min(1, coreRadiusLy / outerLy)
+  if (coreRadiusLy > 0) {
+    stops.push({ offset: coreOffset, color: BLACK_HOLE_CORE_FILL, opacity: 1 })
+    stops.push({
+      offset: coreOffset,
+      color: blackHoleErgosphereBandGrey(1),
+      opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+    })
+  } else {
+    stops.push({
+      offset: 0,
+      color: blackHoleErgosphereBandGrey(1),
+      opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+    })
+  }
+
+  for (let band = 2; band <= ERGOSPHERE_BAND_COUNT; band++) {
+    const { innerLy } = blackHoleBandRadiiLy(coreRadiusLy, bandWidthLy, band)
+    const offset = Math.min(1, innerLy / outerLy)
+    stops.push({
+      offset,
+      color: blackHoleErgosphereBandGrey(band - 1),
+      opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+    })
+    stops.push({
+      offset,
+      color: blackHoleErgosphereBandGrey(band),
+      opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+    })
+  }
+
+  stops.push({
+    offset: 1,
+    color: blackHoleErgosphereBandGrey(ERGOSPHERE_BAND_COUNT),
+    opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+  })
+
+  return stops
+}
+
+export function buildBlackHolePaneShape(
+  circle: BlackHoleOverlayCircle,
+  viewport: CartographyOverlayViewport
+): BlackHolePaneShape | null {
+  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
+  const outerLy = blackHoleErgosphereOuterLy(circle.coreRadius, circle.bandRadius)
+  const haloLy = blackHoleHaloRadiusLy(circle.coreRadius, circle.bandRadius)
+  const flowBounds = flowBoundsFromViewport(viewport)
+  if (!circleIntersectsFlowBounds(cx, cy, haloLy, flowBounds)) {
+    return null
+  }
+
+  const { px, py } = flowToPane(cx, cy, viewport)
+  const scale = viewport.scale
+
+  return {
+    key: circle.id,
+    cx: px,
+    cy: py,
+    coreR: circle.coreRadius * scale,
+    ergosphereR: outerLy * scale,
+    haloR: haloLy * scale,
+    ergosphereEdgeOffset: outerLy / haloLy,
+    ergosphereGradientId: `${circle.id}-ergo-grad`,
+    ergosphereStops: buildBlackHoleErgosphereGradientStops(circle.coreRadius, circle.bandRadius),
+  }
+}

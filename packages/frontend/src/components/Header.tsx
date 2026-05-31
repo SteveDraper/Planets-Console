@@ -10,8 +10,6 @@ import { LoginModal } from './LoginModal'
 import { AboutModal } from './AboutModal'
 import { DiagnosticsModal } from './DiagnosticsModal'
 import { SettingsModal } from './SettingsModal'
-import { isFutureTurn } from '../shell'
-
 type ViewMode = 'tabular' | 'map'
 
 type HeaderProps = {
@@ -29,6 +27,8 @@ type HeaderProps = {
   shellTurnMax: number | null
   /** Selected turn; may exceed shellTurnMax when viewing predicted future turns. */
   shellTurnValue: number | null
+  /** From shell context: selected turn is beyond latest stored turn. */
+  isFutureTurn: boolean
   setTurn: (turn: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
   shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
@@ -48,6 +48,7 @@ export function Header({
   reportShellError,
   shellTurnMax,
   shellTurnValue,
+  isFutureTurn,
   setTurn,
   shellViewpoints,
   shellSelectedViewpointName,
@@ -72,7 +73,7 @@ export function Header({
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
-  const showFutureTurn = turnReady && isFutureTurn(shellTurnValue, shellTurnMax)
+  const showFutureTurn = turnReady && isFutureTurn
   const committedTurnStr = shellTurnValue != null ? String(shellTurnValue) : ''
 
   useEffect(() => {

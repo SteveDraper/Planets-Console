@@ -3,6 +3,8 @@ import { useReactFlow, useStoreApi } from '@xyflow/react'
 import {
   MAP_ZOOM_KEYBOARD_REPEAT_INTERVAL_MS,
   MAP_ZOOM_KEYBOARD_REPEAT_START_MS,
+  MAP_ZOOM_MAX,
+  MAP_ZOOM_MIN,
   mapZoomKeyboardStepsPerRepeatTick,
   stepMapZoomBySliderSteps,
 } from '../../lib/utils'
@@ -14,7 +16,7 @@ export function useCenteredViewportZoom(onMapZoomChange: (z: number) => void) {
 
   return useCallback(
     (targetZoom: number) => {
-      const z = Math.min(40, Math.max(0.2, Number(targetZoom) || 0.2))
+      const z = Math.min(MAP_ZOOM_MAX, Math.max(MAP_ZOOM_MIN, Number(targetZoom) || MAP_ZOOM_MIN))
       const apply = () => {
         const domNode = storeApi.getState().domNode
         if (!domNode || domNode.getBoundingClientRect().width <= 0) return false
@@ -22,7 +24,7 @@ export function useCenteredViewportZoom(onMapZoomChange: (z: number) => void) {
         const rect = domNode.getBoundingClientRect()
         const w = Math.max(rect.width, 1)
         const h = Math.max(rect.height, 1)
-        const vz = Math.max(Number(vp.zoom) || 0.2, 0.2)
+        const vz = Math.max(Number(vp.zoom) || MAP_ZOOM_MIN, MAP_ZOOM_MIN)
         const vx = Number.isFinite(vp.x) ? vp.x : 0
         const vy = Number.isFinite(vp.y) ? vp.y : 0
         const cx = (w / 2 - vx) / vz

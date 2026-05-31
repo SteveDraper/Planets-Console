@@ -14,6 +14,8 @@ import {
   type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
 import { hexWithAlpha } from './cartographyColor'
+import { buildBlackHolePaneShape, type BlackHolePaneShape } from './blackHoleOverlay'
+import { ionStormStepDeltaGameLy } from './ionStormMovement'
 import { buildNebulaCloudPaneShapes, type NebulaCloudPaneShape } from './nebulaCloudOverlay'
 import {
   buildIonStormCloudPaneShapes,
@@ -25,11 +27,6 @@ import {
 } from './neutronClusterFluxOverlay'
 import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
-  BLACK_HOLE_CORE_FILL,
-  BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
-  blackHoleErgosphereBandGrey,
-  blackHoleErgosphereOuterLy,
-  blackHoleHaloRadiusLy,
   DEBRIS_DISK_BORDER_STROKE,
   DEBRIS_DISK_BORDER_STROKE_WIDTH,
   DISC_RIM_ALPHA,
@@ -49,7 +46,6 @@ import {
   STAR_CLUSTER_STROKE_WIDTH,
   WORMHOLE_ENDPOINT_DIAMETER_LY,
   WORMHOLE_ENDPOINT_MIN_DIAMETER_PX,
-  ERGOSPHERE_BAND_COUNT,
 } from './stellarCartographyTheme'
 
 export type StellarCartographyOverlayViewport = CartographyOverlayViewport
@@ -138,19 +134,12 @@ export type StellarCartographyOverlayWormholeMarkerShape = {
   mapY: number
 }
 
-export type StellarCartographyOverlayBlackHoleHaloShape = {
-  key: string
-  cx: number
-  cy: number
-  r: number
-  /** Fraction of halo radius (0–1) where the ergosphere edge and cyan glow begin. */
-  ergosphereEdgeOffset: number
-}
+export type { BlackHolePaneShape } from './blackHoleOverlay'
 
 export type StellarCartographyOverlayPaneShapes = {
   circles: StellarCartographyOverlayCircleShape[]
   annuli: StellarCartographyOverlayAnnulusShape[]
-  blackHoleHalos: StellarCartographyOverlayBlackHoleHaloShape[]
+  blackHoles: BlackHolePaneShape[]
   nebulaClouds: NebulaCloudPaneShape[]
   ionStormClouds: IonStormCloudPaneShape[]
   neutronFluxClouds: NeutronClusterFluxPaneShape[]
@@ -162,11 +151,6 @@ export type StellarCartographyOverlayPaneShapes = {
 
 export { gameMapCellCenterToFlow } from './cartographyOverlayGeometry'
 
-function ionStormMovementLengthLy(warp: number | undefined): number {
-  const w = warp ?? 0
-  return w * w
-}
-
 /** Ion storm movement arrow endpoint in flow space (heading degrees, 0 = north, clockwise). */
 export function ionStormArrowEndpointFlow(
   centerGx: number,
@@ -175,10 +159,7 @@ export function ionStormArrowEndpointFlow(
   warp: number | undefined
 ): { x1: number; y1: number; x2: number; y2: number } {
   const { cx, cy } = gameMapCellCenterToFlow(centerGx, centerGy)
-  const lengthLy = ionStormMovementLengthLy(warp)
-  const theta = (heading * Math.PI) / 180
-  const dx = Math.sin(theta) * lengthLy
-  const dyGame = Math.cos(theta) * lengthLy
+  const { dx, dy: dyGame } = ionStormStepDeltaGameLy(heading, warp)
   return {
     x1: cx,
     y1: cy,
@@ -396,57 +377,6 @@ function buildStarClusterCoreCircle(
   )
 }
 
-function buildBlackHolePaneShapes(
-  circle: BlackHoleOverlayCircle,
-  viewport: StellarCartographyOverlayViewport
-): {
-  halo: StellarCartographyOverlayBlackHoleHaloShape | null
-  annuli: StellarCartographyOverlayAnnulusShape[]
-} {
-  const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const outerLy = blackHoleErgosphereOuterLy(circle.coreRadius, circle.bandRadius)
-  const haloLy = blackHoleHaloRadiusLy(circle.coreRadius, circle.bandRadius)
-  const flowBounds = flowBoundsFromViewport(viewport)
-  if (!circleIntersectsFlowBounds(cx, cy, haloLy, flowBounds)) {
-    return { halo: null, annuli: [] }
-  }
-
-  const { px, py } = flowToPane(cx, cy, viewport)
-  const scale = viewport.scale
-  const haloR = haloLy * scale
-  const annuli: StellarCartographyOverlayAnnulusShape[] = []
-
-  for (let band = ERGOSPHERE_BAND_COUNT; band >= 1; band--) {
-    const innerLy = circle.coreRadius + (band - 1) * circle.bandRadius
-    const outerBandLy = circle.coreRadius + band * circle.bandRadius
-    annuli.push({
-      key: `${circle.id}-band-${band}`,
-      cx: px,
-      cy: py,
-      coreR: innerLy * scale,
-      bandR: outerBandLy * scale,
-      coreFill: band === 1 ? BLACK_HOLE_CORE_FILL : 'transparent',
-      bandFill: hexWithAlpha(
-        blackHoleErgosphereBandGrey(band),
-        BLACK_HOLE_ERGOSPHERE_BAND_OPACITY
-      ),
-      bandStroke: 'none',
-      strokeWidth: 0,
-    })
-  }
-
-  return {
-    halo: {
-      key: `${circle.id}-halo`,
-      cx: px,
-      cy: py,
-      r: haloR,
-      ergosphereEdgeOffset: outerLy / haloLy,
-    },
-    annuli,
-  }
-}
-
 function buildIonStormArrow(
   storm: IonStormOverlayCircle,
   viewport: StellarCartographyOverlayViewport,
@@ -488,7 +418,7 @@ export function buildStellarCartographyOverlayPaneShapes(
   const empty: StellarCartographyOverlayPaneShapes = {
     circles: [],
     annuli: [],
-    blackHoleHalos: [],
+    blackHoles: [],
     nebulaClouds: [],
     ionStormClouds: [],
     neutronFluxClouds: [],
@@ -527,7 +457,7 @@ export function buildStellarCartographyOverlayPaneShapes(
   })
   const circles: StellarCartographyOverlayCircleShape[] = []
   const annuli: StellarCartographyOverlayAnnulusShape[] = []
-  const blackHoleHalos: StellarCartographyOverlayBlackHoleHaloShape[] = []
+  const blackHoles: BlackHolePaneShape[] = []
   const debrisDiskBorders: StellarCartographyOverlayCircleShape[] = []
   const arrows: StellarCartographyOverlayArrowShape[] = []
 
@@ -541,9 +471,8 @@ export function buildStellarCartographyOverlayPaneShapes(
     )
   )) {
     if (circle.layer === 'black-holes') {
-      const blackHole = buildBlackHolePaneShapes(circle as BlackHoleOverlayCircle, viewport)
-      if (blackHole.halo != null) blackHoleHalos.push(blackHole.halo)
-      annuli.push(...blackHole.annuli)
+      const blackHole = buildBlackHolePaneShape(circle as BlackHoleOverlayCircle, viewport)
+      if (blackHole != null) blackHoles.push(blackHole)
       continue
     }
     if (circle.layer === 'star-clusters') {
@@ -615,7 +544,7 @@ export function buildStellarCartographyOverlayPaneShapes(
   return {
     circles,
     annuli,
-    blackHoleHalos,
+    blackHoles,
     nebulaClouds,
     ionStormClouds,
     neutronFluxClouds,

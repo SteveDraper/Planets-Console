@@ -8,6 +8,7 @@ How the console draws and interacts with **Stellar Cartography** on the React Fl
 |------|----------|
 | Theme constants | `packages/frontend/src/lib/stellarCartographyTheme.ts` |
 | SVG overlay builder | `packages/frontend/src/lib/stellarCartographyOverlay.ts` |
+| Black hole pane shapes | `packages/frontend/src/lib/cartography/blackHoleOverlay.ts` |
 | Map integration | `packages/frontend/src/components/MapGraph.tsx` |
 | Wormhole edges | `packages/frontend/src/analytics/mapLayers.ts` (merge) + custom edge type if needed |
 | Core map geometry | `packages/api/api/analytics/stellar_cartography.py` |
@@ -78,7 +79,9 @@ One circle per `stars[]` body at `radius`. Bodies sharing `name` are one cluster
 
 ### 2.4 Black holes
 
-**C** with two radii: lethal **core** (`coreradius`) and **ergosphere band** to `bandradius`. Core fill dark; band visible on black background.
+**C** with lethal **core** (`coreradius`) and nine **ergosphere bands** spanning `coreradius + 9 * bandradius` ly (see analytic doc). Map overlay adds a cosmetic **+5 ly** cyan halo beyond the outer band.
+
+**Rendering:** One SVG group per hole (`BlackHoleOverlay`): bottom circle uses a halo radial gradient (transparent inside the ergosphere, cyan at the edge, fading outward); top circle uses an ergosphere radial gradient with hard stops at each band boundary (grey ramp from `blackHoleErgosphereBandGrey`, composited at `BLACK_HOLE_ERGOSPHERE_BAND_OPACITY`). Pane shapes are built in `blackHoleOverlay.ts`, not as nine generic masked annuli.
 
 ### 2.5 Debris disk borders
 

@@ -1,0 +1,60 @@
+{
+  "description": "Cross-layer contract for Planets.nu-aligned black hole ergosphere geometry (getBlackHoleBand). Core implements api/concepts/stellar_cartography/black_holes.py; frontend band sampling and overlay radii in lib/cartography/blackHoles.ts and stellarCartographyTheme.ts. Keep both packages in sync with this fixture.",
+  "ergosphereBandCount": 9,
+  "haloExtraLy": 5,
+  "cases": [
+    {
+      "id": "solace-shaped",
+      "coreradius": 15,
+      "bandradius": 4,
+      "outerRadiusLy": 51,
+      "haloRadiusLy": 56,
+      "samples": [
+        { "dist": 10, "band": 0, "maxWarp": null, "fuelSavingPercent": null },
+        { "dist": 15, "band": 0, "maxWarp": null, "fuelSavingPercent": null },
+        { "dist": 15.5, "band": 1, "maxWarp": 1, "fuelSavingPercent": 9 },
+        { "dist": 16, "band": 1, "maxWarp": 1, "fuelSavingPercent": 9 },
+        { "dist": 19, "band": 1, "maxWarp": 1, "fuelSavingPercent": 9 },
+        { "dist": 19.001, "band": 2, "maxWarp": 2, "fuelSavingPercent": 8 },
+        { "dist": 20, "band": 2, "maxWarp": 2, "fuelSavingPercent": 8 },
+        { "dist": 23, "band": 2, "maxWarp": 2, "fuelSavingPercent": 8 },
+        { "dist": 27, "band": 3, "maxWarp": 3, "fuelSavingPercent": 7 },
+        { "dist": 31, "band": 4, "maxWarp": 4, "fuelSavingPercent": 6 },
+        { "dist": 35, "band": 5, "maxWarp": 5, "fuelSavingPercent": 5 },
+        { "dist": 39, "band": 6, "maxWarp": 6, "fuelSavingPercent": 4 },
+        { "dist": 43, "band": 7, "maxWarp": 7, "fuelSavingPercent": 3 },
+        { "dist": 47, "band": 8, "maxWarp": 8, "fuelSavingPercent": 2 },
+        { "dist": 51, "band": 9, "maxWarp": 9, "fuelSavingPercent": 1 },
+        { "dist": 51.1, "band": null, "maxWarp": null, "fuelSavingPercent": null },
+        { "dist": 55, "band": null, "maxWarp": null, "fuelSavingPercent": null }
+      ]
+    },
+    {
+      "id": "compact-core",
+      "coreradius": 5,
+      "bandradius": 2,
+      "outerRadiusLy": 23,
+      "haloRadiusLy": 28,
+      "samples": [
+        { "dist": 5, "band": 0, "maxWarp": null, "fuelSavingPercent": null },
+        { "dist": 6, "band": 1, "maxWarp": 1, "fuelSavingPercent": 9 },
+        { "dist": 7, "band": 1, "maxWarp": 1, "fuelSavingPercent": 9 },
+        { "dist": 8, "band": 2, "maxWarp": 2, "fuelSavingPercent": 8 },
+        { "dist": 23, "band": 9, "maxWarp": 9, "fuelSavingPercent": 1 },
+        { "dist": 24, "band": null, "maxWarp": null, "fuelSavingPercent": null }
+      ]
+    },
+    {
+      "id": "zero-bandwidth",
+      "coreradius": 10,
+      "bandradius": 0,
+      "outerRadiusLy": 10,
+      "haloRadiusLy": 15,
+      "samples": [
+        { "dist": 10, "band": null, "maxWarp": null, "fuelSavingPercent": null },
+        { "dist": 15, "band": null, "maxWarp": null, "fuelSavingPercent": null },
+        { "dist": 20, "band": null, "maxWarp": null, "fuelSavingPercent": null }
+      ]
+    }
+  ]
+}

@@ -180,7 +180,7 @@ describe('stellarCartographyOverlay', () => {
     expect(shapes.annuli[0]?.bandStroke).toBe('none')
   })
 
-  it('draws black hole ergosphere as nine grey band annuli with outer cyan halo', () => {
+  it('includes black holes as dedicated pane shapes, not generic annuli', () => {
     const viewport = {
       width: 800,
       height: 600,
@@ -204,18 +204,10 @@ describe('stellarCartographyOverlay', () => {
       [],
       viewport
     )
-    expect(shapes.annuli).toHaveLength(9)
-    expect(shapes.blackHoleHalos).toHaveLength(1)
-    expect(shapes.annuli[0]?.key).toBe('bh-1-band-9')
-    expect(shapes.annuli[8]?.key).toBe('bh-1-band-1')
-    expect(shapes.annuli[0]?.bandFill).toBe('rgba(74, 74, 74, 0.3)')
-    expect(shapes.annuli[8]?.bandFill).toBe('rgba(26, 26, 26, 0.3)')
-    expect(shapes.annuli[0]?.bandGradient).toBeUndefined()
-    expect(shapes.annuli[8]?.coreR).toBeCloseTo(15 * viewport.scale)
-    expect(shapes.annuli[0]?.bandR).toBeCloseTo(51 * viewport.scale)
-    expect(shapes.blackHoleHalos[0]?.r).toBeCloseTo(56 * viewport.scale)
-    expect(shapes.blackHoleHalos[0]?.ergosphereEdgeOffset).toBeCloseTo(51 / 56)
-    expect(shapes.annuli[0]?.bandStroke).toBe('none')
+    expect(shapes.annuli).toHaveLength(0)
+    expect(shapes.blackHoles).toHaveLength(1)
+    expect(shapes.blackHoles[0]?.key).toBe('bh-1')
+    expect(shapes.blackHoles[0]?.ergosphereR).toBeCloseTo(51 * viewport.scale)
   })
 
   it('draws neutron cluster flux as raster and blue cores without per-star annuli', () => {
