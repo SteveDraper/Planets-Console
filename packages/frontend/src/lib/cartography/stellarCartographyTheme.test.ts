@@ -25,10 +25,11 @@ function parseHexRgb(hex: string): [number, number, number] {
 
 describe('stellarCartographyTheme', () => {
   it('ramps black hole ergosphere greys from inner to outer band', () => {
-    expect(blackHoleErgosphereBandGrey(1)).toBe('#1a1a1a')
-    expect(blackHoleErgosphereBandGrey(9)).toBe('#4a4a4a')
-    expect(parseHexRgb(blackHoleErgosphereBandGrey(5))[0]).toBeGreaterThan(
-      parseHexRgb(blackHoleErgosphereBandGrey(2))[0]
+    const bandCount = 9
+    expect(blackHoleErgosphereBandGrey(1, bandCount)).toBe('#1a1a1a')
+    expect(blackHoleErgosphereBandGrey(9, bandCount)).toBe('#4a4a4a')
+    expect(parseHexRgb(blackHoleErgosphereBandGrey(5, bandCount))[0]).toBeGreaterThan(
+      parseHexRgb(blackHoleErgosphereBandGrey(2, bandCount))[0]
     )
   })
 

@@ -202,7 +202,10 @@ describe('stellarCartographyOverlay', () => {
         },
       ],
       [],
-      viewport
+      viewport,
+      {
+        blackHoleConstants: { ergosphereBandCount: 9, haloExtraLy: 5 },
+      }
     )
     expect(shapes.annuli).toHaveLength(0)
     expect(shapes.blackHoles).toHaveLength(1)

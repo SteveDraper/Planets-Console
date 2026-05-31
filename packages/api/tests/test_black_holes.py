@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from api.concepts.stellar_cartography.black_holes import (
+    BLACK_HOLE_HALO_EXTRA_LY,
     ERGOSPHERE_BAND_COUNT,
     black_hole_band_at,
     black_hole_fuel_saving_percent_at,
@@ -25,6 +26,7 @@ def contract_fixture() -> dict:
 class TestBlackHoleErgosphereContract:
     def test_constants_match_fixture(self, contract_fixture):
         assert ERGOSPHERE_BAND_COUNT == contract_fixture["ergosphereBandCount"]
+        assert BLACK_HOLE_HALO_EXTRA_LY == contract_fixture["haloExtraLy"]
 
     def test_geometry_radii(self, contract_fixture):
         halo_extra = contract_fixture["haloExtraLy"]

@@ -1,5 +1,5 @@
-import type { StellarCartographyOverlayCircle } from '../api/bff'
-import { ionStormStepDeltaGameLy } from './cartography/ionStormMovement'
+import type { StellarCartographyOverlayCircle } from '../../api/bff'
+import { ionStormStepDeltaGameLy } from './ionStormMovement'
 
 /** Ion storm travel in game light-years over multiple turns (heading 0 = north). */
 export function ionStormGamePositionDeltaLy(

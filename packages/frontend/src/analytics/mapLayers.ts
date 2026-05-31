@@ -7,7 +7,7 @@ import type { WormholeDisplayMode } from './stellar-cartography/wormholeDisplayM
 import type { ClusterOutlineDisplayMode } from './stellar-cartography/clusterOutlineDisplayMode'
 import { appendStellarCartographyMapLayer } from './stellar-cartography/mapLayer'
 import { appendConnectionsMapLayer, routeWaypointsFromMap } from './connections/mapLayer'
-import { applyFutureIonStormOverlayPositions } from '../lib/futureTurnIonStorms'
+import { applyFutureIonStormOverlayPositions } from '../lib/cartography/futureTurnIonStorms'
 
 export type StellarCartographyMapMergeOptions = {
   layerVisibility: CartographyLayerVisibility

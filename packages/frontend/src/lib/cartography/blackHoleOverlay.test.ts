@@ -1,21 +1,30 @@
 import { describe, expect, it } from 'vitest'
+import type { BlackHoleConceptConstants } from '../../api/bff'
 import { hexWithAlpha } from './cartographyColor'
 import {
   buildBlackHoleErgosphereGradientStops,
   buildBlackHolePaneShape,
-  ERGOSPHERE_BAND_COUNT,
 } from './blackHoleOverlay'
-import {
-  BLACK_HOLE_HALO_EXTRA_LY,
-  blackHoleErgosphereBandGrey,
-} from './stellarCartographyTheme'
+import { blackHoleErgosphereBandGrey } from './stellarCartographyTheme'
+
+/** Values from test-fixtures/black-hole-ergosphere-contract.json (Core-owned). */
+const blackHoleConstants: BlackHoleConceptConstants = {
+  ergosphereBandCount: 9,
+  haloExtraLy: 5,
+}
 
 describe('buildBlackHoleErgosphereGradientStops', () => {
   it('places band boundaries at host radii with inner and outer greys', () => {
     const coreRadiusLy = 15
     const bandWidthLy = 4
-    const outerLy = coreRadiusLy + ERGOSPHERE_BAND_COUNT * bandWidthLy
-    const stops = buildBlackHoleErgosphereGradientStops(coreRadiusLy, bandWidthLy, outerLy)
+    const outerLy =
+      coreRadiusLy + blackHoleConstants.ergosphereBandCount * bandWidthLy
+    const stops = buildBlackHoleErgosphereGradientStops(
+      blackHoleConstants,
+      coreRadiusLy,
+      bandWidthLy,
+      outerLy
+    )
 
     expect(stops[0]).toEqual({ offset: 0, color: '#000000', opacity: 1 })
     expect(stops.find((s) => s.offset === coreRadiusLy / outerLy && s.color === '#000000')).toBeDefined()
@@ -23,12 +32,12 @@ describe('buildBlackHoleErgosphereGradientStops', () => {
       stops.find(
         (s) =>
           s.offset === coreRadiusLy / outerLy &&
-          s.color === blackHoleErgosphereBandGrey(1)
+          s.color === blackHoleErgosphereBandGrey(1, blackHoleConstants.ergosphereBandCount)
       )
     ).toBeDefined()
     expect(stops.at(-1)).toEqual({
       offset: 1,
-      color: blackHoleErgosphereBandGrey(9),
+      color: blackHoleErgosphereBandGrey(9, blackHoleConstants.ergosphereBandCount),
       opacity: 0.3,
     })
   })
@@ -44,6 +53,7 @@ describe('buildBlackHolePaneShape', () => {
       scale: 4,
     }
     const shape = buildBlackHolePaneShape(
+      blackHoleConstants,
       {
         layer: 'black-holes',
         id: 'bh-1',
@@ -62,22 +72,34 @@ describe('buildBlackHolePaneShape', () => {
     expect(shape?.ergosphereGradientId).toBe('bh-1-ergo-grad')
     expect(shape?.coreR).toBeCloseTo(15 * viewport.scale)
     expect(shape?.ergosphereR).toBeCloseTo(51 * viewport.scale)
-    expect(shape?.haloR).toBeCloseTo((51 + BLACK_HOLE_HALO_EXTRA_LY) * viewport.scale)
-    expect(shape?.ergosphereEdgeOffset).toBeCloseTo(51 / (51 + BLACK_HOLE_HALO_EXTRA_LY))
+    expect(shape?.haloR).toBeCloseTo((51 + blackHoleConstants.haloExtraLy) * viewport.scale)
+    expect(shape?.ergosphereEdgeOffset).toBeCloseTo(
+      51 / (51 + blackHoleConstants.haloExtraLy)
+    )
     expect(shape?.ergosphereStops.length).toBeGreaterThan(0)
 
-    const band1Grey = hexWithAlpha(blackHoleErgosphereBandGrey(1), 0.3)
-    const band9Grey = hexWithAlpha(blackHoleErgosphereBandGrey(9), 0.3)
+    const band1Grey = hexWithAlpha(
+      blackHoleErgosphereBandGrey(1, blackHoleConstants.ergosphereBandCount),
+      0.3
+    )
+    const band9Grey = hexWithAlpha(
+      blackHoleErgosphereBandGrey(9, blackHoleConstants.ergosphereBandCount),
+      0.3
+    )
     expect(
       shape?.ergosphereStops.some(
         (stop) =>
-          stop.color === blackHoleErgosphereBandGrey(1) && stop.opacity === 0.3
+          stop.color ===
+            blackHoleErgosphereBandGrey(1, blackHoleConstants.ergosphereBandCount) &&
+          stop.opacity === 0.3
       )
     ).toBe(true)
     expect(
       shape?.ergosphereStops.some(
         (stop) =>
-          stop.color === blackHoleErgosphereBandGrey(9) && stop.opacity === 0.3
+          stop.color ===
+            blackHoleErgosphereBandGrey(9, blackHoleConstants.ergosphereBandCount) &&
+          stop.opacity === 0.3
       )
     ).toBe(true)
     expect(band1Grey).toBe('rgba(26, 26, 26, 0.3)')

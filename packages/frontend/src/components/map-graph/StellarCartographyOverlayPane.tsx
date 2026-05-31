@@ -1,6 +1,7 @@
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
 import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
+import { useBlackHoleConceptConstants } from '../../lib/cartography/useBlackHoleConceptConstants'
 import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
@@ -53,6 +54,7 @@ export function StellarCartographyOverlayPane({
   const neutronClusterDisplayMode = useStellarCartographyLayersStore(
     (s) => s.neutronClusterDisplayMode
   )
+  const blackHoleConstants = useBlackHoleConceptConstants()
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
@@ -70,6 +72,7 @@ export function StellarCartographyOverlayPane({
       cloudyIonStorms: nuIonStorms ?? true,
       starClusterDisplayMode,
       neutronClusterDisplayMode,
+      blackHoleConstants,
     }
   )
 

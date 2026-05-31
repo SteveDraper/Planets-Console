@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import math
 
-# Duplicated in frontend stellarCartographyTheme; must match Planets.nu host.
+# Planets.nu host constants; contract: test-fixtures/black-hole-ergosphere-contract.json.
 ERGOSPHERE_BAND_COUNT = 9
+BLACK_HOLE_HALO_EXTRA_LY = 5
+
+
+def black_hole_concept_constants() -> dict[str, int]:
+    """Static black-hole facts for map rendering and tooltips (no turn scope)."""
+    return {
+        "ergosphere_band_count": ERGOSPHERE_BAND_COUNT,
+        "halo_extra_ly": BLACK_HOLE_HALO_EXTRA_LY,
+    }
 
 
 def ergosphere_outer_radius(coreradius: int, bandradius: int) -> int:

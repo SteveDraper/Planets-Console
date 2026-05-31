@@ -91,8 +91,7 @@ export const BLACK_HOLE_CORE_FILL = '#000000'
 const BLACK_HOLE_BAND_GREY_INNER = 0x1a
 const BLACK_HOLE_BAND_GREY_OUTER = 0x4a
 
-/** Cosmetic cyan halo beyond the outermost ergosphere band (Planets.nu client uses +5 ly). */
-export const BLACK_HOLE_HALO_EXTRA_LY = 5
+/** Cosmetic cyan halo beyond the outermost ergosphere band (extent from Core concepts route). */
 export const BLACK_HOLE_HALO_CYAN = '#00ffff'
 export const BLACK_HOLE_HALO_CYAN_OPACITY = 0.2
 export const BLACK_HOLE_HALO_OUTER = '#ff8000'
@@ -101,15 +100,16 @@ export const BLACK_HOLE_HALO_OUTER_OPACITY = 0
 /** Opacity applied to ergosphere band greys when composited on the map. */
 export const BLACK_HOLE_ERGOSPHERE_BAND_OPACITY = 0.3
 
-/** Visual grey ramp spans nine ergosphere bands (cosmetic; matches overlay gradient segments). */
-const BLACK_HOLE_GREY_BAND_COUNT = 9
-
-/** Grey fill for ergosphere band ``band`` (1 = innermost, 9 = outermost). */
-export function blackHoleErgosphereBandGrey(band: number): string {
-  const clamped = Math.min(BLACK_HOLE_GREY_BAND_COUNT, Math.max(1, band))
+/** Grey fill for ergosphere band ``band`` (1 = innermost, outermost = ``ergosphereBandCount``). */
+export function blackHoleErgosphereBandGrey(band: number, ergosphereBandCount: number): string {
+  if (ergosphereBandCount <= 1) {
+    const hex = BLACK_HOLE_BAND_GREY_INNER.toString(16).padStart(2, '0')
+    return `#${hex}${hex}${hex}`
+  }
+  const clamped = Math.min(ergosphereBandCount, Math.max(1, band))
   const level = Math.round(
     BLACK_HOLE_BAND_GREY_INNER +
-      ((clamped - 1) / (BLACK_HOLE_GREY_BAND_COUNT - 1)) *
+      ((clamped - 1) / (ergosphereBandCount - 1)) *
         (BLACK_HOLE_BAND_GREY_OUTER - BLACK_HOLE_BAND_GREY_INNER)
   )
   const hex = level.toString(16).padStart(2, '0')

@@ -1,3 +1,4 @@
+import type { BlackHoleConceptConstants } from '../../api/bff'
 import type { BlackHoleOverlayCircle } from '../../api/bff'
 import {
   circleIntersectsFlowBounds,
@@ -9,12 +10,10 @@ import {
 import {
   BLACK_HOLE_CORE_FILL,
   BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
-  BLACK_HOLE_HALO_EXTRA_LY,
   blackHoleErgosphereBandGrey,
 } from './stellarCartographyTheme'
 
-/** Host ergosphere band count (visual gradient segments only; radii from BFF). */
-export const ERGOSPHERE_BAND_COUNT = 9
+export type { BlackHoleConceptConstants }
 
 export type BlackHoleErgosphereGradientStop = {
   /** Fraction of ergosphere radius from center (0–1). */
@@ -49,8 +48,9 @@ function blackHoleBandRadiiLy(
   }
 }
 
-/** Radial gradient stops matching the nine host ergosphere band greys. */
+/** Radial gradient stops matching host ergosphere band greys. */
 export function buildBlackHoleErgosphereGradientStops(
+  constants: BlackHoleConceptConstants,
   coreRadiusLy: number,
   bandWidthLy: number,
   outerLy: number
@@ -59,6 +59,7 @@ export function buildBlackHoleErgosphereGradientStops(
     return []
   }
 
+  const { ergosphereBandCount } = constants
   const stops: BlackHoleErgosphereGradientStop[] = [
     { offset: 0, color: BLACK_HOLE_CORE_FILL, opacity: 1 },
   ]
@@ -68,35 +69,35 @@ export function buildBlackHoleErgosphereGradientStops(
     stops.push({ offset: coreOffset, color: BLACK_HOLE_CORE_FILL, opacity: 1 })
     stops.push({
       offset: coreOffset,
-      color: blackHoleErgosphereBandGrey(1),
+      color: blackHoleErgosphereBandGrey(1, ergosphereBandCount),
       opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
     })
   } else {
     stops.push({
       offset: 0,
-      color: blackHoleErgosphereBandGrey(1),
+      color: blackHoleErgosphereBandGrey(1, ergosphereBandCount),
       opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
     })
   }
 
-  for (let band = 2; band <= ERGOSPHERE_BAND_COUNT; band++) {
+  for (let band = 2; band <= ergosphereBandCount; band++) {
     const { innerLy } = blackHoleBandRadiiLy(coreRadiusLy, bandWidthLy, band)
     const offset = Math.min(1, innerLy / outerLy)
     stops.push({
       offset,
-      color: blackHoleErgosphereBandGrey(band - 1),
+      color: blackHoleErgosphereBandGrey(band - 1, ergosphereBandCount),
       opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
     })
     stops.push({
       offset,
-      color: blackHoleErgosphereBandGrey(band),
+      color: blackHoleErgosphereBandGrey(band, ergosphereBandCount),
       opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
     })
   }
 
   stops.push({
     offset: 1,
-    color: blackHoleErgosphereBandGrey(ERGOSPHERE_BAND_COUNT),
+    color: blackHoleErgosphereBandGrey(ergosphereBandCount, ergosphereBandCount),
     opacity: BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
   })
 
@@ -104,12 +105,13 @@ export function buildBlackHoleErgosphereGradientStops(
 }
 
 export function buildBlackHolePaneShape(
+  constants: BlackHoleConceptConstants,
   circle: BlackHoleOverlayCircle,
   viewport: CartographyOverlayViewport
 ): BlackHolePaneShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
   const outerLy = circle.radius
-  const haloLy = circle.radius + BLACK_HOLE_HALO_EXTRA_LY
+  const haloLy = circle.radius + constants.haloExtraLy
   const flowBounds = flowBoundsFromViewport(viewport)
   if (!circleIntersectsFlowBounds(cx, cy, haloLy, flowBounds)) {
     return null
@@ -128,6 +130,7 @@ export function buildBlackHolePaneShape(
     ergosphereEdgeOffset: outerLy / haloLy,
     ergosphereGradientId: `${circle.id}-ergo-grad`,
     ergosphereStops: buildBlackHoleErgosphereGradientStops(
+      constants,
       circle.coreRadius,
       circle.bandRadius,
       outerLy

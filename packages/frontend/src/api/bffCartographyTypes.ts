@@ -524,3 +524,9 @@ export type StellarCartographyTurnSummaryResponse = {
   ionStormCount: number
   nuIonStorms: boolean
 }
+
+/** Static black-hole geometry from Core concepts route (ergosphere bands, cosmetic halo). */
+export type BlackHoleConceptConstants = {
+  ergosphereBandCount: number
+  haloExtraLy: number
+}
