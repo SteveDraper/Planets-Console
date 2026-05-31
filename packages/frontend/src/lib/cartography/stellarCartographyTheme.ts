@@ -85,9 +85,43 @@ export const STAR_CLUSTER_TEMP_COLOR_MAX = 50_000
 const STAR_CLUSTER_COOL_RGB: readonly [number, number, number] = [220, 38, 38]
 const STAR_CLUSTER_HOT_RGB: readonly [number, number, number] = [248, 250, 252]
 
-export const BLACK_HOLE_CORE_FILL = '#0f0f12'
-export const BLACK_HOLE_BAND_FILL = '#7c3aed'
-export const BLACK_HOLE_BAND_STROKE = '#7c3aed'
+export const BLACK_HOLE_CORE_FILL = '#000000'
+
+/** Ergosphere band grey ramp (inner band 1 darker, outer band 9 lighter). Slightly lifted vs in-game. */
+const BLACK_HOLE_BAND_GREY_INNER = 0x1a
+const BLACK_HOLE_BAND_GREY_OUTER = 0x4a
+
+/** Cosmetic cyan halo beyond the outermost ergosphere band (Planets.nu client uses +5 ly). */
+export const BLACK_HOLE_HALO_EXTRA_LY = 5
+export const BLACK_HOLE_HALO_CYAN = '#00ffff'
+export const BLACK_HOLE_HALO_CYAN_OPACITY = 0.2
+export const BLACK_HOLE_HALO_OUTER = '#ff8000'
+export const BLACK_HOLE_HALO_OUTER_OPACITY = 0
+
+export const ERGOSPHERE_BAND_COUNT = 9
+
+/** Opacity applied to ergosphere band greys when composited on the map. */
+export const BLACK_HOLE_ERGOSPHERE_BAND_OPACITY = 0.3
+
+/** Grey fill for ergosphere band ``band`` (1 = innermost, 9 = outermost). */
+export function blackHoleErgosphereBandGrey(band: number): string {
+  const clamped = Math.min(ERGOSPHERE_BAND_COUNT, Math.max(1, band))
+  const level = Math.round(
+    BLACK_HOLE_BAND_GREY_INNER +
+      ((clamped - 1) / (ERGOSPHERE_BAND_COUNT - 1)) *
+        (BLACK_HOLE_BAND_GREY_OUTER - BLACK_HOLE_BAND_GREY_INNER)
+  )
+  const hex = level.toString(16).padStart(2, '0')
+  return `#${hex}${hex}${hex}`
+}
+
+export function blackHoleErgosphereOuterLy(coreRadiusLy: number, bandWidthLy: number): number {
+  return coreRadiusLy + ERGOSPHERE_BAND_COUNT * bandWidthLy
+}
+
+export function blackHoleHaloRadiusLy(coreRadiusLy: number, bandWidthLy: number): number {
+  return blackHoleErgosphereOuterLy(coreRadiusLy, bandWidthLy) + BLACK_HOLE_HALO_EXTRA_LY
+}
 
 export const WORMHOLE_LINE_STROKE = '#38bdf8'
 export const WORMHOLE_SPIRAL_BLUE = '#5c6670'
@@ -277,9 +311,6 @@ export function neutronClusterCoreEdgeOpacity(): number {
 export function neutronClusterCoreStrokeOpacity(): number {
   return STAR_CLUSTER_CORE_STROKE_ALPHA
 }
-
-export const BLACK_HOLE_BAND_FILL_ALPHA = 0.25
-export const BLACK_HOLE_BAND_RIM_ALPHA = 0.6
 
 /** Wormhole edges render below connection edges (#b1b1b7 at 50%). */
 export const WORMHOLE_EDGE_OPACITY = 0.35

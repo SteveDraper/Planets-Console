@@ -25,11 +25,11 @@ import {
 } from './neutronClusterFluxOverlay'
 import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
-  BLACK_HOLE_BAND_FILL,
-  BLACK_HOLE_BAND_FILL_ALPHA,
-  BLACK_HOLE_BAND_RIM_ALPHA,
-  BLACK_HOLE_BAND_STROKE,
   BLACK_HOLE_CORE_FILL,
+  BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+  blackHoleErgosphereBandGrey,
+  blackHoleErgosphereOuterLy,
+  blackHoleHaloRadiusLy,
   DEBRIS_DISK_BORDER_STROKE,
   DEBRIS_DISK_BORDER_STROKE_WIDTH,
   DISC_RIM_ALPHA,
@@ -49,6 +49,7 @@ import {
   STAR_CLUSTER_STROKE_WIDTH,
   WORMHOLE_ENDPOINT_DIAMETER_LY,
   WORMHOLE_ENDPOINT_MIN_DIAMETER_PX,
+  ERGOSPHERE_BAND_COUNT,
 } from './stellarCartographyTheme'
 
 export type StellarCartographyOverlayViewport = CartographyOverlayViewport
@@ -88,6 +89,8 @@ export type StellarCartographyOverlayAnnulusShape = {
   bandStroke: string
   strokeWidth: number
   bandGradient?: StellarCartographyOverlayAnnulusBandGradient
+  /** When true, paint only the annulus (not a full disc with a transparent core punch). */
+  ringOnly?: boolean
 }
 
 export type StellarCartographyOverlayArrowShape = {
@@ -137,9 +140,19 @@ export type StellarCartographyOverlayWormholeMarkerShape = {
   mapY: number
 }
 
+export type StellarCartographyOverlayBlackHoleHaloShape = {
+  key: string
+  cx: number
+  cy: number
+  r: number
+  /** Fraction of halo radius (0–1) where the ergosphere edge and cyan glow begin. */
+  ergosphereEdgeOffset: number
+}
+
 export type StellarCartographyOverlayPaneShapes = {
   circles: StellarCartographyOverlayCircleShape[]
   annuli: StellarCartographyOverlayAnnulusShape[]
+  blackHoleHalos: StellarCartographyOverlayBlackHoleHaloShape[]
   nebulaClouds: NebulaCloudPaneShape[]
   ionStormClouds: IonStormCloudPaneShape[]
   neutronFluxClouds: NeutronClusterFluxPaneShape[]
@@ -385,27 +398,55 @@ function buildStarClusterCoreCircle(
   )
 }
 
-function buildBlackHoleAnnulus(
+function buildBlackHolePaneShapes(
   circle: BlackHoleOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
-  strokeWidth: number
-): StellarCartographyOverlayAnnulusShape | null {
+  viewport: StellarCartographyOverlayViewport
+): {
+  halo: StellarCartographyOverlayBlackHoleHaloShape | null
+  annuli: StellarCartographyOverlayAnnulusShape[]
+} {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const bandR = circle.bandRadius
+  const outerLy = blackHoleErgosphereOuterLy(circle.coreRadius, circle.bandRadius)
+  const haloLy = blackHoleHaloRadiusLy(circle.coreRadius, circle.bandRadius)
   const flowBounds = flowBoundsFromViewport(viewport)
-  if (!circleIntersectsFlowBounds(cx, cy, bandR, flowBounds)) return null
+  if (!circleIntersectsFlowBounds(cx, cy, haloLy, flowBounds)) {
+    return { halo: null, annuli: [] }
+  }
 
   const { px, py } = flowToPane(cx, cy, viewport)
+  const scale = viewport.scale
+  const haloR = haloLy * scale
+  const annuli: StellarCartographyOverlayAnnulusShape[] = []
+
+  for (let band = ERGOSPHERE_BAND_COUNT; band >= 1; band--) {
+    const innerLy = circle.coreRadius + (band - 1) * circle.bandRadius
+    const outerBandLy = circle.coreRadius + band * circle.bandRadius
+    annuli.push({
+      key: `${circle.id}-band-${band}`,
+      cx: px,
+      cy: py,
+      coreR: innerLy * scale,
+      bandR: outerBandLy * scale,
+      coreFill: band === 1 ? BLACK_HOLE_CORE_FILL : 'transparent',
+      bandFill: hexWithAlpha(
+        blackHoleErgosphereBandGrey(band),
+        BLACK_HOLE_ERGOSPHERE_BAND_OPACITY
+      ),
+      bandStroke: 'none',
+      strokeWidth: 0,
+      ringOnly: true,
+    })
+  }
+
   return {
-    key: circle.id,
-    cx: px,
-    cy: py,
-    coreR: circle.coreRadius * viewport.scale,
-    bandR: bandR * viewport.scale,
-    coreFill: BLACK_HOLE_CORE_FILL,
-    bandFill: hexWithAlpha(BLACK_HOLE_BAND_FILL, BLACK_HOLE_BAND_FILL_ALPHA),
-    bandStroke: hexWithAlpha(BLACK_HOLE_BAND_STROKE, BLACK_HOLE_BAND_RIM_ALPHA),
-    strokeWidth,
+    halo: {
+      key: `${circle.id}-halo`,
+      cx: px,
+      cy: py,
+      r: haloR,
+      ergosphereEdgeOffset: outerLy / haloLy,
+    },
+    annuli,
   }
 }
 
@@ -450,6 +491,7 @@ export function buildStellarCartographyOverlayPaneShapes(
   const empty: StellarCartographyOverlayPaneShapes = {
     circles: [],
     annuli: [],
+    blackHoleHalos: [],
     nebulaClouds: [],
     ionStormClouds: [],
     neutronFluxClouds: [],
@@ -488,6 +530,7 @@ export function buildStellarCartographyOverlayPaneShapes(
   })
   const circles: StellarCartographyOverlayCircleShape[] = []
   const annuli: StellarCartographyOverlayAnnulusShape[] = []
+  const blackHoleHalos: StellarCartographyOverlayBlackHoleHaloShape[] = []
   const debrisDiskBorders: StellarCartographyOverlayCircleShape[] = []
   const arrows: StellarCartographyOverlayArrowShape[] = []
 
@@ -501,8 +544,9 @@ export function buildStellarCartographyOverlayPaneShapes(
     )
   )) {
     if (circle.layer === 'black-holes') {
-      const annulus = buildBlackHoleAnnulus(circle as BlackHoleOverlayCircle, viewport, strokeWidth)
-      if (annulus != null) annuli.push(annulus)
+      const blackHole = buildBlackHolePaneShapes(circle as BlackHoleOverlayCircle, viewport)
+      if (blackHole.halo != null) blackHoleHalos.push(blackHole.halo)
+      annuli.push(...blackHole.annuli)
       continue
     }
     if (circle.layer === 'star-clusters') {
@@ -574,6 +618,7 @@ export function buildStellarCartographyOverlayPaneShapes(
   return {
     circles,
     annuli,
+    blackHoleHalos,
     nebulaClouds,
     ionStormClouds,
     neutronFluxClouds,

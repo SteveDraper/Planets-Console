@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  blackHoleErgosphereBandGrey,
+  blackHoleErgosphereOuterLy,
+  blackHoleHaloRadiusLy,
   ionStormFillOpacity,
   ionStormStrokeColor,
   starClusterBandEdgeOpacity,
@@ -23,6 +26,19 @@ function parseHexRgb(hex: string): [number, number, number] {
 }
 
 describe('stellarCartographyTheme', () => {
+  it('ramps black hole ergosphere greys from inner to outer band', () => {
+    expect(blackHoleErgosphereBandGrey(1)).toBe('#1a1a1a')
+    expect(blackHoleErgosphereBandGrey(9)).toBe('#4a4a4a')
+    expect(parseHexRgb(blackHoleErgosphereBandGrey(5))[0]).toBeGreaterThan(
+      parseHexRgb(blackHoleErgosphereBandGrey(2))[0]
+    )
+  })
+
+  it('extends cosmetic halo five ly beyond ergosphere edge', () => {
+    expect(blackHoleErgosphereOuterLy(15, 4)).toBe(51)
+    expect(blackHoleHaloRadiusLy(15, 4)).toBe(56)
+  })
+
   it('uses warmer stroke colors for classes 4 and 5', () => {
     expect(ionStormStrokeColor(3)).toBe('#eab308')
     expect(ionStormStrokeColor(4)).toBe('#f97316')

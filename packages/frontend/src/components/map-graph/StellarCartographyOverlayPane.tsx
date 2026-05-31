@@ -75,6 +75,7 @@ export function StellarCartographyOverlayPane({
 
   const hasVector =
     shapes.circles.length > 0 ||
+    shapes.blackHoleHalos.length > 0 ||
     shapes.annuli.length > 0 ||
     shapes.nebulaClouds.length > 0 ||
     shapes.ionStormClouds.length > 0 ||
@@ -94,6 +95,7 @@ export function StellarCartographyOverlayPane({
             ionStormClouds: shapes.ionStormClouds,
             neutronFluxClouds: shapes.neutronFluxClouds,
             circles: shapes.circles,
+            blackHoleHalos: shapes.blackHoleHalos,
             annuli: shapes.annuli,
             debrisDiskBorders: shapes.debrisDiskBorders,
             arrows: shapes.arrows,

@@ -6,6 +6,10 @@ import math
 from collections import defaultdict
 
 from api.analytics.stellar_cartography import ion_storm_class
+from api.concepts.stellar_cartography.black_holes import (
+    black_hole_fuel_saving_percent_at,
+    black_hole_max_warp_at,
+)
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
     LAYER_ION_STORMS,
@@ -119,18 +123,6 @@ def _star_cluster_entries(turn: TurnInfo, x: int, y: int) -> tuple[list[dict], l
     return star_entries, neutron_entries
 
 
-def _black_hole_max_warp(coreradius: int, bandradius: int, dist: float) -> int | None:
-    """Map ergosphere depth to max safe warp (9 outer bands, 1 inner)."""
-    if dist <= coreradius or dist > bandradius:
-        return None
-    width = bandradius - coreradius
-    if width <= 0:
-        return None
-    depth = (bandradius - dist) / width
-    band = min(9, max(1, math.ceil(depth * 9)))
-    return 10 - band
-
-
 def _black_hole_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
     entries: list[dict] = []
     for hole in turn.blackholes:
@@ -139,12 +131,16 @@ def _black_hole_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
             label = f"Lethal ({hole.name})" if hole.name else "Lethal"
             entries.append({"layer": LAYER_BLACK_HOLES, "lines": [label]})
             continue
-        max_warp = _black_hole_max_warp(hole.coreradius, hole.bandradius, dist)
+        max_warp = black_hole_max_warp_at(hole.coreradius, hole.bandradius, dist)
         if max_warp is not None:
+            fuel_saving = black_hole_fuel_saving_percent_at(hole.coreradius, hole.bandradius, dist)
+            lines = [f"Max warp: {max_warp}"]
+            if fuel_saving is not None:
+                lines.append(f"Fuel saving: {fuel_saving}%")
             entries.append(
                 {
                     "layer": LAYER_BLACK_HOLES,
-                    "lines": [f"Max warp: {max_warp}"],
+                    "lines": lines,
                 }
             )
     return entries

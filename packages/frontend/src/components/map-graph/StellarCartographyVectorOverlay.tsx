@@ -1,5 +1,14 @@
-import type { StellarCartographyOverlayRadialGradient } from '../../lib/cartography/stellarCartographyOverlay'
+import type {
+  StellarCartographyOverlayBlackHoleHaloShape,
+  StellarCartographyOverlayRadialGradient,
+} from '../../lib/cartography/stellarCartographyOverlay'
 import type { StellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
+import {
+  BLACK_HOLE_HALO_CYAN,
+  BLACK_HOLE_HALO_CYAN_OPACITY,
+  BLACK_HOLE_HALO_OUTER,
+  BLACK_HOLE_HALO_OUTER_OPACITY,
+} from '../../lib/cartography/stellarCartographyTheme'
 import {
   ionStormCloudPaneShapeToRasterField,
   nebulaCloudPaneShapeToRasterField,
@@ -34,6 +43,27 @@ function StellarCartographyRadialGradientDef({
   )
 }
 
+function BlackHoleHaloGradientDef({
+  halo,
+}: {
+  halo: StellarCartographyOverlayBlackHoleHaloShape
+}) {
+  const edgeStop = `${halo.ergosphereEdgeOffset * 100}%`
+  const gradientId = `${halo.key}-grad`
+  return (
+    <radialGradient id={gradientId} cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stopColor="#000000" stopOpacity={0} />
+      <stop offset={edgeStop} stopColor="#000000" stopOpacity={0} />
+      <stop offset={edgeStop} stopColor={BLACK_HOLE_HALO_CYAN} stopOpacity={BLACK_HOLE_HALO_CYAN_OPACITY} />
+      <stop
+        offset="100%"
+        stopColor={BLACK_HOLE_HALO_OUTER}
+        stopOpacity={BLACK_HOLE_HALO_OUTER_OPACITY}
+      />
+    </radialGradient>
+  )
+}
+
 export function StellarCartographyVectorOverlay({
   shapes,
   width,
@@ -41,7 +71,14 @@ export function StellarCartographyVectorOverlay({
 }: {
   shapes: Pick<
     StellarCartographyOverlayPaneShapes,
-    'nebulaClouds' | 'ionStormClouds' | 'neutronFluxClouds' | 'circles' | 'annuli' | 'debrisDiskBorders' | 'arrows'
+    | 'nebulaClouds'
+    | 'ionStormClouds'
+    | 'neutronFluxClouds'
+    | 'circles'
+    | 'blackHoleHalos'
+    | 'annuli'
+    | 'debrisDiskBorders'
+    | 'arrows'
   >
   width: number
   height: number
@@ -74,6 +111,14 @@ export function StellarCartographyVectorOverlay({
           />
         </g>
       ))}
+      {shapes.blackHoleHalos.map((halo) => (
+        <g key={halo.key}>
+          <defs>
+            <BlackHoleHaloGradientDef halo={halo} />
+          </defs>
+          <circle cx={halo.cx} cy={halo.cy} r={halo.r} fill={`url(#${halo.key}-grad)`} stroke="none" />
+        </g>
+      ))}
       {shapes.annuli.map(
         ({
           key,
@@ -88,36 +133,58 @@ export function StellarCartographyVectorOverlay({
           bandStroke,
           strokeWidth,
           bandGradient,
-        }) => (
-          <g key={key}>
-            {(bandGradient != null || coreGradient != null) && (
+          ringOnly,
+        }) =>
+          ringOnly ? (
+            <g key={key}>
               <defs>
-                {bandGradient != null && (
-                  <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
-                )}
-                {coreGradient != null && (
-                  <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
-                )}
+                <mask id={`${key}-ring-mask`}>
+                  <circle cx={cx} cy={cy} r={bandR} fill="white" />
+                  <circle cx={cx} cy={cy} r={coreR} fill="black" />
+                </mask>
               </defs>
-            )}
-            <circle
-              cx={cx}
-              cy={cy}
-              r={bandR}
-              fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
-              stroke={bandStroke}
-              strokeWidth={strokeWidth}
-            />
-            <circle
-              cx={cx}
-              cy={cy}
-              r={coreR}
-              fill={coreGradient != null ? `url(#${coreGradient.id})` : coreFill}
-              stroke={coreStroke ?? 'none'}
-              strokeWidth={coreStroke != null ? strokeWidth : 0}
-            />
-          </g>
-        )
+              <circle
+                cx={cx}
+                cy={cy}
+                r={bandR}
+                fill={bandFill}
+                mask={`url(#${key}-ring-mask)`}
+                stroke="none"
+              />
+              {coreFill !== 'transparent' ? (
+                <circle cx={cx} cy={cy} r={coreR} fill={coreFill} stroke="none" />
+              ) : null}
+            </g>
+          ) : (
+            <g key={key}>
+              {(bandGradient != null || coreGradient != null) && (
+                <defs>
+                  {bandGradient != null && (
+                    <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
+                  )}
+                  {coreGradient != null && (
+                    <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
+                  )}
+                </defs>
+              )}
+              <circle
+                cx={cx}
+                cy={cy}
+                r={bandR}
+                fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
+                stroke={bandStroke}
+                strokeWidth={strokeWidth}
+              />
+              <circle
+                cx={cx}
+                cy={cy}
+                r={coreR}
+                fill={coreGradient != null ? `url(#${coreGradient.id})` : coreFill}
+                stroke={coreStroke ?? 'none'}
+                strokeWidth={coreStroke != null ? strokeWidth : 0}
+              />
+            </g>
+          )
       )}
       {shapes.debrisDiskBorders.map(({ key, cx, cy, r, fill, stroke, strokeWidth }) => (
         <circle

@@ -132,6 +132,18 @@ uv run serve -c api.storage_asset_path=/data/store.json -c bff=@bff.yaml
 - Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly.
 - Implementation lives in: `packages/server/server/config.py` (loading, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config).
 
+## Planets.nu client JavaScript (reference)
+
+The live [planets.nu](https://planets.nu) browser client is not vendored in this repo. Host-aligned tooltip math and map rendering for Stellar Cartography (black holes, ion storms, nebulae, etc.) should be checked against the deployed client bundle when behaviour is unclear.
+
+| Item | Value |
+|------|--------|
+| **Main bundle URL** | `https://app.planets.nu/1.24/nu.js` (version segment may change; discover it from the `<script src="...">` tag on [planets.nu](https://planets.nu/)) |
+| **Fetch decompressed** | `curl -sL --compressed 'https://app.planets.nu/1.24/nu.js' -o /tmp/nu.js` |
+| **Search examples** | `rg -i 'getBlackHoleBand|bandradius|coreradius' /tmp/nu.js` |
+
+Useful symbols in the client include `getBlackHoleBand`, `blackholeScan`, `drawBlackHole`, and ship-order checks such as `blackholetoofast` on simulated `turnendpoints`. The help site ([help.planets.nu](https://help.planets.nu/)) documents player-facing rules but usually not field semantics or formulas.
+
 ## Unit tests
 
 The config override system and CLI usage are covered by unit tests under `packages/server/tests/`. Run them with `make test_server` or as part of `make test`.
