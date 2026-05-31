@@ -293,6 +293,40 @@ describe('useMapAnalyticQueries', () => {
     })
   })
 
+  it('recombines when query data changes at the same array lengths', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let baseMapY = 10
+    vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {
+      if (analyticId === 'base-map') {
+        return {
+          analyticId: 'base-map',
+          nodes: [{ id: 'p1', label: 'p1', x: 1, y: baseMapY }],
+          edges: [],
+        }
+      }
+      if (analyticId === 'connections') {
+        return { analyticId: 'connections', nodes: [], edges: [], routes: [] }
+      }
+      throw new Error(`unexpected analytic ${analyticId}`)
+    })
+    vi.mocked(combineMapData).mockClear()
+
+    const { result } = renderHook(() => useMapAnalyticQueries(defaultHookInput()), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(result.current.combined.nodes[0]?.y).toBe(10)
+    })
+
+    baseMapY = 99
+    await client.invalidateQueries({ queryKey: ['analytic', 'base-map', 'map'] })
+
+    await waitFor(() => {
+      expect(result.current.combined.nodes[0]?.y).toBe(99)
+    })
+  })
+
   it('recombines when futureTurnOffset changes with stellar cartography enabled', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useQueries, type UseQueryResult } from '@tanstack/react-query'
 import type {
   AnalyticItem,
@@ -130,13 +130,6 @@ export function useMapAnalyticQueries({
     [analyticScope, analyticFetchEnabled, connectionsMapParams]
   )
 
-  const mapQueries = useQueries({
-    queries: mapIds.map((analyticId) => mapAnalyticQuerySpecFor(analyticId, queryContext)),
-  })
-
-  const pending = mapQueries.some((q) => q.isPending)
-  const hasError = mapQueries.some((q) => q.error)
-
   const mergeOptions = useMemo(
     () =>
       buildMergeOptions(
@@ -149,29 +142,25 @@ export function useMapAnalyticQueries({
     [mapIds, analyticFetchEnabled, connectionsMapParams, futureTurnOffset, stellarCartography]
   )
 
-  const combineInputsKey = useMemo(
-    () =>
-      mapQueries
-        .map(
-          (q) =>
-            `${q.dataUpdatedAt}:${q.data?.nodes.length ?? ''}:${q.data?.edges.length ?? ''}:${q.data?.overlayCircles?.length ?? ''}`
-        )
-        .join('|'),
-    [mapQueries]
-  )
-
-  const combined = useMemo(
-    () =>
-      combineMapResultsFromQueries(
+  const combineMapQueries = useCallback(
+    (results: UseQueryResult<MapDataResponse, Error>[]) => ({
+      mapQueries: results,
+      combined: combineMapResultsFromQueries(
         mapIds,
-        mapQueries.map((q) => q.data),
+        results.map((q) => q.data),
         mergeOptions
       ),
-    // combineInputsKey tracks query data versions; mapQueries read from render closure.
-    [mapIds, mergeOptions, combineInputsKey]
+      pending: results.some((q) => q.isPending),
+      hasError: results.some((q) => q.isError),
+      hasAnyData: results.some((q) => q.data != null),
+    }),
+    [mapIds, mergeOptions]
   )
 
-  const hasAnyData = mapQueries.some((q) => q.data != null)
+  const { mapQueries, combined, pending, hasError, hasAnyData } = useQueries({
+    queries: mapIds.map((analyticId) => mapAnalyticQuerySpecFor(analyticId, queryContext)),
+    combine: combineMapQueries,
+  })
 
   return {
     enabledMapIds,
