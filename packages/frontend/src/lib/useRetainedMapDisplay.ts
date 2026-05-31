@@ -26,7 +26,6 @@ export type UseRetainedMapDisplayInput = {
 
 export type UseRetainedMapDisplayResult = {
   displayMapData: CombinedMapData | null
-  retainDuringLoad: boolean
   mapShellView: MapShellView
 }
 
@@ -106,5 +105,5 @@ export function useRetainedMapDisplay({
     mapHasAnyData,
   })
 
-  return { displayMapData, retainDuringLoad, mapShellView }
+  return { displayMapData, mapShellView }
 }

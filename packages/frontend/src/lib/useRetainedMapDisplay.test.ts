@@ -48,7 +48,6 @@ describe('useRetainedMapDisplay', () => {
       })
     )
     expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.retainDuringLoad).toBe(false)
     expect(result.current.mapShellView).toEqual({
       phase: 'ready',
       displayMapData: sampleMap,
@@ -65,7 +64,6 @@ describe('useRetainedMapDisplay', () => {
       })
     )
     expect(result.current.displayMapData).toBeNull()
-    expect(result.current.retainDuringLoad).toBe(false)
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
@@ -116,7 +114,6 @@ describe('useRetainedMapDisplay', () => {
     })
 
     expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.retainDuringLoad).toBe(true)
     expect(result.current.mapShellView).toEqual({
       phase: 'retained',
       displayMapData: sampleMap,
@@ -166,7 +163,6 @@ describe('useRetainedMapDisplay', () => {
       mapHasAnyData: false,
     })
     expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.retainDuringLoad).toBe(true)
     expect(result.current.mapShellView).toEqual({
       phase: 'retained',
       displayMapData: sampleMap,
@@ -179,7 +175,6 @@ describe('useRetainedMapDisplay', () => {
       mapHasAnyData: true,
     })
     expect(result.current.displayMapData).toBe(turnTwoMap)
-    expect(result.current.retainDuringLoad).toBe(false)
     expect(result.current.mapShellView).toEqual({
       phase: 'ready',
       displayMapData: turnTwoMap,
@@ -245,7 +240,10 @@ describe('useRetainedMapDisplay', () => {
     })
     expect(result.current.displayMapData).toBe(otherGameMap)
     expect(result.current.displayMapData).not.toBe(sampleMap)
-    expect(result.current.retainDuringLoad).toBe(true)
+    expect(result.current.mapShellView).toEqual({
+      phase: 'retained',
+      displayMapData: otherGameMap,
+    })
   })
 
   it('clears retention after gameId changes', () => {
@@ -272,7 +270,6 @@ describe('useRetainedMapDisplay', () => {
     rerender({ combined: emptyCombined, gameId: 'g2', perspective: 1 })
 
     expect(result.current.displayMapData).toBeNull()
-    expect(result.current.retainDuringLoad).toBe(false)
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
@@ -303,7 +300,6 @@ describe('useRetainedMapDisplay', () => {
     rerender({ combined: emptyCombined, gameId: 'g1', perspective: 2 })
 
     expect(result.current.displayMapData).toBeNull()
-    expect(result.current.retainDuringLoad).toBe(false)
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
@@ -340,7 +336,6 @@ describe('useRetainedMapDisplay', () => {
     rerender({ combined: emptyCombined, viewMode: 'tabular' })
 
     expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.retainDuringLoad).toBe(false)
     expect(result.current.mapShellView).toEqual({ phase: 'inactive' })
   })
 
@@ -391,7 +386,6 @@ describe('useRetainedMapDisplay', () => {
     })
 
     expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.retainDuringLoad).toBe(true)
     expect(result.current.mapShellView).toEqual({
       phase: 'retained',
       displayMapData: sampleMap,
