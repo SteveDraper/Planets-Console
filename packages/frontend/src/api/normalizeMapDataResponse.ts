@@ -10,6 +10,7 @@ import type {
   MapDataResponse,
   MapEdge,
   MapNode,
+  MapPlanetSnapshot,
   NebulaOverlayCircle,
   NeutronClusterOverlayCircle,
   NormalWellMapCell,
@@ -216,16 +217,18 @@ function normalizeMapNodeCoordinate(value: unknown): number {
   return parseJsonFiniteNumber(value) ?? 0
 }
 
+function normalizeMapPlanetSnapshot(raw: unknown): MapPlanetSnapshot | undefined {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  return { ...(raw as Record<string, unknown>) }
+}
+
 function normalizeMapNode(raw: unknown): MapNode {
   if (raw == null || typeof raw !== 'object') {
     return { id: '', label: '', x: 0, y: 0 }
   }
   const n = raw as Record<string, unknown>
   const nested = n.planet ?? n.Planet
-  const planet =
-    nested != null && typeof nested === 'object' && !Array.isArray(nested)
-      ? ({ ...(nested as Record<string, unknown>) } as Record<string, unknown>)
-      : undefined
+  const planet = normalizeMapPlanetSnapshot(nested)
   const base: MapNode = {
     id: typeof n.id === 'string' ? n.id : String(n.id ?? ''),
     label: typeof n.label === 'string' ? n.label : String(n.label ?? ''),

@@ -3,20 +3,12 @@ import type {
   IonStormOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
-import {
-  isBlackHoleOverlayCircle,
-  isDebrisDiskOverlayCircle,
-  isIonStormOverlayCircle,
-  isNebulaOverlayCircle,
-  isNeutronClusterOverlayCircle,
-  isStarClusterOverlayCircle,
-} from '../../api/bffCartographyTypes'
+import { isStarClusterOverlayCircle } from '../../api/bffCartographyTypes'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
   flowToPane,
   gameMapCellCenterToFlow,
-  type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
 import {
   buildNeutronClusterCoreCircle,
@@ -25,15 +17,13 @@ import {
 } from './clusterOverlay'
 import { BLACK_HOLE_CONCEPT_CONSTANTS, buildBlackHolePaneShape, type BlackHolePaneShape } from './blackHoleOverlay'
 import { ionStormStepDeltaGameLy } from './ionStormMovement'
-import { buildNebulaCloudPaneShapes, type NebulaCloudPaneShape } from './nebulaCloudOverlay'
+import { buildNebulaCloudPaneShapes } from './nebulaCloudOverlay'
+import { buildIonStormCloudPaneShapes } from './ionStormCloudOverlay'
+import { buildNeutronClusterFluxPaneShapes } from './neutronClusterFluxOverlay'
 import {
-  buildIonStormCloudPaneShapes,
-  type IonStormCloudPaneShape,
-} from './ionStormCloudOverlay'
-import {
-  buildNeutronClusterFluxPaneShapes,
-  type NeutronClusterFluxPaneShape,
-} from './neutronClusterFluxOverlay'
+  groupOverlayCirclesByLayer,
+  vectorOverlayCirclesInPaintOrder,
+} from './overlayCirclesByLayer'
 import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
   DEBRIS_DISK_BORDER_STROKE,
@@ -44,54 +34,27 @@ import {
   WORMHOLE_ENDPOINT_MIN_DIAMETER_PX,
 } from './stellarCartographyTheme'
 
-export type StellarCartographyOverlayViewport = CartographyOverlayViewport
+export type {
+  StellarCartographyOverlayAnnulusBandGradient,
+  StellarCartographyOverlayAnnulusShape,
+  StellarCartographyOverlayArrowShape,
+  StellarCartographyOverlayCircleShape,
+  StellarCartographyOverlayPaneShapes,
+  StellarCartographyOverlayRadialGradient,
+  StellarCartographyOverlayViewport,
+  StellarCartographyOverlayWormholeMarkerShape,
+} from './cartographyPaneShapes'
 
-export type StellarCartographyOverlayCircleShape = {
-  key: string
-  cx: number
-  cy: number
-  r: number
-  fill: string
-  stroke: string
-  strokeWidth: number
-  fillGradient?: StellarCartographyOverlayRadialGradient
-}
+import type {
+  StellarCartographyOverlayAnnulusShape,
+  StellarCartographyOverlayArrowShape,
+  StellarCartographyOverlayCircleShape,
+  StellarCartographyOverlayPaneShapes,
+  StellarCartographyOverlayViewport,
+  StellarCartographyOverlayWormholeMarkerShape,
+} from './cartographyPaneShapes'
 
-export type StellarCartographyOverlayRadialGradient = {
-  id: string
-  color: string
-  innerOffset: number
-  peakOpacity: number
-  edgeOpacity: number
-}
-
-/** Radiation halo gradient: transparent until core edge, then peak to edge opacity. */
-export type StellarCartographyOverlayAnnulusBandGradient = StellarCartographyOverlayRadialGradient
-
-export type StellarCartographyOverlayAnnulusShape = {
-  key: string
-  cx: number
-  cy: number
-  coreR: number
-  bandR: number
-  coreFill: string
-  coreStroke?: string
-  coreGradient?: StellarCartographyOverlayRadialGradient
-  bandFill: string
-  bandStroke: string
-  strokeWidth: number
-  bandGradient?: StellarCartographyOverlayAnnulusBandGradient
-}
-
-export type StellarCartographyOverlayArrowShape = {
-  key: string
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-  stroke: string
-  strokeWidth: number
-}
+export type { BlackHolePaneShape } from './blackHoleOverlay'
 
 /** Map span in light-years to pane pixel extent (same projection as warp wells and annuli). */
 export function flowLySpanToPanePixels(
@@ -121,30 +84,6 @@ export function wormholeEndpointDiameterPx(
   return Math.max(mapScaled, WORMHOLE_ENDPOINT_MIN_DIAMETER_PX)
 }
 
-export type StellarCartographyOverlayWormholeMarkerShape = {
-  key: string
-  cx: number
-  cy: number
-  diameterPx: number
-  mapX: number
-  mapY: number
-}
-
-export type { BlackHolePaneShape } from './blackHoleOverlay'
-
-export type StellarCartographyOverlayPaneShapes = {
-  circles: StellarCartographyOverlayCircleShape[]
-  annuli: StellarCartographyOverlayAnnulusShape[]
-  blackHoles: BlackHolePaneShape[]
-  nebulaClouds: NebulaCloudPaneShape[]
-  ionStormClouds: IonStormCloudPaneShape[]
-  neutronFluxClouds: NeutronClusterFluxPaneShape[]
-  /** Debris disk outlines; painted above annuli so borders stay visible. */
-  debrisDiskBorders: StellarCartographyOverlayCircleShape[]
-  arrows: StellarCartographyOverlayArrowShape[]
-  wormholeMarkers: StellarCartographyOverlayWormholeMarkerShape[]
-}
-
 export { gameMapCellCenterToFlow } from './cartographyOverlayGeometry'
 
 /** Ion storm movement arrow endpoint in flow space (heading degrees, 0 = north, clockwise). */
@@ -162,22 +101,6 @@ export function ionStormArrowEndpointFlow(
     x2: cx + dx,
     y2: cy - dyGame,
   }
-}
-
-function sortOverlayCircles(
-  circles: readonly StellarCartographyOverlayCircle[]
-): StellarCartographyOverlayCircle[] {
-  const order: Record<string, number> = {
-    'debris-disks': -1,
-    nebulae: 0,
-    'ion-storms': 1,
-    'star-clusters': 2,
-    'neutron-clusters': 2,
-    'black-holes': 3,
-  }
-  return [...circles].sort(
-    (a, b) => (order[a.layer] ?? 99) - (order[b.layer] ?? 99)
-  )
 }
 
 function buildDebrisDiskBorderShape(
@@ -201,18 +124,6 @@ function buildDebrisDiskBorderShape(
     stroke: DEBRIS_DISK_BORDER_STROKE,
     strokeWidth: DEBRIS_DISK_BORDER_STROKE_WIDTH,
   }
-}
-
-/** Circles rendered by raster clouds, debris borders, or ion-storm arrows -- not annuli/black holes. */
-function isRasterCloudOrBorderOverlayCircle(
-  circle: StellarCartographyOverlayCircle
-): boolean {
-  return (
-    isNebulaOverlayCircle(circle) ||
-    isDebrisDiskOverlayCircle(circle) ||
-    isIonStormOverlayCircle(circle) ||
-    isNeutronClusterOverlayCircle(circle)
-  )
 }
 
 function buildIonStormArrow(
@@ -268,6 +179,7 @@ export function buildStellarCartographyOverlayPaneShapes(
     return empty
   }
 
+  const byLayer = groupOverlayCirclesByLayer(overlayCircles)
   const strokeWidth = 1
   const starClusterOutlines = areClusterOutlinesShown(
     options?.starClusterDisplayMode ?? 'outlined'
@@ -275,39 +187,24 @@ export function buildStellarCartographyOverlayPaneShapes(
   const neutronClusterOutlines = areClusterOutlinesShown(
     options?.neutronClusterDisplayMode ?? 'outlined'
   )
-  const nebulaCircles = overlayCircles.filter(isNebulaOverlayCircle)
-  const nebulaClouds = buildNebulaCloudPaneShapes(nebulaCircles, viewport)
-  const ionStormCircles = overlayCircles.filter(isIonStormOverlayCircle)
+
+  const nebulaClouds = buildNebulaCloudPaneShapes(byLayer.nebulae, viewport)
   const ionStormClouds = buildIonStormCloudPaneShapes(
-    ionStormCircles,
+    byLayer.ionStorms,
     viewport,
     options?.cloudyIonStorms ?? true
   )
-  const neutronClusterCircles = overlayCircles.filter(isNeutronClusterOverlayCircle)
-  const neutronFluxClouds = buildNeutronClusterFluxPaneShapes(neutronClusterCircles, viewport, {
+  const neutronFluxClouds = buildNeutronClusterFluxPaneShapes(byLayer.neutronClusters, viewport, {
     showOutlines: areClusterOutlinesShown(options?.neutronClusterDisplayMode ?? 'outlined'),
   })
+
   const circles: StellarCartographyOverlayCircleShape[] = []
   const annuli: StellarCartographyOverlayAnnulusShape[] = []
   const blackHoles: BlackHolePaneShape[] = []
   const debrisDiskBorders: StellarCartographyOverlayCircleShape[] = []
   const arrows: StellarCartographyOverlayArrowShape[] = []
 
-  type OverlayCirclePaneTarget = {
-    circles: StellarCartographyOverlayCircleShape[]
-    annuli: StellarCartographyOverlayAnnulusShape[]
-    blackHoles: BlackHolePaneShape[]
-  }
-
-  const appendOverlayCirclePaneShape = (
-    circle: StellarCartographyOverlayCircle,
-    target: OverlayCirclePaneTarget
-  ): void => {
-    if (isBlackHoleOverlayCircle(circle)) {
-      const blackHole = buildBlackHolePaneShape(BLACK_HOLE_CONCEPT_CONSTANTS, circle, viewport)
-      if (blackHole != null) target.blackHoles.push(blackHole)
-      return
-    }
+  for (const circle of vectorOverlayCirclesInPaintOrder(byLayer)) {
     if (isStarClusterOverlayCircle(circle)) {
       const annulus = buildStarClusterAnnulus(
         circle,
@@ -316,8 +213,8 @@ export function buildStellarCartographyOverlayPaneShapes(
         starClusterOutlines
       )
       if (annulus != null) {
-        target.annuli.push(annulus)
-        return
+        annuli.push(annulus)
+        continue
       }
       const core = buildStarClusterCoreCircle(
         circle,
@@ -325,18 +222,14 @@ export function buildStellarCartographyOverlayPaneShapes(
         STAR_CLUSTER_STROKE_WIDTH,
         starClusterOutlines
       )
-      if (core != null) target.circles.push(core)
+      if (core != null) circles.push(core)
+      continue
     }
+    const blackHole = buildBlackHolePaneShape(BLACK_HOLE_CONCEPT_CONSTANTS, circle, viewport)
+    if (blackHole != null) blackHoles.push(blackHole)
   }
 
-  const paneTarget: OverlayCirclePaneTarget = { circles, annuli, blackHoles }
-  for (const circle of sortOverlayCircles(
-    overlayCircles.filter((entry) => !isRasterCloudOrBorderOverlayCircle(entry))
-  )) {
-    appendOverlayCirclePaneShape(circle, paneTarget)
-  }
-
-  for (const circle of neutronClusterCircles) {
+  for (const circle of byLayer.neutronClusters) {
     const core = buildNeutronClusterCoreCircle(
       circle,
       viewport,
@@ -346,13 +239,13 @@ export function buildStellarCartographyOverlayPaneShapes(
     if (core != null) circles.push(core)
   }
 
-  for (const circle of ionStormCircles) {
+  for (const circle of byLayer.ionStorms) {
     if ((circle.parentId ?? 0) !== 0) continue
     const arrow = buildIonStormArrow(circle, viewport, strokeWidth)
     if (arrow != null) arrows.push(arrow)
   }
 
-  for (const circle of overlayCircles.filter(isDebrisDiskOverlayCircle)) {
+  for (const circle of byLayer.debrisDisks) {
     const shape = buildDebrisDiskBorderShape(circle, viewport)
     if (shape != null) debrisDiskBorders.push(shape)
   }

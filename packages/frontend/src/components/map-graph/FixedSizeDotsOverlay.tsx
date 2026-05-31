@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
-import type { CombinedMapData, RouteMapWaypoint } from '../../api/bff'
+import type { CombinedMapData, MapPlanetSnapshot, RouteMapWaypoint } from '../../api/bff'
 import {
   findClosestPlanetWithinRadius,
   flowCenterToPlanet,
@@ -32,7 +32,7 @@ const HOVER_CLIENT_MOVE_EPS_PX = 0.5
 
 /** Label text uses map payload (planet name, etc.). React Flow's internal node store does not reliably retain custom `data` fields. */
 export type MapNodeLabelSource = {
-  planet?: Record<string, unknown>
+  planet?: MapPlanetSnapshot
   ownerName?: string | null
   mapX: number
   mapY: number

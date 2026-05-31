@@ -140,6 +140,13 @@ function connectionsMapAnalyticQuerySpec(context: MapAnalyticQueryContext): MapA
   }
 }
 
+/**
+ * Map analytics whose BFF GET depends on UI params beyond shell scope (game, turn,
+ * perspective). Each entry supplies a custom query key and fetch args so TanStack
+ * refetches when those params change. Client-only merge options (e.g. Stellar
+ * Cartography layer toggles) stay in `combineMapResultsFromQueries` -- no registry entry.
+ * Expect more analytics here as map endpoints gain query parameters like Connections.
+ */
 const mapAnalyticQueryRegistry: Record<
   string,
   (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec

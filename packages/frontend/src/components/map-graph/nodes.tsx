@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Handle, Position, type Node } from '@xyflow/react'
-import type { CombinedMapData } from '../../api/bff'
+import type { CombinedMapData, MapPlanetSnapshot } from '../../api/bff'
 import {
   CELL_CENTER_OFFSET,
   NODE_SIZE_FLOW,
@@ -12,7 +12,7 @@ export type MapNodeData = {
   ordinal: number
   x: number
   y: number
-  planet?: Record<string, unknown>
+  planet?: MapPlanetSnapshot
   ownerName?: string | null
 }
 

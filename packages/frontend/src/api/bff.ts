@@ -30,6 +30,7 @@ export type {
   MapDataResponse,
   MapEdge,
   MapNode,
+  MapPlanetSnapshot,
   NebulaOverlayCircle,
   NormalWellMapCell,
   PlanetPairRoute,

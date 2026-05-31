@@ -11,6 +11,34 @@ export type MapCell = components['schemas']['MapCellModel']
 /** Map cell whose center lies in a planet's normal warp well (from base-map). */
 export type NormalWellMapCell = MapCell
 
+/**
+ * Turn planet snapshot embedded on map wire nodes (Planets.nu host field names).
+ * Additional host keys are allowed for debug labels and forward compatibility.
+ */
+export type MapPlanetSnapshot = {
+  id?: number | string
+  name?: string
+  ownerid?: number
+  temp?: number
+  neutronium?: number
+  nativetype?: number
+  nativeracename?: string
+  nativeclans?: number
+  clans?: number
+  duranium?: number
+  groundduranium?: number
+  densityduranium?: number
+  tritanium?: number
+  groundtritanium?: number
+  densitytritanium?: number
+  molybdenum?: number
+  groundmolybdenum?: number
+  densitymolybdenum?: number
+  groundneutronium?: number
+  densityneutronium?: number
+  [key: string]: unknown
+}
+
 /** Node position in the map's fixed Cartesian coordinate system. */
 export type MapNode = {
   id: string
@@ -18,7 +46,7 @@ export type MapNode = {
   x: number
   y: number
   /** Present for base-map planets; full turn snapshot fields for map labels. */
-  planet?: Record<string, unknown>
+  planet?: MapPlanetSnapshot
   /** Resolved from turn players when `planet` is present. */
   ownerName?: string | null
   /** Normal warp well cells from base-map; empty for debris-disk planets. */
@@ -256,5 +284,3 @@ export type StellarCartographyTurnSummaryResponse = {
   ionStormCount: number
   nuIonStorms: boolean
 }
-
-export { normalizeMapDataResponse } from './normalizeMapDataResponse'

@@ -29,7 +29,7 @@ import type {
   StellarCartographyOverlayCircleShape,
   StellarCartographyOverlayRadialGradient,
   StellarCartographyOverlayViewport,
-} from './stellarCartographyOverlay'
+} from './cartographyPaneShapes'
 
 type ClusterCoreGradientTheme = {
   colorFromTemp: (temp: number) => string
