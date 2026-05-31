@@ -43,6 +43,103 @@ function StellarCartographyRadialGradientDef({
   )
 }
 
+function BlackHoleBandOverlay({
+  shapeKey,
+  cx,
+  cy,
+  coreR,
+  bandR,
+  coreFill,
+  bandFill,
+}: {
+  shapeKey: string
+  cx: number
+  cy: number
+  coreR: number
+  bandR: number
+  coreFill: string
+  bandFill: string
+}) {
+  return (
+    <g>
+      <defs>
+        <mask id={`${shapeKey}-ring-mask`}>
+          <circle cx={cx} cy={cy} r={bandR} fill="white" />
+          <circle cx={cx} cy={cy} r={coreR} fill="black" />
+        </mask>
+      </defs>
+      <circle
+        cx={cx}
+        cy={cy}
+        r={bandR}
+        fill={bandFill}
+        mask={`url(#${shapeKey}-ring-mask)`}
+        stroke="none"
+      />
+      {coreFill !== 'transparent' ? (
+        <circle cx={cx} cy={cy} r={coreR} fill={coreFill} stroke="none" />
+      ) : null}
+    </g>
+  )
+}
+
+function GradientAnnulusOverlay({
+  cx,
+  cy,
+  coreR,
+  bandR,
+  coreFill,
+  coreStroke,
+  coreGradient,
+  bandFill,
+  bandStroke,
+  strokeWidth,
+  bandGradient,
+}: {
+  cx: number
+  cy: number
+  coreR: number
+  bandR: number
+  coreFill: string
+  coreStroke?: string
+  coreGradient?: StellarCartographyOverlayRadialGradient
+  bandFill: string
+  bandStroke: string
+  strokeWidth: number
+  bandGradient?: StellarCartographyOverlayRadialGradient
+}) {
+  return (
+    <g>
+      {(bandGradient != null || coreGradient != null) && (
+        <defs>
+          {bandGradient != null && (
+            <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
+          )}
+          {coreGradient != null && (
+            <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
+          )}
+        </defs>
+      )}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={bandR}
+        fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
+        stroke={bandStroke}
+        strokeWidth={strokeWidth}
+      />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={coreR}
+        fill={coreGradient != null ? `url(#${coreGradient.id})` : coreFill}
+        stroke={coreStroke ?? 'none'}
+        strokeWidth={coreStroke != null ? strokeWidth : 0}
+      />
+    </g>
+  )
+}
+
 function BlackHoleHaloGradientDef({
   halo,
 }: {
@@ -119,72 +216,12 @@ export function StellarCartographyVectorOverlay({
           <circle cx={halo.cx} cy={halo.cy} r={halo.r} fill={`url(#${halo.key}-grad)`} stroke="none" />
         </g>
       ))}
-      {shapes.annuli.map(
-        ({
-          key,
-          cx,
-          cy,
-          coreR,
-          bandR,
-          coreFill,
-          coreStroke,
-          coreGradient,
-          bandFill,
-          bandStroke,
-          strokeWidth,
-          bandGradient,
-          ringOnly,
-        }) =>
-          ringOnly ? (
-            <g key={key}>
-              <defs>
-                <mask id={`${key}-ring-mask`}>
-                  <circle cx={cx} cy={cy} r={bandR} fill="white" />
-                  <circle cx={cx} cy={cy} r={coreR} fill="black" />
-                </mask>
-              </defs>
-              <circle
-                cx={cx}
-                cy={cy}
-                r={bandR}
-                fill={bandFill}
-                mask={`url(#${key}-ring-mask)`}
-                stroke="none"
-              />
-              {coreFill !== 'transparent' ? (
-                <circle cx={cx} cy={cy} r={coreR} fill={coreFill} stroke="none" />
-              ) : null}
-            </g>
-          ) : (
-            <g key={key}>
-              {(bandGradient != null || coreGradient != null) && (
-                <defs>
-                  {bandGradient != null && (
-                    <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
-                  )}
-                  {coreGradient != null && (
-                    <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
-                  )}
-                </defs>
-              )}
-              <circle
-                cx={cx}
-                cy={cy}
-                r={bandR}
-                fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
-                stroke={bandStroke}
-                strokeWidth={strokeWidth}
-              />
-              <circle
-                cx={cx}
-                cy={cy}
-                r={coreR}
-                fill={coreGradient != null ? `url(#${coreGradient.id})` : coreFill}
-                stroke={coreStroke ?? 'none'}
-                strokeWidth={coreStroke != null ? strokeWidth : 0}
-              />
-            </g>
-          )
+      {shapes.annuli.map((annulus) =>
+        annulus.bandGradient != null || annulus.coreGradient != null ? (
+          <GradientAnnulusOverlay key={annulus.key} {...annulus} />
+        ) : (
+          <BlackHoleBandOverlay key={annulus.key} shapeKey={annulus.key} {...annulus} />
+        )
       )}
       {shapes.debrisDiskBorders.map(({ key, cx, cy, r, fill, stroke, strokeWidth }) => (
         <circle

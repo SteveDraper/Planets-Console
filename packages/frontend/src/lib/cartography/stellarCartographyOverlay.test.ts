@@ -210,7 +210,7 @@ describe('stellarCartographyOverlay', () => {
     expect(shapes.annuli[8]?.key).toBe('bh-1-band-1')
     expect(shapes.annuli[0]?.bandFill).toBe('rgba(74, 74, 74, 0.3)')
     expect(shapes.annuli[8]?.bandFill).toBe('rgba(26, 26, 26, 0.3)')
-    expect(shapes.annuli[0]?.ringOnly).toBe(true)
+    expect(shapes.annuli[0]?.bandGradient).toBeUndefined()
     expect(shapes.annuli[8]?.coreR).toBeCloseTo(15 * viewport.scale)
     expect(shapes.annuli[0]?.bandR).toBeCloseTo(51 * viewport.scale)
     expect(shapes.blackHoleHalos[0]?.r).toBeCloseTo(56 * viewport.scale)

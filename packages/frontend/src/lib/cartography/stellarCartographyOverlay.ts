@@ -89,8 +89,6 @@ export type StellarCartographyOverlayAnnulusShape = {
   bandStroke: string
   strokeWidth: number
   bandGradient?: StellarCartographyOverlayAnnulusBandGradient
-  /** When true, paint only the annulus (not a full disc with a transparent core punch). */
-  ringOnly?: boolean
 }
 
 export type StellarCartographyOverlayArrowShape = {
@@ -434,7 +432,6 @@ function buildBlackHolePaneShapes(
       ),
       bandStroke: 'none',
       strokeWidth: 0,
-      ringOnly: true,
     })
   }
 
