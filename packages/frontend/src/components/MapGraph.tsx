@@ -40,6 +40,7 @@ import { CoordinateGridOverlay, FlowCoordinateReadout } from './map-graph/coordi
 import { NormalWarpWellOutlinesOverlay } from './map-graph/NormalWarpWellOutlinesOverlay'
 import {
   InitialViewportFit,
+  MapZoomKeyboardShortcuts,
   SliderZoomControl,
   ViewportZoomSync,
 } from './map-graph/viewportControls'
@@ -210,6 +211,7 @@ function MapGraphFlow({
       />
       <ViewportZoomSync onMapZoomChange={onMapZoomChange} />
       <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
+      <MapZoomKeyboardShortcuts onMapZoomChange={onMapZoomChange} />
       <CoordinateGridOverlay />
       <StellarCartographyOverlayPane
         overlayCircles={data.overlayCircles}

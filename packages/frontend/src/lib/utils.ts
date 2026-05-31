@@ -31,3 +31,23 @@ export function mapSliderToZoom(sliderPosition: number): number {
   const p = Math.min(1, Math.max(0, sliderPosition / MAP_ZOOM_SLIDER_STEPS))
   return MAP_ZOOM_MIN * MAP_ZOOM_RATIO ** p
 }
+
+/** One header slider step on the log zoom scale (same as keyboard +/-). */
+export function stepMapZoomBySliderSteps(zoom: number, deltaSteps: number): number {
+  const slider = mapZoomToSlider(zoom) + deltaSteps
+  const clamped = Math.min(MAP_ZOOM_SLIDER_STEPS, Math.max(0, slider))
+  return mapSliderToZoom(clamped)
+}
+
+/** Hold +/-: repeat starts after this delay; tap-only stays one step. */
+export const MAP_ZOOM_KEYBOARD_REPEAT_START_MS = 250
+/** Hold +/-: repeat tick interval while key stays down. */
+export const MAP_ZOOM_KEYBOARD_REPEAT_INTERVAL_MS = 50
+/** Hold +/-: add one slider step per tick every this much hold time. */
+export const MAP_ZOOM_KEYBOARD_RATE_RAMP_MS = 250
+
+/** Slider steps applied per repeat tick while a zoom key is held. */
+export function mapZoomKeyboardStepsPerRepeatTick(holdDurationMs: number): number {
+  if (!Number.isFinite(holdDurationMs) || holdDurationMs < 0) return 1
+  return 1 + Math.floor(holdDurationMs / MAP_ZOOM_KEYBOARD_RATE_RAMP_MS)
+}
