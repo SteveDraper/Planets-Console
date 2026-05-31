@@ -26,8 +26,7 @@ function renderHeader() {
         reportShellError={() => {}}
         shellTurnMax={null}
         shellTurnValue={null}
-        isFutureTurn={false}
-        onShellTurnChange={() => {}}
+        setTurn={() => {}}
         shellViewpoints={[]}
         shellSelectedViewpointName={null}
         onShellViewpointChange={() => {}}
@@ -108,8 +107,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
-          isFutureTurn={false}
-          onShellTurnChange={() => {}}
+          setTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
             { name: 'Beta', raceName: null, disabled: false },
@@ -140,8 +138,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
-          isFutureTurn={false}
-          onShellTurnChange={() => {}}
+          setTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
             { name: 'Beta', raceName: null, disabled: true },
@@ -173,8 +170,7 @@ describe('Header', () => {
             reportShellError={() => {}}
             shellTurnMax={max}
             shellTurnValue={t}
-            isFutureTurn={t > max}
-            onShellTurnChange={setT}
+            setTurn={setT}
             shellViewpoints={[]}
             shellSelectedViewpointName={null}
             onShellViewpointChange={() => {}}

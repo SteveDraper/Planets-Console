@@ -85,10 +85,9 @@ function ConsoleShell() {
     onViewpointChange: handleShellViewpointChange,
     shellTurnMax,
     selectedTurn,
-    isFutureTurn,
     futureTurnOffset,
-    onTurnChange: handleShellTurnChange,
-    onTurnStep: handleShellTurnStep,
+    setTurn,
+    stepTurn,
   } = useShellContext({ reportShellError: addShellError })
 
   const refreshGameMutation = useMutation({
@@ -299,7 +298,7 @@ function ConsoleShell() {
     <div className="flex h-screen flex-col bg-black">
       <TurnKeyboardShortcuts
         enabled={shellTurnMax != null && selectedTurn != null}
-        onTurnStep={handleShellTurnStep}
+        stepTurn={stepTurn}
       />
       <Header
         viewMode={viewMode}
@@ -312,8 +311,7 @@ function ConsoleShell() {
         reportShellError={addShellError}
         shellTurnMax={shellTurnMax}
         shellTurnValue={selectedTurn}
-        isFutureTurn={isFutureTurn}
-        onShellTurnChange={handleShellTurnChange}
+        setTurn={setTurn}
         shellViewpoints={shellViewpoints}
         shellSelectedViewpointName={shellSelectedViewpointName}
         onShellViewpointChange={handleShellViewpointChange}

@@ -10,6 +10,7 @@ import { LoginModal } from './LoginModal'
 import { AboutModal } from './AboutModal'
 import { DiagnosticsModal } from './DiagnosticsModal'
 import { SettingsModal } from './SettingsModal'
+import { isFutureTurn } from '../shell/shellContext'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -28,8 +29,7 @@ type HeaderProps = {
   shellTurnMax: number | null
   /** Selected turn; may exceed shellTurnMax when viewing predicted future turns. */
   shellTurnValue: number | null
-  isFutureTurn: boolean
-  onShellTurnChange: (turn: number) => void
+  setTurn: (turn: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
   shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
   /** Current viewpoint (login default or user override). */
@@ -48,8 +48,7 @@ export function Header({
   reportShellError,
   shellTurnMax,
   shellTurnValue,
-  isFutureTurn,
-  onShellTurnChange,
+  setTurn,
   shellViewpoints,
   shellSelectedViewpointName,
   onShellViewpointChange,
@@ -73,6 +72,7 @@ export function Header({
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
+  const showFutureTurn = turnReady && isFutureTurn(shellTurnValue, shellTurnMax)
   const committedTurnStr = shellTurnValue != null ? String(shellTurnValue) : ''
 
   useEffect(() => {
@@ -174,7 +174,7 @@ export function Header({
               type="button"
               aria-label="Decrease turn"
               disabled={shellTurnValue <= 1}
-              onClick={() => onShellTurnChange(shellTurnValue - 1)}
+              onClick={() => setTurn(shellTurnValue - 1)}
               className={cn(
                 'flex items-center justify-center px-1 text-slate-300 hover:bg-white/10 hover:text-slate-100',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400',
@@ -183,7 +183,7 @@ export function Header({
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden />
             </button>
-            {isFutureTurn ? (
+            {showFutureTurn ? (
               <span
                 className="min-w-11 border-x border-[#52575d] px-1 py-0.5 text-center text-xs tabular-nums text-slate-200"
                 aria-label={`Turn number ${shellTurnValue} (future)`}
@@ -203,7 +203,7 @@ export function Header({
                   setTurnInputDraft(null)
                   const parsed = Number.parseInt(displayTurnInput.trim(), 10)
                   if (Number.isFinite(parsed)) {
-                    onShellTurnChange(parsed)
+                    setTurn(parsed)
                   }
                 }}
                 onKeyDown={(e) => {
@@ -221,7 +221,7 @@ export function Header({
             <button
               type="button"
               aria-label="Increase turn"
-              onClick={() => onShellTurnChange(shellTurnValue + 1)}
+              onClick={() => setTurn(shellTurnValue + 1)}
               className={cn(
                 'flex items-center justify-center px-1 text-slate-300 hover:bg-white/10 hover:text-slate-100',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400'

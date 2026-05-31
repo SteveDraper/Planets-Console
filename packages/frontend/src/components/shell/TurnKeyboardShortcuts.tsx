@@ -3,10 +3,10 @@ import { isModalDialogOpen, keyboardTargetBlocksShortcut } from '../../lib/keybo
 
 type TurnKeyboardShortcutsProps = {
   enabled: boolean
-  onTurnStep: (delta: number) => void
+  stepTurn: (delta: number) => void
 }
 
-export function TurnKeyboardShortcuts({ enabled, onTurnStep }: TurnKeyboardShortcutsProps) {
+export function TurnKeyboardShortcuts({ enabled, stepTurn }: TurnKeyboardShortcutsProps) {
   useEffect(() => {
     if (!enabled) return
 
@@ -16,12 +16,12 @@ export function TurnKeyboardShortcuts({ enabled, onTurnStep }: TurnKeyboardShort
       if (keyboardTargetBlocksShortcut(e.target)) return
       if (isModalDialogOpen()) return
       e.preventDefault()
-      onTurnStep(e.key === 'i' ? -1 : 1)
+      stepTurn(e.key === 'i' ? -1 : 1)
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [enabled, onTurnStep])
+  }, [enabled, stepTurn])
 
   return null
 }
