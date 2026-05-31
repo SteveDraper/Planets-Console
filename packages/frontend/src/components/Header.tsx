@@ -28,7 +28,7 @@ type HeaderProps = {
   /** Selected turn; may exceed shellTurnMax when viewing predicted future turns. */
   shellTurnValue: number | null
   /** From shell context: selected turn is beyond latest stored turn. */
-  isFutureTurn: boolean
+  isFuture: boolean
   setTurn: (turn: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
   shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
@@ -48,7 +48,7 @@ export function Header({
   reportShellError,
   shellTurnMax,
   shellTurnValue,
-  isFutureTurn,
+  isFuture,
   setTurn,
   shellViewpoints,
   shellSelectedViewpointName,
@@ -73,7 +73,7 @@ export function Header({
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
-  const showFutureTurn = turnReady && isFutureTurn
+  const showFutureTurn = turnReady && isFuture
   const committedTurnStr = shellTurnValue != null ? String(shellTurnValue) : ''
 
   useEffect(() => {

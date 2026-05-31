@@ -43,7 +43,7 @@ export type ShellContext = {
   onViewpointChange: (name: string) => void
   shellTurnMax: number | null
   selectedTurn: number | null
-  isFutureTurn: boolean
+  isFuture: boolean
   futureTurnOffset: number
   setTurn: (turn: number) => void
   stepTurn: (delta: number) => void
@@ -100,7 +100,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     [selectedTurn, shellTurnMax]
   )
 
-  const { dataTurn, futureOffset: futureTurnOffset, isFuture: futureTurnActive } = turnView
+  const { dataTurn, futureOffset: futureTurnOffset, isFuture } = turnView
 
   const shellViewpoints = useMemo(() => deriveShellViewpoints(shellInputs), [shellInputs])
 
@@ -292,7 +292,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     onViewpointChange,
     shellTurnMax,
     selectedTurn,
-    isFutureTurn: futureTurnActive,
+    isFuture,
     futureTurnOffset,
     setTurn,
     stepTurn,

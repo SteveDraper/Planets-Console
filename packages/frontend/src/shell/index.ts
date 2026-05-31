@@ -7,7 +7,6 @@ export {
   deriveTurnDataReady,
   deriveTurnEnsureEnabled,
   deriveTurnView,
-  isFutureTurn,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
   type ShellContextInputs,

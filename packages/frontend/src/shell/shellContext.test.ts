@@ -10,7 +10,6 @@ import {
   deriveTurnDataReady,
   deriveTurnEnsureEnabled,
   deriveTurnView,
-  isFutureTurn,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
   type ShellContextInputs,
@@ -94,18 +93,6 @@ describe('deriveTurnView', () => {
       futureOffset: 2,
       isFuture: true,
     })
-  })
-})
-
-describe('isFutureTurn', () => {
-  it('returns true when selected turn exceeds shell turn max', () => {
-    expect(isFutureTurn(12, 10)).toBe(true)
-    expect(isFutureTurn(10, 10)).toBe(false)
-  })
-
-  it('delegates to deriveTurnView', () => {
-    const view = deriveTurnView(12, 10)
-    expect(isFutureTurn(12, 10)).toBe(view.isFuture)
   })
 })
 

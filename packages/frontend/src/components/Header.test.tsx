@@ -26,7 +26,7 @@ function renderHeader() {
         reportShellError={() => {}}
         shellTurnMax={null}
         shellTurnValue={null}
-        isFutureTurn={false}
+        isFuture={false}
         setTurn={() => {}}
         shellViewpoints={[]}
         shellSelectedViewpointName={null}
@@ -108,7 +108,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
-          isFutureTurn={false}
+          isFuture={false}
           setTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
@@ -140,7 +140,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
-          isFutureTurn={false}
+          isFuture={false}
           setTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
@@ -173,7 +173,7 @@ describe('Header', () => {
             reportShellError={() => {}}
             shellTurnMax={max}
             shellTurnValue={t}
-            isFutureTurn={t > max}
+            isFuture={t > max}
             setTurn={setT}
             shellViewpoints={[]}
             shellSelectedViewpointName={null}
@@ -200,7 +200,7 @@ describe('Header', () => {
     expect(inc).not.toBeDisabled()
   })
 
-  it('shows future turn label when isFutureTurn is true', () => {
+  it('shows future turn label when isFuture is true', () => {
     render(
       <QueryClientProvider client={headerQueryClient}>
         <Header
@@ -214,7 +214,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={10}
           shellTurnValue={12}
-          isFutureTurn={true}
+          isFuture={true}
           setTurn={() => {}}
           shellViewpoints={[]}
           shellSelectedViewpointName={null}
@@ -226,7 +226,7 @@ describe('Header', () => {
     expect(screen.queryByLabelText(/^turn number$/i)).not.toBeInTheDocument()
   })
 
-  it('shows turn input when isFutureTurn is false even at max turn', () => {
+  it('shows turn input when isFuture is false even at max turn', () => {
     render(
       <QueryClientProvider client={headerQueryClient}>
         <Header
@@ -240,7 +240,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={10}
           shellTurnValue={10}
-          isFutureTurn={false}
+          isFuture={false}
           setTurn={() => {}}
           shellViewpoints={[]}
           shellSelectedViewpointName={null}

@@ -71,13 +71,6 @@ export function deriveTurnView(
   }
 }
 
-export function isFutureTurn(
-  selectedTurn: number | null,
-  shellTurnMax: number | null
-): boolean {
-  return deriveTurnView(selectedTurn, shellTurnMax).isFuture
-}
-
 export function deriveShellDefaultViewpointName(
   gameInfoContext: GameInfoShellContext | null,
   loginName: string | null

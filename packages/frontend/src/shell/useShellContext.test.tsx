@@ -279,7 +279,7 @@ describe('useShellContext', () => {
       result.current.setTurn(12)
     })
     expect(useShellStore.getState().selectedTurn).toBe(12)
-    expect(result.current.isFutureTurn).toBe(true)
+    expect(result.current.isFuture).toBe(true)
     expect(result.current.futureTurnOffset).toBe(2)
   })
 
