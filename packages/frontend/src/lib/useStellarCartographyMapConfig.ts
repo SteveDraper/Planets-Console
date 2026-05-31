@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
-import type { StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
+import type { StellarCartographyMapUiConfig } from '../analytics/mapLayers'
 import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
 import { useShellStore } from '../stores/shell'
 
-/** Canonical read site for Stellar Cartography map merge and overlay UI config. */
-export function useStellarCartographyMapConfig(): StellarCartographyMapMergeOptions {
+/** Canonical read site for Stellar Cartography map overlay and hover UI config. */
+export function useStellarCartographyMapConfig(): StellarCartographyMapUiConfig {
   const layerVisibility = useStellarCartographyLayersStore((s) => s.layers)
   const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
   const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)

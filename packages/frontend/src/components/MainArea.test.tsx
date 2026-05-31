@@ -121,6 +121,16 @@ describe('MainArea map hook mounting', () => {
   })
 
   it('subscribes to cartography config only when that analytic is enabled', () => {
+    vi.mocked(useMapAnalyticQueries).mockReturnValue({
+      enabledMapIds: ['connections', 'stellar-cartography'],
+      mapIds: ['base-map', 'connections', 'stellar-cartography'],
+      combined: emptyCombined,
+      pending: false,
+      hasError: false,
+      hasAnyData: false,
+      mapQueries: [],
+    })
+
     render(
       <MainArea
         {...defaultMainAreaProps('map')}

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable } from '../api/bff'
 import type {
@@ -8,8 +8,8 @@ import type {
 } from '../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import {
-  defaultStellarCartographyMapMergeOptions,
-  type StellarCartographyMapMergeOptions,
+  DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
+  type StellarCartographyMapUiConfig,
 } from '../analytics/mapLayers'
 import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import {
@@ -21,8 +21,8 @@ import { MapShellContent } from './shell/MapShellContent'
 import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
 import { errorDetailFromUnknown } from '../lib/queryRetry'
 import {
-  enabledMapAnalyticIds,
   useMapAnalyticQueries,
+  type UseMapAnalyticQueriesResult,
 } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
@@ -124,71 +124,55 @@ type MapMainAreaProps = {
 
 /** Map queries and retention run only while this component is mounted (map view). */
 const MapMainArea = memo(function MapMainArea(props: MapMainAreaProps) {
-  const enabledMapIds = useMemo(
-    () => enabledMapAnalyticIds(props.enabledAnalyticIds, props.analytics),
-    [props.enabledAnalyticIds, props.analytics]
-  )
-  const needsCartography = enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
+  const analyticFetchEnabled = props.analyticScope != null && props.turnDataReady
+  const mapQueries = useMapAnalyticQueries({
+    enabledAnalyticIds: props.enabledAnalyticIds,
+    analytics: props.analytics,
+    analyticScope: props.analyticScope,
+    analyticFetchEnabled,
+    connectionsMapParams: props.connectionsMapParams,
+    futureTurnOffset: props.futureTurnOffset,
+  })
 
+  const needsCartography = mapQueries.enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
   if (needsCartography) {
-    return <MapMainAreaWithCartography {...props} enabledMapIds={enabledMapIds} />
+    return <MapMainAreaWithCartography {...props} mapQueries={mapQueries} />
   }
 
   return (
     <MapMainAreaInner
       {...props}
-      enabledMapIds={enabledMapIds}
-      cartographyConfig={defaultStellarCartographyMapMergeOptions()}
+      mapQueries={mapQueries}
+      cartographyConfig={DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG}
     />
   )
 })
 
 function MapMainAreaWithCartography(
-  props: MapMainAreaProps & { enabledMapIds: string[] }
+  props: MapMainAreaProps & { mapQueries: UseMapAnalyticQueriesResult }
 ) {
   const cartographyConfig = useStellarCartographyMapConfig()
   return <MapMainAreaInner {...props} cartographyConfig={cartographyConfig} />
 }
 
 type MapMainAreaInnerProps = MapMainAreaProps & {
-  enabledMapIds: string[]
-  cartographyConfig: StellarCartographyMapMergeOptions
+  mapQueries: UseMapAnalyticQueriesResult
+  cartographyConfig: StellarCartographyMapUiConfig
 }
 
 function MapMainAreaInner({
-  enabledMapIds,
-  enabledAnalyticIds,
-  analytics,
+  mapQueries,
   analyticScope,
   turnDataReady,
   turnEnsurePending,
-  connectionsMapParams,
-  futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
   cartographyConfig,
 }: MapMainAreaInnerProps) {
-  const analyticFetchEnabled = analyticScope != null && turnDataReady
-  const needsCartography = enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
-
-  const {
-    mapIds,
-    combined,
-    pending,
-    hasError,
-    hasAnyData,
-    mapQueries,
-  } = useMapAnalyticQueries({
-    enabledAnalyticIds,
-    analytics,
-    analyticScope,
-    analyticFetchEnabled,
-    connectionsMapParams,
-    futureTurnOffset,
-    stellarCartography: needsCartography ? cartographyConfig : null,
-  })
+  const { enabledMapIds, mapIds, combined, pending, hasError, hasAnyData, mapQueries: queries } =
+    mapQueries
 
   const { mapShellView } = useRetainedMapDisplay({
     combined,
@@ -216,7 +200,7 @@ function MapMainAreaInner({
   return (
     <MapShellContent
       mapShellView={mapShellView}
-      mapQueries={mapQueries}
+      mapQueries={queries}
       planetLabelOptions={planetLabelOptions}
       onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
       onMapZoomChange={onMapZoomChange}
@@ -316,4 +300,3 @@ export function MainArea({
     />
   )
 }
-

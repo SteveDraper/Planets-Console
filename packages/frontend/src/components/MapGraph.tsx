@@ -31,7 +31,7 @@ import {
   WormholeInteractionProvider,
   useWormholeInteractionState,
 } from './map-graph/stellarCartographyWormholeInteraction'
-import type { StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
+import type { StellarCartographyMapUiConfig } from '../analytics/mapLayers'
 import type { StellarCartographyMapUi } from './map-graph/stellarCartographyMapUi'
 import {
   buildLabelSourceByNodeId,
@@ -53,7 +53,7 @@ type MapGraphProps = {
   /** Called once so the header slider can drive zoom (same as scroll wheel). */
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   planetLabelOptions?: PlanetLabelOptions
-  cartographyConfig: StellarCartographyMapMergeOptions
+  cartographyConfig: StellarCartographyMapUiConfig
   stellarCartography?: StellarCartographyMapUi
 }
 
@@ -149,7 +149,7 @@ type MapGraphFlowProps = {
   wormholeEndpointHoverByCell: ReturnType<typeof buildWormholeEndpointHoverIndex>
   wormholeDisplayMode: WormholeDisplayMode
   planetLabelOptions: PlanetLabelOptions
-  cartographyConfig: StellarCartographyMapMergeOptions
+  cartographyConfig: StellarCartographyMapUiConfig
   stellarCartography?: StellarCartographyMapUi
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
@@ -222,6 +222,7 @@ function MapGraphFlow({
       <StellarCartographyOverlayPane
         overlayCircles={data.overlayCircles}
         wormholeEndpoints={wormholeEndpoints}
+        cartographyConfig={cartographyConfig}
         wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
         wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
         blockedByPlanetHover={blockedByPlanetHover}

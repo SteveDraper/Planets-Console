@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { combineMapData } from './mapLayers'
 import type { MapDataResponse } from '../api/bff'
-import { defaultCartographyLayerVisibility, EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './stellar-cartography/layers'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './stellar-cartography/layers'
 import {
   defaultNeutronClusterDisplayMode,
   defaultStarClusterDisplayMode,
 } from './stellar-cartography/clusterOutlineDisplayMode'
+import {
+  areCartographyWormholesShown,
+  filterCartographyOverlayCircles,
+} from './stellar-cartography/overlayDisplayFilter'
+import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from './mapLayers'
 
 describe('combineMapData', () => {
   const baseMap: MapDataResponse = {
@@ -15,25 +20,6 @@ describe('combineMapData', () => {
       { id: 'p2', label: 'p2', x: 30, y: 40 },
     ],
     edges: [],
-  }
-
-  const cartographyOptions = {
-    liveConnectionsParams: null,
-    stellarCartography: {
-      layerVisibility: defaultCartographyLayerVisibility(),
-      settingsGates: {
-        ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-        debrisDiskBorders: true,
-        nebulae: true,
-        ionStorms: true,
-        starClusters: true,
-        wormholes: true,
-        blackHoles: true,
-      },
-      wormholeDisplayMode: 'always' as const,
-      starClusterDisplayMode: defaultStarClusterDisplayMode(),
-      neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
-    },
   }
 
   it('binds Connections routes onto base-map planet node ids', () => {
@@ -130,7 +116,7 @@ describe('combineMapData', () => {
     expect(combined.nodes[0].planet).not.toBe(planet)
   })
 
-  it('prefixes stellar cartography wormhole nodes and merges bidirectional edges once', () => {
+  it('merges stellar cartography wormhole nodes and bidirectional edges from wire data', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',
       nodes: [
@@ -153,7 +139,7 @@ describe('combineMapData', () => {
     const combined = combineMapData(
       ['base-map', 'stellar-cartography'],
       [{ data: baseMap }, { data: sc }],
-      cartographyOptions
+      { liveConnectionsParams: null }
     )
 
     expect(combined.nodes.map((n) => n.id)).toEqual([
@@ -175,7 +161,7 @@ describe('combineMapData', () => {
     })
   })
 
-  it('filters overlay circles by layer visibility and settings gates', () => {
+  it('merges all overlay circles from wire data regardless of UI visibility', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',
       nodes: [],
@@ -203,79 +189,11 @@ describe('combineMapData', () => {
       ],
     }
 
-    const combined = combineMapData(
-      ['stellar-cartography'],
-      [{ data: sc }],
-      {
-        ...cartographyOptions,
-        stellarCartography: {
-          ...cartographyOptions.stellarCartography,
-          layerVisibility: {
-            ...defaultCartographyLayerVisibility(),
-            nebulae: false,
-          },
-        },
-      }
-    )
+    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
+      liveConnectionsParams: null,
+    })
 
-    expect(combined.overlayCircles).toHaveLength(1)
-    expect(combined.overlayCircles[0].layer).toBe('ion-storms')
-  })
-
-  it('passes debris disk borders when layer and gate are enabled', () => {
-    const sc: MapDataResponse = {
-      analyticId: 'stellar-cartography',
-      nodes: [],
-      edges: [],
-      overlayCircles: [
-        {
-          layer: 'debris-disks',
-          id: 'dd-1',
-          x: 100,
-          y: 200,
-          radius: 37,
-        },
-      ],
-    }
-
-    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], cartographyOptions)
-
-    expect(combined.overlayCircles).toHaveLength(1)
-    expect(combined.overlayCircles[0].layer).toBe('debris-disks')
-  })
-
-  it('filters debris disk borders when the settings gate is off', () => {
-    const sc: MapDataResponse = {
-      analyticId: 'stellar-cartography',
-      nodes: [],
-      edges: [],
-      overlayCircles: [
-        {
-          layer: 'debris-disks',
-          id: 'dd-1',
-          x: 100,
-          y: 200,
-          radius: 37,
-        },
-      ],
-    }
-
-    const combined = combineMapData(
-      ['stellar-cartography'],
-      [{ data: sc }],
-      {
-        ...cartographyOptions,
-        stellarCartography: {
-          ...cartographyOptions.stellarCartography,
-          settingsGates: {
-            ...cartographyOptions.stellarCartography.settingsGates,
-            debrisDiskBorders: false,
-          },
-        },
-      }
-    )
-
-    expect(combined.overlayCircles).toHaveLength(0)
+    expect(combined.overlayCircles).toHaveLength(2)
   })
 
   it('records unknown-target wormhole entrances when no edge is emitted', () => {
@@ -286,93 +204,11 @@ describe('combineMapData', () => {
       overlayCircles: [],
     }
 
-    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], cartographyOptions)
-
-    expect(combined.wormholeUnknownEntrances).toEqual([{ x: 99, y: 88 }])
-  })
-
-  it('omits wormhole geometry when display mode is off', () => {
-    const sc: MapDataResponse = {
-      analyticId: 'stellar-cartography',
-      nodes: [
-        { id: 'wh-a', label: '', x: 1, y: 2 },
-        { id: 'wh-b', label: '', x: 9, y: 8 },
-      ],
-      edges: [
-        {
-          source: 'wh-a',
-          target: 'wh-b',
-          isBidirectional: true,
-          stability: 80,
-        },
-      ],
-      overlayCircles: [],
-    }
-
-    const combined = combineMapData(
-      ['stellar-cartography'],
-      [{ data: sc }],
-      {
-        ...cartographyOptions,
-        stellarCartography: {
-          ...cartographyOptions.stellarCartography,
-          wormholeDisplayMode: 'off',
-        },
-      }
-    )
-
-    expect(combined.edges.filter((edge) => edge.layer === 'wormholes')).toHaveLength(0)
-    expect(combined.wormholeUnknownEntrances).toHaveLength(0)
-  })
-
-  it('omits star cluster overlay circles when display mode is off', () => {
-    const sc: MapDataResponse = {
-      analyticId: 'stellar-cartography',
-      nodes: [],
-      edges: [],
-      overlayCircles: [
-        {
-          layer: 'star-clusters',
-          id: 'star-1',
-          x: 100,
-          y: 200,
-          radius: 5,
-          temp: 10000,
-          mass: 10000,
-          name: 'Solo',
-        },
-      ],
-    }
-
-    const combined = combineMapData(
-      ['stellar-cartography'],
-      [{ data: sc }],
-      {
-        ...cartographyOptions,
-        stellarCartography: {
-          ...cartographyOptions.stellarCartography,
-          starClusterDisplayMode: 'off',
-        },
-      }
-    )
-
-    expect(combined.overlayCircles).toHaveLength(0)
-  })
-
-  it('merges Stellar Cartography with default options when merge config is omitted', () => {
-    const sc: MapDataResponse = {
-      analyticId: 'stellar-cartography',
-      nodes: [],
-      edges: [],
-      overlayCircles: [],
-    }
-
     const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
       liveConnectionsParams: null,
     })
 
-    expect(combined.overlayCircles).toHaveLength(0)
-    expect(combined.nodes).toHaveLength(0)
+    expect(combined.wormholeUnknownEntrances).toEqual([{ x: 99, y: 88 }])
   })
 
   it('extrapolates ion storm overlay positions for future turns', () => {
@@ -402,11 +238,72 @@ describe('combineMapData', () => {
     }
 
     const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
-      ...cartographyOptions,
+      liveConnectionsParams: null,
       futureTurnOffset: 2,
     })
 
     expect(combined.overlayCircles[0]).toMatchObject({ layer: 'nebulae', x: 1, y: 2 })
     expect(combined.overlayCircles[1]).toMatchObject({ layer: 'ion-storms', x: 100, y: 250 })
+  })
+})
+
+describe('cartography display filters (render-time)', () => {
+  const uiConfig = {
+    ...DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
+    settingsGates: {
+      ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+      nebulae: true,
+      ionStorms: true,
+      debrisDiskBorders: true,
+      wormholes: true,
+      starClusters: true,
+    },
+    wormholeDisplayMode: 'always' as const,
+    starClusterDisplayMode: defaultStarClusterDisplayMode(),
+    neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
+  }
+
+  it('hides overlay circles when layer visibility is off', () => {
+    const filtered = filterCartographyOverlayCircles(
+      [
+        {
+          layer: 'nebulae',
+          id: 'neb-1',
+          x: 1,
+          y: 2,
+          radius: 10,
+        },
+        {
+          layer: 'ion-storms',
+          id: 'is-1',
+          x: 3,
+          y: 4,
+          radius: 5,
+          voltage: 120,
+          class: 3,
+          heading: 90,
+          warp: 6,
+        },
+      ],
+      {
+        ...uiConfig,
+        layerVisibility: {
+          ...uiConfig.layerVisibility,
+          nebulae: false,
+        },
+      }
+    )
+
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.layer).toBe('ion-storms')
+  })
+
+  it('hides wormhole geometry at render time when display mode is off', () => {
+    expect(
+      areCartographyWormholesShown({
+        ...uiConfig,
+        wormholeDisplayMode: 'off',
+      })
+    ).toBe(false)
   })
 })

@@ -5,7 +5,7 @@ import {
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
 } from '../analytics/mapAnalyticIds'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
-import type { StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
+import type { StellarCartographyMapUiConfig } from '../analytics/mapLayers'
 
 export { BASE_MAP_ANALYTIC_ID, CONNECTIONS_ANALYTIC_ID, STELLAR_CARTOGRAPHY_ANALYTIC_ID }
 
@@ -40,7 +40,7 @@ export const sampleAnalytics: AnalyticItem[] = [
   },
 ]
 
-export const defaultStellarCartography: StellarCartographyMapMergeOptions = {
+export const defaultStellarCartography: StellarCartographyMapUiConfig = {
   layerVisibility: {
     'debris-disks': true,
     nebulae: true,

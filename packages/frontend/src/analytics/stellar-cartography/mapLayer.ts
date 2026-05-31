@@ -5,13 +5,6 @@ import type {
   StellarCartographyOverlayCircle,
   WormholeUnknownEntrance,
 } from '../../api/bff'
-import {
-  isCartographyLayerShown,
-  type CartographyLayerVisibility,
-  type StellarCartographySettingsGates,
-} from './layers'
-import type { ClusterOutlineDisplayMode } from './clusterOutlineDisplayMode'
-import type { WormholeDisplayMode } from './wormholeDisplayMode'
 
 const STELLAR_CARTOGRAPHY_PREFIX = 'stellar-cartography'
 
@@ -21,30 +14,6 @@ export type AppendStellarCartographyMapLayerArgs = {
   edges: MapEdge[]
   overlayCircles: StellarCartographyOverlayCircle[]
   wormholeUnknownEntrances: WormholeUnknownEntrance[]
-  layerVisibility: CartographyLayerVisibility
-  settingsGates: StellarCartographySettingsGates
-  wormholeDisplayMode: WormholeDisplayMode
-  starClusterDisplayMode: ClusterOutlineDisplayMode
-  neutronClusterDisplayMode: ClusterOutlineDisplayMode
-}
-
-function filterOverlayCircles(
-  circles: StellarCartographyOverlayCircle[],
-  layerVisibility: CartographyLayerVisibility,
-  settingsGates: StellarCartographySettingsGates,
-  wormholeDisplayMode: WormholeDisplayMode,
-  starClusterDisplayMode: ClusterOutlineDisplayMode,
-  neutronClusterDisplayMode: ClusterOutlineDisplayMode
-): StellarCartographyOverlayCircle[] {
-  return circles.filter((circle) =>
-    isCartographyLayerShown(circle.layer, {
-      layerVisibility,
-      settingsGates,
-      wormholeDisplayMode,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode,
-    })
-  )
 }
 
 function nodePositionById(nodes: MapDataResponse['nodes']): Map<string, { x: number; y: number }> {
@@ -55,83 +24,59 @@ function nodePositionById(nodes: MapDataResponse['nodes']): Map<string, { x: num
   return positions
 }
 
-/** Merge Stellar Cartography wormhole nodes/edges and filtered overlay circles into the combined map. */
+/** Merge Stellar Cartography wormhole nodes/edges and overlay circles from wire data. */
 export function appendStellarCartographyMapLayer({
   data,
   nodes,
   edges,
   overlayCircles,
   wormholeUnknownEntrances,
-  layerVisibility,
-  settingsGates,
-  wormholeDisplayMode,
-  starClusterDisplayMode,
-  neutronClusterDisplayMode,
 }: AppendStellarCartographyMapLayerArgs): void {
-  const wormholesEnabled = isCartographyLayerShown('wormholes', {
-    layerVisibility,
-    settingsGates,
-    wormholeDisplayMode,
-    starClusterDisplayMode,
-    neutronClusterDisplayMode,
-  })
   const positions = nodePositionById(data.nodes)
   const connectedNodeIds = new Set<string>()
 
-  if (wormholesEnabled) {
-    for (const node of data.nodes) {
-      nodes.push({
-        id: `${STELLAR_CARTOGRAPHY_PREFIX}:${node.id}`,
-        label: '',
-        x: node.x,
-        y: node.y,
-      })
-    }
-
-    for (const rawEdge of data.edges) {
-      connectedNodeIds.add(rawEdge.source)
-      connectedNodeIds.add(rawEdge.target)
-      const sourcePos = positions.get(rawEdge.source)
-      const targetPos = positions.get(rawEdge.target)
-      const edge: MapEdge = {
-        source: `${STELLAR_CARTOGRAPHY_PREFIX}:${rawEdge.source}`,
-        target: `${STELLAR_CARTOGRAPHY_PREFIX}:${rawEdge.target}`,
-        layer: 'wormholes',
-      }
-      if (rawEdge.isBidirectional === true) edge.isBidirectional = true
-      else if (rawEdge.isBidirectional === false) edge.isBidirectional = false
-      if (rawEdge.stability != null) edge.stability = rawEdge.stability
-      if (rawEdge.name != null) edge.name = rawEdge.name
-      if (rawEdge.partnerId != null) edge.partnerId = rawEdge.partnerId
-      if (sourcePos != null) {
-        edge.sourceGameX = sourcePos.x
-        edge.sourceGameY = sourcePos.y
-      }
-      if (targetPos != null) {
-        edge.targetGameX = targetPos.x
-        edge.targetGameY = targetPos.y
-      }
-      if (rawEdge.target.startsWith('wh-exit-')) {
-        edge.wormholeExitOnly = true
-      }
-      edges.push(edge)
-    }
-
-    for (const node of data.nodes) {
-      if (connectedNodeIds.has(node.id)) continue
-      wormholeUnknownEntrances.push({ x: Number(node.x), y: Number(node.y) })
-    }
+  for (const node of data.nodes) {
+    nodes.push({
+      id: `${STELLAR_CARTOGRAPHY_PREFIX}:${node.id}`,
+      label: '',
+      x: node.x,
+      y: node.y,
+    })
   }
 
-  const rawCircles = data.overlayCircles ?? []
-  overlayCircles.push(
-    ...filterOverlayCircles(
-      rawCircles,
-      layerVisibility,
-      settingsGates,
-      wormholeDisplayMode,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode
-    )
-  )
+  for (const rawEdge of data.edges) {
+    connectedNodeIds.add(rawEdge.source)
+    connectedNodeIds.add(rawEdge.target)
+    const sourcePos = positions.get(rawEdge.source)
+    const targetPos = positions.get(rawEdge.target)
+    const edge: MapEdge = {
+      source: `${STELLAR_CARTOGRAPHY_PREFIX}:${rawEdge.source}`,
+      target: `${STELLAR_CARTOGRAPHY_PREFIX}:${rawEdge.target}`,
+      layer: 'wormholes',
+    }
+    if (rawEdge.isBidirectional === true) edge.isBidirectional = true
+    else if (rawEdge.isBidirectional === false) edge.isBidirectional = false
+    if (rawEdge.stability != null) edge.stability = rawEdge.stability
+    if (rawEdge.name != null) edge.name = rawEdge.name
+    if (rawEdge.partnerId != null) edge.partnerId = rawEdge.partnerId
+    if (sourcePos != null) {
+      edge.sourceGameX = sourcePos.x
+      edge.sourceGameY = sourcePos.y
+    }
+    if (targetPos != null) {
+      edge.targetGameX = targetPos.x
+      edge.targetGameY = targetPos.y
+    }
+    if (rawEdge.target.startsWith('wh-exit-')) {
+      edge.wormholeExitOnly = true
+    }
+    edges.push(edge)
+  }
+
+  for (const node of data.nodes) {
+    if (connectedNodeIds.has(node.id)) continue
+    wormholeUnknownEntrances.push({ x: Number(node.x), y: Number(node.y) })
+  }
+
+  overlayCircles.push(...(data.overlayCircles ?? []))
 }

@@ -1,7 +1,12 @@
+import { useMemo } from 'react'
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
+import type { StellarCartographyMapUiConfig } from '../../analytics/mapLayers'
+import {
+  areCartographyWormholesShown,
+  filterCartographyOverlayCircles,
+} from '../../analytics/stellar-cartography/overlayDisplayFilter'
 import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
-import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
@@ -37,6 +42,7 @@ export function collectWormholeEndpoints(
 export function StellarCartographyOverlayPane({
   overlayCircles,
   wormholeEndpoints,
+  cartographyConfig,
   wormholeEndpointHoverByCell,
   wormholeRecenterPulseTarget,
   blockedByPlanetHover,
@@ -44,32 +50,38 @@ export function StellarCartographyOverlayPane({
 }: {
   overlayCircles: CombinedMapData['overlayCircles']
   wormholeEndpoints: { x: number; y: number }[]
+  cartographyConfig: StellarCartographyMapUiConfig
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
   wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
   blockedByPlanetHover: boolean
   nuIonStorms?: boolean
 }) {
-  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
-  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
-    (s) => s.neutronClusterDisplayMode
-  )
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
 
+  const visibleOverlayCircles = useMemo(
+    () => filterCartographyOverlayCircles(overlayCircles, cartographyConfig),
+    [overlayCircles, cartographyConfig]
+  )
+  const visibleWormholeEndpoints = useMemo(
+    () => (areCartographyWormholesShown(cartographyConfig) ? wormholeEndpoints : []),
+    [cartographyConfig, wormholeEndpoints]
+  )
+
   if (!transform || width <= 0 || height <= 0) return null
-  if (overlayCircles.length === 0 && wormholeEndpoints.length === 0) return null
+  if (visibleOverlayCircles.length === 0 && visibleWormholeEndpoints.length === 0) return null
 
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
   const shapes = buildStellarCartographyOverlayPaneShapes(
-    overlayCircles,
-    wormholeEndpoints,
+    visibleOverlayCircles,
+    visibleWormholeEndpoints,
     { width, height, tx, ty, scale },
     {
       cloudyIonStorms: nuIonStorms ?? true,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode,
+      starClusterDisplayMode: cartographyConfig.starClusterDisplayMode,
+      neutronClusterDisplayMode: cartographyConfig.neutronClusterDisplayMode,
     }
   )
 

@@ -2,10 +2,8 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import {
   defaultConnectionsParams,
-  defaultStellarCartography,
   sampleAnalytics,
   sampleScope,
 } from './mapAnalyticQueryTestFixtures'
@@ -50,7 +48,6 @@ function defaultHookInput(
     analyticFetchEnabled: true,
     connectionsMapParams: defaultConnectionsParams,
     futureTurnOffset: 0,
-    stellarCartography: defaultStellarCartography,
     ...overrides,
   }
 }
@@ -173,14 +170,6 @@ describe('useMapAnalyticQueries', () => {
     rerender(
       defaultHookInput({
         enabledAnalyticIds: ['connections', 'stellar-cartography'],
-        stellarCartography: {
-          ...defaultStellarCartography,
-          wormholeDisplayMode: 'always',
-          settingsGates: {
-            ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-            wormholes: true,
-          },
-        },
       })
     )
 
@@ -197,28 +186,6 @@ describe('useMapAnalyticQueries', () => {
       'connections',
       'stellar-cartography',
     ])
-  })
-
-  it('omits stellarCartography from merge options when not supplied', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(combineMapData).mockClear()
-
-    renderHook(
-      () =>
-        useMapAnalyticQueries(
-          defaultHookInput({
-            stellarCartography: null,
-          })
-        ),
-      { wrapper: createWrapper(client) }
-    )
-
-    await waitFor(() => {
-      expect(combineMapData).toHaveBeenCalled()
-    })
-    expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[2]).not.toHaveProperty(
-      'stellarCartography'
-    )
   })
 
   it('passes null liveConnectionsParams when fetch is disabled', async () => {
@@ -240,79 +207,6 @@ describe('useMapAnalyticQueries', () => {
     })
     expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[2]).toMatchObject({
       liveConnectionsParams: null,
-      stellarCartography: defaultStellarCartography,
-    })
-  })
-
-  it('recombines when stellar cartography visibility changes', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {
-      if (analyticId === 'base-map') {
-        return { analyticId: 'base-map', nodes: [], edges: [] }
-      }
-      if (analyticId === 'connections') {
-        return { analyticId: 'connections', nodes: [], edges: [], routes: [] }
-      }
-      if (analyticId === 'stellar-cartography') {
-        return {
-          analyticId: 'stellar-cartography',
-          nodes: [],
-          edges: [],
-          overlayCircles: [
-            {
-              layer: 'nebulae',
-              id: 'neb-1',
-              x: 1,
-              y: 2,
-              radius: 3,
-            },
-          ],
-        }
-      }
-      throw new Error(`unexpected analytic ${analyticId}`)
-    })
-    vi.mocked(combineMapData).mockClear()
-
-    const { result, rerender } = renderHook(
-      (input: UseMapAnalyticQueriesInput) => useMapAnalyticQueries(input),
-      {
-        wrapper: createWrapper(client),
-        initialProps: defaultHookInput({
-          enabledAnalyticIds: ['connections', 'stellar-cartography'],
-          stellarCartography: {
-            ...defaultStellarCartography,
-            settingsGates: {
-              ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-              nebulae: true,
-            },
-          },
-        }),
-      }
-    )
-
-    await waitFor(() => {
-      expect(result.current.combined.overlayCircles.length).toBeGreaterThan(0)
-    })
-
-    rerender(
-      defaultHookInput({
-        enabledAnalyticIds: ['connections', 'stellar-cartography'],
-        stellarCartography: {
-          ...defaultStellarCartography,
-          layerVisibility: {
-            ...defaultStellarCartography.layerVisibility,
-            nebulae: false,
-          },
-          settingsGates: {
-            ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-            nebulae: true,
-          },
-        },
-      })
-    )
-
-    await waitFor(() => {
-      expect(result.current.combined.overlayCircles).toHaveLength(0)
     })
   })
 
@@ -389,13 +283,6 @@ describe('useMapAnalyticQueries', () => {
         initialProps: defaultHookInput({
           enabledAnalyticIds: ['connections', 'stellar-cartography'],
           futureTurnOffset: 0,
-          stellarCartography: {
-            ...defaultStellarCartography,
-            settingsGates: {
-              ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-              ionStorms: true,
-            },
-          },
         }),
       }
     )
@@ -409,13 +296,6 @@ describe('useMapAnalyticQueries', () => {
       defaultHookInput({
         enabledAnalyticIds: ['connections', 'stellar-cartography'],
         futureTurnOffset: 2,
-        stellarCartography: {
-          ...defaultStellarCartography,
-          settingsGates: {
-            ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-            ionStorms: true,
-          },
-        },
       })
     )
 
