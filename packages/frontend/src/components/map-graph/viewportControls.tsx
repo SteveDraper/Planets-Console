@@ -11,13 +11,7 @@ import {
   CELL_CENTER_OFFSET,
   gameMapYToFlowCenterY,
 } from './geometry'
-
-function keyboardTargetBlocksMapZoom(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
-  return target.isContentEditable
-}
+import { isModalDialogOpen, keyboardTargetBlocksShortcut } from '../../lib/keyboardShortcuts'
 
 function isMapZoomInKey(e: KeyboardEvent): boolean {
   return e.key === '+' || e.key === '=' || e.code === 'NumpadAdd'
@@ -263,8 +257,8 @@ export function MapZoomKeyboardShortcuts({
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const direction = zoomDirectionForKey(e)
       if (direction == null) return
-      if (keyboardTargetBlocksMapZoom(e.target)) return
-      if (document.querySelector('[aria-modal="true"]')) return
+      if (keyboardTargetBlocksShortcut(e.target)) return
+      if (isModalDialogOpen()) return
       e.preventDefault()
       if (e.repeat) return
       startHold(direction)

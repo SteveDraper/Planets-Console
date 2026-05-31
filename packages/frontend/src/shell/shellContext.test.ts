@@ -3,12 +3,15 @@ import type { GameInfoShellContext } from '../stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import {
   deriveAnalyticScope,
+  deriveFutureTurnOffset,
   deriveSelectedViewpointName,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
   deriveTurnDataReady,
+  deriveTurnDataTurn,
   deriveTurnEnsureEnabled,
+  isFutureTurn,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
   type ShellContextInputs,
@@ -48,6 +51,15 @@ describe('deriveShellTurnMax', () => {
   it('uses latest turn from game info context', () => {
     const ctx = shellContext({ turn: 50, isGameFinished: false, sectorDisplayName: null })
     expect(deriveShellTurnMax(ctx)).toBe(50)
+  })
+})
+
+describe('future turn helpers', () => {
+  it('uses latest stored turn for data when viewing the future', () => {
+    expect(deriveTurnDataTurn(12, 10)).toBe(10)
+    expect(deriveFutureTurnOffset(12, 10)).toBe(2)
+    expect(isFutureTurn(12, 10)).toBe(true)
+    expect(isFutureTurn(10, 10)).toBe(false)
   })
 })
 
@@ -226,6 +238,14 @@ describe('deriveAnalyticScope', () => {
       gameId: '628580',
       turn: 5,
       perspective: 2,
+    })
+  })
+
+  it('loads latest stored turn data when selected turn is in the future', () => {
+    expect(deriveAnalyticScope(baseInputs({ selectedTurn: 12 }))).toEqual({
+      gameId: '628580',
+      turn: 10,
+      perspective: 1,
     })
   })
 

@@ -356,4 +356,39 @@ describe('combineMapData', () => {
       combineMapData(['stellar-cartography'], [{ data: sc }], { liveConnectionsParams: null })
     ).toThrow('Stellar Cartography map merge requires stellarCartography options')
   })
+
+  it('extrapolates ion storm overlay positions for future turns', () => {
+    const sc: MapDataResponse = {
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      overlayCircles: [
+        {
+          layer: 'nebulae',
+          id: 'neb-1',
+          x: 1,
+          y: 2,
+          radius: 10,
+        },
+        {
+          layer: 'ion-storms',
+          id: 'is-1',
+          x: 100,
+          y: 200,
+          radius: 30,
+          class: 2,
+          heading: 0,
+          warp: 5,
+        },
+      ],
+    }
+
+    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
+      ...cartographyOptions,
+      futureTurnOffset: 2,
+    })
+
+    expect(combined.overlayCircles[0]).toMatchObject({ layer: 'nebulae', x: 1, y: 2 })
+    expect(combined.overlayCircles[1]).toMatchObject({ layer: 'ion-storms', x: 100, y: 250 })
+  })
 })

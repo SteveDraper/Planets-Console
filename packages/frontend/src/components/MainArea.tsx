@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
+  CombinedMapData,
   ConnectionsFlareMode,
   ConnectionsMapParams,
   MapDataResponse,
@@ -19,6 +20,10 @@ import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
+import {
+  hasDisplayableMapData,
+  shouldRetainMapDuringLoad,
+} from '../lib/mapDisplayRetention'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -38,6 +43,8 @@ type MainAreaProps = {
   turnBlockedNoLogin: boolean
   /** Parameters for the Connections map analytic (refetch when these change). */
   connectionsMapParams: ConnectionsMapParams
+  /** Turns beyond latest stored game turn for ion storm prediction. */
+  futureTurnOffset: number
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
@@ -136,6 +143,7 @@ export function MainArea({
   turnEnsureError,
   turnBlockedNoLogin,
   connectionsMapParams,
+  futureTurnOffset,
   onMapZoomChange,
   onSetZoomReady,
 }: MainAreaProps) {
@@ -216,7 +224,7 @@ export function MainArea({
             return fetchAnalyticMap('connections', scope, params)
           },
           enabled: analyticFetchEnabled,
-          placeholderData: undefined,
+          placeholderData: keepPreviousData,
           structuralSharing: false as const,
         }
       }
@@ -224,6 +232,7 @@ export function MainArea({
         queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
         queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
         enabled: analyticFetchEnabled,
+        placeholderData: keepPreviousData,
         structuralSharing: false as const,
       }
     }),
@@ -245,6 +254,7 @@ export function MainArea({
         includesStellarCartography
           ? {
               liveConnectionsParams,
+              futureTurnOffset,
               stellarCartography: {
                 layerVisibility: cartographyLayerVisibility,
                 settingsGates: cartographySettingsGates,
@@ -253,7 +263,7 @@ export function MainArea({
                 neutronClusterDisplayMode,
               },
             }
-          : { liveConnectionsParams }
+          : { liveConnectionsParams, futureTurnOffset }
       ),
     [
       mapIdsKey,
@@ -265,6 +275,7 @@ export function MainArea({
       connectionsMapParams.warpSpeed,
       connectionsMapParams.gravitonicMovement,
       connectionsMapParams.flareDepth,
+      futureTurnOffset,
       cartographyLayerVisibility,
       cartographySettingsGates,
       wormholeDisplayMode,
@@ -273,6 +284,29 @@ export function MainArea({
     ]
   )
   const hasAnyData = mapQueries.some((q) => q.data != null)
+
+  const retainedMapDataRef = useRef<CombinedMapData | null>(null)
+  const retainedMapGameIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const gameId = analyticScope?.gameId ?? null
+    if (gameId !== retainedMapGameIdRef.current) {
+      retainedMapDataRef.current = null
+      retainedMapGameIdRef.current = gameId
+    }
+  }, [analyticScope?.gameId])
+  useEffect(() => {
+    if (hasDisplayableMapData(combined)) {
+      retainedMapDataRef.current = combined
+    }
+  }, [combined])
+
+  const retainMapDuringLoad = shouldRetainMapDuringLoad(
+    viewMode,
+    retainedMapDataRef.current
+  )
+  const displayMapData = hasDisplayableMapData(combined)
+    ? combined
+    : retainedMapDataRef.current
 
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
     DEFAULT_PLANET_LABEL_OPTIONS
@@ -294,7 +328,7 @@ export function MainArea({
     )
   }
 
-  if (analyticScope != null && !turnDataReady && turnEnsurePending) {
+  if (analyticScope != null && !turnDataReady && turnEnsurePending && !retainMapDuringLoad) {
     return (
       <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading turn data…
@@ -359,16 +393,16 @@ export function MainArea({
       </main>
     )
   }
-  // Only show loading when we have no data yet (initial load). While adding another analytic,
-  // keep rendering the map with current data so React Flow stays mounted and viewport is preserved.
-  if (!hasAnyData && pending) {
+  // Only show loading when we have no data yet (initial load). While fetching another turn,
+  // keep rendering the map so React Flow stays mounted and viewport is preserved.
+  if (!hasAnyData && pending && !retainMapDuringLoad) {
     return (
       <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
         Loading map…
       </main>
     )
   }
-  if (hasError && !hasAnyData) {
+  if (hasError && !hasAnyData && !retainMapDuringLoad) {
     const firstErr = mapQueries.find((q) => q.error)?.error
     const detail =
       firstErr instanceof Error
@@ -386,16 +420,23 @@ export function MainArea({
     )
   }
 
+  if (displayMapData == null) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        Loading map…
+      </main>
+    )
+  }
+
   return (
-    <main className="flex min-h-0 flex-1 flex-col bg-black">
-      <DeferredPendingMessage pending={pending} />
+    <main className="relative flex min-h-0 flex-1 flex-col bg-black">
       <MapPaneWithDisplayControls
         controls={
           <PlanetMapInfoControls value={planetLabelOptions} onChange={setPlanetLabelOptions} />
         }
       >
         <MapGraph
-          data={combined}
+          data={displayMapData}
           className="h-full w-full min-h-0"
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
@@ -411,11 +452,12 @@ export function MainArea({
           }}
         />
       </MapPaneWithDisplayControls>
+      <DeferredPendingMessage pending={pending && !retainMapDuringLoad} />
     </main>
   )
 }
 
-/** Shows "Loading additional map data…" only after a short delay so it doesn't flash on first map load. */
+/** Shows "Loading additional map data…" after a short delay. Overlays the map so the pane size never changes. */
 function DeferredPendingMessage({ pending }: { pending: boolean }) {
   const [show, setShow] = useState(false)
   useEffect(() => {
@@ -436,7 +478,7 @@ function DeferredPendingMessage({ pending }: { pending: boolean }) {
   }, [pending])
   if (!pending || !show) return null
   return (
-    <p className="shrink-0 bg-black px-4 py-1 text-sm text-gray-400">
+    <p className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-sm text-gray-400">
       Loading additional map data…
     </p>
   )

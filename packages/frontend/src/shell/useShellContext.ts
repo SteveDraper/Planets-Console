@@ -14,12 +14,15 @@ import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
 import {
   deriveAnalyticScope,
+  deriveFutureTurnOffset,
   deriveSelectedViewpointName,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
   deriveTurnDataReady,
+  deriveTurnDataTurn,
   deriveTurnEnsureEnabled,
+  isFutureTurn,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
   type ShellViewpointRow,
@@ -42,7 +45,10 @@ export type ShellContext = {
   onViewpointChange: (name: string) => void
   shellTurnMax: number | null
   selectedTurn: number | null
+  isFutureTurn: boolean
+  futureTurnOffset: number
   onTurnChange: (turn: number) => void
+  onTurnStep: (delta: number) => void
 }
 
 export function useShellContext({ reportShellError }: UseShellContextOptions): ShellContext {
@@ -81,15 +87,29 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
   )
 
   useEffect(() => {
-    const cap = deriveShellTurnMax(gameInfoContext)
-    if (cap != null && selectedTurn != null && selectedTurn > cap) {
-      setSelectedTurn(cap)
+    if (selectedTurn != null && selectedTurn < 1) {
+      setSelectedTurn(1)
     }
-  }, [gameInfoContext, selectedTurn, setSelectedTurn])
+  }, [selectedTurn, setSelectedTurn])
 
   const shellTurnMax = useMemo(
     () => deriveShellTurnMax(gameInfoContext),
     [gameInfoContext]
+  )
+
+  const futureTurnOffset = useMemo(
+    () => deriveFutureTurnOffset(selectedTurn, shellTurnMax),
+    [selectedTurn, shellTurnMax]
+  )
+
+  const futureTurnActive = useMemo(
+    () => isFutureTurn(selectedTurn, shellTurnMax),
+    [selectedTurn, shellTurnMax]
+  )
+
+  const dataTurn = useMemo(
+    () => deriveTurnDataTurn(selectedTurn, shellTurnMax),
+    [selectedTurn, shellTurnMax]
   )
 
   const shellViewpoints = useMemo(() => deriveShellViewpoints(shellInputs), [shellInputs])
@@ -140,10 +160,21 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
   const onTurnChange = useCallback(
     (n: number) => {
       if (shellTurnMax == null) return
-      const clamped = Math.min(Math.max(1, Math.round(n)), shellTurnMax)
-      setSelectedTurn(clamped)
+      setSelectedTurn(Math.max(1, Math.round(n)))
     },
     [shellTurnMax, setSelectedTurn]
+  )
+
+  const onTurnStep = useCallback(
+    (delta: number) => {
+      if (shellTurnMax == null || selectedTurn == null) return
+      if (delta < 0) {
+        setSelectedTurn(Math.max(1, selectedTurn + delta))
+        return
+      }
+      setSelectedTurn(selectedTurn + delta)
+    },
+    [shellTurnMax, selectedTurn, setSelectedTurn]
   )
 
   const analyticScope = useMemo(() => deriveAnalyticScope(shellInputs), [shellInputs])
@@ -202,18 +233,18 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
 
   const storageTurnResyncSeen = useRef<{ gameId: string; turn: number } | null>(null)
   useEffect(() => {
-    if (!storageOnlyLoad || loginTrimmed || !selectedGameId || selectedTurn == null) {
+    if (!storageOnlyLoad || loginTrimmed || !selectedGameId || dataTurn == null) {
       storageTurnResyncSeen.current = null
       return
     }
     const seen = storageTurnResyncSeen.current
-    if (seen?.gameId === selectedGameId && seen.turn === selectedTurn) {
+    if (seen?.gameId === selectedGameId && seen.turn === dataTurn) {
       return
     }
 
     let cancelled = false
-    const resyncKey = { gameId: selectedGameId, turn: selectedTurn }
-    void fetchStoredTurnPerspectives(selectedGameId, selectedTurn)
+    const resyncKey = { gameId: selectedGameId, turn: dataTurn }
+    void fetchStoredTurnPerspectives(selectedGameId, dataTurn)
       .then(({ perspectives }) => {
         if (cancelled) return
         if (perspectives.length === 0) {
@@ -252,7 +283,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     storageOnlyLoad,
     loginTrimmed,
     selectedGameId,
-    selectedTurn,
+    dataTurn,
     setStorageAvailablePerspectives,
     setPerspectiveOverrideName,
     reportShellError,
@@ -274,6 +305,9 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     onViewpointChange,
     shellTurnMax,
     selectedTurn,
+    isFutureTurn: futureTurnActive,
+    futureTurnOffset,
     onTurnChange,
+    onTurnStep,
   }
 }

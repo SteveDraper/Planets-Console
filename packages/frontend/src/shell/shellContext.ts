@@ -34,6 +34,31 @@ export function deriveShellTurnMax(
   return selectableTurnMaxForShell(gameInfoContext.turn)
 }
 
+/** Turn whose stored data is loaded (latest game turn when viewing the future). */
+export function deriveTurnDataTurn(
+  selectedTurn: number | null,
+  shellTurnMax: number | null
+): number | null {
+  if (selectedTurn == null) return null
+  if (shellTurnMax == null) return selectedTurn
+  return Math.min(selectedTurn, shellTurnMax)
+}
+
+export function deriveFutureTurnOffset(
+  selectedTurn: number | null,
+  shellTurnMax: number | null
+): number {
+  if (selectedTurn == null || shellTurnMax == null) return 0
+  return Math.max(0, selectedTurn - shellTurnMax)
+}
+
+export function isFutureTurn(
+  selectedTurn: number | null,
+  shellTurnMax: number | null
+): boolean {
+  return deriveFutureTurnOffset(selectedTurn, shellTurnMax) > 0
+}
+
 export function deriveShellDefaultViewpointName(
   gameInfoContext: GameInfoShellContext | null,
   loginName: string | null
@@ -156,9 +181,11 @@ export function deriveAnalyticScope(inputs: ShellContextInputs): AnalyticShellSc
   const selectedViewpointName = deriveSelectedViewpointName(inputs)
   const ordinal = perspectiveOrdinalForName(perspectives, selectedViewpointName)
   if (ordinal == null) return null
+  const dataTurn = deriveTurnDataTurn(inputs.selectedTurn, deriveShellTurnMax(inputs.gameInfoContext))
+  if (dataTurn == null) return null
   return {
     gameId: inputs.selectedGameId,
-    turn: inputs.selectedTurn,
+    turn: dataTurn,
     perspective: ordinal,
   }
 }

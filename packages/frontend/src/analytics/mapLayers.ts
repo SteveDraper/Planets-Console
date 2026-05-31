@@ -7,6 +7,7 @@ import type { WormholeDisplayMode } from './stellar-cartography/wormholeDisplayM
 import type { ClusterOutlineDisplayMode } from './stellar-cartography/clusterOutlineDisplayMode'
 import { appendStellarCartographyMapLayer } from './stellar-cartography/mapLayer'
 import { appendConnectionsMapLayer, routeWaypointsFromMap } from './connections/mapLayer'
+import { applyFutureIonStormOverlayPositions } from '../lib/futureTurnIonStorms'
 
 export type StellarCartographyMapMergeOptions = {
   layerVisibility: CartographyLayerVisibility
@@ -19,6 +20,8 @@ export type StellarCartographyMapMergeOptions = {
 export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
+  /** Extrapolate ion storm positions forward from the latest stored turn. */
+  futureTurnOffset?: number
   stellarCartography?: StellarCartographyMapMergeOptions
 }
 
@@ -160,11 +163,16 @@ export function combineMapData(
     if (!data) return
     mapLayerMergerFor(data.analyticId)(data, context, options, prefix)
   })
+  const futureTurnOffset = options.futureTurnOffset ?? 0
+  const overlayCirclesWithFuture =
+    futureTurnOffset > 0
+      ? applyFutureIonStormOverlayPositions(context.overlayCircles, futureTurnOffset)
+      : context.overlayCircles
   return {
     nodes,
     edges,
     routeWaypoints: routeWaypointsFromMap(context.waypointsByKey),
-    overlayCircles,
+    overlayCircles: overlayCirclesWithFuture,
     wormholeUnknownEntrances,
     nuIonStorms: context.nuIonStorms,
   }

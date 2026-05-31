@@ -26,6 +26,7 @@ function renderHeader() {
         reportShellError={() => {}}
         shellTurnMax={null}
         shellTurnValue={null}
+        isFutureTurn={false}
         onShellTurnChange={() => {}}
         shellViewpoints={[]}
         shellSelectedViewpointName={null}
@@ -107,6 +108,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
+          isFutureTurn={false}
           onShellTurnChange={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
@@ -138,6 +140,7 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
+          isFutureTurn={false}
           onShellTurnChange={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
@@ -152,10 +155,11 @@ describe('Header', () => {
     expect(screen.getByRole('option', { name: 'Beta' })).toBeDisabled()
   })
 
-  it('turn stepper clamps to 1 and max turn', async () => {
+  it('turn stepper stops at 1 and can advance past latest turn', async () => {
     const user = userEvent.setup()
     function Wrapper() {
       const [t, setT] = useState(2)
+      const max = 3
       return (
         <QueryClientProvider client={headerQueryClient}>
           <Header
@@ -167,8 +171,9 @@ describe('Header', () => {
             onCommitGameSelection={() => {}}
             isGameRefreshPending={false}
             reportShellError={() => {}}
-            shellTurnMax={3}
+            shellTurnMax={max}
             shellTurnValue={t}
+            isFutureTurn={t > max}
             onShellTurnChange={setT}
             shellViewpoints={[]}
             shellSelectedViewpointName={null}
@@ -189,7 +194,10 @@ describe('Header', () => {
     expect(input).toHaveValue(2)
     await user.click(inc)
     expect(input).toHaveValue(3)
-    expect(inc).toBeDisabled()
+    await user.click(inc)
+    expect(screen.queryByLabelText(/^turn number$/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/turn number 4 \(future\)/i)).toHaveTextContent('4 (future)')
+    expect(inc).not.toBeDisabled()
   })
 
   it('prefills name from localStorage when opening login modal', async () => {

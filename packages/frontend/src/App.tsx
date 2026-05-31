@@ -30,6 +30,7 @@ import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
 import { useShellContext } from './shell'
+import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 
 const queryClient = new QueryClient({
@@ -84,7 +85,10 @@ function ConsoleShell() {
     onViewpointChange: handleShellViewpointChange,
     shellTurnMax,
     selectedTurn,
+    isFutureTurn,
+    futureTurnOffset,
     onTurnChange: handleShellTurnChange,
+    onTurnStep: handleShellTurnStep,
   } = useShellContext({ reportShellError: addShellError })
 
   const refreshGameMutation = useMutation({
@@ -293,6 +297,10 @@ function ConsoleShell() {
 
   return (
     <div className="flex h-screen flex-col bg-black">
+      <TurnKeyboardShortcuts
+        enabled={shellTurnMax != null && selectedTurn != null}
+        onTurnStep={handleShellTurnStep}
+      />
       <Header
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -304,6 +312,7 @@ function ConsoleShell() {
         reportShellError={addShellError}
         shellTurnMax={shellTurnMax}
         shellTurnValue={selectedTurn}
+        isFutureTurn={isFutureTurn}
         onShellTurnChange={handleShellTurnChange}
         shellViewpoints={shellViewpoints}
         shellSelectedViewpointName={shellSelectedViewpointName}
@@ -337,6 +346,7 @@ function ConsoleShell() {
             turnEnsureError={turnEnsureError}
             turnBlockedNoLogin={turnBlockedNoLogin}
             connectionsMapParams={connectionsMapParams}
+            futureTurnOffset={futureTurnOffset}
             onMapZoomChange={handleMapZoomChange}
             onSetZoomReady={handleSetZoomReady}
           />
