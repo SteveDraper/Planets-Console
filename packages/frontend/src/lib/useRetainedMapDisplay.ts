@@ -1,10 +1,10 @@
 import { useLayoutEffect, useRef } from 'react'
 import type { CombinedMapData } from '../api/bff'
 import {
-  deriveMapShellPhase,
+  deriveMapShellView,
   hasDisplayableMapData,
   shouldRetainMapDuringLoad,
-  type MapShellPhase,
+  type MapShellView,
 } from './mapDisplayRetention'
 
 export type MapDisplayRetentionKey = {
@@ -27,7 +27,7 @@ export type UseRetainedMapDisplayInput = {
 export type UseRetainedMapDisplayResult = {
   displayMapData: CombinedMapData | null
   retainDuringLoad: boolean
-  mapShellPhase: MapShellPhase
+  mapShellView: MapShellView
 }
 
 function mapDisplayRetentionKey(
@@ -93,10 +93,12 @@ export function useRetainedMapDisplay({
     viewMode,
     showingLiveCombined ? null : retainedForCurrentKey
   )
-  const mapShellPhase = deriveMapShellPhase({
+  const hasAnalyticScope = gameId != null && perspective != null
+  const mapShellView = deriveMapShellView({
     viewMode,
     displayMapData,
     retainDuringLoad,
+    hasAnalyticScope,
     turnDataReady,
     turnEnsurePending,
     mapPending,
@@ -104,5 +106,5 @@ export function useRetainedMapDisplay({
     mapHasAnyData,
   })
 
-  return { displayMapData, retainDuringLoad, mapShellPhase }
+  return { displayMapData, retainDuringLoad, mapShellView }
 }

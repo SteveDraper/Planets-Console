@@ -2,15 +2,31 @@ import type { CombinedMapData } from '../api/bff'
 
 export type MapShellPhase = 'full-loading' | 'retained' | 'ready' | 'error'
 
-export type DeriveMapShellPhaseInput = {
+export const MAP_SHELL_TURN_LOADING_MESSAGE = 'Loading turn data…'
+export const MAP_SHELL_MAP_LOADING_MESSAGE = 'Loading map…'
+
+export type MapShellView =
+  | { phase: 'inactive' }
+  | { phase: 'full-loading'; loadingMessage: string }
+  | { phase: 'retained'; displayMapData: CombinedMapData }
+  | { phase: 'ready'; displayMapData: CombinedMapData }
+  | { phase: 'error' }
+
+export type DeriveMapShellViewInput = {
   viewMode: 'tabular' | 'map'
   displayMapData: CombinedMapData | null
   retainDuringLoad: boolean
+  hasAnalyticScope: boolean
   turnDataReady: boolean
   turnEnsurePending: boolean
   mapPending: boolean
   mapHasError: boolean
   mapHasAnyData: boolean
+}
+
+/** @deprecated Prefer DeriveMapShellViewInput */
+export type DeriveMapShellPhaseInput = Omit<DeriveMapShellViewInput, 'hasAnalyticScope'> & {
+  hasAnalyticScope?: boolean
 }
 
 /** Pure retention predicates; cross-turn ref retention lives in useRetainedMapDisplay. */
@@ -27,36 +43,49 @@ export function shouldRetainMapDuringLoad(
   return viewMode === 'map' && hasDisplayableMapData(retainedMapData)
 }
 
-/** Single map-shell phase for MainArea loading, retention, and error UI. */
-export function deriveMapShellPhase({
+/** Unified map-shell view for MainArea loading, retention, and error UI. */
+export function deriveMapShellView({
   viewMode,
   displayMapData,
   retainDuringLoad,
+  hasAnalyticScope,
   turnDataReady,
   turnEnsurePending,
   mapPending,
   mapHasError,
   mapHasAnyData,
-}: DeriveMapShellPhaseInput): MapShellPhase {
-  if (retainDuringLoad) {
-    return 'retained'
+}: DeriveMapShellViewInput): MapShellView {
+  if (retainDuringLoad && displayMapData != null) {
+    return { phase: 'retained', displayMapData }
   }
 
-  if (!turnDataReady && turnEnsurePending) {
-    return 'full-loading'
+  if (hasAnalyticScope && !turnDataReady && turnEnsurePending) {
+    return { phase: 'full-loading', loadingMessage: MAP_SHELL_TURN_LOADING_MESSAGE }
   }
 
   if (viewMode !== 'map') {
-    return displayMapData != null ? 'ready' : 'full-loading'
+    return { phase: 'inactive' }
   }
 
   if (mapHasError && !mapHasAnyData) {
-    return 'error'
+    return { phase: 'error' }
   }
 
   if (displayMapData == null || (!mapHasAnyData && mapPending)) {
-    return 'full-loading'
+    return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
   }
 
-  return 'ready'
+  return { phase: 'ready', displayMapData }
+}
+
+/** Single map-shell phase; use deriveMapShellView when loading copy or displayMapData guarantees matter. */
+export function deriveMapShellPhase(input: DeriveMapShellPhaseInput): MapShellPhase {
+  const view = deriveMapShellView({
+    ...input,
+    hasAnalyticScope: input.hasAnalyticScope ?? true,
+  })
+  if (view.phase === 'inactive') {
+    return input.displayMapData != null ? 'ready' : 'full-loading'
+  }
+  return view.phase
 }

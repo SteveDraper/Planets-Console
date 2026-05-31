@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { CombinedMapData } from '../api/bff'
+import { MAP_SHELL_MAP_LOADING_MESSAGE } from './mapDisplayRetention'
 import { useRetainedMapDisplay } from './useRetainedMapDisplay'
 
 const sampleMap: CombinedMapData = {
@@ -48,7 +49,10 @@ describe('useRetainedMapDisplay', () => {
     )
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(false)
-    expect(result.current.mapShellPhase).toBe('ready')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'ready',
+      displayMapData: sampleMap,
+    })
   })
 
   it('reports full-loading on initial map load with no retained frame', () => {
@@ -62,7 +66,10 @@ describe('useRetainedMapDisplay', () => {
     )
     expect(result.current.displayMapData).toBeNull()
     expect(result.current.retainDuringLoad).toBe(false)
-    expect(result.current.mapShellPhase).toBe('full-loading')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'full-loading',
+      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
+    })
   })
 
   it('retains prior map across empty combined within the same game and perspective', () => {
@@ -110,7 +117,10 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(true)
-    expect(result.current.mapShellPhase).toBe('retained')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'retained',
+      displayMapData: sampleMap,
+    })
   })
 
   it('retains across turn step when game and perspective are unchanged', () => {
@@ -157,7 +167,10 @@ describe('useRetainedMapDisplay', () => {
     })
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(true)
-    expect(result.current.mapShellPhase).toBe('retained')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'retained',
+      displayMapData: sampleMap,
+    })
 
     rerender({
       combined: turnTwoMap,
@@ -167,7 +180,10 @@ describe('useRetainedMapDisplay', () => {
     })
     expect(result.current.displayMapData).toBe(turnTwoMap)
     expect(result.current.retainDuringLoad).toBe(false)
-    expect(result.current.mapShellPhase).toBe('ready')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'ready',
+      displayMapData: turnTwoMap,
+    })
   })
 
   it('retains only within the current game and perspective key', () => {
@@ -257,7 +273,10 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBeNull()
     expect(result.current.retainDuringLoad).toBe(false)
-    expect(result.current.mapShellPhase).toBe('full-loading')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'full-loading',
+      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
+    })
   })
 
   it('clears retention after perspective changes', () => {
@@ -285,7 +304,10 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBeNull()
     expect(result.current.retainDuringLoad).toBe(false)
-    expect(result.current.mapShellPhase).toBe('full-loading')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'full-loading',
+      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
+    })
   })
 
   it('does not retain during load in tabular mode', () => {
@@ -319,7 +341,7 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(false)
-    expect(result.current.mapShellPhase).toBe('ready')
+    expect(result.current.mapShellView).toEqual({ phase: 'inactive' })
   })
 
   it('keeps phase retained (not full-loading) when turn ensure fails after a prior frame', () => {
@@ -370,7 +392,10 @@ describe('useRetainedMapDisplay', () => {
 
     expect(result.current.displayMapData).toBe(sampleMap)
     expect(result.current.retainDuringLoad).toBe(true)
-    expect(result.current.mapShellPhase).toBe('retained')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'retained',
+      displayMapData: sampleMap,
+    })
   })
 
   it('keeps retained map visible while turn ensure runs in map mode', () => {
@@ -418,6 +443,9 @@ describe('useRetainedMapDisplay', () => {
     })
 
     expect(result.current.displayMapData).toBe(sampleMap)
-    expect(result.current.mapShellPhase).toBe('retained')
+    expect(result.current.mapShellView).toEqual({
+      phase: 'retained',
+      displayMapData: sampleMap,
+    })
   })
 })

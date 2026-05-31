@@ -4,7 +4,6 @@ import { fetchAnalyticTable } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
-  CombinedMapData,
   ConnectionsMapParams,
 } from '../api/bff'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
@@ -17,7 +16,10 @@ import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
-import type { MapShellPhase } from '../lib/mapDisplayRetention'
+import {
+  MAP_SHELL_TURN_LOADING_MESSAGE,
+  type MapShellView,
+} from '../lib/mapDisplayRetention'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 
@@ -156,7 +158,7 @@ export function MainArea({
     },
   })
 
-  const { displayMapData, mapShellPhase } = useRetainedMapDisplay({
+  const { mapShellView } = useRetainedMapDisplay({
     combined,
     gameId: analyticScope?.gameId ?? null,
     perspective: analyticScope?.perspective ?? null,
@@ -188,13 +190,25 @@ export function MainArea({
     )
   }
 
-  const turnLoadingMessage = turnEnsureLoadingMessage(
-    analyticScope,
-    turnDataReady,
-    turnEnsurePending
-  )
-  if (mapShellPhase === 'full-loading' && turnLoadingMessage != null) {
-    return mapShellCenterMain(turnLoadingMessage)
+  if (
+    mapShellView.phase === 'full-loading' &&
+    mapShellView.loadingMessage === MAP_SHELL_TURN_LOADING_MESSAGE
+  ) {
+    return renderMapShellView(mapShellView, {
+      mapQueries,
+      planetLabelOptions,
+      setPlanetLabelOptions,
+      onMapZoomChange,
+      onSetZoomReady,
+      pending,
+      cartographyLayerVisibility,
+      cartographySettingsGates,
+      wormholeDisplayMode,
+      starClusterDisplayMode,
+      neutronClusterDisplayMode,
+      enabledMapIds,
+      analyticScope,
+    })
   }
 
   if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
@@ -255,9 +269,7 @@ export function MainArea({
     )
   }
 
-  return renderMapShellBody({
-    mapShellPhase,
-    displayMapData,
+  return renderMapShellView(mapShellView, {
     mapQueries,
     planetLabelOptions,
     setPlanetLabelOptions,
@@ -274,9 +286,7 @@ export function MainArea({
   })
 }
 
-type RenderMapShellBodyArgs = {
-  mapShellPhase: MapShellPhase
-  displayMapData: CombinedMapData | null
+type RenderMapShellViewArgs = {
   mapQueries: { error: unknown }[]
   planetLabelOptions: PlanetLabelOptions
   setPlanetLabelOptions: (value: PlanetLabelOptions) => void
@@ -300,26 +310,29 @@ type RenderMapShellBodyArgs = {
   analyticScope: AnalyticShellScope | null
 }
 
-function renderMapShellBody({
-  mapShellPhase,
-  displayMapData,
-  mapQueries,
-  planetLabelOptions,
-  setPlanetLabelOptions,
-  onMapZoomChange,
-  onSetZoomReady,
-  pending,
-  cartographyLayerVisibility,
-  cartographySettingsGates,
-  wormholeDisplayMode,
-  starClusterDisplayMode,
-  neutronClusterDisplayMode,
-  enabledMapIds,
-  analyticScope,
-}: RenderMapShellBodyArgs) {
-  switch (mapShellPhase) {
+function renderMapShellView(
+  mapShellView: MapShellView,
+  {
+    mapQueries,
+    planetLabelOptions,
+    setPlanetLabelOptions,
+    onMapZoomChange,
+    onSetZoomReady,
+    pending,
+    cartographyLayerVisibility,
+    cartographySettingsGates,
+    wormholeDisplayMode,
+    starClusterDisplayMode,
+    neutronClusterDisplayMode,
+    enabledMapIds,
+    analyticScope,
+  }: RenderMapShellViewArgs
+) {
+  switch (mapShellView.phase) {
+    case 'inactive':
+      throw new Error('renderMapShellView called with inactive map shell view')
     case 'full-loading':
-      return mapShellCenterMain('Loading map…')
+      return mapShellCenterMain(mapShellView.loadingMessage)
     case 'error': {
       const firstErr = mapQueries.find((q) => q.error)?.error
       const detail =
@@ -343,7 +356,7 @@ function renderMapShellBody({
             }
           >
             <MapGraph
-              data={displayMapData!}
+              data={mapShellView.displayMapData}
               className="h-full w-full min-h-0"
               onMapZoomChange={onMapZoomChange}
               onSetZoomReady={onSetZoomReady}
@@ -359,7 +372,7 @@ function renderMapShellBody({
               }}
             />
           </MapPaneWithDisplayControls>
-          <DeferredPendingMessage pending={mapShellPhase === 'ready' && pending} />
+          <DeferredPendingMessage pending={mapShellView.phase === 'ready' && pending} />
         </main>
       )
   }
@@ -382,17 +395,6 @@ function mapShellErrorMain(detail: string) {
       </p>
     </main>
   )
-}
-
-function turnEnsureLoadingMessage(
-  analyticScope: AnalyticShellScope | null,
-  turnDataReady: boolean,
-  turnEnsurePending: boolean
-): string | null {
-  if (analyticScope != null && !turnDataReady && turnEnsurePending) {
-    return 'Loading turn data…'
-  }
-  return null
 }
 
 /** Shows "Loading additional map data…" after a short delay. Overlays the map so the pane size never changes. */
