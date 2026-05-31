@@ -220,6 +220,7 @@ export function MainArea({
             return fetchAnalyticMap('connections', scope, params)
           },
           enabled: analyticFetchEnabled,
+          // Same query key refetch only; cross-turn retention is useRetainedMapDisplay.
           placeholderData: keepPreviousData,
           structuralSharing: false as const,
         }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+# Duplicated in frontend stellarCartographyTheme; must match Planets.nu host.
 ERGOSPHERE_BAND_COUNT = 9
 
 

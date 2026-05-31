@@ -1,5 +1,7 @@
 import type { CombinedMapData } from '../api/bff'
 
+/** Pure retention predicates; cross-turn ref retention lives in useRetainedMapDisplay. */
+
 export function hasDisplayableMapData(data: CombinedMapData | null | undefined): boolean {
   return (data?.nodes.length ?? 0) > 0
 }

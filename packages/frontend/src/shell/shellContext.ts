@@ -41,6 +41,7 @@ export type TurnView = {
   isFuture: boolean
 }
 
+/** Selected turn may exceed shellTurnMax (future "time machine" turns); fetches use dataTurn only. */
 export function deriveTurnView(
   selectedTurn: number | null,
   shellTurnMax: number | null

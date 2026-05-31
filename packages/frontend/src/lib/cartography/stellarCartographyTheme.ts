@@ -98,6 +98,7 @@ export const BLACK_HOLE_HALO_CYAN_OPACITY = 0.2
 export const BLACK_HOLE_HALO_OUTER = '#ff8000'
 export const BLACK_HOLE_HALO_OUTER_OPACITY = 0
 
+// Duplicated in api/concepts/stellar_cartography/black_holes.py; must match Planets.nu host.
 export const ERGOSPHERE_BAND_COUNT = 9
 
 /** Opacity applied to ergosphere band greys when composited on the map. */

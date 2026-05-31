@@ -14,9 +14,9 @@ export type UseRetainedMapDisplayResult = {
 }
 
 /**
- * Retains the last displayable map across turn/query-key changes within a game.
- * The ref handles cross-turn query-key changes; keepPreviousData on map queries
- * (in MainArea) handles same-key refetch without clearing the pane.
+ * Retains the last displayable map across turn changes within a game.
+ * Ref: new query keys on turn change (keepPreviousData does not apply).
+ * MainArea keepPreviousData: same-key refetch while turn is unchanged.
  */
 export function useRetainedMapDisplay({
   combined,

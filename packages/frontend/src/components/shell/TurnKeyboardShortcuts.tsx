@@ -6,6 +6,7 @@ type TurnKeyboardShortcutsProps = {
   stepTurn: (delta: number) => void
 }
 
+/** i/o step turns in tabular and map mode (not gated on viewMode). */
 export function TurnKeyboardShortcuts({ enabled, stepTurn }: TurnKeyboardShortcutsProps) {
   useWindowKeydown(
     useCallback(

@@ -147,6 +147,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     ]
   )
 
+  // Lower bound only; no upper clamp -- future turns beyond shellTurnMax are intentional.
   const setTurn = useCallback(
     (absolute: number) => {
       if (shellTurnMax == null) return
