@@ -402,6 +402,14 @@ export function MainArea({
     )
   }
 
+  if (displayMapData == null) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+        Loading map…
+      </main>
+    )
+  }
+
   return (
     <main className="relative flex min-h-0 flex-1 flex-col bg-black">
       <MapPaneWithDisplayControls
