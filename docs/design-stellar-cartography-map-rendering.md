@@ -79,9 +79,9 @@ One circle per `stars[]` body at `radius`. Bodies sharing `name` are one cluster
 
 ### 2.4 Black holes
 
-**C** with lethal **core** (`coreradius`) and nine **ergosphere bands** spanning `coreradius + 9 * bandradius` ly (see analytic doc). Map overlay adds a cosmetic **+5 ly** cyan halo beyond the outer band.
+**C** with lethal **core** (`coreradius`) and nine **ergosphere bands**; BFF **`radius`** is the outer ergosphere edge (Core: `coreradius + 9 * bandradius` ly; see analytic doc). Map overlay adds a cosmetic **+5 ly** cyan halo beyond that radius.
 
-**Rendering:** One SVG group per hole (`BlackHoleOverlay`): bottom circle uses a halo radial gradient (transparent inside the ergosphere, cyan at the edge, fading outward); top circle uses an ergosphere radial gradient with hard stops at each band boundary (grey ramp from `blackHoleErgosphereBandGrey`, composited at `BLACK_HOLE_ERGOSPHERE_BAND_OPACITY`). Pane shapes are built in `blackHoleOverlay.ts`, not as nine generic masked annuli.
+**Rendering:** One SVG group per hole (`BlackHoleOverlay`): bottom circle uses a halo radial gradient (transparent inside the ergosphere, cyan at the edge, fading outward); top circle uses an ergosphere radial gradient with hard stops at each band boundary (grey ramp from `blackHoleErgosphereBandGrey`, composited at `BLACK_HOLE_ERGOSPHERE_BAND_OPACITY`). Pane shapes are built in `blackHoleOverlay.ts` from BFF `radius` plus cosmetic halo; band/warp/fuel sampling is Core-only via `sample_at`.
 
 ### 2.5 Debris disk borders
 

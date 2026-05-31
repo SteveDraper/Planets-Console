@@ -6,13 +6,15 @@ import {
   gameMapCellCenterToFlow,
   type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
-import { blackHoleBandRadiiLy, blackHoleErgosphereOuterLy, blackHoleHaloRadiusLy } from './blackHoles'
 import {
   BLACK_HOLE_CORE_FILL,
   BLACK_HOLE_ERGOSPHERE_BAND_OPACITY,
+  BLACK_HOLE_HALO_EXTRA_LY,
   blackHoleErgosphereBandGrey,
-  ERGOSPHERE_BAND_COUNT,
 } from './stellarCartographyTheme'
+
+/** Host ergosphere band count (visual gradient segments only; radii from BFF). */
+export const ERGOSPHERE_BAND_COUNT = 9
 
 export type BlackHoleErgosphereGradientStop = {
   /** Fraction of ergosphere radius from center (0–1). */
@@ -35,12 +37,24 @@ export type BlackHolePaneShape = {
   ergosphereStops: readonly BlackHoleErgosphereGradientStop[]
 }
 
+/** Inner and outer ergosphere band edges in ly (band 1 = innermost). Visual gradient only. */
+function blackHoleBandRadiiLy(
+  coreRadiusLy: number,
+  bandWidthLy: number,
+  band: number
+): { innerLy: number; outerLy: number } {
+  return {
+    innerLy: coreRadiusLy + (band - 1) * bandWidthLy,
+    outerLy: coreRadiusLy + band * bandWidthLy,
+  }
+}
+
 /** Radial gradient stops matching the nine host ergosphere band greys. */
 export function buildBlackHoleErgosphereGradientStops(
   coreRadiusLy: number,
-  bandWidthLy: number
+  bandWidthLy: number,
+  outerLy: number
 ): BlackHoleErgosphereGradientStop[] {
-  const outerLy = blackHoleErgosphereOuterLy(coreRadiusLy, bandWidthLy)
   if (outerLy <= 0) {
     return []
   }
@@ -94,8 +108,8 @@ export function buildBlackHolePaneShape(
   viewport: CartographyOverlayViewport
 ): BlackHolePaneShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
-  const outerLy = blackHoleErgosphereOuterLy(circle.coreRadius, circle.bandRadius)
-  const haloLy = blackHoleHaloRadiusLy(circle.coreRadius, circle.bandRadius)
+  const outerLy = circle.radius
+  const haloLy = circle.radius + BLACK_HOLE_HALO_EXTRA_LY
   const flowBounds = flowBoundsFromViewport(viewport)
   if (!circleIntersectsFlowBounds(cx, cy, haloLy, flowBounds)) {
     return null
@@ -113,6 +127,10 @@ export function buildBlackHolePaneShape(
     haloR: haloLy * scale,
     ergosphereEdgeOffset: outerLy / haloLy,
     ergosphereGradientId: `${circle.id}-ergo-grad`,
-    ergosphereStops: buildBlackHoleErgosphereGradientStops(circle.coreRadius, circle.bandRadius),
+    ergosphereStops: buildBlackHoleErgosphereGradientStops(
+      circle.coreRadius,
+      circle.bandRadius,
+      outerLy
+    ),
   }
 }

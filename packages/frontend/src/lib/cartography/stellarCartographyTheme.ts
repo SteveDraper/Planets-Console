@@ -98,30 +98,22 @@ export const BLACK_HOLE_HALO_CYAN_OPACITY = 0.2
 export const BLACK_HOLE_HALO_OUTER = '#ff8000'
 export const BLACK_HOLE_HALO_OUTER_OPACITY = 0
 
-// Duplicated in api/concepts/stellar_cartography/black_holes.py; must match Planets.nu host.
-export const ERGOSPHERE_BAND_COUNT = 9
-
 /** Opacity applied to ergosphere band greys when composited on the map. */
 export const BLACK_HOLE_ERGOSPHERE_BAND_OPACITY = 0.3
 
+/** Visual grey ramp spans nine ergosphere bands (cosmetic; matches overlay gradient segments). */
+const BLACK_HOLE_GREY_BAND_COUNT = 9
+
 /** Grey fill for ergosphere band ``band`` (1 = innermost, 9 = outermost). */
 export function blackHoleErgosphereBandGrey(band: number): string {
-  const clamped = Math.min(ERGOSPHERE_BAND_COUNT, Math.max(1, band))
+  const clamped = Math.min(BLACK_HOLE_GREY_BAND_COUNT, Math.max(1, band))
   const level = Math.round(
     BLACK_HOLE_BAND_GREY_INNER +
-      ((clamped - 1) / (ERGOSPHERE_BAND_COUNT - 1)) *
+      ((clamped - 1) / (BLACK_HOLE_GREY_BAND_COUNT - 1)) *
         (BLACK_HOLE_BAND_GREY_OUTER - BLACK_HOLE_BAND_GREY_INNER)
   )
   const hex = level.toString(16).padStart(2, '0')
   return `#${hex}${hex}${hex}`
-}
-
-export function blackHoleErgosphereOuterLy(coreRadiusLy: number, bandWidthLy: number): number {
-  return coreRadiusLy + ERGOSPHERE_BAND_COUNT * bandWidthLy
-}
-
-export function blackHoleHaloRadiusLy(coreRadiusLy: number, bandWidthLy: number): number {
-  return blackHoleErgosphereOuterLy(coreRadiusLy, bandWidthLy) + BLACK_HOLE_HALO_EXTRA_LY
 }
 
 export const WORMHOLE_LINE_STROKE = '#38bdf8'

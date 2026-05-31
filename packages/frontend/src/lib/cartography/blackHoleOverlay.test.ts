@@ -3,16 +3,19 @@ import { hexWithAlpha } from './cartographyColor'
 import {
   buildBlackHoleErgosphereGradientStops,
   buildBlackHolePaneShape,
+  ERGOSPHERE_BAND_COUNT,
 } from './blackHoleOverlay'
-import { ERGOSPHERE_BAND_COUNT } from './blackHoles'
-import { blackHoleErgosphereBandGrey } from './stellarCartographyTheme'
+import {
+  BLACK_HOLE_HALO_EXTRA_LY,
+  blackHoleErgosphereBandGrey,
+} from './stellarCartographyTheme'
 
 describe('buildBlackHoleErgosphereGradientStops', () => {
   it('places band boundaries at host radii with inner and outer greys', () => {
     const coreRadiusLy = 15
     const bandWidthLy = 4
-    const stops = buildBlackHoleErgosphereGradientStops(coreRadiusLy, bandWidthLy)
     const outerLy = coreRadiusLy + ERGOSPHERE_BAND_COUNT * bandWidthLy
+    const stops = buildBlackHoleErgosphereGradientStops(coreRadiusLy, bandWidthLy, outerLy)
 
     expect(stops[0]).toEqual({ offset: 0, color: '#000000', opacity: 1 })
     expect(stops.find((s) => s.offset === coreRadiusLy / outerLy && s.color === '#000000')).toBeDefined()
@@ -59,8 +62,8 @@ describe('buildBlackHolePaneShape', () => {
     expect(shape?.ergosphereGradientId).toBe('bh-1-ergo-grad')
     expect(shape?.coreR).toBeCloseTo(15 * viewport.scale)
     expect(shape?.ergosphereR).toBeCloseTo(51 * viewport.scale)
-    expect(shape?.haloR).toBeCloseTo(56 * viewport.scale)
-    expect(shape?.ergosphereEdgeOffset).toBeCloseTo(51 / 56)
+    expect(shape?.haloR).toBeCloseTo((51 + BLACK_HOLE_HALO_EXTRA_LY) * viewport.scale)
+    expect(shape?.ergosphereEdgeOffset).toBeCloseTo(51 / (51 + BLACK_HOLE_HALO_EXTRA_LY))
     expect(shape?.ergosphereStops.length).toBeGreaterThan(0)
 
     const band1Grey = hexWithAlpha(blackHoleErgosphereBandGrey(1), 0.3)
