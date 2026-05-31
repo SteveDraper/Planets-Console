@@ -170,6 +170,68 @@ describe('useRetainedMapDisplay', () => {
     expect(result.current.mapShellPhase).toBe('ready')
   })
 
+  it('retains only within the current game and perspective key', () => {
+    const otherGameMap: CombinedMapData = {
+      ...sampleMap,
+      nodes: [{ id: 'base-map:99', label: 'Z', x: 9, y: 9 }],
+    }
+
+    const { result, rerender } = renderHook(
+      ({
+        combined,
+        gameId,
+        perspective,
+        mapPending,
+        mapHasAnyData,
+      }: {
+        combined: CombinedMapData | null
+        gameId: string | null
+        perspective: number | null
+        mapPending: boolean
+        mapHasAnyData: boolean
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          gameId,
+          perspective,
+          viewMode: 'map',
+          turnDataReady: true,
+          turnEnsurePending: false,
+          mapPending,
+          mapHasError: false,
+          mapHasAnyData,
+        }),
+      {
+        initialProps: {
+          combined: sampleMap,
+          ...defaultScope,
+          mapPending: false,
+          mapHasAnyData: true,
+        },
+      }
+    )
+
+    rerender({
+      combined: otherGameMap,
+      gameId: 'g2',
+      perspective: 1,
+      mapPending: false,
+      mapHasAnyData: true,
+    })
+    expect(result.current.displayMapData).toBe(otherGameMap)
+
+    rerender({
+      combined: emptyCombined,
+      gameId: 'g2',
+      perspective: 1,
+      mapPending: true,
+      mapHasAnyData: false,
+    })
+    expect(result.current.displayMapData).toBe(otherGameMap)
+    expect(result.current.displayMapData).not.toBe(sampleMap)
+    expect(result.current.retainDuringLoad).toBe(true)
+  })
+
   it('clears retention after gameId changes', () => {
     const { result, rerender } = renderHook(
       ({

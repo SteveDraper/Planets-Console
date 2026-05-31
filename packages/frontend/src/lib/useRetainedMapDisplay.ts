@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import type { CombinedMapData } from '../api/bff'
 import {
   deriveMapShellPhase,
@@ -66,23 +66,32 @@ export function useRetainedMapDisplay({
   const retentionKeyRef = useRef<MapDisplayRetentionKey | null>(null)
 
   const currentKey = mapDisplayRetentionKey(gameId, perspective)
-  if (!retentionKeysEqual(currentKey, retentionKeyRef.current)) {
-    retainedMapDataRef.current = null
-    retentionKeyRef.current = currentKey
-  }
+  const retentionKeyMatches = retentionKeysEqual(currentKey, retentionKeyRef.current)
+  const retainedForCurrentKey = retentionKeyMatches
+    ? retainedMapDataRef.current
+    : null
 
-  if (combined != null && hasDisplayableMapData(combined)) {
-    retainedMapDataRef.current = combined
-  }
+  // useLayoutEffect (not useEffect) so ref updates run before paint, avoiding a flash of
+  // another viewpoint's retained map when gameId or perspective changes.
+  useLayoutEffect(() => {
+    const key = mapDisplayRetentionKey(gameId, perspective)
+    if (!retentionKeysEqual(key, retentionKeyRef.current)) {
+      retainedMapDataRef.current = null
+      retentionKeyRef.current = key
+    }
+    if (combined != null && hasDisplayableMapData(combined)) {
+      retainedMapDataRef.current = combined
+    }
+  }, [gameId, perspective, combined])
 
   const showingLiveCombined =
     combined != null && hasDisplayableMapData(combined)
   const displayMapData: CombinedMapData | null = showingLiveCombined
     ? combined
-    : retainedMapDataRef.current
+    : retainedForCurrentKey
   const retainDuringLoad = shouldRetainMapDuringLoad(
     viewMode,
-    showingLiveCombined ? null : retainedMapDataRef.current
+    showingLiveCombined ? null : retainedForCurrentKey
   )
   const mapShellPhase = deriveMapShellPhase({
     viewMode,
