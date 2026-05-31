@@ -8,6 +8,8 @@ import {
   connectionsMapQueryKey,
   enabledMapAnalyticIds,
   mapIdsToFetch,
+  mapQueryCombineRevision,
+  mapQueryCombineRevisionKey,
   useMapAnalyticQueries,
   type UseMapAnalyticQueriesInput,
 } from './useMapAnalyticQueries'
@@ -83,7 +85,6 @@ function defaultHookInput(
   overrides: Partial<UseMapAnalyticQueriesInput> = {}
 ): UseMapAnalyticQueriesInput {
   return {
-    viewMode: 'map',
     enabledAnalyticIds: ['connections'],
     analytics: sampleAnalytics,
     analyticScope: sampleScope,
@@ -162,6 +163,50 @@ describe('enabledMapAnalyticIds and mapIdsToFetch', () => {
   })
 })
 
+describe('mapQueryCombineRevision', () => {
+  it('returns empty revision and key for no queries', () => {
+    expect(mapQueryCombineRevision([])).toEqual([])
+    expect(mapQueryCombineRevisionKey([])).toBe('')
+  })
+
+  it('captures dataUpdatedAt, fetchStatus, and status per query in order', () => {
+    const revision = mapQueryCombineRevision([
+      { dataUpdatedAt: 100, fetchStatus: 'idle', status: 'success' },
+      { dataUpdatedAt: 200, fetchStatus: 'fetching', status: 'pending' },
+    ])
+    expect(revision).toEqual([
+      [100, 'idle', 'success'],
+      [200, 'fetching', 'pending'],
+    ])
+    expect(mapQueryCombineRevisionKey(revision)).toBe('100:idle:success|200:fetching:pending')
+  })
+
+  it('changes key when any query revision field changes', () => {
+    const base = [{ dataUpdatedAt: 1, fetchStatus: 'idle' as const, status: 'success' as const }]
+    const key = mapQueryCombineRevisionKey(mapQueryCombineRevision(base))
+
+    expect(mapQueryCombineRevisionKey(mapQueryCombineRevision([
+      { ...base[0], dataUpdatedAt: 2 },
+    ]))).not.toBe(key)
+    expect(mapQueryCombineRevisionKey(mapQueryCombineRevision([
+      { ...base[0], fetchStatus: 'fetching' },
+    ]))).not.toBe(key)
+    expect(mapQueryCombineRevisionKey(mapQueryCombineRevision([
+      { ...base[0], status: 'error' },
+    ]))).not.toBe(key)
+  })
+
+  it('keeps key stable for identical revision tuples', () => {
+    const queries = [
+      { dataUpdatedAt: 42, fetchStatus: 'idle' as const, status: 'success' as const },
+      { dataUpdatedAt: 99, fetchStatus: 'paused' as const, status: 'pending' as const },
+    ]
+    const keyA = mapQueryCombineRevisionKey(mapQueryCombineRevision(queries))
+    const keyB = mapQueryCombineRevisionKey(mapQueryCombineRevision([...queries]))
+    expect(keyA).toBe(keyB)
+  })
+})
+
 describe('useMapAnalyticQueries', () => {
   it('registers idle connections query key when scope is null', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -171,7 +216,6 @@ describe('useMapAnalyticQueries', () => {
     renderHook(
       () =>
         useMapAnalyticQueries({
-          viewMode: 'map',
           enabledAnalyticIds: ['connections'],
           analytics: sampleAnalytics,
           analyticScope: null,

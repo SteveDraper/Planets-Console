@@ -1,7 +1,5 @@
 import type { CombinedMapData } from '../api/bff'
 
-export type MapShellPhase = 'full-loading' | 'retained' | 'ready' | 'error'
-
 export const MAP_SHELL_TURN_LOADING_MESSAGE = 'Loading turn data…'
 export const MAP_SHELL_MAP_LOADING_MESSAGE = 'Loading map…'
 
@@ -22,11 +20,6 @@ export type DeriveMapShellViewInput = {
   mapPending: boolean
   mapHasError: boolean
   mapHasAnyData: boolean
-}
-
-/** @deprecated Prefer DeriveMapShellViewInput */
-export type DeriveMapShellPhaseInput = Omit<DeriveMapShellViewInput, 'hasAnalyticScope'> & {
-  hasAnalyticScope?: boolean
 }
 
 /** Pure retention predicates; cross-turn ref retention lives in useRetainedMapDisplay. */
@@ -76,16 +69,4 @@ export function deriveMapShellView({
   }
 
   return { phase: 'ready', displayMapData }
-}
-
-/** Single map-shell phase; use deriveMapShellView when loading copy or displayMapData guarantees matter. */
-export function deriveMapShellPhase(input: DeriveMapShellPhaseInput): MapShellPhase {
-  const view = deriveMapShellView({
-    ...input,
-    hasAnalyticScope: input.hasAnalyticScope ?? true,
-  })
-  if (view.phase === 'inactive') {
-    return input.displayMapData != null ? 'ready' : 'full-loading'
-  }
-  return view.phase
 }

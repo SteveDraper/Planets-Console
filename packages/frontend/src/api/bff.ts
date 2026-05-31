@@ -6,7 +6,6 @@ import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
 import type { ConnectionsMapParams } from '../analytics/connections/api'
 import type {
   MapDataResponse,
-  BlackHoleConceptConstants,
   StellarCartographySampleResponse,
   StellarCartographyTurnSummaryResponse,
 } from './bffCartographyTypes'
@@ -484,16 +483,6 @@ export async function fetchStellarCartographyTurnSummary(
   scope: AnalyticShellScope
 ): Promise<StellarCartographyTurnSummaryResponse> {
   const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/summary`
-  const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, { cache: 'no-store' }, endpointLabel)
-  if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
-  }
-  return r.json()
-}
-
-export async function fetchBlackHoleConceptConstants(): Promise<BlackHoleConceptConstants> {
-  const path = '/bff/concepts/stellar-cartography/black-holes'
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(path, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {

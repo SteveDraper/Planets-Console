@@ -145,7 +145,6 @@ function MapMainArea({
     hasAnyData,
     mapQueries,
   } = useMapAnalyticQueries({
-    viewMode: 'map',
     enabledAnalyticIds,
     analytics,
     analyticScope,

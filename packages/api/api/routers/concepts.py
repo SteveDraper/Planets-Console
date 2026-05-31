@@ -3,13 +3,11 @@
 from fastapi import APIRouter, Depends, Query
 
 from api.concepts.flare_points import FlareMovementKind
-from api.concepts.stellar_cartography.black_holes import black_hole_concept_constants
 from api.models.flare_point import FlarePoint
 from api.services.flare_point_catalog_service import (
     FlarePointCatalogService,
     get_flare_point_catalog_service,
 )
-from api.transport.concept_black_holes import BlackHoleConceptConstantsResponse
 from api.transport.concept_flare_point import (
     FlareMovementTypeParam,
     FlarePointsListResponse,
@@ -46,12 +44,3 @@ def get_flare_points(
     return FlarePointsListResponse(
         flare_points=[_flare_point_to_wire(p) for p in points],
     )
-
-
-@router.get(
-    "/stellar-cartography/black-holes",
-    response_model=BlackHoleConceptConstantsResponse,
-)
-def get_black_hole_concept_constants() -> BlackHoleConceptConstantsResponse:
-    """Return static black-hole geometry constants (ergosphere bands, cosmetic halo extent)."""
-    return BlackHoleConceptConstantsResponse.model_validate(black_hole_concept_constants())

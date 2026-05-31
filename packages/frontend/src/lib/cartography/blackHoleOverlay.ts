@@ -1,5 +1,6 @@
-import type { BlackHoleConceptConstants } from '../../api/bff'
 import type { BlackHoleOverlayCircle } from '../../api/bff'
+import type { BlackHoleConceptConstants } from '../../api/bffCartographyTypes'
+import { BLACK_HOLE_CONCEPT_CONSTANTS } from './blackHoleConceptConstants'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
@@ -13,6 +14,7 @@ import {
   blackHoleErgosphereBandGrey,
 } from './stellarCartographyTheme'
 
+export { BLACK_HOLE_CONCEPT_CONSTANTS }
 export type { BlackHoleConceptConstants }
 
 export type BlackHoleErgosphereGradientStop = {

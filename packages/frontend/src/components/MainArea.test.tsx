@@ -102,9 +102,7 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).toHaveBeenCalledTimes(1)
     expect(useRetainedMapDisplay).toHaveBeenCalledTimes(1)
-    expect(useMapAnalyticQueries).toHaveBeenCalledWith(
-      expect.objectContaining({ viewMode: 'map' })
-    )
+    expect(useMapAnalyticQueries).toHaveBeenCalledTimes(1)
   })
 
   it('shows turn-loading in tabular mode without map hooks', () => {

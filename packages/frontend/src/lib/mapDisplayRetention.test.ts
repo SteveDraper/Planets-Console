@@ -3,7 +3,6 @@ import type { CombinedMapData } from '../api/bff'
 import {
   MAP_SHELL_MAP_LOADING_MESSAGE,
   MAP_SHELL_TURN_LOADING_MESSAGE,
-  deriveMapShellPhase,
   deriveMapShellView,
   hasDisplayableMapData,
   shouldRetainMapDuringLoad,
@@ -156,91 +155,13 @@ describe('deriveMapShellView', () => {
       loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
     })
   })
-})
 
-describe('deriveMapShellPhase', () => {
-  const baseInput = {
-    viewMode: 'map' as const,
-    displayMapData: sampleMap,
-    retainDuringLoad: false,
-    turnDataReady: true,
-    turnEnsurePending: false,
-    mapPending: false,
-    mapHasError: false,
-    mapHasAnyData: true,
-  }
-
-  it('returns ready when live map data is available', () => {
-    expect(deriveMapShellPhase(baseInput)).toBe('ready')
-  })
-
-  it('returns full-loading on initial map fetch without retention', () => {
+  it('returns inactive in tabular mode when not loading', () => {
     expect(
-      deriveMapShellPhase({
-        ...baseInput,
-        displayMapData: null,
-        mapPending: true,
-        mapHasAnyData: false,
-      })
-    ).toBe('full-loading')
-  })
-
-  it('returns retained while a prior frame is shown during reload', () => {
-    expect(
-      deriveMapShellPhase({
-        ...baseInput,
-        retainDuringLoad: true,
-        mapPending: true,
-        mapHasAnyData: false,
-      })
-    ).toBe('retained')
-  })
-
-  it('returns error when map fetch fails without a retained frame', () => {
-    expect(
-      deriveMapShellPhase({
-        ...baseInput,
-        displayMapData: null,
-        mapHasError: true,
-        mapHasAnyData: false,
-      })
-    ).toBe('error')
-  })
-
-  it('returns retained (not full-loading) during turn ensure when a prior frame is kept', () => {
-    expect(
-      deriveMapShellPhase({
-        ...baseInput,
-        displayMapData: sampleMap,
-        retainDuringLoad: true,
-        turnDataReady: false,
-        turnEnsurePending: true,
-        mapPending: true,
-        mapHasAnyData: false,
-      })
-    ).toBe('retained')
-  })
-
-  it('returns full-loading during turn ensure when not retaining', () => {
-    expect(
-      deriveMapShellPhase({
-        ...baseInput,
-        displayMapData: null,
-        turnDataReady: false,
-        turnEnsurePending: true,
-      })
-    ).toBe('full-loading')
-  })
-
-  it('returns full-loading in tabular mode during turn ensure', () => {
-    expect(
-      deriveMapShellPhase({
+      deriveMapShellView({
         ...baseInput,
         viewMode: 'tabular',
-        displayMapData: sampleMap,
-        turnDataReady: false,
-        turnEnsurePending: true,
       })
-    ).toBe('full-loading')
+    ).toEqual({ phase: 'inactive' })
   })
 })

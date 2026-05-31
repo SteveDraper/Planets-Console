@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bff.config import get_config
 from bff.errors import BFFError, BFFValidationError, make_http_exception_handler
-from bff.routers import analytics, concepts, diagnostics, games, shell
+from bff.routers import analytics, diagnostics, games, shell
 from bff.strip_bff_prefix import StripBffPrefixWhenRootApp
 
 app = FastAPI(
@@ -29,7 +29,6 @@ app.add_exception_handler(Exception, make_http_exception_handler(BFFError))
 # Explicit handler so Starlette/FastAPI invokes it for sync route endpoints (see api/app.py).
 app.add_exception_handler(BFFValidationError, make_http_exception_handler(BFFValidationError))
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
-app.include_router(concepts.router, tags=["concepts"])
 app.include_router(diagnostics.router, prefix="/diagnostics", tags=["diagnostics"])
 app.include_router(games.router, prefix="/games", tags=["games"])
 app.include_router(shell.router, prefix="/shell", tags=["shell"])

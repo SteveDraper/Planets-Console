@@ -58,11 +58,3 @@ class TestFlarePoints:
             params={"warp_speed": 9, "movement_type": "nope"},
         )
         assert resp.status_code == 422
-
-
-class TestBlackHoleConceptConstants:
-    def test_returns_host_constants(self, client):
-        resp = client.get("/v1/concepts/stellar-cartography/black-holes")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data == {"ergosphere_band_count": 9, "halo_extra_ly": 5}

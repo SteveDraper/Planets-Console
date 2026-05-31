@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar
 
-from api.concepts.stellar_cartography.black_holes import black_hole_concept_constants
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError, PlanetsConsoleError
 from api.handlers.stellar_cartography import (
@@ -25,7 +24,6 @@ from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
 from api.storage import get_storage
 from api.storage.base import StorageBackend
-from api.transport.concept_black_holes import BlackHoleConceptConstantsResponse
 from api.transport.concept_stellar_cartography import (
     StellarCartographySampleResponse,
     StellarCartographyTurnSummaryResponse,
@@ -225,11 +223,6 @@ class CoreClient:
                 perspective,
                 turn_number,
             )
-        )
-
-    def black_hole_concept_constants(self) -> BlackHoleConceptConstantsResponse:
-        return self._invoke(
-            lambda: BlackHoleConceptConstantsResponse.model_validate(black_hole_concept_constants())
         )
 
     def get_turn_analytics(

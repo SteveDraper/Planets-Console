@@ -9,14 +9,6 @@ ERGOSPHERE_BAND_COUNT = 9
 BLACK_HOLE_HALO_EXTRA_LY = 5
 
 
-def black_hole_concept_constants() -> dict[str, int]:
-    """Static black-hole facts for map rendering and tooltips (no turn scope)."""
-    return {
-        "ergosphere_band_count": ERGOSPHERE_BAND_COUNT,
-        "halo_extra_ly": BLACK_HOLE_HALO_EXTRA_LY,
-    }
-
-
 def ergosphere_outer_radius(coreradius: int, bandradius: int) -> int:
     """Outer edge of the ergosphere in ly from the black hole center."""
     return coreradius + ERGOSPHERE_BAND_COUNT * bandradius

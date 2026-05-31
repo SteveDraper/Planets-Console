@@ -1,5 +1,10 @@
 import { useMemo } from 'react'
-import { useQueries, type UseQueryResult } from '@tanstack/react-query'
+import {
+  useQueries,
+  type FetchStatus,
+  type QueryStatus,
+  type UseQueryResult,
+} from '@tanstack/react-query'
 import { fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
@@ -10,8 +15,6 @@ import type {
   MapDataResponse,
 } from '../api/bff'
 import { combineMapData, type StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
-
-type ViewMode = 'tabular' | 'map'
 
 export type ConnectionsMapQueryKey = readonly [
   'analytic',
@@ -27,7 +30,6 @@ export type ConnectionsMapQueryKey = readonly [
 ]
 
 export type UseMapAnalyticQueriesInput = {
-  viewMode: ViewMode
   enabledAnalyticIds: string[]
   analytics: AnalyticItem[]
   analyticScope: AnalyticShellScope | null
@@ -69,6 +71,26 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
   const base = baseMapId(analytics)
   const withoutBase = enabledMapIds.filter((id) => id !== base)
   return base ? [base, ...withoutBase] : withoutBase
+}
+
+export type MapQueryCombineRevisionEntry = readonly [number, FetchStatus, QueryStatus]
+
+export type MapQueryCombineRevision = readonly MapQueryCombineRevisionEntry[]
+
+type MapQueryRevisionSource = ReadonlyArray<
+  Pick<UseQueryResult<unknown, Error>, 'dataUpdatedAt' | 'fetchStatus' | 'status'>
+>
+
+/** Serializable revision of map query fetch state used to invalidate combined map data. */
+export function mapQueryCombineRevision(mapQueries: MapQueryRevisionSource): MapQueryCombineRevision {
+  return mapQueries.map((q) => [q.dataUpdatedAt, q.fetchStatus, q.status] as const)
+}
+
+/** Stable string key for `useMemo` deps derived from {@link mapQueryCombineRevision}. */
+export function mapQueryCombineRevisionKey(revision: MapQueryCombineRevision): string {
+  return revision.map(([dataUpdatedAt, fetchStatus, status]) =>
+    `${dataUpdatedAt}:${fetchStatus}:${status}`
+  ).join('|')
 }
 
 /** Stable query key for the Connections map analytic; uses `idle` placeholders when scope is null. */
@@ -132,7 +154,6 @@ async function fetchConnectionsMapFromQueryKey(
 }
 
 export function useMapAnalyticQueries({
-  viewMode,
   enabledAnalyticIds,
   analytics,
   analyticScope,
@@ -146,8 +167,8 @@ export function useMapAnalyticQueries({
     [enabledAnalyticIds, analytics]
   )
   const mapIds = useMemo(
-    () => (viewMode === 'map' ? mapIdsToFetch(analytics, enabledMapIds) : []),
-    [viewMode, analytics, enabledMapIds]
+    () => mapIdsToFetch(analytics, enabledMapIds),
+    [analytics, enabledMapIds]
   )
 
   const mapQueries = useQueries({
@@ -177,6 +198,7 @@ export function useMapAnalyticQueries({
     mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
   const mapIdsKey = mapIds.join('\0')
   const includesStellarCartography = mapIds.includes('stellar-cartography')
+  const mapQueryRevisionKey = mapQueryCombineRevisionKey(mapQueryCombineRevision(mapQueries))
 
   const combined = useMemo(
     () =>
@@ -193,7 +215,7 @@ export function useMapAnalyticQueries({
       ),
     [
       mapIdsKey,
-      mapQueries.map((q) => `${q.dataUpdatedAt}:${q.fetchStatus}:${q.status}`).join('|'),
+      mapQueryRevisionKey,
       liveConnectionsParams,
       analyticFetchEnabled,
       includesStellarCartography,

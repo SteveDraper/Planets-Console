@@ -1,17 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { BlackHoleConceptConstants } from '../../api/bff'
 import { hexWithAlpha } from './cartographyColor'
 import {
+  BLACK_HOLE_CONCEPT_CONSTANTS,
   buildBlackHoleErgosphereGradientStops,
   buildBlackHolePaneShape,
 } from './blackHoleOverlay'
 import { blackHoleErgosphereBandGrey } from './stellarCartographyTheme'
 
-/** Values from test-fixtures/black-hole-ergosphere-contract.json (Core-owned). */
-const blackHoleConstants: BlackHoleConceptConstants = {
-  ergosphereBandCount: 9,
-  haloExtraLy: 5,
-}
+const blackHoleConstants = BLACK_HOLE_CONCEPT_CONSTANTS
 
 describe('buildBlackHoleErgosphereGradientStops', () => {
   it('places band boundaries at host radii with inner and outer greys', () => {

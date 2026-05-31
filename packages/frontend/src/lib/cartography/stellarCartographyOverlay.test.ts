@@ -180,7 +180,7 @@ describe('stellarCartographyOverlay', () => {
     expect(shapes.annuli[0]?.bandStroke).toBe('none')
   })
 
-  it('includes black holes as dedicated pane shapes, not generic annuli', () => {
+  it('includes black holes as dedicated pane shapes without async constants', () => {
     const viewport = {
       width: 800,
       height: 600,
@@ -202,10 +202,7 @@ describe('stellarCartographyOverlay', () => {
         },
       ],
       [],
-      viewport,
-      {
-        blackHoleConstants: { ergosphereBandCount: 9, haloExtraLy: 5 },
-      }
+      viewport
     )
     expect(shapes.annuli).toHaveLength(0)
     expect(shapes.blackHoles).toHaveLength(1)

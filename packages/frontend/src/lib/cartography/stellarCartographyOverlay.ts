@@ -19,7 +19,7 @@ import {
   type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
 import { hexWithAlpha } from './cartographyColor'
-import { buildBlackHolePaneShape, type BlackHoleConceptConstants, type BlackHolePaneShape } from './blackHoleOverlay'
+import { BLACK_HOLE_CONCEPT_CONSTANTS, buildBlackHolePaneShape, type BlackHolePaneShape } from './blackHoleOverlay'
 import { ionStormStepDeltaGameLy } from './ionStormMovement'
 import { buildNebulaCloudPaneShapes, type NebulaCloudPaneShape } from './nebulaCloudOverlay'
 import {
@@ -417,7 +417,6 @@ export function buildStellarCartographyOverlayPaneShapes(
     cloudyIonStorms?: boolean
     starClusterDisplayMode?: ClusterOutlineDisplayMode
     neutronClusterDisplayMode?: ClusterOutlineDisplayMode
-    blackHoleConstants?: BlackHoleConceptConstants
   }
 ): StellarCartographyOverlayPaneShapes {
   const { width, height, scale } = viewport
@@ -471,8 +470,7 @@ export function buildStellarCartographyOverlayPaneShapes(
     )
   )) {
     if (isBlackHoleOverlayCircle(circle)) {
-      if (options?.blackHoleConstants == null) continue
-      const blackHole = buildBlackHolePaneShape(options.blackHoleConstants, circle, viewport)
+      const blackHole = buildBlackHolePaneShape(BLACK_HOLE_CONCEPT_CONSTANTS, circle, viewport)
       if (blackHole != null) blackHoles.push(blackHole)
       continue
     }

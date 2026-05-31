@@ -1,5 +1,5 @@
 {
-  "description": "Cross-layer contract for Planets.nu-aligned black hole ergosphere geometry (getBlackHoleBand). Core implements api/concepts/stellar_cartography/black_holes.py and exposes constants via GET /v1/concepts/stellar-cartography/black-holes; frontend map overlay fetches the same values through the BFF. Keep Core, this fixture, and frontend contract tests in sync.",
+  "description": "Cross-layer contract for Planets.nu-aligned black hole ergosphere geometry (getBlackHoleBand). Core implements api/concepts/stellar_cartography/black_holes.py; frontend map overlay uses lib/cartography/blackHoleConceptConstants.ts. Keep Core, this fixture, and frontend contract tests in sync.",
   "ergosphereBandCount": 9,
   "haloExtraLy": 5,
   "cases": [

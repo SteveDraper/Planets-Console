@@ -237,7 +237,7 @@ Turn JSON supplies `coreradius` (lethal core) and `bandradius` (width of each of
 | Fuel saving % in band | `10 - band` |
 | Map overlay halo | Outer ergosphere + **5 ly** cosmetic cyan glow (Planets.nu client) |
 
-Core: `api/concepts/stellar_cartography/black_holes.py` and `sample_at` tooltip lines (band, max warp, fuel saving). Frontend map overlay trusts BFF **`radius`** for ergosphere extent; **`blackHoleOverlay.ts`** paints the nine-band grey gradient (cosmetic band-edge math only) and a **`+5 ly`** cyan halo from `BLACK_HOLE_HALO_EXTRA_LY`. Greys and opacities live in `stellarCartographyTheme.ts`.
+Core: `api/concepts/stellar_cartography/black_holes.py` and `sample_at` tooltip lines (band, max warp, fuel saving). Frontend map overlay trusts BFF **`radius`** for ergosphere extent; band count and halo extent come from **`lib/cartography/blackHoleConceptConstants.ts`** (aligned with the Core module and `test-fixtures/black-hole-ergosphere-contract.json`). **`blackHoleOverlay.ts`** paints the nine-band grey gradient (cosmetic band-edge math only) and the cosmetic cyan halo. Greys and opacities live in `stellarCartographyTheme.ts`.
 
 **Map rendering (black holes):** Pane geometry lives in `lib/cartography/blackHoleOverlay.ts` (`buildBlackHolePaneShape`, `buildBlackHoleErgosphereGradientStops`). Each hole is one `BlackHolePaneShape` rendered by `BlackHoleOverlay` in `StellarCartographyVectorOverlay.tsx`: a radial gradient with hard stops at each band boundary (nine greys from `blackHoleErgosphereBandGrey`, opacity `BLACK_HOLE_ERGOSPHERE_BAND_OPACITY`) over a lethal core, then a separate halo circle with the cosmetic cyan ramp beyond the BFF ergosphere radius (+5 ly). This replaces nine masked annulus primitives per hole.
 
