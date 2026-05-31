@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StellarCartographyOverlayCircle } from '../../api/bff'
-import {
-  groupOverlayCirclesByLayer,
-  vectorOverlayCirclesInPaintOrder,
-} from './overlayCirclesByLayer'
+import { groupOverlayCirclesByLayer } from './overlayCirclesByLayer'
 
 function circle(
   layer: StellarCartographyOverlayCircle['layer'],
@@ -43,14 +40,13 @@ describe('groupOverlayCirclesByLayer', () => {
     expect(grouped.neutronClusters.map((c) => c.id)).toEqual(['nc1'])
     expect(grouped.debrisDisks.map((c) => c.id)).toEqual(['d1'])
   })
-})
 
-describe('vectorOverlayCirclesInPaintOrder', () => {
-  it('returns star clusters before black holes', () => {
-    const byLayer = groupOverlayCirclesByLayer([
+  it('keeps star clusters and black holes in separate buckets for paint order', () => {
+    const grouped = groupOverlayCirclesByLayer([
       circle('black-holes', 'bh'),
       circle('star-clusters', 'sc'),
     ])
-    expect(vectorOverlayCirclesInPaintOrder(byLayer).map((c) => c.id)).toEqual(['sc', 'bh'])
+    expect(grouped.starClusters.map((c) => c.id)).toEqual(['sc'])
+    expect(grouped.blackHoles.map((c) => c.id)).toEqual(['bh'])
   })
 })

@@ -212,34 +212,39 @@ function normalizeOverlayCircle(raw: unknown): StellarCartographyOverlayCircle |
   return null
 }
 
-function normalizeMapNodeCoordinate(value: unknown): number {
-  if (value === undefined) return 0
-  return parseJsonFiniteNumber(value) ?? 0
-}
-
 function normalizeMapPlanetSnapshot(raw: unknown): MapPlanetSnapshot | undefined {
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   return { ...(raw as Record<string, unknown>) }
 }
 
-function normalizeMapNode(raw: unknown): MapNode {
+function normalizeMapNode(raw: unknown): MapNode | null {
   if (raw == null || typeof raw !== 'object') {
-    return { id: '', label: '', x: 0, y: 0 }
+    return null
   }
   const n = raw as Record<string, unknown>
+  const x = parseJsonFiniteNumber(n.x)
+  const y = parseJsonFiniteNumber(n.y)
+  if (x == null || y == null) {
+    return null
+  }
   const nested = n.planet ?? n.Planet
   const planet = normalizeMapPlanetSnapshot(nested)
   const base: MapNode = {
     id: typeof n.id === 'string' ? n.id : String(n.id ?? ''),
     label: typeof n.label === 'string' ? n.label : String(n.label ?? ''),
-    x: normalizeMapNodeCoordinate(n.x),
-    y: normalizeMapNodeCoordinate(n.y),
+    x,
+    y,
   }
   if (planet != null) {
     base.planet = planet
   }
   if (Object.prototype.hasOwnProperty.call(n, 'ownerName')) {
-    base.ownerName = n.ownerName as string | null | undefined
+    const ownerRaw = n.ownerName
+    if (ownerRaw === null) {
+      base.ownerName = null
+    } else if (typeof ownerRaw === 'string') {
+      base.ownerName = ownerRaw
+    }
   }
   const rawCells = n.normalWellCells ?? n.normal_well_cells
   if (Array.isArray(rawCells)) {
@@ -298,7 +303,9 @@ export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
   const nodesRaw = o.nodes
   const edgesRaw = o.edges
   const routesRaw = o.routes
-  const nodes = Array.isArray(nodesRaw) ? nodesRaw.map(normalizeMapNode) : []
+  const nodes = Array.isArray(nodesRaw)
+    ? nodesRaw.map(normalizeMapNode).filter((node): node is MapNode => node != null)
+    : []
   const edges = Array.isArray(edgesRaw)
     ? (edgesRaw.map(normalizeMapEdge).filter((e) => e != null) as MapEdge[])
     : []

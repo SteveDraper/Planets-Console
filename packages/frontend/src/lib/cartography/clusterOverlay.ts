@@ -7,6 +7,7 @@ import {
   flowBoundsFromViewport,
   flowToPane,
   gameMapCellCenterToFlow,
+  type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
 import { hexWithAlpha } from './cartographyColor'
 import {
@@ -28,7 +29,6 @@ import type {
   StellarCartographyOverlayAnnulusShape,
   StellarCartographyOverlayCircleShape,
   StellarCartographyOverlayRadialGradient,
-  StellarCartographyOverlayViewport,
 } from './cartographyPaneShapes'
 
 type ClusterCoreGradientTheme = {
@@ -77,7 +77,7 @@ const neutronClusterCoreTheme: ClusterCoreGradientTheme = {
 
 function buildClusterCoreCircle(
   circle: { id: string; x: number; y: number; radius: number; temp?: number },
-  viewport: StellarCartographyOverlayViewport,
+  viewport: CartographyOverlayViewport,
   strokeWidth: number,
   showOutlines: boolean,
   gradientIdPrefix: string,
@@ -108,7 +108,7 @@ function buildClusterCoreCircle(
 
 export function buildStarClusterAnnulus(
   circle: StarClusterOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
+  viewport: CartographyOverlayViewport,
   strokeWidth: number,
   showOutlines: boolean
 ): StellarCartographyOverlayAnnulusShape | null {
@@ -156,7 +156,7 @@ export function buildStarClusterAnnulus(
 
 export function buildNeutronClusterCoreCircle(
   circle: NeutronClusterOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
+  viewport: CartographyOverlayViewport,
   strokeWidth: number,
   showOutlines: boolean
 ): StellarCartographyOverlayCircleShape | null {
@@ -172,7 +172,7 @@ export function buildNeutronClusterCoreCircle(
 
 export function buildStarClusterCoreCircle(
   circle: StarClusterOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
+  viewport: CartographyOverlayViewport,
   strokeWidth: number,
   showOutlines: boolean
 ): StellarCartographyOverlayCircleShape | null {

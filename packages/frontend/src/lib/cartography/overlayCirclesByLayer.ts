@@ -7,14 +7,6 @@ import type {
   StarClusterOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
-import {
-  isBlackHoleOverlayCircle,
-  isDebrisDiskOverlayCircle,
-  isIonStormOverlayCircle,
-  isNebulaOverlayCircle,
-  isNeutronClusterOverlayCircle,
-  isStarClusterOverlayCircle,
-} from '../../api/bffCartographyTypes'
 
 /** Overlay circles grouped by `layer` in a single pass over the wire list. */
 export type OverlayCirclesByLayer = {
@@ -38,26 +30,26 @@ export function groupOverlayCirclesByLayer(
     blackHoles: [],
   }
   for (const circle of circles) {
-    if (isDebrisDiskOverlayCircle(circle)) {
-      out.debrisDisks.push(circle)
-    } else if (isNebulaOverlayCircle(circle)) {
-      out.nebulae.push(circle)
-    } else if (isIonStormOverlayCircle(circle)) {
-      out.ionStorms.push(circle)
-    } else if (isStarClusterOverlayCircle(circle)) {
-      out.starClusters.push(circle)
-    } else if (isNeutronClusterOverlayCircle(circle)) {
-      out.neutronClusters.push(circle)
-    } else if (isBlackHoleOverlayCircle(circle)) {
-      out.blackHoles.push(circle)
+    switch (circle.layer) {
+      case 'debris-disks':
+        out.debrisDisks.push(circle)
+        break
+      case 'nebulae':
+        out.nebulae.push(circle)
+        break
+      case 'ion-storms':
+        out.ionStorms.push(circle)
+        break
+      case 'star-clusters':
+        out.starClusters.push(circle)
+        break
+      case 'neutron-clusters':
+        out.neutronClusters.push(circle)
+        break
+      case 'black-holes':
+        out.blackHoles.push(circle)
+        break
     }
   }
   return out
-}
-
-/** Star clusters before black holes (paint order for vector annuli / cores). */
-export function vectorOverlayCirclesInPaintOrder(
-  byLayer: OverlayCirclesByLayer
-): Array<StarClusterOverlayCircle | BlackHoleOverlayCircle> {
-  return [...byLayer.starClusters, ...byLayer.blackHoles]
 }

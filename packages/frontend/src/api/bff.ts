@@ -47,7 +47,6 @@ export type {
 
 export { isStellarCartographySampleLayerId } from './bffCartographyTypes'
 export { normalizeMapDataResponse } from './normalizeMapDataResponse'
-export type { BlackHoleConceptConstants } from '../lib/cartography/blackHoleOverlay'
 
 /** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
 export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const

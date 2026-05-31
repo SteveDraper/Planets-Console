@@ -146,20 +146,36 @@ describe('normalizeMapDataResponse', () => {
     expect(out.nodes[0].planet).not.toBe((raw.nodes[0] as { planet: object }).planet)
   })
 
-  it('parses node coordinates with parseJsonFiniteNumber (no boolean coercion)', () => {
+  it('keeps nodes only when x and y parse as finite numbers (no boolean coercion)', () => {
     const raw = {
       analyticId: 'base-map',
       nodes: [
         { id: 'a', label: 'a', x: true, y: false },
         { id: 'b', label: 'b', x: '12', y: '-3' },
         { id: 'c', label: 'c', x: null, y: '' },
+        { id: 'd', label: 'd' },
       ],
       edges: [],
     }
     const out = normalizeMapDataResponse(raw)
-    expect(out.nodes[0]).toMatchObject({ x: 0, y: 0 })
-    expect(out.nodes[1]).toMatchObject({ x: 12, y: -3 })
-    expect(out.nodes[2]).toMatchObject({ x: 0, y: 0 })
+    expect(out.nodes).toHaveLength(1)
+    expect(out.nodes[0]).toMatchObject({ id: 'b', x: 12, y: -3 })
+  })
+
+  it('parses ownerName only when string or null on the wire', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        { id: 'p1', label: 'p1', x: 1, y: 2, ownerName: 'Alice' },
+        { id: 'p2', label: 'p2', x: 3, y: 4, ownerName: null },
+        { id: 'p3', label: 'p3', x: 5, y: 6, ownerName: 42 },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].ownerName).toBe('Alice')
+    expect(out.nodes[1].ownerName).toBe(null)
+    expect(out.nodes[2]).not.toHaveProperty('ownerName')
   })
 
   it('preserves normalWellCells on base-map nodes', () => {

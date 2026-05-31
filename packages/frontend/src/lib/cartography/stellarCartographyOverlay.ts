@@ -3,12 +3,12 @@ import type {
   IonStormOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
-import { isStarClusterOverlayCircle } from '../../api/bffCartographyTypes'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
   flowToPane,
   gameMapCellCenterToFlow,
+  type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
 import {
   buildNeutronClusterCoreCircle,
@@ -20,10 +20,7 @@ import { ionStormStepDeltaGameLy } from './ionStormMovement'
 import { buildNebulaCloudPaneShapes } from './nebulaCloudOverlay'
 import { buildIonStormCloudPaneShapes } from './ionStormCloudOverlay'
 import { buildNeutronClusterFluxPaneShapes } from './neutronClusterFluxOverlay'
-import {
-  groupOverlayCirclesByLayer,
-  vectorOverlayCirclesInPaintOrder,
-} from './overlayCirclesByLayer'
+import { groupOverlayCirclesByLayer } from './overlayCirclesByLayer'
 import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
   DEBRIS_DISK_BORDER_STROKE,
@@ -41,7 +38,6 @@ export type {
   StellarCartographyOverlayCircleShape,
   StellarCartographyOverlayPaneShapes,
   StellarCartographyOverlayRadialGradient,
-  StellarCartographyOverlayViewport,
   StellarCartographyOverlayWormholeMarkerShape,
 } from './cartographyPaneShapes'
 
@@ -50,7 +46,6 @@ import type {
   StellarCartographyOverlayArrowShape,
   StellarCartographyOverlayCircleShape,
   StellarCartographyOverlayPaneShapes,
-  StellarCartographyOverlayViewport,
   StellarCartographyOverlayWormholeMarkerShape,
 } from './cartographyPaneShapes'
 
@@ -61,7 +56,7 @@ export function flowLySpanToPanePixels(
   flowCx: number,
   flowCy: number,
   spanLy: number,
-  viewport: StellarCartographyOverlayViewport
+  viewport: CartographyOverlayViewport
 ): number {
   const half = spanLy / 2
   const a = flowToPane(flowCx - half, flowCy, viewport)
@@ -73,7 +68,7 @@ export function flowLySpanToPanePixels(
 export function wormholeEndpointDiameterPx(
   flowCx: number,
   flowCy: number,
-  viewport: StellarCartographyOverlayViewport
+  viewport: CartographyOverlayViewport
 ): number {
   const mapScaled = flowLySpanToPanePixels(
     flowCx,
@@ -105,7 +100,7 @@ export function ionStormArrowEndpointFlow(
 
 function buildDebrisDiskBorderShape(
   circle: DebrisDiskOverlayCircle,
-  viewport: StellarCartographyOverlayViewport
+  viewport: CartographyOverlayViewport
 ): StellarCartographyOverlayCircleShape | null {
   const { cx, cy } = gameMapCellCenterToFlow(circle.x, circle.y)
   const r = circle.radius
@@ -128,7 +123,7 @@ function buildDebrisDiskBorderShape(
 
 function buildIonStormArrow(
   storm: IonStormOverlayCircle,
-  viewport: StellarCartographyOverlayViewport,
+  viewport: CartographyOverlayViewport,
   strokeWidth: number
 ): StellarCartographyOverlayArrowShape | null {
   if (storm.heading == null || storm.warp == null || storm.warp <= 0) return null
@@ -156,7 +151,7 @@ function buildIonStormArrow(
 export function buildStellarCartographyOverlayPaneShapes(
   overlayCircles: readonly StellarCartographyOverlayCircle[],
   wormholeEndpoints: readonly { x: number; y: number }[],
-  viewport: StellarCartographyOverlayViewport,
+  viewport: CartographyOverlayViewport,
   options?: {
     cloudyIonStorms?: boolean
     starClusterDisplayMode?: ClusterOutlineDisplayMode
@@ -195,7 +190,7 @@ export function buildStellarCartographyOverlayPaneShapes(
     options?.cloudyIonStorms ?? true
   )
   const neutronFluxClouds = buildNeutronClusterFluxPaneShapes(byLayer.neutronClusters, viewport, {
-    showOutlines: areClusterOutlinesShown(options?.neutronClusterDisplayMode ?? 'outlined'),
+    showOutlines: neutronClusterOutlines,
   })
 
   const circles: StellarCartographyOverlayCircleShape[] = []
@@ -204,27 +199,27 @@ export function buildStellarCartographyOverlayPaneShapes(
   const debrisDiskBorders: StellarCartographyOverlayCircleShape[] = []
   const arrows: StellarCartographyOverlayArrowShape[] = []
 
-  for (const circle of vectorOverlayCirclesInPaintOrder(byLayer)) {
-    if (isStarClusterOverlayCircle(circle)) {
-      const annulus = buildStarClusterAnnulus(
-        circle,
-        viewport,
-        STAR_CLUSTER_STROKE_WIDTH,
-        starClusterOutlines
-      )
-      if (annulus != null) {
-        annuli.push(annulus)
-        continue
-      }
-      const core = buildStarClusterCoreCircle(
-        circle,
-        viewport,
-        STAR_CLUSTER_STROKE_WIDTH,
-        starClusterOutlines
-      )
-      if (core != null) circles.push(core)
+  for (const circle of byLayer.starClusters) {
+    const annulus = buildStarClusterAnnulus(
+      circle,
+      viewport,
+      STAR_CLUSTER_STROKE_WIDTH,
+      starClusterOutlines
+    )
+    if (annulus != null) {
+      annuli.push(annulus)
       continue
     }
+    const core = buildStarClusterCoreCircle(
+      circle,
+      viewport,
+      STAR_CLUSTER_STROKE_WIDTH,
+      starClusterOutlines
+    )
+    if (core != null) circles.push(core)
+  }
+
+  for (const circle of byLayer.blackHoles) {
     const blackHole = buildBlackHolePaneShape(BLACK_HOLE_CONCEPT_CONSTANTS, circle, viewport)
     if (blackHole != null) blackHoles.push(blackHole)
   }

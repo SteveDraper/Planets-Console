@@ -96,9 +96,11 @@ export function useRetainedMapDisplay({
   const showingLiveCombined =
     combined != null && hasDisplayableMapData(combined)
   const mapFrameSource = deriveMapFrameSource(showingLiveCombined, retainedForCurrentKey)
+  const liveDisplayMapData =
+    showingLiveCombined && combined != null ? combined : null
   const displayMapData: CombinedMapData | null =
     mapFrameSource === 'live'
-      ? combined!
+      ? liveDisplayMapData
       : mapFrameSource === 'retained'
         ? retainedForCurrentKey
         : null

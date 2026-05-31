@@ -1,10 +1,7 @@
-import type { CartographyOverlayViewport } from './cartographyOverlayGeometry'
 import type { BlackHolePaneShape } from './blackHoleOverlay'
 import type { IonStormCloudPaneShape } from './ionStormCloudOverlay'
 import type { NebulaCloudPaneShape } from './nebulaCloudOverlay'
 import type { NeutronClusterFluxPaneShape } from './neutronClusterFluxOverlay'
-
-export type StellarCartographyOverlayViewport = CartographyOverlayViewport
 
 export type StellarCartographyOverlayCircleShape = {
   key: string

@@ -36,8 +36,8 @@ TanStack Query owns **data fetched from the BFF** (the SPA never calls the Core 
 |---------|---------|----------|
 | `['bff', '<resource>']` | BFF lists or singleton metadata | `['bff', 'analytics']`, `['bff', 'games']` |
 | `['analytic', <id>, 'table', <scope>]` | Tabular analytic for a **game + turn + perspective** | Scope is `AnalyticShellScope` (or equivalent fields) so changing shell context **refetches** without manual `invalidateQueries`. |
-| `['analytic', <id>, 'map', <scope>, 'planet-v2']` | Generic map fetch in `MainArea.tsx` (**base-map** and other map analytics except **connections**). `<scope>` is `AnalyticShellScope \| null`. The `'planet-v2'` suffix invalidates cache when base-map node shape changes (e.g. `normalWellCells`). |
-| `['analytic', 'connections', 'map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth]` | **Connections** map overlay (`MainArea.tsx`). Primitive scope + sidebar params so changing warp/flare settings refetches. When scope is not ready, the key uses `'idle', 0, 0` in place of `gameId, turn, perspective`. |
+| `['analytic', <id>, 'map', <scope>, 'planet-v2']` | Generic map fetch in `useMapAnalyticQueries.ts` (**base-map** and other map analytics except **connections**). Mounted from `MapMainArea` in map view only. `<scope>` is `AnalyticShellScope \| null`. The `'planet-v2'` suffix invalidates cache when base-map node shape changes (e.g. `normalWellCells`). |
+| `['analytic', 'connections', 'map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth]` | **Connections** map overlay (`useMapAnalyticQueries.ts`). Primitive scope + sidebar params so changing warp/flare settings refetches. |
 | `['bff', 'turnData', gameId, turn, perspective, loginName, credentialsRevision]` | **Turn presence in storage** (see below) | One logical ensure per distinct shell + identity; `credentialsRevision` bumps on login/clear (not the password). |
 
 **Mutations** (`useMutation`) are for operations that **change server-side** data (e.g. `POST /bff/games/{id}/info`). They may call `queryClient.invalidateQueries` for related lists (e.g. games) when needed.
