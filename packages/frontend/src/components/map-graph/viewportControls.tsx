@@ -5,6 +5,7 @@ import {
   CELL_CENTER_OFFSET,
   gameMapYToFlowCenterY,
 } from './geometry'
+import { viewportZoomFromTransform } from '../../lib/utils'
 import {
   MapZoomKeyboardShortcuts,
   useCenteredViewportZoom,
@@ -95,8 +96,7 @@ export function InitialViewportFit({
 
 /** Mirrors React Flow zoom to the app (wheel, pinch, initial fit, slider). */
 export function ViewportZoomSync({ onMapZoomChange }: { onMapZoomChange: (z: number) => void }) {
-  const raw = useStore((s) => s.transform?.[2])
-  const zoom = Number.isFinite(raw) && (raw as number) > 0 ? (raw as number) : 1
+  const zoom = useStore((s) => viewportZoomFromTransform(s.transform))
   const prev = useRef(zoom)
   const rafRef = useRef<number | null>(null)
   const pendingZoomRef = useRef<number>(zoom)

@@ -7,6 +7,7 @@ import {
   MAP_ZOOM_MIN,
   mapZoomKeyboardStepsPerRepeatTick,
   stepMapZoomBySliderSteps,
+  viewportZoomFromTransform,
 } from '../../lib/utils'
 import { useWindowKeydown } from '../../lib/keyboardShortcuts'
 
@@ -82,8 +83,7 @@ export function MapZoomKeyboardShortcuts({
 
   const applyZoomSteps = useCallback(
     (direction: -1 | 1, deltaSteps: number) => {
-      const raw = storeApi.getState().transform?.[2]
-      const current = Number.isFinite(raw) && (raw as number) > 0 ? (raw as number) : 1
+      const current = viewportZoomFromTransform(storeApi.getState().transform)
       setZoom(stepMapZoomBySliderSteps(current, direction * deltaSteps))
     },
     [setZoom, storeApi]

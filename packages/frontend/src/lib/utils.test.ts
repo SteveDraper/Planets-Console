@@ -7,7 +7,26 @@ import {
   mapZoomKeyboardStepsPerRepeatTick,
   mapZoomToSlider,
   stepMapZoomBySliderSteps,
+  viewportZoomFromTransform,
 } from './utils'
+
+describe('viewportZoomFromTransform', () => {
+  it('reads zoom from transform and clamps to map bounds', () => {
+    expect(viewportZoomFromTransform([0, 0, 1.5])).toBe(1.5)
+    expect(viewportZoomFromTransform([0, 0, MAP_ZOOM_MIN])).toBe(MAP_ZOOM_MIN)
+    expect(viewportZoomFromTransform([0, 0, MAP_ZOOM_MAX])).toBe(MAP_ZOOM_MAX)
+    expect(viewportZoomFromTransform([0, 0, 0.01])).toBe(MAP_ZOOM_MIN)
+    expect(viewportZoomFromTransform([0, 0, 999])).toBe(MAP_ZOOM_MAX)
+  })
+
+  it('falls back to MAP_ZOOM_MIN for missing or invalid transform', () => {
+    expect(viewportZoomFromTransform(undefined)).toBe(MAP_ZOOM_MIN)
+    expect(viewportZoomFromTransform(null)).toBe(MAP_ZOOM_MIN)
+    expect(viewportZoomFromTransform([0, 0, NaN])).toBe(MAP_ZOOM_MIN)
+    expect(viewportZoomFromTransform([0, 0, 0])).toBe(MAP_ZOOM_MIN)
+    expect(viewportZoomFromTransform([0, 0, -1])).toBe(MAP_ZOOM_MIN)
+  })
+})
 
 describe('stepMapZoomBySliderSteps', () => {
   it('moves one log-scale slider step per keypress', () => {

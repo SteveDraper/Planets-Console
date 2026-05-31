@@ -8,6 +8,17 @@ export function cn(...inputs: ClassValue[]) {
 /** Matches React Flow map minZoom / maxZoom. */
 export const MAP_ZOOM_MIN = 0.2
 export const MAP_ZOOM_MAX = 40
+
+/** React Flow store transform `[translateX, translateY, zoom]`. */
+export type ViewportTransform = readonly [number, number, number]
+
+/** Reads zoom from a React Flow transform; invalid or missing values clamp to map bounds. */
+export function viewportZoomFromTransform(transform: ViewportTransform | null | undefined): number {
+  const raw = transform?.[2]
+  const zoom =
+    raw !== undefined && Number.isFinite(raw) && raw > 0 ? raw : MAP_ZOOM_MIN
+  return Math.min(MAP_ZOOM_MAX, Math.max(MAP_ZOOM_MIN, zoom))
+}
 const MAP_ZOOM_RATIO = MAP_ZOOM_MAX / MAP_ZOOM_MIN
 /** Slider 0 … SLIDER_STEPS; equal steps move equally in log(zoom). */
 export const MAP_ZOOM_SLIDER_STEPS = 1000
