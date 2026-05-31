@@ -9,6 +9,8 @@ How the console draws and interacts with **Stellar Cartography** on the React Fl
 | Theme constants | `packages/frontend/src/lib/stellarCartographyTheme.ts` |
 | SVG overlay builder | `packages/frontend/src/lib/stellarCartographyOverlay.ts` |
 | Black hole pane shapes | `packages/frontend/src/lib/cartography/blackHoleOverlay.ts` |
+| Black hole SVG overlay | `packages/frontend/src/components/map-graph/BlackHoleVectorOverlay.tsx` |
+| Stellar cartography SVG pane | `packages/frontend/src/components/map-graph/StellarCartographyVectorOverlay.tsx` |
 | Map integration | `packages/frontend/src/components/MapGraph.tsx` |
 | Wormhole edges | `packages/frontend/src/analytics/mapLayers.ts` (merge) + custom edge type if needed |
 | Core map geometry | `packages/api/api/analytics/stellar_cartography.py` |
