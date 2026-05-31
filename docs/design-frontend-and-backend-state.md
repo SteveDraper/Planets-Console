@@ -93,6 +93,8 @@ While map analytic queries reload, the SPA keeps **MapGraph** mounted and may sh
 
 **Predicates:** `hasDisplayableMapData`, `shouldRetainMapDuringLoad`, and `deriveMapShellPhase` in `mapDisplayRetention.ts` (unit-tested separately).
 
+**Turn ensure vs retention:** While a prior frame is retained, `deriveMapShellPhase` returns **`retained`** even when `turnEnsurePending && !turnDataReady`, so the map shell does not enter **`full-loading`** during turn reload. If **turn ensure** then fails (`turnEnsureIsError && !turnDataReady`), `MainArea.tsx` still renders the full-pane turn-error placeholder **before** the map shell body -- the retained frame is not shown alongside that error. The hook keeps reporting **`retained`** until scope or live data changes; only the shell layout decides whether the user sees the stale map or the error pane.
+
 ---
 
 ## 3. Frontend: Local React state (`useState` / `useRef`)

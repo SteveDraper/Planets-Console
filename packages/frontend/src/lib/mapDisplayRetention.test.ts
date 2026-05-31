@@ -83,6 +83,21 @@ describe('deriveMapShellPhase', () => {
     ).toBe('error')
   })
 
+  it('returns retained (not full-loading) during turn ensure when a prior frame is kept', () => {
+    // retainDuringLoad is checked before turnEnsurePending; turn reload keeps MapGraph mounted.
+    expect(
+      deriveMapShellPhase({
+        ...baseInput,
+        displayMapData: sampleMap,
+        retainDuringLoad: true,
+        turnDataReady: false,
+        turnEnsurePending: true,
+        mapPending: true,
+        mapHasAnyData: false,
+      })
+    ).toBe('retained')
+  })
+
   it('returns full-loading during turn ensure when not retaining', () => {
     expect(
       deriveMapShellPhase({

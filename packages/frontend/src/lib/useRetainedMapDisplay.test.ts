@@ -322,6 +322,57 @@ describe('useRetainedMapDisplay', () => {
     expect(result.current.mapShellPhase).toBe('ready')
   })
 
+  it('keeps phase retained (not full-loading) when turn ensure fails after a prior frame', () => {
+    // Hook phase stays retained; MainArea.tsx replaces the map pane with a turn-error placeholder
+    // when turnEnsureIsError && !turnDataReady (see design-frontend-and-backend-state.md).
+    const { result, rerender } = renderHook(
+      ({
+        combined,
+        turnDataReady,
+        turnEnsurePending,
+        mapPending,
+        mapHasAnyData,
+      }: {
+        combined: CombinedMapData | null
+        turnDataReady: boolean
+        turnEnsurePending: boolean
+        mapPending: boolean
+        mapHasAnyData: boolean
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          ...defaultScope,
+          viewMode: 'map',
+          turnDataReady,
+          turnEnsurePending,
+          mapPending,
+          mapHasError: false,
+          mapHasAnyData,
+        }),
+      {
+        initialProps: {
+          combined: sampleMap,
+          turnDataReady: true,
+          turnEnsurePending: false,
+          mapPending: false,
+          mapHasAnyData: true,
+        },
+      }
+    )
+
+    rerender({
+      combined: emptyCombined,
+      turnDataReady: false,
+      turnEnsurePending: false,
+      mapPending: true,
+      mapHasAnyData: false,
+    })
+
+    expect(result.current.displayMapData).toBe(sampleMap)
+    expect(result.current.retainDuringLoad).toBe(true)
+    expect(result.current.mapShellPhase).toBe('retained')
+  })
+
   it('keeps retained map visible while turn ensure runs in map mode', () => {
     const { result, rerender } = renderHook(
       ({
