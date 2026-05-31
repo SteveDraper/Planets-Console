@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { AnalyticShellScope, MapDataResponse } from '../../api/bff'
+import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
+import type { StellarCartographyMapMergeOptions } from '../../analytics/mapLayers'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from '../PlanetMapInfoControls'
@@ -17,6 +19,7 @@ type MapShellContentProps = {
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   enabledMapIds: string[]
   analyticScope: AnalyticShellScope | null
+  cartographyConfig: StellarCartographyMapMergeOptions
 }
 
 /** Renders map shell phases (loading, error, or live map with optional deferred pending banner). */
@@ -29,6 +32,7 @@ export function MapShellContent({
   onSetZoomReady,
   enabledMapIds,
   analyticScope,
+  cartographyConfig,
 }: MapShellContentProps) {
   switch (mapShellView.phase) {
     case 'full-loading':
@@ -60,8 +64,9 @@ export function MapShellContent({
               onMapZoomChange={onMapZoomChange}
               onSetZoomReady={onSetZoomReady}
               planetLabelOptions={planetLabelOptions}
+              cartographyConfig={cartographyConfig}
               stellarCartography={{
-                sampleEnabled: enabledMapIds.includes('stellar-cartography'),
+                sampleEnabled: enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID),
                 analyticScope,
               }}
             />

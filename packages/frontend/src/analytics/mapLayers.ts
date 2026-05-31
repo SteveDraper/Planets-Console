@@ -11,6 +11,7 @@ import {
   mapLayerMergerFor,
   type MapLayerMergeContext,
 } from './mapAnalyticRegistry'
+import { BASE_MAP_ANALYTIC_ID } from './mapAnalyticIds'
 
 export type StellarCartographyMapMergeOptions = {
   layerVisibility: CartographyLayerVisibility
@@ -28,28 +29,12 @@ export type CombineMapDataOptionsBase = {
   stellarCartography?: StellarCartographyMapMergeOptions
 }
 
-export type CombineMapDataOptionsWithStellarCartography = CombineMapDataOptionsBase & {
-  stellarCartography: StellarCartographyMapMergeOptions
-}
-
-export function combineMapData(
-  analyticIds: readonly string[],
-  results: { data?: MapDataResponse }[],
-  options: CombineMapDataOptionsBase
-): CombinedMapData
-export function combineMapData<T extends readonly string[]>(
-  analyticIds: T,
-  results: { data?: MapDataResponse }[],
-  options: 'stellar-cartography' extends T[number]
-    ? CombineMapDataOptionsWithStellarCartography
-    : CombineMapDataOptionsBase
-): CombinedMapData
 export function combineMapData(
   analyticIds: readonly string[],
   results: { data?: MapDataResponse }[],
   options: CombineMapDataOptionsBase
 ): CombinedMapData {
-  const baseMapAnalyticId = analyticIds.find((id) => id === 'base-map') ?? null
+  const baseMapAnalyticId = analyticIds.find((id) => id === BASE_MAP_ANALYTIC_ID) ?? null
   const nodes: CombinedMapData['nodes'] = []
   const edges: MapEdge[] = []
   const overlayCircles: CombinedMapData['overlayCircles'] = []
@@ -65,9 +50,9 @@ export function combineMapData(
   }
   results.forEach((result, idx) => {
     const data = result.data
-    const prefix = analyticIds[idx] ?? ''
-    if (!data) return
-    mapLayerMergerFor(data.analyticId)(data, context, options, prefix)
+    const slotId = analyticIds[idx] ?? ''
+    if (!data || slotId === '') return
+    mapLayerMergerFor(slotId)(data, context, options, slotId)
   })
   const futureTurnOffset = options.futureTurnOffset ?? 0
   const overlayCirclesWithFuture =

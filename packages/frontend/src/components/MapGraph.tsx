@@ -33,7 +33,6 @@ import {
 } from './map-graph/stellarCartographyWormholeInteraction'
 import type { StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
 import type { StellarCartographyMapUi } from './map-graph/stellarCartographyMapUi'
-import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import {
   buildLabelSourceByNodeId,
   FixedSizeDotsOverlay,
@@ -54,6 +53,7 @@ type MapGraphProps = {
   /** Called once so the header slider can drive zoom (same as scroll wheel). */
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   planetLabelOptions?: PlanetLabelOptions
+  cartographyConfig: StellarCartographyMapMergeOptions
   stellarCartography?: StellarCartographyMapUi
 }
 
@@ -68,11 +68,11 @@ export function MapGraph({
   onMapZoomChange,
   onSetZoomReady,
   planetLabelOptions = DEFAULT_PLANET_LABEL_OPTIONS,
+  cartographyConfig,
   stellarCartography,
 }: MapGraphProps) {
   const [initialFitDone, setInitialFitDone] = useState(false)
   const onInitialFitDone = useCallback(() => setInitialFitDone(true), [])
-  const cartographyConfig = useStellarCartographyMapConfig()
 
   useEffect(() => {
     const t = setTimeout(() => setInitialFitDone(true), INITIAL_FIT_REVEAL_MS)

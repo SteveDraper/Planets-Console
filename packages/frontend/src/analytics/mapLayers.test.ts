@@ -115,6 +115,21 @@ describe('combineMapData', () => {
     expect(combined.nodes[0].normalWellCells).toEqual(cells)
   })
 
+  it('clones planet snapshots when prefixing base-map nodes', () => {
+    const planet = { id: 1, name: 'Homeworld', temp: 50 }
+    const baseMapWithPlanet: MapDataResponse = {
+      analyticId: 'base-map',
+      nodes: [{ id: 'p1', label: 'p1', x: 10, y: 20, planet }],
+      edges: [],
+    }
+
+    const combined = combineMapData(['base-map'], [{ data: baseMapWithPlanet }], {
+      liveConnectionsParams: null,
+    })
+    expect(combined.nodes[0].planet).toEqual(planet)
+    expect(combined.nodes[0].planet).not.toBe(planet)
+  })
+
   it('prefixes stellar cartography wormhole nodes and merges bidirectional edges once', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',

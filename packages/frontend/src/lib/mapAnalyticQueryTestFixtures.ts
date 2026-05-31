@@ -1,6 +1,13 @@
 import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
+import {
+  BASE_MAP_ANALYTIC_ID,
+  CONNECTIONS_ANALYTIC_ID,
+  STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+} from '../analytics/mapAnalyticIds'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import type { StellarCartographyMapMergeOptions } from '../analytics/mapLayers'
+
+export { BASE_MAP_ANALYTIC_ID, CONNECTIONS_ANALYTIC_ID, STELLAR_CARTOGRAPHY_ANALYTIC_ID }
 
 export const defaultConnectionsParams: ConnectionsMapParams = {
   warpSpeed: 9,
@@ -16,16 +23,16 @@ export const sampleScope: AnalyticShellScope = {
 }
 
 export const sampleAnalytics: AnalyticItem[] = [
-  { id: 'base-map', name: 'Base', supportsTable: false, supportsMap: true, type: 'base' },
+  { id: BASE_MAP_ANALYTIC_ID, name: 'Base', supportsTable: false, supportsMap: true, type: 'base' },
   {
-    id: 'connections',
+    id: CONNECTIONS_ANALYTIC_ID,
     name: 'Connections',
     supportsTable: true,
     supportsMap: true,
     type: 'selectable',
   },
   {
-    id: 'stellar-cartography',
+    id: STELLAR_CARTOGRAPHY_ANALYTIC_ID,
     name: 'Stellar Cartography',
     supportsTable: false,
     supportsMap: true,

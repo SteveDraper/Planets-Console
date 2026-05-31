@@ -6,6 +6,13 @@ import {
   mapIdsToFetch,
 } from './useMapAnalyticQueries'
 import {
+  mapIdsNeedLiveConnectionsParams,
+  mapIdsNeedStellarCartographyMergeOptions,
+} from '../analytics/mapAnalyticRegistry'
+import {
+  BASE_MAP_ANALYTIC_ID,
+  CONNECTIONS_ANALYTIC_ID,
+  STELLAR_CARTOGRAPHY_ANALYTIC_ID,
   defaultConnectionsParams,
   sampleAnalytics,
   sampleScope,
@@ -70,14 +77,23 @@ describe('connectionsMapQueryKey', () => {
 describe('enabledMapAnalyticIds and mapIdsToFetch', () => {
   it('includes base map first and skips duplicate base id in enabled list', () => {
     const enabled = enabledMapAnalyticIds(
-      ['connections', 'base-map', 'stellar-cartography'],
+      [CONNECTIONS_ANALYTIC_ID, BASE_MAP_ANALYTIC_ID, STELLAR_CARTOGRAPHY_ANALYTIC_ID],
       sampleAnalytics
     )
-    expect(enabled).toEqual(['connections', 'stellar-cartography'])
+    expect(enabled).toEqual([CONNECTIONS_ANALYTIC_ID, STELLAR_CARTOGRAPHY_ANALYTIC_ID])
     expect(mapIdsToFetch(sampleAnalytics, enabled)).toEqual([
-      'base-map',
-      'connections',
-      'stellar-cartography',
+      BASE_MAP_ANALYTIC_ID,
+      CONNECTIONS_ANALYTIC_ID,
+      STELLAR_CARTOGRAPHY_ANALYTIC_ID,
     ])
+  })
+})
+
+describe('map analytic merge requirements', () => {
+  it('flags stellar cartography and connections from registry metadata', () => {
+    expect(mapIdsNeedStellarCartographyMergeOptions([STELLAR_CARTOGRAPHY_ANALYTIC_ID])).toBe(true)
+    expect(mapIdsNeedStellarCartographyMergeOptions([CONNECTIONS_ANALYTIC_ID])).toBe(false)
+    expect(mapIdsNeedLiveConnectionsParams([CONNECTIONS_ANALYTIC_ID])).toBe(true)
+    expect(mapIdsNeedLiveConnectionsParams([BASE_MAP_ANALYTIC_ID])).toBe(false)
   })
 })

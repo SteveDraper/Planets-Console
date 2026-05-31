@@ -3,6 +3,7 @@ import type {
   IonStormOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
+import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
@@ -10,6 +11,13 @@ import {
   gameMapCellCenterToFlow,
   type CartographyOverlayViewport,
 } from './cartographyOverlayGeometry'
+import type {
+  StellarCartographyOverlayAnnulusShape,
+  StellarCartographyOverlayArrowShape,
+  StellarCartographyOverlayCircleShape,
+  StellarCartographyOverlayPaneShapes,
+  StellarCartographyOverlayWormholeMarkerShape,
+} from './cartographyPaneShapes'
 import {
   buildNeutronClusterCoreCircle,
   buildStarClusterAnnulus,
@@ -21,7 +29,6 @@ import { buildNebulaCloudPaneShapes } from './nebulaCloudOverlay'
 import { buildIonStormCloudPaneShapes } from './ionStormCloudOverlay'
 import { buildNeutronClusterFluxPaneShapes } from './neutronClusterFluxOverlay'
 import { groupOverlayCirclesByLayer } from './overlayCirclesByLayer'
-import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
   DEBRIS_DISK_BORDER_STROKE,
   DEBRIS_DISK_BORDER_STROKE_WIDTH,
@@ -38,14 +45,6 @@ export type {
   StellarCartographyOverlayCircleShape,
   StellarCartographyOverlayPaneShapes,
   StellarCartographyOverlayRadialGradient,
-  StellarCartographyOverlayWormholeMarkerShape,
-} from './cartographyPaneShapes'
-
-import type {
-  StellarCartographyOverlayAnnulusShape,
-  StellarCartographyOverlayArrowShape,
-  StellarCartographyOverlayCircleShape,
-  StellarCartographyOverlayPaneShapes,
   StellarCartographyOverlayWormholeMarkerShape,
 } from './cartographyPaneShapes'
 

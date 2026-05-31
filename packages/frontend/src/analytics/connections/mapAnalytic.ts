@@ -5,6 +5,7 @@ import type {
   MapAnalyticRegistration,
 } from '../mapAnalyticRegistry'
 import type { ConnectionsMapParams, ConnectionsFlareMode } from './api'
+import { CONNECTIONS_ANALYTIC_ID } from '../mapAnalyticIds'
 import { appendConnectionsMapLayer } from './mapLayer'
 
 export type ConnectionsMapQueryKey = readonly [
@@ -44,7 +45,7 @@ export const connectionsMapAnalytic: MapAnalyticRegistration = {
     return {
       queryKey: connectionsMapQueryKey(context.analyticScope, context.connectionsMapParams),
       queryFn: () =>
-        fetchAnalyticMap('connections', context.analyticScope!, context.connectionsMapParams),
+        fetchAnalyticMap(CONNECTIONS_ANALYTIC_ID, context.analyticScope!, context.connectionsMapParams),
       enabled: context.analyticFetchEnabled && context.analyticScope != null,
     }
   },

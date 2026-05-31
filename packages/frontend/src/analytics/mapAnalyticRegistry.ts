@@ -7,6 +7,11 @@ import type {
 } from '../api/bff'
 import type { ConnectionsMapParams } from './connections/api'
 import { connectionsMapAnalytic } from './connections/mapAnalytic'
+import {
+  BASE_MAP_ANALYTIC_ID,
+  CONNECTIONS_ANALYTIC_ID,
+  STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+} from './mapAnalyticIds'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
 import type { CombineMapDataOptionsBase } from './mapLayers'
 
@@ -46,6 +51,10 @@ export type MapLayerMerger = (
 export type MapAnalyticRegistration = {
   buildQuerySpec?: (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
   mergeLayer: MapLayerMerger
+  /** When true, `combineMapData` needs `stellarCartography` merge options. */
+  needsStellarCartographyMergeOptions?: boolean
+  /** When true, `combineMapData` needs live Connections params for stale-route clipping. */
+  needsLiveConnectionsParams?: boolean
 }
 
 function prefixMapNodes(
@@ -62,7 +71,7 @@ function prefixMapNodes(
     }
     const node: CombinedMapData['nodes'][number] = { ...base }
     if (n.planet != null) {
-      node.planet = n.planet
+      node.planet = { ...n.planet }
       node.ownerName = n.ownerName ?? null
     }
     if (n.normalWellCells != null) {
@@ -94,9 +103,15 @@ export const defaultMapAnalyticRegistration: MapAnalyticRegistration = {
 }
 
 const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
-  'base-map': defaultMapAnalyticRegistration,
-  connections: connectionsMapAnalytic,
-  'stellar-cartography': stellarCartographyMapAnalytic,
+  [BASE_MAP_ANALYTIC_ID]: defaultMapAnalyticRegistration,
+  [CONNECTIONS_ANALYTIC_ID]: {
+    ...connectionsMapAnalytic,
+    needsLiveConnectionsParams: true,
+  },
+  [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: {
+    ...stellarCartographyMapAnalytic,
+    needsStellarCartographyMergeOptions: true,
+  },
 }
 
 export function mapAnalyticRegistrationFor(analyticId: string): MapAnalyticRegistration {
@@ -124,4 +139,12 @@ export function mapAnalyticQuerySpecFor(
 ): MapAnalyticQuerySpec {
   const registration = mapAnalyticRegistrationFor(analyticId)
   return registration.buildQuerySpec?.(context) ?? defaultMapAnalyticQuerySpec(analyticId, context)
+}
+
+export function mapIdsNeedStellarCartographyMergeOptions(mapIds: readonly string[]): boolean {
+  return mapIds.some((id) => mapAnalyticRegistrationFor(id).needsStellarCartographyMergeOptions)
+}
+
+export function mapIdsNeedLiveConnectionsParams(mapIds: readonly string[]): boolean {
+  return mapIds.some((id) => mapAnalyticRegistrationFor(id).needsLiveConnectionsParams)
 }

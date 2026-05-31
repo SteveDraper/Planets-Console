@@ -14,6 +14,8 @@ import {
 } from '../analytics/mapLayers'
 import {
   mapAnalyticQuerySpecFor,
+  mapIdsNeedLiveConnectionsParams,
+  mapIdsNeedStellarCartographyMergeOptions,
   type MapAnalyticQueryContext,
 } from '../analytics/mapAnalyticRegistry'
 
@@ -27,7 +29,8 @@ export type UseMapAnalyticQueriesInput = {
   analyticFetchEnabled: boolean
   connectionsMapParams: ConnectionsMapParams
   futureTurnOffset: number
-  stellarCartography: StellarCartographyMapMergeOptions
+  /** Required when a registered map analytic needs Stellar Cartography merge options. */
+  stellarCartography?: StellarCartographyMapMergeOptions
 }
 
 export type UseMapAnalyticQueriesResult = {
@@ -53,10 +56,6 @@ export function combineMapResultsFromQueries(
   )
 }
 
-// TanStack structural sharing reuses nested objects by reference; normalizeMapDataResponse
-// clones node.planet snapshots so merged label fields are not dropped across refetches.
-const MAP_QUERY_STRUCTURAL_SHARING = false as const
-
 /** Id of the base map analytic (planets + edges), if present. */
 export function baseMapId(analytics: AnalyticItem[]): string | null {
   const a = analytics.find((x) => x.type === 'base' && x.supportsMap)
@@ -79,6 +78,29 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
   const base = baseMapId(analytics)
   const withoutBase = enabledMapIds.filter((id) => id !== base)
   return base ? [base, ...withoutBase] : withoutBase
+}
+
+function buildMergeOptions(
+  mapIds: readonly string[],
+  analyticFetchEnabled: boolean,
+  connectionsMapParams: ConnectionsMapParams,
+  futureTurnOffset: number,
+  stellarCartography: StellarCartographyMapMergeOptions | undefined
+): CombineMapDataOptionsBase {
+  const base: CombineMapDataOptionsBase = {
+    liveConnectionsParams:
+      mapIdsNeedLiveConnectionsParams(mapIds) && analyticFetchEnabled
+        ? connectionsMapParams
+        : null,
+    futureTurnOffset,
+  }
+  if (mapIdsNeedStellarCartographyMergeOptions(mapIds)) {
+    if (stellarCartography == null) {
+      throw new Error('Stellar Cartography map merge requires stellarCartography options')
+    }
+    return { ...base, stellarCartography }
+  }
+  return base
 }
 
 export function useMapAnalyticQueries({
@@ -109,40 +131,46 @@ export function useMapAnalyticQueries({
   )
 
   const mapQueries = useQueries({
-    queries: mapIds.map((analyticId) => {
-      const spec = mapAnalyticQuerySpecFor(analyticId, queryContext)
-      return {
-        ...spec,
-        structuralSharing: MAP_QUERY_STRUCTURAL_SHARING,
-      }
-    }),
+    queries: mapIds.map((analyticId) => mapAnalyticQuerySpecFor(analyticId, queryContext)),
   })
 
   const pending = mapQueries.some((q) => q.isPending)
   const hasError = mapQueries.some((q) => q.error)
-  const includesStellarCartography = mapIds.includes('stellar-cartography')
 
-  const mergeOptions = useMemo(() => {
-    const base = {
-      liveConnectionsParams:
-        mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null,
-      futureTurnOffset,
-    }
-    if (includesStellarCartography) {
-      return { ...base, stellarCartography }
-    }
-    return base
-  }, [
-    mapIds,
-    analyticFetchEnabled,
-    connectionsMapParams,
-    futureTurnOffset,
-    includesStellarCartography,
-    stellarCartography,
-  ])
+  const mergeOptions = useMemo(
+    () =>
+      buildMergeOptions(
+        mapIds,
+        analyticFetchEnabled,
+        connectionsMapParams,
+        futureTurnOffset,
+        stellarCartography
+      ),
+    [mapIds, analyticFetchEnabled, connectionsMapParams, futureTurnOffset, stellarCartography]
+  )
 
-  const mapQueryData = mapQueries.map((q) => q.data)
-  const combined = combineMapResultsFromQueries(mapIds, mapQueryData, mergeOptions)
+  const combineInputsKey = useMemo(
+    () =>
+      mapQueries
+        .map(
+          (q) =>
+            `${q.dataUpdatedAt}:${q.data?.nodes.length ?? ''}:${q.data?.edges.length ?? ''}:${q.data?.overlayCircles?.length ?? ''}`
+        )
+        .join('|'),
+    [mapQueries]
+  )
+
+  const combined = useMemo(
+    () =>
+      combineMapResultsFromQueries(
+        mapIds,
+        mapQueries.map((q) => q.data),
+        mergeOptions
+      ),
+    // combineInputsKey tracks query data versions; mapQueries read from render closure.
+    [mapIds, mergeOptions, combineInputsKey]
+  )
+
   const hasAnyData = mapQueries.some((q) => q.data != null)
 
   return {

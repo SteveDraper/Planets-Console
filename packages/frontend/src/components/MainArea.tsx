@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable } from '../api/bff'
 import type {
@@ -115,7 +115,7 @@ type MapMainAreaProps = {
 }
 
 /** Map queries and retention run only while this component is mounted (map view). */
-function MapMainArea({
+const MapMainArea = memo(function MapMainArea({
   enabledAnalyticIds,
   analytics,
   analyticScope,
@@ -129,8 +129,7 @@ function MapMainArea({
   onSetZoomReady,
 }: MapMainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
-
-  const stellarCartography = useStellarCartographyMapConfig()
+  const cartographyConfig = useStellarCartographyMapConfig()
 
   const {
     enabledMapIds,
@@ -147,7 +146,7 @@ function MapMainArea({
     analyticFetchEnabled,
     connectionsMapParams,
     futureTurnOffset,
-    stellarCartography,
+    stellarCartography: cartographyConfig,
   })
 
   const { mapShellView } = useRetainedMapDisplay({
@@ -183,9 +182,10 @@ function MapMainArea({
       onSetZoomReady={onSetZoomReady}
       enabledMapIds={enabledMapIds}
       analyticScope={analyticScope}
+      cartographyConfig={cartographyConfig}
     />
   )
-}
+})
 
 export function MainArea({
   viewMode,
