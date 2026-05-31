@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
 import type {
   AnalyticItem,
@@ -220,8 +220,6 @@ export function MainArea({
             return fetchAnalyticMap('connections', scope, params)
           },
           enabled: analyticFetchEnabled,
-          // Same query key refetch only; cross-turn retention is useRetainedMapDisplay.
-          placeholderData: keepPreviousData,
           structuralSharing: false as const,
         }
       }
@@ -229,7 +227,6 @@ export function MainArea({
         queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
         queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
         enabled: analyticFetchEnabled,
-        placeholderData: keepPreviousData,
         structuralSharing: false as const,
       }
     }),
@@ -285,6 +282,7 @@ export function MainArea({
   const { displayMapData, retainDuringLoad } = useRetainedMapDisplay({
     combined,
     gameId: analyticScope?.gameId ?? null,
+    perspective: analyticScope?.perspective ?? null,
     viewMode,
   })
 

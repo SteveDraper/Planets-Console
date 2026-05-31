@@ -1,10 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import type { CombinedMapData } from '../api/bff'
 import { hasDisplayableMapData, shouldRetainMapDuringLoad } from './mapDisplayRetention'
+
+export type MapDisplayRetentionKey = {
+  gameId: string
+  perspective: number
+}
 
 export type UseRetainedMapDisplayInput = {
   combined: CombinedMapData | null | undefined
   gameId: string | null
+  perspective: number | null
   viewMode: 'tabular' | 'map'
 }
 
@@ -13,37 +19,55 @@ export type UseRetainedMapDisplayResult = {
   retainDuringLoad: boolean
 }
 
+function mapDisplayRetentionKey(
+  gameId: string | null,
+  perspective: number | null
+): MapDisplayRetentionKey | null {
+  if (gameId == null || perspective == null) {
+    return null
+  }
+  return { gameId, perspective }
+}
+
+function retentionKeysEqual(
+  a: MapDisplayRetentionKey | null,
+  b: MapDisplayRetentionKey | null
+): boolean {
+  return a?.gameId === b?.gameId && a?.perspective === b?.perspective
+}
+
 /**
- * Retains the last displayable map across turn changes within a game.
- * Ref: new query keys on turn change (keepPreviousData does not apply).
- * MainArea keepPreviousData: same-key refetch while turn is unchanged.
+ * Retains the last displayable combined map while map queries reload.
+ * Clears synchronously when game id or perspective changes; retains across turn steps.
  */
 export function useRetainedMapDisplay({
   combined,
   gameId,
+  perspective,
   viewMode,
 }: UseRetainedMapDisplayInput): UseRetainedMapDisplayResult {
   const retainedMapDataRef = useRef<CombinedMapData | null>(null)
-  const retainedMapGameIdRef = useRef<string | null>(null)
+  const retentionKeyRef = useRef<MapDisplayRetentionKey | null>(null)
 
-  useEffect(() => {
-    if (gameId !== retainedMapGameIdRef.current) {
-      retainedMapDataRef.current = null
-      retainedMapGameIdRef.current = gameId
-    }
-  }, [gameId])
+  const currentKey = mapDisplayRetentionKey(gameId, perspective)
+  if (!retentionKeysEqual(currentKey, retentionKeyRef.current)) {
+    retainedMapDataRef.current = null
+    retentionKeyRef.current = currentKey
+  }
 
-  useEffect(() => {
-    if (combined != null && hasDisplayableMapData(combined)) {
-      retainedMapDataRef.current = combined
-    }
-  }, [combined])
+  if (combined != null && hasDisplayableMapData(combined)) {
+    retainedMapDataRef.current = combined
+  }
 
-  const retainDuringLoad = shouldRetainMapDuringLoad(viewMode, retainedMapDataRef.current)
-  const displayMapData: CombinedMapData | null =
+  const showingLiveCombined =
     combined != null && hasDisplayableMapData(combined)
-      ? combined
-      : retainedMapDataRef.current
+  const displayMapData: CombinedMapData | null = showingLiveCombined
+    ? combined
+    : retainedMapDataRef.current
+  const retainDuringLoad = shouldRetainMapDuringLoad(
+    viewMode,
+    showingLiveCombined ? null : retainedMapDataRef.current
+  )
 
   return { displayMapData, retainDuringLoad }
 }

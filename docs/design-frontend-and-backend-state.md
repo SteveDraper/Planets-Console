@@ -81,6 +81,18 @@ Turn blobs live in **Core storage** (`games/{gameId}/{perspective}/turns/{turn}`
 
 **Backend idempotency:** `GameService.ensure_turn_loaded` returns immediately if the turn path already exists; otherwise it calls Planets.nu and writes **`rst`**. Repeating ensure for the same turn is safe.
 
+### Map display retention
+
+While map analytic queries reload, the SPA keeps **MapGraph** mounted and may show the last displayable **combined map** so React Flow preserves zoom and pan. See **Map display retention** in [CONTEXT.md](../CONTEXT.md).
+
+**Owner:** `useRetainedMapDisplay` in `packages/frontend/src/lib/useRetainedMapDisplay.ts`. Map queries in `MainArea.tsx` do **not** use `placeholderData: keepPreviousData`; TanStack Query cannot retain across turn or ensure gaps (new query keys plus `enabled: false` while **turn ensure** runs).
+
+**Retention key:** `{ gameId, perspective }`. Clears **synchronously** when either changes so another viewpoint's planets never flash on screen. **Turn** is not part of the key -- stepping turns within the same game and viewpoint keeps the prior frame until fresh data arrives.
+
+**Display rule:** When live `combined` has nodes, show it; otherwise show the retained snapshot if the retention key still matches. **`retainDuringLoad`** is true only in **map** view mode when a retained snapshot exists; it suppresses full-screen loading placeholders and keeps the map pane mounted. No loading overlay is shown while a retained map is visible.
+
+**Predicates:** `hasDisplayableMapData` and `shouldRetainMapDuringLoad` in `mapDisplayRetention.ts` (unit-tested separately).
+
 ---
 
 ## 3. Frontend: Local React state (`useState` / `useRef`)
