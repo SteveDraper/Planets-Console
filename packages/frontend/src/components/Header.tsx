@@ -30,6 +30,7 @@ type HeaderProps = {
   /** From shell context: selected turn is beyond latest stored turn. */
   isFuture: boolean
   setTurn: (turn: number) => void
+  stepTurn: (delta: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
   shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
   /** Current viewpoint (login default or user override). */
@@ -50,6 +51,7 @@ export function Header({
   shellTurnValue,
   isFuture,
   setTurn,
+  stepTurn,
   shellViewpoints,
   shellSelectedViewpointName,
   onShellViewpointChange,
@@ -175,7 +177,7 @@ export function Header({
               type="button"
               aria-label="Decrease turn"
               disabled={shellTurnValue <= 1}
-              onClick={() => setTurn(shellTurnValue - 1)}
+              onClick={() => stepTurn(-1)}
               className={cn(
                 'flex items-center justify-center px-1 text-slate-300 hover:bg-white/10 hover:text-slate-100',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400',
@@ -222,7 +224,7 @@ export function Header({
             <button
               type="button"
               aria-label="Increase turn"
-              onClick={() => setTurn(shellTurnValue + 1)}
+              onClick={() => stepTurn(1)}
               className={cn(
                 'flex items-center justify-center px-1 text-slate-300 hover:bg-white/10 hover:text-slate-100',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400'

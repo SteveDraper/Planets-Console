@@ -314,6 +314,7 @@ function ConsoleShell() {
         shellTurnValue={selectedTurn}
         isFuture={isFuture}
         setTurn={setTurn}
+        stepTurn={stepTurn}
         shellViewpoints={shellViewpoints}
         shellSelectedViewpointName={shellSelectedViewpointName}
         onShellViewpointChange={handleShellViewpointChange}

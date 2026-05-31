@@ -28,6 +28,7 @@ function renderHeader() {
         shellTurnValue={null}
         isFuture={false}
         setTurn={() => {}}
+        stepTurn={() => {}}
         shellViewpoints={[]}
         shellSelectedViewpointName={null}
         onShellViewpointChange={() => {}}
@@ -110,6 +111,7 @@ describe('Header', () => {
           shellTurnValue={null}
           isFuture={false}
           setTurn={() => {}}
+          stepTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
             { name: 'Beta', raceName: null, disabled: false },
@@ -142,6 +144,7 @@ describe('Header', () => {
           shellTurnValue={null}
           isFuture={false}
           setTurn={() => {}}
+          stepTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
             { name: 'Beta', raceName: null, disabled: true },
@@ -160,6 +163,8 @@ describe('Header', () => {
     function Wrapper() {
       const [t, setT] = useState(2)
       const max = 3
+      const setTurn = (turn: number) => setT(Math.max(1, Math.round(turn)))
+      const stepTurn = (delta: number) => setT((prev) => Math.max(1, prev + delta))
       return (
         <QueryClientProvider client={headerQueryClient}>
           <Header
@@ -174,7 +179,8 @@ describe('Header', () => {
             shellTurnMax={max}
             shellTurnValue={t}
             isFuture={t > max}
-            setTurn={setT}
+            setTurn={setTurn}
+            stepTurn={stepTurn}
             shellViewpoints={[]}
             shellSelectedViewpointName={null}
             onShellViewpointChange={() => {}}
@@ -216,6 +222,7 @@ describe('Header', () => {
           shellTurnValue={12}
           isFuture={true}
           setTurn={() => {}}
+          stepTurn={() => {}}
           shellViewpoints={[]}
           shellSelectedViewpointName={null}
           onShellViewpointChange={() => {}}
@@ -242,6 +249,7 @@ describe('Header', () => {
           shellTurnValue={10}
           isFuture={false}
           setTurn={() => {}}
+          stepTurn={() => {}}
           shellViewpoints={[]}
           shellSelectedViewpointName={null}
           onShellViewpointChange={() => {}}
