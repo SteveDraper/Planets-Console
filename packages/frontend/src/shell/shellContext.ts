@@ -34,29 +34,62 @@ export function deriveShellTurnMax(
   return selectableTurnMaxForShell(gameInfoContext.turn)
 }
 
+export type TurnView = {
+  selectedTurn: number | null
+  dataTurn: number | null
+  futureOffset: number
+  isFuture: boolean
+}
+
+export function deriveTurnView(
+  selectedTurn: number | null,
+  shellTurnMax: number | null
+): TurnView {
+  if (selectedTurn == null) {
+    return {
+      selectedTurn: null,
+      dataTurn: null,
+      futureOffset: 0,
+      isFuture: false,
+    }
+  }
+  if (shellTurnMax == null) {
+    return {
+      selectedTurn,
+      dataTurn: selectedTurn,
+      futureOffset: 0,
+      isFuture: false,
+    }
+  }
+  const futureOffset = Math.max(0, selectedTurn - shellTurnMax)
+  return {
+    selectedTurn,
+    dataTurn: Math.min(selectedTurn, shellTurnMax),
+    futureOffset,
+    isFuture: futureOffset > 0,
+  }
+}
+
 /** Turn whose stored data is loaded (latest game turn when viewing the future). */
 export function deriveTurnDataTurn(
   selectedTurn: number | null,
   shellTurnMax: number | null
 ): number | null {
-  if (selectedTurn == null) return null
-  if (shellTurnMax == null) return selectedTurn
-  return Math.min(selectedTurn, shellTurnMax)
+  return deriveTurnView(selectedTurn, shellTurnMax).dataTurn
 }
 
 export function deriveFutureTurnOffset(
   selectedTurn: number | null,
   shellTurnMax: number | null
 ): number {
-  if (selectedTurn == null || shellTurnMax == null) return 0
-  return Math.max(0, selectedTurn - shellTurnMax)
+  return deriveTurnView(selectedTurn, shellTurnMax).futureOffset
 }
 
 export function isFutureTurn(
   selectedTurn: number | null,
   shellTurnMax: number | null
 ): boolean {
-  return deriveFutureTurnOffset(selectedTurn, shellTurnMax) > 0
+  return deriveTurnView(selectedTurn, shellTurnMax).isFuture
 }
 
 export function deriveShellDefaultViewpointName(
@@ -181,7 +214,10 @@ export function deriveAnalyticScope(inputs: ShellContextInputs): AnalyticShellSc
   const selectedViewpointName = deriveSelectedViewpointName(inputs)
   const ordinal = perspectiveOrdinalForName(perspectives, selectedViewpointName)
   if (ordinal == null) return null
-  const dataTurn = deriveTurnDataTurn(inputs.selectedTurn, deriveShellTurnMax(inputs.gameInfoContext))
+  const { dataTurn } = deriveTurnView(
+    inputs.selectedTurn,
+    deriveShellTurnMax(inputs.gameInfoContext)
+  )
   if (dataTurn == null) return null
   return {
     gameId: inputs.selectedGameId,

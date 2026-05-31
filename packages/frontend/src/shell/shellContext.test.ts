@@ -11,6 +11,7 @@ import {
   deriveTurnDataReady,
   deriveTurnDataTurn,
   deriveTurnEnsureEnabled,
+  deriveTurnView,
   isFutureTurn,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
@@ -54,12 +55,63 @@ describe('deriveShellTurnMax', () => {
   })
 })
 
+describe('deriveTurnView', () => {
+  it('returns null data turn when selected turn is null', () => {
+    expect(deriveTurnView(null, 10)).toEqual({
+      selectedTurn: null,
+      dataTurn: null,
+      futureOffset: 0,
+      isFuture: false,
+    })
+  })
+
+  it('uses selected turn as data turn when shell turn max is null', () => {
+    expect(deriveTurnView(5, null)).toEqual({
+      selectedTurn: 5,
+      dataTurn: 5,
+      futureOffset: 0,
+      isFuture: false,
+    })
+  })
+
+  it('passes through when selected turn is at or before shell turn max', () => {
+    expect(deriveTurnView(8, 10)).toEqual({
+      selectedTurn: 8,
+      dataTurn: 8,
+      futureOffset: 0,
+      isFuture: false,
+    })
+    expect(deriveTurnView(10, 10)).toEqual({
+      selectedTurn: 10,
+      dataTurn: 10,
+      futureOffset: 0,
+      isFuture: false,
+    })
+  })
+
+  it('caps data turn and sets future offset when viewing the future', () => {
+    expect(deriveTurnView(12, 10)).toEqual({
+      selectedTurn: 12,
+      dataTurn: 10,
+      futureOffset: 2,
+      isFuture: true,
+    })
+  })
+})
+
 describe('future turn helpers', () => {
   it('uses latest stored turn for data when viewing the future', () => {
     expect(deriveTurnDataTurn(12, 10)).toBe(10)
     expect(deriveFutureTurnOffset(12, 10)).toBe(2)
     expect(isFutureTurn(12, 10)).toBe(true)
     expect(isFutureTurn(10, 10)).toBe(false)
+  })
+
+  it('delegates to deriveTurnView', () => {
+    const view = deriveTurnView(12, 10)
+    expect(deriveTurnDataTurn(12, 10)).toBe(view.dataTurn)
+    expect(deriveFutureTurnOffset(12, 10)).toBe(view.futureOffset)
+    expect(isFutureTurn(12, 10)).toBe(view.isFuture)
   })
 })
 
