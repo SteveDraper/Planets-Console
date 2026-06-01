@@ -101,7 +101,7 @@ export function isCartographyLayerGateEnabled(
   }
 }
 
-/** Layer visibility inputs; {@link StellarCartographyMapUiConfig} satisfies this shape. */
+/** Layer visibility inputs; {@link StellarCartographyMapUiConfig} in `mapUiConfig.ts` satisfies this shape. */
 export type CartographyLayerShownOptions = {
   layerVisibility: CartographyLayerVisibility
   settingsGates: StellarCartographySettingsGates

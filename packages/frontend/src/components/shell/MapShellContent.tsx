@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
-import type { StellarCartographyMapContext } from '../../analytics/mapLayers'
+import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from '../PlanetMapInfoControls'

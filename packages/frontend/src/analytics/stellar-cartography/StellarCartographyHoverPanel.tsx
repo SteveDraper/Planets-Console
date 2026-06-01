@@ -5,7 +5,7 @@ import {
   type StellarCartographySampleEntry,
 } from '../../api/bff'
 import { fetchStellarCartographySample } from '../../api/bff'
-import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from '../mapLayers'
+import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from './mapUiConfig'
 import { isCartographyLayerShown } from './layers'
 import { areCartographyWormholesShown } from './overlayDisplayFilter'
 import { flowToMapCellIndices } from '../../lib/planetSpatialGrid'

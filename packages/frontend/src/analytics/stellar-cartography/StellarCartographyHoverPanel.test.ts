@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defaultStellarCartographyMapUiConfig } from '../mapLayers'
+import { defaultStellarCartographyMapUiConfig } from './mapUiConfig'
 import { buildStellarCartographyHoverLines } from './StellarCartographyHoverPanel'
 import { defaultCartographyLayerVisibility } from './layers'
 import {

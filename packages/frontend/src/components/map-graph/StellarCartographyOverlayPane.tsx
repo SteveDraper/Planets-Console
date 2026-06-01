@@ -1,11 +1,6 @@
-import { useMemo } from 'react'
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
-import type { StellarCartographyMapUiConfig } from '../../analytics/mapLayers'
-import {
-  areCartographyWormholesShown,
-  filterCartographyOverlayCircles,
-} from '../../analytics/stellar-cartography/overlayDisplayFilter'
+import type { StellarCartographyMapUiConfig } from '../../analytics/stellar-cartography/mapUiConfig'
 import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
@@ -13,30 +8,8 @@ import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverl
 import { WormholeEndpointMarkers } from './WormholeEndpointMarkers'
 import type { WormholeEndpointHoverInfo } from '../../lib/wormholeEndpointHover'
 import type { WormholeRecenterPulseTarget } from './stellarCartographyWormholeInteraction'
-import { STELLAR_CARTOGRAPHY_NODE_ID_PREFIX } from '../../analytics/mapAnalyticIds'
 
-export function collectWormholeEndpoints(
-  nodes: CombinedMapData['nodes'],
-  unknownEntrances: CombinedMapData['wormholeUnknownEntrances']
-): { x: number; y: number }[] {
-  const seen = new Set<string>()
-  const endpoints: { x: number; y: number }[] = []
-  const add = (x: number, y: number) => {
-    const key = `${x},${y}`
-    if (seen.has(key)) return
-    seen.add(key)
-    endpoints.push({ x, y })
-  }
-  for (const node of nodes) {
-    if (node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_ID_PREFIX)) {
-      add(Number(node.x), Number(node.y))
-    }
-  }
-  for (const entrance of unknownEntrances) {
-    add(entrance.x, entrance.y)
-  }
-  return endpoints
-}
+export { collectWormholeEndpoints } from '../../analytics/stellar-cartography/cartographyDisplayModel'
 
 export function StellarCartographyOverlayPane({
   overlayCircles,
@@ -59,23 +32,14 @@ export function StellarCartographyOverlayPane({
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
 
-  const visibleOverlayCircles = useMemo(
-    () => filterCartographyOverlayCircles(overlayCircles, cartographyConfig),
-    [overlayCircles, cartographyConfig]
-  )
-  const visibleWormholeEndpoints = useMemo(
-    () => (areCartographyWormholesShown(cartographyConfig) ? wormholeEndpoints : []),
-    [cartographyConfig, wormholeEndpoints]
-  )
-
   if (!transform || width <= 0 || height <= 0) return null
-  if (visibleOverlayCircles.length === 0 && visibleWormholeEndpoints.length === 0) return null
+  if (overlayCircles.length === 0 && wormholeEndpoints.length === 0) return null
 
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
   const shapes = buildStellarCartographyOverlayPaneShapes(
-    visibleOverlayCircles,
-    visibleWormholeEndpoints,
+    overlayCircles,
+    wormholeEndpoints,
     { width, height, tx, ty, scale },
     {
       cloudyIonStorms: nuIonStorms ?? true,

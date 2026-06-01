@@ -7,7 +7,7 @@ import {
   defaultNeutronClusterDisplayMode,
   defaultStarClusterDisplayMode,
 } from './clusterOutlineDisplayMode'
-import { defaultStellarCartographyMapUiConfig } from '../mapLayers'
+import { defaultStellarCartographyMapUiConfig } from './mapUiConfig'
 import {
   areCartographyWormholesShown,
   filterCartographyOverlayCircles,

@@ -1,5 +1,5 @@
 import type { MapEdge, StellarCartographyOverlayCircle } from '../../api/bff'
-import type { StellarCartographyMapUiConfig } from '../mapLayers'
+import type { StellarCartographyMapUiConfig } from './mapUiConfig'
 import { isCartographyLayerShown } from './layers'
 import { filterWormholeEdgesForDisplayMode } from './wormholeDisplayMode'
 

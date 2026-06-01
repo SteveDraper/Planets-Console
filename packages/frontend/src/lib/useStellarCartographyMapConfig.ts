@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { StellarCartographyMapUiConfig } from '../analytics/mapLayers'
+import type { StellarCartographyMapUiConfig } from '../analytics/stellar-cartography/mapUiConfig'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
 import { useShellStore } from '../stores/shell'

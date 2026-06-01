@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MapDataResponse } from '../api/bff'
-import { combineMapData, defaultStellarCartographyMapUiConfig } from './mapLayers'
+import { combineMapData } from './mapLayers'
+import { defaultStellarCartographyMapUiConfig } from './stellar-cartography/mapUiConfig'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './stellar-cartography/layers'
 import {
   defaultNeutronClusterDisplayMode,

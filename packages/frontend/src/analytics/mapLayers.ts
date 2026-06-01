@@ -1,25 +1,9 @@
 import type {
-  AnalyticShellScope,
   CombinedMapData,
   ConnectionsMapParams,
   MapDataResponse,
   MapEdge,
 } from '../api/bff'
-import {
-  defaultCartographyLayerVisibility,
-  EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-  type CartographyLayerVisibility,
-  type StellarCartographySettingsGates,
-} from './stellar-cartography/layers'
-import {
-  defaultNeutronClusterDisplayMode,
-  defaultStarClusterDisplayMode,
-  type ClusterOutlineDisplayMode,
-} from './stellar-cartography/clusterOutlineDisplayMode'
-import {
-  defaultWormholeDisplayMode,
-  type WormholeDisplayMode,
-} from './stellar-cartography/wormholeDisplayMode'
 import { routeWaypointsFromMap } from './connections/mapLayer'
 import { applyFutureIonStormOverlayPositions } from '../lib/cartography/futureTurnIonStorms'
 import {
@@ -28,36 +12,11 @@ import {
 } from './mapAnalyticRegistry'
 import { BASE_MAP_ANALYTIC_ID } from './mapAnalyticIds'
 
-/** Cartography layer visibility and display modes for map rendering (not merge). */
-export type StellarCartographyMapUiConfig = {
-  layerVisibility: CartographyLayerVisibility
-  settingsGates: StellarCartographySettingsGates
-  wormholeDisplayMode: WormholeDisplayMode
-  starClusterDisplayMode: ClusterOutlineDisplayMode
-  neutronClusterDisplayMode: ClusterOutlineDisplayMode
-}
-
-/** Live cartography UI config and sample scope, passed together when the analytic is enabled. */
-export type StellarCartographyMapContext = {
-  config: StellarCartographyMapUiConfig
-  analyticScope: AnalyticShellScope
-}
-
 export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
   /** Extrapolate ion storm positions forward from the latest stored turn. */
   futureTurnOffset?: number
-}
-
-export function defaultStellarCartographyMapUiConfig(): StellarCartographyMapUiConfig {
-  return {
-    layerVisibility: defaultCartographyLayerVisibility(),
-    settingsGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
-    wormholeDisplayMode: defaultWormholeDisplayMode(),
-    starClusterDisplayMode: defaultStarClusterDisplayMode(),
-    neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
-  }
 }
 
 export function combineMapData(

@@ -5,7 +5,7 @@ import {
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
 } from '../analytics/mapAnalyticIds'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
-import type { StellarCartographyMapUiConfig } from '../analytics/mapLayers'
+import type { StellarCartographyMapUiConfig } from '../analytics/stellar-cartography/mapUiConfig'
 
 export { BASE_MAP_ANALYTIC_ID, CONNECTIONS_ANALYTIC_ID, STELLAR_CARTOGRAPHY_ANALYTIC_ID }
 
