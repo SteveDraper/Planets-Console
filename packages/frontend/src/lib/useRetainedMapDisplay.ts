@@ -3,7 +3,7 @@ import type { CombinedMapData } from '../api/bff'
 import {
   deriveMapShellView,
   hasDisplayableMapData,
-  type MapFrameSource,
+  type MapFrame,
   type MapShellView,
 } from './mapDisplayRetention'
 
@@ -23,7 +23,7 @@ export type UseRetainedMapDisplayInput = {
   mapPending: boolean
   mapHasError: boolean
   mapHasAnyData: boolean
-  mapError: unknown | null
+  mapError: unknown
 }
 
 export type UseRetainedMapDisplayResult = {
@@ -56,17 +56,17 @@ function retentionKeysEqual(
   )
 }
 
-function deriveMapFrameSource(
-  showingLiveCombined: boolean,
+function deriveMapFrame(
+  liveCombined: CombinedMapData | null | undefined,
   retainedForCurrentKey: CombinedMapData | null
-): MapFrameSource {
-  if (showingLiveCombined) {
-    return 'live'
+): MapFrame {
+  if (liveCombined != null && hasDisplayableMapData(liveCombined)) {
+    return { source: 'live', data: liveCombined }
   }
-  if (hasDisplayableMapData(retainedForCurrentKey)) {
-    return 'retained'
+  if (retainedForCurrentKey != null && hasDisplayableMapData(retainedForCurrentKey)) {
+    return { source: 'retained', data: retainedForCurrentKey }
   }
-  return 'none'
+  return { source: 'none' }
 }
 
 /**
@@ -107,21 +107,10 @@ export function useRetainedMapDisplay({
     }
   }, [gameId, perspective, mapIds, combined])
 
-  const showingLiveCombined =
-    combined != null && hasDisplayableMapData(combined)
-  const mapFrameSource = deriveMapFrameSource(showingLiveCombined, retainedForCurrentKey)
-  const liveDisplayMapData =
-    showingLiveCombined && combined != null ? combined : null
-  const displayMapData: CombinedMapData | null =
-    mapFrameSource === 'live'
-      ? liveDisplayMapData
-      : mapFrameSource === 'retained'
-        ? retainedForCurrentKey
-        : null
+  const frame = deriveMapFrame(combined, retainedForCurrentKey)
   const hasAnalyticScope = gameId != null && perspective != null
   const mapShellView = deriveMapShellView({
-    displayMapData,
-    mapFrameSource,
+    frame,
     hasAnalyticScope,
     turnDataReady,
     turnEnsurePending,

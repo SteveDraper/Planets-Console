@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { CombinedMapData } from '../../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../mapAnalyticIds'
 import {
-  buildCartographyDisplay,
   buildCartographyMapFrame,
   cartographyDisplayEdges,
   collectWormholeEndpoints,
@@ -109,7 +108,7 @@ describe('collectWormholeEndpoints', () => {
   })
 })
 
-describe('buildCartographyDisplay', () => {
+describe('cartography map frame and edges', () => {
   it('applies hover reveal only through edges, not the static frame', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
     const frame = buildCartographyMapFrame(sampleData, context)
@@ -123,25 +122,17 @@ describe('buildCartographyDisplay', () => {
     ).toBe(true)
   })
 
-  it('builds frame and edges together via buildCartographyDisplay', () => {
-    const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
-    const display = buildCartographyDisplay(sampleData, context, {
-      wormholeLineRevealKey: '10,20',
-    })
-
-    expect(display.baseEdges.some((e) => e.layer === 'wormholes')).toBe(true)
-    expect(display.edges.some((e) => e.layer === 'wormholes')).toBe(true)
-  })
-
   it('hides all cartography artifacts when the analytic is disabled', () => {
-    const display = buildCartographyDisplay(sampleData, undefined)
+    const frame = buildCartographyMapFrame(sampleData, undefined)
 
-    expect(display.nodes.map((n) => n.id)).toEqual(['base-map:1'])
-    expect(display.edges.every((e) => e.layer !== 'wormholes')).toBe(true)
-    expect(display.overlayCircles).toEqual([])
-    expect(display.wormholeUnknownEntrances).toEqual([])
-    expect(display.wormholeEndpoints).toEqual([])
-    expect(display.wormholeEndpointHoverByCell.size).toBe(0)
+    expect(frame.nodes.map((n) => n.id)).toEqual(['base-map:1'])
+    expect(cartographyDisplayEdges(frame, undefined).every((e) => e.layer !== 'wormholes')).toBe(
+      true
+    )
+    expect(frame.overlayCircles).toEqual([])
+    expect(frame.wormholeUnknownEntrances).toEqual([])
+    expect(frame.wormholeEndpoints).toEqual([])
+    expect(frame.wormholeEndpointHoverByCell.size).toBe(0)
   })
 
   it('filters overlay circles by layer config when cartography is enabled', () => {
@@ -169,30 +160,32 @@ describe('buildCartographyDisplay', () => {
 
   it('removes wormhole routing nodes and endpoints when the wormhole layer is off', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'off' })
-    const display = buildCartographyDisplay(sampleData, context)
+    const frame = buildCartographyMapFrame(sampleData, context)
 
-    expect(display.nodes.map((n) => n.id)).toEqual(['base-map:1'])
-    expect(display.edges.every((e) => e.layer !== 'wormholes')).toBe(true)
-    expect(display.wormholeUnknownEntrances).toEqual([])
-    expect(display.wormholeEndpoints).toEqual([])
-    expect(display.wormholeEndpointHoverByCell.size).toBe(0)
+    expect(frame.nodes.map((n) => n.id)).toEqual(['base-map:1'])
+    expect(cartographyDisplayEdges(frame, context).every((e) => e.layer !== 'wormholes')).toBe(true)
+    expect(frame.wormholeUnknownEntrances).toEqual([])
+    expect(frame.wormholeEndpoints).toEqual([])
+    expect(frame.wormholeEndpointHoverByCell.size).toBe(0)
   })
 
   it('keeps wormhole hover metadata when lines use on-hover reveal', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
-    const display = buildCartographyDisplay(sampleData, context)
+    const frame = buildCartographyMapFrame(sampleData, context)
 
-    expect(display.edges.filter((e) => e.layer === 'wormholes')).toEqual([])
-    expect(display.wormholeEndpointHoverByCell.size).toBeGreaterThan(0)
-    expect(display.wormholeEndpoints.length).toBeGreaterThan(0)
+    expect(cartographyDisplayEdges(frame, context).filter((e) => e.layer === 'wormholes')).toEqual(
+      []
+    )
+    expect(frame.wormholeEndpointHoverByCell.size).toBeGreaterThan(0)
+    expect(frame.wormholeEndpoints.length).toBeGreaterThan(0)
   })
 
   it('reveals wormhole lines for the hovered cell key', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
-    const display = buildCartographyDisplay(sampleData, context, {
-      wormholeLineRevealKey: '10,20',
-    })
+    const frame = buildCartographyMapFrame(sampleData, context)
 
-    expect(display.edges.some((e) => e.layer === 'wormholes')).toBe(true)
+    expect(
+      cartographyDisplayEdges(frame, context, '10,20').some((e) => e.layer === 'wormholes')
+    ).toBe(true)
   })
 })

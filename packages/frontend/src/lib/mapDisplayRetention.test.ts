@@ -51,8 +51,7 @@ describe('deriveTurnEnsureLoadingView', () => {
 
 describe('deriveMapShellView', () => {
   const baseInput = {
-    displayMapData: sampleMap,
-    mapFrameSource: 'live' as const,
+    frame: { source: 'live', data: sampleMap } as const,
     hasAnalyticScope: true,
     turnDataReady: true,
     turnEnsurePending: false,
@@ -87,8 +86,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        displayMapData: null,
-        mapFrameSource: 'none',
+        frame: { source: 'none' },
         mapPending: true,
         mapHasAnyData: false,
       })
@@ -102,7 +100,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        mapFrameSource: 'retained',
+        frame: { source: 'retained', data: sampleMap },
         mapPending: true,
         mapHasAnyData: false,
       })
@@ -118,8 +116,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        displayMapData: null,
-        mapFrameSource: 'none',
+        frame: { source: 'none' },
         mapHasError: true,
         mapHasAnyData: false,
         mapError: err,
@@ -131,7 +128,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        mapFrameSource: 'retained',
+        frame: { source: 'retained', data: sampleMap },
         turnDataReady: false,
         turnEnsurePending: true,
         mapPending: true,
@@ -148,8 +145,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        displayMapData: null,
-        mapFrameSource: 'none',
+        frame: { source: 'none' },
         turnDataReady: false,
         turnEnsurePending: true,
       })
@@ -163,8 +159,7 @@ describe('deriveMapShellView', () => {
     expect(
       deriveMapShellView({
         ...baseInput,
-        displayMapData: null,
-        mapFrameSource: 'none',
+        frame: { source: 'none' },
         hasAnalyticScope: false,
         turnDataReady: false,
         turnEnsurePending: true,

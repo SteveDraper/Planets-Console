@@ -32,7 +32,7 @@ export type UseMapAnalyticQueriesResult = {
   pending: boolean
   hasError: boolean
   hasAnyData: boolean
-  mapError: unknown | null
+  mapError: unknown
   mapQueries: UseQueryResult<MapDataResponse, Error>[]
 }
 

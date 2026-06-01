@@ -3,7 +3,12 @@ import type {
   IonStormOverlayCircle,
   StellarCartographyOverlayCircle,
 } from '../../api/bff'
-import { areClusterOutlinesShown, type ClusterOutlineDisplayMode } from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
+import {
+  areClusterOutlinesShown,
+  defaultNeutronClusterDisplayMode,
+  defaultStarClusterDisplayMode,
+  type ClusterOutlineDisplayMode,
+} from '../../analytics/stellar-cartography/clusterOutlineDisplayMode'
 import {
   circleIntersectsFlowBounds,
   flowBoundsFromViewport,
@@ -176,10 +181,10 @@ export function buildStellarCartographyOverlayPaneShapes(
   const byLayer = groupOverlayCirclesByLayer(overlayCircles)
   const strokeWidth = 1
   const starClusterOutlines = areClusterOutlinesShown(
-    options?.starClusterDisplayMode ?? 'outlined'
+    options?.starClusterDisplayMode ?? defaultStarClusterDisplayMode()
   )
   const neutronClusterOutlines = areClusterOutlinesShown(
-    options?.neutronClusterDisplayMode ?? 'outlined'
+    options?.neutronClusterDisplayMode ?? defaultNeutronClusterDisplayMode()
   )
 
   const nebulaClouds = buildNebulaCloudPaneShapes(byLayer.nebulae, viewport)

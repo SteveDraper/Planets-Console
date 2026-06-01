@@ -23,9 +23,8 @@ export function BlackHoleErgosphereGradientDef({ shape }: { shape: BlackHolePane
 
 export function BlackHoleHaloGradientDef({ shape }: { shape: BlackHolePaneShape }) {
   const edgeStop = `${shape.ergosphereEdgeOffset * 100}%`
-  const gradientId = `${shape.key}-halo-grad`
   return (
-    <radialGradient id={gradientId} cx="50%" cy="50%" r="50%">
+    <radialGradient id={shape.haloGradientId} cx="50%" cy="50%" r="50%">
       <stop offset="0%" stopColor="#000000" stopOpacity={0} />
       <stop offset={edgeStop} stopColor="#000000" stopOpacity={0} />
       <stop offset={edgeStop} stopColor={BLACK_HOLE_HALO_CYAN} stopOpacity={BLACK_HOLE_HALO_CYAN_OPACITY} />
@@ -39,7 +38,6 @@ export function BlackHoleHaloGradientDef({ shape }: { shape: BlackHolePaneShape 
 }
 
 export function BlackHoleOverlay({ shape }: { shape: BlackHolePaneShape }) {
-  const haloGradientId = `${shape.key}-halo-grad`
   return (
     <g>
       <defs>
@@ -50,7 +48,7 @@ export function BlackHoleOverlay({ shape }: { shape: BlackHolePaneShape }) {
         cx={shape.cx}
         cy={shape.cy}
         r={shape.haloR}
-        fill={`url(#${haloGradientId})`}
+        fill={`url(#${shape.haloGradientId})`}
         stroke="none"
       />
       <circle

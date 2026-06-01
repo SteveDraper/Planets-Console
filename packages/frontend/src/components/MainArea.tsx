@@ -32,7 +32,7 @@ type MainAreaProps = {
   turnEnsurePending: boolean
   turnEnsureIsError: boolean
   /** TanStack `error` for the turn-ensure query (shown inline when `turnEnsureIsError`). */
-  turnEnsureError: unknown | null | undefined
+  turnEnsureError: unknown
   /** Scope is set but login name is missing, so turn cannot be ensured. */
   turnBlockedNoLogin: boolean
   /** Parameters for the Connections map analytic (refetch when these change). */

@@ -42,6 +42,7 @@ export type BlackHolePaneShape = {
   /** Fraction of halo radius where ergosphere ends and cyan glow begins. */
   ergosphereEdgeOffset: number
   ergosphereGradientId: string
+  haloGradientId: string
   ergosphereStops: readonly BlackHoleErgosphereGradientStop[]
 }
 
@@ -138,6 +139,7 @@ export function buildBlackHolePaneShape(
     haloR: haloLy * scale,
     ergosphereEdgeOffset: outerLy / haloLy,
     ergosphereGradientId: `${circle.id}-ergo-grad`,
+    haloGradientId: `${circle.id}-halo-grad`,
     ergosphereStops: buildBlackHoleErgosphereGradientStops(
       constants,
       circle.coreRadius,

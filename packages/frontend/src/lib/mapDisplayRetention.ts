@@ -3,7 +3,14 @@ import type { CombinedMapData } from '../api/bff'
 export const MAP_SHELL_TURN_LOADING_MESSAGE = 'Loading turn data…'
 export const MAP_SHELL_MAP_LOADING_MESSAGE = 'Loading map…'
 
-export type MapFrameSource = 'live' | 'retained' | 'none'
+/**
+ * Which map frame the shell should display, with its data attached.
+ * `live` = current query result; `retained` = prior frame kept during a reload/turn step.
+ */
+export type MapFrame =
+  | { source: 'live'; data: CombinedMapData }
+  | { source: 'retained'; data: CombinedMapData }
+  | { source: 'none' }
 
 export type MapShellView =
   | { phase: 'full-loading'; loadingMessage: string }
@@ -12,7 +19,7 @@ export type MapShellView =
       displayMapData: CombinedMapData
       showDeferredPending: boolean
     }
-  | { phase: 'error'; error: unknown | null }
+  | { phase: 'error'; error: unknown }
 
 export type DeriveTurnEnsureLoadingInput = {
   hasAnalyticScope: boolean
@@ -37,15 +44,14 @@ export function deriveTurnEnsureLoadingView({
 }
 
 export type DeriveMapShellViewInput = {
-  displayMapData: CombinedMapData | null
-  mapFrameSource: MapFrameSource
+  frame: MapFrame
   hasAnalyticScope: boolean
   turnDataReady: boolean
   turnEnsurePending: boolean
   mapPending: boolean
   mapHasError: boolean
   mapHasAnyData: boolean
-  mapError: unknown | null
+  mapError: unknown
 }
 
 /** Pure retention predicates; cross-turn ref retention lives in useRetainedMapDisplay. */
@@ -77,8 +83,7 @@ function showingMapView(
  */
 export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView {
   const {
-    displayMapData,
-    mapFrameSource,
+    frame,
     hasAnalyticScope,
     turnDataReady,
     turnEnsurePending,
@@ -88,8 +93,8 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
     mapError,
   } = input
 
-  if (mapFrameSource === 'retained' && displayMapData != null) {
-    return showingMapView(displayMapData, false)
+  if (frame.source === 'retained') {
+    return showingMapView(frame.data, false)
   }
 
   const turnEnsureLoading = deriveTurnEnsureLoadingView({
@@ -105,9 +110,9 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
     return { phase: 'error', error: mapError }
   }
 
-  if (displayMapData == null || (!mapHasAnyData && mapPending)) {
+  if (frame.source === 'none' || (!mapHasAnyData && mapPending)) {
     return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
   }
 
-  return showingMapView(displayMapData, mapPending && mapFrameSource === 'live')
+  return showingMapView(frame.data, mapPending)
 }

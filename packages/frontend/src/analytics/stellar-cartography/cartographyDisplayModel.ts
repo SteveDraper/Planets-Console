@@ -20,16 +20,6 @@ export type CartographyMapFrame = {
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
 }
 
-/** Full cartography display model for map rendering (frame + hover-filtered edges). */
-export type CartographyMapDisplay = CartographyMapFrame & {
-  edges: MapEdge[]
-}
-
-export type BuildCartographyDisplayOptions = {
-  wormholeLineRevealKey?: string | null
-  futureTurnOffset?: number
-}
-
 function overlayCirclesForDisplay(
   data: CombinedMapData,
   cartography: StellarCartographyMapContext | undefined,
@@ -66,19 +56,4 @@ export function cartographyDisplayEdges(
   wormholeLineRevealKey: string | null = null
 ): MapEdge[] {
   return cartographyFramePolicy(cartography).mapEdges(frame.baseEdges, wormholeLineRevealKey)
-}
-
-/** Builds the full cartography display model (frame + edges) from combined map data. */
-export function buildCartographyDisplay(
-  data: CombinedMapData,
-  cartography: StellarCartographyMapContext | undefined,
-  options: BuildCartographyDisplayOptions = {}
-): CartographyMapDisplay {
-  const futureTurnOffset = options.futureTurnOffset ?? 0
-  const wormholeLineRevealKey = options.wormholeLineRevealKey ?? null
-  const frame = buildCartographyMapFrame(data, cartography, futureTurnOffset)
-  return {
-    ...frame,
-    edges: cartographyDisplayEdges(frame, cartography, wormholeLineRevealKey),
-  }
 }
