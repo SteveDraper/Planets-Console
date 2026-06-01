@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { CombinedMapData } from '../api/bff'
 import { MAP_SHELL_MAP_LOADING_MESSAGE } from './mapDisplayRetention'
 import {
+  defaultMapIds,
   defaultRetentionScope,
   emptyCombined,
   idleMapLoad,
@@ -23,12 +24,18 @@ function showingMap(
   }
 }
 
+const retentionDefaults = {
+  mapIds: defaultMapIds,
+  mapError: null,
+}
+
 describe('useRetainedMapDisplay', () => {
   it('returns showing-map when combined is displayable', () => {
     const { result } = renderHook(() =>
       useRetainedMapDisplay({
         combined: sampleMap,
         ...defaultRetentionScope,
+        ...retentionDefaults,
         ...idleMapLoad,
       })
     )
@@ -41,12 +48,14 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapIds,
         mapPending,
         mapHasAnyData,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
+        mapIds: readonly string[]
         mapPending: boolean
         mapHasAnyData: boolean
       }) =>
@@ -54,16 +63,19 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
+          mapIds,
           turnDataReady: true,
           turnEnsurePending: false,
           mapPending,
           mapHasError: false,
           mapHasAnyData,
+          mapError: null,
         }),
       {
         initialProps: {
           combined: sampleMap,
           ...defaultRetentionScope,
+          mapIds: defaultMapIds,
           mapPending: false,
           mapHasAnyData: true,
         },
@@ -73,6 +85,7 @@ describe('useRetainedMapDisplay', () => {
     rerender({
       combined: emptyCombined,
       ...defaultRetentionScope,
+      mapIds: defaultMapIds,
       mapPending: true,
       mapHasAnyData: false,
     })
@@ -86,12 +99,14 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapIds,
         mapPending,
         mapHasAnyData,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
+        mapIds: readonly string[]
         mapPending: boolean
         mapHasAnyData: boolean
       }) =>
@@ -99,16 +114,19 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
+          mapIds,
           turnDataReady: true,
           turnEnsurePending: false,
           mapPending,
           mapHasError: false,
           mapHasAnyData,
+          mapError: null,
         }),
       {
         initialProps: {
           combined: sampleMap,
           ...defaultRetentionScope,
+          mapIds: defaultMapIds,
           mapPending: false,
           mapHasAnyData: true,
         },
@@ -118,6 +136,7 @@ describe('useRetainedMapDisplay', () => {
     rerender({
       combined: emptyCombined,
       ...defaultRetentionScope,
+      mapIds: defaultMapIds,
       mapPending: true,
       mapHasAnyData: false,
     })
@@ -126,6 +145,7 @@ describe('useRetainedMapDisplay', () => {
     rerender({
       combined: turnTwoMap,
       ...defaultRetentionScope,
+      mapIds: defaultMapIds,
       mapPending: false,
       mapHasAnyData: true,
     })
@@ -143,12 +163,14 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapIds,
         mapPending,
         mapHasAnyData,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
+        mapIds: readonly string[]
         mapPending: boolean
         mapHasAnyData: boolean
       }) =>
@@ -156,16 +178,19 @@ describe('useRetainedMapDisplay', () => {
           combined,
           gameId,
           perspective,
+          mapIds,
           turnDataReady: true,
           turnEnsurePending: false,
           mapPending,
           mapHasError: false,
           mapHasAnyData,
+          mapError: null,
         }),
       {
         initialProps: {
           combined: sampleMap,
           ...defaultRetentionScope,
+          mapIds: defaultMapIds,
           mapPending: false,
           mapHasAnyData: true,
         },
@@ -176,6 +201,7 @@ describe('useRetainedMapDisplay', () => {
       combined: otherGameMap,
       gameId: 'g2',
       perspective: 1,
+      mapIds: defaultMapIds,
       mapPending: false,
       mapHasAnyData: true,
     })
@@ -185,6 +211,7 @@ describe('useRetainedMapDisplay', () => {
       combined: emptyCombined,
       gameId: 'g2',
       perspective: 1,
+      mapIds: defaultMapIds,
       mapPending: true,
       mapHasAnyData: false,
     })
@@ -197,21 +224,35 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapIds,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
+        mapIds: readonly string[]
       }) =>
         useRetainedMapDisplay({
           combined,
           gameId,
           perspective,
+          mapIds,
           ...initialMapLoad,
         }),
-      { initialProps: { combined: sampleMap, ...defaultRetentionScope } }
+      {
+        initialProps: {
+          combined: sampleMap,
+          ...defaultRetentionScope,
+          mapIds: defaultMapIds,
+        },
+      }
     )
 
-    rerender({ combined: emptyCombined, gameId: 'g2', perspective: 1 })
+    rerender({
+      combined: emptyCombined,
+      gameId: 'g2',
+      perspective: 1,
+      mapIds: defaultMapIds,
+    })
 
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',
@@ -225,21 +266,75 @@ describe('useRetainedMapDisplay', () => {
         combined,
         gameId,
         perspective,
+        mapIds,
       }: {
         combined: CombinedMapData | null
         gameId: string | null
         perspective: number | null
+        mapIds: readonly string[]
       }) =>
         useRetainedMapDisplay({
           combined,
           gameId,
           perspective,
+          mapIds,
           ...initialMapLoad,
         }),
-      { initialProps: { combined: sampleMap, ...defaultRetentionScope } }
+      {
+        initialProps: {
+          combined: sampleMap,
+          ...defaultRetentionScope,
+          mapIds: defaultMapIds,
+        },
+      }
     )
 
-    rerender({ combined: emptyCombined, gameId: 'g1', perspective: 2 })
+    rerender({
+      combined: emptyCombined,
+      gameId: 'g1',
+      perspective: 2,
+      mapIds: defaultMapIds,
+    })
+
+    expect(result.current.mapShellView).toEqual({
+      phase: 'full-loading',
+      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
+    })
+  })
+
+  it('clears retention when fetched map analytic ids change', () => {
+    const cartographyMapIds: readonly string[] = [
+      'base-map',
+      'connections',
+      'stellar-cartography',
+    ]
+
+    const { result, rerender } = renderHook(
+      ({
+        combined,
+        mapIds,
+      }: {
+        combined: CombinedMapData | null
+        mapIds: readonly string[]
+      }) =>
+        useRetainedMapDisplay({
+          combined,
+          ...defaultRetentionScope,
+          mapIds,
+          ...initialMapLoad,
+        }),
+      {
+        initialProps: {
+          combined: sampleMap,
+          mapIds: cartographyMapIds,
+        },
+      }
+    )
+
+    rerender({
+      combined: emptyCombined,
+      mapIds: defaultMapIds,
+    })
 
     expect(result.current.mapShellView).toEqual({
       phase: 'full-loading',

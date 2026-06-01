@@ -16,7 +16,7 @@ const SAMPLE_DEBOUNCE_MS = 100
 
 type StellarCartographyHoverPanelProps = {
   analyticScope: AnalyticShellScope | null
-  sampleEnabled: boolean
+  cartographyEnabled: boolean
   cartographyConfig: StellarCartographyMapUiConfig
   wormholeHoverLines: string[] | null
   /** When a planet hover/pin label is showing, suppress cartography hover entirely. */
@@ -61,7 +61,7 @@ export function buildStellarCartographyHoverLines(
 /** Debounced stacked tooltip for Stellar Cartography map hover sampling (Phase 4b). */
 export function StellarCartographyHoverPanel({
   analyticScope,
-  sampleEnabled,
+  cartographyEnabled,
   cartographyConfig,
   wormholeHoverLines,
   blockedByPlanetHover = false,
@@ -99,7 +99,7 @@ export function StellarCartographyHoverPanel({
       clearTimeout(debounceRef.current)
       debounceRef.current = null
     }
-    if (!sampleEnabled || analyticScope == null || clientPos == null || !transform) {
+    if (!cartographyEnabled || analyticScope == null || clientPos == null || !transform) {
       setEntries([])
       return
     }
@@ -138,7 +138,7 @@ export function StellarCartographyHoverPanel({
     clientPos,
     clientToFlowPosition,
     domNode,
-    sampleEnabled,
+    cartographyEnabled,
     blockedByPlanetHover,
     transform,
   ])

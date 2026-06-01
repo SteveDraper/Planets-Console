@@ -6,7 +6,8 @@ import {
 } from 'react'
 import { ReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { CombinedMapData } from '../api/bff'
+import type { CombinedMapData, MapEdge } from '../api/bff'
+import { STELLAR_CARTOGRAPHY_NODE_ID_PREFIX } from '../analytics/mapAnalyticIds'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
 import { filterWormholeEdgesForCartographyConfig } from '../analytics/stellar-cartography/overlayDisplayFilter'
 import {
@@ -54,8 +55,25 @@ type MapGraphProps = {
   /** Called once so the header slider can drive zoom (same as scroll wheel). */
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   planetLabelOptions?: PlanetLabelOptions
-  cartographyConfig: StellarCartographyMapUiConfig
+  cartographyActive: boolean
+  cartographyConfig?: StellarCartographyMapUiConfig
   stellarCartography?: StellarCartographyMapUi
+}
+
+function displayMapNodes(
+  nodes: CombinedMapData['nodes'],
+  cartographyActive: boolean
+): CombinedMapData['nodes'] {
+  if (cartographyActive) return nodes
+  return nodes.filter((node) => !node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_ID_PREFIX))
+}
+
+function displayMapEdges(
+  edges: CombinedMapData['edges'],
+  cartographyActive: boolean
+): CombinedMapData['edges'] {
+  if (cartographyActive) return edges
+  return edges.filter((edge) => edge.layer !== 'wormholes')
 }
 
 /** Max time to wait for initial viewport fit before showing the map anyway (avoids staying invisible if fit never runs). */
@@ -67,6 +85,7 @@ export function MapGraph({
   onMapZoomChange,
   onSetZoomReady,
   planetLabelOptions = DEFAULT_PLANET_LABEL_OPTIONS,
+  cartographyActive,
   cartographyConfig,
   stellarCartography,
 }: MapGraphProps) {
@@ -78,10 +97,18 @@ export function MapGraph({
     return () => clearTimeout(t)
   }, [])
 
-  const nodes = useMemo(() => toFlowNodes(data.nodes), [data.nodes])
+  const displayNodes = useMemo(
+    () => displayMapNodes(data.nodes, cartographyActive),
+    [data.nodes, cartographyActive]
+  )
+  const displayEdges = useMemo(
+    () => displayMapEdges(data.edges, cartographyActive),
+    [data.edges, cartographyActive]
+  )
+  const nodes = useMemo(() => toFlowNodes(displayNodes), [displayNodes])
   const planetMapNodes = useMemo(
-    () => data.nodes.filter((n) => n.planet != null),
-    [data.nodes]
+    () => displayNodes.filter((n) => n.planet != null),
+    [displayNodes]
   )
   const planetGrid = useMemo(() => buildPlanetSpatialGrid(planetMapNodes), [planetMapNodes])
   const waypointGrid = useMemo(() => {
@@ -94,12 +121,18 @@ export function MapGraph({
     [planetMapNodes]
   )
   const wormholeEndpoints = useMemo(
-    () => collectWormholeEndpoints(data.nodes, data.wormholeUnknownEntrances),
-    [data.nodes, data.wormholeUnknownEntrances]
+    () =>
+      cartographyActive
+        ? collectWormholeEndpoints(displayNodes, data.wormholeUnknownEntrances)
+        : [],
+    [cartographyActive, displayNodes, data.wormholeUnknownEntrances]
   )
   const wormholeEndpointHoverByCell = useMemo(
-    () => buildWormholeEndpointHoverIndex(data.edges, data.wormholeUnknownEntrances),
-    [data.edges, data.wormholeUnknownEntrances]
+    () =>
+      cartographyActive
+        ? buildWormholeEndpointHoverIndex(displayEdges, data.wormholeUnknownEntrances)
+        : new Map(),
+    [cartographyActive, displayEdges, data.wormholeUnknownEntrances]
   )
 
   return (
@@ -113,6 +146,8 @@ export function MapGraph({
         <WormholeInteractionProvider>
           <MapGraphFlow
             data={data}
+            displayNodes={displayNodes}
+            displayEdges={displayEdges}
             nodes={nodes}
             planetMapNodes={planetMapNodes}
             planetGrid={planetGrid}
@@ -121,6 +156,7 @@ export function MapGraph({
             wormholeEndpoints={wormholeEndpoints}
             wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
             planetLabelOptions={planetLabelOptions}
+            cartographyActive={cartographyActive}
             cartographyConfig={cartographyConfig}
             stellarCartography={stellarCartography}
             onMapZoomChange={onMapZoomChange}
@@ -135,6 +171,8 @@ export function MapGraph({
 
 type MapGraphFlowProps = {
   data: CombinedMapData
+  displayNodes: CombinedMapData['nodes']
+  displayEdges: MapEdge[]
   nodes: ReturnType<typeof toFlowNodes>
   planetMapNodes: CombinedMapData['nodes']
   planetGrid: ReturnType<typeof buildPlanetSpatialGrid>
@@ -143,7 +181,8 @@ type MapGraphFlowProps = {
   wormholeEndpoints: { x: number; y: number }[]
   wormholeEndpointHoverByCell: ReturnType<typeof buildWormholeEndpointHoverIndex>
   planetLabelOptions: PlanetLabelOptions
-  cartographyConfig: StellarCartographyMapUiConfig
+  cartographyActive: boolean
+  cartographyConfig?: StellarCartographyMapUiConfig
   stellarCartography?: StellarCartographyMapUi
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
@@ -152,6 +191,8 @@ type MapGraphFlowProps = {
 
 function MapGraphFlow({
   data,
+  displayNodes,
+  displayEdges,
   nodes,
   planetMapNodes,
   planetGrid,
@@ -160,6 +201,7 @@ function MapGraphFlow({
   wormholeEndpoints,
   wormholeEndpointHoverByCell,
   planetLabelOptions,
+  cartographyActive,
   cartographyConfig,
   stellarCartography,
   onMapZoomChange,
@@ -174,15 +216,16 @@ function MapGraphFlow({
     onPlanetLabelHoverActiveChange,
   } = useWormholeInteractionState()
 
-  const visibleMapEdges = useMemo(
-    () =>
-      filterWormholeEdgesForCartographyConfig(
-        data.edges,
-        cartographyConfig,
-        wormholeLineRevealKey
-      ),
-    [data.edges, cartographyConfig, wormholeLineRevealKey]
-  )
+  const visibleMapEdges = useMemo(() => {
+    if (!cartographyActive || cartographyConfig == null) {
+      return displayEdges
+    }
+    return filterWormholeEdgesForCartographyConfig(
+      displayEdges,
+      cartographyConfig,
+      wormholeLineRevealKey
+    )
+  }, [cartographyActive, cartographyConfig, displayEdges, wormholeLineRevealKey])
   const edges = useMemo(() => toEdges(visibleMapEdges), [visibleMapEdges])
 
   return (
@@ -204,7 +247,7 @@ function MapGraphFlow({
       zoomOnPinch
     >
       <InitialViewportFit
-        nodes={data.nodes}
+        nodes={displayNodes}
         onInitialFitDone={onInitialFitDone}
         onMapZoomChange={onMapZoomChange}
       />
@@ -212,15 +255,17 @@ function MapGraphFlow({
       <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
       <MapZoomKeyboardShortcuts onMapZoomChange={onMapZoomChange} />
       <CoordinateGridOverlay />
-      <StellarCartographyOverlayPane
-        overlayCircles={data.overlayCircles}
-        wormholeEndpoints={wormholeEndpoints}
-        cartographyConfig={cartographyConfig}
-        wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
-        wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
-        blockedByPlanetHover={blockedByPlanetHover}
-        nuIonStorms={data.nuIonStorms}
-      />
+      {cartographyActive && cartographyConfig != null ? (
+        <StellarCartographyOverlayPane
+          overlayCircles={data.overlayCircles}
+          wormholeEndpoints={wormholeEndpoints}
+          cartographyConfig={cartographyConfig}
+          wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
+          wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
+          blockedByPlanetHover={blockedByPlanetHover}
+          nuIonStorms={data.nuIonStorms}
+        />
+      ) : null}
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}
@@ -232,10 +277,10 @@ function MapGraphFlow({
         onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
       />
       <FlowCoordinateReadout />
-      {stellarCartography != null ? (
+      {stellarCartography != null && cartographyConfig != null ? (
         <StellarCartographyHoverPanel
           analyticScope={stellarCartography.analyticScope}
-          sampleEnabled={stellarCartography.sampleEnabled}
+          cartographyEnabled={stellarCartography.cartographyEnabled}
           cartographyConfig={cartographyConfig}
           wormholeHoverLines={wormholeHoverLines}
           blockedByPlanetHover={blockedByPlanetHover}

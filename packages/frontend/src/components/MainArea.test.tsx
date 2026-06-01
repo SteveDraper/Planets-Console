@@ -93,6 +93,7 @@ describe('MainArea map hook mounting', () => {
       pending: false,
       hasError: false,
       hasAnyData: false,
+      mapError: null,
       mapQueries: [],
     })
     vi.mocked(useRetainedMapDisplay).mockReturnValue({

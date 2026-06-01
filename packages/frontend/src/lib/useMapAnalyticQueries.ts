@@ -7,17 +7,25 @@ import type {
   ConnectionsMapParams,
   MapDataResponse,
 } from '../api/bff'
-import {
-  combineMapData,
-  type CombineMapDataOptionsBase,
-} from '../analytics/mapLayers'
+import { type CombineMapDataOptionsBase } from '../analytics/mapLayers'
 import {
   mapAnalyticQuerySpecFor,
   type MapAnalyticQueryContext,
 } from '../analytics/mapAnalyticRegistry'
+import {
+  combineMapResultsFromQueries,
+  enabledMapAnalyticIds,
+  mapIdsToFetch,
+} from './mapAnalyticQueryPlan'
 
 export type { ConnectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
 export { connectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
+export {
+  combineMapResultsFromQueries,
+  enabledMapAnalyticIds,
+  mapIdsToFetch,
+  resolveBaseMapAnalyticId,
+} from './mapAnalyticQueryPlan'
 
 export type UseMapAnalyticQueriesInput = {
   enabledAnalyticIds: string[]
@@ -35,44 +43,8 @@ export type UseMapAnalyticQueriesResult = {
   pending: boolean
   hasError: boolean
   hasAnyData: boolean
+  mapError: unknown | null
   mapQueries: UseQueryResult<MapDataResponse, Error>[]
-}
-
-/** Merges per-analytic map payloads in fetch order. Pure; unit-tested separately. */
-export function combineMapResultsFromQueries(
-  mapIds: readonly string[],
-  mapQueryData: readonly (MapDataResponse | undefined)[],
-  mergeOptions: CombineMapDataOptionsBase
-): CombinedMapData {
-  return combineMapData(
-    mapIds,
-    mapQueryData.map((data) => ({ data })),
-    mergeOptions
-  )
-}
-
-/** Id of the base map analytic (planets + edges), if present. */
-export function baseMapId(analytics: AnalyticItem[]): string | null {
-  const a = analytics.find((x) => x.type === 'base' && x.supportsMap)
-  return a?.id ?? null
-}
-
-/** User-enabled analytic ids that support map view (selectable only). */
-export function enabledMapAnalyticIds(
-  enabledAnalyticIds: string[],
-  analytics: AnalyticItem[]
-): string[] {
-  const set = new Set(
-    analytics.filter((a) => a.supportsMap && a.type !== 'base').map((a) => a.id)
-  )
-  return enabledAnalyticIds.filter((id) => set.has(id))
-}
-
-/** Map data ids to fetch: base map first, then enabled selectable map analytics. */
-export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]): string[] {
-  const base = baseMapId(analytics)
-  const withoutBase = enabledMapIds.filter((id) => id !== base)
-  return base ? [base, ...withoutBase] : withoutBase
 }
 
 export function useMapAnalyticQueries({
@@ -120,11 +92,12 @@ export function useMapAnalyticQueries({
       pending: results.some((q) => q.isPending),
       hasError: results.some((q) => q.isError),
       hasAnyData: results.some((q) => q.data != null),
+      mapError: results.find((q) => q.error)?.error ?? null,
     }),
     [mapIds, mergeOptions]
   )
 
-  const { mapQueries, combined, pending, hasError, hasAnyData } = useQueries({
+  const { mapQueries, combined, pending, hasError, hasAnyData, mapError } = useQueries({
     queries: mapIds.map((analyticId) => mapAnalyticQuerySpecFor(analyticId, queryContext)),
     combine: combineMapQueries,
   })
@@ -136,6 +109,7 @@ export function useMapAnalyticQueries({
     pending,
     hasError,
     hasAnyData,
+    mapError,
     mapQueries,
   }
 }

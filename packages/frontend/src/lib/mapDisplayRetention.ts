@@ -12,7 +12,7 @@ export type MapShellView =
       displayMapData: CombinedMapData
       showDeferredPending: boolean
     }
-  | { phase: 'error' }
+  | { phase: 'error'; error: unknown | null }
 
 export type DeriveTurnEnsureLoadingInput = {
   hasAnalyticScope: boolean
@@ -45,6 +45,7 @@ export type DeriveMapShellViewInput = {
   mapPending: boolean
   mapHasError: boolean
   mapHasAnyData: boolean
+  mapError: unknown | null
 }
 
 /** Pure retention predicates; cross-turn ref retention lives in useRetainedMapDisplay. */
@@ -84,6 +85,7 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
     mapPending,
     mapHasError,
     mapHasAnyData,
+    mapError,
   } = input
 
   if (mapFrameSource === 'retained' && displayMapData != null) {
@@ -100,7 +102,7 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
   }
 
   if (mapHasError && !mapHasAnyData) {
-    return { phase: 'error' }
+    return { phase: 'error', error: mapError }
   }
 
   if (displayMapData == null || (!mapHasAnyData && mapPending)) {

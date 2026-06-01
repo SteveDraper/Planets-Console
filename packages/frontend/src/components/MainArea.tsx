@@ -6,7 +6,6 @@ import type {
   AnalyticShellScope,
   ConnectionsMapParams,
 } from '../api/bff'
-import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
@@ -138,19 +137,26 @@ const MapMainArea = memo(function MapMainArea({
     futureTurnOffset,
   })
 
-  const cartographyEnabled = mapQueries.enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
-
-  const { mapIds, pending, hasError, hasAnyData, mapQueries: queries } = mapQueries
+  const {
+    enabledMapIds,
+    mapIds,
+    pending,
+    hasError,
+    hasAnyData,
+    mapError,
+  } = mapQueries
 
   const { mapShellView } = useRetainedMapDisplay({
     combined: mapQueries.combined,
     gameId: analyticScope?.gameId ?? null,
     perspective: analyticScope?.perspective ?? null,
+    mapIds,
     turnDataReady,
     turnEnsurePending,
     mapPending: pending,
     mapHasError: hasError,
     mapHasAnyData: hasAnyData,
+    mapError,
   })
 
   if (analyticScope == null) {
@@ -168,12 +174,11 @@ const MapMainArea = memo(function MapMainArea({
   return (
     <MapShellContent
       mapShellView={mapShellView}
-      mapQueries={queries}
+      enabledMapIds={enabledMapIds}
       planetLabelOptions={planetLabelOptions}
       onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
       onMapZoomChange={onMapZoomChange}
       onSetZoomReady={onSetZoomReady}
-      cartographyEnabled={cartographyEnabled}
       analyticScope={analyticScope}
     />
   )

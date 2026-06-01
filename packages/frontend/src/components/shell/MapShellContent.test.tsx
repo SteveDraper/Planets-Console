@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { AnalyticShellScope } from '../../api/bff'
+import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
 import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from '../../analytics/mapLayers'
 import { DEFAULT_PLANET_LABEL_OPTIONS } from '../planetMapLabelModel'
 import { MapShellContent } from './MapShellContent'
@@ -46,7 +47,7 @@ const showingMapShellView = {
 
 const defaultProps = {
   mapShellView: showingMapShellView,
-  mapQueries: [],
+  enabledMapIds: ['connections'],
   planetLabelOptions: DEFAULT_PLANET_LABEL_OPTIONS,
   onPlanetLabelOptionsChange: vi.fn(),
   onMapZoomChange: vi.fn(),
@@ -60,16 +61,34 @@ describe('MapShellContent cartography config', () => {
   })
 
   it('does not subscribe to cartography config when that analytic is disabled', () => {
-    render(<MapShellContent {...defaultProps} cartographyEnabled={false} />)
+    render(<MapShellContent {...defaultProps} />)
 
     expect(useStellarCartographyMapConfig).not.toHaveBeenCalled()
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
   })
 
   it('subscribes to live cartography config only when that analytic is enabled', () => {
-    render(<MapShellContent {...defaultProps} cartographyEnabled={true} />)
+    render(
+      <MapShellContent
+        {...defaultProps}
+        enabledMapIds={['connections', STELLAR_CARTOGRAPHY_ANALYTIC_ID]}
+      />
+    )
 
     expect(useStellarCartographyMapConfig).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
+  })
+
+  it('renders map errors from mapShellView without query objects', () => {
+    const err = new Error('map failed')
+    render(
+      <MapShellContent
+        {...defaultProps}
+        mapShellView={{ phase: 'error', error: err }}
+      />
+    )
+
+    expect(screen.getByText(/Failed to load map data/i)).toBeInTheDocument()
+    expect(screen.getByText(/map failed/i)).toBeInTheDocument()
   })
 })

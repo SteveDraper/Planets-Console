@@ -59,6 +59,7 @@ describe('deriveMapShellView', () => {
     mapPending: false,
     mapHasError: false,
     mapHasAnyData: true,
+    mapError: null,
   }
 
   it('returns showing-map with deferred pending off when live map data is available', () => {
@@ -113,6 +114,7 @@ describe('deriveMapShellView', () => {
   })
 
   it('returns error when map fetch fails without a retained frame', () => {
+    const err = new Error('map failed')
     expect(
       deriveMapShellView({
         ...baseInput,
@@ -120,8 +122,9 @@ describe('deriveMapShellView', () => {
         mapFrameSource: 'none',
         mapHasError: true,
         mapHasAnyData: false,
+        mapError: err,
       })
-    ).toEqual({ phase: 'error' })
+    ).toEqual({ phase: 'error', error: err })
   })
 
   it('returns showing-map (not turn-loading) during turn ensure when a prior frame is kept', () => {

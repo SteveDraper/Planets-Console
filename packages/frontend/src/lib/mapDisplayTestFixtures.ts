@@ -17,12 +17,15 @@ export const emptyCombined: CombinedMapData = { ...sampleMap, nodes: [] }
 
 export const defaultRetentionScope = { gameId: 'g1', perspective: 1 }
 
+export const defaultMapIds = ['base-map', 'connections'] as const
+
 export const idleMapLoad = {
   turnDataReady: true,
   turnEnsurePending: false,
   mapPending: false,
   mapHasError: false,
   mapHasAnyData: true,
+  mapError: null,
 }
 
 export const initialMapLoad = {
@@ -31,4 +34,5 @@ export const initialMapLoad = {
   mapPending: true,
   mapHasError: false,
   mapHasAnyData: false,
+  mapError: null,
 }

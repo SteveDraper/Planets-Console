@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   combineMapResultsFromQueries,
-  connectionsMapQueryKey,
   enabledMapAnalyticIds,
   mapIdsToFetch,
-} from './useMapAnalyticQueries'
+  resolveBaseMapAnalyticId,
+} from './mapAnalyticQueryPlan'
+import { connectionsMapQueryKey } from './useMapAnalyticQueries'
 import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
@@ -67,6 +68,18 @@ describe('connectionsMapQueryKey', () => {
       'off',
       2,
     ])
+  })
+})
+
+describe('resolveBaseMapAnalyticId', () => {
+  it('returns the canonical base map id when present in analytics', () => {
+    expect(resolveBaseMapAnalyticId(sampleAnalytics)).toBe(BASE_MAP_ANALYTIC_ID)
+  })
+
+  it('returns null when the base map analytic is absent', () => {
+    expect(
+      resolveBaseMapAnalyticId(sampleAnalytics.filter((a) => a.id !== BASE_MAP_ANALYTIC_ID))
+    ).toBeNull()
   })
 })
 
