@@ -1,6 +1,7 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
 import time
+from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
@@ -9,6 +10,7 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
+    ProbabilityBucket,
 )
 
 STATUS_EXACT = "exact"
@@ -17,6 +19,13 @@ STATUS_NO_EXACT_SOLUTION = "no_exact_solution"
 STATUS_TIME_LIMITED = "time_limited"
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+
+@dataclass(frozen=True)
+class _BuiltModel:
+    model: cp_model.CpModel
+    count_vars: dict[str, cp_model.IntVar]
+    bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]]
 
 
 def _validate_problem(problem: InferenceProblem) -> str | None:
@@ -29,7 +38,37 @@ def _validate_problem(problem: InferenceProblem) -> str | None:
             return f"action {action.id} has negative lower_bound"
         if action.lower_bound > action.upper_bound:
             return f"action {action.id} has lower_bound greater than upper_bound"
+
+    for action_id, buckets in problem.probability_buckets_by_action_id.items():
+        if action_id not in seen_action_ids:
+            return f"unknown bucket action id: {action_id}"
+        if not buckets:
+            return f"empty probability buckets for action {action_id}"
+
+        action = next(candidate for candidate in problem.actions if candidate.id == action_id)
+        previous_upper_count = -1
+        total_bucket_capacity = 0
+        for bucket in buckets:
+            if bucket.lower_count > bucket.upper_count:
+                return f"bucket {bucket.label} for action {action_id} has invalid count range"
+            if bucket.lower_count <= previous_upper_count:
+                return f"bucket {bucket.label} for action {action_id} overlaps prior bucket"
+            previous_upper_count = bucket.upper_count
+            total_bucket_capacity += _bucket_capacity(bucket)
+
+        if total_bucket_capacity < action.upper_bound:
+            return (
+                f"probability buckets for action {action_id} "
+                f"cover only {total_bucket_capacity} counts but upper_bound is {action.upper_bound}"
+            )
+
     return None
+
+
+def _bucket_capacity(bucket: ProbabilityBucket) -> int:
+    if bucket.lower_count == 0:
+        return bucket.upper_count
+    return bucket.upper_count - bucket.lower_count + 1
 
 
 def _observation_has_no_deltas(problem: InferenceProblem) -> bool:
@@ -42,14 +81,32 @@ def _observation_has_no_deltas(problem: InferenceProblem) -> bool:
     )
 
 
-def _build_model(
-    problem: InferenceProblem,
-) -> tuple[cp_model.CpModel, dict[str, cp_model.IntVar]]:
+def _build_model(problem: InferenceProblem) -> _BuiltModel:
     model = cp_model.CpModel()
     count_vars = {
         action.id: model.new_int_var(action.lower_bound, action.upper_bound, action.id)
         for action in problem.actions
     }
+    bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]] = {}
+    objective_terms: list[cp_model.LinearExpr] = []
+
+    for action in problem.actions:
+        buckets = problem.probability_buckets_by_action_id.get(action.id)
+        if buckets:
+            bucket_vars: list[cp_model.IntVar] = []
+            for index, bucket in enumerate(buckets):
+                bucket_var = model.new_int_var(
+                    0,
+                    _bucket_capacity(bucket),
+                    f"{action.id}_bucket_{index}",
+                )
+                bucket_vars.append(bucket_var)
+                objective_terms.append(bucket_var * bucket.marginal_weight)
+            bucket_vars_by_action_id[action.id] = tuple(bucket_vars)
+            model.add(count_vars[action.id] == sum(bucket_vars))
+        else:
+            objective_terms.append(count_vars[action.id] * action.probability_weight)
+
     observation = problem.observation
 
     model.add(
@@ -72,10 +129,12 @@ def _build_model(
         sum(action.build_slot_usage * count_vars[action.id] for action in problem.actions)
         <= observation.starbases_owned
     )
-    model.maximize(
-        sum(action.probability_weight * count_vars[action.id] for action in problem.actions)
+    model.maximize(sum(objective_terms))
+    return _BuiltModel(
+        model=model,
+        count_vars=count_vars,
+        bucket_vars_by_action_id=bucket_vars_by_action_id,
     )
-    return model, count_vars
 
 
 def _read_action_counts(
@@ -86,13 +145,40 @@ def _read_action_counts(
     return {action.id: solver.value(count_vars[action.id]) for action in problem.actions}
 
 
+def _read_bucket_counts(
+    bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]],
+    solver: cp_model.CpSolver,
+) -> dict[str, tuple[int, ...]]:
+    return {
+        action_id: tuple(solver.value(bucket_var) for bucket_var in bucket_vars)
+        for action_id, bucket_vars in bucket_vars_by_action_id.items()
+    }
+
+
+def _objective_value(
+    problem: InferenceProblem,
+    action_counts: dict[str, int],
+    bucket_counts_by_action_id: dict[str, tuple[int, ...]],
+) -> int:
+    objective_value = 0
+    for action in problem.actions:
+        buckets = problem.probability_buckets_by_action_id.get(action.id)
+        if buckets:
+            bucket_counts = bucket_counts_by_action_id[action.id]
+            for bucket, count in zip(buckets, bucket_counts, strict=True):
+                objective_value += bucket.marginal_weight * count
+        else:
+            objective_value += action.probability_weight * action_counts[action.id]
+    return objective_value
+
+
 def _extract_solution(
     problem: InferenceProblem,
     action_counts: dict[str, int],
+    bucket_counts_by_action_id: dict[str, tuple[int, ...]],
 ) -> InferenceSolution:
     action_by_id = {action.id: action for action in problem.actions}
     solution_actions: list[InferenceSolutionAction] = []
-    objective_value = 0
     for action_id, count in action_counts.items():
         if count == 0:
             continue
@@ -104,9 +190,8 @@ def _extract_solution(
                 count=count,
             )
         )
-        objective_value += action.probability_weight * count
     return InferenceSolution(
-        objective_value=objective_value,
+        objective_value=_objective_value(problem, action_counts, bucket_counts_by_action_id),
         actions=tuple(solution_actions),
     )
 
@@ -156,7 +241,10 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
             diagnostics={"reason": "no candidate actions for non-zero observation deltas"},
         )
 
-    model, count_vars = _build_model(problem)
+    built_model = _build_model(problem)
+    model = built_model.model
+    count_vars = built_model.count_vars
+    bucket_vars_by_action_id = built_model.bucket_vars_by_action_id
     solver = cp_model.CpSolver()
     solutions: list[InferenceSolution] = []
     seen_signatures: set[tuple[tuple[str, int], ...]] = set()
@@ -164,6 +252,7 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
     last_solver_status = cp_model.UNKNOWN
     stopped_reason = "exhausted"
     time_limited = False
+    top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
 
     while len(solutions) < problem.max_solutions:
         elapsed_seconds = time.monotonic() - started_at
@@ -192,7 +281,8 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
                 stopped_reason = "time_budget"
 
         action_counts = _read_action_counts(problem, count_vars, solver)
-        solution = _extract_solution(problem, action_counts)
+        bucket_counts = _read_bucket_counts(bucket_vars_by_action_id, solver)
+        solution = _extract_solution(problem, action_counts, bucket_counts)
         signature = _solution_signature(solution)
         if signature in seen_signatures:
             stopped_reason = "duplicate_solution"
@@ -200,6 +290,7 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
 
         seen_signatures.add(signature)
         solutions.append(solution)
+        top_solution_bucket_counts = bucket_counts
         _add_no_good_cut(model, count_vars, action_counts, len(solutions))
 
         if len(solutions) >= problem.max_solutions:
@@ -214,6 +305,8 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
     }
     if time_limited:
         diagnostics["time_limited"] = True
+    if top_solution_bucket_counts:
+        diagnostics["bucket_counts_by_action_id"] = top_solution_bucket_counts
 
     if not solutions:
         status = STATUS_TIME_LIMITED if time_limited else STATUS_NO_EXACT_SOLUTION

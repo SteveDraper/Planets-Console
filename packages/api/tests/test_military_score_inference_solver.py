@@ -5,9 +5,11 @@ from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
     InferenceSolutionAction,
+    ProbabilityBucket,
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
+    PLANET_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_FIGHTER_SCORE_DELTA_2X,
 )
 from api.analytics.military_score_inference.solver import (
@@ -44,13 +46,30 @@ def _problem(
     *actions: CandidateAction,
     max_solutions: int = 20,
     time_limit_seconds: float = 1.0,
+    probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]] | None = None,
 ) -> InferenceProblem:
     return InferenceProblem(
         observation=observation,
         actions=actions,
-        probability_buckets_by_action_id={},
+        probability_buckets_by_action_id=probability_buckets_by_action_id or {},
         max_solutions=max_solutions,
         time_limit_seconds=time_limit_seconds,
+    )
+
+
+PLANET_DEFENSE_POST_BUCKETS = (
+    ProbabilityBucket("modest build-up", 0, 10, 100),
+    ProbabilityBucket("heavy build-up", 11, 50, 20),
+    ProbabilityBucket("extreme build-up", 51, 100, 5),
+)
+
+
+def _planet_defense_posts_action(*, upper_bound: int = 100) -> CandidateAction:
+    return CandidateAction(
+        id="planet_defense_posts",
+        label="Planet defense posts",
+        score_delta_2x=PLANET_DEFENSE_POST_SCORE_DELTA_2X,
+        upper_bound=upper_bound,
     )
 
 
@@ -296,3 +315,63 @@ def test_top_k_surfaces_time_limited_status(monkeypatch):
     assert len(result.solutions) == 1
     assert result.diagnostics["time_limited"] is True
     assert result.diagnostics["stopped_reason"] == "time_budget"
+
+
+def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100():
+    action = _planet_defense_posts_action()
+    buckets = {"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS}
+
+    result_ten = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=10 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
+            action,
+            probability_buckets_by_action_id=buckets,
+        )
+    )
+    result_hundred = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=100 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
+            action,
+            probability_buckets_by_action_id=buckets,
+        )
+    )
+
+    assert result_ten.solutions[0].actions[0].count == 10
+    assert result_ten.solutions[0].objective_value == 10 * 100
+    assert result_hundred.solutions[0].actions[0].count == 100
+    assert result_hundred.solutions[0].objective_value == 10 * 100 + 40 * 20 + 50 * 5
+    assert result_ten.solutions[0].objective_value / 10 != (
+        result_hundred.solutions[0].objective_value / 100
+    )
+
+
+def test_bucketed_action_satisfies_exact_score_constraint():
+    action = _planet_defense_posts_action()
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=55 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
+            action,
+            probability_buckets_by_action_id={"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS},
+        )
+    )
+
+    assert result.status == STATUS_EXACT
+    assert result.solutions[0].actions[0].count == 55
+
+
+def test_bucket_variables_respect_configured_count_ranges():
+    action = _planet_defense_posts_action()
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=100 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
+            action,
+            probability_buckets_by_action_id={"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS},
+        )
+    )
+
+    bucket_counts = result.diagnostics["bucket_counts_by_action_id"]["planet_defense_posts"]
+    assert bucket_counts == (10, 40, 50)
+    assert bucket_counts[0] <= 10
+    assert bucket_counts[1] <= 40
+    assert bucket_counts[2] <= 50
+    assert sum(bucket_counts) == 100
