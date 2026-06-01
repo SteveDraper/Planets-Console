@@ -1,7 +1,10 @@
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
 import type { StellarCartographyMapUiConfig } from '../../analytics/stellar-cartography/mapUiConfig'
-import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
+import {
+  buildStellarCartographyOverlayPaneShapes,
+  hasVectorOverlayShapes,
+} from '../../lib/cartography/stellarCartographyOverlay'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
@@ -46,15 +49,7 @@ export function StellarCartographyOverlayPane({
     }
   )
 
-  const hasVector =
-    shapes.circles.length > 0 ||
-    shapes.blackHoles.length > 0 ||
-    shapes.annuli.length > 0 ||
-    shapes.nebulaClouds.length > 0 ||
-    shapes.ionStormClouds.length > 0 ||
-    shapes.neutronFluxClouds.length > 0 ||
-    shapes.debrisDiskBorders.length > 0 ||
-    shapes.arrows.length > 0
+  const hasVector = hasVectorOverlayShapes(shapes)
   const hasMarkers = shapes.wormholeMarkers.length > 0
 
   if (!hasVector && !hasMarkers) return null
@@ -62,20 +57,7 @@ export function StellarCartographyOverlayPane({
   return (
     <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
       {hasVector ? (
-        <StellarCartographyVectorOverlay
-          shapes={{
-            nebulaClouds: shapes.nebulaClouds,
-            ionStormClouds: shapes.ionStormClouds,
-            neutronFluxClouds: shapes.neutronFluxClouds,
-            circles: shapes.circles,
-            blackHoles: shapes.blackHoles,
-            annuli: shapes.annuli,
-            debrisDiskBorders: shapes.debrisDiskBorders,
-            arrows: shapes.arrows,
-          }}
-          width={width}
-          height={height}
-        />
+        <StellarCartographyVectorOverlay shapes={shapes} width={width} height={height} />
       ) : null}
       <WormholeEndpointMarkers
         markers={shapes.wormholeMarkers}

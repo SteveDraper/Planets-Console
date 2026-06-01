@@ -57,7 +57,7 @@ describe('warp well overlay regression', () => {
     const normalized = normalizeMapDataResponse(raw)
     expect(normalized.nodes[0].normalWellCells).toHaveLength(29)
 
-    const combined = combineMapData(['base-map'], [{ data: normalized }], {
+    const combined = combineMapData(['base-map'], [normalized], {
       liveConnectionsParams: null,
     })
     expect(combined.nodes[0].normalWellCells).toHaveLength(29)

@@ -10,13 +10,24 @@ import {
   type WormholeEndpointHoverInfo,
 } from '../../lib/wormholeEndpointHover'
 import type { CartographyLayerId } from './layers'
-import { isCartographyLayerShown } from './layers'
+import {
+  defaultCartographyLayerVisibility,
+  EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+  isCartographyLayerShown,
+} from './layers'
 import {
   collectWormholeEndpoints,
   withoutCartographyNodes,
 } from './cartographyWormholeFrame'
 import type { StellarCartographyMapUiConfig } from './mapUiConfig'
-import { filterWormholeEdgesForDisplayMode } from './wormholeDisplayMode'
+import {
+  defaultNeutronClusterDisplayMode,
+  defaultStarClusterDisplayMode,
+} from './clusterOutlineDisplayMode'
+import {
+  defaultWormholeDisplayMode,
+  filterWormholeEdgesForDisplayMode,
+} from './wormholeDisplayMode'
 
 /** Static map frame fields derived from combined map data (before hover-sensitive edge filtering). */
 export type CartographyMapFrameParts = {
@@ -50,22 +61,6 @@ function hiddenWormholeFrameParts(data: CombinedMapData): CartographyMapFramePar
     wormholeEndpoints: [],
     wormholeEndpointHoverByCell: new Map(),
   }
-}
-
-/** Used when Stellar Cartography is not enabled on the map. */
-export const cartographyDisabledPolicy: CartographyVisibilityPolicy = {
-  isLayerShown: () => false,
-  overlayCircles: () => [],
-  sampleEntries: () => [],
-  areWormholesShown: () => false,
-  mapFrameParts: (data) => hiddenWormholeFrameParts(data),
-  mapEdges: (edges) => edges.filter((edge) => edge.layer !== 'wormholes'),
-}
-
-export function cartographyFramePolicy(
-  cartography: { policy: CartographyVisibilityPolicy } | undefined
-): CartographyVisibilityPolicy {
-  return cartography?.policy ?? cartographyDisabledPolicy
 }
 
 export function cartographyVisibilityPolicy(
@@ -110,4 +105,23 @@ export function cartographyVisibilityPolicy(
       )
     },
   }
+}
+
+/** Config with every layer gated off; its visibility policy hides all cartography artifacts. */
+const ALL_LAYERS_HIDDEN_CONFIG: StellarCartographyMapUiConfig = {
+  layerVisibility: defaultCartographyLayerVisibility(),
+  settingsGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+  wormholeDisplayMode: defaultWormholeDisplayMode(),
+  starClusterDisplayMode: defaultStarClusterDisplayMode(),
+  neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
+}
+
+/** Used when Stellar Cartography is not enabled on the map. */
+export const cartographyDisabledPolicy: CartographyVisibilityPolicy =
+  cartographyVisibilityPolicy(ALL_LAYERS_HIDDEN_CONFIG)
+
+export function cartographyFramePolicy(
+  cartography: { policy: CartographyVisibilityPolicy } | undefined
+): CartographyVisibilityPolicy {
+  return cartography?.policy ?? cartographyDisabledPolicy
 }

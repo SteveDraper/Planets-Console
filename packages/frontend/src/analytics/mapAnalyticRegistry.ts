@@ -138,6 +138,7 @@ export function defaultMapAnalyticQuerySpec(
   context: MapAnalyticQueryContext
 ): MapAnalyticQuerySpec {
   return {
+    // 'planet-v2' namespaces the cache to the current planet-map wire shape; bump it when that shape changes.
     queryKey: ['analytic', analyticId, 'map', context.analyticScope, 'planet-v2'] as const,
     queryFn: () => {
       if (context.analyticScope == null) {

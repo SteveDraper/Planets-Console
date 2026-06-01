@@ -13,6 +13,10 @@ import {
   cartographyDisplayEdges,
   type CartographyMapFrame,
 } from '../analytics/stellar-cartography/cartographyDisplayModel'
+import {
+  cartographyFramePolicy,
+  type CartographyVisibilityPolicy,
+} from '../analytics/stellar-cartography/cartographyVisibilityPolicy'
 import type { StellarCartographyMapContext } from '../analytics/stellar-cartography/mapUiConfig'
 import {
   MAP_ZOOM_MAX,
@@ -77,9 +81,10 @@ export function MapGraph({
     return () => clearTimeout(t)
   }, [])
 
+  const policy = useMemo(() => cartographyFramePolicy(cartography), [cartography])
   const frame = useMemo(
-    () => buildCartographyMapFrame(data, cartography, futureTurnOffset),
-    [data, cartography, futureTurnOffset]
+    () => buildCartographyMapFrame(data, policy, futureTurnOffset),
+    [data, policy, futureTurnOffset]
   )
   const nodes = useMemo(() => toFlowNodes(frame.nodes), [frame.nodes])
   const planetMapNodes = useMemo(
@@ -116,6 +121,7 @@ export function MapGraph({
             labelSourceByNodeId={labelSourceByNodeId}
             planetLabelOptions={planetLabelOptions}
             cartography={cartography}
+            policy={policy}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
             onInitialFitDone={onInitialFitDone}
@@ -136,6 +142,7 @@ type MapGraphFlowProps = {
   labelSourceByNodeId: ReturnType<typeof buildLabelSourceByNodeId>
   planetLabelOptions: PlanetLabelOptions
   cartography?: StellarCartographyMapContext
+  policy: CartographyVisibilityPolicy
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
@@ -151,6 +158,7 @@ function MapGraphFlow({
   labelSourceByNodeId,
   planetLabelOptions,
   cartography,
+  policy,
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
@@ -164,8 +172,8 @@ function MapGraphFlow({
   } = useWormholeInteractionState()
 
   const edges = useMemo(
-    () => toEdges(cartographyDisplayEdges(frame, cartography, wormholeLineRevealKey)),
-    [frame, cartography, wormholeLineRevealKey]
+    () => toEdges(cartographyDisplayEdges(frame, policy, wormholeLineRevealKey)),
+    [frame, policy, wormholeLineRevealKey]
   )
 
   return (

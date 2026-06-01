@@ -280,3 +280,17 @@ export function buildStellarCartographyOverlayPaneShapes(
     wormholeMarkers,
   }
 }
+
+/** True when any drawable vector shape is present (everything except wormhole markers). */
+export function hasVectorOverlayShapes(shapes: StellarCartographyOverlayPaneShapes): boolean {
+  return (
+    shapes.circles.length > 0 ||
+    shapes.blackHoles.length > 0 ||
+    shapes.annuli.length > 0 ||
+    shapes.nebulaClouds.length > 0 ||
+    shapes.ionStormClouds.length > 0 ||
+    shapes.neutronFluxClouds.length > 0 ||
+    shapes.debrisDiskBorders.length > 0 ||
+    shapes.arrows.length > 0
+  )
+}

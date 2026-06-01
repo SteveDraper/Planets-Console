@@ -14,8 +14,13 @@ import {
   defaultNeutronClusterDisplayMode,
   defaultStarClusterDisplayMode,
 } from './clusterOutlineDisplayMode'
-import type { StellarCartographyMapContext } from './mapUiConfig'
-import { buildStellarCartographyMapContext, defaultStellarCartographyMapUiConfig } from './mapUiConfig'
+import type { StellarCartographyMapUiConfig } from './mapUiConfig'
+import { defaultStellarCartographyMapUiConfig } from './mapUiConfig'
+import {
+  cartographyDisabledPolicy,
+  cartographyVisibilityPolicy,
+  type CartographyVisibilityPolicy,
+} from './cartographyVisibilityPolicy'
 
 const SC_PREFIX = `${STELLAR_CARTOGRAPHY_ANALYTIC_ID}:`
 
@@ -56,27 +61,24 @@ const sampleData = {
   wormholeUnknownEntrances: [{ x: 50, y: 60 }],
 } satisfies CombinedMapData
 
-function cartographyContext(
-  overrides: Partial<StellarCartographyMapContext['config']> = {}
-): StellarCartographyMapContext {
-  return buildStellarCartographyMapContext(
-    {
-      ...defaultStellarCartographyMapUiConfig(),
-      settingsGates: {
-        ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
-        nebulae: true,
-        blackHoles: true,
-        wormholes: true,
-        ionStorms: true,
-      },
-      layerVisibility: defaultCartographyLayerVisibility(),
-      wormholeDisplayMode: 'always',
-      starClusterDisplayMode: defaultStarClusterDisplayMode(),
-      neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
-      ...overrides,
+function cartographyPolicy(
+  overrides: Partial<StellarCartographyMapUiConfig> = {}
+): CartographyVisibilityPolicy {
+  return cartographyVisibilityPolicy({
+    ...defaultStellarCartographyMapUiConfig(),
+    settingsGates: {
+      ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+      nebulae: true,
+      blackHoles: true,
+      wormholes: true,
+      ionStorms: true,
     },
-    { gameId: 'g1', turn: 5, perspective: 1 }
-  )
+    layerVisibility: defaultCartographyLayerVisibility(),
+    wormholeDisplayMode: 'always',
+    starClusterDisplayMode: defaultStarClusterDisplayMode(),
+    neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
+    ...overrides,
+  })
 }
 
 describe('collectWormholeEndpoints', () => {
@@ -110,23 +112,23 @@ describe('collectWormholeEndpoints', () => {
 
 describe('cartography map frame and edges', () => {
   it('applies hover reveal only through edges, not the static frame', () => {
-    const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
-    const frame = buildCartographyMapFrame(sampleData, context)
+    const policy = cartographyPolicy({ wormholeDisplayMode: 'on-hover' })
+    const frame = buildCartographyMapFrame(sampleData, policy)
 
     expect(frame.baseEdges.some((e) => e.layer === 'wormholes')).toBe(true)
-    expect(cartographyDisplayEdges(frame, context, null).every((e) => e.layer !== 'wormholes')).toBe(
+    expect(cartographyDisplayEdges(frame, policy, null).every((e) => e.layer !== 'wormholes')).toBe(
       true
     )
     expect(
-      cartographyDisplayEdges(frame, context, '10,20').some((e) => e.layer === 'wormholes')
+      cartographyDisplayEdges(frame, policy, '10,20').some((e) => e.layer === 'wormholes')
     ).toBe(true)
   })
 
   it('hides all cartography artifacts when the analytic is disabled', () => {
-    const frame = buildCartographyMapFrame(sampleData, undefined)
+    const frame = buildCartographyMapFrame(sampleData, cartographyDisabledPolicy)
 
     expect(frame.nodes.map((n) => n.id)).toEqual(['base-map:1'])
-    expect(cartographyDisplayEdges(frame, undefined).every((e) => e.layer !== 'wormholes')).toBe(
+    expect(cartographyDisplayEdges(frame, cartographyDisabledPolicy).every((e) => e.layer !== 'wormholes')).toBe(
       true
     )
     expect(frame.overlayCircles).toEqual([])
@@ -136,17 +138,17 @@ describe('cartography map frame and edges', () => {
   })
 
   it('filters overlay circles by layer config when cartography is enabled', () => {
-    const context = cartographyContext({
+    const policy = cartographyPolicy({
       layerVisibility: { ...defaultCartographyLayerVisibility(), nebulae: false },
     })
-    const frame = buildCartographyMapFrame(sampleData, context)
+    const frame = buildCartographyMapFrame(sampleData, policy)
 
     expect(frame.overlayCircles.map((c) => c.layer)).toEqual(['black-holes', 'ion-storms'])
   })
 
   it('extrapolates ion storm overlay positions for future turns at display time', () => {
-    const context = cartographyContext()
-    const frame = buildCartographyMapFrame(sampleData, context, 2)
+    const policy = cartographyPolicy()
+    const frame = buildCartographyMapFrame(sampleData, policy, 2)
 
     expect(frame.overlayCircles.find((c) => c.layer === 'ion-storms')).toMatchObject({
       x: 100,
@@ -159,21 +161,21 @@ describe('cartography map frame and edges', () => {
   })
 
   it('removes wormhole routing nodes and endpoints when the wormhole layer is off', () => {
-    const context = cartographyContext({ wormholeDisplayMode: 'off' })
-    const frame = buildCartographyMapFrame(sampleData, context)
+    const policy = cartographyPolicy({ wormholeDisplayMode: 'off' })
+    const frame = buildCartographyMapFrame(sampleData, policy)
 
     expect(frame.nodes.map((n) => n.id)).toEqual(['base-map:1'])
-    expect(cartographyDisplayEdges(frame, context).every((e) => e.layer !== 'wormholes')).toBe(true)
+    expect(cartographyDisplayEdges(frame, policy).every((e) => e.layer !== 'wormholes')).toBe(true)
     expect(frame.wormholeUnknownEntrances).toEqual([])
     expect(frame.wormholeEndpoints).toEqual([])
     expect(frame.wormholeEndpointHoverByCell.size).toBe(0)
   })
 
   it('keeps wormhole hover metadata when lines use on-hover reveal', () => {
-    const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
-    const frame = buildCartographyMapFrame(sampleData, context)
+    const policy = cartographyPolicy({ wormholeDisplayMode: 'on-hover' })
+    const frame = buildCartographyMapFrame(sampleData, policy)
 
-    expect(cartographyDisplayEdges(frame, context).filter((e) => e.layer === 'wormholes')).toEqual(
+    expect(cartographyDisplayEdges(frame, policy).filter((e) => e.layer === 'wormholes')).toEqual(
       []
     )
     expect(frame.wormholeEndpointHoverByCell.size).toBeGreaterThan(0)
@@ -181,11 +183,11 @@ describe('cartography map frame and edges', () => {
   })
 
   it('reveals wormhole lines for the hovered cell key', () => {
-    const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
-    const frame = buildCartographyMapFrame(sampleData, context)
+    const policy = cartographyPolicy({ wormholeDisplayMode: 'on-hover' })
+    const frame = buildCartographyMapFrame(sampleData, policy)
 
     expect(
-      cartographyDisplayEdges(frame, context, '10,20').some((e) => e.layer === 'wormholes')
+      cartographyDisplayEdges(frame, policy, '10,20').some((e) => e.layer === 'wormholes')
     ).toBe(true)
   })
 })

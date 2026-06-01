@@ -57,9 +57,5 @@ export function combineMapDataFromAnalyticQueries(
   const mergeOptions: CombineMapDataOptionsBase = {
     liveConnectionsParams: input.liveConnectionsParams,
   }
-  return combineMapData(
-    mapIds,
-    mapQueryData.map((data) => ({ data })),
-    mergeOptions
-  )
+  return combineMapData(mapIds, mapQueryData, mergeOptions)
 }

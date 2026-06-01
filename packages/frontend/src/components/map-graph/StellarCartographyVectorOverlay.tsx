@@ -99,17 +99,8 @@ export function StellarCartographyVectorOverlay({
   width,
   height,
 }: {
-  shapes: Pick<
-    StellarCartographyOverlayPaneShapes,
-    | 'nebulaClouds'
-    | 'ionStormClouds'
-    | 'neutronFluxClouds'
-    | 'circles'
-    | 'blackHoles'
-    | 'annuli'
-    | 'debrisDiskBorders'
-    | 'arrows'
-  >
+  /** Full overlay shape set; wormhole markers render separately in WormholeEndpointMarkers. */
+  shapes: StellarCartographyOverlayPaneShapes
   width: number
   height: number
 }) {

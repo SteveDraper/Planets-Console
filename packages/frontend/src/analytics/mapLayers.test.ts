@@ -27,13 +27,9 @@ describe('combineMapData', () => {
       routes: [{ fromPlanetId: 1, toPlanetId: 2, viaFlare: false }],
     }
 
-    const combined = combineMapData(
-      ['base-map', 'connections'],
-      [{ data: baseMap }, { data: connections }],
-      {
-        liveConnectionsParams: null,
-      }
-    )
+    const combined = combineMapData(['base-map', 'connections'], [baseMap, connections], {
+      liveConnectionsParams: null,
+    })
 
     expect(combined.edges).toContainEqual({
       source: 'base-map:p1',
@@ -55,7 +51,7 @@ describe('combineMapData', () => {
 
     const combined = combineMapData(
       ['base-map', 'connections'],
-      [{ data: baseMap }, { data: connections }],
+      [baseMap, connections],
       {
         liveConnectionsParams: {
           warpSpeed: 9,
@@ -92,7 +88,7 @@ describe('combineMapData', () => {
       edges: [],
     }
 
-    const combined = combineMapData(['base-map'], [{ data: baseMapWithWells }], {
+    const combined = combineMapData(['base-map'], [baseMapWithWells], {
       liveConnectionsParams: null,
     })
     expect(combined.nodes[0].normalWellCells).toEqual(cells)
@@ -106,7 +102,7 @@ describe('combineMapData', () => {
       edges: [],
     }
 
-    const combined = combineMapData(['base-map'], [{ data: baseMapWithPlanet }], {
+    const combined = combineMapData(['base-map'], [baseMapWithPlanet], {
       liveConnectionsParams: null,
     })
     expect(combined.nodes[0].planet).toEqual(planet)
@@ -135,7 +131,7 @@ describe('combineMapData', () => {
 
     const combined = combineMapData(
       ['base-map', 'stellar-cartography'],
-      [{ data: baseMap }, { data: sc }],
+      [baseMap, sc],
       { liveConnectionsParams: null }
     )
 
@@ -186,7 +182,7 @@ describe('combineMapData', () => {
       ],
     }
 
-    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
+    const combined = combineMapData(['stellar-cartography'], [sc], {
       liveConnectionsParams: null,
     })
 
@@ -201,7 +197,7 @@ describe('combineMapData', () => {
       overlayCircles: [],
     }
 
-    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
+    const combined = combineMapData(['stellar-cartography'], [sc], {
       liveConnectionsParams: null,
     })
 
@@ -234,7 +230,7 @@ describe('combineMapData', () => {
       ],
     }
 
-    const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
+    const combined = combineMapData(['stellar-cartography'], [sc], {
       liveConnectionsParams: null,
     })
 

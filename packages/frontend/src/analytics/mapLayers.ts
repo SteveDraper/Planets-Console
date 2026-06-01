@@ -18,7 +18,7 @@ export type CombineMapDataOptionsBase = {
 
 export function combineMapData(
   analyticIds: readonly string[],
-  results: { data?: MapDataResponse }[],
+  mapData: readonly (MapDataResponse | undefined)[],
   options: CombineMapDataOptionsBase
 ): CombinedMapData {
   const baseMapAnalyticId = analyticIds.find((id) => id === BASE_MAP_ANALYTIC_ID) ?? null
@@ -35,8 +35,7 @@ export function combineMapData(
     waypointsByKey: new Map<string, { x: number; y: number }>(),
     nuIonStorms: undefined,
   }
-  results.forEach((result, idx) => {
-    const data = result.data
+  mapData.forEach((data, idx) => {
     const slotId = analyticIds[idx] ?? ''
     if (!data || slotId === '') return
     mapLayerMergerFor(slotId)(data, context, options, slotId)
