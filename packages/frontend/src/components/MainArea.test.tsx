@@ -6,6 +6,8 @@ import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../
 import { MainArea } from './MainArea'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
+import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
+import { buildStellarCartographyMapContext, defaultStellarCartographyMapUiConfig } from '../analytics/stellar-cartography/mapUiConfig'
 
 vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/useMapAnalyticQueries')>()
@@ -17,6 +19,14 @@ vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
 
 vi.mock('../lib/useRetainedMapDisplay', () => ({
   useRetainedMapDisplay: vi.fn(),
+}))
+
+vi.mock('../lib/useStellarCartographyMapContext', () => ({
+  useStellarCartographyMapContext: vi.fn(),
+}))
+
+vi.mock('./shell/MapShellContent', () => ({
+  MapShellContent: () => <div data-testid="map-shell-content" />,
 }))
 
 const defaultConnectionsParams: ConnectionsMapParams = {
@@ -99,6 +109,9 @@ describe('MainArea map hook mounting', () => {
     vi.mocked(useRetainedMapDisplay).mockReturnValue({
       mapShellView: { phase: 'full-loading', loadingMessage: 'Loading map…' },
     })
+    vi.mocked(useStellarCartographyMapContext).mockReturnValue(
+      buildStellarCartographyMapContext(defaultStellarCartographyMapUiConfig(), sampleScope)
+    )
   })
 
   it('does not run map hooks in tabular mode', () => {
@@ -127,5 +140,35 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).not.toHaveBeenCalled()
     expect(screen.getByText('Loading turn data…')).toBeInTheDocument()
+  })
+
+  it('does not subscribe to cartography config when that analytic is disabled', () => {
+    render(<MainArea {...defaultMainAreaProps('map')} />, { wrapper: createWrapper() })
+
+    expect(useStellarCartographyMapContext).not.toHaveBeenCalled()
+  })
+
+  it('subscribes to live cartography config only when that analytic is enabled', () => {
+    vi.mocked(useMapAnalyticQueries).mockReturnValue({
+      enabledMapIds: ['connections', 'stellar-cartography'],
+      mapIds: ['base-map', 'connections', 'stellar-cartography'],
+      combined: emptyCombined,
+      pending: false,
+      hasError: false,
+      hasAnyData: false,
+      mapError: null,
+      mapQueries: [],
+    })
+
+    render(
+      <MainArea
+        {...defaultMainAreaProps('map')}
+        enabledAnalyticIds={['connections', 'stellar-cartography']}
+      />,
+      { wrapper: createWrapper() }
+    )
+
+    expect(useStellarCartographyMapContext).toHaveBeenCalledTimes(1)
+    expect(useStellarCartographyMapContext).toHaveBeenCalledWith(sampleScope)
   })
 })

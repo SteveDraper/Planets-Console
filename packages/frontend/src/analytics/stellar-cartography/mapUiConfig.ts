@@ -1,5 +1,9 @@
 import type { AnalyticShellScope } from '../../api/bff'
 import {
+  cartographyVisibilityPolicy,
+  type CartographyVisibilityPolicy,
+} from './cartographyVisibilityPolicy'
+import {
   defaultCartographyLayerVisibility,
   EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
   type CartographyLayerVisibility,
@@ -24,10 +28,22 @@ export type StellarCartographyMapUiConfig = {
   neutronClusterDisplayMode: ClusterOutlineDisplayMode
 }
 
-/** Live cartography UI config and sample scope, passed together when the analytic is enabled. */
+/** Live cartography UI config, visibility policy, and sample scope when the analytic is enabled. */
 export type StellarCartographyMapContext = {
   config: StellarCartographyMapUiConfig
+  policy: CartographyVisibilityPolicy
   analyticScope: AnalyticShellScope
+}
+
+export function buildStellarCartographyMapContext(
+  config: StellarCartographyMapUiConfig,
+  analyticScope: AnalyticShellScope
+): StellarCartographyMapContext {
+  return {
+    config,
+    policy: cartographyVisibilityPolicy(config),
+    analyticScope,
+  }
 }
 
 export function defaultStellarCartographyMapUiConfig(): StellarCartographyMapUiConfig {

@@ -10,7 +10,6 @@ import {
   defaultMapAnalyticRegistration,
   defaultMapAnalyticQuerySpec,
   defaultMapLayerMerger,
-  enabledMapAnalyticRequiresLiveUiConfig,
   mapAnalyticQuerySpecFor,
   mapAnalyticRegistrationFor,
   REGISTERED_MAP_ANALYTIC_IDS,
@@ -84,7 +83,6 @@ describe('map analytic registry', () => {
     expect(registration).toBe(stellarCartographyMapAnalytic)
     expect(registration.buildQuerySpec).toBeUndefined()
     expect(registration.mergeLayer).not.toBe(defaultMapLayerMerger)
-    expect(registration.requiresLiveMapUiConfig).toBe(true)
 
     const spec = mapAnalyticQuerySpecFor(STELLAR_CARTOGRAPHY_ANALYTIC_ID, queryContext)
     expect(spec.queryKey).toEqual([
@@ -94,17 +92,6 @@ describe('map analytic registry', () => {
       sampleScope,
       'planet-v2',
     ])
-  })
-
-  it('requires live map UI config only for registered analytics that declare it', () => {
-    expect(enabledMapAnalyticRequiresLiveUiConfig([])).toBe(false)
-    expect(enabledMapAnalyticRequiresLiveUiConfig([CONNECTIONS_ANALYTIC_ID])).toBe(false)
-    expect(
-      enabledMapAnalyticRequiresLiveUiConfig([
-        CONNECTIONS_ANALYTIC_ID,
-        STELLAR_CARTOGRAPHY_ANALYTIC_ID,
-      ])
-    ).toBe(true)
   })
 })
 

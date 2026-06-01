@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react'
-import type { AnalyticShellScope } from '../../api/bff'
-import { enabledMapAnalyticRequiresLiveUiConfig } from '../../analytics/mapAnalyticRegistry'
 import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
@@ -8,51 +6,48 @@ import { PlanetMapInfoControls } from '../PlanetMapInfoControls'
 import type { PlanetLabelOptions } from '../planetMapLabelModel'
 import { ShellCenterPane, ShellErrorPane } from './ShellPlaceholders'
 import type { MapShellView } from '../../lib/mapDisplayRetention'
-import { useStellarCartographyMapConfig } from '../../lib/useStellarCartographyMapConfig'
 
 type MapShellContentProps = {
   mapShellView: MapShellView
-  enabledMapIds: string[]
   planetLabelOptions: PlanetLabelOptions
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
-  analyticScope: AnalyticShellScope | null
+  cartography?: StellarCartographyMapContext
 }
 
 /** Renders map shell phases (loading, error, or live map with optional deferred pending banner). */
-export function MapShellContent(props: MapShellContentProps) {
-  switch (props.mapShellView.phase) {
+export function MapShellContent({
+  mapShellView,
+  planetLabelOptions,
+  onPlanetLabelOptionsChange,
+  onMapZoomChange,
+  onSetZoomReady,
+  cartography,
+}: MapShellContentProps) {
+  switch (mapShellView.phase) {
     case 'full-loading':
-      return <ShellCenterPane message={props.mapShellView.loadingMessage} />
+      return <ShellCenterPane message={mapShellView.loadingMessage} />
     case 'error':
       return (
         <ShellErrorPane
           title="Failed to load map data"
-          error={props.mapShellView.error}
+          error={mapShellView.error}
           fallbackDetail="Failed to load map data"
         />
       )
     case 'showing-map':
-      return enabledMapAnalyticRequiresLiveUiConfig(props.enabledMapIds) ? (
-        <MapShellShowingMapWithLiveConfig {...props} />
-      ) : (
-        <MapShellShowingMap {...props} />
+      return (
+        <MapShellShowingMap
+          mapShellView={mapShellView}
+          planetLabelOptions={planetLabelOptions}
+          onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
+          onMapZoomChange={onMapZoomChange}
+          onSetZoomReady={onSetZoomReady}
+          cartography={cartography}
+        />
       )
   }
-}
-
-type MapShellShowingMapProps = MapShellContentProps & {
-  cartography?: StellarCartographyMapContext
-}
-
-function MapShellShowingMapWithLiveConfig(props: MapShellContentProps) {
-  const config = useStellarCartographyMapConfig()
-  const cartography =
-    props.analyticScope != null
-      ? { config, analyticScope: props.analyticScope }
-      : undefined
-  return <MapShellShowingMap {...props} cartography={cartography} />
 }
 
 function MapShellShowingMap({
@@ -62,11 +57,7 @@ function MapShellShowingMap({
   onMapZoomChange,
   onSetZoomReady,
   cartography,
-}: MapShellShowingMapProps) {
-  if (mapShellView.phase !== 'showing-map') {
-    return null
-  }
-
+}: MapShellContentProps & { mapShellView: Extract<MapShellView, { phase: 'showing-map' }> }) {
   return (
     <main className="relative flex min-h-0 flex-1 flex-col bg-black">
       <MapPaneWithDisplayControls

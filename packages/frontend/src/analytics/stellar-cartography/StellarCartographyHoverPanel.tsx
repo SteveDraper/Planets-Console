@@ -4,8 +4,8 @@ import {
   fetchStellarCartographySample,
   type StellarCartographySampleEntry,
 } from '../../api/bff'
-import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from './mapUiConfig'
-import { cartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
+import type { StellarCartographyMapContext } from './mapUiConfig'
+import type { CartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
 import { flowToMapCellIndices } from '../../lib/planetSpatialGrid'
 import { formatStellarCartographySampleLine } from './sampleTooltipFormat'
 
@@ -29,9 +29,8 @@ type StellarCartographyHoverPanelProps = {
 export function buildStellarCartographyHoverLines(
   entries: StellarCartographySampleEntry[],
   wormholeHoverLines: string[] | null,
-  config: StellarCartographyMapUiConfig
+  policy: CartographyVisibilityPolicy
 ): string[] {
-  const policy = cartographyVisibilityPolicy(config)
   const lines = policy.sampleEntries(entries).map(formatStellarCartographySampleLine)
   if (
     wormholeHoverLines != null &&
@@ -102,7 +101,7 @@ export function StellarCartographyHoverPanel({
       void fetchStellarCartographySample(cartography.analyticScope, mapX, mapY)
         .then((data) => {
           if (seq !== requestSeqRef.current) return
-          setEntries(cartographyVisibilityPolicy(cartography.config).sampleEntries(data.entries))
+          setEntries(data.entries)
         })
         .catch(() => {
           if (seq !== requestSeqRef.current) return
@@ -127,7 +126,7 @@ export function StellarCartographyHoverPanel({
   const lines = buildStellarCartographyHoverLines(
     entries,
     wormholeHoverLines,
-    cartography.config
+    cartography.policy
   )
   if (
     blockedByPlanetHover ||

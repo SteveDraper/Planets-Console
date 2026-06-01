@@ -1,14 +1,15 @@
 import { useMemo } from 'react'
-import type { StellarCartographyMapUiConfig } from '../analytics/stellar-cartography/mapUiConfig'
+import type { AnalyticShellScope } from '../api/bff'
+import {
+  buildStellarCartographyMapContext,
+  type StellarCartographyMapContext,
+  type StellarCartographyMapUiConfig,
+} from '../analytics/stellar-cartography/mapUiConfig'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
 import { useShellStore } from '../stores/shell'
 
-/**
- * Live Stellar Cartography map overlay and hover UI config from layer store and game gates.
- * Mount only while Stellar Cartography is enabled on the map (see MapShellContent).
- */
-export function useStellarCartographyMapConfig(): StellarCartographyMapUiConfig {
+function useStellarCartographyMapUiConfig(): StellarCartographyMapUiConfig {
   const layerVisibility = useStellarCartographyLayersStore((s) => s.layers)
   const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
   const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
@@ -34,5 +35,19 @@ export function useStellarCartographyMapConfig(): StellarCartographyMapUiConfig 
       starClusterDisplayMode,
       neutronClusterDisplayMode,
     ]
+  )
+}
+
+/**
+ * Live Stellar Cartography map context from layer store, game gates, and visibility policy.
+ * Mount only while Stellar Cartography is enabled on the map (see MapMainArea).
+ */
+export function useStellarCartographyMapContext(
+  analyticScope: AnalyticShellScope
+): StellarCartographyMapContext {
+  const config = useStellarCartographyMapUiConfig()
+  return useMemo(
+    () => buildStellarCartographyMapContext(config, analyticScope),
+    [config, analyticScope]
   )
 }

@@ -4,8 +4,8 @@ import {
   buildWormholeEndpointHoverIndex,
   type WormholeEndpointHoverInfo,
 } from '../../lib/wormholeEndpointHover'
-import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from './mapUiConfig'
-import { cartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
+import type { StellarCartographyMapContext } from './mapUiConfig'
+import type { CartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
 
 /** Static cartography map artifacts; wormhole line visibility is applied separately. */
 export type CartographyMapFrame = {
@@ -81,7 +81,7 @@ export function buildCartographyMapFrame(
     )
   }
 
-  const policy = cartographyVisibilityPolicy(cartography.config)
+  const { policy } = cartography
   const overlayCircles = policy.overlayCircles(data.overlayCircles)
 
   if (!policy.areWormholesShown()) {
@@ -115,11 +115,11 @@ export function buildCartographyMapFrame(
 /** Applies visibility policy and optional wormhole hover reveal to a map frame's edges. */
 export function cartographyMapEdges(
   frame: CartographyMapFrame,
-  config: StellarCartographyMapUiConfig | undefined,
+  policy: CartographyVisibilityPolicy | undefined,
   wormholeLineRevealKey: string | null = null
 ): MapEdge[] {
-  if (!frame.cartographyEnabled || config == null) {
+  if (!frame.cartographyEnabled || policy == null) {
     return frame.baseEdges
   }
-  return cartographyVisibilityPolicy(config).mapEdges(frame.baseEdges, wormholeLineRevealKey)
+  return policy.mapEdges(frame.baseEdges, wormholeLineRevealKey)
 }

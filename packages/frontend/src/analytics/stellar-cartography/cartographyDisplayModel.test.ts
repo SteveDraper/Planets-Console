@@ -15,7 +15,7 @@ import {
   defaultStarClusterDisplayMode,
 } from './clusterOutlineDisplayMode'
 import type { StellarCartographyMapContext } from './mapUiConfig'
-import { defaultStellarCartographyMapUiConfig } from './mapUiConfig'
+import { buildStellarCartographyMapContext, defaultStellarCartographyMapUiConfig } from './mapUiConfig'
 
 const SC_PREFIX = `${STELLAR_CARTOGRAPHY_ANALYTIC_ID}:`
 
@@ -49,9 +49,8 @@ const sampleData = {
 function cartographyContext(
   overrides: Partial<StellarCartographyMapContext['config']> = {}
 ): StellarCartographyMapContext {
-  return {
-    analyticScope: { gameId: 'g1', turn: 5, perspective: 1 },
-    config: {
+  return buildStellarCartographyMapContext(
+    {
       ...defaultStellarCartographyMapUiConfig(),
       settingsGates: {
         ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
@@ -65,7 +64,8 @@ function cartographyContext(
       neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
       ...overrides,
     },
-  }
+    { gameId: 'g1', turn: 5, perspective: 1 }
+  )
 }
 
 describe('collectWormholeEndpoints', () => {
@@ -103,11 +103,11 @@ describe('buildCartographyMapFrame and cartographyMapEdges', () => {
     const frame = buildCartographyMapFrame(sampleData, context)
 
     expect(frame.baseEdges.some((e) => e.layer === 'wormholes')).toBe(true)
-    expect(cartographyMapEdges(frame, context.config, null).every((e) => e.layer !== 'wormholes')).toBe(
+    expect(cartographyMapEdges(frame, context.policy, null).every((e) => e.layer !== 'wormholes')).toBe(
       true
     )
     expect(
-      cartographyMapEdges(frame, context.config, '10,20').some((e) => e.layer === 'wormholes')
+      cartographyMapEdges(frame, context.policy, '10,20').some((e) => e.layer === 'wormholes')
     ).toBe(true)
   })
 
@@ -137,7 +137,7 @@ describe('buildCartographyMapFrame and cartographyMapEdges', () => {
   it('removes wormhole routing nodes and endpoints when the wormhole layer is off', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'off' })
     const frame = buildCartographyMapFrame(sampleData, context)
-    const edges = cartographyMapEdges(frame, context.config)
+    const edges = cartographyMapEdges(frame, context.policy)
 
     expect(frame.nodes.map((n) => n.id)).toEqual(['base-map:1'])
     expect(edges.every((e) => e.layer !== 'wormholes')).toBe(true)
@@ -149,7 +149,7 @@ describe('buildCartographyMapFrame and cartographyMapEdges', () => {
   it('keeps wormhole hover metadata when lines use on-hover reveal', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
     const frame = buildCartographyMapFrame(sampleData, context)
-    const edges = cartographyMapEdges(frame, context.config, null)
+    const edges = cartographyMapEdges(frame, context.policy, null)
 
     expect(edges.filter((e) => e.layer === 'wormholes')).toEqual([])
     expect(frame.wormholeEndpointHoverByCell.size).toBeGreaterThan(0)
@@ -159,7 +159,7 @@ describe('buildCartographyMapFrame and cartographyMapEdges', () => {
   it('reveals wormhole lines for the hovered cell key', () => {
     const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
     const frame = buildCartographyMapFrame(sampleData, context)
-    const edges = cartographyMapEdges(frame, context.config, '10,20')
+    const edges = cartographyMapEdges(frame, context.policy, '10,20')
 
     expect(edges.some((e) => e.layer === 'wormholes')).toBe(true)
   })

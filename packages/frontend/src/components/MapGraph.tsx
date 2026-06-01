@@ -161,8 +161,8 @@ function MapGraphFlow({
   } = useWormholeInteractionState()
 
   const edges = useMemo(
-    () => toEdges(cartographyMapEdges(frame, cartography?.config, wormholeLineRevealKey)),
-    [frame, cartography?.config, wormholeLineRevealKey]
+    () => toEdges(cartographyMapEdges(frame, cartography?.policy, wormholeLineRevealKey)),
+    [frame, cartography?.policy, wormholeLineRevealKey]
   )
 
   return (

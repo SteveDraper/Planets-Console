@@ -6,16 +6,19 @@ import type {
   AnalyticShellScope,
   ConnectionsMapParams,
 } from '../api/bff'
+import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import type { StellarCartographyMapContext } from '../analytics/stellar-cartography/mapUiConfig'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
 import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
 import { MapShellContent } from './shell/MapShellContent'
-import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
+import { deriveTurnEnsureLoadingView, type MapShellView } from '../lib/mapDisplayRetention'
 import { errorDetailFromUnknown } from '../lib/queryRetry'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
+import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -113,6 +116,28 @@ type MapMainAreaProps = {
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
+type MapShellContentBridgeProps = {
+  mapShellView: MapShellView
+  planetLabelOptions: PlanetLabelOptions
+  onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
+  onMapZoomChange: (zoom: number) => void
+  onSetZoomReady: (setZoom: (zoom: number) => void) => void
+  cartography?: StellarCartographyMapContext
+}
+
+function MapShellContentBridge(props: MapShellContentBridgeProps) {
+  return <MapShellContent {...props} />
+}
+
+/** Subscribes to live cartography layer store while Stellar Cartography is enabled on the map. */
+function MapShellContentWithCartography({
+  analyticScope,
+  ...props
+}: MapShellContentBridgeProps & { analyticScope: AnalyticShellScope }) {
+  const cartography = useStellarCartographyMapContext(analyticScope)
+  return <MapShellContentBridge {...props} cartography={cartography} />
+}
+
 /** Map queries and retention run only while this component is mounted (map view). */
 const MapMainArea = memo(function MapMainArea({
   enabledAnalyticIds,
@@ -171,17 +196,19 @@ const MapMainArea = memo(function MapMainArea({
     )
   }
 
-  return (
-    <MapShellContent
-      mapShellView={mapShellView}
-      enabledMapIds={enabledMapIds}
-      planetLabelOptions={planetLabelOptions}
-      onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
-      onMapZoomChange={onMapZoomChange}
-      onSetZoomReady={onSetZoomReady}
-      analyticScope={analyticScope}
-    />
-  )
+  const shellProps: MapShellContentBridgeProps = {
+    mapShellView,
+    planetLabelOptions,
+    onPlanetLabelOptionsChange,
+    onMapZoomChange,
+    onSetZoomReady,
+  }
+
+  if (enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)) {
+    return <MapShellContentWithCartography {...shellProps} analyticScope={analyticScope} />
+  }
+
+  return <MapShellContentBridge {...shellProps} />
 })
 
 export function MainArea({
