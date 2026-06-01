@@ -116,7 +116,7 @@ type MapMainAreaProps = {
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
-type MapShellContentBridgeProps = {
+type MapShellContentProps = {
   mapShellView: MapShellView
   planetLabelOptions: PlanetLabelOptions
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
@@ -125,17 +125,13 @@ type MapShellContentBridgeProps = {
   cartography?: StellarCartographyMapContext
 }
 
-function MapShellContentBridge(props: MapShellContentBridgeProps) {
-  return <MapShellContent {...props} />
-}
-
 /** Subscribes to live cartography layer store while Stellar Cartography is enabled on the map. */
 function MapShellContentWithCartography({
   analyticScope,
   ...props
-}: MapShellContentBridgeProps & { analyticScope: AnalyticShellScope }) {
+}: MapShellContentProps & { analyticScope: AnalyticShellScope }) {
   const cartography = useStellarCartographyMapContext(analyticScope)
-  return <MapShellContentBridge {...props} cartography={cartography} />
+  return <MapShellContent {...props} cartography={cartography} />
 }
 
 /** Map queries and retention run only while this component is mounted (map view). */
@@ -196,7 +192,7 @@ const MapMainArea = memo(function MapMainArea({
     )
   }
 
-  const shellProps: MapShellContentBridgeProps = {
+  const shellProps: MapShellContentProps = {
     mapShellView,
     planetLabelOptions,
     onPlanetLabelOptionsChange,
@@ -208,7 +204,7 @@ const MapMainArea = memo(function MapMainArea({
     return <MapShellContentWithCartography {...shellProps} analyticScope={analyticScope} />
   }
 
-  return <MapShellContentBridge {...shellProps} />
+  return <MapShellContent {...shellProps} />
 })
 
 export function MainArea({

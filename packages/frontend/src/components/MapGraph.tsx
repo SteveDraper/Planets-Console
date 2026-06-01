@@ -192,7 +192,7 @@ function MapGraphFlow({
       <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
       <MapZoomKeyboardShortcuts onMapZoomChange={onMapZoomChange} />
       <CoordinateGridOverlay />
-      {frame.cartographyEnabled && cartography != null ? (
+      {cartography != null ? (
         <StellarCartographyOverlayPane
           overlayCircles={frame.overlayCircles}
           wormholeEndpoints={frame.wormholeEndpoints}
@@ -214,7 +214,7 @@ function MapGraphFlow({
         onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
       />
       <FlowCoordinateReadout />
-      {frame.cartographyEnabled && cartography != null ? (
+      {cartography != null ? (
         <StellarCartographyHoverPanel
           cartography={cartography}
           wormholeHoverLines={wormholeHoverLines}

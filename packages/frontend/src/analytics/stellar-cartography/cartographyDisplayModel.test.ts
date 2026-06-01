@@ -115,7 +115,6 @@ describe('buildCartographyMapFrame and cartographyMapEdges', () => {
     const frame = buildCartographyMapFrame(sampleData, undefined)
     const edges = cartographyMapEdges(frame, undefined)
 
-    expect(frame.cartographyEnabled).toBe(false)
     expect(frame.nodes.map((n) => n.id)).toEqual(['base-map:1'])
     expect(edges.every((e) => e.layer !== 'wormholes')).toBe(true)
     expect(frame.overlayCircles).toEqual([])
@@ -130,7 +129,6 @@ describe('buildCartographyMapFrame and cartographyMapEdges', () => {
     })
     const frame = buildCartographyMapFrame(sampleData, context)
 
-    expect(frame.cartographyEnabled).toBe(true)
     expect(frame.overlayCircles.map((c) => c.layer)).toEqual(['black-holes'])
   })
 
