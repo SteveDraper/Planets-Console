@@ -7,7 +7,6 @@ import type {
   ConnectionsMapParams,
   MapDataResponse,
 } from '../api/bff'
-import { type CombineMapDataOptionsBase } from '../analytics/mapLayers'
 import {
   mapAnalyticQuerySpecFor,
   type MapAnalyticQueryContext,
@@ -24,7 +23,6 @@ export type UseMapAnalyticQueriesInput = {
   analyticScope: AnalyticShellScope | null
   analyticFetchEnabled: boolean
   connectionsMapParams: ConnectionsMapParams
-  futureTurnOffset: number
 }
 
 export type UseMapAnalyticQueriesResult = {
@@ -44,7 +42,6 @@ export function useMapAnalyticQueries({
   analyticScope,
   analyticFetchEnabled,
   connectionsMapParams,
-  futureTurnOffset,
 }: UseMapAnalyticQueriesInput): UseMapAnalyticQueriesResult {
   const enabledMapIds = useMemo(
     () => enabledMapAnalyticIds(enabledAnalyticIds, analytics),
@@ -64,26 +61,20 @@ export function useMapAnalyticQueries({
     [analyticScope, analyticFetchEnabled, connectionsMapParams]
   )
 
-  const mergeOptions = useMemo(
-    (): CombineMapDataOptionsBase => ({
-      liveConnectionsParams: analyticFetchEnabled ? connectionsMapParams : null,
-    }),
-    [analyticFetchEnabled, connectionsMapParams]
-  )
+  const liveConnectionsParams = analyticFetchEnabled ? connectionsMapParams : null
 
   const combineMapQueries = useCallback(
     (results: UseQueryResult<MapDataResponse, Error>[]) => ({
       mapQueries: results,
       combined: combineMapDataFromAnalyticQueries(mapIds, results.map((q) => q.data), {
-        liveConnectionsParams: mergeOptions.liveConnectionsParams,
-        futureTurnOffset,
+        liveConnectionsParams,
       }),
       pending: results.some((q) => q.isPending),
       hasError: results.some((q) => q.isError),
       hasAnyData: results.some((q) => q.data != null),
       mapError: results.find((q) => q.error)?.error ?? null,
     }),
-    [mapIds, mergeOptions, futureTurnOffset]
+    [mapIds, liveConnectionsParams]
   )
 
   const { mapQueries, combined, pending, hasError, hasAnyData, mapError } = useQueries({

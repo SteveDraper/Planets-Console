@@ -32,7 +32,7 @@ describe('combineMapDataFromAnalyticQueries', () => {
           routes: [],
         },
       ],
-      { liveConnectionsParams: null, futureTurnOffset: 0 }
+      { liveConnectionsParams: null }
     )
     expect(combined.nodes).toHaveLength(1)
     expect(combined.nodes[0].id).toBe('base-map:1')
@@ -95,5 +95,11 @@ describe('enabledMapAnalyticIds and mapIdsToFetch', () => {
       CONNECTIONS_ANALYTIC_ID,
       STELLAR_CARTOGRAPHY_ANALYTIC_ID,
     ])
+  })
+
+  it('throws when an enabled map analytic is not registered', () => {
+    expect(() =>
+      mapIdsToFetch(sampleAnalytics, ['connections', 'unknown-analytic'])
+    ).toThrow('Map analytic "unknown-analytic" is not registered in mapAnalyticRegistry')
   })
 })

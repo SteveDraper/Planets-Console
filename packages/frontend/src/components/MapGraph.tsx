@@ -10,7 +10,7 @@ import type { CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
 import {
   buildCartographyMapFrame,
-  cartographyMapEdges,
+  cartographyDisplayEdges,
   type CartographyMapFrame,
 } from '../analytics/stellar-cartography/cartographyDisplayModel'
 import type { StellarCartographyMapContext } from '../analytics/stellar-cartography/mapUiConfig'
@@ -47,6 +47,8 @@ import {
 type MapGraphProps = {
   data: CombinedMapData
   className?: string
+  /** Turns beyond latest stored game turn for ion storm overlay extrapolation. */
+  futureTurnOffset?: number
   onMapZoomChange: (zoom: number) => void
   /** Called once so the header slider can drive zoom (same as scroll wheel). */
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
@@ -61,6 +63,7 @@ const INITIAL_FIT_REVEAL_MS = 250
 export function MapGraph({
   data,
   className,
+  futureTurnOffset = 0,
   onMapZoomChange,
   onSetZoomReady,
   planetLabelOptions = DEFAULT_PLANET_LABEL_OPTIONS,
@@ -75,8 +78,8 @@ export function MapGraph({
   }, [])
 
   const frame = useMemo(
-    () => buildCartographyMapFrame(data, cartography),
-    [data, cartography]
+    () => buildCartographyMapFrame(data, cartography, futureTurnOffset),
+    [data, cartography, futureTurnOffset]
   )
   const nodes = useMemo(() => toFlowNodes(frame.nodes), [frame.nodes])
   const planetMapNodes = useMemo(
@@ -161,8 +164,8 @@ function MapGraphFlow({
   } = useWormholeInteractionState()
 
   const edges = useMemo(
-    () => toEdges(cartographyMapEdges(frame, cartography?.policy, wormholeLineRevealKey)),
-    [frame, cartography?.policy, wormholeLineRevealKey]
+    () => toEdges(cartographyDisplayEdges(frame, cartography, wormholeLineRevealKey)),
+    [frame, cartography, wormholeLineRevealKey]
   )
 
   return (

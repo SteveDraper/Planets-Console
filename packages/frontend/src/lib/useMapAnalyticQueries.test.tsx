@@ -47,7 +47,6 @@ function defaultHookInput(
     analyticScope: sampleScope,
     analyticFetchEnabled: true,
     connectionsMapParams: defaultConnectionsParams,
-    futureTurnOffset: 0,
     ...overrides,
   }
 }
@@ -241,70 +240,6 @@ describe('useMapAnalyticQueries', () => {
 
     await waitFor(() => {
       expect(result.current.combined.nodes[0]?.y).toBe(99)
-    })
-  })
-
-  it('recombines when futureTurnOffset changes with stellar cartography enabled', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {
-      if (analyticId === 'base-map') {
-        return { analyticId: 'base-map', nodes: [], edges: [] }
-      }
-      if (analyticId === 'connections') {
-        return { analyticId: 'connections', nodes: [], edges: [], routes: [] }
-      }
-      if (analyticId === 'stellar-cartography') {
-        return {
-          analyticId: 'stellar-cartography',
-          nodes: [],
-          edges: [],
-          overlayCircles: [
-            {
-              layer: 'ion-storms',
-              id: 'storm-1',
-              x: 100,
-              y: 200,
-              radius: 30,
-              class: 2,
-              heading: 0,
-              warp: 5,
-            },
-          ],
-        }
-      }
-      throw new Error(`unexpected analytic ${analyticId}`)
-    })
-    vi.mocked(combineMapData).mockClear()
-
-    const { result, rerender } = renderHook(
-      (input: UseMapAnalyticQueriesInput) => useMapAnalyticQueries(input),
-      {
-        wrapper: createWrapper(client),
-        initialProps: defaultHookInput({
-          enabledAnalyticIds: ['connections', 'stellar-cartography'],
-          futureTurnOffset: 0,
-        }),
-      }
-    )
-
-    await waitFor(() => {
-      expect(result.current.combined.overlayCircles).toHaveLength(1)
-    })
-    const circleAtZero = result.current.combined.overlayCircles[0]
-
-    rerender(
-      defaultHookInput({
-        enabledAnalyticIds: ['connections', 'stellar-cartography'],
-        futureTurnOffset: 2,
-      })
-    )
-
-    await waitFor(() => {
-      expect(result.current.combined.overlayCircles[0]?.y).toBe(250)
-      expect(circleAtZero?.y).toBe(200)
-    })
-    expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[2]).toMatchObject({
-      stellarCartographyFutureTurnOffset: 2,
     })
   })
 })

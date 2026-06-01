@@ -34,6 +34,7 @@ describe('MapShellContent', () => {
           displayMapData,
           showDeferredPending: false,
         }}
+        futureTurnOffset={0}
         planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
         onPlanetLabelOptionsChange={vi.fn()}
         onMapZoomChange={vi.fn()}
@@ -49,6 +50,7 @@ describe('MapShellContent', () => {
     render(
       <MapShellContent
         mapShellView={{ phase: 'error', error: err }}
+        futureTurnOffset={0}
         planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
         onPlanetLabelOptionsChange={vi.fn()}
         onMapZoomChange={vi.fn()}

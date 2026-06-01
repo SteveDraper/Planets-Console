@@ -14,11 +14,6 @@ import { BASE_MAP_ANALYTIC_ID } from './mapAnalyticIds'
 export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
-  /**
-   * Stellar Cartography merge only: extrapolate ion storm overlay positions for turns
-   * beyond the latest stored game turn.
-   */
-  stellarCartographyFutureTurnOffset?: number
 }
 
 export function combineMapData(

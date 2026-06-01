@@ -51,8 +51,6 @@ export type MapLayerMerger = (
 export type MapAnalyticRegistration = {
   buildQuerySpec?: (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
   mergeLayer: MapLayerMerger
-  /** When true, map shell must mount live UI context (e.g. layer store subscriptions) for this analytic. */
-  requiresLiveMapContext?: boolean
 }
 
 function prefixMapNodes(
@@ -120,19 +118,15 @@ export function isRegisteredMapAnalytic(analyticId: string): analyticId is Regis
 }
 
 /**
- * Unregistered map-capable analytics use default fetch + prefix merge (forward-compat).
- * Prefer an explicit registry entry so query keys and merge behavior stay intentional.
+ * Returns the registration for a map analytic id.
+ * Throws when the id is not explicitly registered.
  */
 export function mapAnalyticRegistrationFor(analyticId: string): MapAnalyticRegistration {
-  return mapAnalyticRegistry[analyticId] ?? defaultMapAnalyticRegistration
-}
-
-export function mapAnalyticRequiresLiveMapContext(analyticId: string): boolean {
-  return mapAnalyticRegistrationFor(analyticId).requiresLiveMapContext === true
-}
-
-export function enabledMapIdsRequireLiveMapContext(enabledMapIds: readonly string[]): boolean {
-  return enabledMapIds.some(mapAnalyticRequiresLiveMapContext)
+  const registration = mapAnalyticRegistry[analyticId]
+  if (registration == null) {
+    throw new Error(`Unregistered map analytic: ${analyticId}`)
+  }
+  return registration
 }
 
 export function mapLayerMergerFor(analyticId: string): MapLayerMerger {

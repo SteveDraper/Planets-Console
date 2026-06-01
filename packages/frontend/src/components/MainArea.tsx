@@ -6,7 +6,7 @@ import type {
   AnalyticShellScope,
   ConnectionsMapParams,
 } from '../api/bff'
-import { enabledMapIdsRequireLiveMapContext } from '../analytics/mapAnalyticRegistry'
+import { isStellarCartographyMapEnabled } from '../analytics/mapShellCartography'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
@@ -115,11 +115,13 @@ type MapMainAreaProps = {
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
-/** Subscribes to live map context for analytics registered with requiresLiveMapContext. */
-function MapShellContentWithLiveContext({
+type MapShellContentBaseProps = Omit<MapShellContentProps, 'cartography'>
+
+/** Subscribes to live Stellar Cartography UI when that analytic is enabled on the map. */
+function MapShellContentWithCartography({
   analyticScope,
   ...props
-}: MapShellContentProps & { analyticScope: AnalyticShellScope }) {
+}: MapShellContentBaseProps & { analyticScope: AnalyticShellScope }) {
   const cartography = useStellarCartographyMapContext(analyticScope)
   return <MapShellContent {...props} cartography={cartography} />
 }
@@ -145,7 +147,6 @@ const MapMainArea = memo(function MapMainArea({
     analyticScope,
     analyticFetchEnabled,
     connectionsMapParams,
-    futureTurnOffset,
   })
 
   const {
@@ -182,19 +183,20 @@ const MapMainArea = memo(function MapMainArea({
     )
   }
 
-  const shellProps: MapShellContentProps = {
+  const shellProps: MapShellContentBaseProps = {
     mapShellView,
+    futureTurnOffset,
     planetLabelOptions,
     onPlanetLabelOptionsChange,
     onMapZoomChange,
     onSetZoomReady,
   }
 
-  if (enabledMapIdsRequireLiveMapContext(enabledMapIds)) {
-    return <MapShellContentWithLiveContext {...shellProps} analyticScope={analyticScope} />
+  if (isStellarCartographyMapEnabled(enabledMapIds)) {
+    return <MapShellContentWithCartography {...shellProps} analyticScope={analyticScope} />
   }
 
-  return <MapShellContent {...shellProps} />
+  return <MapShellContent {...shellProps} cartography={undefined} />
 })
 
 export function MainArea({

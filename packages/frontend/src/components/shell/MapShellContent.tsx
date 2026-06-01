@@ -9,6 +9,8 @@ import type { MapShellView } from '../../lib/mapDisplayRetention'
 
 export type MapShellContentProps = {
   mapShellView: MapShellView
+  /** Turns beyond latest stored game turn; applied at cartography display time. */
+  futureTurnOffset: number
   planetLabelOptions: PlanetLabelOptions
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
@@ -19,6 +21,7 @@ export type MapShellContentProps = {
 /** Renders map shell phases (loading, error, or live map with optional deferred pending banner). */
 export function MapShellContent({
   mapShellView,
+  futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
   onMapZoomChange,
@@ -40,6 +43,7 @@ export function MapShellContent({
       return (
         <MapShellShowingMap
           mapShellView={mapShellView}
+          futureTurnOffset={futureTurnOffset}
           planetLabelOptions={planetLabelOptions}
           onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
           onMapZoomChange={onMapZoomChange}
@@ -52,6 +56,7 @@ export function MapShellContent({
 
 function MapShellShowingMap({
   mapShellView,
+  futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
   onMapZoomChange,
@@ -71,6 +76,7 @@ function MapShellShowingMap({
         <MapGraph
           data={mapShellView.displayMapData}
           className="h-full w-full min-h-0"
+          futureTurnOffset={futureTurnOffset}
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           planetLabelOptions={planetLabelOptions}
