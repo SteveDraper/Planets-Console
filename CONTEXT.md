@@ -132,6 +132,110 @@ _Avoid_: debris disks checkbox (use **Debris disk borders**)
 A lethal core plus halo in `stars[]`, keyed by shared cluster `name` across one or more bodies. Radiation and neutron clusters share the same wire shape today; the console renders them under one **Cartography layer** until cluster kind can be classified reliably.
 _Avoid_: neutron star (as a separate layer id before classification exists)
 
+**Homeworld locator**:
+A **turn analytic** (map and tabular) that heuristically infers each **Player**'s starting **homeworld planet** and visualizes **homeworld candidates** on the map. Uses **GameInfo** settings (e.g. `hwdistribution`, cluster counts) plus turn planet data; may emit **slot-anchored candidates** and **orphan homeworld candidates**. Sidebar **homeworld locator panel** for annotation; main-area tabular tile mirrors candidate rows when **view mode** is tabular. Inference signals and Starmap layout constraints: [design-homeworld-locator-analytic.md](docs/design-homeworld-locator-analytic.md).
+_Avoid_: HW finder, start planet analytic
+
+**Homeworld planet**:
+The starting planet assigned to a **Player** slot at map creation. Distinct from **Officer Homeworld** (account metagame UI on planets.nu). Not a boolean flag in **TurnInfo** exports; inferred by the **homeworld locator** or confirmed manually.
+_Avoid_: Officer Homeworld, home planet (without "homeworld" qualifier)
+
+**Homeworld candidate**:
+One inferred or confirmed **homeworld planet** position (or constrained region) with a confidence tier. Either **slot-anchored** (tied to a **perspective** / **Player** slot) or an **orphan homeworld candidate** (location-first when slot assignment is ambiguous).
+_Avoid_: HW guess, probable start
+
+**Slot-anchored homeworld candidate**:
+A **homeworld candidate** tied to a specific **perspective** slot from **GameInfo**. Primary output mode when player count and map settings support one homeworld per slot.
+_Avoid_: player HW, slot HW (in docs without "candidate")
+
+**Orphan homeworld candidate**:
+A **homeworld candidate** not yet tied to a **perspective** slot -- a planet or region that looks like a homeworld under heuristics or geometry, pending slot assignment or manual race annotation.
+_Avoid_: unassigned HW, floating candidate
+
+**Homeworld inference baseline**:
+The earliest available **TurnInfo** (typically turn 1) used as the primary source for planet ownership, population, climate, and map-gen geometry signals in the **homeworld locator**. When turn 1 is not stored, the locator **auto-ensures** turn 1 when credentials allow; if ensure fails, falls back to the earliest stored turn with **baseline degraded** warning in the **homeworld locator panel**. Baseline facts are not recomputed from the shell turn alone.
+_Avoid_: inference turn, T1-only mode
+
+**Baseline degraded**:
+**Homeworld locator** state computed from a baseline turn other than turn 1 (or before turn 1 ensure completes). Baseline-profile **definite** matches are treated cautiously; the panel shows which turn was used and prompts loading turn 1 when possible.
+_Avoid_: weak baseline flag, stale T1 warning
+
+**Homeworld inference evidence**:
+A later-turn signal that increases or decreases confidence in a **homeworld candidate** without replacing the **homeworld inference baseline**. Examples: first sighting of a player's ships, ships at characteristic distances from a planet (81 LY pod hop, warp-8 range), or cluster geometry matching `verycloseplanets` / `closeplanets` settings.
+_Avoid_: secondary heuristic, turn N guess
+
+**Homeworld confidence tier**:
+How strongly the locator treats a candidate as the **homeworld planet** for a slot or orphan location. **Definite** when a baseline profile matches, geometry leaves no plausible alternative, cumulative **homeworld inference evidence** promotes the candidate, or the user manually confirms. **Possible** when consistent with settings and spacing but not unique. Orphans default to **possible** until anchored or confirmed.
+_Avoid_: probability score (until a scoring model is defined)
+
+**Homeworld baseline profile**:
+Turn-1 planet signals used for **definite** rule matching: owned by the slot's **Player**, clan count at or above a configured minimum (below default `homeworldclans` to allow RGA and population loss), starbase present when `homeworldhasstarbase`, and climate matching the slot's race **preferred temperature** from the race climate catalog (50 deg W default; 100 deg W for Crystals when desert advantage applies -- adjusted per game from **GameSettings** / race flags when available).
+_Avoid_: temp-50 rule, 1M pop heuristic (use configured threshold and race-aware climate)
+
+**Race climate catalog**:
+Core **game concept** mapping **race id** to preferred planet temperature for **homeworld baseline profile** checks. Static defaults (e.g. Crystal 100 deg W) adjusted per game when settings disable race-specific advantages (Crystal desert advantage off -> 50 deg W like other races).
+_Avoid_: HW temp table, climate lookup (generic)
+
+**Homeworld locator config**:
+Server-side **analytic policy** for the **homeworld locator**, loaded from amalgamated YAML under the Core API config (not exposed in the SPA UI). Includes minimum clan count for **homeworld baseline profile** matching and evidence-promotion thresholds (e.g. independent sightings required for **possible → definite**). Origin-distance checks use host-aligned constants from **game concepts** (81 LY pod hop, warp-speed range table) -- not ad-hoc YAML distance lists.
+_Avoid_: HW settings panel, client-side heuristic config
+
+**Homeworld locator state**:
+Persisted server-side record for a **homeworld locator** run -- cached **homeworld candidates**, confidence tiers, slot assignments, and user overrides. Split across **homeworld locator state (game-global)** and **homeworld locator evidence (perspective)**. Not recomputed every session; refreshed when **homeworld locator invalidation** rules fire or the user requests **homeworld locator refresh**. **User-asserted** records are preserved across recomputes.
+_Avoid_: HW cache blob, analytic snapshot (generic)
+
+**Homeworld locator invalidation**:
+When inferred **homeworld locator** state is stale and must recompute or append evidence. Triggers: a new **TurnInfo** stored for the shell **perspective** beyond the cached evidence horizon; **GameInfo** re-fetch with changed homeworld-relevant settings (`hwdistribution`, `homeworldclans`, `nohomeworld`, etc.). Does not remove **user-asserted** records -- those merge back after inference.
+_Avoid_: cache TTL, automatic refresh timer
+
+**Homeworld locator refresh**:
+Explicit user action (sidebar control in the **homeworld locator** analytic) that forces recomputation of inferred state regardless of invalidation triggers. **User-asserted** records are preserved and re-merged.
+_Avoid_: reload button (generic), force recompute
+
+**Homeworld candidate record**:
+One entry in **homeworld locator state** -- a **homeworld candidate** with the same shape whether **inferred** or **user-asserted**. Includes planet id or region, **perspective** slot (when slot-anchored), confidence tier, and **homeworld attribution**.
+_Avoid_: override object, manual tag DTO
+
+**Homeworld attribution**:
+Whether a **homeworld candidate record** came from the locator heuristics (**inferred**) or from explicit user confirmation (**user-asserted**). User-asserted slot resolution, race tag, or promotion to **definite** uses the same record shape as inferred results; only attribution differs.
+_Avoid_: source flag, manual flag
+
+**Homeworld assertion**:
+A user-initiated upsert of a **homeworld candidate record** with **user-asserted** attribution. Submitted via Core `POST .../analytics/homeworld-locator/assertions` (BFF exposes SPA-shaped equivalent). Core merges into **homeworld locator state (game-global)**; inference recomputes must not overwrite unless the user revokes the assertion.
+_Avoid_: override POST, manual save endpoint
+
+**Homeworld evidence scope**:
+Which **TurnInfo** snapshots supply **homeworld inference evidence** after the baseline. **Baseline** planet signals come from the earliest stored turn for the shell **perspective**; **later-turn evidence** (e.g. ship sightings, origin-distance signals) uses only turns stored at the current **viewpoint**'s **perspective** -- not a union across all slots.
+_Avoid_: omniscient evidence, all-perspectives merge
+
+**Homeworld locator state (game-global)**:
+Cached slot assignments, orphan candidates, and user-asserted records shared across viewers. Stored at `games/{gameId}/analytics/homeworld-locator` under the **analytic persistence** path convention.
+_Avoid_: games/{gameId}/homeworld-locator (collides with other top-level game keys)
+
+**Homeworld locator evidence (perspective)**:
+Per-**perspective** evidence accumulation and evidence-driven confidence promotions. Stored at `games/{gameId}/{perspective}/analytics/homeworld-locator/evidence`. Merged with **homeworld locator state (game-global)** when serving the analytic.
+_Avoid_: per-viewer HW file, evidence cache (generic)
+
+**Homeworld map marker**:
+Map decoration on a **base map** planet node for a **homeworld candidate** at a known planet id. **Definite** tiers use a solid marker; **possible** tiers use a lighter or dashed marker. **User-asserted** **definite** uses the same definite marker with a distinct attribution cue (border or badge).
+_Avoid_: HW node (separate graph node), duplicate planet
+
+**Homeworld region overlay**:
+Map geometry for a slot or orphan when no planet is pinned -- e.g. circular `hwdistribution` ring arc, or 81/162 LY cluster envelope from **GameSettings**. Rendered as analytic **overlayCircles** or arc overlays (same pattern as **Stellar Cartography**), slot-labeled where applicable.
+_Avoid_: possible zone (vague), sector blob (informal)
+
+**Homeworld locator panel**:
+The **homeworld locator** analytic details UI -- slot and orphan table (assign slot, set race, tier override), plus **homeworld locator refresh**. Map-primary: context menu on **homeworld map marker** or **homeworld region overlay** for quick asserts; table for bulk review with map highlight on row focus.
+_Avoid_: HW settings drawer, annotation modal (generic)
+
+**Homeworld locator availability**:
+Whether the **homeworld locator** can run for the loaded game. Inactive (greyed in the analytics selector with hint) when **GameInfo** rules out traditional **homeworld planet** setups -- e.g. `nohomeworld`, **Wandering Tribes** (`wanderingtribescount > 0`), or scenario overrides with no HW planets. No inference, no **analytic persistence** writes.
+_Avoid_: disabled analytic (generic), HW not applicable toast
+
+**Homeworld region geometry (v1)**:
+Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=2` (Circular)** on round maps (`mapshape=0`) only. Other distributions remain active for baseline profile, evidence, and manual annotation, but skip sector/ring overlay geometry until extended.
+_Avoid_: full hwdistribution support (v1 claim)
+
 ### Observability
 
 **Request diagnostics**:
@@ -197,7 +301,13 @@ _Avoid_: valid key (too generic)
 **V1 breakpoint patterns**:
 - `games/*/info` -- **GameInfo** document
 - `games/*/*/turns/*` -- **TurnInfo** document per **perspective** and turn
+- `games/*/analytics/*` -- game-global **analytic persistence** document per analytic id
+- `games/*/*/analytics/*` -- per-**perspective** **analytic persistence** document per analytic id (nested keys such as `evidence` live inside the document)
 - `credentials/accounts/*` -- account record (e.g. api_key and future fields)
+
+**Analytic persistence**:
+Server-side cached output for a **turn analytic** that must not recompute on every request. Lives under `games/{gameId}/analytics/{analytic_id}` for game-global state and `games/{gameId}/{perspective}/analytics/{analytic_id}/...` for **perspective**-scoped supplements. **Homeworld locator** is the first analytic to use this pattern; user-asserted records share the same **homeworld candidate record** shape as inferred rows, distinguished only by **homeworld attribution**. See [ADR 0002](docs/adr/0002-analytic-persistence.md).
+_Avoid_: analytic cache at game root, `{gameId}/homeworld-locator`
 
 **Shallow store read**:
 A read that returns only the **immediate child segment names** at a logical store path (e.g. game ids under `games`), not nested values. Used to enumerate stored games without loading full documents.
@@ -216,6 +326,12 @@ When true, seed sample paths only if each target path is missing. Never overwrit
 _Avoid_: force seed, reset on boot
 
 ## Flagged ambiguities
+
+**Officer Homeworld vs homeworld planet**:
+- **Officer Homeworld** -- planets.nu account / campaign metagame; not a turn-map object.
+- **Homeworld planet** -- the in-game starting planet for a **Player** slot; what the **homeworld locator** finds.
+
+Use **homeworld planet** in Console prose and UI for map inference. Do not say "homeworld" alone when Officer Homeworld could be misread.
 
 **Player vs perspective vs viewpoint**:
 - **Player** -- the domain entity (name, race, scores) inside **GameInfo** / **TurnInfo**.

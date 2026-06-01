@@ -6,6 +6,8 @@ Step-by-step guide for registering a new **turn analytic** in Planets Console. R
 
 **Worked example (map-only, layered UI, persisted toggles):** [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md). Map appearance: [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md).
 
+**Domain + inference rules (homeworld locator):** [design-homeworld-locator-analytic.md](design-homeworld-locator-analytic.md) -- **required reading** for issues #33--#37 (Starmap settings, baseline/evidence signals, confidence tiers, layout constraints).
+
 ---
 
 ## 1. Choose an `analytic_id`
