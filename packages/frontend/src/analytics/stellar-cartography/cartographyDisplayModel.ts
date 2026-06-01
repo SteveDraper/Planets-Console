@@ -6,6 +6,7 @@ import {
 } from '../../lib/wormholeEndpointHover'
 import type { StellarCartographyMapContext } from './mapUiConfig'
 import type { CartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
+import { cartographyFramePolicy } from './cartographyVisibilityPolicy'
 
 /** Static display frame from combined map data; mount cartography UI when {@link StellarCartographyMapContext} is passed. */
 export type CartographyMapFrame = {
@@ -45,24 +46,6 @@ function withoutCartographyNodes(nodes: CombinedMapData['nodes']): CombinedMapDa
   return nodes.filter((node) => !node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_ID_PREFIX))
 }
 
-function withoutWormholeEdges(edges: readonly MapEdge[]): MapEdge[] {
-  return edges.filter((edge) => edge.layer !== 'wormholes')
-}
-
-function emptyCartographyMapFrame(
-  nodes: CombinedMapData['nodes'],
-  baseEdges: MapEdge[]
-): CartographyMapFrame {
-  return {
-    nodes,
-    baseEdges,
-    overlayCircles: [],
-    wormholeUnknownEntrances: [],
-    wormholeEndpoints: [],
-    wormholeEndpointHoverByCell: new Map(),
-  }
-}
-
 /**
  * Static cartography map frame from combined map data and UI config.
  * Does not apply hover-sensitive wormhole line filtering; use {@link cartographyMapEdges} for that.
@@ -71,39 +54,23 @@ export function buildCartographyMapFrame(
   data: CombinedMapData,
   cartography: StellarCartographyMapContext | undefined
 ): CartographyMapFrame {
-  if (cartography == null) {
-    return emptyCartographyMapFrame(
-      withoutCartographyNodes(data.nodes),
-      withoutWormholeEdges(data.edges)
-    )
-  }
-
-  const { policy } = cartography
+  const policy = cartographyFramePolicy(cartography)
   const overlayCircles = policy.overlayCircles(data.overlayCircles)
+  const wormholesShown = policy.areWormholesShown()
+  const nodes = wormholesShown ? data.nodes : withoutCartographyNodes(data.nodes)
+  const baseEdges = wormholesShown ? [...data.edges] : policy.mapEdges(data.edges, null)
 
-  if (!policy.areWormholesShown()) {
-    return {
-      nodes: withoutCartographyNodes(data.nodes),
-      baseEdges: withoutWormholeEdges(data.edges),
-      overlayCircles,
-      wormholeUnknownEntrances: [],
-      wormholeEndpoints: [],
-      wormholeEndpointHoverByCell: new Map(),
-    }
-  }
-
-  const nodes = data.nodes
-  const wormholeUnknownEntrances = data.wormholeUnknownEntrances
   return {
     nodes,
-    baseEdges: [...data.edges],
+    baseEdges,
     overlayCircles,
-    wormholeUnknownEntrances,
-    wormholeEndpoints: collectWormholeEndpoints(nodes, wormholeUnknownEntrances),
-    wormholeEndpointHoverByCell: buildWormholeEndpointHoverIndex(
-      data.edges,
-      wormholeUnknownEntrances
-    ),
+    wormholeUnknownEntrances: wormholesShown ? data.wormholeUnknownEntrances : [],
+    wormholeEndpoints: wormholesShown
+      ? collectWormholeEndpoints(nodes, data.wormholeUnknownEntrances)
+      : [],
+    wormholeEndpointHoverByCell: wormholesShown
+      ? buildWormholeEndpointHoverIndex(data.edges, data.wormholeUnknownEntrances)
+      : new Map(),
   }
 }
 

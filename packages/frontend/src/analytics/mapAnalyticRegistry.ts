@@ -35,6 +35,8 @@ export type MapLayerMergeContext = {
   wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
   waypointsByKey: Map<string, { x: number; y: number }>
   nuIonStorms: boolean | undefined
+  /** Turns beyond latest stored game turn; Stellar Cartography merge extrapolates ion storms. */
+  futureTurnOffset: number
 }
 
 export type MapLayerMerger = (

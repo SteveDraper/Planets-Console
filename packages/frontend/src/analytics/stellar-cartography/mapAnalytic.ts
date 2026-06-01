@@ -1,3 +1,4 @@
+import { applyFutureIonStormOverlayPositions } from '../../lib/cartography/futureTurnIonStorms'
 import type { MapAnalyticRegistration } from '../mapAnalyticRegistry'
 import { appendStellarCartographyMapLayer } from './mapLayer'
 
@@ -13,5 +14,12 @@ export const stellarCartographyMapAnalytic: MapAnalyticRegistration = {
       overlayCircles: context.overlayCircles,
       wormholeUnknownEntrances: context.wormholeUnknownEntrances,
     })
+    if (context.futureTurnOffset > 0) {
+      const shifted = applyFutureIonStormOverlayPositions(
+        context.overlayCircles,
+        context.futureTurnOffset
+      )
+      context.overlayCircles.splice(0, context.overlayCircles.length, ...shifted)
+    }
   },
 }

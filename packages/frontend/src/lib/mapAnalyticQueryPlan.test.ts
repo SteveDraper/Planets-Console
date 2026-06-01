@@ -32,7 +32,8 @@ describe('combineMapResultsFromQueries', () => {
           routes: [],
         },
       ],
-      { liveConnectionsParams: null, futureTurnOffset: 0 }
+      { liveConnectionsParams: null },
+      0
     )
     expect(combined.nodes).toHaveLength(1)
     expect(combined.nodes[0].id).toBe('base-map:1')

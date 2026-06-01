@@ -22,6 +22,21 @@ export type CartographyVisibilityPolicy = {
   mapEdges: (edges: readonly MapEdge[], wormholeLineRevealKey: string | null) => MapEdge[]
 }
 
+/** Used when Stellar Cartography is not enabled on the map. */
+export const cartographyDisabledPolicy: CartographyVisibilityPolicy = {
+  isLayerShown: () => false,
+  overlayCircles: () => [],
+  sampleEntries: () => [],
+  areWormholesShown: () => false,
+  mapEdges: (edges) => edges.filter((edge) => edge.layer !== 'wormholes'),
+}
+
+export function cartographyFramePolicy(
+  cartography: { policy: CartographyVisibilityPolicy } | undefined
+): CartographyVisibilityPolicy {
+  return cartography?.policy ?? cartographyDisabledPolicy
+}
+
 export function cartographyVisibilityPolicy(
   config: StellarCartographyMapUiConfig
 ): CartographyVisibilityPolicy {

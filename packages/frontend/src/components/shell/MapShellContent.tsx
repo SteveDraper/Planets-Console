@@ -7,7 +7,7 @@ import type { PlanetLabelOptions } from '../planetMapLabelModel'
 import { ShellCenterPane, ShellErrorPane } from './ShellPlaceholders'
 import type { MapShellView } from '../../lib/mapDisplayRetention'
 
-type MapShellContentProps = {
+export type MapShellContentProps = {
   mapShellView: MapShellView
   planetLabelOptions: PlanetLabelOptions
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void

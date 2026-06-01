@@ -67,9 +67,8 @@ export function useMapAnalyticQueries({
   const mergeOptions = useMemo(
     (): CombineMapDataOptionsBase => ({
       liveConnectionsParams: analyticFetchEnabled ? connectionsMapParams : null,
-      futureTurnOffset,
     }),
-    [analyticFetchEnabled, connectionsMapParams, futureTurnOffset]
+    [analyticFetchEnabled, connectionsMapParams]
   )
 
   const combineMapQueries = useCallback(
@@ -78,14 +77,15 @@ export function useMapAnalyticQueries({
       combined: combineMapResultsFromQueries(
         mapIds,
         results.map((q) => q.data),
-        mergeOptions
+        mergeOptions,
+        futureTurnOffset
       ),
       pending: results.some((q) => q.isPending),
       hasError: results.some((q) => q.isError),
       hasAnyData: results.some((q) => q.data != null),
       mapError: results.find((q) => q.error)?.error ?? null,
     }),
-    [mapIds, mergeOptions]
+    [mapIds, mergeOptions, futureTurnOffset]
   )
 
   const { mapQueries, combined, pending, hasError, hasAnyData, mapError } = useQueries({

@@ -7,14 +7,13 @@ import type {
   ConnectionsMapParams,
 } from '../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
-import type { StellarCartographyMapContext } from '../analytics/stellar-cartography/mapUiConfig'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
 import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
-import { MapShellContent } from './shell/MapShellContent'
-import { deriveTurnEnsureLoadingView, type MapShellView } from '../lib/mapDisplayRetention'
+import { MapShellContent, type MapShellContentProps } from './shell/MapShellContent'
+import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
 import { errorDetailFromUnknown } from '../lib/queryRetry'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
@@ -114,15 +113,6 @@ type MapMainAreaProps = {
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
-}
-
-type MapShellContentProps = {
-  mapShellView: MapShellView
-  planetLabelOptions: PlanetLabelOptions
-  onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
-  onMapZoomChange: (zoom: number) => void
-  onSetZoomReady: (setZoom: (zoom: number) => void) => void
-  cartography?: StellarCartographyMapContext
 }
 
 /** Subscribes to live cartography layer store while Stellar Cartography is enabled on the map. */

@@ -34,11 +34,13 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
 export function combineMapResultsFromQueries(
   mapIds: readonly string[],
   mapQueryData: readonly (MapDataResponse | undefined)[],
-  mergeOptions: CombineMapDataOptionsBase
+  mergeOptions: CombineMapDataOptionsBase,
+  futureTurnOffset = 0
 ): CombinedMapData {
   return combineMapData(
     mapIds,
     mapQueryData.map((data) => ({ data })),
-    mergeOptions
+    mergeOptions,
+    futureTurnOffset
   )
 }
