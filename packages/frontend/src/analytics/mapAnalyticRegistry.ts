@@ -51,6 +51,8 @@ export type MapLayerMerger = (
 export type MapAnalyticRegistration = {
   buildQuerySpec?: (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
   mergeLayer: MapLayerMerger
+  /** When true, map shell mounts live UI config (e.g. layer store subscriptions) while enabled. */
+  requiresLiveMapUiConfig?: boolean
 }
 
 function prefixMapNodes(
@@ -123,6 +125,15 @@ export function mapAnalyticRegistrationFor(analyticId: string): MapAnalyticRegis
 
 export function mapLayerMergerFor(analyticId: string): MapLayerMerger {
   return mapAnalyticRegistrationFor(analyticId).mergeLayer
+}
+
+/** True when any enabled map analytic needs live UI config mounted in the map shell. */
+export function enabledMapAnalyticRequiresLiveUiConfig(
+  enabledMapIds: readonly string[]
+): boolean {
+  return enabledMapIds.some(
+    (analyticId) => mapAnalyticRegistrationFor(analyticId).requiresLiveMapUiConfig === true
+  )
 }
 
 export function defaultMapAnalyticQuerySpec(

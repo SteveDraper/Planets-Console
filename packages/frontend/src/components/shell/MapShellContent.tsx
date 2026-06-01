@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
-import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
+import { enabledMapAnalyticRequiresLiveUiConfig } from '../../analytics/mapAnalyticRegistry'
 import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
@@ -20,10 +20,6 @@ type MapShellContentProps = {
   analyticScope: AnalyticShellScope | null
 }
 
-function isCartographyEnabled(enabledMapIds: readonly string[]): boolean {
-  return enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
-}
-
 /** Renders map shell phases (loading, error, or live map with optional deferred pending banner). */
 export function MapShellContent(props: MapShellContentProps) {
   switch (props.mapShellView.phase) {
@@ -38,7 +34,7 @@ export function MapShellContent(props: MapShellContentProps) {
         />
       )
     case 'showing-map':
-      return isCartographyEnabled(props.enabledMapIds) ? (
+      return enabledMapAnalyticRequiresLiveUiConfig(props.enabledMapIds) ? (
         <MapShellShowingMapWithLiveConfig {...props} />
       ) : (
         <MapShellShowingMap {...props} />

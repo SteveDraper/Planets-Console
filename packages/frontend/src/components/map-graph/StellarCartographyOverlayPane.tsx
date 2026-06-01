@@ -9,8 +9,6 @@ import { WormholeEndpointMarkers } from './WormholeEndpointMarkers'
 import type { WormholeEndpointHoverInfo } from '../../lib/wormholeEndpointHover'
 import type { WormholeRecenterPulseTarget } from './stellarCartographyWormholeInteraction'
 
-export { collectWormholeEndpoints } from '../../analytics/stellar-cartography/cartographyDisplayModel'
-
 export function StellarCartographyOverlayPane({
   overlayCircles,
   wormholeEndpoints,

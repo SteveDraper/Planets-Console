@@ -2,6 +2,7 @@ import type { MapAnalyticRegistration } from '../mapAnalyticRegistry'
 import { appendStellarCartographyMapLayer } from './mapLayer'
 
 export const stellarCartographyMapAnalytic: MapAnalyticRegistration = {
+  requiresLiveMapUiConfig: true,
   mergeLayer(data, context) {
     if (data.meta?.nuIonStorms != null) {
       context.nuIonStorms = data.meta.nuIonStorms

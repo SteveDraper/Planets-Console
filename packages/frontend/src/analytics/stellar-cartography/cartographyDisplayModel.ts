@@ -20,11 +20,6 @@ export type CartographyMapFrame = {
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
 }
 
-/** Full display model including edge filtering (convenience for tests and one-shot callers). */
-export type CartographyDisplayModel = CartographyMapFrame & {
-  edges: MapEdge[]
-}
-
 export function collectWormholeEndpoints(
   nodes: CombinedMapData['nodes'],
   unknownEntrances: CombinedMapData['wormholeUnknownEntrances']
@@ -127,20 +122,4 @@ export function cartographyMapEdges(
     return frame.baseEdges
   }
   return cartographyVisibilityPolicy(config).mapEdges(frame.baseEdges, wormholeLineRevealKey)
-}
-
-/**
- * Single render policy for cartography map artifacts.
- * Analytic off hides all cartography content; analytic on applies layer config consistently.
- */
-export function buildCartographyDisplayModel(
-  data: CombinedMapData,
-  cartography: StellarCartographyMapContext | undefined,
-  wormholeLineRevealKey: string | null = null
-): CartographyDisplayModel {
-  const frame = buildCartographyMapFrame(data, cartography)
-  return {
-    ...frame,
-    edges: cartographyMapEdges(frame, cartography?.config, wormholeLineRevealKey),
-  }
 }
