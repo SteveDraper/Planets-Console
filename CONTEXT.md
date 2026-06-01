@@ -100,6 +100,10 @@ _Avoid_: background layer, planet layer (without "base map")
 Shell display mode for the main area: **tabular** (stacked analytic tables) or **map** (React Flow graph). Analytics grey out in the selector when they do not support the active mode.
 _Avoid_: layout mode, display type
 
+**Map display retention**:
+While map data for the current **shell context** is loading, the SPA may keep showing the last displayable **combined map** and leave **MapGraph** mounted so the viewport is preserved. Clears synchronously when **game id** or **perspective** changes; still applies across **turn** steps within the same game and viewpoint. No loading overlay while a retained map is shown -- the stale frame is intentional and silent. Owned by `useRetainedMapDisplay` in the frontend; TanStack Query does not retain across turn or ensure gaps.
+_Avoid_: keepPreviousData (implementation detail; not the product concept), stale map cache
+
 **Map layer**:
 One analytic's contribution to the combined map graph -- nodes and/or edges merged with **base map** and other enabled map analytics via id-prefixing.
 _Avoid_: overlay (acceptable informally; prefer map layer in docs)
@@ -242,6 +246,9 @@ Use **perspective** in storage paths and API path segments; use **viewpoint** in
 
 **Dev:** Turn ensure failed -- where should the message go?  
 **Expert:** The **shell error bar**, not inline on the header control. Include which BFF endpoint failed so it is actionable.
+
+**Dev:** Why does the map stay on the old turn for a moment when I step turns?  
+**Expert:** **Map display retention** -- the SPA keeps the last displayable **combined map** mounted during reload so React Flow preserves zoom and pan. It clears on game or **perspective** change, not on turn step within the same viewpoint.
 
 **Dev:** Connections feels slow -- how do I see where time went?  
 **Expert:** Open the **Diagnostics modal**, enable session diagnostics, repeat the request. **Request diagnostics** on the BFF response populate the **diagnostics buffer** with section timings from Core **turn analytics** and concept code.

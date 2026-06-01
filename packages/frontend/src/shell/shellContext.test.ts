@@ -9,6 +9,7 @@ import {
   deriveTurnBlockedNoLogin,
   deriveTurnDataReady,
   deriveTurnEnsureEnabled,
+  deriveTurnView,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
   type ShellContextInputs,
@@ -48,6 +49,50 @@ describe('deriveShellTurnMax', () => {
   it('uses latest turn from game info context', () => {
     const ctx = shellContext({ turn: 50, isGameFinished: false, sectorDisplayName: null })
     expect(deriveShellTurnMax(ctx)).toBe(50)
+  })
+})
+
+describe('deriveTurnView', () => {
+  it('returns null data turn when selected turn is null', () => {
+    expect(deriveTurnView(null, 10)).toEqual({
+      selectedTurn: null,
+      dataTurn: null,
+      futureOffset: 0,
+      isFuture: false,
+    })
+  })
+
+  it('uses selected turn as data turn when shell turn max is null', () => {
+    expect(deriveTurnView(5, null)).toEqual({
+      selectedTurn: 5,
+      dataTurn: 5,
+      futureOffset: 0,
+      isFuture: false,
+    })
+  })
+
+  it('passes through when selected turn is at or before shell turn max', () => {
+    expect(deriveTurnView(8, 10)).toEqual({
+      selectedTurn: 8,
+      dataTurn: 8,
+      futureOffset: 0,
+      isFuture: false,
+    })
+    expect(deriveTurnView(10, 10)).toEqual({
+      selectedTurn: 10,
+      dataTurn: 10,
+      futureOffset: 0,
+      isFuture: false,
+    })
+  })
+
+  it('caps data turn and sets future offset when viewing the future', () => {
+    expect(deriveTurnView(12, 10)).toEqual({
+      selectedTurn: 12,
+      dataTurn: 10,
+      futureOffset: 2,
+      isFuture: true,
+    })
   })
 })
 
@@ -226,6 +271,14 @@ describe('deriveAnalyticScope', () => {
       gameId: '628580',
       turn: 5,
       perspective: 2,
+    })
+  })
+
+  it('loads latest stored turn data when selected turn is in the future', () => {
+    expect(deriveAnalyticScope(baseInputs({ selectedTurn: 12 }))).toEqual({
+      gameId: '628580',
+      turn: 10,
+      perspective: 1,
     })
   })
 

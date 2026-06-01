@@ -26,7 +26,9 @@ function renderHeader() {
         reportShellError={() => {}}
         shellTurnMax={null}
         shellTurnValue={null}
-        onShellTurnChange={() => {}}
+        isFuture={false}
+        setTurn={() => {}}
+        stepTurn={() => {}}
         shellViewpoints={[]}
         shellSelectedViewpointName={null}
         onShellViewpointChange={() => {}}
@@ -107,7 +109,9 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
-          onShellTurnChange={() => {}}
+          isFuture={false}
+          setTurn={() => {}}
+          stepTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
             { name: 'Beta', raceName: null, disabled: false },
@@ -138,7 +142,9 @@ describe('Header', () => {
           reportShellError={() => {}}
           shellTurnMax={null}
           shellTurnValue={null}
-          onShellTurnChange={() => {}}
+          isFuture={false}
+          setTurn={() => {}}
+          stepTurn={() => {}}
           shellViewpoints={[
             { name: 'Alpha', raceName: null, disabled: false },
             { name: 'Beta', raceName: null, disabled: true },
@@ -152,10 +158,13 @@ describe('Header', () => {
     expect(screen.getByRole('option', { name: 'Beta' })).toBeDisabled()
   })
 
-  it('turn stepper clamps to 1 and max turn', async () => {
+  it('turn stepper stops at 1 and can advance past latest turn', async () => {
     const user = userEvent.setup()
     function Wrapper() {
       const [t, setT] = useState(2)
+      const max = 3
+      const setTurn = (turn: number) => setT(Math.max(1, Math.round(turn)))
+      const stepTurn = (delta: number) => setT((prev) => Math.max(1, prev + delta))
       return (
         <QueryClientProvider client={headerQueryClient}>
           <Header
@@ -167,9 +176,11 @@ describe('Header', () => {
             onCommitGameSelection={() => {}}
             isGameRefreshPending={false}
             reportShellError={() => {}}
-            shellTurnMax={3}
+            shellTurnMax={max}
             shellTurnValue={t}
-            onShellTurnChange={setT}
+            isFuture={t > max}
+            setTurn={setTurn}
+            stepTurn={stepTurn}
             shellViewpoints={[]}
             shellSelectedViewpointName={null}
             onShellViewpointChange={() => {}}
@@ -189,7 +200,63 @@ describe('Header', () => {
     expect(input).toHaveValue(2)
     await user.click(inc)
     expect(input).toHaveValue(3)
-    expect(inc).toBeDisabled()
+    await user.click(inc)
+    expect(screen.queryByLabelText(/^turn number$/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/turn number 4 \(future\)/i)).toHaveTextContent('4 (future)')
+    expect(inc).not.toBeDisabled()
+  })
+
+  it('shows future turn label when isFuture is true', () => {
+    render(
+      <QueryClientProvider client={headerQueryClient}>
+        <Header
+          viewMode="tabular"
+          onViewModeChange={() => {}}
+          mapZoom={1}
+          onMapZoomSliderChange={() => {}}
+          selectedGameId={null}
+          onCommitGameSelection={() => {}}
+          isGameRefreshPending={false}
+          reportShellError={() => {}}
+          shellTurnMax={10}
+          shellTurnValue={12}
+          isFuture={true}
+          setTurn={() => {}}
+          stepTurn={() => {}}
+          shellViewpoints={[]}
+          shellSelectedViewpointName={null}
+          onShellViewpointChange={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    expect(screen.getByLabelText(/turn number 12 \(future\)/i)).toHaveTextContent('12 (future)')
+    expect(screen.queryByLabelText(/^turn number$/i)).not.toBeInTheDocument()
+  })
+
+  it('shows turn input when isFuture is false even at max turn', () => {
+    render(
+      <QueryClientProvider client={headerQueryClient}>
+        <Header
+          viewMode="tabular"
+          onViewModeChange={() => {}}
+          mapZoom={1}
+          onMapZoomSliderChange={() => {}}
+          selectedGameId={null}
+          onCommitGameSelection={() => {}}
+          isGameRefreshPending={false}
+          reportShellError={() => {}}
+          shellTurnMax={10}
+          shellTurnValue={10}
+          isFuture={false}
+          setTurn={() => {}}
+          stepTurn={() => {}}
+          shellViewpoints={[]}
+          shellSelectedViewpointName={null}
+          onShellViewpointChange={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    expect(screen.getByLabelText(/^turn number$/i)).toHaveValue(10)
   })
 
   it('prefills name from localStorage when opening login modal', async () => {

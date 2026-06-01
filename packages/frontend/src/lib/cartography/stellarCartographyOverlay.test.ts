@@ -180,6 +180,36 @@ describe('stellarCartographyOverlay', () => {
     expect(shapes.annuli[0]?.bandStroke).toBe('none')
   })
 
+  it('includes black holes as dedicated pane shapes without async constants', () => {
+    const viewport = {
+      width: 800,
+      height: 600,
+      tx: 400,
+      ty: 300,
+      scale: 4,
+    }
+    const shapes = buildStellarCartographyOverlayPaneShapes(
+      [
+        {
+          layer: 'black-holes',
+          id: 'bh-1',
+          x: 0,
+          y: 0,
+          radius: 51,
+          coreRadius: 15,
+          bandRadius: 4,
+          name: 'Solace',
+        },
+      ],
+      [],
+      viewport
+    )
+    expect(shapes.annuli).toHaveLength(0)
+    expect(shapes.blackHoles).toHaveLength(1)
+    expect(shapes.blackHoles[0]?.key).toBe('bh-1')
+    expect(shapes.blackHoles[0]?.ergosphereR).toBeCloseTo(51 * viewport.scale)
+  })
+
   it('draws neutron cluster flux as raster and blue cores without per-star annuli', () => {
     const viewport = {
       width: 800,

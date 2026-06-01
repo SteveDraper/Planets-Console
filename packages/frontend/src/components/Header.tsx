@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, MoreVertical, RefreshCw } from 'lucide-react'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
-import { cn, mapSliderToZoom, mapZoomToSlider } from '../lib/utils'
+import { cn } from '../lib/utils'
+import { mapSliderToZoom, mapZoomToSlider } from '../lib/mapZoom'
 import { formatViewpointRowLabel } from '../lib/displayFormatters'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
@@ -10,7 +11,6 @@ import { LoginModal } from './LoginModal'
 import { AboutModal } from './AboutModal'
 import { DiagnosticsModal } from './DiagnosticsModal'
 import { SettingsModal } from './SettingsModal'
-
 type ViewMode = 'tabular' | 'map'
 
 type HeaderProps = {
@@ -24,11 +24,14 @@ type HeaderProps = {
   onCommitGameSelection: (gameId: string) => void
   isGameRefreshPending: boolean
   reportShellError: (message: string) => void
-  /** Max selectable turn from game info (inclusive); null if unknown or invalid. */
+  /** Max turn from game info (inclusive); null if unknown or invalid. */
   shellTurnMax: number | null
-  /** Selected turn in [1, shellTurnMax]; null when max is unknown. */
+  /** Selected turn; may exceed shellTurnMax when viewing predicted future turns. */
   shellTurnValue: number | null
-  onShellTurnChange: (turn: number) => void
+  /** From shell context: selected turn is beyond latest stored turn. */
+  isFuture: boolean
+  setTurn: (turn: number) => void
+  stepTurn: (delta: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
   shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
   /** Current viewpoint (login default or user override). */
@@ -47,7 +50,9 @@ export function Header({
   reportShellError,
   shellTurnMax,
   shellTurnValue,
-  onShellTurnChange,
+  isFuture,
+  setTurn,
+  stepTurn,
   shellViewpoints,
   shellSelectedViewpointName,
   onShellViewpointChange,
@@ -71,6 +76,7 @@ export function Header({
   const [turnInputDraft, setTurnInputDraft] = useState<string | null>(null)
 
   const turnReady = shellTurnMax != null && shellTurnValue != null
+  const showFutureTurn = turnReady && isFuture
   const committedTurnStr = shellTurnValue != null ? String(shellTurnValue) : ''
 
   useEffect(() => {
@@ -172,7 +178,7 @@ export function Header({
               type="button"
               aria-label="Decrease turn"
               disabled={shellTurnValue <= 1}
-              onClick={() => onShellTurnChange(shellTurnValue - 1)}
+              onClick={() => stepTurn(-1)}
               className={cn(
                 'flex items-center justify-center px-1 text-slate-300 hover:bg-white/10 hover:text-slate-100',
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400',
@@ -181,42 +187,48 @@ export function Header({
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden />
             </button>
-            <input
-              type="number"
-              min={1}
-              max={shellTurnMax}
-              step={1}
-              aria-label="Turn number"
-              value={displayTurnInput}
-              onChange={(e) => setTurnInputDraft(e.target.value)}
-              onFocus={() => setTurnInputDraft(committedTurnStr)}
-              onBlur={() => {
-                setTurnInputDraft(null)
-                const parsed = Number.parseInt(displayTurnInput.trim(), 10)
-                if (Number.isFinite(parsed)) {
-                  onShellTurnChange(parsed)
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  ;(e.target as HTMLInputElement).blur()
-                }
-              }}
-              className={cn(
-                'w-11 border-x border-[#52575d] bg-transparent py-0.5 text-center text-xs tabular-nums text-slate-200',
-                '[-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
-                'focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-slate-400'
-              )}
-            />
+            {showFutureTurn ? (
+              <span
+                className="min-w-11 border-x border-[#52575d] px-1 py-0.5 text-center text-xs tabular-nums text-slate-200"
+                aria-label={`Turn number ${shellTurnValue} (future)`}
+              >
+                {shellTurnValue} (future)
+              </span>
+            ) : (
+              <input
+                type="number"
+                min={1}
+                step={1}
+                aria-label="Turn number"
+                value={displayTurnInput}
+                onChange={(e) => setTurnInputDraft(e.target.value)}
+                onFocus={() => setTurnInputDraft(committedTurnStr)}
+                onBlur={() => {
+                  setTurnInputDraft(null)
+                  const parsed = Number.parseInt(displayTurnInput.trim(), 10)
+                  if (Number.isFinite(parsed)) {
+                    setTurn(parsed)
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    ;(e.target as HTMLInputElement).blur()
+                  }
+                }}
+                className={cn(
+                  'w-11 border-x border-[#52575d] bg-transparent py-0.5 text-center text-xs tabular-nums text-slate-200',
+                  '[-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+                  'focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-slate-400'
+                )}
+              />
+            )}
             <button
               type="button"
               aria-label="Increase turn"
-              disabled={shellTurnValue >= shellTurnMax}
-              onClick={() => onShellTurnChange(shellTurnValue + 1)}
+              onClick={() => stepTurn(1)}
               className={cn(
                 'flex items-center justify-center px-1 text-slate-300 hover:bg-white/10 hover:text-slate-100',
-                'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400',
-                'disabled:pointer-events-none disabled:opacity-40'
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400'
               )}
             >
               <ChevronUp className="h-3.5 w-3.5" aria-hidden />

@@ -104,12 +104,34 @@ def test_black_hole_lethal_in_core(stellar_cartography_turn):
 
 def test_black_hole_max_warp_in_band(stellar_cartography_turn):
     hole = stellar_cartography_turn.blackholes[0]
-    x = hole.x + hole.coreradius + 5
+    x = hole.x + hole.coreradius + 2
     y = hole.y
     data = sample_at(stellar_cartography_turn, x, y)
     holes = _entries_by_layer(data)["black-holes"]
     assert len(holes) == 1
-    assert holes[0]["lines"][0].startswith("Max warp:")
+    assert holes[0]["lines"] == ["Max warp: 1", "Fuel saving: 9%"]
+
+
+def test_black_hole_max_warp_outer_band(stellar_cartography_turn):
+    from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
+
+    hole = stellar_cartography_turn.blackholes[0]
+    x = hole.x + ergosphere_outer_radius(hole.coreradius, hole.bandradius)
+    y = hole.y
+    data = sample_at(stellar_cartography_turn, x, y)
+    holes = _entries_by_layer(data)["black-holes"]
+    assert len(holes) == 1
+    assert holes[0]["lines"] == ["Max warp: 9", "Fuel saving: 1%"]
+
+
+def test_black_hole_outside_ergosphere(stellar_cartography_turn):
+    from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
+
+    hole = stellar_cartography_turn.blackholes[0]
+    x = hole.x + ergosphere_outer_radius(hole.coreradius, hole.bandradius) + 5
+    y = hole.y
+    data = sample_at(stellar_cartography_turn, x, y)
+    assert "black-holes" not in _entries_by_layer(data)
 
 
 def test_empty_cell_returns_no_entries(stellar_cartography_turn):

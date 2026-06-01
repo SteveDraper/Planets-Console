@@ -38,7 +38,7 @@ export function formatStellarCartographySampleLine(entry: StellarCartographySamp
       return entry.lines.map(formatNeutronClusterSampleLine).join(' — ')
     }
     case 'black-holes':
-      return `Black hole: ${entry.lines.join(' ')}`
+      return `Black hole: ${entry.lines.join(' — ')}`
     case 'debris-disks':
       return entry.lines.join(' ')
     case 'wormholes':

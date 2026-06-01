@@ -2377,7 +2377,7 @@
       "x": 300,
       "y": 400,
       "coreradius": 15,
-      "bandradius": 40,
+      "bandradius": 4,
       "id": 1
     }
   ],

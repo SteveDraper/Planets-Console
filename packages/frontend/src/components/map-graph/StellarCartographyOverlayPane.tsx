@@ -1,7 +1,10 @@
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
-import { buildStellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
-import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
+import type { StellarCartographyMapUiConfig } from '../../analytics/stellar-cartography/mapUiConfig'
+import {
+  buildStellarCartographyOverlayPaneShapes,
+  hasVectorOverlayShapes,
+} from '../../lib/cartography/stellarCartographyOverlay'
 import { safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
@@ -9,34 +12,10 @@ import { WormholeEndpointMarkers } from './WormholeEndpointMarkers'
 import type { WormholeEndpointHoverInfo } from '../../lib/wormholeEndpointHover'
 import type { WormholeRecenterPulseTarget } from './stellarCartographyWormholeInteraction'
 
-const STELLAR_CARTOGRAPHY_NODE_PREFIX = 'stellar-cartography:'
-
-export function collectWormholeEndpoints(
-  nodes: CombinedMapData['nodes'],
-  unknownEntrances: CombinedMapData['wormholeUnknownEntrances']
-): { x: number; y: number }[] {
-  const seen = new Set<string>()
-  const endpoints: { x: number; y: number }[] = []
-  const add = (x: number, y: number) => {
-    const key = `${x},${y}`
-    if (seen.has(key)) return
-    seen.add(key)
-    endpoints.push({ x, y })
-  }
-  for (const node of nodes) {
-    if (node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_PREFIX)) {
-      add(Number(node.x), Number(node.y))
-    }
-  }
-  for (const entrance of unknownEntrances) {
-    add(entrance.x, entrance.y)
-  }
-  return endpoints
-}
-
 export function StellarCartographyOverlayPane({
   overlayCircles,
   wormholeEndpoints,
+  cartographyConfig,
   wormholeEndpointHoverByCell,
   wormholeRecenterPulseTarget,
   blockedByPlanetHover,
@@ -44,15 +23,12 @@ export function StellarCartographyOverlayPane({
 }: {
   overlayCircles: CombinedMapData['overlayCircles']
   wormholeEndpoints: { x: number; y: number }[]
+  cartographyConfig: StellarCartographyMapUiConfig
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
   wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
   blockedByPlanetHover: boolean
   nuIonStorms?: boolean
 }) {
-  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
-  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
-    (s) => s.neutronClusterDisplayMode
-  )
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
@@ -68,19 +44,12 @@ export function StellarCartographyOverlayPane({
     { width, height, tx, ty, scale },
     {
       cloudyIonStorms: nuIonStorms ?? true,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode,
+      starClusterDisplayMode: cartographyConfig.starClusterDisplayMode,
+      neutronClusterDisplayMode: cartographyConfig.neutronClusterDisplayMode,
     }
   )
 
-  const hasVector =
-    shapes.circles.length > 0 ||
-    shapes.annuli.length > 0 ||
-    shapes.nebulaClouds.length > 0 ||
-    shapes.ionStormClouds.length > 0 ||
-    shapes.neutronFluxClouds.length > 0 ||
-    shapes.debrisDiskBorders.length > 0 ||
-    shapes.arrows.length > 0
+  const hasVector = hasVectorOverlayShapes(shapes)
   const hasMarkers = shapes.wormholeMarkers.length > 0
 
   if (!hasVector && !hasMarkers) return null
@@ -88,19 +57,7 @@ export function StellarCartographyOverlayPane({
   return (
     <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
       {hasVector ? (
-        <StellarCartographyVectorOverlay
-          shapes={{
-            nebulaClouds: shapes.nebulaClouds,
-            ionStormClouds: shapes.ionStormClouds,
-            neutronFluxClouds: shapes.neutronFluxClouds,
-            circles: shapes.circles,
-            annuli: shapes.annuli,
-            debrisDiskBorders: shapes.debrisDiskBorders,
-            arrows: shapes.arrows,
-          }}
-          width={width}
-          height={height}
-        />
+        <StellarCartographyVectorOverlay shapes={shapes} width={width} height={height} />
       ) : null}
       <WormholeEndpointMarkers
         markers={shapes.wormholeMarkers}

@@ -1,6 +1,7 @@
 """Core Stellar Cartography map analytic."""
 
 from api.analytics.options import TurnAnalyticsOptions
+from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
     LAYER_DEBRIS_DISKS,
@@ -185,7 +186,7 @@ def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) 
                 "id": f"bh-{blackhole.id}",
                 "x": blackhole.x,
                 "y": blackhole.y,
-                "radius": blackhole.bandradius,
+                "radius": ergosphere_outer_radius(blackhole.coreradius, blackhole.bandradius),
                 "name": blackhole.name,
                 "coreRadius": blackhole.coreradius,
                 "bandRadius": blackhole.bandradius,

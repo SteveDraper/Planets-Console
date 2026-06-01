@@ -171,8 +171,8 @@ def test_nebula_and_blackhole_overlay_fields(stellar_cartography_turn):
     }
     blackhole = next(c for c in data["overlayCircles"] if c["layer"] == "black-holes")
     assert blackhole["coreRadius"] == 15
-    assert blackhole["bandRadius"] == 40
-    assert blackhole["radius"] == 40
+    assert blackhole["bandRadius"] == 4
+    assert blackhole["radius"] == 51
 
 
 def test_ion_storm_overlay_includes_class(stellar_cartography_turn):

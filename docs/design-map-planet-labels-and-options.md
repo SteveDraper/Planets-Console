@@ -138,4 +138,4 @@ For **`detailsLevel` other than `debug`**, the **properties** section is **maske
 
 ## 9. Query / cache notes
 
-Map fetches use the `['analytic', id, 'map', scope]` pattern with a **version segment** (currently `'planet-v2'`) in the key where needed so merged node payloads refetch when the contract changes. See [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).
+Map fetches use the `['analytic', id, 'map', scope]` pattern with a **version segment** (currently `'planet-v2'`) in the key where needed so merged node payloads refetch when the contract changes. Keys are defined in `packages/frontend/src/lib/useMapAnalyticQueries.ts`. See [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md).

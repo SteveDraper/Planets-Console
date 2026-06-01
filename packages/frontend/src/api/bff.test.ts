@@ -146,6 +146,38 @@ describe('normalizeMapDataResponse', () => {
     expect(out.nodes[0].planet).not.toBe((raw.nodes[0] as { planet: object }).planet)
   })
 
+  it('keeps nodes only when x and y parse as finite numbers (no boolean coercion)', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        { id: 'a', label: 'a', x: true, y: false },
+        { id: 'b', label: 'b', x: '12', y: '-3' },
+        { id: 'c', label: 'c', x: null, y: '' },
+        { id: 'd', label: 'd' },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes).toHaveLength(1)
+    expect(out.nodes[0]).toMatchObject({ id: 'b', x: 12, y: -3 })
+  })
+
+  it('parses ownerName only when string or null on the wire', () => {
+    const raw = {
+      analyticId: 'base-map',
+      nodes: [
+        { id: 'p1', label: 'p1', x: 1, y: 2, ownerName: 'Alice' },
+        { id: 'p2', label: 'p2', x: 3, y: 4, ownerName: null },
+        { id: 'p3', label: 'p3', x: 5, y: 6, ownerName: 42 },
+      ],
+      edges: [],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.nodes[0].ownerName).toBe('Alice')
+    expect(out.nodes[1].ownerName).toBe(null)
+    expect(out.nodes[2]).not.toHaveProperty('ownerName')
+  })
+
   it('preserves normalWellCells on base-map nodes', () => {
     const cells = [{ x: 10, y: 20 }, { x: 11, y: 20 }]
     const raw = {
@@ -244,6 +276,22 @@ describe('normalizeMapDataResponse', () => {
         class: 3,
       },
     ])
+  })
+
+  it('drops planet pair routes when planet ids are null, empty string, or non-integer', () => {
+    const raw = {
+      analyticId: 'connections',
+      nodes: [],
+      edges: [],
+      routes: [
+        { fromPlanetId: null, toPlanetId: 2, viaFlare: false },
+        { fromPlanetId: 1, toPlanetId: '', viaFlare: false },
+        { fromPlanetId: 1.5, toPlanetId: 2, viaFlare: false },
+        { fromPlanetId: '3', toPlanetId: '4', viaFlare: false },
+      ],
+    }
+    const out = normalizeMapDataResponse(raw)
+    expect(out.routes).toEqual([{ fromPlanetId: 3, toPlanetId: 4, viaFlare: false }])
   })
 
   it('keeps flare illustrativeRoute waypointOffset and arrivalOffset when valid', () => {
@@ -364,5 +412,43 @@ describe('normalizeMapDataResponse', () => {
     expect(steps[0].arrivalOffset).toEqual([3, 4])
     expect(steps[1].waypointOffset).toBeUndefined()
     expect(steps[2].waypointOffset).toBeUndefined()
+  })
+
+  it('parses stellar cartography meta counts and nuIonStorms flag', () => {
+    const out = normalizeMapDataResponse({
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      meta: {
+        nebulae: '3',
+        ion_storms: 2,
+        nuionstorms: true,
+        star_clusters: 4,
+        neutronClusters: 1,
+        black_holes: 2,
+        wormholes: 5,
+        wormhole_edges: 10,
+      },
+    })
+    expect(out.meta).toEqual({
+      nebulae: 3,
+      ionStorms: 2,
+      nuIonStorms: true,
+      starClusters: 4,
+      neutronClusters: 1,
+      blackHoles: 2,
+      wormholes: 5,
+      wormholeEdges: 10,
+    })
+  })
+
+  it('omits meta when wire payload has no recognized fields', () => {
+    const out = normalizeMapDataResponse({
+      analyticId: 'stellar-cartography',
+      nodes: [],
+      edges: [],
+      meta: { unknownField: 1, nebulae: null },
+    })
+    expect(out.meta).toBeUndefined()
   })
 })

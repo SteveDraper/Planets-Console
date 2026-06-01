@@ -9,7 +9,7 @@ import type {
   StellarCartographySampleResponse,
   StellarCartographyTurnSummaryResponse,
 } from './bffCartographyTypes'
-import { normalizeMapDataResponse } from './bffCartographyTypes'
+import { normalizeMapDataResponse } from './normalizeMapDataResponse'
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 
@@ -30,6 +30,7 @@ export type {
   MapDataResponse,
   MapEdge,
   MapNode,
+  MapPlanetSnapshot,
   NebulaOverlayCircle,
   NormalWellMapCell,
   PlanetPairRoute,
@@ -44,10 +45,8 @@ export type {
   WormholeUnknownEntrance,
 } from './bffCartographyTypes'
 
-export {
-  isStellarCartographySampleLayerId,
-  normalizeMapDataResponse,
-} from './bffCartographyTypes'
+export { isStellarCartographySampleLayerId } from './bffCartographyTypes'
+export { normalizeMapDataResponse } from './normalizeMapDataResponse'
 
 /** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
 export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const

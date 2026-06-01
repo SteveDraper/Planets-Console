@@ -216,6 +216,31 @@ Each phase should be a reviewable PR. Run `make test` before merge.
 
 ## 5. Testing strategy
 
+### Cross-layer golden fixtures
+
+Host-aligned math that must stay in sync across Core and the SPA uses repo-root JSON under `test-fixtures/`:
+
+| Fixture | Core | Frontend |
+|---------|------|----------|
+| [`ion_voltage_contract.json`](../test-fixtures/ion_voltage_contract.json) | `test_ion_voltage_contract.py` | `loadIonVoltageContractFixture.ts`, `ionStormCloudOverlay.test.ts` |
+| [`black-hole-ergosphere-contract.json`](../test-fixtures/black-hole-ergosphere-contract.json) | `test_black_holes.py` | `blackHoleOverlay.test.ts` (band count + halo ly; overlay trusts BFF `radius`) |
+
+### Black hole ergosphere (host `getBlackHoleBand`)
+
+Turn JSON supplies `coreradius` (lethal core) and `bandradius` (width of each of nine bands). Geometry is **not** a single annulus to `bandradius`; the ergosphere spans **`coreradius + 9 * bandradius`** ly, with band index `1` innermost through `9` at the outer edge. Band `0` is the core (`dist <= coreradius`). Outside the ergosphere, sampling returns nothing.
+
+| Quantity | Rule |
+|----------|------|
+| Outer ergosphere ly | `coreradius + 9 * bandradius` |
+| Band at distance `d` | `0` in core; else `ceil((d - coreradius) / bandradius)` clamped to `1..9`; `null` if `bandradius <= 0` or `d` beyond outer |
+| Max warp in band | Same as band index (`1`..`9`) |
+| Fuel saving % in band | `10 - band` |
+| Map overlay halo | Outer ergosphere + **5 ly** cosmetic cyan glow (Planets.nu client) |
+
+Core: `api/concepts/stellar_cartography/black_holes.py` and `sample_at` tooltip lines (band, max warp, fuel saving). Frontend map overlay trusts BFF **`radius`** for ergosphere extent; band count and halo extent come from **`BLACK_HOLE_CONCEPT_CONSTANTS` in `lib/cartography/blackHoleOverlay.ts`** (aligned with the Core module and `test-fixtures/black-hole-ergosphere-contract.json`). **`blackHoleOverlay.ts`** paints the nine-band grey gradient (cosmetic band-edge math only) and the cosmetic cyan halo. Greys and opacities live in `stellarCartographyTheme.ts`.
+
+**Map rendering (black holes):** Pane geometry lives in `lib/cartography/blackHoleOverlay.ts` (`buildBlackHolePaneShape`, `buildBlackHoleErgosphereGradientStops`). Each hole is one `BlackHolePaneShape` rendered by `BlackHoleOverlay` in `StellarCartographyVectorOverlay.tsx`: a radial gradient with hard stops at each band boundary (nine greys from `blackHoleErgosphereBandGrey`, opacity `BLACK_HOLE_ERGOSPHERE_BAND_OPACITY`) over a lethal core, then a separate halo circle with the cosmetic cyan ramp beyond the BFF ergosphere radius (+5 ly). This replaces nine masked annulus primitives per hole.
+
 | Area | Tests |
 |------|--------|
 | Core deserialization | Extended nebula/blackhole/wormhole round-trip |
@@ -250,7 +275,7 @@ This replaces the earlier incorrect heuristic (multiple bodies with the same nam
 ### Other future enhancements
 
 - Persist **Connections** map params (out of scope here).
-- Descriptor-driven map fetch in `MainArea` (trigger per [design-analytics-structure.md](design-analytics-structure.md) when a second parametric map analytic appears).
+- ~~Descriptor-driven map fetch in `MainArea`~~ **Done:** map-capable analytics register query spec + merge layer together in `packages/frontend/src/analytics/mapAnalyticRegistry.ts` (per-analytic modules under `analytics/<id>/mapAnalytic.ts`). Add new parametric map endpoints there, not in separate query and merge registries.
 - Nebula interior raster if `maps[]` gains usable tiles.
 - Spectator / `allwormholesvisible` styling for unknown wormhole ends.
 

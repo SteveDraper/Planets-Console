@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useReactFlow, useStore, useStoreApi } from '@xyflow/react'
+import { useReactFlow, useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
 import {
   CELL_CENTER_OFFSET,
   gameMapYToFlowCenterY,
 } from './geometry'
+import { clampMapZoom, viewportZoomFromTransform } from '../../lib/mapZoom'
+import {
+  MapZoomKeyboardShortcuts,
+  useCenteredViewportZoom,
+} from './mapZoomKeyboardShortcuts'
+
+export { MapZoomKeyboardShortcuts }
 
 /** Fraction of display area to leave as blank margin on each side when fitting initial view (0.1 = 10%). */
 const INITIAL_FIT_MARGIN = 0.1
@@ -75,7 +82,7 @@ export function InitialViewportFit({
     const usableH = size.height * (1 - 2 * INITIAL_FIT_MARGIN)
     const scaleW = usableW / contentWidth
     const scaleH = usableH / contentHeight
-    const zoom = Math.min(40, Math.max(0.2, Math.min(scaleW, scaleH)))
+    const zoom = clampMapZoom(Math.min(scaleW, scaleH))
     const x = size.width / 2 - centerX * zoom
     const y = size.height / 2 - centerY * zoom
     hasFittedRef.current = true
@@ -89,8 +96,7 @@ export function InitialViewportFit({
 
 /** Mirrors React Flow zoom to the app (wheel, pinch, initial fit, slider). */
 export function ViewportZoomSync({ onMapZoomChange }: { onMapZoomChange: (z: number) => void }) {
-  const raw = useStore((s) => s.transform?.[2])
-  const zoom = Number.isFinite(raw) && (raw as number) > 0 ? (raw as number) : 1
+  const zoom = useStore((s) => viewportZoomFromTransform(s.transform))
   const prev = useRef(zoom)
   const rafRef = useRef<number | null>(null)
   const pendingZoomRef = useRef<number>(zoom)
@@ -122,40 +128,9 @@ export function SliderZoomControl({
   onMapZoomChange: (z: number) => void
   onSetZoomReady: (setZoom: (z: number) => void) => void
 }) {
-  const { getViewport, setViewport } = useReactFlow()
-  const storeApi = useStoreApi()
+  const setZoom = useCenteredViewportZoom(onMapZoomChange)
   useEffect(() => {
-    const setZoom = (targetZoom: number) => {
-      const z = Math.min(40, Math.max(0.2, Number(targetZoom) || 0.2))
-      const apply = () => {
-        const domNode = storeApi.getState().domNode
-        if (!domNode || domNode.getBoundingClientRect().width <= 0) return false
-        const vp = getViewport()
-        const rect = domNode.getBoundingClientRect()
-        const w = Math.max(rect.width, 1)
-        const h = Math.max(rect.height, 1)
-        const vz = Math.max(Number(vp.zoom) || 0.2, 0.2)
-        const vx = Number.isFinite(vp.x) ? vp.x : 0
-        const vy = Number.isFinite(vp.y) ? vp.y : 0
-        const cx = (w / 2 - vx) / vz
-        const cy = (h / 2 - vy) / vz
-        const nx = w / 2 - cx * z
-        const ny = h / 2 - cy * z
-        if (!Number.isFinite(nx) || !Number.isFinite(ny)) return false
-        setViewport({ x: nx, y: ny, zoom: z })
-        onMapZoomChange(z)
-        return true
-      }
-      if (apply()) return
-      let n = 0
-      const tick = () => {
-        if (apply()) return
-        if (++n >= 30) return
-        requestAnimationFrame(tick)
-      }
-      requestAnimationFrame(tick)
-    }
     onSetZoomReady(setZoom)
-  }, [getViewport, setViewport, storeApi, onMapZoomChange, onSetZoomReady])
+  }, [onSetZoomReady, setZoom])
   return null
 }

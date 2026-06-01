@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { parseHttpStatusFromErrorMessage, shouldRetryTanStackQuery } from './queryRetry'
+import {
+  errorDetailFromUnknown,
+  parseHttpStatusFromErrorMessage,
+  shouldRetryTanStackQuery,
+} from './queryRetry'
+
+describe('errorDetailFromUnknown', () => {
+  it('formats Error, other values, and nullish with fallback', () => {
+    expect(errorDetailFromUnknown(new Error('boom'))).toBe('boom')
+    expect(errorDetailFromUnknown('plain')).toBe('plain')
+    expect(errorDetailFromUnknown(null, 'fallback')).toBe('fallback')
+  })
+})
 
 describe('parseHttpStatusFromErrorMessage', () => {
   it('reads leading status code', () => {

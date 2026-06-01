@@ -36,8 +36,8 @@ TanStack Query owns **data fetched from the BFF** (the SPA never calls the Core 
 |---------|---------|----------|
 | `['bff', '<resource>']` | BFF lists or singleton metadata | `['bff', 'analytics']`, `['bff', 'games']` |
 | `['analytic', <id>, 'table', <scope>]` | Tabular analytic for a **game + turn + perspective** | Scope is `AnalyticShellScope` (or equivalent fields) so changing shell context **refetches** without manual `invalidateQueries`. |
-| `['analytic', <id>, 'map', <scope>, 'planet-v2']` | Generic map fetch in `MainArea.tsx` (**base-map** and other map analytics except **connections**). `<scope>` is `AnalyticShellScope \| null`. The `'planet-v2'` suffix invalidates cache when base-map node shape changes (e.g. `normalWellCells`). |
-| `['analytic', 'connections', 'map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth]` | **Connections** map overlay (`MainArea.tsx`). Primitive scope + sidebar params so changing warp/flare settings refetches. When scope is not ready, the key uses `'idle', 0, 0` in place of `gameId, turn, perspective`. |
+| `['analytic', <id>, 'map', <scope>, 'planet-v2']` | Generic map fetch in `useMapAnalyticQueries.ts` (**base-map** and other map analytics except **connections**). Mounted from `MapMainArea` in map view only. `<scope>` is `AnalyticShellScope \| null`. The `'planet-v2'` suffix invalidates cache when base-map node shape changes (e.g. `normalWellCells`). |
+| `['analytic', 'connections', 'map', gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth]` | **Connections** map overlay (`useMapAnalyticQueries.ts`). Primitive scope + sidebar params so changing warp/flare settings refetches. |
 | `['bff', 'turnData', gameId, turn, perspective, loginName, credentialsRevision]` | **Turn presence in storage** (see below) | One logical ensure per distinct shell + identity; `credentialsRevision` bumps on login/clear (not the password). |
 
 **Mutations** (`useMutation`) are for operations that **change server-side** data (e.g. `POST /bff/games/{id}/info`). They may call `queryClient.invalidateQueries` for related lists (e.g. games) when needed.
@@ -80,6 +80,20 @@ Turn blobs live in **Core storage** (`games/{gameId}/{perspective}/turns/{turn}`
 - Tabular and map **analytic** queries use `enabled: analyticScope != null && turnDataReady` (via `analyticFetchEnabled`). They **do not** run while the ensure query is pending or before it succeeds, so the BFF/Core never serves analytics for a turn that is still missing from storage.
 
 **Backend idempotency:** `GameService.ensure_turn_loaded` returns immediately if the turn path already exists; otherwise it calls Planets.nu and writes **`rst`**. Repeating ensure for the same turn is safe.
+
+### Map display retention
+
+While map analytic queries reload, the SPA keeps **MapGraph** mounted and may show the last displayable **combined map** so React Flow preserves zoom and pan. See **Map display retention** in [CONTEXT.md](../CONTEXT.md).
+
+**Owner:** `useRetainedMapDisplay` in `packages/frontend/src/lib/useRetainedMapDisplay.ts`. Map queries in `MainArea.tsx` do **not** use `placeholderData: keepPreviousData`; TanStack Query cannot retain across turn or ensure gaps (new query keys plus `enabled: false` while **turn ensure** runs).
+
+**Retention key:** `{ gameId, perspective }`. Clears **synchronously** when either changes so another viewpoint's planets never flash on screen. **Turn** is not part of the key -- stepping turns within the same game and viewpoint keeps the prior frame until fresh data arrives.
+
+**Display rule:** When live `combined` has nodes, show it; otherwise show the retained snapshot if the retention key still matches. **`mapShellView`** (`MapShellView`) is derived in `useRetainedMapDisplay` via `deriveMapShellView` in `mapDisplayRetention.ts` from retention state plus turn-ensure and map-query loading inputs. Phases: **`full-loading`** with a loading message (turn or map fetch); **`showing-map`** keeps **MapGraph** mounted with `displayMapData` and sets **`showDeferredPending`** when the deferred "Loading additional map data…" overlay should appear (live data with secondary queries still pending -- false while showing a retained prior frame); **`error`** drives the full-pane error placeholder in `MainArea.tsx`. Tabular and map turn-ensure loading both use **`deriveTurnEnsureLoadingView`** in `mapDisplayRetention.ts` with **`ShellCenterPane`** in `components/shell/ShellPlaceholders.tsx`.
+
+**Predicates:** `hasDisplayableMapData`, `deriveTurnEnsureLoadingView`, and `deriveMapShellView` in `mapDisplayRetention.ts` (unit-tested separately). Map retention during reload is expressed via the `MapFrame` discriminated union (`{ source: 'live' | 'retained'; data }` or `{ source: 'none' }`) passed to `deriveMapShellView`; a retained frame suppresses turn-ensure and deferred loading UI while the prior map stays visible.
+
+**Turn ensure vs retention:** While a prior frame is retained, `deriveMapShellView` returns **`showing-map`** with **`showDeferredPending: false`** even when `turnEnsurePending && !turnDataReady`, so the map shell does not enter **`full-loading`** during turn reload. If **turn ensure** then fails (`turnEnsureIsError && !turnDataReady`), `MainArea.tsx` still renders the full-pane turn-error placeholder **before** the map shell body -- the retained frame is not shown alongside that error. The hook keeps reporting **`showing-map`** until scope or live data changes; only the shell layout decides whether the user sees the stale map or the error pane.
 
 ---
 

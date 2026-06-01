@@ -7,8 +7,18 @@
 
 const MAX_FAILURE_COUNT_BEFORE_STOP = 3
 
+export function errorDetailFromUnknown(error: unknown, fallback = 'Unknown error'): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (error != null) {
+    return String(error)
+  }
+  return fallback
+}
+
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return errorDetailFromUnknown(error)
 }
 
 /** HTTP status inferred from our Error messages (see api/bff.ts). */

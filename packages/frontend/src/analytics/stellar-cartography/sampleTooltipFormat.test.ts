@@ -24,5 +24,11 @@ describe('formatStellarCartographySampleLine', () => {
         lines: ['Bith — neutrino flux 42 — movement +4.2% (84.4 ly at warp 9)'],
       })
     ).toBe('Bith neutron cluster — neutrino flux 42 — movement +4.2% (84.4 ly at warp 9)')
+    expect(
+      formatStellarCartographySampleLine({
+        layer: 'black-holes',
+        lines: ['Max warp: 1', 'Fuel saving: 9%'],
+      })
+    ).toBe('Black hole: Max warp: 1 — Fuel saving: 9%')
   })
 })

@@ -17,7 +17,7 @@ export type GameInfoShellContext = {
 type ShellState = {
   selectedGameId: string | null
   gameInfoContext: GameInfoShellContext | null
-  /** Viewed turn in [1, gameInfoContext.turn] when known. */
+  /** Viewed turn; may exceed gameInfoContext.turn for future prediction. */
   selectedTurn: number | null
   /** When set, overrides login-based default for the viewpoint control. */
   perspectiveOverrideName: string | null
@@ -101,7 +101,13 @@ export const useShellStore = create<ShellState>((set, get) => ({
       nextTurn = turnCap
     } else {
       const t = get().selectedTurn
-      nextTurn = t == null ? turnCap : Math.min(Math.max(1, t), turnCap)
+      if (t == null) {
+        nextTurn = turnCap
+      } else if (t > turnCap) {
+        nextTurn = t
+      } else {
+        nextTurn = Math.min(Math.max(1, t), turnCap)
+      }
     }
 
     const storageOnlyLoad = options?.storageOnlyLoad ?? false

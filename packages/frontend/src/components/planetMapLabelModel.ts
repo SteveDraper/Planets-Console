@@ -1,3 +1,5 @@
+import type { MapPlanetSnapshot } from '../api/bff'
+
 export type PlanetDetailsLevel = 'none' | 'low' | 'medium' | 'debug'
 
 export type PlanetLabelOptions = {
@@ -18,7 +20,8 @@ export function planetLabelOptionsShowAnyLabel(options: PlanetLabelOptions): boo
   return options.includePlanetId || options.includePlanetName || options.includeCoordinates
 }
 
-export type PlanetWire = Record<string, unknown>
+/** Host planet snapshot on map nodes; same wire shape as `MapNode.planet`. */
+export type PlanetWire = MapPlanetSnapshot
 
 export const PlanetDataAvailability = {
   NO_DATA: 'NO_DATA',

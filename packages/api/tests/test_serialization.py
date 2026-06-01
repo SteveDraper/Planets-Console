@@ -211,7 +211,7 @@ class TestStellarCartographySpatialSerialization:
         assert nebula.gas == 3
         blackhole = turn.blackholes[0]
         assert blackhole.coreradius == 15
-        assert blackhole.bandradius == 40
+        assert blackhole.bandradius == 4
         wormhole = turn.wormholes[0]
         assert wormhole.targetx == 20
         assert wormhole.stability == 80

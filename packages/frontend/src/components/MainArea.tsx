@@ -1,24 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useQueries, useQuery } from '@tanstack/react-query'
-import { fetchAnalyticTable, fetchAnalyticMap } from '../api/bff'
+import { memo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchAnalyticTable } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
-  ConnectionsFlareMode,
   ConnectionsMapParams,
-  MapDataResponse,
 } from '../api/bff'
-import { combineMapData } from '../analytics/mapLayers'
-import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
-import { useStellarCartographyLayersStore } from '../stores/stellarCartographyLayers'
-import { useShellStore } from '../stores/shell'
-import { MapGraph } from './MapGraph'
-import { MapPaneWithDisplayControls } from './MapPaneWithDisplayControls'
-import { PlanetMapInfoControls } from './PlanetMapInfoControls'
+import { isStellarCartographyMapEnabled } from '../analytics/mapShellCartography'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
+import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
+import { MapShellContent, type MapShellContentProps } from './shell/MapShellContent'
+import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
+import { errorDetailFromUnknown } from '../lib/queryRetry'
+import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
+import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
+import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -33,11 +32,13 @@ type MainAreaProps = {
   turnEnsurePending: boolean
   turnEnsureIsError: boolean
   /** TanStack `error` for the turn-ensure query (shown inline when `turnEnsureIsError`). */
-  turnEnsureError: unknown | null | undefined
+  turnEnsureError: unknown
   /** Scope is set but login name is missing, so turn cannot be ensured. */
   turnBlockedNoLogin: boolean
   /** Parameters for the Connections map analytic (refetch when these change). */
   connectionsMapParams: ConnectionsMapParams
+  /** Turns beyond latest stored game turn for ion storm prediction. */
+  futureTurnOffset: number
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
@@ -65,10 +66,9 @@ function TableTile({
   }
   if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
   if (error) {
-    const detail = error instanceof Error ? error.message : String(error)
     return (
       <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-        Error loading data. {detail}
+        Error loading data. {errorDetailFromUnknown(error)}
       </div>
     )
   }
@@ -101,29 +101,103 @@ function TableTile({
   )
 }
 
-/** Id of the base map analytic (planets + edges), if present. */
-function baseMapId(analytics: AnalyticItem[]): string | null {
-  const a = analytics.find((x) => x.type === 'base' && x.supportsMap)
-  return a?.id ?? null
-}
-
-/** User-enabled analytic ids that support map view (selectable only). */
-function enabledMapAnalyticIds(
-  enabledAnalyticIds: string[],
+type MapMainAreaProps = {
+  enabledAnalyticIds: string[]
   analytics: AnalyticItem[]
-): string[] {
-  const set = new Set(
-    analytics.filter((a) => a.supportsMap && a.type !== 'base').map((a) => a.id)
-  )
-  return enabledAnalyticIds.filter((id) => set.has(id))
+  analyticScope: AnalyticShellScope | null
+  turnDataReady: boolean
+  turnEnsurePending: boolean
+  connectionsMapParams: ConnectionsMapParams
+  futureTurnOffset: number
+  planetLabelOptions: PlanetLabelOptions
+  onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
+  onMapZoomChange: (zoom: number) => void
+  onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
-/** Map data ids to fetch: base map first, then enabled selectable map analytics. */
-function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]): string[] {
-  const base = baseMapId(analytics)
-  const withoutBase = enabledMapIds.filter((id) => id !== base)
-  return base ? [base, ...withoutBase] : withoutBase
+type MapShellContentBaseProps = Omit<MapShellContentProps, 'cartography'>
+
+/** Subscribes to live Stellar Cartography UI when that analytic is enabled on the map. */
+function MapShellContentWithCartography({
+  analyticScope,
+  ...props
+}: MapShellContentBaseProps & { analyticScope: AnalyticShellScope }) {
+  const cartography = useStellarCartographyMapContext(analyticScope)
+  return <MapShellContent {...props} cartography={cartography} />
 }
+
+/** Map queries and retention run only while this component is mounted (map view). */
+const MapMainArea = memo(function MapMainArea({
+  enabledAnalyticIds,
+  analytics,
+  analyticScope,
+  turnDataReady,
+  turnEnsurePending,
+  connectionsMapParams,
+  futureTurnOffset,
+  planetLabelOptions,
+  onPlanetLabelOptionsChange,
+  onMapZoomChange,
+  onSetZoomReady,
+}: MapMainAreaProps) {
+  const analyticFetchEnabled = analyticScope != null && turnDataReady
+  const mapQueries = useMapAnalyticQueries({
+    enabledAnalyticIds,
+    analytics,
+    analyticScope,
+    analyticFetchEnabled,
+    connectionsMapParams,
+  })
+
+  const {
+    enabledMapIds,
+    mapIds,
+    pending,
+    hasError,
+    hasAnyData,
+    mapError,
+  } = mapQueries
+
+  const { mapShellView } = useRetainedMapDisplay({
+    combined: mapQueries.combined,
+    gameId: analyticScope?.gameId ?? null,
+    perspective: analyticScope?.perspective ?? null,
+    mapIds,
+    turnDataReady,
+    turnEnsurePending,
+    mapPending: pending,
+    mapHasError: hasError,
+    mapHasAnyData: hasAnyData,
+    mapError,
+  })
+
+  if (analyticScope == null) {
+    return (
+      <ShellCenterPane message="Load game info and choose a turn and viewpoint to load the map." />
+    )
+  }
+
+  if (mapIds.length === 0) {
+    return (
+      <ShellCenterPane message="No base map available. Enable at least one map-capable analytic to see the map." />
+    )
+  }
+
+  const shellProps: MapShellContentBaseProps = {
+    mapShellView,
+    futureTurnOffset,
+    planetLabelOptions,
+    onPlanetLabelOptionsChange,
+    onMapZoomChange,
+    onSetZoomReady,
+  }
+
+  if (isStellarCartographyMapEnabled(enabledMapIds)) {
+    return <MapShellContentWithCartography {...shellProps} analyticScope={analyticScope} />
+  }
+
+  return <MapShellContent {...shellProps} cartography={undefined} />
+})
 
 export function MainArea({
   viewMode,
@@ -136,193 +210,46 @@ export function MainArea({
   turnEnsureError,
   turnBlockedNoLogin,
   connectionsMapParams,
+  futureTurnOffset,
   onMapZoomChange,
   onSetZoomReady,
 }: MainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
-
-  const enabledMapIds = useMemo(
-    () => enabledMapAnalyticIds(enabledAnalyticIds, analytics),
-    [enabledAnalyticIds, analytics]
-  )
-  const mapIds = useMemo(
-    () => (viewMode === 'map' ? mapIdsToFetch(analytics, enabledMapIds) : []),
-    [viewMode, analytics, enabledMapIds]
-  )
-
-  const cartographyLayerVisibility = useStellarCartographyLayersStore((s) => s.layers)
-  const wormholeDisplayMode = useStellarCartographyLayersStore((s) => s.wormholeDisplayMode)
-  const starClusterDisplayMode = useStellarCartographyLayersStore((s) => s.starClusterDisplayMode)
-  const neutronClusterDisplayMode = useStellarCartographyLayersStore(
-    (s) => s.neutronClusterDisplayMode
-  )
-  const cartographySettingsGates =
-    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
-    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
-
-  const mapQueries = useQueries({
-    queries: mapIds.map((analyticId) => {
-      if (analyticId === 'connections') {
-        const queryKey =
-          analyticScope != null
-            ? ([
-                'analytic',
-                'connections',
-                'map',
-                analyticScope.gameId,
-                analyticScope.turn,
-                analyticScope.perspective,
-                connectionsMapParams.warpSpeed,
-                connectionsMapParams.gravitonicMovement,
-                connectionsMapParams.flareMode,
-                connectionsMapParams.flareDepth,
-              ] as const)
-            : ([
-                'analytic',
-                'connections',
-                'map',
-                'idle',
-                0,
-                0,
-                connectionsMapParams.warpSpeed,
-                connectionsMapParams.gravitonicMovement,
-                connectionsMapParams.flareMode,
-                connectionsMapParams.flareDepth,
-              ] as const)
-        return {
-          queryKey,
-          queryFn: async ({ queryKey: qk }) => {
-            if (qk[3] === 'idle') {
-              return {
-                analyticId: 'connections',
-                nodes: [],
-                edges: [],
-                routes: [],
-              } satisfies MapDataResponse
-            }
-            const [, , , gameId, turn, perspective, warpSpeed, gravitonicMovement, flareMode, flareDepth] =
-              qk
-            const scope: AnalyticShellScope = {
-              gameId: String(gameId),
-              turn: Number(turn),
-              perspective: Number(perspective),
-            }
-            const params: ConnectionsMapParams = {
-              warpSpeed: Number(warpSpeed),
-              gravitonicMovement: Boolean(gravitonicMovement),
-              flareMode: flareMode as ConnectionsFlareMode,
-              flareDepth: Number(flareDepth) as ConnectionsMapParams['flareDepth'],
-            }
-            return fetchAnalyticMap('connections', scope, params)
-          },
-          enabled: analyticFetchEnabled,
-          placeholderData: undefined,
-          structuralSharing: false as const,
-        }
-      }
-      return {
-        queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
-        queryFn: () => fetchAnalyticMap(analyticId, analyticScope!, undefined),
-        enabled: analyticFetchEnabled,
-        structuralSharing: false as const,
-      }
-    }),
-  })
-  const pending = mapQueries.some((q) => q.isPending)
-  const hasError = mapQueries.some((q) => q.error)
-  const mapQueriesStateSignature = mapQueries
-    .map((q) => `${q.dataUpdatedAt}:${q.fetchStatus}:${q.status}`)
-    .join('|')
-  const liveConnectionsParams =
-    mapIds.includes('connections') && analyticFetchEnabled ? connectionsMapParams : null
-  const mapIdsKey = mapIds.join('\0')
-  const includesStellarCartography = mapIds.includes('stellar-cartography')
-  const combined = useMemo(
-    () =>
-      combineMapData(
-        mapIds,
-        mapQueries.map((q) => ({ data: q.data })),
-        includesStellarCartography
-          ? {
-              liveConnectionsParams,
-              stellarCartography: {
-                layerVisibility: cartographyLayerVisibility,
-                settingsGates: cartographySettingsGates,
-                wormholeDisplayMode,
-                starClusterDisplayMode,
-                neutronClusterDisplayMode,
-              },
-            }
-          : { liveConnectionsParams }
-      ),
-    [
-      mapIdsKey,
-      mapQueriesStateSignature,
-      liveConnectionsParams,
-      analyticFetchEnabled,
-      includesStellarCartography,
-      connectionsMapParams.flareMode,
-      connectionsMapParams.warpSpeed,
-      connectionsMapParams.gravitonicMovement,
-      connectionsMapParams.flareDepth,
-      cartographyLayerVisibility,
-      cartographySettingsGates,
-      wormholeDisplayMode,
-      starClusterDisplayMode,
-      neutronClusterDisplayMode,
-    ]
-  )
-  const hasAnyData = mapQueries.some((q) => q.data != null)
-
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
     DEFAULT_PLANET_LABEL_OPTIONS
   )
 
   if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Enable at least one analytic in the left bar.
-      </main>
-    )
+    return <ShellCenterPane message="Enable at least one analytic in the left bar." />
   }
 
   if (analyticScope != null && turnBlockedNoLogin) {
     return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Set login name in the header to load turn data for analytics.
-      </main>
-    )
-  }
-
-  if (analyticScope != null && !turnDataReady && turnEnsurePending) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Loading turn data…
-      </main>
+      <ShellCenterPane message="Set login name in the header to load turn data for analytics." />
     )
   }
 
   if (analyticScope != null && !turnDataReady && turnEnsureIsError) {
-    const detail =
-      turnEnsureError instanceof Error
-        ? turnEnsureError.message
-        : turnEnsureError != null
-          ? String(turnEnsureError)
-          : 'Unknown error'
     return (
-      <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
-        <p className="text-center font-medium">Failed to load turn data</p>
-        <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
-          {detail}
-        </p>
-        <p className="text-center text-sm text-gray-500">
-          See the error bar, or try another turn or viewpoint.
-        </p>
-      </main>
+      <ShellErrorPane
+        title="Failed to load turn data"
+        error={turnEnsureError}
+        footer="See the error bar, or try another turn or viewpoint."
+      />
     )
   }
 
+  const turnEnsureLoading = deriveTurnEnsureLoadingView({
+    hasAnalyticScope: analyticScope != null,
+    turnDataReady,
+    turnEnsurePending,
+  })
+
   if (viewMode === 'tabular') {
+    if (turnEnsureLoading.show) {
+      return <ShellCenterPane message={turnEnsureLoading.loadingMessage} />
+    }
+
     return (
       <main className="flex flex-1 flex-col gap-4 overflow-auto bg-black p-4">
         {enabledAnalyticIds.map((id) => (
@@ -344,100 +271,19 @@ export function MainArea({
     )
   }
 
-  if (viewMode === 'map' && analyticScope == null) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Load game info and choose a turn and viewpoint to load the map.
-      </main>
-    )
-  }
-
-  if (viewMode === 'map' && mapIds.length === 0) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        No base map available. Enable at least one map-capable analytic to see the map.
-      </main>
-    )
-  }
-  // Only show loading when we have no data yet (initial load). While adding another analytic,
-  // keep rendering the map with current data so React Flow stays mounted and viewport is preserved.
-  if (!hasAnyData && pending) {
-    return (
-      <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
-        Loading map…
-      </main>
-    )
-  }
-  if (hasError && !hasAnyData) {
-    const firstErr = mapQueries.find((q) => q.error)?.error
-    const detail =
-      firstErr instanceof Error
-        ? firstErr.message
-        : firstErr != null
-          ? String(firstErr)
-          : 'Failed to load map data'
-    return (
-      <main className="flex max-w-3xl flex-1 flex-col items-center justify-center gap-2 bg-black p-8 text-red-400">
-        <p className="text-center font-medium">Failed to load map data</p>
-        <p className="whitespace-pre-wrap break-words text-left text-sm text-red-300/90">
-          {detail}
-        </p>
-      </main>
-    )
-  }
-
   return (
-    <main className="flex min-h-0 flex-1 flex-col bg-black">
-      <DeferredPendingMessage pending={pending} />
-      <MapPaneWithDisplayControls
-        controls={
-          <PlanetMapInfoControls value={planetLabelOptions} onChange={setPlanetLabelOptions} />
-        }
-      >
-        <MapGraph
-          data={combined}
-          className="h-full w-full min-h-0"
-          onMapZoomChange={onMapZoomChange}
-          onSetZoomReady={onSetZoomReady}
-          planetLabelOptions={planetLabelOptions}
-          stellarCartography={{
-            layerVisibility: cartographyLayerVisibility,
-            settingsGates: cartographySettingsGates,
-            wormholeDisplayMode,
-            starClusterDisplayMode,
-            neutronClusterDisplayMode,
-            sampleEnabled: enabledMapIds.includes('stellar-cartography'),
-            analyticScope,
-          }}
-        />
-      </MapPaneWithDisplayControls>
-    </main>
-  )
-}
-
-/** Shows "Loading additional map data…" only after a short delay so it doesn't flash on first map load. */
-function DeferredPendingMessage({ pending }: { pending: boolean }) {
-  const [show, setShow] = useState(false)
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
-
-    if (pending) {
-      timeoutId = setTimeout(() => setShow(true), 400)
-    } else {
-      // Reset `show` when no longer pending so a future pending state is delayed again.
-      setShow(false)
-    }
-
-    return () => {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId)
-      }
-    }
-  }, [pending])
-  if (!pending || !show) return null
-  return (
-    <p className="shrink-0 bg-black px-4 py-1 text-sm text-gray-400">
-      Loading additional map data…
-    </p>
+    <MapMainArea
+      enabledAnalyticIds={enabledAnalyticIds}
+      analytics={analytics}
+      analyticScope={analyticScope}
+      turnDataReady={turnDataReady}
+      turnEnsurePending={turnEnsurePending}
+      connectionsMapParams={connectionsMapParams}
+      futureTurnOffset={futureTurnOffset}
+      planetLabelOptions={planetLabelOptions}
+      onPlanetLabelOptionsChange={setPlanetLabelOptions}
+      onMapZoomChange={onMapZoomChange}
+      onSetZoomReady={onSetZoomReady}
+    />
   )
 }

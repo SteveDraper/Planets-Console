@@ -1,5 +1,8 @@
-import type { StellarCartographyOverlayRadialGradient } from '../../lib/cartography/stellarCartographyOverlay'
-import type { StellarCartographyOverlayPaneShapes } from '../../lib/cartography/stellarCartographyOverlay'
+import type {
+  StellarCartographyOverlayPaneShapes,
+  StellarCartographyOverlayRadialGradient,
+} from '../../lib/cartography/stellarCartographyOverlay'
+import { BlackHoleOverlay } from './BlackHoleVectorOverlay'
 import {
   ionStormCloudPaneShapeToRasterField,
   nebulaCloudPaneShapeToRasterField,
@@ -34,15 +37,70 @@ function StellarCartographyRadialGradientDef({
   )
 }
 
+function GradientAnnulusOverlay({
+  cx,
+  cy,
+  coreR,
+  bandR,
+  coreFill,
+  coreStroke,
+  coreGradient,
+  bandFill,
+  bandStroke,
+  strokeWidth,
+  bandGradient,
+}: {
+  cx: number
+  cy: number
+  coreR: number
+  bandR: number
+  coreFill: string
+  coreStroke?: string
+  coreGradient?: StellarCartographyOverlayRadialGradient
+  bandFill: string
+  bandStroke: string
+  strokeWidth: number
+  bandGradient?: StellarCartographyOverlayRadialGradient
+}) {
+  return (
+    <g>
+      {(bandGradient != null || coreGradient != null) && (
+        <defs>
+          {bandGradient != null && (
+            <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
+          )}
+          {coreGradient != null && (
+            <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
+          )}
+        </defs>
+      )}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={bandR}
+        fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
+        stroke={bandStroke}
+        strokeWidth={strokeWidth}
+      />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={coreR}
+        fill={coreGradient != null ? `url(#${coreGradient.id})` : coreFill}
+        stroke={coreStroke ?? 'none'}
+        strokeWidth={coreStroke != null ? strokeWidth : 0}
+      />
+    </g>
+  )
+}
+
 export function StellarCartographyVectorOverlay({
   shapes,
   width,
   height,
 }: {
-  shapes: Pick<
-    StellarCartographyOverlayPaneShapes,
-    'nebulaClouds' | 'ionStormClouds' | 'neutronFluxClouds' | 'circles' | 'annuli' | 'debrisDiskBorders' | 'arrows'
-  >
+  /** Full overlay shape set; wormhole markers render separately in WormholeEndpointMarkers. */
+  shapes: StellarCartographyOverlayPaneShapes
   width: number
   height: number
 }) {
@@ -74,51 +132,12 @@ export function StellarCartographyVectorOverlay({
           />
         </g>
       ))}
-      {shapes.annuli.map(
-        ({
-          key,
-          cx,
-          cy,
-          coreR,
-          bandR,
-          coreFill,
-          coreStroke,
-          coreGradient,
-          bandFill,
-          bandStroke,
-          strokeWidth,
-          bandGradient,
-        }) => (
-          <g key={key}>
-            {(bandGradient != null || coreGradient != null) && (
-              <defs>
-                {bandGradient != null && (
-                  <StellarCartographyRadialGradientDef gradient={bandGradient} variant="band" />
-                )}
-                {coreGradient != null && (
-                  <StellarCartographyRadialGradientDef gradient={coreGradient} variant="core" />
-                )}
-              </defs>
-            )}
-            <circle
-              cx={cx}
-              cy={cy}
-              r={bandR}
-              fill={bandGradient != null ? `url(#${bandGradient.id})` : bandFill}
-              stroke={bandStroke}
-              strokeWidth={strokeWidth}
-            />
-            <circle
-              cx={cx}
-              cy={cy}
-              r={coreR}
-              fill={coreGradient != null ? `url(#${coreGradient.id})` : coreFill}
-              stroke={coreStroke ?? 'none'}
-              strokeWidth={coreStroke != null ? strokeWidth : 0}
-            />
-          </g>
-        )
-      )}
+      {shapes.blackHoles.map((shape) => (
+        <BlackHoleOverlay key={shape.key} shape={shape} />
+      ))}
+      {shapes.annuli.map(({ key, ...annulus }) => (
+        <GradientAnnulusOverlay key={key} {...annulus} />
+      ))}
       {shapes.debrisDiskBorders.map(({ key, cx, cy, r, fill, stroke, strokeWidth }) => (
         <circle
           key={key}
