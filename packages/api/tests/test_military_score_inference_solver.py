@@ -1,7 +1,141 @@
-"""Smoke tests for OR-Tools CP-SAT availability (military score inference dependency)."""
+"""Tests for the military score inference CP-SAT solver."""
+
+from api.analytics.military_score_inference.models import (
+    CandidateAction,
+    InferenceObservation,
+    InferenceProblem,
+    InferenceSolutionAction,
+)
+from api.analytics.military_score_inference.scoring import (
+    LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
+    STARBASE_FIGHTER_SCORE_DELTA_2X,
+)
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_INVALID_PROBLEM,
+    STATUS_NO_EXACT_SOLUTION,
+    solve_inference_problem,
+)
 
 
-def test_cp_model_imports():
-    from ortools.sat.python import cp_model
+def _observation(
+    *,
+    military_delta_2x: int = 0,
+    warship_delta: int = 0,
+    freighter_delta: int = 0,
+    priority_point_delta: int = 0,
+    starbases_owned: int = 3,
+) -> InferenceObservation:
+    return InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=military_delta_2x,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        priority_point_delta=priority_point_delta,
+        starbases_owned=starbases_owned,
+        is_after_ship_limit=False,
+    )
 
-    assert cp_model.CpModel is not None
+
+def _problem(
+    observation: InferenceObservation,
+    *actions: CandidateAction,
+) -> InferenceProblem:
+    return InferenceProblem(
+        observation=observation,
+        actions=actions,
+        probability_buckets_by_action_id={},
+    )
+
+
+def test_cp_model_available_via_solver_module():
+    from api.analytics.military_score_inference import solver as inference_solver
+
+    assert inference_solver.cp_model.CpModel is not None
+
+
+def test_solve_exact_positive_action_solution():
+    build_warship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=400,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    result = solve_inference_problem(
+        _problem(_observation(military_delta_2x=400, warship_delta=1), build_warship)
+    )
+
+    assert result.status == STATUS_EXACT
+    assert result.solutions[0].actions == (
+        InferenceSolutionAction(
+            action_id="build_rush",
+            label="Build Rush",
+            count=1,
+        ),
+    )
+    assert result.solutions[0].objective_value == 100
+
+
+def test_solve_solution_with_negative_action_contribution():
+    load_fighters = CandidateAction(
+        id="load_fighters",
+        label="Load ship fighters",
+        score_delta_2x=LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    transfer_to_starbase = CandidateAction(
+        id="transfer_to_starbase",
+        label="Transfer fighters ship to starbase",
+        score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
+        upper_bound=1,
+        probability_weight=10,
+    )
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=125),
+            load_fighters,
+            transfer_to_starbase,
+        )
+    )
+
+    assert result.status == STATUS_EXACT
+    counts = {action.action_id: action.count for action in result.solutions[0].actions}
+    assert counts["load_fighters"] == 1
+    assert counts["transfer_to_starbase"] == 1
+
+
+def test_solve_infeasible_problem_returns_no_exact_solution():
+    build_warship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=400,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=1,
+    )
+    result = solve_inference_problem(
+        _problem(_observation(military_delta_2x=401, warship_delta=1), build_warship)
+    )
+
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.solutions == ()
+
+
+def test_solve_invalid_problem_with_bad_action_bounds():
+    invalid_action = CandidateAction(
+        id="planet_defense_posts",
+        label="Planet defense posts",
+        score_delta_2x=11,
+        lower_bound=5,
+        upper_bound=2,
+    )
+    result = solve_inference_problem(_problem(_observation(military_delta_2x=11), invalid_action))
+
+    assert result.status == STATUS_INVALID_PROBLEM
+    assert result.solutions == ()
+    assert "lower_bound" in str(result.diagnostics["reason"])
