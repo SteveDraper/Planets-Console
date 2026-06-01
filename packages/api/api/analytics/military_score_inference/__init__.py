@@ -1,5 +1,12 @@
 """Military score build inference (internal to the scores analytic)."""
 
+from api.analytics.military_score_inference.actions import (
+    ActionCatalog,
+    ActionCatalogConfig,
+    build_action_catalog,
+    build_action_catalog_from_turn,
+    build_inference_problem,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -39,6 +46,8 @@ __all__ = [
     "STATUS_INVALID_PROBLEM",
     "STATUS_NO_EXACT_SOLUTION",
     "STATUS_TIME_LIMITED",
+    "ActionCatalog",
+    "ActionCatalogConfig",
     "CandidateAction",
     "InferenceObservation",
     "InferenceProblem",
@@ -46,6 +55,9 @@ __all__ = [
     "InferenceSolution",
     "InferenceSolutionAction",
     "ProbabilityBucket",
+    "build_action_catalog",
+    "build_action_catalog_from_turn",
+    "build_inference_problem",
     "construction_value",
     "loaded_ship_fighter_score_delta_2x",
     "loaded_ship_torpedo_score_delta_2x",
