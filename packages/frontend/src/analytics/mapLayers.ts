@@ -14,13 +14,17 @@ import { BASE_MAP_ANALYTIC_ID } from './mapAnalyticIds'
 export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
+  /**
+   * Stellar Cartography merge only: extrapolate ion storm overlay positions for turns
+   * beyond the latest stored game turn.
+   */
+  stellarCartographyFutureTurnOffset?: number
 }
 
 export function combineMapData(
   analyticIds: readonly string[],
   results: { data?: MapDataResponse }[],
-  options: CombineMapDataOptionsBase,
-  futureTurnOffset = 0
+  options: CombineMapDataOptionsBase
 ): CombinedMapData {
   const baseMapAnalyticId = analyticIds.find((id) => id === BASE_MAP_ANALYTIC_ID) ?? null
   const nodes: CombinedMapData['nodes'] = []
@@ -35,7 +39,6 @@ export function combineMapData(
     wormholeUnknownEntrances,
     waypointsByKey: new Map<string, { x: number; y: number }>(),
     nuIonStorms: undefined,
-    futureTurnOffset,
   }
   results.forEach((result, idx) => {
     const data = result.data

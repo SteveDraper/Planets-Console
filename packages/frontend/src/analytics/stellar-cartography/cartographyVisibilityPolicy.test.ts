@@ -127,6 +127,58 @@ describe('cartographyVisibilityPolicy', () => {
     })
   })
 
+  describe('mapFrameParts', () => {
+    const wormholeNode = {
+      id: 'stellar-cartography:wh-1',
+      label: '',
+      x: 10,
+      y: 20,
+    }
+    const planetNode = { id: 'base-map:1', label: 'A', x: 0, y: 0 }
+    const wormholeEdge = {
+      source: 'stellar-cartography:wh-1',
+      target: 'stellar-cartography:wh-2',
+      layer: 'wormholes' as const,
+    }
+
+    it('omits wormhole nodes and artifacts when wormholes are off', () => {
+      const data = {
+        nodes: [planetNode, wormholeNode],
+        edges: [wormholeEdge],
+        routeWaypoints: [],
+        overlayCircles: [],
+        wormholeUnknownEntrances: [{ x: 50, y: 60 }],
+      }
+      const policy = cartographyVisibilityPolicy({
+        ...baseConfig,
+        wormholeDisplayMode: 'off',
+      })
+      const parts = policy.mapFrameParts(data)
+
+      expect(parts.nodes.map((n) => n.id)).toEqual(['base-map:1'])
+      expect(parts.baseEdges).toEqual([])
+      expect(parts.wormholeUnknownEntrances).toEqual([])
+      expect(parts.wormholeEndpoints).toEqual([])
+      expect(parts.wormholeEndpointHoverByCell.size).toBe(0)
+    })
+
+    it('keeps wormhole routing data in the frame when wormholes are shown', () => {
+      const data = {
+        nodes: [planetNode, wormholeNode],
+        edges: [wormholeEdge],
+        routeWaypoints: [],
+        overlayCircles: [],
+        wormholeUnknownEntrances: [{ x: 50, y: 60 }],
+      }
+      const parts = cartographyVisibilityPolicy(baseConfig).mapFrameParts(data)
+
+      expect(parts.nodes).toHaveLength(2)
+      expect(parts.baseEdges).toEqual([wormholeEdge])
+      expect(parts.wormholeUnknownEntrances).toEqual([{ x: 50, y: 60 }])
+      expect(parts.wormholeEndpoints.length).toBeGreaterThan(0)
+    })
+  })
+
   describe('areWormholesShown', () => {
     it('returns false when wormhole display mode is off', () => {
       expect(

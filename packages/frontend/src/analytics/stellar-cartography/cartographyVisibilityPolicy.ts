@@ -1,13 +1,31 @@
 import type {
+  CombinedMapData,
   MapEdge,
   StellarCartographyOverlayCircle,
   StellarCartographySampleEntry,
 } from '../../api/bff'
 import { isStellarCartographySampleLayerId } from '../../api/bff'
+import {
+  buildWormholeEndpointHoverIndex,
+  type WormholeEndpointHoverInfo,
+} from '../../lib/wormholeEndpointHover'
 import type { CartographyLayerId } from './layers'
 import { isCartographyLayerShown } from './layers'
+import {
+  collectWormholeEndpoints,
+  withoutCartographyNodes,
+} from './cartographyWormholeFrame'
 import type { StellarCartographyMapUiConfig } from './mapUiConfig'
 import { filterWormholeEdgesForDisplayMode } from './wormholeDisplayMode'
+
+/** Static map frame fields derived from combined map data (before hover-sensitive edge filtering). */
+export type CartographyMapFrameParts = {
+  nodes: CombinedMapData['nodes']
+  baseEdges: MapEdge[]
+  wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
+  wormholeEndpoints: { x: number; y: number }[]
+  wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
+}
 
 /** Visibility and filtering rules shared by map rendering and hover sampling. */
 export type CartographyVisibilityPolicy = {
@@ -19,7 +37,19 @@ export type CartographyVisibilityPolicy = {
     entries: readonly StellarCartographySampleEntry[]
   ) => StellarCartographySampleEntry[]
   areWormholesShown: () => boolean
+  mapFrameParts: (data: CombinedMapData) => CartographyMapFrameParts
   mapEdges: (edges: readonly MapEdge[], wormholeLineRevealKey: string | null) => MapEdge[]
+}
+
+function hiddenWormholeFrameParts(data: CombinedMapData): CartographyMapFrameParts {
+  const nodes = withoutCartographyNodes(data.nodes)
+  return {
+    nodes,
+    baseEdges: data.edges.filter((edge) => edge.layer !== 'wormholes'),
+    wormholeUnknownEntrances: [],
+    wormholeEndpoints: [],
+    wormholeEndpointHoverByCell: new Map(),
+  }
 }
 
 /** Used when Stellar Cartography is not enabled on the map. */
@@ -28,6 +58,7 @@ export const cartographyDisabledPolicy: CartographyVisibilityPolicy = {
   overlayCircles: () => [],
   sampleEntries: () => [],
   areWormholesShown: () => false,
+  mapFrameParts: (data) => hiddenWormholeFrameParts(data),
   mapEdges: (edges) => edges.filter((edge) => edge.layer !== 'wormholes'),
 }
 
@@ -52,6 +83,22 @@ export function cartographyVisibilityPolicy(
           isStellarCartographySampleLayerId(entry.layer) && isLayerShown(entry.layer)
       ),
     areWormholesShown: () => isLayerShown('wormholes'),
+    mapFrameParts: (data) => {
+      if (!isLayerShown('wormholes')) {
+        return hiddenWormholeFrameParts(data)
+      }
+      const nodes = data.nodes
+      return {
+        nodes,
+        baseEdges: [...data.edges],
+        wormholeUnknownEntrances: data.wormholeUnknownEntrances,
+        wormholeEndpoints: collectWormholeEndpoints(nodes, data.wormholeUnknownEntrances),
+        wormholeEndpointHoverByCell: buildWormholeEndpointHoverIndex(
+          data.edges,
+          data.wormholeUnknownEntrances
+        ),
+      }
+    },
     mapEdges: (edges, wormholeLineRevealKey) => {
       if (!isLayerShown('wormholes')) {
         return edges.filter((edge) => edge.layer !== 'wormholes')

@@ -3,7 +3,8 @@ import type { MapAnalyticRegistration } from '../mapAnalyticRegistry'
 import { appendStellarCartographyMapLayer } from './mapLayer'
 
 export const stellarCartographyMapAnalytic: MapAnalyticRegistration = {
-  mergeLayer(data, context) {
+  requiresLiveMapContext: true,
+  mergeLayer(data, context, options) {
     if (data.meta?.nuIonStorms != null) {
       context.nuIonStorms = data.meta.nuIonStorms
     }
@@ -14,12 +15,11 @@ export const stellarCartographyMapAnalytic: MapAnalyticRegistration = {
       overlayCircles: context.overlayCircles,
       wormholeUnknownEntrances: context.wormholeUnknownEntrances,
     })
-    if (context.futureTurnOffset > 0) {
-      const shifted = applyFutureIonStormOverlayPositions(
-        context.overlayCircles,
-        context.futureTurnOffset
-      )
-      context.overlayCircles.splice(0, context.overlayCircles.length, ...shifted)
+    const forwardTurns = options.stellarCartographyFutureTurnOffset ?? 0
+    if (forwardTurns > 0) {
+      const shifted = applyFutureIonStormOverlayPositions(context.overlayCircles, forwardTurns)
+      context.overlayCircles.length = 0
+      context.overlayCircles.push(...shifted)
     }
   },
 }

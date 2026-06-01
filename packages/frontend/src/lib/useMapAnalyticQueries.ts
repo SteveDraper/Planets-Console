@@ -13,7 +13,7 @@ import {
   type MapAnalyticQueryContext,
 } from '../analytics/mapAnalyticRegistry'
 import {
-  combineMapResultsFromQueries,
+  combineMapDataFromAnalyticQueries,
   enabledMapAnalyticIds,
   mapIdsToFetch,
 } from './mapAnalyticQueryPlan'
@@ -74,12 +74,10 @@ export function useMapAnalyticQueries({
   const combineMapQueries = useCallback(
     (results: UseQueryResult<MapDataResponse, Error>[]) => ({
       mapQueries: results,
-      combined: combineMapResultsFromQueries(
-        mapIds,
-        results.map((q) => q.data),
-        mergeOptions,
-        futureTurnOffset
-      ),
+      combined: combineMapDataFromAnalyticQueries(mapIds, results.map((q) => q.data), {
+        liveConnectionsParams: mergeOptions.liveConnectionsParams,
+        futureTurnOffset,
+      }),
       pending: results.some((q) => q.isPending),
       hasError: results.some((q) => q.isError),
       hasAnyData: results.some((q) => q.data != null),

@@ -10,8 +10,10 @@ import {
   defaultMapAnalyticRegistration,
   defaultMapAnalyticQuerySpec,
   defaultMapLayerMerger,
+  enabledMapIdsRequireLiveMapContext,
   mapAnalyticQuerySpecFor,
   mapAnalyticRegistrationFor,
+  mapAnalyticRequiresLiveMapContext,
   REGISTERED_MAP_ANALYTIC_IDS,
   isRegisteredMapAnalytic,
 } from './mapAnalyticRegistry'
@@ -81,6 +83,12 @@ describe('map analytic registry', () => {
   it('wires stellar cartography to the default query spec and custom merger', () => {
     const registration = mapAnalyticRegistrationFor(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
     expect(registration).toBe(stellarCartographyMapAnalytic)
+    expect(registration.requiresLiveMapContext).toBe(true)
+    expect(mapAnalyticRequiresLiveMapContext(STELLAR_CARTOGRAPHY_ANALYTIC_ID)).toBe(true)
+    expect(mapAnalyticRequiresLiveMapContext(CONNECTIONS_ANALYTIC_ID)).toBe(false)
+    expect(
+      enabledMapIdsRequireLiveMapContext([CONNECTIONS_ANALYTIC_ID, STELLAR_CARTOGRAPHY_ANALYTIC_ID])
+    ).toBe(true)
     expect(registration.buildQuerySpec).toBeUndefined()
     expect(registration.mergeLayer).not.toBe(defaultMapLayerMerger)
 

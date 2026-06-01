@@ -6,7 +6,7 @@ import type {
   AnalyticShellScope,
   ConnectionsMapParams,
 } from '../api/bff'
-import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import { enabledMapIdsRequireLiveMapContext } from '../analytics/mapAnalyticRegistry'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
@@ -115,8 +115,8 @@ type MapMainAreaProps = {
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
 
-/** Subscribes to live cartography layer store while Stellar Cartography is enabled on the map. */
-function MapShellContentWithCartography({
+/** Subscribes to live map context for analytics registered with requiresLiveMapContext. */
+function MapShellContentWithLiveContext({
   analyticScope,
   ...props
 }: MapShellContentProps & { analyticScope: AnalyticShellScope }) {
@@ -190,8 +190,8 @@ const MapMainArea = memo(function MapMainArea({
     onSetZoomReady,
   }
 
-  if (enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)) {
-    return <MapShellContentWithCartography {...shellProps} analyticScope={analyticScope} />
+  if (enabledMapIdsRequireLiveMapContext(enabledMapIds)) {
+    return <MapShellContentWithLiveContext {...shellProps} analyticScope={analyticScope} />
   }
 
   return <MapShellContent {...shellProps} />

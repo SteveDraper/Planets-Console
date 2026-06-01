@@ -35,8 +35,6 @@ export type MapLayerMergeContext = {
   wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
   waypointsByKey: Map<string, { x: number; y: number }>
   nuIonStorms: boolean | undefined
-  /** Turns beyond latest stored game turn; Stellar Cartography merge extrapolates ion storms. */
-  futureTurnOffset: number
 }
 
 export type MapLayerMerger = (
@@ -53,6 +51,8 @@ export type MapLayerMerger = (
 export type MapAnalyticRegistration = {
   buildQuerySpec?: (context: MapAnalyticQueryContext) => MapAnalyticQuerySpec
   mergeLayer: MapLayerMerger
+  /** When true, map shell must mount live UI context (e.g. layer store subscriptions) for this analytic. */
+  requiresLiveMapContext?: boolean
 }
 
 function prefixMapNodes(
@@ -119,8 +119,20 @@ export function isRegisteredMapAnalytic(analyticId: string): analyticId is Regis
   return (REGISTERED_MAP_ANALYTIC_IDS as readonly string[]).includes(analyticId)
 }
 
+/**
+ * Unregistered map-capable analytics use default fetch + prefix merge (forward-compat).
+ * Prefer an explicit registry entry so query keys and merge behavior stay intentional.
+ */
 export function mapAnalyticRegistrationFor(analyticId: string): MapAnalyticRegistration {
   return mapAnalyticRegistry[analyticId] ?? defaultMapAnalyticRegistration
+}
+
+export function mapAnalyticRequiresLiveMapContext(analyticId: string): boolean {
+  return mapAnalyticRegistrationFor(analyticId).requiresLiveMapContext === true
+}
+
+export function enabledMapIdsRequireLiveMapContext(enabledMapIds: readonly string[]): boolean {
+  return enabledMapIds.some(mapAnalyticRequiresLiveMapContext)
 }
 
 export function mapLayerMergerFor(analyticId: string): MapLayerMerger {

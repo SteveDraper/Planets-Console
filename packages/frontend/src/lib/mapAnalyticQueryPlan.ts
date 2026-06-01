@@ -1,4 +1,9 @@
-import type { AnalyticItem, CombinedMapData, MapDataResponse } from '../api/bff'
+import type {
+  AnalyticItem,
+  CombinedMapData,
+  ConnectionsMapParams,
+  MapDataResponse,
+} from '../api/bff'
 import { BASE_MAP_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import {
   combineMapData,
@@ -30,17 +35,24 @@ export function mapIdsToFetch(analytics: AnalyticItem[], enabledMapIds: string[]
   return base ? [base, ...withoutBase] : withoutBase
 }
 
-/** Merges per-analytic map payloads in fetch order. */
-export function combineMapResultsFromQueries(
+export type CombineMapDataFromQueriesInput = {
+  liveConnectionsParams: ConnectionsMapParams | null
+  futureTurnOffset: number
+}
+
+/** Builds merge options and combines per-analytic map query results in fetch order. */
+export function combineMapDataFromAnalyticQueries(
   mapIds: readonly string[],
   mapQueryData: readonly (MapDataResponse | undefined)[],
-  mergeOptions: CombineMapDataOptionsBase,
-  futureTurnOffset = 0
+  input: CombineMapDataFromQueriesInput
 ): CombinedMapData {
+  const mergeOptions: CombineMapDataOptionsBase = {
+    liveConnectionsParams: input.liveConnectionsParams,
+    stellarCartographyFutureTurnOffset: input.futureTurnOffset,
+  }
   return combineMapData(
     mapIds,
     mapQueryData.map((data) => ({ data })),
-    mergeOptions,
-    futureTurnOffset
+    mergeOptions
   )
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  combineMapResultsFromQueries,
+  combineMapDataFromAnalyticQueries,
   enabledMapAnalyticIds,
   mapIdsToFetch,
   resolveBaseMapAnalyticId,
@@ -15,9 +15,9 @@ import {
   sampleScope,
 } from './mapAnalyticQueryTestFixtures'
 
-describe('combineMapResultsFromQueries', () => {
+describe('combineMapDataFromAnalyticQueries', () => {
   it('merges map payloads in analytic id order', () => {
-    const combined = combineMapResultsFromQueries(
+    const combined = combineMapDataFromAnalyticQueries(
       ['base-map', 'connections'],
       [
         {
@@ -32,8 +32,7 @@ describe('combineMapResultsFromQueries', () => {
           routes: [],
         },
       ],
-      { liveConnectionsParams: null },
-      0
+      { liveConnectionsParams: null, futureTurnOffset: 0 }
     )
     expect(combined.nodes).toHaveLength(1)
     expect(combined.nodes[0].id).toBe('base-map:1')

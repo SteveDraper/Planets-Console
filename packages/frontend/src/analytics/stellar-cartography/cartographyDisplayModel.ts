@@ -1,12 +1,13 @@
 import type { CombinedMapData, MapEdge } from '../../api/bff'
-import { STELLAR_CARTOGRAPHY_NODE_ID_PREFIX } from '../mapAnalyticIds'
-import {
-  buildWormholeEndpointHoverIndex,
-  type WormholeEndpointHoverInfo,
-} from '../../lib/wormholeEndpointHover'
+import type { WormholeEndpointHoverInfo } from '../../lib/wormholeEndpointHover'
 import type { StellarCartographyMapContext } from './mapUiConfig'
 import type { CartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
 import { cartographyFramePolicy } from './cartographyVisibilityPolicy'
+
+export {
+  collectWormholeEndpoints,
+  withoutCartographyNodes,
+} from './cartographyWormholeFrame'
 
 /** Static display frame from combined map data; mount cartography UI when {@link StellarCartographyMapContext} is passed. */
 export type CartographyMapFrame = {
@@ -19,33 +20,6 @@ export type CartographyMapFrame = {
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
 }
 
-export function collectWormholeEndpoints(
-  nodes: CombinedMapData['nodes'],
-  unknownEntrances: CombinedMapData['wormholeUnknownEntrances']
-): { x: number; y: number }[] {
-  const seen = new Set<string>()
-  const endpoints: { x: number; y: number }[] = []
-  const add = (x: number, y: number) => {
-    const key = `${x},${y}`
-    if (seen.has(key)) return
-    seen.add(key)
-    endpoints.push({ x, y })
-  }
-  for (const node of nodes) {
-    if (node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_ID_PREFIX)) {
-      add(Number(node.x), Number(node.y))
-    }
-  }
-  for (const entrance of unknownEntrances) {
-    add(entrance.x, entrance.y)
-  }
-  return endpoints
-}
-
-function withoutCartographyNodes(nodes: CombinedMapData['nodes']): CombinedMapData['nodes'] {
-  return nodes.filter((node) => !node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_ID_PREFIX))
-}
-
 /**
  * Static cartography map frame from combined map data and UI config.
  * Does not apply hover-sensitive wormhole line filtering; use {@link cartographyMapEdges} for that.
@@ -55,22 +29,9 @@ export function buildCartographyMapFrame(
   cartography: StellarCartographyMapContext | undefined
 ): CartographyMapFrame {
   const policy = cartographyFramePolicy(cartography)
-  const overlayCircles = policy.overlayCircles(data.overlayCircles)
-  const wormholesShown = policy.areWormholesShown()
-  const nodes = wormholesShown ? data.nodes : withoutCartographyNodes(data.nodes)
-  const baseEdges = wormholesShown ? [...data.edges] : policy.mapEdges(data.edges, null)
-
   return {
-    nodes,
-    baseEdges,
-    overlayCircles,
-    wormholeUnknownEntrances: wormholesShown ? data.wormholeUnknownEntrances : [],
-    wormholeEndpoints: wormholesShown
-      ? collectWormholeEndpoints(nodes, data.wormholeUnknownEntrances)
-      : [],
-    wormholeEndpointHoverByCell: wormholesShown
-      ? buildWormholeEndpointHoverIndex(data.edges, data.wormholeUnknownEntrances)
-      : new Map(),
+    ...policy.mapFrameParts(data),
+    overlayCircles: policy.overlayCircles(data.overlayCircles),
   }
 }
 

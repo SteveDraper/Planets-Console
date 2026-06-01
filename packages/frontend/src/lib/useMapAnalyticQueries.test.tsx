@@ -303,6 +303,8 @@ describe('useMapAnalyticQueries', () => {
       expect(result.current.combined.overlayCircles[0]?.y).toBe(250)
       expect(circleAtZero?.y).toBe(200)
     })
-    expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[3]).toBe(2)
+    expect(vi.mocked(combineMapData).mock.calls.at(-1)?.[2]).toMatchObject({
+      stellarCartographyFutureTurnOffset: 2,
+    })
   })
 })

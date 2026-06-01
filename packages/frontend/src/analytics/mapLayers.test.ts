@@ -236,7 +236,8 @@ describe('combineMapData', () => {
 
     const combined = combineMapData(['stellar-cartography'], [{ data: sc }], {
       liveConnectionsParams: null,
-    }, 2)
+      stellarCartographyFutureTurnOffset: 2,
+    })
 
     expect(combined.overlayCircles[0]).toMatchObject({ layer: 'nebulae', x: 1, y: 2 })
     expect(combined.overlayCircles[1]).toMatchObject({ layer: 'ion-storms', x: 100, y: 250 })
