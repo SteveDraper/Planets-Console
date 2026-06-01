@@ -7,10 +7,7 @@ import {
   defaultNeutronClusterDisplayMode,
   defaultStarClusterDisplayMode,
 } from './stellar-cartography/clusterOutlineDisplayMode'
-import {
-  areCartographyWormholesShown,
-  filterCartographyOverlayCircles,
-} from './stellar-cartography/overlayDisplayFilter'
+import { cartographyVisibilityPolicy } from './stellar-cartography/cartographyVisibilityPolicy'
 
 describe('combineMapData', () => {
   const baseMap: MapDataResponse = {
@@ -264,35 +261,32 @@ describe('cartography display filters (render-time)', () => {
   }
 
   it('hides overlay circles when layer visibility is off', () => {
-    const filtered = filterCartographyOverlayCircles(
-      [
-        {
-          layer: 'nebulae',
-          id: 'neb-1',
-          x: 1,
-          y: 2,
-          radius: 10,
-        },
-        {
-          layer: 'ion-storms',
-          id: 'is-1',
-          x: 3,
-          y: 4,
-          radius: 5,
-          voltage: 120,
-          class: 3,
-          heading: 90,
-          warp: 6,
-        },
-      ],
+    const filtered = cartographyVisibilityPolicy({
+      ...uiConfig,
+      layerVisibility: {
+        ...uiConfig.layerVisibility,
+        nebulae: false,
+      },
+    }).overlayCircles([
       {
-        ...uiConfig,
-        layerVisibility: {
-          ...uiConfig.layerVisibility,
-          nebulae: false,
-        },
-      }
-    )
+        layer: 'nebulae',
+        id: 'neb-1',
+        x: 1,
+        y: 2,
+        radius: 10,
+      },
+      {
+        layer: 'ion-storms',
+        id: 'is-1',
+        x: 3,
+        y: 4,
+        radius: 5,
+        voltage: 120,
+        class: 3,
+        heading: 90,
+        warp: 6,
+      },
+    ])
 
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.layer).toBe('ion-storms')
@@ -300,10 +294,10 @@ describe('cartography display filters (render-time)', () => {
 
   it('hides wormhole geometry at render time when display mode is off', () => {
     expect(
-      areCartographyWormholesShown({
+      cartographyVisibilityPolicy({
         ...uiConfig,
         wormholeDisplayMode: 'off',
-      })
+      }).areWormholesShown()
     ).toBe(false)
   })
 })

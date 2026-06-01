@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import {
-  isStellarCartographySampleLayerId,
+  fetchStellarCartographySample,
   type StellarCartographySampleEntry,
 } from '../../api/bff'
-import { fetchStellarCartographySample } from '../../api/bff'
 import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from './mapUiConfig'
-import { isCartographyLayerShown } from './layers'
-import { areCartographyWormholesShown } from './overlayDisplayFilter'
+import { cartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
 import { flowToMapCellIndices } from '../../lib/planetSpatialGrid'
 import { formatStellarCartographySampleLine } from './sampleTooltipFormat'
 
@@ -27,28 +25,18 @@ type StellarCartographyHoverPanelProps = {
   ) => { x: number; y: number } | null
 }
 
-function filterSampleEntries(
-  entries: StellarCartographySampleEntry[],
-  config: StellarCartographyMapUiConfig
-): StellarCartographySampleEntry[] {
-  return entries.filter(
-    (entry): entry is StellarCartographySampleEntry =>
-      isStellarCartographySampleLayerId(entry.layer) &&
-      isCartographyLayerShown(entry.layer, config)
-  )
-}
-
 /** Build stacked hover lines for all active cartography features at a map cell. */
 export function buildStellarCartographyHoverLines(
   entries: StellarCartographySampleEntry[],
   wormholeHoverLines: string[] | null,
   config: StellarCartographyMapUiConfig
 ): string[] {
-  const lines = filterSampleEntries(entries, config).map(formatStellarCartographySampleLine)
+  const policy = cartographyVisibilityPolicy(config)
+  const lines = policy.sampleEntries(entries).map(formatStellarCartographySampleLine)
   if (
     wormholeHoverLines != null &&
     wormholeHoverLines.length > 0 &&
-    areCartographyWormholesShown(config)
+    policy.areWormholesShown()
   ) {
     lines.push(...wormholeHoverLines)
   }
@@ -114,7 +102,7 @@ export function StellarCartographyHoverPanel({
       void fetchStellarCartographySample(cartography.analyticScope, mapX, mapY)
         .then((data) => {
           if (seq !== requestSeqRef.current) return
-          setEntries(filterSampleEntries(data.entries, cartography.config))
+          setEntries(cartographyVisibilityPolicy(cartography.config).sampleEntries(data.entries))
         })
         .catch(() => {
           if (seq !== requestSeqRef.current) return

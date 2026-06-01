@@ -4,22 +4,25 @@ import {
   buildWormholeEndpointHoverIndex,
   type WormholeEndpointHoverInfo,
 } from '../../lib/wormholeEndpointHover'
-import type { StellarCartographyMapContext } from './mapUiConfig'
-import {
-  areCartographyWormholesShown,
-  filterCartographyOverlayCircles,
-  filterWormholeEdgesForCartographyConfig,
-} from './overlayDisplayFilter'
+import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from './mapUiConfig'
+import { cartographyVisibilityPolicy } from './cartographyVisibilityPolicy'
 
-export type CartographyDisplayModel = {
+/** Static cartography map artifacts; wormhole line visibility is applied separately. */
+export type CartographyMapFrame = {
   /** When false, cartography overlay and hover UI should not mount. */
   cartographyEnabled: boolean
   nodes: CombinedMapData['nodes']
-  edges: MapEdge[]
+  /** Map edges before hover-sensitive wormhole line filtering. */
+  baseEdges: MapEdge[]
   overlayCircles: CombinedMapData['overlayCircles']
   wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
   wormholeEndpoints: { x: number; y: number }[]
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
+}
+
+/** Full display model including edge filtering (convenience for tests and one-shot callers). */
+export type CartographyDisplayModel = CartographyMapFrame & {
+  edges: MapEdge[]
 }
 
 export function collectWormholeEndpoints(
@@ -53,19 +56,77 @@ function withoutWormholeEdges(edges: readonly MapEdge[]): MapEdge[] {
   return edges.filter((edge) => edge.layer !== 'wormholes')
 }
 
-function emptyCartographyDisplayModel(
+function emptyCartographyMapFrame(
   nodes: CombinedMapData['nodes'],
-  edges: MapEdge[]
-): CartographyDisplayModel {
+  baseEdges: MapEdge[]
+): CartographyMapFrame {
   return {
     cartographyEnabled: false,
     nodes,
-    edges,
+    baseEdges,
     overlayCircles: [],
     wormholeUnknownEntrances: [],
     wormholeEndpoints: [],
     wormholeEndpointHoverByCell: new Map(),
   }
+}
+
+/**
+ * Static cartography map frame from combined map data and UI config.
+ * Does not apply hover-sensitive wormhole line filtering; use {@link cartographyMapEdges} for that.
+ */
+export function buildCartographyMapFrame(
+  data: CombinedMapData,
+  cartography: StellarCartographyMapContext | undefined
+): CartographyMapFrame {
+  if (cartography == null) {
+    return emptyCartographyMapFrame(
+      withoutCartographyNodes(data.nodes),
+      withoutWormholeEdges(data.edges)
+    )
+  }
+
+  const policy = cartographyVisibilityPolicy(cartography.config)
+  const overlayCircles = policy.overlayCircles(data.overlayCircles)
+
+  if (!policy.areWormholesShown()) {
+    return {
+      cartographyEnabled: true,
+      nodes: withoutCartographyNodes(data.nodes),
+      baseEdges: withoutWormholeEdges(data.edges),
+      overlayCircles,
+      wormholeUnknownEntrances: [],
+      wormholeEndpoints: [],
+      wormholeEndpointHoverByCell: new Map(),
+    }
+  }
+
+  const nodes = data.nodes
+  const wormholeUnknownEntrances = data.wormholeUnknownEntrances
+  return {
+    cartographyEnabled: true,
+    nodes,
+    baseEdges: [...data.edges],
+    overlayCircles,
+    wormholeUnknownEntrances,
+    wormholeEndpoints: collectWormholeEndpoints(nodes, wormholeUnknownEntrances),
+    wormholeEndpointHoverByCell: buildWormholeEndpointHoverIndex(
+      data.edges,
+      wormholeUnknownEntrances
+    ),
+  }
+}
+
+/** Applies visibility policy and optional wormhole hover reveal to a map frame's edges. */
+export function cartographyMapEdges(
+  frame: CartographyMapFrame,
+  config: StellarCartographyMapUiConfig | undefined,
+  wormholeLineRevealKey: string | null = null
+): MapEdge[] {
+  if (!frame.cartographyEnabled || config == null) {
+    return frame.baseEdges
+  }
+  return cartographyVisibilityPolicy(config).mapEdges(frame.baseEdges, wormholeLineRevealKey)
 }
 
 /**
@@ -77,50 +138,9 @@ export function buildCartographyDisplayModel(
   cartography: StellarCartographyMapContext | undefined,
   wormholeLineRevealKey: string | null = null
 ): CartographyDisplayModel {
-  if (cartography == null) {
-    return emptyCartographyDisplayModel(
-      withoutCartographyNodes(data.nodes),
-      withoutWormholeEdges(data.edges)
-    )
-  }
-
-  const { config } = cartography
-  const overlayCircles = filterCartographyOverlayCircles(data.overlayCircles, config)
-  const wormholesShown = areCartographyWormholesShown(config)
-
-  if (!wormholesShown) {
-    const nodes = withoutCartographyNodes(data.nodes)
-    return {
-      cartographyEnabled: true,
-      nodes,
-      edges: withoutWormholeEdges(data.edges),
-      overlayCircles,
-      wormholeUnknownEntrances: [],
-      wormholeEndpoints: [],
-      wormholeEndpointHoverByCell: new Map(),
-    }
-  }
-
-  const nodes = data.nodes
-  const wormholeUnknownEntrances = data.wormholeUnknownEntrances
-  const edges = filterWormholeEdgesForCartographyConfig(
-    data.edges,
-    config,
-    wormholeLineRevealKey
-  )
-  const wormholeEndpointHoverByCell = buildWormholeEndpointHoverIndex(
-    data.edges,
-    wormholeUnknownEntrances
-  )
-  const wormholeEndpoints = collectWormholeEndpoints(nodes, wormholeUnknownEntrances)
-
+  const frame = buildCartographyMapFrame(data, cartography)
   return {
-    cartographyEnabled: true,
-    nodes,
-    edges,
-    overlayCircles,
-    wormholeUnknownEntrances,
-    wormholeEndpoints,
-    wormholeEndpointHoverByCell,
+    ...frame,
+    edges: cartographyMapEdges(frame, cartography?.config, wormholeLineRevealKey),
   }
 }

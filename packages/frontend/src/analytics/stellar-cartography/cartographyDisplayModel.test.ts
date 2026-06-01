@@ -3,6 +3,8 @@ import type { CombinedMapData } from '../../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../mapAnalyticIds'
 import {
   buildCartographyDisplayModel,
+  buildCartographyMapFrame,
+  cartographyMapEdges,
   collectWormholeEndpoints,
 } from './cartographyDisplayModel'
 import {
@@ -76,6 +78,21 @@ describe('collectWormholeEndpoints', () => {
       { x: 30, y: 40 },
       { x: 50, y: 60 },
     ])
+  })
+})
+
+describe('buildCartographyMapFrame and cartographyMapEdges', () => {
+  it('applies hover reveal only through cartographyMapEdges, not the static frame', () => {
+    const context = cartographyContext({ wormholeDisplayMode: 'on-hover' })
+    const frame = buildCartographyMapFrame(sampleData, context)
+
+    expect(frame.baseEdges.some((e) => e.layer === 'wormholes')).toBe(true)
+    expect(cartographyMapEdges(frame, context.config, null).every((e) => e.layer !== 'wormholes')).toBe(
+      true
+    )
+    expect(
+      cartographyMapEdges(frame, context.config, '10,20').some((e) => e.layer === 'wormholes')
+    ).toBe(true)
   })
 })
 

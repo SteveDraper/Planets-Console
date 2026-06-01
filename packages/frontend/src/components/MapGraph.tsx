@@ -8,7 +8,11 @@ import { ReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
-import { buildCartographyDisplayModel } from '../analytics/stellar-cartography/cartographyDisplayModel'
+import {
+  buildCartographyMapFrame,
+  cartographyMapEdges,
+  type CartographyMapFrame,
+} from '../analytics/stellar-cartography/cartographyDisplayModel'
 import type { StellarCartographyMapContext } from '../analytics/stellar-cartography/mapUiConfig'
 import {
   MAP_ZOOM_MAX,
@@ -70,14 +74,14 @@ export function MapGraph({
     return () => clearTimeout(t)
   }, [])
 
-  const display = useMemo(
-    () => buildCartographyDisplayModel(data, cartography),
+  const frame = useMemo(
+    () => buildCartographyMapFrame(data, cartography),
     [data, cartography]
   )
-  const nodes = useMemo(() => toFlowNodes(display.nodes), [display.nodes])
+  const nodes = useMemo(() => toFlowNodes(frame.nodes), [frame.nodes])
   const planetMapNodes = useMemo(
-    () => display.nodes.filter((n) => n.planet != null),
-    [display.nodes]
+    () => frame.nodes.filter((n) => n.planet != null),
+    [frame.nodes]
   )
   const planetGrid = useMemo(() => buildPlanetSpatialGrid(planetMapNodes), [planetMapNodes])
   const waypointGrid = useMemo(() => {
@@ -101,7 +105,7 @@ export function MapGraph({
         <WormholeInteractionProvider>
           <MapGraphFlow
             data={data}
-            display={display}
+            frame={frame}
             nodes={nodes}
             planetMapNodes={planetMapNodes}
             planetGrid={planetGrid}
@@ -121,7 +125,7 @@ export function MapGraph({
 
 type MapGraphFlowProps = {
   data: CombinedMapData
-  display: ReturnType<typeof buildCartographyDisplayModel>
+  frame: CartographyMapFrame
   nodes: ReturnType<typeof toFlowNodes>
   planetMapNodes: CombinedMapData['nodes']
   planetGrid: ReturnType<typeof buildPlanetSpatialGrid>
@@ -136,7 +140,7 @@ type MapGraphFlowProps = {
 
 function MapGraphFlow({
   data,
-  display,
+  frame,
   nodes,
   planetMapNodes,
   planetGrid,
@@ -156,11 +160,10 @@ function MapGraphFlow({
     onPlanetLabelHoverActiveChange,
   } = useWormholeInteractionState()
 
-  const renderDisplay = useMemo(
-    () => buildCartographyDisplayModel(data, cartography, wormholeLineRevealKey),
-    [data, cartography, wormholeLineRevealKey]
+  const edges = useMemo(
+    () => toEdges(cartographyMapEdges(frame, cartography?.config, wormholeLineRevealKey)),
+    [frame, cartography?.config, wormholeLineRevealKey]
   )
-  const edges = useMemo(() => toEdges(renderDisplay.edges), [renderDisplay.edges])
 
   return (
     <ReactFlow
@@ -181,7 +184,7 @@ function MapGraphFlow({
       zoomOnPinch
     >
       <InitialViewportFit
-        nodes={display.nodes}
+        nodes={frame.nodes}
         onInitialFitDone={onInitialFitDone}
         onMapZoomChange={onMapZoomChange}
       />
@@ -189,12 +192,12 @@ function MapGraphFlow({
       <SliderZoomControl onMapZoomChange={onMapZoomChange} onSetZoomReady={onSetZoomReady} />
       <MapZoomKeyboardShortcuts onMapZoomChange={onMapZoomChange} />
       <CoordinateGridOverlay />
-      {display.cartographyEnabled && cartography != null ? (
+      {frame.cartographyEnabled && cartography != null ? (
         <StellarCartographyOverlayPane
-          overlayCircles={display.overlayCircles}
-          wormholeEndpoints={display.wormholeEndpoints}
+          overlayCircles={frame.overlayCircles}
+          wormholeEndpoints={frame.wormholeEndpoints}
           cartographyConfig={cartography.config}
-          wormholeEndpointHoverByCell={display.wormholeEndpointHoverByCell}
+          wormholeEndpointHoverByCell={frame.wormholeEndpointHoverByCell}
           wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
           blockedByPlanetHover={blockedByPlanetHover}
           nuIonStorms={data.nuIonStorms}
@@ -211,7 +214,7 @@ function MapGraphFlow({
         onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
       />
       <FlowCoordinateReadout />
-      {display.cartographyEnabled && cartography != null ? (
+      {frame.cartographyEnabled && cartography != null ? (
         <StellarCartographyHoverPanel
           cartography={cartography}
           wormholeHoverLines={wormholeHoverLines}
