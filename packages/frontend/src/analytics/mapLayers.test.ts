@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { combineMapData } from './mapLayers'
 import type { MapDataResponse } from '../api/bff'
+import { combineMapData, defaultStellarCartographyMapUiConfig } from './mapLayers'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './stellar-cartography/layers'
 import {
   defaultNeutronClusterDisplayMode,
@@ -10,7 +10,6 @@ import {
   areCartographyWormholesShown,
   filterCartographyOverlayCircles,
 } from './stellar-cartography/overlayDisplayFilter'
-import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from './mapLayers'
 
 describe('combineMapData', () => {
   const baseMap: MapDataResponse = {
@@ -249,7 +248,7 @@ describe('combineMapData', () => {
 
 describe('cartography display filters (render-time)', () => {
   const uiConfig = {
-    ...DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
+    ...defaultStellarCartographyMapUiConfig(),
     settingsGates: {
       ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
       nebulae: true,

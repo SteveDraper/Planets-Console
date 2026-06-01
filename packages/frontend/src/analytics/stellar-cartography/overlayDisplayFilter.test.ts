@@ -7,7 +7,7 @@ import {
   defaultNeutronClusterDisplayMode,
   defaultStarClusterDisplayMode,
 } from './clusterOutlineDisplayMode'
-import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from '../mapLayers'
+import { defaultStellarCartographyMapUiConfig } from '../mapLayers'
 import {
   areCartographyWormholesShown,
   filterCartographyOverlayCircles,
@@ -15,7 +15,7 @@ import {
 } from './overlayDisplayFilter'
 
 const baseConfig = {
-  ...DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
+  ...defaultStellarCartographyMapUiConfig(),
   settingsGates: {
     ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
     nebulae: true,

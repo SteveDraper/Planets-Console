@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from '../mapLayers'
+import { defaultStellarCartographyMapUiConfig } from '../mapLayers'
 import { buildStellarCartographyHoverLines } from './StellarCartographyHoverPanel'
 import { defaultCartographyLayerVisibility } from './layers'
 import {
@@ -19,7 +19,7 @@ const settingsGates = {
 }
 
 const baseConfig = {
-  ...DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG,
+  ...defaultStellarCartographyMapUiConfig(),
   settingsGates,
   wormholeDisplayMode: defaultWormholeDisplayMode(),
   starClusterDisplayMode: defaultStarClusterDisplayMode(),

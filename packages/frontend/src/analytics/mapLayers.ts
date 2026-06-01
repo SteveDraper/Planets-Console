@@ -1,4 +1,10 @@
-import type { CombinedMapData, ConnectionsMapParams, MapDataResponse, MapEdge } from '../api/bff'
+import type {
+  AnalyticShellScope,
+  CombinedMapData,
+  ConnectionsMapParams,
+  MapDataResponse,
+  MapEdge,
+} from '../api/bff'
 import {
   defaultCartographyLayerVisibility,
   EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
@@ -31,6 +37,12 @@ export type StellarCartographyMapUiConfig = {
   neutronClusterDisplayMode: ClusterOutlineDisplayMode
 }
 
+/** Live cartography UI config and sample scope, passed together when the analytic is enabled. */
+export type StellarCartographyMapContext = {
+  config: StellarCartographyMapUiConfig
+  analyticScope: AnalyticShellScope
+}
+
 export type CombineMapDataOptionsBase = {
   /** When set, connection routes are clipped to match the UI flare mode if the response is stale. */
   liveConnectionsParams: ConnectionsMapParams | null
@@ -47,10 +59,6 @@ export function defaultStellarCartographyMapUiConfig(): StellarCartographyMapUiC
     neutronClusterDisplayMode: defaultNeutronClusterDisplayMode(),
   }
 }
-
-/** Stable default for map render paths when Stellar Cartography is not enabled. */
-export const DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG: StellarCartographyMapUiConfig =
-  defaultStellarCartographyMapUiConfig()
 
 export function combineMapData(
   analyticIds: readonly string[],

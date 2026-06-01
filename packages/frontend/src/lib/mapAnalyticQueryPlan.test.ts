@@ -5,7 +5,7 @@ import {
   mapIdsToFetch,
   resolveBaseMapAnalyticId,
 } from './mapAnalyticQueryPlan'
-import { connectionsMapQueryKey } from './useMapAnalyticQueries'
+import { connectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
 import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,

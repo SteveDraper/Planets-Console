@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { AnalyticShellScope } from '../../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
-import { DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG } from '../../analytics/mapLayers'
+import { defaultStellarCartographyMapUiConfig } from '../../analytics/mapLayers'
 import { DEFAULT_PLANET_LABEL_OPTIONS } from '../planetMapLabelModel'
 import { MapShellContent } from './MapShellContent'
 import { useStellarCartographyMapConfig } from '../../lib/useStellarCartographyMapConfig'
@@ -22,7 +22,7 @@ vi.mock('../PlanetMapInfoControls', () => ({
 }))
 
 vi.mock('../../lib/useStellarCartographyMapConfig', () => ({
-  useStellarCartographyMapConfig: vi.fn(() => DEFAULT_STELLAR_CARTOGRAPHY_MAP_UI_CONFIG),
+  useStellarCartographyMapConfig: vi.fn(() => defaultStellarCartographyMapUiConfig()),
 }))
 
 const sampleScope: AnalyticShellScope = {

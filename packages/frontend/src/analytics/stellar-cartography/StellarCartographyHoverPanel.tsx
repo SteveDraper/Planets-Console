@@ -2,11 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import {
   isStellarCartographySampleLayerId,
-  type AnalyticShellScope,
   type StellarCartographySampleEntry,
 } from '../../api/bff'
 import { fetchStellarCartographySample } from '../../api/bff'
-import type { StellarCartographyMapUiConfig } from '../mapLayers'
+import type { StellarCartographyMapContext, StellarCartographyMapUiConfig } from '../mapLayers'
 import { isCartographyLayerShown } from './layers'
 import { areCartographyWormholesShown } from './overlayDisplayFilter'
 import { flowToMapCellIndices } from '../../lib/planetSpatialGrid'
@@ -15,9 +14,7 @@ import { formatStellarCartographySampleLine } from './sampleTooltipFormat'
 const SAMPLE_DEBOUNCE_MS = 100
 
 type StellarCartographyHoverPanelProps = {
-  analyticScope: AnalyticShellScope | null
-  cartographyEnabled: boolean
-  cartographyConfig: StellarCartographyMapUiConfig
+  cartography: StellarCartographyMapContext
   wormholeHoverLines: string[] | null
   /** When a planet hover/pin label is showing, suppress cartography hover entirely. */
   blockedByPlanetHover?: boolean
@@ -60,9 +57,7 @@ export function buildStellarCartographyHoverLines(
 
 /** Debounced stacked tooltip for Stellar Cartography map hover sampling (Phase 4b). */
 export function StellarCartographyHoverPanel({
-  analyticScope,
-  cartographyEnabled,
-  cartographyConfig,
+  cartography,
   wormholeHoverLines,
   blockedByPlanetHover = false,
   clientToFlowPosition,
@@ -99,7 +94,7 @@ export function StellarCartographyHoverPanel({
       clearTimeout(debounceRef.current)
       debounceRef.current = null
     }
-    if (!cartographyEnabled || analyticScope == null || clientPos == null || !transform) {
+    if (clientPos == null || !transform) {
       setEntries([])
       return
     }
@@ -116,10 +111,10 @@ export function StellarCartographyHoverPanel({
     const seq = ++requestSeqRef.current
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null
-      void fetchStellarCartographySample(analyticScope, mapX, mapY)
+      void fetchStellarCartographySample(cartography.analyticScope, mapX, mapY)
         .then((data) => {
           if (seq !== requestSeqRef.current) return
-          setEntries(filterSampleEntries(data.entries, cartographyConfig))
+          setEntries(filterSampleEntries(data.entries, cartography.config))
         })
         .catch(() => {
           if (seq !== requestSeqRef.current) return
@@ -133,12 +128,10 @@ export function StellarCartographyHoverPanel({
       }
     }
   }, [
-    analyticScope,
-    cartographyConfig,
+    cartography,
     clientPos,
     clientToFlowPosition,
     domNode,
-    cartographyEnabled,
     blockedByPlanetHover,
     transform,
   ])
@@ -146,7 +139,7 @@ export function StellarCartographyHoverPanel({
   const lines = buildStellarCartographyHoverLines(
     entries,
     wormholeHoverLines,
-    cartographyConfig
+    cartography.config
   )
   if (
     blockedByPlanetHover ||

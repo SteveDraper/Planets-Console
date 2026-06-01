@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../../analytics/mapAnalyticIds'
-import { type StellarCartographyMapUiConfig } from '../../analytics/mapLayers'
+import type { StellarCartographyMapContext } from '../../analytics/mapLayers'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from '../PlanetMapInfoControls'
@@ -41,21 +41,22 @@ export function MapShellContent(props: MapShellContentProps) {
       return isCartographyEnabled(props.enabledMapIds) ? (
         <MapShellShowingMapWithLiveConfig {...props} />
       ) : (
-        <MapShellShowingMap {...props} cartographyActive={false} />
+        <MapShellShowingMap {...props} />
       )
   }
 }
 
 type MapShellShowingMapProps = MapShellContentProps & {
-  cartographyActive: boolean
-  cartographyConfig?: StellarCartographyMapUiConfig
+  cartography?: StellarCartographyMapContext
 }
 
 function MapShellShowingMapWithLiveConfig(props: MapShellContentProps) {
-  const cartographyConfig = useStellarCartographyMapConfig()
-  return (
-    <MapShellShowingMap {...props} cartographyActive cartographyConfig={cartographyConfig} />
-  )
+  const config = useStellarCartographyMapConfig()
+  const cartography =
+    props.analyticScope != null
+      ? { config, analyticScope: props.analyticScope }
+      : undefined
+  return <MapShellShowingMap {...props} cartography={cartography} />
 }
 
 function MapShellShowingMap({
@@ -64,9 +65,7 @@ function MapShellShowingMap({
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
-  analyticScope,
-  cartographyActive,
-  cartographyConfig,
+  cartography,
 }: MapShellShowingMapProps) {
   if (mapShellView.phase !== 'showing-map') {
     return null
@@ -88,13 +87,7 @@ function MapShellShowingMap({
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           planetLabelOptions={planetLabelOptions}
-          cartographyActive={cartographyActive}
-          cartographyConfig={cartographyConfig}
-          stellarCartography={
-            cartographyActive
-              ? { cartographyEnabled: true, analyticScope }
-              : undefined
-          }
+          cartography={cartography}
         />
       </MapPaneWithDisplayControls>
       <DeferredPendingMessage pending={mapShellView.showDeferredPending} />

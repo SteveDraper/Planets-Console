@@ -18,15 +18,6 @@ import {
   mapIdsToFetch,
 } from './mapAnalyticQueryPlan'
 
-export type { ConnectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
-export { connectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
-export {
-  combineMapResultsFromQueries,
-  enabledMapAnalyticIds,
-  mapIdsToFetch,
-  resolveBaseMapAnalyticId,
-} from './mapAnalyticQueryPlan'
-
 export type UseMapAnalyticQueriesInput = {
   enabledAnalyticIds: string[]
   analytics: AnalyticItem[]
