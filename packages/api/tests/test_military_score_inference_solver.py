@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
+    STATUS_TIME_LIMITED,
     solve_inference_problem,
 )
 
@@ -41,11 +42,15 @@ def _observation(
 def _problem(
     observation: InferenceObservation,
     *actions: CandidateAction,
+    max_solutions: int = 20,
+    time_limit_seconds: float = 1.0,
 ) -> InferenceProblem:
     return InferenceProblem(
         observation=observation,
         actions=actions,
         probability_buckets_by_action_id={},
+        max_solutions=max_solutions,
+        time_limit_seconds=time_limit_seconds,
     )
 
 
@@ -139,3 +144,155 @@ def test_solve_invalid_problem_with_bad_action_bounds():
     assert result.status == STATUS_INVALID_PROBLEM
     assert result.solutions == ()
     assert "lower_bound" in str(result.diagnostics["reason"])
+
+
+def test_top_k_returns_higher_weight_solutions_first():
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    paired_build = CandidateAction(
+        id="build_small",
+        label="Build small hull twice",
+        score_delta_2x=200,
+        upper_bound=2,
+        probability_weight=30,
+    )
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=400),
+            preferred_build,
+            alternate_build,
+            paired_build,
+            max_solutions=3,
+        )
+    )
+
+    assert result.status == STATUS_EXACT
+    assert [solution.objective_value for solution in result.solutions] == [100, 60, 50]
+    assert result.solutions[0].actions[0].action_id == "build_preferred"
+
+
+def test_top_k_no_good_cuts_prevent_duplicate_action_vectors():
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=400),
+            preferred_build,
+            alternate_build,
+            max_solutions=5,
+        )
+    )
+
+    signatures = [
+        tuple(sorted((action.action_id, action.count) for action in solution.actions))
+        for solution in result.solutions
+    ]
+    assert len(signatures) == len(set(signatures))
+
+
+def test_top_k_stops_at_configured_max_solutions():
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    paired_build = CandidateAction(
+        id="build_small",
+        label="Build small hull twice",
+        score_delta_2x=200,
+        upper_bound=2,
+        probability_weight=30,
+    )
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=400),
+            preferred_build,
+            alternate_build,
+            paired_build,
+            max_solutions=2,
+        )
+    )
+
+    assert result.status == STATUS_EXACT
+    assert len(result.solutions) == 2
+    assert result.diagnostics["stopped_reason"] == "max_solutions"
+
+
+def test_top_k_surfaces_time_limited_status(monkeypatch):
+    from api.analytics.military_score_inference import solver as inference_solver
+
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    solve_calls = {"count": 0}
+    original_solve = inference_solver.cp_model.CpSolver.solve
+
+    def solve_once_then_time_out(self, model):
+        solve_calls["count"] += 1
+        if solve_calls["count"] == 1:
+            return original_solve(self, model)
+        return inference_solver.cp_model.UNKNOWN
+
+    monkeypatch.setattr(
+        inference_solver.cp_model.CpSolver,
+        "solve",
+        solve_once_then_time_out,
+    )
+
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=400),
+            preferred_build,
+            alternate_build,
+            max_solutions=5,
+        )
+    )
+
+    assert result.status == STATUS_TIME_LIMITED
+    assert len(result.solutions) == 1
+    assert result.diagnostics["time_limited"] is True
+    assert result.diagnostics["stopped_reason"] == "time_budget"

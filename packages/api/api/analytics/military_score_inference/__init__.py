@@ -26,6 +26,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
+    STATUS_TIME_LIMITED,
     solve_inference_problem,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "STATUS_EXACT",
     "STATUS_INVALID_PROBLEM",
     "STATUS_NO_EXACT_SOLUTION",
+    "STATUS_TIME_LIMITED",
     "CandidateAction",
     "InferenceObservation",
     "InferenceProblem",
