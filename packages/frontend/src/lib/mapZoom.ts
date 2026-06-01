@@ -5,12 +5,21 @@ export const MAP_ZOOM_MAX = 40
 /** React Flow store transform `[translateX, translateY, zoom]`. */
 export type ViewportTransform = readonly [number, number, number]
 
+/** Clamps viewport zoom to {@link MAP_ZOOM_MIN} … {@link MAP_ZOOM_MAX}; invalid values become min. */
+export function clampMapZoom(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0) {
+    return MAP_ZOOM_MIN
+  }
+  return Math.min(MAP_ZOOM_MAX, Math.max(MAP_ZOOM_MIN, zoom))
+}
+
 /** Reads zoom from a React Flow transform; invalid or missing values clamp to map bounds. */
 export function viewportZoomFromTransform(transform: ViewportTransform | null | undefined): number {
   const raw = transform?.[2]
-  const zoom =
-    raw !== undefined && Number.isFinite(raw) && raw > 0 ? raw : MAP_ZOOM_MIN
-  return Math.min(MAP_ZOOM_MAX, Math.max(MAP_ZOOM_MIN, zoom))
+  if (raw === undefined) {
+    return MAP_ZOOM_MIN
+  }
+  return clampMapZoom(raw)
 }
 
 const MAP_ZOOM_RATIO = MAP_ZOOM_MAX / MAP_ZOOM_MIN
@@ -25,7 +34,7 @@ export function mapZoomToSlider(zoom: number): number {
   if (!Number.isFinite(zoom) || zoom <= 0) {
     return Math.round(0.5 * MAP_ZOOM_SLIDER_STEPS)
   }
-  const z = Math.min(MAP_ZOOM_MAX, Math.max(MAP_ZOOM_MIN, zoom))
+  const z = clampMapZoom(zoom)
   const p = Math.log(z / MAP_ZOOM_MIN) / Math.log(MAP_ZOOM_RATIO)
   if (!Number.isFinite(p)) return Math.round(0.5 * MAP_ZOOM_SLIDER_STEPS)
   return Math.round(p * MAP_ZOOM_SLIDER_STEPS)

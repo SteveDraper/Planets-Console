@@ -6,3 +6,6 @@ export const CONNECTIONS_ANALYTIC_ID = 'connections'
 
 /** Canonical id for the Stellar Cartography map overlay analytic. */
 export const STELLAR_CARTOGRAPHY_ANALYTIC_ID = 'stellar-cartography'
+
+/** Prefix for merged Stellar Cartography node and edge ids on the combined map. */
+export const STELLAR_CARTOGRAPHY_NODE_ID_PREFIX = `${STELLAR_CARTOGRAPHY_ANALYTIC_ID}:`

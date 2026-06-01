@@ -12,6 +12,10 @@ import { filterWormholeEdgesForCartographyConfig } from '../analytics/stellar-ca
 import {
   buildWormholeEndpointHoverIndex,
 } from '../lib/wormholeEndpointHover'
+import {
+  MAP_ZOOM_MAX,
+  MAP_ZOOM_MIN,
+} from '../lib/mapZoom'
 import { buildPlanetSpatialGrid } from '../lib/planetSpatialGrid'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
@@ -189,8 +193,8 @@ function MapGraphFlow({
       edgeTypes={edgeTypes}
       defaultViewport={{ x: 0, y: 0, zoom: 1 }}
       fitView={false}
-      minZoom={0.2}
-      maxZoom={40}
+      minZoom={MAP_ZOOM_MIN}
+      maxZoom={MAP_ZOOM_MAX}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={false}
       nodesConnectable={false}

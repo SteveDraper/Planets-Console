@@ -5,7 +5,7 @@ import {
   CELL_CENTER_OFFSET,
   gameMapYToFlowCenterY,
 } from './geometry'
-import { viewportZoomFromTransform } from '../../lib/mapZoom'
+import { clampMapZoom, viewportZoomFromTransform } from '../../lib/mapZoom'
 import {
   MapZoomKeyboardShortcuts,
   useCenteredViewportZoom,
@@ -82,7 +82,7 @@ export function InitialViewportFit({
     const usableH = size.height * (1 - 2 * INITIAL_FIT_MARGIN)
     const scaleW = usableW / contentWidth
     const scaleH = usableH / contentHeight
-    const zoom = Math.min(40, Math.max(0.2, Math.min(scaleW, scaleH)))
+    const zoom = clampMapZoom(Math.min(scaleW, scaleH))
     const x = size.width / 2 - centerX * zoom
     const y = size.height / 2 - centerY * zoom
     hasFittedRef.current = true

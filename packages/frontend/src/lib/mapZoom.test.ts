@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clampMapZoom,
   MAP_ZOOM_KEYBOARD_RATE_RAMP_MS,
   MAP_ZOOM_MAX,
   MAP_ZOOM_MIN,
@@ -9,6 +10,22 @@ import {
   stepMapZoomBySliderSteps,
   viewportZoomFromTransform,
 } from './mapZoom'
+
+describe('clampMapZoom', () => {
+  it('clamps finite zoom to map bounds', () => {
+    expect(clampMapZoom(1.5)).toBe(1.5)
+    expect(clampMapZoom(MAP_ZOOM_MIN)).toBe(MAP_ZOOM_MIN)
+    expect(clampMapZoom(MAP_ZOOM_MAX)).toBe(MAP_ZOOM_MAX)
+    expect(clampMapZoom(0.01)).toBe(MAP_ZOOM_MIN)
+    expect(clampMapZoom(999)).toBe(MAP_ZOOM_MAX)
+  })
+
+  it('falls back to MAP_ZOOM_MIN for invalid values', () => {
+    expect(clampMapZoom(NaN)).toBe(MAP_ZOOM_MIN)
+    expect(clampMapZoom(0)).toBe(MAP_ZOOM_MIN)
+    expect(clampMapZoom(-1)).toBe(MAP_ZOOM_MIN)
+  })
+})
 
 describe('viewportZoomFromTransform', () => {
   it('reads zoom from transform and clamps to map bounds', () => {

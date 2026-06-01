@@ -32,6 +32,7 @@ import { useStellarCartographyTurnSummary } from './analytics/stellar-cartograph
 import { useShellContext } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
+import { clampMapZoom } from './lib/mapZoom'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -286,7 +287,7 @@ function ConsoleShell() {
     [analytics, enabledIds]
   )
   const handleMapZoomChange = useCallback((z: number) => {
-    if (Number.isFinite(z) && z > 0) setMapZoom(Math.min(40, Math.max(0.2, z)))
+    setMapZoom(clampMapZoom(z))
   }, [])
   const handleSetZoomReady = useCallback((fn: (z: number) => void) => {
     setMapZoomFromSlider.current = fn

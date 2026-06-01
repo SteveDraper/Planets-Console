@@ -6,7 +6,6 @@ import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../
 import { MainArea } from './MainArea'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
-import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 
 vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/useMapAnalyticQueries')>()
@@ -18,10 +17,6 @@ vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
 
 vi.mock('../lib/useRetainedMapDisplay', () => ({
   useRetainedMapDisplay: vi.fn(),
-}))
-
-vi.mock('../lib/useStellarCartographyMapConfig', () => ({
-  useStellarCartographyMapConfig: vi.fn(),
 }))
 
 const defaultConnectionsParams: ConnectionsMapParams = {
@@ -110,7 +105,6 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).not.toHaveBeenCalled()
     expect(useRetainedMapDisplay).not.toHaveBeenCalled()
-    expect(useStellarCartographyMapConfig).not.toHaveBeenCalled()
   })
 
   it('runs map hooks only in map mode', () => {
@@ -118,29 +112,6 @@ describe('MainArea map hook mounting', () => {
 
     expect(useMapAnalyticQueries).toHaveBeenCalledTimes(1)
     expect(useRetainedMapDisplay).toHaveBeenCalledTimes(1)
-    expect(useStellarCartographyMapConfig).toHaveBeenCalledWith({ enabled: false })
-  })
-
-  it('subscribes to cartography config only when that analytic is enabled', () => {
-    vi.mocked(useMapAnalyticQueries).mockReturnValue({
-      enabledMapIds: ['connections', 'stellar-cartography'],
-      mapIds: ['base-map', 'connections', 'stellar-cartography'],
-      combined: emptyCombined,
-      pending: false,
-      hasError: false,
-      hasAnyData: false,
-      mapQueries: [],
-    })
-
-    render(
-      <MainArea
-        {...defaultMainAreaProps('map')}
-        enabledAnalyticIds={['connections', 'stellar-cartography']}
-      />,
-      { wrapper: createWrapper() }
-    )
-
-    expect(useStellarCartographyMapConfig).toHaveBeenCalledWith({ enabled: true })
   })
 
   it('shows turn-loading in tabular mode without map hooks', () => {

@@ -5,8 +5,7 @@ import type {
   StellarCartographyOverlayCircle,
   WormholeUnknownEntrance,
 } from '../../api/bff'
-
-const STELLAR_CARTOGRAPHY_PREFIX = 'stellar-cartography'
+import { STELLAR_CARTOGRAPHY_NODE_ID_PREFIX } from '../mapAnalyticIds'
 
 export type AppendStellarCartographyMapLayerArgs = {
   data: MapDataResponse
@@ -37,7 +36,7 @@ export function appendStellarCartographyMapLayer({
 
   for (const node of data.nodes) {
     nodes.push({
-      id: `${STELLAR_CARTOGRAPHY_PREFIX}:${node.id}`,
+      id: `${STELLAR_CARTOGRAPHY_NODE_ID_PREFIX}${node.id}`,
       label: '',
       x: node.x,
       y: node.y,
@@ -50,8 +49,8 @@ export function appendStellarCartographyMapLayer({
     const sourcePos = positions.get(rawEdge.source)
     const targetPos = positions.get(rawEdge.target)
     const edge: MapEdge = {
-      source: `${STELLAR_CARTOGRAPHY_PREFIX}:${rawEdge.source}`,
-      target: `${STELLAR_CARTOGRAPHY_PREFIX}:${rawEdge.target}`,
+      source: `${STELLAR_CARTOGRAPHY_NODE_ID_PREFIX}${rawEdge.source}`,
+      target: `${STELLAR_CARTOGRAPHY_NODE_ID_PREFIX}${rawEdge.target}`,
       layer: 'wormholes',
     }
     if (rawEdge.isBidirectional === true) edge.isBidirectional = true

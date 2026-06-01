@@ -13,8 +13,7 @@ import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverl
 import { WormholeEndpointMarkers } from './WormholeEndpointMarkers'
 import type { WormholeEndpointHoverInfo } from '../../lib/wormholeEndpointHover'
 import type { WormholeRecenterPulseTarget } from './stellarCartographyWormholeInteraction'
-
-const STELLAR_CARTOGRAPHY_NODE_PREFIX = 'stellar-cartography:'
+import { STELLAR_CARTOGRAPHY_NODE_ID_PREFIX } from '../../analytics/mapAnalyticIds'
 
 export function collectWormholeEndpoints(
   nodes: CombinedMapData['nodes'],
@@ -29,7 +28,7 @@ export function collectWormholeEndpoints(
     endpoints.push({ x, y })
   }
   for (const node of nodes) {
-    if (node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_PREFIX)) {
+    if (node.id.startsWith(STELLAR_CARTOGRAPHY_NODE_ID_PREFIX)) {
       add(Number(node.x), Number(node.y))
     }
   }

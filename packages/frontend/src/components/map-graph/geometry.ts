@@ -1,4 +1,5 @@
 import { PLANET_CELL_CENTER_OFFSET } from '../../lib/planetSpatialGrid'
+import { clampMapZoom } from '../../lib/mapZoom'
 
 /** Stable node size in flow space so React Flow keeps node measurements through zoom. */
 export const NODE_SIZE_FLOW = 12
@@ -65,6 +66,6 @@ export function recenterViewportOnFlowPoint(
   const w = Math.max(rect.width, 1)
   const h = Math.max(rect.height, 1)
   const vp = getViewport()
-  const z = Math.max(Number(vp.zoom) || 0.2, 0.2)
+  const z = clampMapZoom(Number(vp.zoom) || 0)
   setViewport({ x: w / 2 - flowX * z, y: h / 2 - flowY * z, zoom: z })
 }

@@ -7,7 +7,6 @@ import type {
   ConnectionsMapParams,
 } from '../api/bff'
 import { STELLAR_CARTOGRAPHY_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
-import { useStellarCartographyMapConfig } from '../lib/useStellarCartographyMapConfig'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
@@ -140,7 +139,6 @@ const MapMainArea = memo(function MapMainArea({
   })
 
   const cartographyEnabled = mapQueries.enabledMapIds.includes(STELLAR_CARTOGRAPHY_ANALYTIC_ID)
-  const cartographyConfig = useStellarCartographyMapConfig({ enabled: cartographyEnabled })
 
   const { mapIds, pending, hasError, hasAnyData, mapQueries: queries } = mapQueries
 
@@ -175,9 +173,8 @@ const MapMainArea = memo(function MapMainArea({
       onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
       onMapZoomChange={onMapZoomChange}
       onSetZoomReady={onSetZoomReady}
-      cartographySampleEnabled={cartographyEnabled}
+      cartographyEnabled={cartographyEnabled}
       analyticScope={analyticScope}
-      cartographyConfig={cartographyConfig}
     />
   )
 })
