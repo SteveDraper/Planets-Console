@@ -3,10 +3,7 @@
 from collections import defaultdict
 from collections.abc import Iterator
 
-from api.errors import (
-    LoginCredentialsRequiredError,
-    ValidationError,
-)
+from api.errors import LoginCredentialsRequiredError
 from api.models.game import GameInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.credential_service import CredentialService
@@ -24,6 +21,24 @@ from api.transport.load_all_turns import (
 )
 
 
+def expected_perspectives_for_load_all(
+    info: GameInfo, username: str, game_id: int
+) -> list[int]:
+    """1-based perspectives for load-all status and in-progress bulk load.
+
+    Finished games require every player slot. In-progress games resolve the
+    logged-in player's slot; empty or unknown usernames raise the same errors
+    as ``iter_load_all_turns``.
+    """
+    if GameService.is_game_finished(info):
+        return list(range(1, len(info.players) + 1))
+    if not username.strip():
+        raise LoginCredentialsRequiredError(
+            "Login name is required to load turns from Planets.nu."
+        )
+    return [GameService.perspective_for_username(info, username, game_id)]
+
+
 class LoadAllTurnsService:
     """Orchestrate bulk turn loading (loadall ZIP or sequential loadturn)."""
 
@@ -37,22 +52,15 @@ class LoadAllTurnsService:
         self._games = games
         self._turns = turns
 
-    def _expected_perspectives_for_status(self, info: GameInfo, username: str) -> list[int]:
-        if GameService.is_game_finished(info):
-            return list(range(1, len(info.players) + 1))
-        if not username.strip():
-            return []
-        try:
-            return [GameService.perspective_for_username(info, username, info.game.id)]
-        except ValidationError:
-            return []
-
     def load_all_turns_status_for_user(
         self, game_id: int, username: str
     ) -> LoadAllTurnsStatusResponse:
         info = self._games.get_game_info(game_id)
         latest_turn = info.game.turn
-        expected = self._expected_perspectives_for_status(info, username)
+        if latest_turn < 1:
+            expected: list[int] = []
+        else:
+            expected = expected_perspectives_for_load_all(info, username, game_id)
         return LoadAllTurnsStatusResponse(
             game_id=game_id,
             complete=self._is_load_all_complete(info, expected, latest_turn, game_id),
@@ -185,7 +193,7 @@ class LoadAllTurnsService:
         params: RefreshGameInfoParams,
         planets: PlanetsNuClient,
     ) -> Iterator[LoadAllProgressUpdate | LoadAllTurnsResponse]:
-        perspective = GameService.perspective_for_username(info, params.username, game_id)
+        perspective = expected_perspectives_for_load_all(info, params.username, game_id)[0]
         latest_turn = info.game.turn
         player = info.players[perspective - 1]
         turns_to_load = required_turn_numbers(player, latest_turn)
