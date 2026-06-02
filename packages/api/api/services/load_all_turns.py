@@ -1,12 +1,10 @@
 """Bulk load-all orchestration: archive import, status, and NDJSON progress."""
 
-import logging
 from collections import defaultdict
 from collections.abc import Iterator
 
 from api.errors import (
     LoginCredentialsRequiredError,
-    UpstreamPlanetsError,
     ValidationError,
 )
 from api.models.game import GameInfo
@@ -14,6 +12,7 @@ from api.planets_nu import PlanetsNuClient
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_archive import ArchiveTurnFile, parse_load_all_zip
+from api.services.load_all_final_turns import FinalTurnLoadResult, iter_final_turn_load_progress
 from api.services.player_elimination import last_meaningful_turn
 from api.services.turn_load_service import TurnLoadService
 from api.transport.game_info_update import RefreshGameInfoParams
@@ -23,8 +22,6 @@ from api.transport.load_all_turns import (
     LoadAllTurnsResponse,
     LoadAllTurnsStatusResponse,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class LoadAllTurnsService:
@@ -150,43 +147,19 @@ class LoadAllTurnsService:
                     turns_skipped += 1
 
         latest_turn = info.game.turn
-        final_turn_load_failures: list[int] = []
-        for perspective_index, perspective in enumerate(range(1, player_count + 1), start=1):
-            if latest_turn < 1:
-                continue
-            if self._turns.is_turn_stored(game_id, perspective, latest_turn):
-                turns_skipped += 1
-                yield LoadAllProgressUpdate(
-                    phase="final_turn",
-                    perspective=perspective_index,
-                    perspective_total=player_count,
-                    turn=1,
-                    turn_total=1,
-                    message=f"Final turn already stored (perspective {perspective})",
-                )
-                continue
-            yield LoadAllProgressUpdate(
-                phase="final_turn",
-                perspective=perspective_index,
-                perspective_total=player_count,
-                turn=1,
-                turn_total=1,
-                message=f"Loading final turn for perspective {perspective}",
-            )
-            try:
-                self._turns.ensure_turn_loaded(game_id, perspective, latest_turn, params, planets)
-            except (UpstreamPlanetsError, ValidationError) as exc:
-                final_turn_load_failures.append(perspective)
-                logger.warning(
-                    "Loadall final turn %s for game %s perspective %s failed: %s",
-                    latest_turn,
-                    game_id,
-                    perspective,
-                    exc,
-                )
-                continue
-            turns_written += 1
-            perspectives_touched.add(perspective)
+        final_turn_result = FinalTurnLoadResult()
+        yield from iter_final_turn_load_progress(
+            self._turns,
+            game_id,
+            latest_turn,
+            params,
+            planets,
+            player_count,
+            final_turn_result,
+        )
+        turns_written += final_turn_result.turns_written
+        turns_skipped += final_turn_result.turns_skipped
+        perspectives_touched |= final_turn_result.perspectives_touched
 
         yield LoadAllTurnsResponse(
             game_id=game_id,
@@ -194,7 +167,7 @@ class LoadAllTurnsService:
             turns_written=turns_written,
             turns_skipped=turns_skipped,
             perspectives_touched=sorted(perspectives_touched),
-            final_turn_load_failures=sorted(final_turn_load_failures),
+            final_turn_load_failures=sorted(final_turn_result.failures),
         )
 
     def _iter_load_in_progress_game(
