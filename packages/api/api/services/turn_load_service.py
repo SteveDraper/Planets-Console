@@ -303,17 +303,9 @@ class TurnLoadService:
         player_id = GameService.player_id_for_perspective(game_info, perspective, game_id)
         upstream_turn = self._upstream_turn_for_load(perspective, turn_number, game_info.game.turn)
 
-        if self._credentials.get_stored_api_key(params.username) is None:
-            if params.password is None:
-                raise LoginCredentialsRequiredError("Login credentials are required.")
-            self._credentials.store_api_key(
-                params.username,
-                planets.login(params.username, params.password),
-            )
-
-        api_key = self._credentials.get_stored_api_key(params.username)
-        if not api_key:
-            raise LoginCredentialsRequiredError("Login credentials are required.")
+        api_key = self._credentials.ensure_api_key_for_user(
+            params.username, params.password, planets
+        )
 
         rst, turn = self._load_turn_from_planets_upstream(
             game_id=game_id,

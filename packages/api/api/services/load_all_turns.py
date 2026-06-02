@@ -93,23 +93,6 @@ class LoadAllTurnsService:
                     return False
         return True
 
-    def _ensure_api_key(self, params: RefreshGameInfoParams, planets: PlanetsNuClient) -> str:
-        if not params.username.strip():
-            raise LoginCredentialsRequiredError(
-                "Login name is required to load turns from Planets.nu."
-            )
-        if self._credentials.get_stored_api_key(params.username) is None:
-            if params.password is None:
-                raise LoginCredentialsRequiredError("Login credentials are required.")
-            self._credentials.store_api_key(
-                params.username,
-                planets.login(params.username, params.password),
-            )
-        api_key = self._credentials.get_stored_api_key(params.username)
-        if not api_key:
-            raise LoginCredentialsRequiredError("Login credentials are required.")
-        return api_key
-
     @staticmethod
     def _group_archive_turns_by_perspective(
         archive_turns: list[ArchiveTurnFile],
@@ -253,7 +236,11 @@ class LoadAllTurnsService:
         planets: PlanetsNuClient,
     ) -> Iterator[LoadAllStreamItem]:
         """Yield progress updates and a final summary (serialize to NDJSON in routers)."""
-        self._ensure_api_key(params, planets)
+        if not params.username.strip():
+            raise LoginCredentialsRequiredError(
+                "Login name is required to load turns from Planets.nu."
+            )
+        self._credentials.ensure_api_key_for_user(params.username, params.password, planets)
         info = self._games.get_game_info(game_id)
         if GameService.is_game_finished(info):
             yield from self._iter_load_finished_game_from_loadall(game_id, info, params, planets)

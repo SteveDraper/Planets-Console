@@ -20,10 +20,7 @@ when missing), using the same credential rules as game info refresh.
 
 from __future__ import annotations
 
-import json
 from typing import Annotated
-
-from api.errors import PlanetsConsoleError
 from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
@@ -32,7 +29,7 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest
-from api.transport.load_all_turns import load_all_stream_event_to_dict
+from api.transport.load_all_turns import stream_load_all_turns
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, Path, Query
 from fastapi.responses import StreamingResponse
@@ -175,15 +172,12 @@ def post_load_all_turns_stream(
 ) -> StreamingResponse:
     """Load all turns, streaming NDJSON progress events."""
     core = get_core_client()
-
-    def generate():
-        try:
-            for item in core.iter_load_all_turns(game_id, body.username, body.password):
-                yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
-        except PlanetsConsoleError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
-
-    return StreamingResponse(generate(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        stream_load_all_turns(
+            lambda: core.iter_load_all_turns(game_id, body.username, body.password)
+        ),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.post("/{game_id}/turns/ensure", response_model=BffTurnInfoResponse)

@@ -1,12 +1,9 @@
 """Game info and turn data REST API routes."""
 
-import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-
-from api.errors import PlanetsConsoleError
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.deps import (
@@ -34,7 +31,7 @@ from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInf
 from api.transport.load_all_turns import (
     LoadAllTurnsRequest,
     LoadAllTurnsStatusResponse,
-    load_all_stream_event_to_dict,
+    stream_load_all_turns,
 )
 
 router = APIRouter(prefix="/v1/games", tags=["games"])
@@ -82,15 +79,10 @@ def post_load_all_turns_stream(
     planets: PlanetsNuClient = Depends(get_planets_client),
 ) -> StreamingResponse:
     """Load all turns, streaming NDJSON progress events."""
-
-    def generate():
-        try:
-            for item in load_all.iter_load_all_turns(game_id, body, planets):
-                yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
-        except PlanetsConsoleError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
-
-    return StreamingResponse(generate(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        stream_load_all_turns(lambda: load_all.iter_load_all_turns(game_id, body, planets)),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.post("/{game_id}/{perspective}/turns/{turn_number}/ensure")

@@ -2,7 +2,7 @@
 
 from dacite.exceptions import DaciteError
 
-from api.errors import LoginCredentialsRequiredError, ValidationError
+from api.errors import ValidationError
 from api.models.enums import GameStatus
 from api.models.game import GameInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
@@ -73,13 +73,7 @@ class GameService:
     ) -> GameInfo:
         if not params.username.strip():
             raise ValidationError("username is required to refresh game info.")
-        if self._credentials.get_stored_api_key(params.username) is None:
-            if params.password is None:
-                raise LoginCredentialsRequiredError("Login credentials are required.")
-            self._credentials.store_api_key(
-                params.username,
-                planets.login(params.username, params.password),
-            )
+        self._credentials.ensure_api_key_for_user(params.username, params.password, planets)
 
         remote = planets.load_game_info(game_id)
         try:
