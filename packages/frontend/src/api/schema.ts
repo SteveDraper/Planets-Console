@@ -383,10 +383,14 @@ export interface components {
         };
         /**
          * LoadAllTurnsRequest
-         * @description Credentials for bulk turn loading from Planets.nu.
+         * @description Credentials used when fetching missing turns from Planets.nu.
          */
         LoadAllTurnsRequest: {
-            /** Username */
+            /**
+             * Username
+             * @description Non-empty required for refresh; ensure-turn may omit when data is local.
+             * @default
+             */
             username: string;
             /** Password */
             password?: string | null;

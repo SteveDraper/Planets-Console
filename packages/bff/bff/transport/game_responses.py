@@ -7,6 +7,12 @@ from dataclasses import fields
 from typing import Any, get_type_hints
 
 from api.models.game import GameInfo, TurnInfo
+from api.transport.load_all_turns import (
+    LoadAllTurnsRequest,
+)
+from api.transport.load_all_turns import (
+    LoadAllTurnsStatusResponse as CoreLoadAllTurnsStatusResponse,
+)
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer
 
 
@@ -45,36 +51,31 @@ def bff_dataclass_response_with_diagnostics(
     )
 
 
+def bff_pydantic_response_with_diagnostics(
+    pydantic_model_name: str,
+    source_model: type[BaseModel],
+) -> type[BaseModel]:
+    """Pydantic model mirroring ``source_model`` with optional BFF ``diagnostics`` (OpenAPI)."""
+    field_defs = {
+        name: (field_info.annotation, field_info)
+        for name, field_info in source_model.model_fields.items()
+    }
+    return create_model(
+        pydantic_model_name,
+        __base__=OmitNullDiagnosticsBase,
+        __config__=ConfigDict(),
+        __module__=__name__,
+        **field_defs,
+    )
+
+
 BffGameInfoResponse = bff_dataclass_response_with_diagnostics("BffGameInfoResponse", GameInfo)
 BffTurnInfoResponse = bff_dataclass_response_with_diagnostics("BffTurnInfoResponse", TurnInfo)
 
-
-class LoadAllTurnsRequest(BaseModel):
-    """Credentials for bulk turn loading from Planets.nu."""
-
-    username: str
-    password: str | None = None
-
-
-class LoadAllTurnsResponse(OmitNullDiagnosticsBase):
-    """Summary after bulk turn loading."""
-
-    game_id: int
-    is_game_finished: bool
-    turns_written: int
-    turns_skipped: int
-    perspectives_touched: list[int] = Field(default_factory=list)
-    final_turn_load_failures: list[int] = Field(default_factory=list)
-
-
-class LoadAllTurnsStatusResponse(OmitNullDiagnosticsBase):
-    """Whether storage already contains every turn from a full bulk load."""
-
-    game_id: int
-    complete: bool
-    is_game_finished: bool
-    expected_perspectives: list[int] = Field(default_factory=list)
-    latest_turn: int
+LoadAllTurnsStatusResponse = bff_pydantic_response_with_diagnostics(
+    "LoadAllTurnsStatusResponse",
+    CoreLoadAllTurnsStatusResponse,
+)
 
 
 class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
@@ -88,3 +89,14 @@ class StellarCartographyTurnSummaryResponse(OmitNullDiagnosticsBase):
 
     ionStormCount: int
     nuIonStorms: bool
+
+
+__all__ = [
+    "BffGameInfoResponse",
+    "BffTurnInfoResponse",
+    "LoadAllTurnsRequest",
+    "LoadAllTurnsStatusResponse",
+    "OmitNullDiagnosticsBase",
+    "StoredTurnPerspectivesResponse",
+    "StellarCartographyTurnSummaryResponse",
+]

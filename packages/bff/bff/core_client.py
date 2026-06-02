@@ -45,7 +45,9 @@ from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
 
 from bff.transport.game_responses import (
-    LoadAllTurnsStatusResponse,
+    LoadAllTurnsStatusResponse as BffLoadAllTurnsStatusResponse,
+)
+from bff.transport.game_responses import (
     StoredTurnPerspectivesResponse,
 )
 
@@ -150,16 +152,10 @@ class CoreClient:
         self.remember_sector_title_for_game(game_id, updated)
         return updated
 
-    def load_all_turns_status(self, game_id: int, username: str) -> LoadAllTurnsStatusResponse:
-        def work() -> LoadAllTurnsStatusResponse:
+    def load_all_turns_status(self, game_id: int, username: str) -> BffLoadAllTurnsStatusResponse:
+        def work() -> BffLoadAllTurnsStatusResponse:
             core_status = self._load_all.load_all_turns_status_for_user(game_id, username)
-            return LoadAllTurnsStatusResponse(
-                game_id=core_status.game_id,
-                complete=core_status.complete,
-                is_game_finished=core_status.is_game_finished,
-                expected_perspectives=core_status.expected_perspectives,
-                latest_turn=core_status.latest_turn,
-            )
+            return BffLoadAllTurnsStatusResponse.model_validate(core_status.model_dump())
 
         return self._invoke(work)
 
