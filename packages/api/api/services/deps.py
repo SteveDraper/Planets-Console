@@ -38,7 +38,7 @@ def get_load_all_turns_service(
     games: GameService = Depends(get_game_service),
     turns: TurnLoadService = Depends(get_turn_load_service),
 ) -> LoadAllTurnsService:
-    return LoadAllTurnsService(storage, credentials, games, turns)
+    return LoadAllTurnsService(credentials, games, turns)
 
 
 def get_turn_concept_service(

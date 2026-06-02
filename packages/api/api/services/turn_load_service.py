@@ -15,6 +15,7 @@ from api.serialization.codecs import dataclass_deserialization_detail
 from api.serialization.turn import turn_info_from_json
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
+from api.services.load_all_archive import ArchiveTurnFile
 from api.services.storage_json import require_dict
 from api.storage.base import StorageBackend
 from api.transport.game_info_update import RefreshGameInfoParams
@@ -99,6 +100,35 @@ class TurnLoadService:
         )
 
     @staticmethod
+    def turn_store_key(game_id: int, perspective: int, turn_number: int) -> str:
+        return f"games/{game_id}/{perspective}/turns/{turn_number}"
+
+    def is_turn_stored(self, game_id: int, perspective: int, turn_number: int) -> bool:
+        try:
+            self._storage.get(self.turn_store_key(game_id, perspective, turn_number))
+            return True
+        except NotFoundError:
+            return False
+
+    @staticmethod
+    def _validate_archive_turn_matches_file(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        turn: TurnInfo,
+    ) -> None:
+        if turn.settings.turn != turn_number:
+            raise ValidationError(
+                f"Loadall archive turn settings.turn ({turn.settings.turn}) does not match "
+                f"archive file turn ({turn_number})."
+            )
+        if turn.game.id != game_id:
+            raise ValidationError(
+                f"Loadall archive turn game.id ({turn.game.id}) does not match "
+                f"requested game id ({game_id})."
+            )
+
+    @staticmethod
     def _validate_turn_loaded_matches_request(
         game_id: int,
         turn_number: int,
@@ -119,6 +149,26 @@ class TurnLoadService:
                 f"Load turn response game.turn ({turn.game.turn}) does not match "
                 f"requested turn ({turn_number})."
             )
+
+    def store_archive_turn_if_missing(
+        self,
+        game_id: int,
+        archive_turn: ArchiveTurnFile,
+    ) -> bool:
+        """Deserialize, validate, and store one loadall archive turn when missing."""
+        perspective = archive_turn.player_slot
+        turn_number = archive_turn.turn_number
+        if turn_number < 1:
+            return False
+        if self.is_turn_stored(game_id, perspective, turn_number):
+            return False
+        turn = self.deserialize_archive_turn_rst(game_id, archive_turn.rst)
+        self._validate_archive_turn_matches_file(game_id, perspective, turn_number, turn)
+        self._storage.put(
+            self.turn_store_key(game_id, perspective, turn_number),
+            archive_turn.rst,
+        )
+        return True
 
     def list_stored_turn_perspectives(self, game_id: int, turn_number: int) -> list[int]:
         """Return sorted perspective slots (0 or 1-based) with turn data already in storage."""
@@ -147,7 +197,7 @@ class TurnLoadService:
         return sorted(stored)
 
     def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
-        data = self._storage.get(f"games/{game_id}/{perspective}/turns/{turn_number}")
+        data = self._storage.get(self.turn_store_key(game_id, perspective, turn_number))
         return self._turn_info_from_stored_json(
             game_id,
             require_dict(data, f"turn {turn_number} of game {game_id} perspective {perspective}"),
@@ -234,8 +284,8 @@ class TurnLoadService:
         planets: PlanetsNuClient,
     ) -> TurnInfo:
         """Return turn data from storage, fetching from Planets.nu via loadturn when missing."""
-        store_key = f"games/{game_id}/{perspective}/turns/{turn_number}"
-        try:
+        store_key = self.turn_store_key(game_id, perspective, turn_number)
+        if self.is_turn_stored(game_id, perspective, turn_number):
             data = self._storage.get(store_key)
             return self._turn_info_from_stored_json(
                 game_id,
@@ -243,8 +293,6 @@ class TurnLoadService:
                     data, f"turn {turn_number} of game {game_id} perspective {perspective}"
                 ),
             )
-        except NotFoundError:
-            pass
 
         if not params.username.strip():
             raise LoginCredentialsRequiredError(

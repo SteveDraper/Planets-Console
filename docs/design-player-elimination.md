@@ -62,6 +62,8 @@ For this finished game, loadall ZIP contains turns **0--110** for **every** pers
 
 Post-death turns in the ZIP are mostly redundant for analysis; skipping them in load-all policy is a **Console choice**, not an upstream ZIP limitation for this game.
 
+**Loadall archive validation** (`TurnLoadService.store_archive_turn_if_missing`): after deserializing each ZIP `rst`, require `settings.turn` to match the archive filename turn and `game.id` to match the requested game. Do **not** require `game.turn` to match the filename turn; historical snapshots often carry a later `game.turn` while `settings.turn` identifies the file.
+
 ### 3.3 Counterexample: `statusturn` without elimination (perspective 11, `nocere`)
 
 Latest `loadinfo`: `status = 1`, `statusturn = 90` (still active).

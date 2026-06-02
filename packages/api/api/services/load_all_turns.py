@@ -6,7 +6,6 @@ from collections.abc import Iterator
 
 from api.errors import (
     LoginCredentialsRequiredError,
-    NotFoundError,
     UpstreamPlanetsError,
     ValidationError,
 )
@@ -17,7 +16,6 @@ from api.services.game_service import GameService
 from api.services.load_all_archive import ArchiveTurnFile, parse_load_all_zip
 from api.services.player_elimination import last_meaningful_turn
 from api.services.turn_load_service import TurnLoadService
-from api.storage.base import StorageBackend
 from api.transport.game_info_update import RefreshGameInfoParams
 from api.transport.load_all_turns import (
     LoadAllProgressUpdate,
@@ -34,12 +32,10 @@ class LoadAllTurnsService:
 
     def __init__(
         self,
-        storage: StorageBackend,
         credentials: CredentialService,
         games: GameService,
         turns: TurnLoadService,
     ) -> None:
-        self._storage = storage
         self._credentials = credentials
         self._games = games
         self._turns = turns
@@ -95,26 +91,6 @@ class LoadAllTurnsService:
             for turn_number in range(1, last_required + 1):
                 if turn_number not in stored:
                     return False
-        return True
-
-    def _persist_archive_turn(
-        self,
-        game_id: int,
-        archive_turn: ArchiveTurnFile,
-    ) -> bool:
-        """Store one archive turn when missing. Returns True if a new blob was written."""
-        perspective = archive_turn.player_slot
-        turn_number = archive_turn.turn_number
-        if turn_number < 1:
-            return False
-        store_key = f"games/{game_id}/{perspective}/turns/{turn_number}"
-        try:
-            self._storage.get(store_key)
-            return False
-        except NotFoundError:
-            pass
-        self._turns.deserialize_archive_turn_rst(game_id, archive_turn.rst)
-        self._storage.put(store_key, archive_turn.rst)
         return True
 
     def _ensure_api_key(self, params: RefreshGameInfoParams, planets: PlanetsNuClient) -> str:
@@ -182,7 +158,7 @@ class LoadAllTurnsService:
                     turn_total=turn_total,
                     message=(f"Perspective {perspective}, turn {archive_turn.turn_number}"),
                 )
-                if self._persist_archive_turn(game_id, archive_turn):
+                if self._turns.store_archive_turn_if_missing(game_id, archive_turn):
                     turns_written += 1
                     perspectives_touched.add(archive_turn.player_slot)
                 else:
@@ -193,9 +169,7 @@ class LoadAllTurnsService:
         for perspective_index, perspective in enumerate(range(1, player_count + 1), start=1):
             if latest_turn < 1:
                 continue
-            store_key = f"games/{game_id}/{perspective}/turns/{latest_turn}"
-            try:
-                self._storage.get(store_key)
+            if self._turns.is_turn_stored(game_id, perspective, latest_turn):
                 turns_skipped += 1
                 yield LoadAllProgressUpdate(
                     phase="final_turn",
@@ -206,8 +180,6 @@ class LoadAllTurnsService:
                     message=f"Final turn already stored (perspective {perspective})",
                 )
                 continue
-            except NotFoundError:
-                pass
             yield LoadAllProgressUpdate(
                 phase="final_turn",
                 perspective=perspective_index,
@@ -261,13 +233,9 @@ class LoadAllTurnsService:
                 turn_total=turn_total,
                 message=f"Turn {turn_number}",
             )
-            store_key = f"games/{game_id}/{perspective}/turns/{turn_number}"
-            try:
-                self._storage.get(store_key)
+            if self._turns.is_turn_stored(game_id, perspective, turn_number):
                 turns_skipped += 1
                 continue
-            except NotFoundError:
-                pass
             self._turns.ensure_turn_loaded(game_id, perspective, turn_number, params, planets)
             turns_written += 1
         yield LoadAllTurnsResponse(

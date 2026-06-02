@@ -16,6 +16,7 @@ from api.models.game import TurnInfo
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.stack import build_service_stack
+from api.services.load_all_archive import ArchiveTurnFile
 from api.services.turn_load_service import TurnLoadService
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.game_info_update import RefreshGameInfoParams
@@ -176,6 +177,81 @@ class TestGetPlanetFromTurn:
     def test_unknown_planet_id_raises(self, turn_load_service):
         with pytest.raises(NotFoundError, match="No planet id"):
             turn_load_service.get_planet_from_turn(628580, 1, 111, 999999999)
+
+
+class TestTurnStoreKeyAndIsTurnStored:
+    def test_turn_store_key_format(self) -> None:
+        assert TurnLoadService.turn_store_key(628580, 1, 111) == "games/628580/1/turns/111"
+
+    def test_is_turn_stored_false_when_missing(self, turn_load_service) -> None:
+        assert turn_load_service.is_turn_stored(628580, 1, 999) is False
+
+    def test_is_turn_stored_true_when_present(self, turn_load_service) -> None:
+        assert turn_load_service.is_turn_stored(628580, 1, 111) is True
+
+
+class TestStoreArchiveTurnIfMissing:
+    def test_writes_turn_when_missing(self, turn_rst) -> None:
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _, _ = build_service_stack(backend)
+        archive_turn = ArchiveTurnFile(player_slot=1, turn_number=50, rst=copy.deepcopy(turn_rst))
+        archive_turn.rst["settings"]["turn"] = 50
+        archive_turn.rst["game"]["id"] = 628580
+
+        assert turns.store_archive_turn_if_missing(628580, archive_turn) is True
+        backend.get("games/628580/1/turns/50")
+
+    def test_skips_when_already_stored(self, seeded_backend, turn_rst) -> None:
+        _, turns, _, _, _ = build_service_stack(seeded_backend)
+        archive_turn = ArchiveTurnFile(player_slot=1, turn_number=111, rst=turn_rst)
+        assert turns.store_archive_turn_if_missing(628580, archive_turn) is False
+
+    def test_rejects_settings_turn_mismatch(self, turn_rst) -> None:
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _, _ = build_service_stack(backend)
+        rst = copy.deepcopy(turn_rst)
+        rst["settings"]["turn"] = 42
+        archive_turn = ArchiveTurnFile(player_slot=1, turn_number=50, rst=rst)
+
+        with pytest.raises(ValidationError, match="settings.turn"):
+            turns.store_archive_turn_if_missing(628580, archive_turn)
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/50")
+
+    def test_rejects_game_id_mismatch(self, turn_rst) -> None:
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _, _ = build_service_stack(backend)
+        rst = copy.deepcopy(turn_rst)
+        rst["settings"]["turn"] = 50
+        rst["game"]["id"] = 999999
+        archive_turn = ArchiveTurnFile(player_slot=1, turn_number=50, rst=rst)
+
+        with pytest.raises(ValidationError, match="game.id"):
+            turns.store_archive_turn_if_missing(628580, archive_turn)
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/50")
+
+    def test_accepts_game_turn_different_from_archive_turn(self, turn_rst) -> None:
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _, _ = build_service_stack(backend)
+        rst = copy.deepcopy(turn_rst)
+        rst["settings"]["turn"] = 50
+        rst["game"]["id"] = 628580
+        rst["game"]["turn"] = 111
+        archive_turn = ArchiveTurnFile(player_slot=1, turn_number=50, rst=rst)
+
+        assert turns.store_archive_turn_if_missing(628580, archive_turn) is True
+        stored = backend.get("games/628580/1/turns/50")
+        assert stored["game"]["turn"] == 111
+        assert stored["settings"]["turn"] == 50
 
 
 class TestMalformedTurnStoreData:

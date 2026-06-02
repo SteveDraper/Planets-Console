@@ -27,6 +27,12 @@ ASSETS_DIR = (
 )
 
 
+@pytest.fixture
+def turn_rst() -> dict:
+    with open(ASSETS_DIR / "turn_sample.json") as handle:
+        return json.load(handle)
+
+
 def _archive_turn_rst(game_id: int, turn_number: int) -> dict:
     """Build a loadall-archive-shaped rst that passes turn_info_from_json."""
     with open(ASSETS_DIR / "turn_sample.json") as handle:
@@ -65,7 +71,7 @@ def _load_services():
     credentials = CredentialService(storage)
     games = GameService(storage, credentials)
     turns = TurnLoadService(storage, credentials, games)
-    load_all = LoadAllTurnsService(storage, credentials, games, turns)
+    load_all = LoadAllTurnsService(credentials, games, turns)
     return storage, credentials, games, turns, load_all
 
 
@@ -294,8 +300,8 @@ def test_perspective_for_username_raises_when_not_in_game() -> None:
         GameService.perspective_for_username(info, "not-a-player", 628580)
 
 
-def test_persist_archive_turn_rejects_invalid_rst() -> None:
-    storage, _, _, _, load_all = _load_services()
+def test_store_archive_turn_if_missing_rejects_invalid_rst() -> None:
+    storage, _, _, turns, _ = _load_services()
     with open(ASSETS_DIR / "game_info_sample.json") as handle:
         storage.put("games/628580/info", json.load(handle))
 
@@ -306,7 +312,7 @@ def test_persist_archive_turn_rejects_invalid_rst() -> None:
     )
 
     with pytest.raises(ValidationError, match="Loadall archive turn rst"):
-        load_all._persist_archive_turn(628580, archive_turn)
+        turns.store_archive_turn_if_missing(628580, archive_turn)
 
     with pytest.raises(NotFoundError):
         storage.get("games/628580/1/turns/1")
@@ -343,3 +349,45 @@ def test_load_finished_game_from_loadall_rejects_invalid_archive_rst() -> None:
     assert storage.get("games/628580/1/turns/1") is not None
     with pytest.raises(NotFoundError):
         storage.get("games/628580/2/turns/1")
+
+
+def test_store_archive_turn_rejects_settings_turn_mismatch(turn_rst) -> None:
+    storage, _, _, turns, _ = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        storage.put("games/628580/info", json.load(handle))
+    rst = json.loads(json.dumps(turn_rst))
+    rst["settings"]["turn"] = 99
+    rst["game"]["id"] = 628580
+    archive_turn = ArchiveTurnFile(player_slot=1, turn_number=1, rst=rst)
+
+    with pytest.raises(ValidationError, match="settings.turn"):
+        turns.store_archive_turn_if_missing(628580, archive_turn)
+
+
+def test_store_archive_turn_rejects_wrong_game_id(turn_rst) -> None:
+    storage, _, _, turns, _ = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        storage.put("games/628580/info", json.load(handle))
+    rst = json.loads(json.dumps(turn_rst))
+    rst["settings"]["turn"] = 1
+    rst["game"]["id"] = 999999
+    archive_turn = ArchiveTurnFile(player_slot=1, turn_number=1, rst=rst)
+
+    with pytest.raises(ValidationError, match="game.id"):
+        turns.store_archive_turn_if_missing(628580, archive_turn)
+
+
+def test_store_archive_turn_accepts_game_turn_mismatch(turn_rst) -> None:
+    storage, _, _, turns, _ = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        storage.put("games/628580/info", json.load(handle))
+    rst = json.loads(json.dumps(turn_rst))
+    rst["settings"]["turn"] = 1
+    rst["game"]["id"] = 628580
+    rst["game"]["turn"] = 111
+    archive_turn = ArchiveTurnFile(player_slot=1, turn_number=1, rst=rst)
+
+    assert turns.store_archive_turn_if_missing(628580, archive_turn) is True
+    stored = storage.get("games/628580/1/turns/1")
+    assert stored["settings"]["turn"] == 1
+    assert stored["game"]["turn"] == 111

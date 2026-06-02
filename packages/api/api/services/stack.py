@@ -21,7 +21,7 @@ def build_service_stack(
     credentials = CredentialService(storage)
     games = GameService(storage, credentials)
     turns = TurnLoadService(storage, credentials, games)
-    load_all = LoadAllTurnsService(storage, credentials, games, turns)
+    load_all = LoadAllTurnsService(credentials, games, turns)
     concepts = TurnConceptService(turns)
     analytics = TurnAnalyticService(turns)
     return games, turns, load_all, concepts, analytics
