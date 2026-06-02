@@ -12,6 +12,7 @@ from api.errors import LoginCredentialsRequiredError, NotFoundError, ValidationE
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_archive import ArchiveTurnFile
+from api.services.load_all_streaming import stream_load_all_turns
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_load_service import TurnLoadService
 from api.storage import clear_backend_cache, get_storage
@@ -20,7 +21,6 @@ from api.transport.load_all_turns import (
     LoadAllProgressUpdate,
     LoadAllTurnsResponse,
     load_all_stream_event_to_dict,
-    stream_load_all_turns,
 )
 
 ASSETS_DIR = (
