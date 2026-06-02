@@ -20,6 +20,13 @@ import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
 import { formatFinalTurnLoadFailuresMessage } from './finalTurnLoadFailuresMessage'
 import { invalidateShellGameQueries } from './invalidateShellGameQueries'
+import {
+  idleLoadAllActivity,
+  isLoadAllActivityPending,
+  loadAllProgressFromActivity,
+  streamingLoadAllActivity,
+  type LoadAllActivity,
+} from './loadAllActivity'
 
 export type UseShellGameSelectionOptions = {
   reportShellError: (message: string) => void
@@ -43,7 +50,7 @@ function reportLoadAllFailure(
   reportShellError(formatFinalTurnLoadFailuresMessage(failures, perspectives))
 }
 
-/** Game refresh, load-all (header or on commit), and a single pending model for the shell. */
+/** Game refresh, load-all (header or on commit), and a single activity model for the shell. */
 export function useShellGameSelection({ reportShellError }: UseShellGameSelectionOptions) {
   const queryClient = useQueryClient()
   const loginName = useSessionStore((s) => s.name)
@@ -52,29 +59,23 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
   const applyGameInfoRefresh = useShellStore((s) => s.applyGameInfoRefresh)
   const clearStorageOnlyLoad = useShellStore((s) => s.clearStorageOnlyLoad)
 
-  const [loadAllProgress, setLoadAllProgress] = useState<LoadAllProgressUpdate | null>(null)
-  const [gameCommitIncludesLoadAll, setGameCommitIncludesLoadAll] = useState(false)
+  const [loadAllActivity, setLoadAllActivity] = useState<LoadAllActivity>(idleLoadAllActivity)
 
   const loadAllTurnsMutation = useMutation({
     mutationFn: async (vars: LoadAllTurnsVars): Promise<LoadAllTurnsResponse> => {
-      setLoadAllProgress({
-        phase: 'download',
-        perspective: 0,
-        perspective_total: 0,
-        turn: 0,
-        turn_total: 0,
-        message: 'Starting load…',
-      })
+      setLoadAllActivity(streamingLoadAllActivity())
       try {
         const result = await loadAllTurnsWithProgress(
           vars.gameId,
           { username: vars.username, password: vars.password },
-          setLoadAllProgress
+          (progress: LoadAllProgressUpdate) => {
+            setLoadAllActivity({ phase: 'streaming', progress })
+          }
         )
         reportLoadAllFailure(result, reportShellError)
         return result
       } finally {
-        setLoadAllProgress(null)
+        setLoadAllActivity(idleLoadAllActivity)
       }
     },
     retry: false,
@@ -155,7 +156,9 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       reportShellError(message)
     },
     onSettled: () => {
-      setGameCommitIncludesLoadAll(false)
+      setLoadAllActivity((current) =>
+        current.phase === 'awaiting-refresh' ? idleLoadAllActivity : current
+      )
     },
   })
 
@@ -170,7 +173,7 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
     (gameId: string, options?: GameSelectionOptions) => {
       const { name, password } = useSessionStore.getState()
       if (options?.loadAllTurns) {
-        setGameCommitIncludesLoadAll(true)
+        setLoadAllActivity({ phase: 'awaiting-refresh' })
       }
       refreshGameMutation.mutate({
         gameId,
@@ -202,10 +205,8 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
     loadAllTurnsStatus?.complete === true ||
     gameInfoContext == null
 
-  const isLoadAllTurnsPending =
-    gameCommitIncludesLoadAll ||
-    loadAllProgress != null ||
-    loadAllTurnsMutation.isPending
+  const loadAllProgress = loadAllProgressFromActivity(loadAllActivity)
+  const isLoadAllTurnsPending = isLoadAllActivityPending(loadAllActivity)
 
   return {
     loadAllProgress,
