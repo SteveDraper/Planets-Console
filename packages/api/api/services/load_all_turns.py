@@ -21,9 +21,7 @@ from api.transport.load_all_turns import (
 )
 
 
-def expected_perspectives_for_load_all(
-    info: GameInfo, username: str, game_id: int
-) -> list[int]:
+def expected_perspectives_for_load_all(info: GameInfo, username: str, game_id: int) -> list[int]:
     """1-based perspectives for load-all status and in-progress bulk load.
 
     Finished games require every player slot. In-progress games resolve the
@@ -33,9 +31,7 @@ def expected_perspectives_for_load_all(
     if GameService.is_game_finished(info):
         return list(range(1, len(info.players) + 1))
     if not username.strip():
-        raise LoginCredentialsRequiredError(
-            "Login name is required to load turns from Planets.nu."
-        )
+        raise LoginCredentialsRequiredError("Login name is required to load turns from Planets.nu.")
     return [GameService.perspective_for_username(info, username, game_id)]
 
 
