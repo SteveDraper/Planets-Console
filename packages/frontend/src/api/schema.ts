@@ -455,6 +455,17 @@ export interface components {
              */
             type: "progress";
         };
+        /** LoadAllTurnsRequest */
+        LoadAllTurnsRequest: {
+            /**
+             * Username
+             * @description Non-empty required for refresh; ensure-turn may omit when data is local.
+             * @default
+             */
+            username: string;
+            /** Password */
+            password?: string | null;
+        };
         /** LoadAllTurnsResponse */
         LoadAllTurnsResponse: {
             /** Game Id */
@@ -473,7 +484,19 @@ export interface components {
              */
             final_turn_load_failures?: number[];
         };
-        LoadAllTurnsStatusResponse: unknown;
+        /** LoadAllTurnsStatusResponse */
+        LoadAllTurnsStatusResponse: {
+            /** Game Id */
+            game_id: number;
+            /** Complete */
+            complete: boolean;
+            /** Is Game Finished */
+            is_game_finished: boolean;
+            /** Expected Perspectives */
+            expected_perspectives?: number[];
+            /** Latest Turn */
+            latest_turn: number;
+        };
         /** MapCellModel */
         MapCellModel: {
             /** X */
@@ -576,20 +599,6 @@ export interface components {
             activebeams: string;
             /** Activetorps */
             activetorps: string;
-        };
-        /**
-         * RefreshGameInfoParams
-         * @description Parameters for operation `refresh`.
-         */
-        RefreshGameInfoParams: {
-            /**
-             * Username
-             * @description Non-empty required for refresh; ensure-turn may omit when data is local.
-             * @default
-             */
-            username: string;
-            /** Password */
-            password?: string | null;
         };
         ShellBootstrapResponse: unknown;
         /** StellarCartographySampleEntry */
@@ -1026,7 +1035,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RefreshGameInfoParams"];
+                "application/json": components["schemas"]["LoadAllTurnsRequest"];
             };
         };
         responses: {
