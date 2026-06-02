@@ -8,7 +8,7 @@ export type LoadAllStreamCompleteEvent = {
   type: 'complete'
   result: LoadAllTurnsResponse
 }
-export type LoadAllStreamErrorEvent = { type: 'error'; detail: string }
+export type LoadAllStreamErrorEvent = components['schemas']['LoadAllStreamErrorEvent']
 
 export type LoadAllStreamEvent =
   | LoadAllStreamProgressEvent

@@ -177,6 +177,7 @@ def get_load_all_turns_status(
                         "oneOf": [
                             {"$ref": "#/components/schemas/LoadAllStreamProgressEvent"},
                             {"$ref": "#/components/schemas/LoadAllStreamCompleteEvent"},
+                            {"$ref": "#/components/schemas/LoadAllStreamErrorEvent"},
                         ]
                     }
                 }

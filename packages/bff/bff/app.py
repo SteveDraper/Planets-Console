@@ -12,6 +12,7 @@ from bff.strip_bff_prefix import StripBffPrefixWhenRootApp
 from bff.transport.game_responses import (
     LoadAllProgressUpdate,
     LoadAllStreamCompleteEvent,
+    LoadAllStreamErrorEvent,
     LoadAllStreamProgressEvent,
 )
 
@@ -45,6 +46,7 @@ def build_openapi_schema() -> dict:
         LoadAllProgressUpdate,
         LoadAllStreamProgressEvent,
         LoadAllStreamCompleteEvent,
+        LoadAllStreamErrorEvent,
     ):
         _merge_model_json_schema(openapi_schema, model)
     app.openapi_schema = openapi_schema

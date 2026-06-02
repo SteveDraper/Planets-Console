@@ -716,6 +716,19 @@ export interface components {
              */
             final_turn_load_failures?: number[];
         };
+        /**
+         * LoadAllStreamErrorEvent
+         * @description NDJSON line when bulk load fails (``type: error``).
+         */
+        LoadAllStreamErrorEvent: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "error";
+            /** Detail */
+            detail: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1046,7 +1059,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                    "application/x-ndjson": components["schemas"]["LoadAllStreamProgressEvent"] | components["schemas"]["LoadAllStreamCompleteEvent"];
+                    "application/x-ndjson": components["schemas"]["LoadAllStreamProgressEvent"] | components["schemas"]["LoadAllStreamCompleteEvent"] | components["schemas"]["LoadAllStreamErrorEvent"];
                 };
             };
             /** @description Validation Error */

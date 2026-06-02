@@ -102,6 +102,13 @@ class LoadAllStreamCompleteEvent(BaseModel):
     result: LoadAllTurnsResponse
 
 
+class LoadAllStreamErrorEvent(BaseModel):
+    """NDJSON line when bulk load fails (``type: error``)."""
+
+    type: Literal["error"]
+    detail: str
+
+
 class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
     """1-based perspective slots that already have turn data in storage."""
 
@@ -120,6 +127,7 @@ __all__ = [
     "BffTurnInfoResponse",
     "LoadAllProgressUpdate",
     "LoadAllStreamCompleteEvent",
+    "LoadAllStreamErrorEvent",
     "LoadAllStreamProgressEvent",
     "LoadAllTurnsRequest",
     "LoadAllTurnsResponse",
