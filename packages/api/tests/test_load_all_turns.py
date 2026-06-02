@@ -141,6 +141,7 @@ def test_load_all_turns_status_complete_when_latest_turn_zero() -> None:
     assert status.latest_turn == 0
     assert status.complete is True
 
+
 def test_load_all_turns_status_complete_eliminated_through_statusturn_only() -> None:
     """628580 perspective 1 eliminated at turn 49; post-death turns are not required."""
     storage, _, _, _, load_all = _load_services()

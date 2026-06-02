@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.deps import (

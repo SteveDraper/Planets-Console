@@ -7,10 +7,10 @@ from typing import Any, Literal, TypeAlias
 from pydantic import BaseModel, Field
 
 from api.errors import PlanetsConsoleError
-
 from api.transport.game_info_update import RefreshGameInfoParams
 
 LoadAllTurnsRequest = RefreshGameInfoParams
+
 
 class LoadAllProgressUpdate(BaseModel):
     """Progress while bulk-loading turns (perspective index, then turns within)."""

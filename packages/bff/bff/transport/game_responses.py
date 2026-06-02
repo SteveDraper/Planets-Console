@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import fields
-from typing import Any, get_type_hints
+from typing import Any, Literal, get_type_hints
 
 from api.models.game import GameInfo, TurnInfo
-from typing import Literal
-
 from api.transport.game_info_update import RefreshGameInfoParams
 from api.transport.load_all_turns import (
     LoadAllProgressUpdate as CoreLoadAllProgressUpdate,

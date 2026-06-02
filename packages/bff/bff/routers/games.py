@@ -21,6 +21,7 @@ when missing), using the same credential rules as game info refresh.
 from __future__ import annotations
 
 from typing import Annotated
+
 from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
