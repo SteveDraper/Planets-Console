@@ -165,7 +165,9 @@ function ConsoleShell() {
   })
 
   const isLoadAllTurnsPending =
-    isLoadAllTurnsPendingFromHook || refreshGameMutation.isPending
+    isLoadAllTurnsPendingFromHook ||
+    (refreshGameMutation.isPending &&
+      refreshGameMutation.variables?.loadAllTurns === true)
 
   useEffect(() => {
     resetPerspectiveOverride()

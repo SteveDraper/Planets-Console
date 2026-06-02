@@ -73,6 +73,61 @@ describe('Header', () => {
     expect(screen.queryByLabelText(/^viewpoint$/i)).not.toBeInTheDocument()
   })
 
+  async function openHeaderMenu(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: /open menu/i }))
+    expect(screen.getByRole('dialog', { name: /header menu/i })).toBeInTheDocument()
+  }
+
+  function renderHeaderWithLoadAll(
+    props: Partial<{
+      isGameRefreshPending: boolean
+      isLoadAllTurnsPending: boolean
+      selectedGameId: string | null
+      onLoadAllTurns: () => void
+    }> = {}
+  ) {
+    return render(
+      <QueryClientProvider client={headerQueryClient}>
+        <Header
+          viewMode="tabular"
+          onViewModeChange={() => {}}
+          mapZoom={1}
+          onMapZoomSliderChange={() => {}}
+          selectedGameId={props.selectedGameId ?? '42'}
+          onCommitGameSelection={() => {}}
+          isGameRefreshPending={props.isGameRefreshPending ?? false}
+          isLoadAllTurnsPending={props.isLoadAllTurnsPending ?? false}
+          isLoadAllTurnsDisabled={false}
+          onLoadAllTurns={props.onLoadAllTurns ?? (() => {})}
+          reportShellError={() => {}}
+          shellTurnMax={null}
+          shellTurnValue={null}
+          isFuture={false}
+          setTurn={() => {}}
+          stepTurn={() => {}}
+          shellViewpoints={[]}
+          shellSelectedViewpointName={null}
+          onShellViewpointChange={() => {}}
+        />
+      </QueryClientProvider>
+    )
+  }
+
+  it('keeps load-all label during game refresh when load-all is not pending', async () => {
+    const user = userEvent.setup()
+    renderHeaderWithLoadAll({ isGameRefreshPending: true, isLoadAllTurnsPending: false })
+    await openHeaderMenu(user)
+    expect(screen.getByRole('button', { name: /^load all turns$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /loading all turns/i })).not.toBeInTheDocument()
+  })
+
+  it('shows loading label when load-all is pending', async () => {
+    const user = userEvent.setup()
+    renderHeaderWithLoadAll({ isLoadAllTurnsPending: true })
+    await openHeaderMenu(user)
+    expect(screen.getByRole('button', { name: /loading all turns/i })).toBeInTheDocument()
+  })
+
   it('opens settings from the header menu', async () => {
     const user = userEvent.setup()
     renderHeader()
