@@ -116,6 +116,31 @@ def test_load_all_turns_status_incomplete_when_turn_missing() -> None:
     assert status.complete is False
 
 
+def test_load_all_turns_status_incomplete_when_no_expected_perspectives() -> None:
+    """In-progress game with no resolvable login has nothing to compare against storage."""
+    storage, _, _, _, load_all = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        info_payload = json.load(handle)
+    info_payload["game"]["status"] = 1
+    storage.put("games/628580/info", info_payload)
+    assert info_payload["game"]["turn"] >= 1
+
+    status = load_all.load_all_turns_status_for_user(628580, "")
+    assert status.expected_perspectives == []
+    assert status.complete is False
+
+
+def test_load_all_turns_status_complete_when_latest_turn_zero() -> None:
+    storage, _, _, _, load_all = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        info_payload = json.load(handle)
+    info_payload["game"]["turn"] = 0
+    storage.put("games/628580/info", info_payload)
+
+    status = load_all.load_all_turns_status_for_user(628580, "")
+    assert status.latest_turn == 0
+    assert status.complete is True
+
 def test_load_all_turns_status_complete_eliminated_through_statusturn_only() -> None:
     """628580 perspective 1 eliminated at turn 49; post-death turns are not required."""
     storage, _, _, _, load_all = _load_services()

@@ -1,31 +1,42 @@
 """Codec for TurnInfo (rst object from Load Turn Data)."""
 
 import copy
-from dataclasses import fields
 
 import dacite
 
 from api.models.game import TurnInfo
-from api.models.player import Score
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
 
-
-def _score_field_defaults() -> dict[str, int | float | str]:
-    """Default values for Score fields omitted from older turn snapshots."""
-    defaults: dict[str, int | float | str] = {}
-    for score_field in fields(Score):
-        if score_field.type is int:
-            defaults[score_field.name] = 0
-        elif score_field.type is float:
-            defaults[score_field.name] = 0.0
-        elif score_field.type is str:
-            defaults[score_field.name] = ""
-        else:
-            defaults[score_field.name] = 0
-    return defaults
-
-
-SCORE_FIELD_DEFAULTS = _score_field_defaults()
+SCORE_FIELD_DEFAULTS: dict[str, int | float | str] = {
+    "id": 0,
+    "dateadded": "",
+    "ownerid": 0,
+    "accountid": 0,
+    "capitalships": 0,
+    "freighters": 0,
+    "planets": 0,
+    "starbases": 0,
+    "militaryscore": 0,
+    "inventoryscore": 0,
+    "prioritypoints": 0,
+    "turn": 0,
+    "percent": 0.0,
+    "victoryscore": 0,
+    "victorybonuses": "",
+    "technologicalaccumulator": 0,
+    "widestreach": 0,
+    "greatestwarrior": 0,
+    "happybeings": 0,
+    "shipchange": 0,
+    "freighterchange": 0,
+    "planetchange": 0,
+    "starbasechange": 0,
+    "militarychange": 0,
+    "inventorychange": 0,
+    "prioritypointchange": 0,
+    "percentchange": 0.0,
+    "victoryscorechange": 0,
+}
 
 
 def _backfill_turn_settings_from_defaults(settings: dict, defaults: dict) -> None:

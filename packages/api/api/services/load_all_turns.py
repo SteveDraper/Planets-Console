@@ -81,8 +81,10 @@ class LoadAllTurnsService:
         latest_turn: int,
         game_id: int,
     ) -> bool:
-        if latest_turn < 1 or not perspectives:
+        if latest_turn < 1:
             return True
+        if not perspectives:
+            return False
         for perspective in perspectives:
             last_required = self._last_required_turn_for_perspective(info, perspective, latest_turn)
             if last_required < 1:

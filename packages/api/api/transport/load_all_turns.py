@@ -10,12 +10,7 @@ from api.errors import PlanetsConsoleError
 
 from api.transport.game_info_update import RefreshGameInfoParams
 
-
-class LoadAllTurnsRequest(RefreshGameInfoParams):
-    """Credentials used when fetching missing turns from Planets.nu."""
-
-    pass
-
+LoadAllTurnsRequest = RefreshGameInfoParams
 
 class LoadAllProgressUpdate(BaseModel):
     """Progress while bulk-loading turns (perspective index, then turns within)."""

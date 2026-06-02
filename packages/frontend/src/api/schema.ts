@@ -381,19 +381,97 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /**
-         * LoadAllTurnsRequest
-         * @description Credentials used when fetching missing turns from Planets.nu.
-         */
-        LoadAllTurnsRequest: {
+        /** LoadAllProgressUpdate */
+        LoadAllProgressUpdate: {
             /**
-             * Username
-             * @description Non-empty required for refresh; ensure-turn may omit when data is local.
+             * Phase
+             * @enum {string}
+             */
+            phase: "download" | "import" | "final_turn";
+            /**
+             * Perspective
+             * @description 1-based perspective index; 0 during download.
+             */
+            perspective: number;
+            /** Perspective Total */
+            perspective_total: number;
+            /**
+             * Turn
+             * @description 1-based turn step within the current perspective.
+             */
+            turn: number;
+            /** Turn Total */
+            turn_total: number;
+            /**
+             * Message
              * @default
              */
-            username: string;
-            /** Password */
-            password?: string | null;
+            message: string;
+        };
+        /**
+         * LoadAllStreamCompleteEvent
+         * @description Final NDJSON line after bulk load (``type: complete``).
+         */
+        LoadAllStreamCompleteEvent: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "complete";
+            result: components["schemas"]["LoadAllTurnsResponse"];
+        };
+        /**
+         * LoadAllStreamProgressEvent
+         * @description One NDJSON line while bulk-loading turns (``type: progress``).
+         */
+        LoadAllStreamProgressEvent: {
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "download" | "import" | "final_turn";
+            /**
+             * Perspective
+             * @description 1-based perspective index; 0 during download.
+             */
+            perspective: number;
+            /** Perspective Total */
+            perspective_total: number;
+            /**
+             * Turn
+             * @description 1-based turn step within the current perspective.
+             */
+            turn: number;
+            /** Turn Total */
+            turn_total: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "progress";
+        };
+        /** LoadAllTurnsResponse */
+        LoadAllTurnsResponse: {
+            /** Game Id */
+            game_id: number;
+            /** Is Game Finished */
+            is_game_finished: boolean;
+            /** Turns Written */
+            turns_written: number;
+            /** Turns Skipped */
+            turns_skipped: number;
+            /** Perspectives Touched */
+            perspectives_touched?: number[];
+            /**
+             * Final Turn Load Failures
+             * @description 1-based perspective slots where the final turn could not be fetched via loadturn after a finished-game loadall archive import.
+             */
+            final_turn_load_failures?: number[];
         };
         LoadAllTurnsStatusResponse: unknown;
         /** MapCellModel */
@@ -498,6 +576,20 @@ export interface components {
             activebeams: string;
             /** Activetorps */
             activetorps: string;
+        };
+        /**
+         * RefreshGameInfoParams
+         * @description Parameters for operation `refresh`.
+         */
+        RefreshGameInfoParams: {
+            /**
+             * Username
+             * @description Non-empty required for refresh; ensure-turn may omit when data is local.
+             * @default
+             */
+            username: string;
+            /** Password */
+            password?: string | null;
         };
         ShellBootstrapResponse: unknown;
         /** StellarCartographySampleEntry */
@@ -934,17 +1026,18 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LoadAllTurnsRequest"];
+                "application/json": components["schemas"]["RefreshGameInfoParams"];
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description NDJSON stream of progress and complete events. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LoadAllProgressUpdate"] | components["schemas"]["LoadAllStreamProgressEvent"] | components["schemas"]["LoadAllStreamCompleteEvent"];
+                    "application/x-ndjson": components["schemas"]["LoadAllStreamProgressEvent"] | components["schemas"]["LoadAllStreamCompleteEvent"];
                 };
             };
             /** @description Validation Error */

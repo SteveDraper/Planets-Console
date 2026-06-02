@@ -2,17 +2,19 @@
 
 import copy
 import json
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 from api.models.enums import GameStatus, MessageType, NativeType
+from api.models.player import Score
 from api.models.ship import ShipHistory
 from api.serialization.codecs import (
     dataclass_deserialization_detail,
     describe_dacite_error,
 )
 from api.serialization.game import game_info_from_json, game_info_to_json
-from api.serialization.turn import turn_info_from_json, turn_info_to_json
+from api.serialization.turn import SCORE_FIELD_DEFAULTS, turn_info_from_json, turn_info_to_json
 from dacite.exceptions import DaciteError, MissingValueError, WrongTypeError
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -56,6 +58,10 @@ def game_info_sample_data():
 
 
 class TestTurnInfoSerialization:
+    def test_score_field_defaults_match_score_dataclass_fields(self):
+        score_field_names = {field.name for field in fields(Score)}
+        assert set(SCORE_FIELD_DEFAULTS.keys()) == score_field_names
+
     def test_deserialize(self, turn_sample_data):
         ti = turn_info_from_json(turn_sample_data)
         assert ti.game.id == 628580

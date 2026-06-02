@@ -10,6 +10,12 @@ import type {
   StellarCartographyTurnSummaryResponse,
 } from './bffCartographyTypes'
 import { normalizeMapDataResponse } from './normalizeMapDataResponse'
+import {
+  parseLoadAllStreamEvent,
+  type LoadAllProgressUpdate,
+  type LoadAllStreamEvent,
+  type LoadAllTurnsResponse,
+} from './parseLoadAllStreamEvent'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema'
 
@@ -301,44 +307,9 @@ export async function fetchStoredTurnPerspectives(
 
 export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
 
-export type LoadAllTurnsStatusResponse = {
-  game_id: number
-  complete: boolean
-  is_game_finished: boolean
-  expected_perspectives: number[]
-  latest_turn: number
-}
+export type LoadAllTurnsStatusResponse = components['schemas']['LoadAllTurnsStatusResponse']
 
-export type LoadAllTurnsResponse = {
-  game_id: number
-  is_game_finished: boolean
-  turns_written: number
-  turns_skipped: number
-  perspectives_touched: number[]
-  final_turn_load_failures?: number[]
-}
-
-export type LoadAllProgressUpdate = {
-  phase: 'download' | 'import' | 'final_turn'
-  perspective: number
-  perspective_total: number
-  turn: number
-  turn_total: number
-  message: string
-}
-
-type LoadAllStreamEvent =
-  | ({ type: 'progress' } & LoadAllProgressUpdate)
-  | { type: 'complete'; result: LoadAllTurnsResponse }
-  | { type: 'error'; detail: string }
-
-function parseLoadAllStreamLine(line: string): LoadAllStreamEvent | null {
-  const trimmed = line.trim()
-  if (!trimmed) {
-    return null
-  }
-  return JSON.parse(trimmed) as LoadAllStreamEvent
-}
+export type { LoadAllProgressUpdate, LoadAllTurnsResponse }
 
 /** Load all turns with streaming progress (NDJSON). */
 export async function loadAllTurnsWithProgress(
@@ -401,7 +372,7 @@ export async function loadAllTurnsWithProgress(
   }
 
   await readNdjsonStream(r.body, (line) => {
-    const event = parseLoadAllStreamLine(line)
+    const event = parseLoadAllStreamEvent(line)
     if (event) {
       dispatchLoadAllEvent(event)
     }

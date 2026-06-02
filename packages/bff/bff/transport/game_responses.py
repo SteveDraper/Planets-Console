@@ -7,8 +7,14 @@ from dataclasses import fields
 from typing import Any, get_type_hints
 
 from api.models.game import GameInfo, TurnInfo
+from typing import Literal
+
+from api.transport.game_info_update import RefreshGameInfoParams
 from api.transport.load_all_turns import (
-    LoadAllTurnsRequest,
+    LoadAllProgressUpdate as CoreLoadAllProgressUpdate,
+)
+from api.transport.load_all_turns import (
+    LoadAllTurnsResponse as CoreLoadAllTurnsResponse,
 )
 from api.transport.load_all_turns import (
     LoadAllTurnsStatusResponse as CoreLoadAllTurnsStatusResponse,
@@ -69,6 +75,23 @@ def bff_pydantic_response_with_diagnostics(
     )
 
 
+def bff_pydantic_mirror(
+    pydantic_model_name: str,
+    source_model: type[BaseModel],
+) -> type[BaseModel]:
+    """Pydantic model mirroring ``source_model`` field-for-field (OpenAPI components)."""
+    field_defs = {
+        name: (field_info.annotation, field_info)
+        for name, field_info in source_model.model_fields.items()
+    }
+    return create_model(
+        pydantic_model_name,
+        __config__=ConfigDict(),
+        __module__=__name__,
+        **field_defs,
+    )
+
+
 BffGameInfoResponse = bff_dataclass_response_with_diagnostics("BffGameInfoResponse", GameInfo)
 BffTurnInfoResponse = bff_dataclass_response_with_diagnostics("BffTurnInfoResponse", TurnInfo)
 
@@ -76,6 +99,32 @@ LoadAllTurnsStatusResponse = bff_pydantic_response_with_diagnostics(
     "LoadAllTurnsStatusResponse",
     CoreLoadAllTurnsStatusResponse,
 )
+
+LoadAllProgressUpdate = bff_pydantic_mirror(
+    "LoadAllProgressUpdate",
+    CoreLoadAllProgressUpdate,
+)
+
+LoadAllTurnsResponse = bff_pydantic_mirror(
+    "LoadAllTurnsResponse",
+    CoreLoadAllTurnsResponse,
+)
+
+
+class LoadAllStreamProgressEvent(LoadAllProgressUpdate):
+    """One NDJSON line while bulk-loading turns (``type: progress``)."""
+
+    type: Literal["progress"]
+
+
+class LoadAllStreamCompleteEvent(BaseModel):
+    """Final NDJSON line after bulk load (``type: complete``)."""
+
+    type: Literal["complete"]
+    result: LoadAllTurnsResponse
+
+
+LoadAllTurnsRequest = RefreshGameInfoParams
 
 
 class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
@@ -94,7 +143,11 @@ class StellarCartographyTurnSummaryResponse(OmitNullDiagnosticsBase):
 __all__ = [
     "BffGameInfoResponse",
     "BffTurnInfoResponse",
+    "LoadAllProgressUpdate",
+    "LoadAllStreamCompleteEvent",
+    "LoadAllStreamProgressEvent",
     "LoadAllTurnsRequest",
+    "LoadAllTurnsResponse",
     "LoadAllTurnsStatusResponse",
     "OmitNullDiagnosticsBase",
     "StoredTurnPerspectivesResponse",
