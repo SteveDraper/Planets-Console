@@ -69,7 +69,11 @@ def iter_load_all_ndjson_lines(iterator: Iterator[LoadAllStreamItem]) -> Iterato
 def stream_load_all_turns(
     load_iterator: Callable[[], Iterator[LoadAllStreamItem]],
 ) -> Iterator[str]:
-    """Run bulk load and yield NDJSON lines, including one error line on failure."""
+    """Run bulk load and yield NDJSON lines, including one error line on failure.
+
+    ``PlanetsConsoleError`` raised while iterating is not propagated to FastAPI;
+    callers always get HTTP 200 with a final ``{"type": "error", ...}`` line instead.
+    """
     try:
         yield from iter_load_all_ndjson_lines(load_iterator())
     except PlanetsConsoleError as exc:

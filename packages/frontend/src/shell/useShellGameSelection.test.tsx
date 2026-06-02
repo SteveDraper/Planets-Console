@@ -122,4 +122,122 @@ describe('useShellGameSelection', () => {
       resolveRefresh({ game: { id: 99, turn: 5 }, players: [] })
     })
   })
+
+  it('disables load-all when status reports complete', async () => {
+    const { fetchLoadAllTurnsStatus } = await import('../api/bff')
+    vi.mocked(fetchLoadAllTurnsStatus).mockResolvedValue({
+      game_id: 99,
+      complete: true,
+      is_game_finished: true,
+      expected_perspectives: [1],
+      latest_turn: 10,
+    })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useShellGameSelection({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(result.current.isLoadAllTurnsDisabled).toBe(true)
+    })
+  })
+
+  it('reports shell error when load-all is triggered without login', async () => {
+    useSessionStore.setState({ name: '', password: '', credentialsRevision: 0 })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useShellGameSelection({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    act(() => {
+      result.current.handleLoadAllTurns()
+    })
+
+    expect(reportShellError).toHaveBeenCalled()
+    expect(loadAllTurnsWithProgress).not.toHaveBeenCalled()
+  })
+
+  it('runs load-all mutation with session credentials', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useShellGameSelection({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await act(async () => {
+      result.current.handleLoadAllTurns()
+    })
+
+    await waitFor(() => {
+      expect(loadAllTurnsWithProgress).toHaveBeenCalledWith(
+        '99',
+        { username: 'Alice', password: 'secret' },
+        expect.any(Function)
+      )
+    })
+  })
+
+  it('reports shell error when final turn load fails for some perspectives', async () => {
+    useShellStore.setState({
+      gameInfoContext: {
+        turn: 5,
+        perspectives: [
+          { ordinal: 1, name: 'Alice', raceName: null },
+          { ordinal: 2, name: 'Bob', raceName: null },
+        ],
+        isGameFinished: true,
+        sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+      },
+    })
+    vi.mocked(loadAllTurnsWithProgress).mockResolvedValue({
+      game_id: 99,
+      is_game_finished: true,
+      turns_written: 10,
+      turns_skipped: 0,
+      perspectives_touched: [1, 2],
+      final_turn_load_failures: [2],
+    })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useShellGameSelection({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await act(async () => {
+      result.current.handleLoadAllTurns()
+    })
+
+    await waitFor(() => {
+      expect(reportShellError).toHaveBeenCalledWith(
+        'Load-all finished but the final turn could not be fetched for Bob (perspective 2). Retry Load all turns or change turn to load the latest turn manually.'
+      )
+    })
+  })
+
+  it('does not report shell error when final turn load succeeds for all perspectives', async () => {
+    vi.mocked(loadAllTurnsWithProgress).mockResolvedValue({
+      game_id: 99,
+      is_game_finished: true,
+      turns_written: 10,
+      turns_skipped: 0,
+      perspectives_touched: [1],
+      final_turn_load_failures: [],
+    })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useShellGameSelection({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await act(async () => {
+      result.current.handleLoadAllTurns()
+    })
+
+    await waitFor(() => {
+      expect(loadAllTurnsWithProgress).toHaveBeenCalled()
+    })
+    expect(reportShellError).not.toHaveBeenCalled()
+  })
 })
