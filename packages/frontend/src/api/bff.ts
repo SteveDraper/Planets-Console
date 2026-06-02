@@ -356,14 +356,8 @@ export async function loadAllTurnsWithProgress(
 
   const dispatchLoadAllEvent = (event: LoadAllStreamEvent) => {
     if (event.type === 'progress') {
-      onProgress({
-        phase: event.phase,
-        perspective: event.perspective,
-        perspective_total: event.perspective_total,
-        turn: event.turn,
-        turn_total: event.turn_total,
-        message: event.message,
-      })
+      const { type: _type, ...progress } = event
+      onProgress(progress)
     } else if (event.type === 'complete') {
       result = event.result
     } else if (event.type === 'error') {

@@ -14,7 +14,6 @@ from api.services.deps import (
     get_turn_load_service,
 )
 from api.services.game_service import GameService
-from api.services.load_all_streaming import stream_load_all_turns
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_load_service import TurnLoadService
@@ -30,7 +29,11 @@ from api.transport.connections_options import (
     FlareConnectionMode,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
-from api.transport.load_all_turns import LoadAllTurnsRequest, LoadAllTurnsStatusResponse
+from api.transport.load_all_turns import (
+    LoadAllTurnsRequest,
+    LoadAllTurnsStatusResponse,
+    stream_load_all_turns,
+)
 
 router = APIRouter(prefix="/v1/games", tags=["games"])
 

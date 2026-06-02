@@ -15,3 +15,7 @@ export {
 } from './shellContext'
 export { useShellContext, type ShellContext, type UseShellContextOptions } from './useShellContext'
 export { useLoadAllTurns, type UseLoadAllTurnsOptions } from './useLoadAllTurns'
+export {
+  useShellGameSelection,
+  type UseShellGameSelectionOptions,
+} from './useShellGameSelection'

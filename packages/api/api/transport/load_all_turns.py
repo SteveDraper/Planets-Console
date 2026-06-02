@@ -1,11 +1,12 @@
 """Request and response models for bulk turn loading."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
 
+from api.errors import PlanetsConsoleError
 from api.transport.game_info_update import RefreshGameInfoParams
 
 LoadAllTurnsRequest = RefreshGameInfoParams
@@ -63,3 +64,13 @@ def iter_load_all_ndjson_lines(iterator: Iterator[LoadAllStreamItem]) -> Iterato
     """Serialize each stream item as one NDJSON line."""
     for item in iterator:
         yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
+
+
+def stream_load_all_turns(
+    load_iterator: Callable[[], Iterator[LoadAllStreamItem]],
+) -> Iterator[str]:
+    """Run bulk load and yield NDJSON lines, including one error line on failure."""
+    try:
+        yield from iter_load_all_ndjson_lines(load_iterator())
+    except PlanetsConsoleError as exc:
+        yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"

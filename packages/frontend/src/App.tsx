@@ -4,14 +4,8 @@ import {
   getLatestTurnFromGameInfo,
   selectableTurnMaxForShell,
 } from './lib/gameInfoShell'
-import { loadGameFromStorage, type StorageGameLoadResult } from './lib/loadGameFromStorage'
-import {
-  QueryClient,
-  QueryClientProvider,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query'
+import { loadGameFromStorage } from './lib/loadGameFromStorage'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { Header } from './components/Header'
 import { ShellErrorBar, type ShellErrorItem } from './components/ShellErrorBar'
 import { ShellLoadAllProgressBar } from './components/ShellLoadAllProgressBar'
@@ -21,17 +15,14 @@ import {
   fetchAnalytics,
   fetchShellBootstrap,
   fetchStoredGameInfo,
-  refreshGameInfo,
   type ConnectionsMapParams,
-  type GameInfoResponse,
 } from './api/bff'
-import type { GameSelectionOptions } from './components/GameControl'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
-import { useLoadAllTurns, useShellContext } from './shell'
+import { useShellContext, useShellGameSelection } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
@@ -45,7 +36,6 @@ const queryClient = new QueryClient({
 })
 
 function ConsoleShell() {
-  const queryClient = useQueryClient()
   const loginName = useSessionStore((s) => s.name)
   const [viewMode, setViewMode] = useState<'tabular' | 'map'>('map')
   /** React Flow zoom (same as mousewheel); 1 = 100% on slider. Updated by MapGraph. */
@@ -97,77 +87,12 @@ function ConsoleShell() {
 
   const {
     loadAllProgress,
-    runLoadAllTurns,
+    handleCommitGameSelection,
+    isGameRefreshPending,
     isLoadAllTurnsDisabled,
-    isLoadAllTurnsPending: isLoadAllTurnsPendingFromHook,
+    isLoadAllTurnsPending,
     handleLoadAllTurns,
-  } = useLoadAllTurns({ reportShellError: addShellError })
-
-  const refreshGameMutation = useMutation({
-    mutationFn: async (vars: {
-      gameId: string
-      username: string
-      password?: string
-      loadAllTurns?: boolean
-    }): Promise<
-      | { source: 'refresh'; gameInfo: GameInfoResponse }
-      | { source: 'storage'; load: StorageGameLoadResult }
-    > => {
-      const username = vars.username.trim()
-      if (username) {
-        const gameInfo = await refreshGameInfo(vars.gameId, {
-          username,
-          password: vars.password,
-        })
-        if (vars.loadAllTurns) {
-          await runLoadAllTurns({
-            gameId: vars.gameId,
-            username,
-            password: vars.password,
-          })
-        }
-        return { source: 'refresh', gameInfo }
-      }
-      return { source: 'storage', load: await loadGameFromStorage(vars.gameId) }
-    },
-    retry: false,
-    onSuccess: (data, vars) => {
-      if (data.source === 'storage') {
-        const { load } = data
-        applyGameInfoRefresh(
-          vars.gameId,
-          buildGameInfoShellContext(load.gameInfo),
-          {
-            storageOnlyLoad: true,
-            storageAvailablePerspectives: load.storedPerspectives,
-            perspectiveOverrideName: load.defaultViewpointName,
-          }
-        )
-      } else {
-        clearStorageOnlyLoad()
-        const { gameInfo } = data
-        const latestTurn = getLatestTurnFromGameInfo(gameInfo)
-        applyGameInfoRefresh(vars.gameId, buildGameInfoShellContext(gameInfo), {
-          selectableTurnMax: selectableTurnMaxForShell(latestTurn),
-        })
-      }
-
-      void queryClient.invalidateQueries({ queryKey: ['bff', 'games'] })
-      void queryClient.invalidateQueries({
-        queryKey: ['bff', 'games', vars.gameId, 'load-all-status'],
-      })
-    },
-    onError: (err) => {
-      const message =
-        err instanceof Error ? err.message : typeof err === 'string' ? err : 'Game refresh failed'
-      addShellError(message)
-    },
-  })
-
-  const isLoadAllTurnsPending =
-    isLoadAllTurnsPendingFromHook ||
-    (refreshGameMutation.isPending &&
-      refreshGameMutation.variables?.loadAllTurns === true)
+  } = useShellGameSelection({ reportShellError: addShellError })
 
   useEffect(() => {
     resetPerspectiveOverride()
@@ -175,19 +100,6 @@ function ConsoleShell() {
       clearStorageOnlyLoad()
     }
   }, [loginName, resetPerspectiveOverride, clearStorageOnlyLoad])
-
-  const handleCommitGameSelection = useCallback(
-    (gameId: string, options?: GameSelectionOptions) => {
-      const { name, password } = useSessionStore.getState()
-      refreshGameMutation.mutate({
-        gameId,
-        username: name?.trim() ?? '',
-        password: password || undefined,
-        loadAllTurns: options?.loadAllTurns,
-      })
-    },
-    [refreshGameMutation]
-  )
 
   const { data: shellBootstrap } = useQuery({
     queryKey: ['bff', 'shell-bootstrap'],
@@ -337,7 +249,7 @@ function ConsoleShell() {
         onMapZoomSliderChange={handleMapZoomSliderChange}
         selectedGameId={selectedGameId}
         onCommitGameSelection={handleCommitGameSelection}
-        isGameRefreshPending={refreshGameMutation.isPending}
+        isGameRefreshPending={isGameRefreshPending}
         isLoadAllTurnsPending={isLoadAllTurnsPending}
         isLoadAllTurnsDisabled={isLoadAllTurnsDisabled}
         onLoadAllTurns={handleLoadAllTurns}

@@ -74,17 +74,16 @@ describe('parseLoadAllStreamEvent', () => {
     )
   })
 
-  it('throws for malformed progress payloads', () => {
+  it('throws when progress event omits message', () => {
     expect(() =>
       parseLoadAllStreamEvent(
         JSON.stringify({
           type: 'progress',
           phase: 'import',
-          perspective: -1,
+          perspective: 2,
           perspective_total: 11,
           turn: 5,
           turn_total: 111,
-          message: 'Turn 5',
         })
       )
     ).toThrow('invalid shape')

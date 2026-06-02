@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from api.services.load_all_streaming import stream_load_all_turns
 from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
@@ -31,6 +30,7 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest
+from api.transport.load_all_turns import stream_load_all_turns
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, Path, Query
 from fastapi.responses import StreamingResponse
