@@ -7,9 +7,13 @@ import { cn } from '../lib/utils'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useShellStore } from '../stores/shell'
 
+export type GameSelectionOptions = {
+  loadAllTurns?: boolean
+}
+
 type GameControlProps = {
   selectedGameId: string | null
-  onCommitGameSelection: (gameId: string) => void
+  onCommitGameSelection: (gameId: string, options?: GameSelectionOptions) => void
   isGameRefreshPending: boolean
   /** Append a dismissible shell error (e.g. games list fetch failed). */
   reportShellError: (message: string) => void
@@ -30,6 +34,7 @@ export function GameControl({
   const [isOpen, setIsOpen] = useState(false)
   const [sessionExtraIds, setSessionExtraIds] = useState<string[]>([])
   const [addNewId, setAddNewId] = useState('')
+  const [loadAllTurnsOnAdd, setLoadAllTurnsOnAdd] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const gameTriggerRef = useRef<HTMLButtonElement>(null)
@@ -120,7 +125,7 @@ export function GameControl({
     e.preventDefault()
     const trimmed = addNewId.trim()
     if (!trimmed) return
-    onCommitGameSelection(trimmed)
+    onCommitGameSelection(trimmed, loadAllTurnsOnAdd ? { loadAllTurns: true } : undefined)
     setSessionExtraIds((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]))
     closeAndReturnFocus()
   }
@@ -230,6 +235,15 @@ export function GameControl({
                 className="rounded border border-[#52575d] bg-[#2b2e32] px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none"
                 aria-label="New game id"
               />
+              <label className="flex cursor-pointer items-center gap-2 px-1 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={loadAllTurnsOnAdd}
+                  onChange={(e) => setLoadAllTurnsOnAdd(e.target.checked)}
+                  className="rounded border-[#52575d]"
+                />
+                Load all turns
+              </label>
               <button
                 type="submit"
                 disabled={isGameRefreshPending}

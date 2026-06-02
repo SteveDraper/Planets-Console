@@ -54,3 +54,11 @@ class GameStatus(IntEnum):
     RUNNING = 1
     PAUSED = 2
     FINISHED = 3
+
+
+class PlayerStatus(IntEnum):
+    """Wire values on ``Player.status`` (not ``Game.status``)."""
+
+    UNKNOWN = -1
+    ACTIVE = 1
+    ELIMINATED = 3

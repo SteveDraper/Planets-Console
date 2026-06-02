@@ -180,7 +180,8 @@ All fields from the `settings` key of the `rst` object. This is a large dataclas
 | `id` | `int` | Player ID |
 | `username` | `str` | |
 | `raceid` | `int` | Race ID (1-based) |
-| `status` | `int` | |
+| `status` | `int` | Player life-cycle; **`3` = eliminated** (see [design-player-elimination.md](design-player-elimination.md)). Not `Game.status`. |
+| `statusturn` | `int` | Turn when `status` last changed; elimination turn when `status == 3`. |
 | `prioritypoints` | `int` | |
 | `turnjoined` | `int` | |
 | `turnready` | `bool` | |
@@ -665,7 +666,16 @@ Observed in sample data and inferred from wiki:
 | 2 | Paused |
 | 3 | Finished |
 
-### 6.4 Extensibility
+### 6.4 `PlayerStatus` (IntEnum)
+
+Observed on ``Player.status`` (distinct from ``GameStatus``). See [design-player-elimination.md](design-player-elimination.md).
+
+| Value | Name |
+|-------|------|
+| 1 | Active |
+| 3 | Eliminated |
+
+### 6.5 Extensibility
 
 Additional enums (e.g. `Mission`, `NativeGovernment`, `StockType`) can be added in later enhancements as analytics require them. The serialization layer should handle unknown enum values gracefully (see §7.2).
 

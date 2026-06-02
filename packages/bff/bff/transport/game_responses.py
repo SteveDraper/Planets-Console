@@ -49,6 +49,34 @@ BffGameInfoResponse = bff_dataclass_response_with_diagnostics("BffGameInfoRespon
 BffTurnInfoResponse = bff_dataclass_response_with_diagnostics("BffTurnInfoResponse", TurnInfo)
 
 
+class LoadAllTurnsRequest(BaseModel):
+    """Credentials for bulk turn loading from Planets.nu."""
+
+    username: str
+    password: str | None = None
+
+
+class LoadAllTurnsResponse(OmitNullDiagnosticsBase):
+    """Summary after bulk turn loading."""
+
+    game_id: int
+    is_game_finished: bool
+    turns_written: int
+    turns_skipped: int
+    perspectives_touched: list[int] = Field(default_factory=list)
+    final_turn_load_failures: list[int] = Field(default_factory=list)
+
+
+class LoadAllTurnsStatusResponse(OmitNullDiagnosticsBase):
+    """Whether storage already contains every turn from a full bulk load."""
+
+    game_id: int
+    complete: bool
+    is_game_finished: bool
+    expected_perspectives: list[int] = Field(default_factory=list)
+    latest_turn: int
+
+
 class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
     """1-based perspective slots that already have turn data in storage."""
 

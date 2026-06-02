@@ -179,6 +179,103 @@ def test_get_stored_turn_perspectives():
     assert response.json() == {"perspectives": [1]}
 
 
+def test_get_load_all_turns_status_incomplete():
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        storage.put("games/628580/info", json.load(f))
+    response = client.get("/games/628580/turns/load-all-status?username=player1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["complete"] is False
+    assert body["is_game_finished"] is True
+    assert body["latest_turn"] == 111
+
+
+@patch("bff.core_client.PlanetsNuClient")
+def test_post_load_all_turns_finished_game(mock_pc_class):
+    import io
+    import zipfile
+
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        info_payload = json.load(f)
+    info_payload["game"]["turn"] = 1
+    info_payload["settings"]["turn"] = 1
+    info_payload["players"] = info_payload["players"][:1]
+    storage.put("games/628580/info", info_payload)
+    storage.put("credentials/accounts/player1/api_key", "cached-key")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr(
+            "player1-turn1.trn",
+            json.dumps({"settings": {"turn": 1}, "game": {"id": 628580, "turn": 1}}),
+        )
+    mock_instance = mock_pc_class.from_config.return_value
+    mock_instance.load_all.return_value = buf.getvalue()
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        rst = json.load(f)
+    rst["settings"]["turn"] = 1
+    rst["game"]["id"] = 628580
+    rst["game"]["turn"] = 1
+    mock_instance.load_turn.return_value = {"success": True, "rst": rst}
+
+    response = client.post(
+        "/games/628580/turns/load-all",
+        json={"username": "player1"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_game_finished"] is True
+    assert body["turns_written"] >= 1
+    mock_instance.load_all.assert_called_once_with(628580)
+    storage.get("games/628580/1/turns/1")
+
+
+@patch("bff.core_client.PlanetsNuClient")
+def test_post_load_all_turns_stream_finished_game(mock_pc_class):
+    import io
+    import zipfile
+
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        info_payload = json.load(f)
+    info_payload["game"]["turn"] = 1
+    info_payload["settings"]["turn"] = 1
+    info_payload["players"] = info_payload["players"][:1]
+    storage.put("games/628580/info", info_payload)
+    storage.put("credentials/accounts/player1/api_key", "cached-key")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr(
+            "player1-turn1.trn",
+            json.dumps({"settings": {"turn": 1}, "game": {"id": 628580, "turn": 1}}),
+        )
+    mock_instance = mock_pc_class.from_config.return_value
+    mock_instance.load_all.return_value = buf.getvalue()
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        rst = json.load(f)
+    rst["settings"]["turn"] = 1
+    rst["game"]["id"] = 628580
+    rst["game"]["turn"] = 1
+    mock_instance.load_turn.return_value = {"success": True, "rst": rst}
+
+    response = client.post(
+        "/games/628580/turns/load-all/stream",
+        json={"username": "player1"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    lines = [line for line in response.text.strip().split("\n") if line]
+    assert lines[0].startswith('{"type": "progress"')
+    assert '"phase": "download"' in lines[0]
+    assert lines[-1].startswith('{"type": "complete"')
+    complete = json.loads(lines[-1])
+    assert complete["result"]["is_game_finished"] is True
+    storage.get("games/628580/1/turns/1")
+
+
 def test_get_stored_turn_perspectives_empty_when_missing():
     response = client.get("/games/628580/turns/111/stored-perspectives")
     assert response.status_code == 200

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TypeVar
+from collections.abc import Callable, Iterator
+from typing import Any, TypeVar
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError, PlanetsConsoleError
@@ -42,7 +42,11 @@ from api.transport.sector_display import (
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
 
-from bff.transport.game_responses import StoredTurnPerspectivesResponse
+from bff.transport.game_responses import (
+    LoadAllTurnsResponse,
+    LoadAllTurnsStatusResponse,
+    StoredTurnPerspectivesResponse,
+)
 
 T = TypeVar("T")
 
@@ -142,6 +146,62 @@ class CoreClient:
         updated = self._invoke(work)
         self.remember_sector_title_for_game(game_id, updated)
         return updated
+
+    def load_all_turns_status(self, game_id: int, username: str) -> LoadAllTurnsStatusResponse:
+        def work() -> LoadAllTurnsStatusResponse:
+            core_status = self._turns.load_all_turns_status_for_user(game_id, username)
+            return LoadAllTurnsStatusResponse(
+                game_id=core_status.game_id,
+                complete=core_status.complete,
+                is_game_finished=core_status.is_game_finished,
+                expected_perspectives=core_status.expected_perspectives,
+                latest_turn=core_status.latest_turn,
+            )
+
+        return self._invoke(work)
+
+    def load_all_turns(
+        self, game_id: int, username: str, password: str | None
+    ) -> LoadAllTurnsResponse:
+        params = RefreshGameInfoParams(username=username, password=password)
+
+        def work() -> LoadAllTurnsResponse:
+            planets = self._planets_client_factory()
+            core_result = self._turns.load_all_turns(game_id, params, planets)
+            return LoadAllTurnsResponse(
+                game_id=core_result.game_id,
+                is_game_finished=core_result.is_game_finished,
+                turns_written=core_result.turns_written,
+                turns_skipped=core_result.turns_skipped,
+                perspectives_touched=core_result.perspectives_touched,
+                final_turn_load_failures=core_result.final_turn_load_failures,
+            )
+
+        return self._invoke(work)
+
+    def iter_load_all_turns(
+        self, game_id: int, username: str, password: str | None
+    ) -> Iterator[dict[str, Any]]:
+        params = RefreshGameInfoParams(username=username, password=password)
+        planets = self._planets_client_factory()
+        for event in self._turns.iter_load_all_turns(game_id, params, planets):
+            if event.get("type") == "complete":
+                core_result = event["result"]
+                yield {
+                    "type": "complete",
+                    "result": {
+                        "game_id": core_result["game_id"],
+                        "is_game_finished": core_result["is_game_finished"],
+                        "turns_written": core_result["turns_written"],
+                        "turns_skipped": core_result["turns_skipped"],
+                        "perspectives_touched": core_result["perspectives_touched"],
+                        "final_turn_load_failures": core_result.get(
+                            "final_turn_load_failures", []
+                        ),
+                    },
+                }
+            else:
+                yield event
 
     def ensure_turn(self, game_id: int, body: TurnEnsureRequest) -> TurnInfo:
         params = RefreshGameInfoParams(username=body.username, password=body.password)

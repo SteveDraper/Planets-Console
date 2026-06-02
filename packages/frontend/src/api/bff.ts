@@ -297,6 +297,181 @@ export async function fetchStoredTurnPerspectives(
   return r.json()
 }
 
+export type LoadAllTurnsStatusResponse = {
+  game_id: number
+  complete: boolean
+  is_game_finished: boolean
+  expected_perspectives: number[]
+  latest_turn: number
+}
+
+export type LoadAllTurnsResponse = {
+  game_id: number
+  is_game_finished: boolean
+  turns_written: number
+  turns_skipped: number
+  perspectives_touched: number[]
+  final_turn_load_failures?: number[]
+}
+
+export type LoadAllProgressUpdate = {
+  phase: 'download' | 'import' | 'final_turn'
+  perspective: number
+  perspective_total: number
+  turn: number
+  turn_total: number
+  message: string
+}
+
+type LoadAllStreamEvent =
+  | ({ type: 'progress' } & LoadAllProgressUpdate)
+  | { type: 'complete'; result: LoadAllTurnsResponse }
+  | { type: 'error'; detail: string }
+
+function parseLoadAllStreamLine(line: string): LoadAllStreamEvent | null {
+  const trimmed = line.trim()
+  if (!trimmed) {
+    return null
+  }
+  return JSON.parse(trimmed) as LoadAllStreamEvent
+}
+
+/** Load all turns with streaming progress (NDJSON). */
+export async function loadAllTurnsWithProgress(
+  gameId: string,
+  params: RefreshGameInfoParams,
+  onProgress: (update: LoadAllProgressUpdate) => void
+): Promise<LoadAllTurnsResponse> {
+  const trimmedUser = params.username.trim()
+  if (!trimmedUser) {
+    throw new Error('Set login name in the header before loading all turns.')
+  }
+  const body: { username: string; password?: string } = { username: trimmedUser }
+  if (params.password) {
+    body.password = params.password
+  }
+  const path = `/bff/games/${encodeURIComponent(gameId)}/turns/load-all/stream`
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    endpointLabel
+  )
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  if (!r.body) {
+    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
+  }
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: LoadAllTurnsResponse | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const event = parseLoadAllStreamLine(line)
+      if (!event) {
+        continue
+      }
+      if (event.type === 'progress') {
+        onProgress({
+          phase: event.phase,
+          perspective: event.perspective,
+          perspective_total: event.perspective_total,
+          turn: event.turn,
+          turn_total: event.turn_total,
+          message: event.message,
+        })
+      } else if (event.type === 'complete') {
+        result = event.result
+      } else if (event.type === 'error') {
+        throw new Error(withEndpointIfGeneric(event.detail, endpointLabel))
+      }
+    }
+  }
+
+  const trailing = parseLoadAllStreamLine(buffer)
+  if (trailing) {
+    if (trailing.type === 'progress') {
+      onProgress({
+        phase: trailing.phase,
+        perspective: trailing.perspective,
+        perspective_total: trailing.perspective_total,
+        turn: trailing.turn,
+        turn_total: trailing.turn_total,
+        message: trailing.message,
+      })
+    } else if (trailing.type === 'complete') {
+      result = trailing.result
+    } else if (trailing.type === 'error') {
+      throw new Error(withEndpointIfGeneric(trailing.detail, endpointLabel))
+    }
+  }
+
+  if (!result) {
+    throw new Error(withEndpointIfGeneric('Load all turns ended without a result', endpointLabel))
+  }
+  return result
+}
+
+/** Load all turns into storage (loadall ZIP when finished, else sequential loadturn). */
+export async function loadAllTurns(
+  gameId: string,
+  params: RefreshGameInfoParams
+): Promise<LoadAllTurnsResponse> {
+  return loadAllTurnsWithProgress(gameId, params, () => {})
+}
+
+/** Whether storage already has every turn from a full bulk load for this login. */
+export async function fetchLoadAllTurnsStatus(
+  gameId: string,
+  username: string
+): Promise<LoadAllTurnsStatusResponse> {
+  const params = new URLSearchParams()
+  if (username.trim()) {
+    params.set('username', username.trim())
+  }
+  const qs = params.toString()
+  const path = `/bff/games/${encodeURIComponent(gameId)}/turns/load-all-status${qs ? `?${qs}` : ''}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  return r.json()
+}
+
 /**
  * Ensures turn data exists in Core storage (Planets.nu loadturn when missing).
  * Username may be empty when the turn is already stored (no upstream fetch).

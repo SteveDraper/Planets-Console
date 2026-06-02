@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -111,3 +112,30 @@ class PlanetsNuClient:
         if not isinstance(data, dict):
             raise UpstreamPlanetsError("Planets.nu loadturn returned an unexpected payload.")
         return data
+
+    def load_all(self, game_id: int) -> bytes:
+        """GET /game/loadall; returns a ZIP of turn files for a finished game."""
+        url = f"{self._base_url}/game/loadall"
+        loadall_timeout = max(self._timeout, 300.0)
+        try:
+            with httpx.Client(timeout=loadall_timeout) as client:
+                response = client.get(url, params={"gameid": game_id})
+                response.raise_for_status()
+                body = response.content
+        except httpx.HTTPError as exc:
+            logger.warning("Planets.nu loadall HTTP error: %s", _safe_httpx_error_summary(exc))
+            raise UpstreamPlanetsError("Planets.nu loadall request failed.") from exc
+
+        if not body:
+            raise UpstreamPlanetsError("Planets.nu loadall returned an empty response.")
+
+        if body[:1] == b"{":
+            try:
+                data = json.loads(body)
+            except ValueError as exc:
+                raise UpstreamPlanetsError("Planets.nu loadall returned invalid JSON.") from exc
+            if isinstance(data, dict) and not data.get("success", True):
+                detail = data.get("error") or data.get("message") or "Loadall was not successful."
+                raise UpstreamPlanetsError(str(detail))
+
+        return body

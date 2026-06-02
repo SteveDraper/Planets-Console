@@ -172,6 +172,24 @@ class TestTurnInfoSerialization:
         assert ti.settings.allplanetsvisible is defaults["allplanetsvisible"]
         assert ti.settings.spectatormode is defaults["spectatormode"]
 
+    def test_historical_scores_backfilled_with_defaults(self, turn_sample_data):
+        """Older turn snapshots may omit newer score fields added mid-game."""
+        historical = copy.deepcopy(turn_sample_data)
+        for entry in historical["scores"]:
+            for key in (
+                "victoryscore",
+                "technologicalaccumulator",
+                "widestreach",
+                "greatestwarrior",
+                "happybeings",
+            ):
+                entry.pop(key, None)
+
+        ti = turn_info_from_json(historical, settings_defaults=historical["settings"])
+        assert ti.scores[0].victoryscore == 0
+        assert ti.scores[0].technologicalaccumulator == 0
+        assert ti.scores[0].widestreach == 0
+
     def test_turn_info_from_json_does_not_mutate_input(self, turn_sample_data):
         data = copy.deepcopy(turn_sample_data)
         before = copy.deepcopy(data)

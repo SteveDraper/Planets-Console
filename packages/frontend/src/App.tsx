@@ -14,16 +14,22 @@ import {
 } from '@tanstack/react-query'
 import { Header } from './components/Header'
 import { ShellErrorBar, type ShellErrorItem } from './components/ShellErrorBar'
+import { ShellLoadAllProgressBar } from './components/ShellLoadAllProgressBar'
 import { AnalyticsBar } from './components/AnalyticsBar'
 import { MainArea } from './components/MainArea'
 import {
   fetchAnalytics,
   fetchShellBootstrap,
   fetchStoredGameInfo,
+  fetchLoadAllTurnsStatus,
+  loadAllTurnsWithProgress,
   refreshGameInfo,
   type ConnectionsMapParams,
   type GameInfoResponse,
+  type LoadAllProgressUpdate,
 } from './api/bff'
+import type { GameSelectionOptions } from './components/GameControl'
+import { LOGIN_REQUIRED_FOR_GAME_SELECTION } from './lib/gameInfoShell'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
@@ -70,6 +76,7 @@ function ConsoleShell() {
   }, [])
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
+  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const applyGameInfoRefresh = useShellStore((s) => s.applyGameInfoRefresh)
   const resetPerspectiveOverride = useShellStore((s) => s.resetPerspectiveOverride)
   const clearStorageOnlyLoad = useShellStore((s) => s.clearStorageOnlyLoad)
@@ -92,21 +99,55 @@ function ConsoleShell() {
     stepTurn,
   } = useShellContext({ reportShellError: addShellError })
 
+  const [loadAllProgress, setLoadAllProgress] = useState<LoadAllProgressUpdate | null>(null)
+
+  const runLoadAllTurns = useCallback(
+    async (vars: { gameId: string; username: string; password?: string }) => {
+      setLoadAllProgress({
+        phase: 'download',
+        perspective: 0,
+        perspective_total: 0,
+        turn: 0,
+        turn_total: 0,
+        message: 'Starting load…',
+      })
+      try {
+        return await loadAllTurnsWithProgress(
+          vars.gameId,
+          { username: vars.username, password: vars.password },
+          setLoadAllProgress
+        )
+      } finally {
+        setLoadAllProgress(null)
+      }
+    },
+    []
+  )
+
   const refreshGameMutation = useMutation({
     mutationFn: async (vars: {
       gameId: string
       username: string
       password?: string
+      loadAllTurns?: boolean
     }): Promise<
       | { source: 'refresh'; gameInfo: GameInfoResponse }
       | { source: 'storage'; load: StorageGameLoadResult }
     > => {
       const username = vars.username.trim()
       if (username) {
-        return {
-          source: 'refresh',
-          gameInfo: await refreshGameInfo(vars.gameId, { username, password: vars.password }),
+        const gameInfo = await refreshGameInfo(vars.gameId, {
+          username,
+          password: vars.password,
+        })
+        if (vars.loadAllTurns) {
+          await runLoadAllTurns({
+            gameId: vars.gameId,
+            username,
+            password: vars.password,
+          })
         }
+        return { source: 'refresh', gameInfo }
       }
       return { source: 'storage', load: await loadGameFromStorage(vars.gameId) }
     },
@@ -133,12 +174,43 @@ function ConsoleShell() {
       }
 
       void queryClient.invalidateQueries({ queryKey: ['bff', 'games'] })
+      void queryClient.invalidateQueries({
+        queryKey: ['bff', 'games', vars.gameId, 'load-all-status'],
+      })
     },
     onError: (err) => {
       const message =
         err instanceof Error ? err.message : typeof err === 'string' ? err : 'Game refresh failed'
       addShellError(message)
     },
+  })
+
+  const loadAllTurnsMutation = useMutation({
+    mutationFn: runLoadAllTurns,
+    retry: false,
+    onSuccess: (_data, vars) => {
+      clearStorageOnlyLoad()
+      void queryClient.invalidateQueries({ queryKey: ['bff', 'games'] })
+      void queryClient.invalidateQueries({
+        queryKey: ['bff', 'games', vars.gameId, 'load-all-status'],
+      })
+    },
+    onError: (err) => {
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : 'Load all turns failed'
+      addShellError(message)
+    },
+  })
+
+  const { data: loadAllTurnsStatus } = useQuery({
+    queryKey: ['bff', 'games', selectedGameId, 'load-all-status', loginName?.trim() ?? ''],
+    queryFn: () => fetchLoadAllTurnsStatus(selectedGameId!, loginName!.trim()),
+    enabled: Boolean(selectedGameId && loginName?.trim() && gameInfoContext != null),
+    staleTime: 30_000,
   })
 
   useEffect(() => {
@@ -149,16 +221,41 @@ function ConsoleShell() {
   }, [loginName, resetPerspectiveOverride, clearStorageOnlyLoad])
 
   const handleCommitGameSelection = useCallback(
-    (gameId: string) => {
+    (gameId: string, options?: GameSelectionOptions) => {
       const { name, password } = useSessionStore.getState()
       refreshGameMutation.mutate({
         gameId,
         username: name?.trim() ?? '',
         password: password || undefined,
+        loadAllTurns: options?.loadAllTurns,
       })
     },
     [refreshGameMutation]
   )
+
+  const handleLoadAllTurns = useCallback(() => {
+    if (!selectedGameId) return
+    const { name, password } = useSessionStore.getState()
+    const username = name?.trim() ?? ''
+    if (!username) {
+      addShellError(LOGIN_REQUIRED_FOR_GAME_SELECTION)
+      return
+    }
+    loadAllTurnsMutation.mutate({
+      gameId: selectedGameId,
+      username,
+      password: password || undefined,
+    })
+  }, [selectedGameId, loadAllTurnsMutation, addShellError])
+
+  const isLoadAllTurnsDisabled =
+    !loginName?.trim() ||
+    loadAllTurnsStatus?.complete === true ||
+    gameInfoContext == null
+  const isLoadAllTurnsPending =
+    loadAllProgress != null ||
+    loadAllTurnsMutation.isPending ||
+    refreshGameMutation.isPending
 
   const { data: shellBootstrap } = useQuery({
     queryKey: ['bff', 'shell-bootstrap'],
@@ -265,7 +362,6 @@ function ConsoleShell() {
     }
   }, [analyticsIsError, analyticsError, addShellError])
 
-  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const stellarCartographyGates =
     gameInfoContext?.stellarCartographyGates ??
     EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
@@ -310,6 +406,9 @@ function ConsoleShell() {
         selectedGameId={selectedGameId}
         onCommitGameSelection={handleCommitGameSelection}
         isGameRefreshPending={refreshGameMutation.isPending}
+        isLoadAllTurnsPending={isLoadAllTurnsPending}
+        isLoadAllTurnsDisabled={isLoadAllTurnsDisabled}
+        onLoadAllTurns={handleLoadAllTurns}
         reportShellError={addShellError}
         shellTurnMax={shellTurnMax}
         shellTurnValue={selectedTurn}
@@ -321,6 +420,7 @@ function ConsoleShell() {
         onShellViewpointChange={handleShellViewpointChange}
       />
       <ShellErrorBar errors={shellErrors} onDismiss={dismissShellError} />
+      {loadAllProgress ? <ShellLoadAllProgressBar progress={loadAllProgress} /> : null}
       <div className="flex min-h-0 flex-1">
         <AnalyticsBar
           analytics={analytics}
