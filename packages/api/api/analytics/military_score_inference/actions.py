@@ -22,7 +22,6 @@ from api.models.game import TurnInfo
 from api.models.player import Player, Race
 
 LOADOUT_PRESET_EMPTY = "empty"
-LOADOUT_PRESET_FIGHTERS = "fighters"
 LOADOUT_PRESET_TORPEDOES = "torpedoes"
 
 PLANET_DEFENSE_POST_BUCKETS = (
@@ -70,7 +69,6 @@ class ActionCatalogConfig:
     max_ship_torpedoes_per_type: int = 200
     max_fighter_transfers: int = 50
     default_ship_build_probability_weight: int = 80
-    fighter_carrier_build_probability_weight: int = 90
     torpedo_ship_build_probability_weight: int = 85
     noisy_action_probability_weight: int = 10
     fighter_transfer_probability_weight: int = 15
@@ -388,7 +386,7 @@ def _ship_build_actions(
 
     for hull_id in sorted(buildable_hull_ids):
         hull = hulls_by_id.get(hull_id)
-        if hull is None or hull.isbase:
+        if hull is None:
             continue
 
         is_warship = _is_military_hull(hull)
@@ -401,36 +399,23 @@ def _ship_build_actions(
         if build_upper_bound <= 0:
             continue
 
-        presets = [(LOADOUT_PRESET_EMPTY, config.default_ship_build_probability_weight, 0, 0)]
-        if hull.fighterbays > 0:
-            presets.append(
-                (
-                    LOADOUT_PRESET_FIGHTERS,
-                    config.fighter_carrier_build_probability_weight,
-                    hull.fighterbays,
-                    0,
-                )
-            )
+        presets: list[tuple[str, int]] = [
+            (LOADOUT_PRESET_EMPTY, config.default_ship_build_probability_weight),
+        ]
         if hull.launchers > 0 and default_torpedo is not None:
             presets.append(
-                (
-                    LOADOUT_PRESET_TORPEDOES,
-                    config.torpedo_ship_build_probability_weight,
-                    0,
-                    hull.launchers,
-                )
+                (LOADOUT_PRESET_TORPEDOES, config.torpedo_ship_build_probability_weight),
             )
 
-        for preset_id, probability_weight, initial_fighters, initial_torpedoes in presets:
+        for preset_id, probability_weight in presets:
+            armed_build = preset_id == LOADOUT_PRESET_TORPEDOES
             score_delta_2x = _ship_build_score_delta_2x(
                 hull,
                 default_engine,
                 default_beam,
                 default_torpedo,
-                beam_count=hull.beams if preset_id == LOADOUT_PRESET_TORPEDOES else 0,
-                torpedo_count=initial_torpedoes,
-                initial_fighters=initial_fighters,
-                initial_torpedoes=initial_torpedoes,
+                beam_count=hull.beams if armed_build else 0,
+                launcher_count=hull.launchers if armed_build else 0,
             )
             if score_delta_2x == 0:
                 continue
@@ -457,33 +442,25 @@ def _ship_build_score_delta_2x(
     torpedo: Torpedo | None,
     *,
     beam_count: int,
-    torpedo_count: int,
-    initial_fighters: int,
-    initial_torpedoes: int,
+    launcher_count: int,
 ) -> int:
-    construction_megacredits = hull.cost + engine.cost
-    construction_minerals = _component_minerals(hull) + _component_minerals(engine)
+    """Hull construction score only; ammo is modeled by separate catalog actions."""
+    engine_count = hull.engines
+    construction_megacredits = hull.cost + engine.cost * engine_count
+    construction_minerals = _component_minerals(hull) + _component_minerals(engine) * engine_count
 
     if beam is not None and beam_count > 0:
         construction_megacredits += beam.cost * beam_count
         construction_minerals += _component_minerals(beam) * beam_count
 
-    if torpedo is not None and torpedo_count > 0:
-        construction_megacredits += torpedo.launchercost * torpedo_count
-        construction_minerals += _component_minerals(torpedo) * torpedo_count
+    if torpedo is not None and launcher_count > 0:
+        construction_megacredits += torpedo.launchercost * launcher_count
+        construction_minerals += _component_minerals(torpedo) * launcher_count
 
-    score_delta_2x = ship_construction_score_delta_2x(
+    return ship_construction_score_delta_2x(
         construction_megacredits,
         construction_minerals,
     )
-    if initial_fighters > 0:
-        score_delta_2x += loaded_ship_fighter_score_delta_2x(initial_fighters)
-    if torpedo is not None and initial_torpedoes > 0:
-        score_delta_2x += loaded_ship_torpedo_score_delta_2x(
-            torpedo.torpedocost,
-            initial_torpedoes,
-        )
-    return score_delta_2x
 
 
 def _probability_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...]:

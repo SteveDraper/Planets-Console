@@ -4,6 +4,8 @@
 
 import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
 import type { ConnectionsMapParams } from '../analytics/connections/api'
+import { appendScoresTableQueryParams } from '../analytics/scores/api'
+import type { ScoresTableParams } from '../analytics/scores/api'
 import type {
   MapDataResponse,
   StellarCartographySampleResponse,
@@ -26,6 +28,8 @@ export type {
   ConnectionsFlareMode,
   ConnectionsMapParams,
 } from '../analytics/connections/api'
+
+export type { ScoresTableParams } from '../analytics/scores/api'
 
 export type {
   BlackHoleOverlayCircle,
@@ -202,6 +206,30 @@ export type TableDataResponse = {
   analyticId: string
   columns: string[]
   rows: string[][]
+  includeBuildInference?: boolean
+  inferenceByRow?: ScoresInferenceRowDetail[]
+}
+
+export type ScoresInferenceSolutionAction = {
+  actionId: string
+  label: string
+  count: number
+}
+
+export type ScoresInferenceSolution = {
+  objectiveValue: number
+  actions: ScoresInferenceSolutionAction[]
+}
+
+export type ScoresInferenceRowDetail = {
+  playerId?: number
+  displayStatus: 'success' | 'pending' | 'failure'
+  status: string
+  summary: string
+  solutionCount: number
+  isComplete: boolean
+  solutions: ScoresInferenceSolution[]
+  diagnostics: Record<string, unknown>
 }
 
 export type StoredGameItem = {
@@ -543,10 +571,19 @@ function analyticMapQueryString(
 
 export async function fetchAnalyticTable(
   analyticId: string,
-  scope: AnalyticShellScope
+  scope: AnalyticShellScope,
+  scoresTableParams?: ScoresTableParams
 ): Promise<TableDataResponse> {
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/table`
-  const qs = analyticScopeQuery(scope)
+  const params = new URLSearchParams({
+    gameId: scope.gameId,
+    turn: String(scope.turn),
+    perspective: String(scope.perspective),
+  })
+  if (analyticId === 'scores' && scoresTableParams != null) {
+    appendScoresTableQueryParams(params, scoresTableParams)
+  }
+  const qs = `?${params.toString()}`
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
   if (!r.ok) {

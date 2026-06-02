@@ -31,8 +31,10 @@ When adding the dependency, respect the dependency cooldown rule. At design time
 ```mermaid
 flowchart LR
     Scores["Adjacent scoreboard rows"] --> Observations["InferenceObservation"]
-    Observations --> Catalog["Candidate action catalog"]
-    Catalog --> Model["CP-SAT model"]
+    Observations --> Agg["Aggregate actions"]
+    Observations --> Combos["Ship build combos"]
+    Agg --> Model["CP-SAT model"]
+    Combos --> Model
     Model --> Solutions["Top-K feasible explanations"]
     Solutions --> CoreScores["Core scores payload"]
     CoreScores --> BffScores["BFF scores table"]
@@ -50,12 +52,15 @@ Start with a small Core API subpackage so the solver and scoring model do not cr
 ```text
 packages/api/api/analytics/military_score_inference/
 |-- __init__.py
-|-- actions.py          # action catalog and contribution helpers
-|-- models.py           # dataclasses for observations, actions, problems, solutions
-|-- scoring.py          # scaled military-score contribution formulas
-|-- solver.py           # OR-Tools CP-SAT adapter
-`-- analytic.py         # turn-level analytic assembly
+|-- actions.py            # aggregate noisy actions (defense, ammo load, transfers)
+|-- ship_build_combos.py  # eligible hull/engine/beam/torp combos and tier policy (Phase 1G+)
+|-- models.py             # dataclasses for observations, actions, problems, solutions
+|-- scoring.py            # scaled military-score contribution formulas
+|-- solver.py             # OR-Tools CP-SAT adapter
+`-- analytic.py           # turn-level analytic assembly
 ```
+
+Phase 1F shipped an interim flat `build_{hull}_{preset}` catalog in `actions.py`. Phase 1G moves ship builds into `ship_build_combos.py` and leaves aggregate actions in `actions.py`.
 
 Do not register `military_score_inference` as a separate user-facing analytic. The solver package should be called by the existing `scores` analytic when inference is requested.
 
@@ -123,6 +128,39 @@ class InferenceProblem:
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
     max_solutions: int = 20
     time_limit_seconds: float = 1.0
+```
+
+**Target extension (Phase 1G+):** ship builds become structured combos; aggregate noisy actions stay flat.
+
+```python
+@dataclass(frozen=True)
+class ShipBuildCombo:
+    combo_id: str
+    hull_id: int
+    engine_id: int
+    beam_id: int | None       # None = no beams fitted
+    torp_id: int | None       # None = no torp tubes fitted
+    beam_count: int           # 0 .. hull.beams
+    launcher_count: int       # 0 .. hull.launchers
+    labels: tuple[str, ...]   # display labels; multiple when score-equivalent
+    score_delta_2x: int
+    warship_delta: int
+    freighter_delta: int
+    probability_weight: int
+
+
+@dataclass(frozen=True)
+class InferenceProblem:
+    observation: InferenceObservation
+    aggregate_actions: tuple[CandidateAction, ...]
+    ship_build_combos: tuple[ShipBuildCombo, ...]
+    ship_build_tier: int
+    probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
+    max_solutions: int = 20
+    time_limit_seconds: float = 1.0
+```
+
+The solver sums contributions from **both** aggregate action counts and ship-build combo counts into the same hard constraints.
 
 
 @dataclass(frozen=True)
@@ -293,34 +331,101 @@ The BFF can decide whether to include detailed solutions in the initial table re
 
 ## 8. Action catalog
 
-Generate the initial catalog from the observation and static game data.
+The catalog has **two layers** that feed the same CP-SAT hard constraints:
 
-### 8.1 Ship build actions
+1. **Aggregate actions** -- flat `CandidateAction` rows for repeated or location-agnostic effects.
+2. **Ship build combos** -- sparse `(hull, engine, beam?, torp?, counts)` tuples with integer count variables (Phase 1G+).
 
-Create build actions for hulls the player can build. Each concrete action should include hull, engines, beams, tubes, and optional initial ammo load if the loadout catalog is known.
+Do **not** fold build-time fighter or torpedo **ammo** into ship combos. Loaded fighters and loaded torpedoes are separate aggregate actions that can take non-zero counts alongside ship builds.
 
-Initial implementation can deliberately start with a reduced loadout catalog:
+### 8.1 Ship build combos (target model)
 
-- canonical empty or low-ammo build,
-- common full-fighter carrier build,
-- common torpedo-ship loadouts by torpedo tech,
-- race-specific preferred hull priors.
+Each combo describes **one ship construction configuration** built at a starbase:
 
-Avoid generating every theoretical component combination until the performance envelope is measured.
+- one hull type;
+- `hull.engines` copies of **one** engine type;
+- `beam_count` copies of **one** beam type, or zero beams fitted;
+- `launcher_count` copies of **one** torp tube type (via a torp's `launchercost`), or zero tubes fitted.
 
-### 8.2 Low-value repeated actions
+**Independence of beams and tubes:** omitting beams, omitting launchers, or omitting both is always allowed when the hull has the corresponding slots. Beams and tubes are not required to be fitted together.
 
-Aggregate noisy actions where location detail is not yet known:
+**Same-type rule:** when `beam_count > 0`, all fitted beams share one beam type. When `launcher_count > 0`, all fitted tubes share one torp type (`launchercost`).
+
+**Construction score** (scaled `score_delta_2x`):
+
+```text
+hull.cost
++ hull.engines * engine.cost
++ beam_count * beam.cost            (if beam_count > 0)
++ launcher_count * torp.launchercost (if launcher_count > 0)
+plus minerals via megacredits + 5 * minerals
+times 2 for military score scaling
+```
+
+Ammo (fighters loaded on ships, torpedoes loaded into tubes) is **not** part of this formula.
+
+**Warship vs freighter:** a hull is a warship when it has `beams > 0`, `launchers > 0`, or `fighterbays > 0`; otherwise it counts as a freighter for `shipchange` / `freighterchange` constraints.
+
+**Buildable hulls:** intersection of `player.activehulls`, race hull lists, `turn.racehulls`, and hulls present in `turn.hulls`. Do not filter hull catalog rows on `Hull.isbase`; Planets.nu marks normal starships with `isbase: true`.
+
+**Eligible components** (widened by search tier -- see 8.5):
+
+- engines from `player.activeengines` intersect `turn.engines`;
+- beams from `player.activebeams` intersect `turn.beams`;
+- torps from `player.activetorps` intersect `turn.torpedos` (tube cost only).
+
+**Combo families by tier:**
+
+| Tier focus | Beam / launcher counts | Typical use |
+|------------|------------------------|-------------|
+| Early tiers | `0` or maximum slot count only (`beam_count in {0, hull.beams}`, `launcher_count in {0, hull.launchers}`) | Default search; covers almost all practical builds |
+| Later tiers | Intermediate counts `1 .. hull.beams - 1` and `1 .. hull.launchers - 1` | Niche partial-fit builds; lower priority |
+
+Early tiers still include **minimal** builds `(beam_count=0, launcher_count=0)` for hulls with slots, including unarmed warships and torp hulls with empty tubes and/or empty beams.
+
+**Global linking** (same hard constraints as today, summed over both layers):
+
+```text
+sum_agg(score_delta_2x * count)
+  + sum_combo(score_delta_2x * build) == military_delta_2x
+
+sum_agg(warship_delta * count)
+  + sum_combo(warship_delta * build) == warship_delta
+
+sum_agg(freighter_delta * count)
+  + sum_combo(freighter_delta * build) == freighter_delta
+
+sum(build_slot_usage) <= starbases_owned
+```
+
+Ship combos use `build_slot_usage = 1` per ship. Priority-point deltas on ship builds remain **zero** until production-queue semantics are modeled; treat `prioritypointchange` as diagnostic-only until then.
+
+**Solution shape:** emit structured rows `{ hull, engine, beam?, torp?, beam_count, launcher_count, count }` rather than opaque `build_*` preset IDs.
+
+### 8.2 Interim flat ship builds (Phase 1F -- to be replaced)
+
+Phase 1F shipped a reduced flat catalog (`build_{hull}_{preset}`) with known gaps:
+
+- single default engine (lowest ID in `turn.engines`);
+- single default beam and torp type for armed presets;
+- no beam-type or engine-type enumeration;
+- preset names `empty` / `torpedoes` only.
+
+This was enough to prove the pipeline but produces frequent INFEASIBLE results when the true build used other components. Phase 1G replaces this block with section 8.1.
+
+### 8.3 Aggregate noisy actions
+
+Aggregate actions where location detail is not yet known:
 
 - `planet_defense_posts_added_total`,
 - `starbase_defense_posts_added_total`,
 - `starbase_fighters_added_total`,
 - `ship_fighters_added_total`,
-- `ship_torps_loaded_by_type`.
+- `ship_torps_loaded_{torpedo_id}` for each torp type in `turn.torpedos`.
 
 These variables still have exact score contributions, but they avoid one variable per planet or starbase in the initial version.
 
-### 8.3 Negative actions
+### 8.4 Negative actions
 
 Support signed contribution vectors from the start:
 
@@ -330,11 +435,51 @@ Support signed contribution vectors from the start:
 
 Negative actions need explicit upper bounds. Without bounds, positive and negative actions can create cancellation loops and a huge number of equivalent solutions.
 
+### 8.5 Tiered catalog expansion
+
+A full cross product of buildable hulls times eligible engines, beams, and torps can reach **low thousands to ~10k** combo variables in worst cases (many torp hulls, full turn catalogs, empty `active*` lists). Prefer **staged widening** over a single hand-tuned subset.
+
+Search tiers (increase component eligibility and, in later tiers, partial beam/launcher counts):
+
+| Tier | Engines | Beams | Torps (tube cost) | Partial beam/launcher counts |
+|------|---------|-------|-------------------|----------------------------|
+| 0 | single default (min id) | default | default | no |
+| 1 | `activeengines` or jump if empty | default | default | no |
+| 2 | active or full turn catalog if active empty | `activebeams` or jump | default | no |
+| 3 | active or full | active or full | `activetorps` or full | no |
+| 4 | full `turn.*` catalog | full | full | yes (niche counts) |
+
+**Empty `active*` lists:** do not linger on narrow tiers. **Jump** to the next tier that uses a usable component set (typically full turn-catalog intersection for that axis) rather than solving repeatedly with a single default component.
+
+Per player:
+
+1. Build combo list for tier *n* plus aggregate actions.
+2. Solve.
+3. Stop on FEASIBLE (or TIME_LIMITED with at least one solution).
+4. Else advance tier and retry until max tier or time budget.
+
+Record `ship_build_tier`, `tiers_attempted`, and `combo_count` in diagnostics.
+
+**Future refinement:** order tiers and intra-tier weights from fleet priors (histogram of engines, beams, and torps on existing ships). Likelihood informs search order and objective weights; it should not hard-exclude legal combos unless the product explicitly chooses a "most likely only" mode.
+
+### 8.6 Score-equivalent combos (solver-side merge)
+
+Multiple combos may share the same `(score_delta_2x, warship_delta, freighter_delta)` but differ in labels or probability weights (different hull names with identical construction cost, or different components that collide after scaling).
+
+For **feasibility**, the solver may merge such combos into one integer variable carrying multiple `labels`.
+
+For **top-K enumeration**, equal score does **not** imply equal probability. Distinct labels with the same score should still produce **distinct ranked solutions** when their probability weights differ. Implementation options:
+
+- keep separate objective terms until after solve, or
+- expand merged variables back into label-specific solution rows during extraction.
+
+Do not treat score-equivalent combos as interchangeable in the UI ranking solely because the military score constraint cannot distinguish them.
+
 ---
 
 ## 9. Bounds and performance
 
-The solver should receive a bounded, pruned action catalog.
+The solver should receive a bounded catalog. Ship builds use **tiered combo generation** (section 8.5) rather than materializing the full cross product on the first attempt.
 
 Use these bounds before building the CP-SAT model:
 
@@ -343,10 +488,11 @@ Use these bounds before building the CP-SAT model:
 - **Count-delta bound:** warship and freighter build actions are bounded by the observed count deltas when losses and trades are out of scope.
 - **Capacity bound:** ship fighters and torpedoes should be capped by plausible loadout capacity where known.
 - **Noisy-action cap:** defense posts, starbase fighters, and generic ammo adjustments should have conservative caps and lower probability weights.
+- **Combo tier cap:** stop widening ship-build tiers when feasible or when the per-player time budget is exhausted.
 - **Top-K cap:** default to a small solution count, such as 10 or 20 per player.
 - **Time cap:** use a per-player solver budget so a pathological player does not block the whole analytic.
 
-The target scale for early implementation is hundreds to low thousands of variables per player, not every possible per-location action. If the catalog grows beyond that, add staged solving or column generation before broadening the action families.
+Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving is the primary mitigation. Column generation remains a later option if tier search is still too slow.
 
 ---
 
@@ -489,6 +635,8 @@ Done when:
 
 Goal: generate a bounded catalog for the first useful scoreboard-inference cases.
 
+Status: **delivered** with interim flat ship-build presets (section 8.2). Replace in Phase 1G.
+
 Files:
 
 - `packages/api/api/analytics/military_score_inference/actions.py`,
@@ -497,22 +645,54 @@ Files:
 Steps:
 
 1. Add aggregate variables for low-value repeated actions.
-2. Add simple ship-build actions from a small, documented loadout catalog.
+2. Add interim flat ship-build actions from a small preset catalog.
 3. Bound ship-build actions by observed warship/freighter deltas and starbase count.
 4. Bound noisy actions by residual score and configured caps.
 5. Add negative fighter-transfer actions with explicit caps.
-
-Tests:
-
-- generated actions have finite bounds,
-- noisy actions are aggregate actions rather than per-location actions,
-- ship-build actions respect observed count deltas,
-- negative actions cannot create unbounded cancellation loops.
 
 Done when:
 
 - action catalog tests pass,
 - generated catalog size is logged or exposed in diagnostics for performance checks.
+
+### Phase 1G: Factored ship build combos and tiered search
+
+Goal: replace flat ship-build presets with structured combos (section 8.1) and staged tier widening (section 8.5).
+
+Files:
+
+- `packages/api/api/analytics/military_score_inference/ship_build_combos.py` (new),
+- `packages/api/api/analytics/military_score_inference/actions.py` (aggregate actions only),
+- `packages/api/api/analytics/military_score_inference/models.py`,
+- `packages/api/api/analytics/military_score_inference/solver.py`,
+- `packages/api/api/analytics/military_score_inference/analytic.py`,
+- `packages/api/tests/test_military_score_inference_ship_build_combos.py` (new),
+- updates to existing inference tests.
+
+Steps:
+
+1. Add `ShipBuildCombo` generation with validity rules (independent beam/tube omission, same-type rule, `hull.engines` engine count in score).
+2. Early tiers: combo counts limited to `{0, max slots}` per axis; later tier adds partial beam/launcher counts.
+3. Implement tier policy with **jump** when `activeengines` / `activebeams` / `activetorps` are empty.
+4. Extend `InferenceProblem` and CP-SAT model to sum aggregate actions and combo counts into shared constraints.
+5. Extend no-good cuts and solution extraction for combo variables; emit structured build rows.
+6. Optional solver-side merge of score-equivalent combos; preserve distinct top-K rows when probability weights differ (section 8.6).
+7. Expose `ship_build_tier`, `tiers_attempted`, and combo counts in diagnostics.
+8. Remove interim flat `build_{hull}_{preset}` actions once parity tests pass.
+
+Tests:
+
+- combo validity and construction score for minimal, beam-only, tube-only, and fully armed builds;
+- multi-engine hulls multiply engine cost by `hull.engines`;
+- tier widening finds a feasible solution when tier 0 is too narrow;
+- empty `active*` lists jump tiers without false INFEASIBLE from single-default components;
+- score-equivalent merge does not collapse distinct probability-ranked solutions.
+
+Done when:
+
+- real-turn cases that failed under Phase 1F (wrong engine/torp/beam type) become feasible at an documented tier,
+- diagnostics report tier and combo cardinality,
+- `make lint` and inference package tests pass.
 
 ### Phase 2: Integrate with the existing Core scores analytic
 
@@ -642,7 +822,7 @@ Done when:
 
 ### Phase 6: richer constraints and deferred effects
 
-Add action families and constraints only after the initial pipeline is measurable.
+Add action families and constraints only after Phase 1G ship-build combos are measurable.
 
 Candidates:
 
@@ -651,7 +831,8 @@ Candidates:
 - planet and starbase losses,
 - prior inventory and resource bounds,
 - per-location defense post and fighter attribution,
-- calibrated race/player probability priors.
+- production-queue priority-point effects on ship builds,
+- fleet-histogram priors for tier ordering and combo weights.
 
 Each addition should include tests showing both new feasible explanations and cases where the new action removes a previous false unsat.
 
@@ -664,13 +845,14 @@ Keep most tests below HTTP boundaries until the model stabilizes.
 | Layer | Tests |
 |-------|-------|
 | Scoring helpers | exact scaled contribution values for ships, fighters, torpedoes, defenses |
-| Action catalog | bounds, signed actions, noisy-action aggregation, bucket assignments |
-| Solver | exact fit, top-K, no-good cuts, negative coefficients, bucketed objective terms, infeasible status |
+| Aggregate action catalog | bounds, signed actions, noisy-action aggregation, bucket assignments |
+| Ship build combos | validity rules, tier widening, construction score, partial counts (later tier) |
+| Solver | exact fit, top-K, no-good cuts over aggregate + combo vars, tier diagnostics, infeasible status |
 | Core scores analytic | disabled behavior, enabled row enrichment, per-player results, diagnostics |
 | BFF scores table | default table contract, optional inference column, hover summaries |
 | Frontend scores UI | checkbox control, row status icons, modal behavior |
 
-Prefer synthetic fixtures with small action catalogs. Large real-turn fixtures can be added later as performance regression tests.
+Prefer synthetic fixtures with small combo catalogs. Large real-turn fixtures should include tier and combo-count regression checks.
 
 ---
 
@@ -679,13 +861,15 @@ Prefer synthetic fixtures with small action catalogs. Large real-turn fixtures c
 | Risk | Mitigation |
 |------|------------|
 | Too many low-probability exact solutions | optimize by probability first, top-K only, aggregate noisy actions |
-| Solver runtime spikes | per-player time limits, action bounds, catalog pruning |
-| Incorrect priority-point model | make priority constraint configurable until queue semantics are confirmed |
+| Ship-build catalog too narrow (INFEASIBLE) | factored combos with tiered widening; jump tiers when `active*` empty |
+| Ship-build catalog too wide (slow solve) | tier caps, per-player time limits, combo-count diagnostics |
+| Score-equivalent combos hide UI diversity | merge for feasibility only; split labels for top-K when weights differ |
+| Incorrect priority-point model | priority-point equality soft/diagnostic until queue semantics are modeled |
 | False confidence | return multiple explanations and expose ambiguity |
 | Scoreboard regression | keep inference disabled by default and test the existing table contract |
 | Row-level solving blocks the table | track per-row status and consider lazy or asynchronous detail loading |
 | Dependency/platform issue | keep solver isolated behind an adapter so a fallback can be added |
-| Hard-to-debug CP-SAT models | emit diagnostics with action counts, bounds, constraint targets, and solver status |
+| Hard-to-debug CP-SAT models | emit diagnostics with tier, combo counts, bounds, constraint targets, solver status |
 
 ---
 

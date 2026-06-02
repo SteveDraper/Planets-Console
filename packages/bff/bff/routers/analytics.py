@@ -71,6 +71,7 @@ def get_analytic_table(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=0),
+    include_build_inference: bool = Query(False, alias="includeBuildInference"),
     include: IncludeDiagnostics = False,
 ):
     """Tabular data scoped to the selected game, turn, and perspective."""
@@ -84,11 +85,18 @@ def get_analytic_table(
         gameId=game_id,
         turn=turn,
         perspective=perspective,
+        includeBuildInference=include_build_inference,
         handler="get_analytic_table",
     )
     table_node = root.child("get_analytic_table")
     with timed_section(table_node, "total"):
-        body = get_table_response(analytic_id, scope, _turn_analytics_from_core, table_node)
+        body = get_table_response(
+            analytic_id,
+            scope,
+            _turn_analytics_from_core,
+            table_node,
+            include_build_inference=include_build_inference,
+        )
     return finish_response(body, root)
 
 

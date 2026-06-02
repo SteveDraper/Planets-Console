@@ -23,6 +23,11 @@ class ConnectionsMapQuery:
     include_illustrative_routes: bool
 
 
+@dataclass(frozen=True)
+class ScoresTableQuery:
+    include_build_inference: bool = False
+
+
 CoreAnalyticsLoader = Callable[..., dict]
 
 

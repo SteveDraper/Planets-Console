@@ -17,6 +17,8 @@ TABLE_COLUMNS = [
     "Priority Points",
 ]
 
+INFERENCE_COLUMN = "Build inference"
+
 TABLE_FIELDS = [
     "planets",
     "starbases",
@@ -39,27 +41,95 @@ def _format_score_cell(cell: object) -> str:
     return f"{value} ({change})"
 
 
-def table_from_core(core_data: dict) -> dict:
-    rows = []
+def _inference_cell_display_status(inference: dict[str, object]) -> str:
+    status = str(inference.get("status", ""))
+    solution_count = inference.get("solutionCount", 0)
+    if status == "exact":
+        return "success"
+    if status == "time_limited" and isinstance(solution_count, int) and solution_count > 0:
+        return "success"
+    if status == "time_limited" and inference.get("isComplete") is False:
+        return "pending"
+    return "failure"
+
+
+def _shape_inference_detail(
+    inference: object,
+    *,
+    player_id: object = None,
+) -> dict[str, object]:
+    if not isinstance(inference, dict):
+        shaped = {
+            "displayStatus": "failure",
+            "status": "missing_inference",
+            "summary": "Inference data unavailable",
+            "solutionCount": 0,
+            "isComplete": True,
+            "solutions": [],
+            "diagnostics": {},
+        }
+    else:
+        shaped = {
+            "displayStatus": _inference_cell_display_status(inference),
+            "status": inference.get("status"),
+            "summary": inference.get("summary", ""),
+            "solutionCount": inference.get("solutionCount", 0),
+            "isComplete": inference.get("isComplete", True),
+            "solutions": inference.get("solutions", []),
+            "diagnostics": inference.get("diagnostics", {}),
+        }
+    if isinstance(player_id, int):
+        shaped["playerId"] = player_id
+    return shaped
+
+
+def table_from_core(core_data: dict, *, include_build_inference: bool = False) -> dict:
+    columns = list(TABLE_COLUMNS)
+    if include_build_inference:
+        columns.append(INFERENCE_COLUMN)
+
+    rows: list[list[str]] = []
+    inference_by_row: list[dict[str, object]] = []
     for row in core_data.get("rows", []):
         if not isinstance(row, dict):
             continue
-        rows.append(
-            [
-                str(row.get("racePlayer", "")),
-                *[_format_score_cell(row.get(field)) for field in TABLE_FIELDS],
-            ]
-        )
-    return {
+        table_row = [
+            str(row.get("racePlayer", "")),
+            *[_format_score_cell(row.get(field)) for field in TABLE_FIELDS],
+        ]
+        if include_build_inference:
+            inference_by_row.append(
+                _shape_inference_detail(row.get("inference"), player_id=row.get("playerId"))
+            )
+            table_row.append("")
+        rows.append(table_row)
+
+    payload: dict[str, object] = {
         "analyticId": ANALYTIC_ID,
-        "columns": TABLE_COLUMNS,
+        "columns": columns,
         "rows": rows,
     }
+    if include_build_inference:
+        payload["includeBuildInference"] = True
+        payload["inferenceByRow"] = inference_by_row
+    return payload
 
 
-def get_table(scope: TurnScope, load_core: CoreAnalyticsLoader, diagnostics: Diagnostics) -> dict:
-    core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
-    return table_from_core(core_data)
+def get_table(
+    scope: TurnScope,
+    load_core: CoreAnalyticsLoader,
+    diagnostics: Diagnostics,
+    *,
+    include_build_inference: bool = False,
+) -> dict:
+    core_data = load_core_analytic(
+        load_core,
+        scope,
+        ANALYTIC_ID,
+        diagnostics=diagnostics,
+        include_military_score_inference=include_build_inference,
+    )
+    return table_from_core(core_data, include_build_inference=include_build_inference)
 
 
 DESCRIPTOR = AnalyticDescriptor(

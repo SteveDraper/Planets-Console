@@ -1,6 +1,7 @@
 """Tests for military score inference action catalog generation."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -263,6 +264,61 @@ def test_catalog_size_exposed_in_diagnostics(synthetic_catalog_context):
     assert diagnostics["catalog_size"] == len(catalog.actions)
 
 
+def test_ship_build_presets_exclude_build_time_ammo(synthetic_catalog_context):
+    catalog = build_action_catalog(_observation(), **synthetic_catalog_context)
+    build_action_ids = {action.id for action in catalog.actions if action.id.startswith("build_")}
+
+    assert "build_71_fighters" not in build_action_ids
+    assert not any(action_id.endswith("_fighters") for action_id in build_action_ids)
+
+    carrier_empty = next(action for action in catalog.actions if action.id == "build_71_empty")
+    hull = synthetic_catalog_context["hulls_by_id"][71]
+    engine = synthetic_catalog_context["engines_by_id"][1]
+    from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
+
+    expected_score = ship_construction_score_delta_2x(
+        hull.cost + engine.cost * hull.engines,
+        hull.tritanium + hull.duranium + hull.molybdenum
+        + (engine.tritanium + engine.duranium + engine.molybdenum) * hull.engines,
+    )
+    assert carrier_empty.score_delta_2x == expected_score
+
+
+def test_ship_build_score_scales_engine_cost_by_hull_engine_slots(synthetic_catalog_context):
+    catalog = build_action_catalog(
+        _observation(warship_delta=1, freighter_delta=1),
+        **synthetic_catalog_context,
+    )
+    carrier_build = next(action for action in catalog.actions if action.id == "build_71_empty")
+    hull = synthetic_catalog_context["hulls_by_id"][71]
+    engine = synthetic_catalog_context["engines_by_id"][1]
+    from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
+
+    engine_minerals = engine.tritanium + engine.duranium + engine.molybdenum
+    hull_minerals = hull.tritanium + hull.duranium + hull.molybdenum
+    expected = ship_construction_score_delta_2x(
+        hull.cost + engine.cost * hull.engines,
+        hull_minerals + engine_minerals * hull.engines,
+    )
+    assert carrier_build.score_delta_2x == expected
+    assert hull.engines == 2
+
+
+def test_ship_build_actions_are_not_filtered_by_hull_isbase_flag(synthetic_catalog_context):
+    """Planets.nu hull catalog entries use isbase=true for starships too."""
+    hulls_by_id = {
+        hull_id: replace(hull, isbase=True)
+        for hull_id, hull in synthetic_catalog_context["hulls_by_id"].items()
+    }
+    context = {**synthetic_catalog_context, "hulls_by_id": hulls_by_id}
+    catalog = build_action_catalog(
+        _observation(warship_delta=1, freighter_delta=0, starbases_owned=3),
+        **context,
+    )
+    ship_build_actions = [action for action in catalog.actions if action.id.startswith("build_")]
+    assert ship_build_actions
+
+
 def test_build_action_catalog_from_turn_sample(sample_turn):
     observation = _observation(
         military_delta_2x=110,
@@ -276,11 +332,9 @@ def test_build_action_catalog_from_turn_sample(sample_turn):
     assert catalog.catalog_size > 0
     assert "planet_defense_posts_added_total" in {action.id for action in catalog.actions}
     assert buildable_hulls
-    buildable_non_base_hulls = [
-        hull for hull in sample_turn.hulls if hull.id in buildable_hulls and not hull.isbase
-    ]
     ship_build_actions = [action for action in catalog.actions if action.id.startswith("build_")]
-    if buildable_non_base_hulls and (
-        observation.warship_delta > 0 or observation.freighter_delta > 0
-    ):
-        assert ship_build_actions
+    if observation.warship_delta > 0 or observation.freighter_delta > 0:
+        catalog_hull_ids = {hull.id for hull in sample_turn.hulls}
+        buildable_in_catalog = buildable_hulls & catalog_hull_ids
+        if buildable_in_catalog:
+            assert ship_build_actions

@@ -1,11 +1,16 @@
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable } from '../api/bff'
 import type {
   AnalyticItem,
   AnalyticShellScope,
   ConnectionsMapParams,
+  ScoresTableParams,
 } from '../api/bff'
+import { scoresTableQueryKey } from '../analytics/scores/api'
+import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
+import { ScoresTableView } from '../analytics/scores/ScoresTableView'
+import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
 import { isStellarCartographyMapEnabled } from '../analytics/mapShellCartography'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
@@ -37,6 +42,8 @@ type MainAreaProps = {
   turnBlockedNoLogin: boolean
   /** Parameters for the Connections map analytic (refetch when these change). */
   connectionsMapParams: ConnectionsMapParams
+  /** Parameters for the Scores table analytic (refetch when these change). */
+  scoresTableParams: ScoresTableParams
   /** Turns beyond latest stored game turn for ion storm prediction. */
   futureTurnOffset: number
   onMapZoomChange: (zoom: number) => void
@@ -47,16 +54,43 @@ function TableTile({
   analyticId,
   analyticScope,
   fetchEnabled,
+  scoresTableParams,
 }: {
   analyticId: string
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
+  scoresTableParams: ScoresTableParams
 }) {
+  const isScores = analyticId === 'scores'
+  const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
-    queryKey: ['analytic', analyticId, 'table', analyticScope] as const,
-    queryFn: () => fetchAnalyticTable(analyticId, analyticScope!),
+    queryKey: [
+      'analytic',
+      analyticId,
+      'table',
+      analyticScope,
+      ...(isScores ? scoresTableQueryKey(scoresTableParams) : []),
+    ] as const,
+    queryFn: () =>
+      fetchAnalyticTable(
+        analyticId,
+        analyticScope!,
+        isScores ? scoresTableParams : undefined
+      ),
     enabled: fetchEnabled,
   })
+
+  useEffect(() => {
+    if (!isScores || analyticScope == null) {
+      return
+    }
+    if (data?.includeBuildInference === true) {
+      setScoresDiagnostics(scoresDiagnosticsFromTable(data, analyticScope))
+      return
+    }
+    setScoresDiagnostics(null)
+  }, [isScores, analyticScope, data, setScoresDiagnostics])
+
   if (analyticScope == null) {
     return (
       <div className="p-4 text-sm text-gray-400">
@@ -73,6 +107,9 @@ function TableTile({
     )
   }
   if (!data) return null
+  if (isScores && data.includeBuildInference === true) {
+    return <ScoresTableView data={data} />
+  }
   return (
     <div className="overflow-auto">
       <table className="min-w-full border-collapse text-sm">
@@ -210,6 +247,7 @@ export function MainArea({
   turnEnsureError,
   turnBlockedNoLogin,
   connectionsMapParams,
+  scoresTableParams,
   futureTurnOffset,
   onMapZoomChange,
   onSetZoomReady,
@@ -264,6 +302,7 @@ export function MainArea({
               analyticId={id}
               analyticScope={analyticScope}
               fetchEnabled={analyticFetchEnabled}
+              scoresTableParams={scoresTableParams}
             />
           </section>
         ))}

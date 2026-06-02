@@ -34,10 +34,19 @@ def get_table_response(
     scope: TurnScope,
     load_core: CoreAnalyticsLoader,
     diagnostics: Diagnostics,
+    *,
+    include_build_inference: bool = False,
 ) -> dict:
     descriptor = _require_descriptor(analytic_id)
     if descriptor.get_table is None:
         raise BFFValidationError(f"Analytic {analytic_id!r} does not support table view")
+    if analytic_id == "scores":
+        return descriptor.get_table(
+            scope,
+            load_core,
+            diagnostics,
+            include_build_inference=include_build_inference,
+        )
     return descriptor.get_table(scope, load_core, diagnostics)
 
 

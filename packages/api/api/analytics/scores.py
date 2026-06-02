@@ -1,12 +1,18 @@
 """Core scoreboard analytic."""
 
+from api.analytics.military_score_inference.analytic import infer_military_score_build
+from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 
 ANALYTIC_ID = "scores"
 
 
-def get_scores_table(turn: TurnInfo) -> dict:
+def get_scores_table(
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions | None = None,
+) -> dict:
     """Return scoreboard values for each player in a turn."""
+    resolved_options = options or TurnAnalyticsOptions()
     players_by_id = {player.id: player for player in [turn.player, *turn.players]}
     races_by_id = {race.id: race for race in turn.races}
 
@@ -20,22 +26,23 @@ def get_scores_table(turn: TurnInfo) -> dict:
             race_player = player.username
         else:
             race_player = f"Player {score.ownerid}"
-        rows.append(
-            {
-                "playerId": score.ownerid,
-                "racePlayer": race_player,
-                "planets": {"value": score.planets, "change": score.planetchange},
-                "starbases": {"value": score.starbases, "change": score.starbasechange},
-                "warShips": {"value": score.capitalships, "change": score.shipchange},
-                "freighters": {"value": score.freighters, "change": score.freighterchange},
-                "military": {
-                    "value": score.militaryscore,
-                    "change": score.militarychange,
-                },
-                "priorityPoints": {
-                    "value": score.prioritypoints,
-                    "change": score.prioritypointchange,
-                },
-            }
-        )
+        row: dict[str, object] = {
+            "playerId": score.ownerid,
+            "racePlayer": race_player,
+            "planets": {"value": score.planets, "change": score.planetchange},
+            "starbases": {"value": score.starbases, "change": score.starbasechange},
+            "warShips": {"value": score.capitalships, "change": score.shipchange},
+            "freighters": {"value": score.freighters, "change": score.freighterchange},
+            "military": {
+                "value": score.militaryscore,
+                "change": score.militarychange,
+            },
+            "priorityPoints": {
+                "value": score.prioritypoints,
+                "change": score.prioritypointchange,
+            },
+        }
+        if resolved_options.include_military_score_inference:
+            row["inference"] = infer_military_score_build(score, turn)
+        rows.append(row)
     return {"analyticId": ANALYTIC_ID, "rows": rows}

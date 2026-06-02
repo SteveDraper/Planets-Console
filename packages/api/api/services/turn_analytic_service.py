@@ -24,6 +24,7 @@ class TurnAnalyticService:
         connection_flare_mode: FlareConnectionMode | str = FlareConnectionMode.OFF,
         connection_flare_depth: int = 1,
         connection_include_illustrative_routes: bool = False,
+        include_military_score_inference: bool = False,
         diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     ) -> dict:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
@@ -36,6 +37,7 @@ class TurnAnalyticService:
                 connection_flare_mode=connection_flare_mode,
                 connection_flare_depth=connection_flare_depth,
                 connection_include_illustrative_routes=connection_include_illustrative_routes,
+                include_military_score_inference=include_military_score_inference,
                 diagnostics=diagnostics,
             ),
         )

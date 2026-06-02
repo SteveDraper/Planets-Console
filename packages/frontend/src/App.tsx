@@ -16,6 +16,7 @@ import {
   fetchShellBootstrap,
   fetchStoredGameInfo,
   type ConnectionsMapParams,
+  type ScoresTableParams,
 } from './api/bff'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 import { useSessionStore } from './stores/session'
@@ -50,6 +51,9 @@ function ConsoleShell() {
     flareMode: 'include',
     /** 2+ includes full static table (1- and 3-pair host rows); 1 is 1-pair rows only. */
     flareDepth: 2,
+  })
+  const [scoresTableParams, setScoresTableParams] = useState<ScoresTableParams>({
+    includeBuildInference: false,
   })
   const [shellErrors, setShellErrors] = useState<ShellErrorItem[]>([])
 
@@ -273,6 +277,8 @@ function ConsoleShell() {
           viewMode={viewMode}
           connectionsMapParams={connectionsMapParams}
           onConnectionsMapParamsChange={setConnectionsMapParams}
+          scoresTableParams={scoresTableParams}
+          onScoresTableParamsChange={setScoresTableParams}
           stellarCartographyGates={stellarCartographyGates}
           ionStormCount={ionStormCount}
         />
@@ -292,6 +298,7 @@ function ConsoleShell() {
             turnEnsureError={turnEnsureError}
             turnBlockedNoLogin={turnBlockedNoLogin}
             connectionsMapParams={connectionsMapParams}
+            scoresTableParams={scoresTableParams}
             futureTurnOffset={futureTurnOffset}
             onMapZoomChange={handleMapZoomChange}
             onSetZoomReady={handleSetZoomReady}

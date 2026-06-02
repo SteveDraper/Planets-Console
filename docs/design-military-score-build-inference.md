@@ -50,9 +50,9 @@ Construction value is `megacredits + 5 * minerals`. For ships, the value include
 
 The first version should model these action families:
 
-- **Ship builds:** one built hull at a starbase, with a concrete engine, beam count/type, tube count/type, and possible initial ammo load.
-- **Freighter builds:** constrained by `freighterchange`, buildable hull list, starbase count, and priority-point behavior.
-- **Warship builds:** constrained by `shipchange`, buildable hull list, starbase count, and priority-point behavior.
+- **Ship builds:** one built hull at a starbase, with a concrete engine type, optional beam type and count, and optional torp tube type and count. Construction score includes hull, engines (`hull.engines` copies of one type), fitted beams, and tube hardware (`launchercost`). Beams and tubes may be omitted independently. **Do not** include fighters or torpedo ammo loaded at build time; those are separate aggregate actions.
+- **Freighter builds:** constrained by `freighterchange`, buildable hull list, starbase count, and priority-point behavior (diagnostic until queue model lands).
+- **Warship builds:** constrained by `shipchange`, buildable hull list, starbase count, and priority-point behavior (diagnostic until queue model lands).
 - **Loaded torpedoes:** score increase from torpedoes loaded onto ships.
 - **Ship fighters:** score increase from fighters loaded onto ships.
 - **Starbase fighters:** score contribution at half value.
@@ -77,7 +77,12 @@ The design should still make those extensions natural. Deferred effects should b
 
 ## 4. Problem formulation
 
-For one player and one turn transition, define a set of candidate actions. Each action has:
+For one player and one turn transition, define candidate actions in **two layers**:
+
+1. **Aggregate actions** -- flat integer variables for defense posts, starbase fighters, ship ammo loading, fighter transfers, and similar location-agnostic effects.
+2. **Ship build combos** -- sparse integer variables for `(hull, engine, beam?, torp?, beam_count, launcher_count)` configurations. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.
+
+Each aggregate action or ship build combo has:
 
 - a scaled military-score delta,
 - a warship-count delta,
@@ -87,7 +92,7 @@ For one player and one turn transition, define a set of candidate actions. Each 
 - optional resource or inventory effects for later phases,
 - a heuristic log-probability contribution.
 
-The solver chooses non-negative integer counts for those actions subject to hard constraints:
+The solver chooses non-negative integer counts subject to hard constraints summed over **both** layers:
 
 ```text
 sum(action.score_delta_2x * count) == 2 * militarychange
@@ -97,7 +102,7 @@ sum(action.priority_delta * count) == prioritypointchange
 sum(action.build_slot_usage * count) <= starbases_owned
 ```
 
-Additional constraints depend on the queue and ship-limit state. Before the ship limit, the build-slot constraint dominates and priority points may only be checked as a consistency signal. After the ship limit, each ship-build action should carry the relevant priority-point effect from the production queue model.
+Additional constraints depend on the queue and ship-limit state. Before the ship limit, the build-slot constraint dominates. **Priority-point equality is diagnostic-only in the initial model** until production-queue semantics (standard vs priority build) are encoded per ship-build combo.
 
 The objective is not simply "minimize score error"; score equality is a hard constraint for the initial model. Among feasible solutions, rank by heuristic probability:
 
@@ -288,7 +293,7 @@ Generate only promising composite actions, solve a restricted master problem, th
 - More architecture than the initial problem needs.
 - Harder to debug and test.
 
-**Fit:** A later scaling technique if ship-loadout catalogs become too large.
+**Fit:** A later scaling technique if tiered combo generation is still too slow after Phase 1G.
 
 ---
 
@@ -296,17 +301,17 @@ Generate only promising composite actions, solve a restricted master problem, th
 
 Use a hybrid exact-plus-ranking architecture:
 
-1. **Build an action catalog** for the player and turn. Include legal hull builds from that player's hull list, bounded ammunition and defense actions, starbase fighter actions, planet defense actions, and fighter-transfer actions.
+1. **Build a two-layer catalog** for the player and turn: aggregate actions (defense, ammo load, transfers) plus **ship build combos** from eligible hulls and components. Use **tiered widening** when a narrow combo set is INFEASIBLE; jump tiers when `activeengines` / `activebeams` / `activetorps` are empty. Early tiers use beam/launcher counts of `0` or full slot fill; partial slot counts are a later tier (niche builds).
 2. **Apply cheap bounds before solving.** Drop actions whose score contribution cannot fit the residual, whose ship class cannot match count deltas, or whose priority-point behavior is impossible for the ship-limit state.
-3. **Solve hard constraints with CP-SAT or an integer-programming adapter.** Treat exact score, ship-count, freighter-count, priority-point, and starbase-slot constraints as mandatory.
-4. **Enumerate top-K feasible solutions.** Use no-good cuts or solver-native solution callbacks to avoid returning the same explanation repeatedly.
-5. **Rank by heuristic log-probability.** Prefer common builds, race-appropriate hulls, plausible ammo loads, and smaller unexplained fixed-defense changes. Keep the heuristic model separate from hard constraints.
-6. **Return ambiguity deliberately.** Show several explanations when they are close in probability, and report when no exact explanation exists under the current scope.
+3. **Solve hard constraints with CP-SAT or an integer-programming adapter.** Treat exact score, ship-count, and freighter-count as mandatory; treat priority-point fit as diagnostic until the queue model is added. Enforce starbase build-slot limits.
+4. **Enumerate top-K feasible solutions.** Use no-good cuts over both aggregate and combo variables. Score-equivalent combos may share solver variables for feasibility, but distinct labels/weights should still yield distinct ranked explanations when probabilities differ.
+5. **Rank by heuristic log-probability.** Prefer common builds, race-appropriate hulls, and plausible ammo loads. Keep the heuristic model separate from hard constraints.
+6. **Return ambiguity deliberately.** Show several explanations when they are close in probability, and report when no exact explanation exists under the current scope and tier.
 
 The solver interface should hide the concrete backend:
 
 ```text
-InferenceProblem -> CandidateAction[] -> ConstraintSolver -> FeasibleExplanation[] -> Ranker
+InferenceProblem -> [AggregateActions + ShipBuildCombos] -> ConstraintSolver -> FeasibleExplanation[] -> Ranker
 ```
 
 This keeps the first implementation independent of whether the backend is CP-SAT, another integer-programming solver, or a domain-specific branch-and-bound fallback.
@@ -369,12 +374,28 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 
 ---
 
-## 10. Open design decisions for implementation
+## 10. Design decisions
 
-- Which solver backend to use first.
-- How to represent buildable hulls and component costs in the Core domain model.
-- How detailed the initial loadout catalog should be for engines, beams, tubes, and ammo.
-- Whether priority-point deltas are treated as hard constraints immediately or as diagnostics until the queue model is confirmed.
+### Resolved
+
+| Topic | Decision |
+|-------|----------|
+| Solver backend | OR-Tools CP-SAT in Core API (`design-military-score-build-inference-implementation.md`) |
+| Buildable hulls | `activehulls` intersect race and turn catalogs; ignore `Hull.isbase` as a build filter |
+| Build-time ammo | Not on ship combos; use aggregate `ship_fighters_added_total` and `ship_torps_loaded_*` |
+| Beams vs tubes | May be omitted independently; same-type rule within each fitted component |
+| Partial slot fills | Allowed; `{0, max}` counts in early tiers; intermediate counts in later tier (niche) |
+| Ship build catalog shape | Factored combos (Phase 1G), not flat cross-product preset IDs |
+| Catalog widening | Tiered search with jump when `active*` lists are empty |
+| Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
+| Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
+| Fleet priors | Deferred; will inform tier order and weights, not hard exclusion |
+
+### Still open
+
+- Engine/hull tech-legality rules beyond active component lists.
 - How much of the probability model should be user-configurable.
+- Whether BFF returns full solutions inline or lazily per row at scale.
+- Column generation if tier-4 combo search exceeds time budget on large games.
 
 These decisions affect implementation, not the overall approach. The core design remains: exact integer feasibility first, probabilistic ranking second.

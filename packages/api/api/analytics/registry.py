@@ -22,7 +22,7 @@ def _base_map_handler(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
 
 
 def _scores_handler(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
-    return get_scores_table(turn)
+    return get_scores_table(turn, options)
 
 
 TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
