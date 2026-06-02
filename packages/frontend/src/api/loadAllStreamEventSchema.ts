@@ -1,5 +1,5 @@
 /**
- * Runtime validation for load-all NDJSON events (wire contract matches BFF OpenAPI).
+ * Load-all NDJSON stream: runtime validation and TypeScript types (wire contract matches BFF OpenAPI).
  */
 
 import { z } from 'zod'
@@ -9,7 +9,7 @@ const nonNegativeInt = z
   .int()
   .min(0, { message: 'must be a non-negative integer' })
 
-const loadAllProgressFieldsSchema = z.object({
+export const loadAllProgressFieldsSchema = z.object({
   phase: z.enum(['download', 'import', 'final_turn']),
   perspective: nonNegativeInt,
   perspective_total: nonNegativeInt,
@@ -18,7 +18,7 @@ const loadAllProgressFieldsSchema = z.object({
   message: z.string(),
 })
 
-const loadAllTurnsResponseSchema = z.object({
+export const loadAllTurnsResponseSchema = z.object({
   game_id: z.number().int({ message: 'must be an integer' }),
   is_game_finished: z.boolean(),
   turns_written: nonNegativeInt,
@@ -47,7 +47,9 @@ export const loadAllStreamEventSchema = z.discriminatedUnion('type', [
   loadAllStreamErrorEventSchema,
 ])
 
-export type ParsedLoadAllStreamEvent = z.infer<typeof loadAllStreamEventSchema>
+export type LoadAllProgressUpdate = z.infer<typeof loadAllProgressFieldsSchema>
+export type LoadAllTurnsResponse = z.infer<typeof loadAllTurnsResponseSchema>
+export type LoadAllStreamEvent = z.infer<typeof loadAllStreamEventSchema>
 
 function fieldLabel(path: (string | number)[]): string {
   if (path.length === 0) {
@@ -64,6 +66,10 @@ export function formatLoadAllStreamValidationError(error: z.ZodError): string {
   const issue = error.issues[0]
   if (!issue) {
     return 'Load-all stream event has an invalid shape.'
+  }
+
+  if (issue.code === 'invalid_union_discriminator') {
+    return 'Load-all stream returned unknown event type.'
   }
 
   const label = fieldLabel(issue.path)
@@ -96,6 +102,10 @@ export function formatLoadAllStreamValidationError(error: z.ZodError): string {
 
   if (issue.path.includes('result')) {
     return 'Load-all stream complete event has an invalid result shape.'
+  }
+
+  if (issue.path.includes('type')) {
+    return 'Load-all stream event is missing a type field.'
   }
 
   return 'Load-all stream event has an invalid shape.'
