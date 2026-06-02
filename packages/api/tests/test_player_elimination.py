@@ -7,6 +7,7 @@ from api.services.player_elimination import (
     is_eliminated_at_turn,
     last_meaningful_turn,
     player_status,
+    required_turn_numbers,
 )
 
 
@@ -82,3 +83,18 @@ def test_unknown_status_is_not_eliminated() -> None:
     unknown = _player(status=99, statusturn=10)
     assert player_status(unknown) == PlayerStatus.UNKNOWN
     assert elimination_turn(unknown) is None
+
+
+def test_required_turn_numbers_for_eliminated_player() -> None:
+    eliminated = _player(status=3, statusturn=49, username="dead", accountid=0)
+    assert required_turn_numbers(eliminated, 111) == list(range(1, 50))
+
+
+def test_required_turn_numbers_for_active_player() -> None:
+    active = _player(status=1, statusturn=1)
+    assert required_turn_numbers(active, 5) == [1, 2, 3, 4, 5]
+
+
+def test_required_turn_numbers_empty_when_latest_turn_zero() -> None:
+    active = _player(status=1, statusturn=1)
+    assert required_turn_numbers(active, 0) == []

@@ -69,20 +69,3 @@ def iter_final_turn_load_progress(
             continue
         result.turns_written += 1
         result.perspectives_touched.add(perspective)
-
-
-def load_missing_final_turns(
-    turns: TurnLoadService,
-    game_id: int,
-    latest_turn: int,
-    params: RefreshGameInfoParams,
-    planets: PlanetsNuClient,
-    player_count: int,
-) -> list[int]:
-    """Load missing final turns for every perspective; return failed 1-based slots."""
-    result = FinalTurnLoadResult()
-    for _ in iter_final_turn_load_progress(
-        turns, game_id, latest_turn, params, planets, player_count, result
-    ):
-        pass
-    return sorted(result.failures)

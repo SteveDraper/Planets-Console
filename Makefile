@@ -1,4 +1,4 @@
-.PHONY: test lint ci typecheck_frontend test_bff test_api test_server test_frontend
+.PHONY: test lint ci typecheck_frontend test_bff test_api test_server test_frontend generate generate_frontend_api
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
 # `test` runs lint and unit tests. `ci` also runs the full frontend `tsc -b` (see `typecheck_frontend`).
@@ -6,6 +6,13 @@ test: lint test_bff test_api test_server test_frontend
 
 # Everything CI should run: Python lint, frontend typecheck, then all test suites.
 ci: lint typecheck_frontend test_bff test_api test_server test_frontend
+
+# Regenerate checked-in artefacts from source (BFF OpenAPI -> frontend TypeScript types).
+generate: generate_frontend_api
+
+generate_frontend_api:
+	uv sync --extra dev
+	cd packages/frontend && npm run generate:api
 
 # Full TypeScript project build for packages/frontend (tsconfig app + node / Vite).
 typecheck_frontend:

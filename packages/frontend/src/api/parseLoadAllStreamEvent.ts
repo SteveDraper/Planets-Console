@@ -81,24 +81,36 @@ export function parseLoadAllStreamEvent(line: string): LoadAllStreamEvent | null
     return null
   }
 
-  const parsed: unknown = JSON.parse(trimmed)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    throw new Error('Load-all stream returned invalid JSON.')
+  }
+
   if (!isRecord(parsed) || typeof parsed.type !== 'string') {
-    return null
+    throw new Error('Load-all stream event is missing a type field.')
   }
 
   if (parsed.type === 'progress') {
     const progress = parseLoadAllProgressUpdate(parsed)
-    return progress ? { type: 'progress', ...progress } : null
+    if (!progress) {
+      throw new Error('Load-all stream progress event has an invalid shape.')
+    }
+    return { type: 'progress', ...progress }
   }
 
   if (parsed.type === 'complete') {
     const result = parseLoadAllTurnsResponse(parsed.result)
-    return result ? { type: 'complete', result } : null
+    if (!result) {
+      throw new Error('Load-all stream complete event has an invalid result shape.')
+    }
+    return { type: 'complete', result }
   }
 
   if (parsed.type === 'error' && typeof parsed.detail === 'string') {
     return { type: 'error', detail: parsed.detail }
   }
 
-  return null
+  throw new Error(`Load-all stream returned unknown event type: ${parsed.type}`)
 }

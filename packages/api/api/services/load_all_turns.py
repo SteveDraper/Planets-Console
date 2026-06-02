@@ -13,7 +13,7 @@ from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_archive import ArchiveTurnFile, parse_load_all_zip
 from api.services.load_all_final_turns import FinalTurnLoadResult, iter_final_turn_load_progress
-from api.services.player_elimination import last_meaningful_turn
+from api.services.player_elimination import required_turn_numbers
 from api.services.turn_load_service import TurnLoadService
 from api.transport.game_info_update import RefreshGameInfoParams
 from api.transport.load_all_turns import (
@@ -61,16 +61,6 @@ class LoadAllTurnsService:
             latest_turn=latest_turn,
         )
 
-    def _last_required_turn_for_perspective(
-        self,
-        info: GameInfo,
-        perspective: int,
-        latest_turn: int,
-    ) -> int:
-        """Highest turn number that must be stored for this perspective."""
-        player = info.players[perspective - 1]
-        return last_meaningful_turn(player, latest_turn)
-
     def _is_load_all_complete(
         self,
         info: GameInfo,
@@ -83,14 +73,32 @@ class LoadAllTurnsService:
         if not perspectives:
             return False
         for perspective in perspectives:
-            last_required = self._last_required_turn_for_perspective(info, perspective, latest_turn)
-            if last_required < 1:
+            player = info.players[perspective - 1]
+            turns_required = required_turn_numbers(player, latest_turn)
+            if not turns_required:
                 continue
             stored = set(self._turns.list_stored_turn_numbers(game_id, perspective))
-            for turn_number in range(1, last_required + 1):
+            for turn_number in turns_required:
                 if turn_number not in stored:
                     return False
         return True
+
+    @staticmethod
+    def _archive_entries_for_perspective(
+        info: GameInfo,
+        perspective: int,
+        latest_turn: int,
+        grouped: dict[int, list[ArchiveTurnFile]],
+    ) -> list[ArchiveTurnFile]:
+        """Archive turns within the required range for this perspective (skips post-death)."""
+        player = info.players[perspective - 1]
+        required = set(required_turn_numbers(player, latest_turn))
+        if not required:
+            return []
+        return sorted(
+            (entry for entry in grouped.get(perspective, []) if entry.turn_number in required),
+            key=lambda item: item.turn_number,
+        )
 
     @staticmethod
     def _group_archive_turns_by_perspective(
@@ -128,8 +136,9 @@ class LoadAllTurnsService:
         turns_skipped = 0
         perspectives_touched: set[int] = set()
 
+        latest_turn = info.game.turn
         for perspective_index, perspective in enumerate(range(1, player_count + 1), start=1):
-            entries = grouped.get(perspective, [])
+            entries = self._archive_entries_for_perspective(info, perspective, latest_turn, grouped)
             turn_total = max(len(entries), 1)
             for turn_index, archive_turn in enumerate(entries, start=1):
                 yield LoadAllProgressUpdate(
@@ -146,7 +155,6 @@ class LoadAllTurnsService:
                 else:
                     turns_skipped += 1
 
-        latest_turn = info.game.turn
         final_turn_result = FinalTurnLoadResult()
         yield from iter_final_turn_load_progress(
             self._turns,
@@ -179,15 +187,17 @@ class LoadAllTurnsService:
     ) -> Iterator[LoadAllProgressUpdate | LoadAllTurnsResponse]:
         perspective = GameService.perspective_for_username(info, params.username, game_id)
         latest_turn = info.game.turn
+        player = info.players[perspective - 1]
+        turns_to_load = required_turn_numbers(player, latest_turn)
         turns_written = 0
         turns_skipped = 0
-        turn_total = max(latest_turn, 1)
-        for turn_number in range(1, latest_turn + 1):
+        turn_total = max(len(turns_to_load), 1)
+        for turn_index, turn_number in enumerate(turns_to_load, start=1):
             yield LoadAllProgressUpdate(
                 phase="import",
                 perspective=1,
                 perspective_total=1,
-                turn=turn_number,
+                turn=turn_index,
                 turn_total=turn_total,
                 message=f"Turn {turn_number}",
             )

@@ -459,3 +459,79 @@ def test_stream_load_all_turns_yields_error_line_on_planets_console_error() -> N
     assert len(lines) == 1
     error = json.loads(lines[0])
     assert error == {"type": "error", "detail": "Login credentials are required."}
+
+
+def test_load_finished_game_skips_post_death_archive_turns() -> None:
+    storage, credentials, _, _, load_all = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        info_payload = json.load(handle)
+    info_payload["game"]["turn"] = 2
+    info_payload["settings"]["turn"] = 2
+    info_payload["players"] = info_payload["players"][:1]
+    info_payload["players"][0]["status"] = 3
+    info_payload["players"][0]["statusturn"] = 2
+    info_payload["players"][0]["username"] = "dead"
+    storage.put("games/628580/info", info_payload)
+    credentials.store_api_key("captain", "api-key-1")
+
+    zip_bytes = _zip_with(
+        {
+            "player1-turn1.trn": _archive_turn_rst(628580, 1),
+            "player1-turn2.trn": _archive_turn_rst(628580, 2),
+            "player1-turn3.trn": _archive_turn_rst(628580, 3),
+        }
+    )
+
+    planets = MagicMock()
+    planets.load_all.return_value = zip_bytes
+
+    result = _final_load_all_result(
+        load_all,
+        628580,
+        RefreshGameInfoParams(username="captain"),
+        planets,
+    )
+
+    assert result.is_game_finished is True
+    assert storage.get("games/628580/1/turns/1") is not None
+    assert storage.get("games/628580/1/turns/2") is not None
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/1/turns/3")
+    planets.load_turn.assert_not_called()
+
+
+def test_load_in_progress_game_stops_at_elimination_turn() -> None:
+    storage, credentials, _, _, load_all = _load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        info_payload = json.load(handle)
+    info_payload["game"]["status"] = 1
+    info_payload["game"]["turn"] = 5
+    info_payload["settings"]["turn"] = 5
+    info_payload["players"] = info_payload["players"][:1]
+    info_payload["players"][0]["status"] = 3
+    info_payload["players"][0]["statusturn"] = 2
+    info_payload["players"][0]["username"] = "captain"
+    storage.put("games/628580/info", info_payload)
+    credentials.store_api_key("captain", "api-key-1")
+
+    planets = MagicMock()
+
+    def load_turn_side_effect(**kwargs):
+        turn_number = kwargs.get("turn")
+        return {"success": True, "rst": _archive_turn_rst(628580, turn_number)}
+
+    planets.load_turn.side_effect = load_turn_side_effect
+
+    result = _final_load_all_result(
+        load_all,
+        628580,
+        RefreshGameInfoParams(username="captain"),
+        planets,
+    )
+
+    assert result.is_game_finished is False
+    assert planets.load_turn.call_count == 2
+    assert storage.get("games/628580/1/turns/1") is not None
+    assert storage.get("games/628580/1/turns/2") is not None
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/1/turns/3")

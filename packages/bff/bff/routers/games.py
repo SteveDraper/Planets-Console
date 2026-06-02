@@ -45,9 +45,6 @@ from bff.diagnostics_dep import (
 from bff.transport.game_responses import (
     BffGameInfoResponse,
     BffTurnInfoResponse,
-    LoadAllProgressUpdate,
-    LoadAllStreamCompleteEvent,
-    LoadAllStreamProgressEvent,
     LoadAllTurnsRequest,
     LoadAllTurnsStatusResponse,
     StellarCartographyTurnSummaryResponse,
@@ -171,10 +168,9 @@ def get_load_all_turns_status(
 
 @router.post(
     "/{game_id}/turns/load-all/stream",
-    response_model=LoadAllProgressUpdate | LoadAllStreamProgressEvent | LoadAllStreamCompleteEvent,
     responses={
         200: {
-            "description": "NDJSON stream of progress and complete events.",
+            "description": "NDJSON stream of progress, complete, and error events.",
             "content": {
                 "application/x-ndjson": {
                     "schema": {

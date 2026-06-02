@@ -12,7 +12,6 @@ from api.services.game_service import GameService
 from api.services.load_all_final_turns import (
     FinalTurnLoadResult,
     iter_final_turn_load_progress,
-    load_missing_final_turns,
 )
 from api.services.turn_load_service import TurnLoadService
 from api.storage import clear_backend_cache, get_storage
@@ -184,7 +183,7 @@ def test_iter_final_turn_load_progress_no_op_when_latest_turn_zero() -> None:
     assert result.failures == []
 
 
-def test_load_missing_final_turns_returns_sorted_failures() -> None:
+def test_iter_final_turn_load_progress_records_partial_failures() -> None:
     turns, credentials = _load_turns()
     _setup_finished_game(player_count=3)
     credentials.store_api_key("captain", "api-key-1")
@@ -200,16 +199,20 @@ def test_load_missing_final_turns_returns_sorted_failures() -> None:
 
     planets.load_turn.side_effect = load_turn_side_effect
 
-    failures = load_missing_final_turns(
-        turns,
-        628580,
-        2,
-        RefreshGameInfoParams(username="captain"),
-        planets,
-        3,
+    result = FinalTurnLoadResult()
+    list(
+        iter_final_turn_load_progress(
+            turns,
+            628580,
+            2,
+            RefreshGameInfoParams(username="captain"),
+            planets,
+            3,
+            result,
+        )
     )
 
-    assert failures == [2]
+    assert result.failures == [2]
     assert get_storage().get("games/628580/3/turns/2") is not None
 
 

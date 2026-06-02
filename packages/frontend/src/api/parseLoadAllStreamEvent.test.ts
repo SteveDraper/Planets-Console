@@ -68,12 +68,14 @@ describe('parseLoadAllStreamEvent', () => {
     })
   })
 
-  it('returns null for unknown event types', () => {
-    expect(parseLoadAllStreamEvent(JSON.stringify({ type: 'unknown' }))).toBeNull()
+  it('throws for unknown event types', () => {
+    expect(() => parseLoadAllStreamEvent(JSON.stringify({ type: 'unknown' }))).toThrow(
+      'unknown event type'
+    )
   })
 
-  it('returns null for malformed progress payloads', () => {
-    expect(
+  it('throws for malformed progress payloads', () => {
+    expect(() =>
       parseLoadAllStreamEvent(
         JSON.stringify({
           type: 'progress',
@@ -85,10 +87,10 @@ describe('parseLoadAllStreamEvent', () => {
           message: 'Turn 5',
         })
       )
-    ).toBeNull()
+    ).toThrow('invalid shape')
   })
 
   it('throws on invalid JSON', () => {
-    expect(() => parseLoadAllStreamEvent('{not json')).toThrow()
+    expect(() => parseLoadAllStreamEvent('{not json')).toThrow('invalid JSON')
   })
 })
