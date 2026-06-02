@@ -10,6 +10,8 @@ import type {
   StellarCartographyTurnSummaryResponse,
 } from './bffCartographyTypes'
 import { normalizeMapDataResponse } from './normalizeMapDataResponse'
+import { readNdjsonStream } from './readNdjsonStream'
+import type { components } from './schema'
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 
@@ -297,6 +299,8 @@ export async function fetchStoredTurnPerspectives(
   return r.json()
 }
 
+export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
+
 export type LoadAllTurnsStatusResponse = {
   game_id: number
   complete: boolean
@@ -346,7 +350,7 @@ export async function loadAllTurnsWithProgress(
   if (!trimmedUser) {
     throw new Error('Set login name in the header before loading all turns.')
   }
-  const body: { username: string; password?: string } = { username: trimmedUser }
+  const body: LoadAllTurnsRequestBody = { username: trimmedUser }
   if (params.password) {
     body.password = params.password
   }
@@ -377,71 +381,36 @@ export async function loadAllTurnsWithProgress(
     throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
   }
 
-  const reader = r.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
   let result: LoadAllTurnsResponse | null = null
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
-    }
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      const event = parseLoadAllStreamLine(line)
-      if (!event) {
-        continue
-      }
-      if (event.type === 'progress') {
-        onProgress({
-          phase: event.phase,
-          perspective: event.perspective,
-          perspective_total: event.perspective_total,
-          turn: event.turn,
-          turn_total: event.turn_total,
-          message: event.message,
-        })
-      } else if (event.type === 'complete') {
-        result = event.result
-      } else if (event.type === 'error') {
-        throw new Error(withEndpointIfGeneric(event.detail, endpointLabel))
-      }
+  const dispatchLoadAllEvent = (event: LoadAllStreamEvent) => {
+    if (event.type === 'progress') {
+      onProgress({
+        phase: event.phase,
+        perspective: event.perspective,
+        perspective_total: event.perspective_total,
+        turn: event.turn,
+        turn_total: event.turn_total,
+        message: event.message,
+      })
+    } else if (event.type === 'complete') {
+      result = event.result
+    } else if (event.type === 'error') {
+      throw new Error(withEndpointIfGeneric(event.detail, endpointLabel))
     }
   }
 
-  const trailing = parseLoadAllStreamLine(buffer)
-  if (trailing) {
-    if (trailing.type === 'progress') {
-      onProgress({
-        phase: trailing.phase,
-        perspective: trailing.perspective,
-        perspective_total: trailing.perspective_total,
-        turn: trailing.turn,
-        turn_total: trailing.turn_total,
-        message: trailing.message,
-      })
-    } else if (trailing.type === 'complete') {
-      result = trailing.result
-    } else if (trailing.type === 'error') {
-      throw new Error(withEndpointIfGeneric(trailing.detail, endpointLabel))
+  await readNdjsonStream(r.body, (line) => {
+    const event = parseLoadAllStreamLine(line)
+    if (event) {
+      dispatchLoadAllEvent(event)
     }
-  }
+  })
 
   if (!result) {
     throw new Error(withEndpointIfGeneric('Load all turns ended without a result', endpointLabel))
   }
   return result
-}
-
-/** Load all turns into storage (loadall ZIP when finished, else sequential loadturn). */
-export async function loadAllTurns(
-  gameId: string,
-  params: RefreshGameInfoParams
-): Promise<LoadAllTurnsResponse> {
-  return loadAllTurnsWithProgress(gameId, params, () => {})
 }
 
 /** Whether storage already has every turn from a full bulk load for this login. */

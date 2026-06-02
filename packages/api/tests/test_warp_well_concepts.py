@@ -27,7 +27,7 @@ def lorthidonia_planet():
         backend.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
         backend.put("games/628580/1/turns/111", json.load(f))
-    _, turns, _, _ = build_service_stack(backend)
+    _, turns, _, _, _ = build_service_stack(backend)
     return turns.get_planet_from_turn(628580, 1, 111, 1)
 
 

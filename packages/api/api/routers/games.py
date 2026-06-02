@@ -11,10 +11,12 @@ from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.deps import (
     get_game_service,
+    get_load_all_turns_service,
     get_turn_analytic_service,
     get_turn_load_service,
 )
 from api.services.game_service import GameService
+from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_load_service import TurnLoadService
 from api.transport.connections_options import (
@@ -31,8 +33,8 @@ from api.transport.connections_options import (
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 from api.transport.load_all_turns import (
     LoadAllTurnsRequest,
-    LoadAllTurnsResponse,
     LoadAllTurnsStatusResponse,
+    load_all_stream_event_to_dict,
 )
 
 router = APIRouter(prefix="/v1/games", tags=["games"])
@@ -66,36 +68,25 @@ def post_game_info(
 def get_load_all_turns_status(
     game_id: int,
     username: Annotated[str, Query()] = "",
-    turns: TurnLoadService = Depends(get_turn_load_service),
+    load_all: LoadAllTurnsService = Depends(get_load_all_turns_service),
 ) -> LoadAllTurnsStatusResponse:
     """Report whether storage already has every turn expected after a bulk load."""
-    return turns.load_all_turns_status_for_user(game_id, username)
-
-
-@router.post("/{game_id}/turns/load-all", response_model=LoadAllTurnsResponse)
-def post_load_all_turns(
-    game_id: int,
-    body: LoadAllTurnsRequest,
-    turns: TurnLoadService = Depends(get_turn_load_service),
-    planets: PlanetsNuClient = Depends(get_planets_client),
-) -> LoadAllTurnsResponse:
-    """Load all turns into storage (loadall ZIP when finished, else sequential loadturn)."""
-    return turns.load_all_turns(game_id, body, planets)
+    return load_all.load_all_turns_status_for_user(game_id, username)
 
 
 @router.post("/{game_id}/turns/load-all/stream")
 def post_load_all_turns_stream(
     game_id: int,
     body: LoadAllTurnsRequest,
-    turns: TurnLoadService = Depends(get_turn_load_service),
+    load_all: LoadAllTurnsService = Depends(get_load_all_turns_service),
     planets: PlanetsNuClient = Depends(get_planets_client),
 ) -> StreamingResponse:
     """Load all turns, streaming NDJSON progress events."""
 
     def generate():
         try:
-            for event in turns.iter_load_all_turns(game_id, body, planets):
-                yield json.dumps(event) + "\n"
+            for item in load_all.iter_load_all_turns(game_id, body, planets):
+                yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
         except PlanetsConsoleError as exc:
             yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
 

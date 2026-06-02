@@ -159,6 +159,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/turns/load-all-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Load All Turns Status
+         * @description Whether storage already has every turn expected after a bulk load.
+         */
+        get: operations["get_load_all_turns_status_games__game_id__turns_load_all_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/turns/load-all/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Load All Turns Stream
+         * @description Load all turns, streaming NDJSON progress events.
+         */
+        post: operations["post_load_all_turns_stream_games__game_id__turns_load_all_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/turns/ensure": {
         parameters: {
             query?: never;
@@ -211,6 +251,46 @@ export interface paths {
          * @description Turn-scoped warp-well cells via ``CoreClient`` (shared handler with Core REST).
          */
         get: operations["get_warp_well_cells_games__game_id___perspective__turns__turn_number__concepts_warp_wells_cells_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/sample": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stellar Cartography Sample
+         * @description Turn-scoped Stellar Cartography cell sample via ``CoreClient``.
+         */
+        get: operations["get_stellar_cartography_sample_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_sample_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stellar Cartography Turn Summary
+         * @description Turn-scoped lightweight Stellar Cartography facts via ``CoreClient``.
+         */
+        get: operations["get_stellar_cartography_turn_summary_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -301,6 +381,17 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * LoadAllTurnsRequest
+         * @description Credentials for bulk turn loading from Planets.nu.
+         */
+        LoadAllTurnsRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password?: string | null;
+        };
+        LoadAllTurnsStatusResponse: unknown;
         /** MapCellModel */
         MapCellModel: {
             /** X */
@@ -405,6 +496,26 @@ export interface components {
             activetorps: string;
         };
         ShellBootstrapResponse: unknown;
+        /** StellarCartographySampleEntry */
+        StellarCartographySampleEntry: {
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "debris-disks" | "nebulae" | "ion-storms" | "star-clusters" | "neutron-clusters" | "black-holes" | "wormholes";
+            /** Lines */
+            lines: string[];
+        };
+        /** StellarCartographySampleResponse */
+        StellarCartographySampleResponse: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /** Entries */
+            entries?: components["schemas"]["StellarCartographySampleEntry"][];
+        };
+        StellarCartographyTurnSummaryResponse: unknown;
         StoredTurnPerspectivesResponse: unknown;
         /**
          * TurnEnsureRequest
@@ -774,6 +885,75 @@ export interface operations {
             };
         };
     };
+    get_load_all_turns_status_games__game_id__turns_load_all_status_get: {
+        parameters: {
+            query?: {
+                username?: string;
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadAllTurnsStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_load_all_turns_stream_games__game_id__turns_load_all_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoadAllTurnsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_ensure_turn_games__game_id__turns_ensure_post: {
         parameters: {
             query?: {
@@ -874,6 +1054,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WarpWellCellsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stellar_cartography_sample_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_sample_get: {
+        parameters: {
+            query: {
+                x: number;
+                y: number;
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+                perspective: number;
+                turn_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StellarCartographySampleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stellar_cartography_turn_summary_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_summary_get: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+                perspective: number;
+                turn_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StellarCartographyTurnSummaryResponse"];
                 };
             };
             /** @description Validation Error */

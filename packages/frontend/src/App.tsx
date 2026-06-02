@@ -21,21 +21,17 @@ import {
   fetchAnalytics,
   fetchShellBootstrap,
   fetchStoredGameInfo,
-  fetchLoadAllTurnsStatus,
-  loadAllTurnsWithProgress,
   refreshGameInfo,
   type ConnectionsMapParams,
   type GameInfoResponse,
-  type LoadAllProgressUpdate,
 } from './api/bff'
 import type { GameSelectionOptions } from './components/GameControl'
-import { LOGIN_REQUIRED_FOR_GAME_SELECTION } from './lib/gameInfoShell'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
-import { useShellContext } from './shell'
+import { useLoadAllTurns, useShellContext } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
@@ -99,30 +95,13 @@ function ConsoleShell() {
     stepTurn,
   } = useShellContext({ reportShellError: addShellError })
 
-  const [loadAllProgress, setLoadAllProgress] = useState<LoadAllProgressUpdate | null>(null)
-
-  const runLoadAllTurns = useCallback(
-    async (vars: { gameId: string; username: string; password?: string }) => {
-      setLoadAllProgress({
-        phase: 'download',
-        perspective: 0,
-        perspective_total: 0,
-        turn: 0,
-        turn_total: 0,
-        message: 'Starting load…',
-      })
-      try {
-        return await loadAllTurnsWithProgress(
-          vars.gameId,
-          { username: vars.username, password: vars.password },
-          setLoadAllProgress
-        )
-      } finally {
-        setLoadAllProgress(null)
-      }
-    },
-    []
-  )
+  const {
+    loadAllProgress,
+    runLoadAllTurns,
+    isLoadAllTurnsDisabled,
+    isLoadAllTurnsPending: isLoadAllTurnsPendingFromHook,
+    handleLoadAllTurns,
+  } = useLoadAllTurns({ reportShellError: addShellError })
 
   const refreshGameMutation = useMutation({
     mutationFn: async (vars: {
@@ -185,33 +164,8 @@ function ConsoleShell() {
     },
   })
 
-  const loadAllTurnsMutation = useMutation({
-    mutationFn: runLoadAllTurns,
-    retry: false,
-    onSuccess: (_data, vars) => {
-      clearStorageOnlyLoad()
-      void queryClient.invalidateQueries({ queryKey: ['bff', 'games'] })
-      void queryClient.invalidateQueries({
-        queryKey: ['bff', 'games', vars.gameId, 'load-all-status'],
-      })
-    },
-    onError: (err) => {
-      const message =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'string'
-            ? err
-            : 'Load all turns failed'
-      addShellError(message)
-    },
-  })
-
-  const { data: loadAllTurnsStatus } = useQuery({
-    queryKey: ['bff', 'games', selectedGameId, 'load-all-status', loginName?.trim() ?? ''],
-    queryFn: () => fetchLoadAllTurnsStatus(selectedGameId!, loginName!.trim()),
-    enabled: Boolean(selectedGameId && loginName?.trim() && gameInfoContext != null),
-    staleTime: 30_000,
-  })
+  const isLoadAllTurnsPending =
+    isLoadAllTurnsPendingFromHook || refreshGameMutation.isPending
 
   useEffect(() => {
     resetPerspectiveOverride()
@@ -232,30 +186,6 @@ function ConsoleShell() {
     },
     [refreshGameMutation]
   )
-
-  const handleLoadAllTurns = useCallback(() => {
-    if (!selectedGameId) return
-    const { name, password } = useSessionStore.getState()
-    const username = name?.trim() ?? ''
-    if (!username) {
-      addShellError(LOGIN_REQUIRED_FOR_GAME_SELECTION)
-      return
-    }
-    loadAllTurnsMutation.mutate({
-      gameId: selectedGameId,
-      username,
-      password: password || undefined,
-    })
-  }, [selectedGameId, loadAllTurnsMutation, addShellError])
-
-  const isLoadAllTurnsDisabled =
-    !loginName?.trim() ||
-    loadAllTurnsStatus?.complete === true ||
-    gameInfoContext == null
-  const isLoadAllTurnsPending =
-    loadAllProgress != null ||
-    loadAllTurnsMutation.isPending ||
-    refreshGameMutation.isPending
 
   const { data: shellBootstrap } = useQuery({
     queryKey: ['bff', 'shell-bootstrap'],

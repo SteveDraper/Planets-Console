@@ -1,6 +1,6 @@
 """Request and response models for bulk turn loading."""
 
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
 
@@ -51,4 +51,11 @@ class LoadAllTurnsStatusResponse(BaseModel):
     latest_turn: int
 
 
-LoadAllStreamEvent = dict[str, Any]
+LoadAllStreamItem: TypeAlias = LoadAllProgressUpdate | LoadAllTurnsResponse
+
+
+def load_all_stream_event_to_dict(item: LoadAllStreamItem) -> dict[str, Any]:
+    """Wire shape for one NDJSON line (progress or complete)."""
+    if isinstance(item, LoadAllProgressUpdate):
+        return {"type": "progress", **item.model_dump()}
+    return {"type": "complete", "result": item.model_dump()}

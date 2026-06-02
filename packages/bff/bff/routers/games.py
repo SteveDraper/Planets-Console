@@ -32,6 +32,7 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest
+from api.transport.load_all_turns import load_all_stream_event_to_dict
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, Path, Query
 from fastapi.responses import StreamingResponse
@@ -47,7 +48,6 @@ from bff.transport.game_responses import (
     BffGameInfoResponse,
     BffTurnInfoResponse,
     LoadAllTurnsRequest,
-    LoadAllTurnsResponse,
     LoadAllTurnsStatusResponse,
     StellarCartographyTurnSummaryResponse,
     StoredTurnPerspectivesResponse,
@@ -168,30 +168,6 @@ def get_load_all_turns_status(
     return finish_response(result, root)
 
 
-@router.post("/{game_id}/turns/load-all", response_model=LoadAllTurnsResponse)
-def post_load_all_turns(
-    game_id: int,
-    body: LoadAllTurnsRequest,
-    include: IncludeDiagnostics = False,
-) -> object:
-    """Load all turns into storage (loadall when finished, else sequential loadturn)."""
-    core = get_core_client()
-    root = optional_request_root(
-        include,
-        "POST",
-        f"/games/{game_id}/turns/load-all",
-        gameId=game_id,
-        handler="post_load_all_turns",
-    )
-    result = with_timed_child(
-        root,
-        "post_load_all_turns",
-        "total",
-        lambda: core.load_all_turns(game_id, body.username, body.password),
-    )
-    return finish_response(result, root)
-
-
 @router.post("/{game_id}/turns/load-all/stream")
 def post_load_all_turns_stream(
     game_id: int,
@@ -202,8 +178,8 @@ def post_load_all_turns_stream(
 
     def generate():
         try:
-            for event in core.iter_load_all_turns(game_id, body.username, body.password):
-                yield json.dumps(event) + "\n"
+            for item in core.iter_load_all_turns(game_id, body.username, body.password):
+                yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
         except PlanetsConsoleError as exc:
             yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
 

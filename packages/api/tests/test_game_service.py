@@ -35,7 +35,7 @@ def seeded_backend():
 
 @pytest.fixture
 def service(seeded_backend):
-    games, _, _, _ = build_service_stack(seeded_backend)
+    games, _, _, _, _ = build_service_stack(seeded_backend)
     return games
 
 
@@ -75,7 +75,7 @@ class TestMalformedGameInfoStoreData:
     def test_game_info_non_dict_raises_validation(self):
         backend = MemoryAssetBackend(initial={})
         backend.put("games/1/info", ["not", "a", "dict"])
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="Expected JSON object"):
             games.get_game_info(1)
 
@@ -84,7 +84,7 @@ class TestMalformedGameInfoStoreData:
         bad = copy.deepcopy(game_info_sample_data)
         del bad["settings"]["id"]
         backend.put("games/628580/info", bad)
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="settings\\.id"):
             games.get_game_info(628580)
 
@@ -113,7 +113,7 @@ class TestRefreshGameInfo:
 
     def test_requires_password_when_no_stored_api_key(self, sample_info):
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(sample_info)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -126,7 +126,7 @@ class TestRefreshGameInfo:
 
     def test_login_and_store_when_password_given(self, sample_info):
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(sample_info, login_returns="stored-key")
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -142,7 +142,7 @@ class TestRefreshGameInfo:
     def test_skips_login_when_api_key_cached(self, sample_info):
         backend = MemoryAssetBackend(initial={})
         backend.put("credentials/accounts/player1/api_key", "cached-key")
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(sample_info)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -156,7 +156,7 @@ class TestRefreshGameInfo:
         bad = copy.deepcopy(sample_info)
         bad["game"]["id"] = 1
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(bad)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -169,7 +169,7 @@ class TestRefreshGameInfo:
         bad = copy.deepcopy(sample_info)
         bad["settings"]["turn"] = 1
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(bad)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,

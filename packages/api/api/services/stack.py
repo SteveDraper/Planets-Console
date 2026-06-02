@@ -2,6 +2,7 @@
 
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
+from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
@@ -10,10 +11,17 @@ from api.storage.base import StorageBackend
 
 def build_service_stack(
     storage: StorageBackend,
-) -> tuple[GameService, TurnLoadService, TurnConceptService, TurnAnalyticService]:
+) -> tuple[
+    GameService,
+    TurnLoadService,
+    LoadAllTurnsService,
+    TurnConceptService,
+    TurnAnalyticService,
+]:
     credentials = CredentialService(storage)
     games = GameService(storage, credentials)
     turns = TurnLoadService(storage, credentials, games)
+    load_all = LoadAllTurnsService(storage, credentials, games, turns)
     concepts = TurnConceptService(turns)
     analytics = TurnAnalyticService(turns)
-    return games, turns, concepts, analytics
+    return games, turns, load_all, concepts, analytics
