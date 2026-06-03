@@ -269,6 +269,25 @@ class CoreClient:
             )
         )
 
+    def get_scores_row_inference(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        *,
+        diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
+    ) -> dict[str, object]:
+        _ = diagnostics
+        return self._invoke(
+            lambda: self._analytics.get_scores_row_inference(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+        )
+
 
 def get_core_client() -> CoreClient:
     return CoreClient()

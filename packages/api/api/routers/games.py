@@ -110,6 +110,23 @@ def get_turn_info(
     return turns.get_turn_info(game_id, perspective, turn_number)
 
 
+@router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference")
+def get_scores_row_inference(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+):
+    """Return military score build inference for one scoreboard row."""
+    return analytics.get_scores_row_inference(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+    )
+
+
 @router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}")
 def get_turn_analytics(
     game_id: int,

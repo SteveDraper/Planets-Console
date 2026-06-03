@@ -4,6 +4,8 @@
 
 import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
 import type { ConnectionsMapParams } from '../analytics/connections/api'
+import { appendScoresTableQueryParams } from '../analytics/scores/api'
+import type { ScoresTableParams } from '../analytics/scores/api'
 import type {
   MapDataResponse,
   StellarCartographySampleResponse,
@@ -26,6 +28,8 @@ export type {
   ConnectionsFlareMode,
   ConnectionsMapParams,
 } from '../analytics/connections/api'
+
+export type { ScoresTableParams } from '../analytics/scores/api'
 
 export type {
   BlackHoleOverlayCircle,
@@ -198,10 +202,74 @@ export type AnalyticsListResponse = {
   analytics: AnalyticItem[]
 }
 
+/** Initial table payload before per-row inference GETs complete. */
+export type ScoresInferenceRowStub = {
+  playerId?: number
+}
+
 export type TableDataResponse = {
   analyticId: string
   columns: string[]
   rows: string[][]
+  includeBuildInference?: boolean
+  inferenceByRow?: Array<ScoresInferenceRowStub | ScoresInferenceRowDetail>
+}
+
+export type ScoresInferenceSolutionAction = {
+  actionId: string
+  label: string
+  count: number
+}
+
+export type ScoresInferenceMilitaryScoreLineItem = {
+  actionId: string
+  label: string
+  count: number
+  scoreDelta2xPerUnit: number
+  militaryChangePerUnit: number
+  scoreDelta2xSubtotal: number
+  militaryChangeSubtotal: number
+}
+
+export type ScoresInferenceMilitaryScoreArithmetic = {
+  observedMilitaryChange: number
+  observedMilitaryDelta2x: number
+  explainedMilitaryChange: number
+  explainedMilitaryDelta2x: number
+  matchesObserved: boolean
+  lineItems: ScoresInferenceMilitaryScoreLineItem[]
+}
+
+export type ScoresInferenceSolution = {
+  objectiveValue: number
+  actions: ScoresInferenceSolutionAction[]
+  militaryScoreArithmetic?: ScoresInferenceMilitaryScoreArithmetic
+}
+
+export type ScoresInferenceRowDetail = {
+  playerId?: number
+  displayStatus: 'success' | 'pending' | 'failure'
+  status: string
+  summary: string
+  solutionCount: number
+  isComplete: boolean
+  solutions: ScoresInferenceSolution[]
+  diagnostics: Record<string, unknown>
+}
+
+/** Scores table after per-row inference queries have been merged for display. */
+export type ScoresTableWithInferenceData = Omit<
+  TableDataResponse,
+  'includeBuildInference' | 'inferenceByRow'
+> & {
+  includeBuildInference: true
+  inferenceByRow: ScoresInferenceRowDetail[]
+}
+
+export function isScoresInferenceRowDetail(
+  row: ScoresInferenceRowStub | ScoresInferenceRowDetail
+): row is ScoresInferenceRowDetail {
+  return 'displayStatus' in row
 }
 
 export type StoredGameItem = {
@@ -516,13 +584,12 @@ export type AnalyticShellScope = {
   perspective: number
 }
 
-function analyticScopeQuery(scope: AnalyticShellScope): string {
-  const params = new URLSearchParams({
+function analyticScopeParams(scope: AnalyticShellScope): URLSearchParams {
+  return new URLSearchParams({
     gameId: scope.gameId,
     turn: String(scope.turn),
     perspective: String(scope.perspective),
   })
-  return `?${params.toString()}`
 }
 
 function analyticMapQueryString(
@@ -530,11 +597,7 @@ function analyticMapQueryString(
   analyticId: string,
   connectionsParams: ConnectionsMapParams | undefined
 ): string {
-  const params = new URLSearchParams({
-    gameId: scope.gameId,
-    turn: String(scope.turn),
-    perspective: String(scope.perspective),
-  })
+  const params = analyticScopeParams(scope)
   if (analyticId === 'connections' && connectionsParams != null) {
     appendConnectionsMapQueryParams(params, connectionsParams)
   }
@@ -543,10 +606,31 @@ function analyticMapQueryString(
 
 export async function fetchAnalyticTable(
   analyticId: string,
-  scope: AnalyticShellScope
+  scope: AnalyticShellScope,
+  scoresTableParams?: ScoresTableParams
 ): Promise<TableDataResponse> {
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/table`
-  const qs = analyticScopeQuery(scope)
+  const params = analyticScopeParams(scope)
+  if (analyticId === 'scores' && scoresTableParams != null) {
+    appendScoresTableQueryParams(params, scoresTableParams)
+  }
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function fetchScoresRowInference(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<ScoresInferenceRowDetail> {
+  const path = '/bff/analytics/scores/inference'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
   if (!r.ok) {

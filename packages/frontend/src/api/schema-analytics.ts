@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/{analytic_id}/inference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analytic Inference
+         * @description Per-row military score build inference for the Scores analytic.
+         */
+        get: operations["get_analytic_inference_analytics__analytic_id__inference_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/{analytic_id}/map": {
         parameters: {
             query?: never;
@@ -145,6 +165,44 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                includeBuildInference?: boolean;
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                analytic_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_analytic_inference_analytics__analytic_id__inference_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+                playerId: number;
                 includeDiagnostics?: boolean;
             };
             header?: never;

@@ -39,3 +39,15 @@ class TurnAnalyticService:
                 diagnostics=diagnostics,
             ),
         )
+
+    def get_scores_row_inference(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        from api.analytics.scores import get_scores_row_inference
+
+        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        return get_scores_row_inference(turn, player_id)

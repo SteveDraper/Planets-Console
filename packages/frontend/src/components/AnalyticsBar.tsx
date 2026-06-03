@@ -1,9 +1,10 @@
 import { cn } from '../lib/utils'
 import { ConnectionsMapTile } from '../analytics/connections/ConnectionsMapTile'
+import { ScoresTableTile } from '../analytics/scores/ScoresTableTile'
 import { StellarCartographyMapTile } from '../analytics/stellar-cartography/StellarCartographyMapTile'
 import { tileClassName } from '../analytics/tileChrome'
 import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
-import type { AnalyticItem, ConnectionsMapParams } from '../api/bff'
+import type { AnalyticItem, ConnectionsMapParams, ScoresTableParams } from '../api/bff'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -14,6 +15,8 @@ type AnalyticsBarProps = {
   viewMode: ViewMode
   connectionsMapParams: ConnectionsMapParams
   onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
+  scoresTableParams: ScoresTableParams
+  onScoresTableParamsChange: (next: ScoresTableParams) => void
   stellarCartographyGates: StellarCartographySettingsGates
   ionStormCount: number | null
 }
@@ -34,6 +37,8 @@ export function AnalyticsBar({
   viewMode,
   connectionsMapParams,
   onConnectionsMapParamsChange,
+  scoresTableParams,
+  onScoresTableParamsChange,
   stellarCartographyGates,
   ionStormCount,
 }: AnalyticsBarProps) {
@@ -49,7 +54,24 @@ export function AnalyticsBar({
           const supportsMode = supportsCurrentMode(a, viewMode)
           const depressed = enabled && supportsMode
           const isConnectionsMap = a.id === 'connections' && viewMode === 'map'
+          const isScoresTable = a.id === 'scores' && viewMode === 'tabular'
           const isStellarCartographyMap = a.id === 'stellar-cartography' && viewMode === 'map'
+
+          if (isScoresTable) {
+            return (
+              <li key={a.id} className="min-w-0">
+                <ScoresTableTile
+                  name={a.name}
+                  enabled={enabled}
+                  supportsMode={supportsMode}
+                  depressed={depressed}
+                  onToggle={() => onToggle(a.id)}
+                  scoresTableParams={scoresTableParams}
+                  onScoresTableParamsChange={onScoresTableParamsChange}
+                />
+              </li>
+            )
+          }
 
           if (isConnectionsMap) {
             return (

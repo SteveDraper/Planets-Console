@@ -276,6 +276,46 @@ _Avoid_: disabled analytic (generic), HW not applicable toast
 Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=2` (Circular)** on round maps (`mapshape=0`) only. Other distributions remain active for baseline profile, evidence, and manual annotation, but skip sector/ring overlay geometry until extended.
 _Avoid_: full hwdistribution support (v1 claim)
 
+**Military score build inference**:
+Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
+_Avoid_: build solver, score guesser
+
+**Inference host turn**:
+The host turn whose activity is being explained. Scoreboard deltas are read from the **later** stored **TurnInfo** document (turn *N+1*); the **earlier** document (turn *N*) supplies inventory ground truth for complexity grading and Tier 2 checks.
+_Avoid_: inference turn (ambiguous with shell **turn**)
+
+**Inference corpus case**:
+One scored test targeting one **Player** on one **inference host turn**, discovered when `games/{gameId}/{perspective}/turns/{N}` and `.../{N+1}` both exist. Default scope: the **Player** at that **perspective** slot (what that slot built on the host turn). Sparse and complete stores are both valid.
+_Avoid_: scoreboard row test (too vague)
+
+**Inference case complexity**:
+An ordinal label (`minimal` through `adjunct`) for how hard a corpus case is to explain, derived from ground-truth inventory change between the paired turns for the case **Player** (ship builds, ammo and defenses, then adjunct effects such as trades and losses). **Adjunct** classification may require **multi-perspective ground truth** when an effect spans players (e.g. ship trades need every involved **perspective** stored). With sparse storage, classify from what the case **perspective** can see and treat missing cross-player views as unknown adjunct, not proven absence. Runners skip cases above `--max-complexity` with a recorded reason.
+_Avoid_: turn band (unless explicitly mapped to complexity)
+
+**Multi-perspective ground truth**:
+Inventory truth for a corpus case assembled from one or more stored **TurnInfo** documents at the same host turn (and the following turn), merging visibility across **perspective** slots when adjunct or Tier 2 checks need events that no single slot sees alone.
+_Avoid_: omniscient turn (informal)
+
+**Inference corpus runner**:
+Test-harness code (not shipped in the Core REST API package) that performs discovery, complexity grading, **catalog coverage**, case execution, and reporting. Two modes: **fixed corpus** (committed fixtures and manifest for CI) and **local corpus** (script `game_id` against a completed game in the **file backend** store). Invokes production inference APIs only; no corpus logic in `api/` business modules.
+_Avoid_: inference integration test (implementation name)
+
+**Ground truth explanation**:
+The feasible action multiset inferred from inventory change between the paired turns for the case **Player** (exact by construction when adjunct effects are absent or fully visible). Used for Tier 2 compatibility checks and for **top-K ranking** checks against solver output.
+_Avoid_: true build (implies uniqueness)
+
+**Inference top-K ranking check**:
+Whether the **ground truth explanation** appears among the solver's top *K* ranked solutions (default *K* = 3). A miss means constraints are satisfied but likelihood ordering may be wrong -- reported as an investigation signal, not necessarily a hard failure unless promoted in the fixed corpus.
+_Avoid_: best solution match (implies rank 1 only)
+
+**Catalog coverage** (inference):
+Whether the **ground truth explanation** can be expressed using the solver's candidate **action catalog** for that turn (aggregate actions and ship-build combos, within bounds). If not, the case is **out of search space** -- a distinct outcome from solver failure; the runner should not treat `no_exact_solution` as a solver regression on that row.
+_Avoid_: infeasible (ambiguous with CP-SAT status)
+
+**Out of search space**:
+Corpus case outcome when **catalog coverage** fails: the inferencer's modeled action inventory is incomplete for this host turn (deferred effect families, missing hull combo tier, bucket cap too low, etc.). Report separately from `skipped` (complexity cap) and from Tier 1 `exact` / `no_exact_solution`.
+_Avoid_: unsupported (too vague)
+
 ### Observability
 
 **Request diagnostics**:

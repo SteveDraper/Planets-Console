@@ -99,6 +99,43 @@ def test_scores_table_returns_scoreboard_columns_and_deltas():
     ]
 
 
+def test_scores_table_with_build_inference_adds_column_and_player_stubs():
+    response = client.get(f"/analytics/scores/table?{SCOPE_QS}&includeBuildInference=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["includeBuildInference"] is True
+    assert data["columns"][-1] == "Build inference"
+    assert len(data["rows"][0]) == len(data["columns"]) - 1
+    assert data["inferenceByRow"][0] == {"playerId": 8}
+
+
+def test_scores_inference_returns_row_detail():
+    response = client.get(f"/analytics/scores/inference?{SCOPE_QS}&playerId=8")
+    assert response.status_code == 200
+    inference = response.json()
+    assert inference["displayStatus"] in {"success", "failure", "pending"}
+    assert isinstance(inference["summary"], str)
+    assert "status" in inference
+    assert "diagnostics" in inference
+    assert inference["playerId"] == 8
+    assert inference["diagnostics"]["turn"] == 111
+    assert "constraints" in inference["diagnostics"]
+    assert "actionCatalog" in inference["diagnostics"]
+    assert "solver" in inference["diagnostics"]
+
+
+def test_scores_table_build_inference_disabled_matches_default_contract():
+    default_response = client.get(f"/analytics/scores/table?{SCOPE_QS}")
+    explicit_response = client.get(
+        f"/analytics/scores/table?{SCOPE_QS}&includeBuildInference=false"
+    )
+    assert default_response.status_code == 200
+    assert explicit_response.status_code == 200
+    assert default_response.json() == explicit_response.json()
+    assert "includeBuildInference" not in default_response.json()
+    assert "inferenceByRow" not in default_response.json()
+
+
 def test_base_map_returns_planets_and_no_edges():
     """GET /analytics/base-map/map returns planet nodes and no edges."""
     response = client.get(f"/analytics/base-map/map?{SCOPE_QS}")
