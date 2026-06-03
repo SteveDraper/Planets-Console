@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from api.analytics.military_score_inference.actions import (
     ActionCatalogConfig,
+    _residual_count_bound,
     build_action_catalog,
     build_action_catalog_from_turn,
     buildable_hull_ids_for_player,
@@ -228,6 +229,27 @@ def test_ship_build_actions_respect_observed_count_deltas(synthetic_catalog_cont
     assert all(action.upper_bound <= 2 for action in warship_builds)
     assert all(action.upper_bound <= 1 for action in freighter_builds)
     assert all(action.build_slot_usage == 1 for action in warship_builds + freighter_builds)
+
+
+@pytest.mark.parametrize(
+    ("military_delta_2x", "score_delta_2x", "configured_cap", "expected"),
+    [
+        (500, 125, 100, 4),
+        (500, -125, 100, 4),
+        (-500, 125, 100, 4),
+        (-500, -125, 100, 4),
+        (10, 125, 100, 0),
+        (500, 125, 3, 3),
+    ],
+)
+def test_residual_count_bound_uses_abs_residual_regardless_of_sign(
+    military_delta_2x,
+    score_delta_2x,
+    configured_cap,
+    expected,
+):
+    observation = _observation(military_delta_2x=military_delta_2x)
+    assert _residual_count_bound(observation, score_delta_2x, configured_cap) == expected
 
 
 def test_negative_fighter_transfer_cannot_create_unbounded_cancellation_loops():

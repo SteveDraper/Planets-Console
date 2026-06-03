@@ -101,7 +101,6 @@ def table_from_core(core_data: dict, *, include_build_inference: bool = False) -
             inference_by_row.append(
                 _shape_inference_detail(row.get("inference"), player_id=row.get("playerId"))
             )
-            table_row.append("")
         rows.append(table_row)
 
     payload: dict[str, object] = {

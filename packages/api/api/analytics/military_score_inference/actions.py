@@ -240,9 +240,6 @@ def _residual_count_bound(
 
     abs_score = abs(score_delta_2x)
     abs_residual = abs(observation.military_delta_2x)
-    same_sign = (observation.military_delta_2x > 0) == (score_delta_2x > 0)
-    if same_sign:
-        return min(configured_cap, abs_residual // abs_score)
     return min(configured_cap, abs_residual // abs_score)
 
 

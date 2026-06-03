@@ -56,9 +56,15 @@ function InferenceStatusCell({
   )
 }
 
+const BUILD_INFERENCE_COLUMN = 'Build inference'
+
 export function ScoresTableView({ data }: ScoresTableViewProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
   const inferenceByRow = data.inferenceByRow
+  const inferenceColumnIndex =
+    data.includeBuildInference === true && inferenceByRow != null
+      ? data.columns.indexOf(BUILD_INFERENCE_COLUMN)
+      : -1
   const selectedDetail =
     selectedRowIndex != null && inferenceByRow != null
       ? inferenceByRow[selectedRowIndex]
@@ -82,24 +88,20 @@ export function ScoresTableView({ data }: ScoresTableViewProps) {
           <tbody>
             {data.rows.map((row, rowIndex) => (
               <tr key={rowIndex} className="border-b border-[#52575d]/60">
-                {row.map((cell, columnIndex) => {
-                  const isInferenceColumn =
-                    data.includeBuildInference === true &&
-                    inferenceByRow != null &&
-                    columnIndex === row.length - 1
-                  if (isInferenceColumn) {
+                {data.columns.map((column, columnIndex) => {
+                  if (columnIndex === inferenceColumnIndex) {
                     return (
-                      <td key={columnIndex} className="px-3 py-2 text-gray-400">
+                      <td key={column} className="px-3 py-2 text-gray-400">
                         <InferenceStatusCell
-                          detail={inferenceByRow[rowIndex]}
+                          detail={inferenceByRow![rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
                         />
                       </td>
                     )
                   }
                   return (
-                    <td key={columnIndex} className="px-3 py-2 text-gray-400">
-                      {cell}
+                    <td key={column} className="px-3 py-2 text-gray-400">
+                      {row[columnIndex] ?? ''}
                     </td>
                   )
                 })}

@@ -105,8 +105,7 @@ def test_scores_table_with_build_inference_adds_column_and_details():
     data = response.json()
     assert data["includeBuildInference"] is True
     assert data["columns"][-1] == "Build inference"
-    assert len(data["rows"][0]) == len(data["columns"])
-    assert data["rows"][0][-1] == ""
+    assert len(data["rows"][0]) == len(data["columns"]) - 1
     inference = data["inferenceByRow"][0]
     assert inference["displayStatus"] in {"success", "failure", "pending"}
     assert isinstance(inference["summary"], str)
