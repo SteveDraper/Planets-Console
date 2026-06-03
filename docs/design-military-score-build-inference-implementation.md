@@ -840,7 +840,9 @@ Each addition should include tests showing both new feasible explanations and ca
 
 ## 11. Testing strategy
 
-Keep most tests below HTTP boundaries until the model stabilizes.
+Keep most unit tests below HTTP boundaries until the model stabilizes. See also **inference corpus** integration tests below (real finished-game turns).
+
+### 11.1 Unit and integration layers (existing)
 
 | Layer | Tests |
 |-------|-------|
@@ -853,6 +855,81 @@ Keep most tests below HTTP boundaries until the model stabilizes.
 | Frontend scores UI | checkbox control, row status icons, modal behavior |
 
 Prefer synthetic fixtures with small combo catalogs. Large real-turn fixtures should include tier and combo-count regression checks.
+
+### 11.2 Inference corpus (real-turn regression)
+
+The **inference corpus** exercises production inference APIs against stored **TurnInfo** from finished games. Harness code lives under the API **test hierarchy** (`packages/api/tests/inference_corpus/`), not under `api/` business modules. A thin Typer entrypoint lives at `scripts/run_inference_corpus.py`.
+
+Glossary terms: repo root `CONTEXT.md` (**Inference corpus case**, **Inference host turn**, **Catalog coverage**, **Out of search space**, etc.).
+
+#### Two runner modes
+
+| Mode | Purpose | Data source |
+|------|---------|-------------|
+| **Fixed corpus** | CI (`make test_api`) | `packages/api/tests/fixtures/inference_corpus/manifest.json` plus trimmed RST slices |
+| **Local corpus** | Dev / nightly against downloaded games | `scripts/run_inference_corpus.py --game-id <id>` reading the **file backend** store (default storage root from config, typically `.data`) |
+
+Both modes call the same harness library (`tests.inference_corpus`).
+
+#### Case discovery (local mode)
+
+Enumerate stored paths under `games/{gameId}/`. For each **perspective** `P` and each host turn `N` where **both** `games/{id}/P/turns/N` and `.../N+1` exist, emit one **inference corpus case**:
+
+- **Inference host turn:** `N` (activity being explained).
+- **Scoreboard input:** `TurnInfo` at turn **N+1** from perspective `P` (deltas on that document describe host turn `N`).
+- **Default player scope:** the **Player** at perspective slot `P` (what that slot built on host turn `N`).
+
+Sparse storage is valid: only perspectives and turn pairs that exist are discovered.
+
+#### Complexity grading and culling
+
+Before running the solver, classify each case into `minimal`, `routine`, `heavy`, or `adjunct` from **ground-truth inventory change** between turns `N` and `N+1` for the case player. Signals include ship build count, defense/fighter load-ups, and adjunct effects (losses, trades, captures).
+
+- **Multi-perspective ground truth:** adjunct detection (e.g. trades) may merge ship visibility from every perspective that has both turns stored. If a required other perspective is missing, do not infer a trade; mark `incomplete_multi_view` when relevant.
+- **`--max-complexity`:** skip cases above the cap (recorded reason, not a failure).
+- **Level 3 (`adjunct`):** skipped by default unless a future `--include-adjunct` flag is added.
+
+#### Per-case pipeline
+
+1. Skip if complexity > `--max-complexity`.
+2. Classify complexity (optional multi-perspective merge for adjunct signals).
+3. Extract **ground truth explanation** when the extractor supports this case; if unavailable, run **Tier 1 only** (observation closure).
+4. **Catalog coverage** (v1: action-level mapping of ground truth to the catalog built from turn `N+1` `TurnInfo`; later: optional CP-SAT feasibility probe when mapping says covered but solver is INFEASIBLE). If not covered, emit **out of search space** with `coverageReason` (e.g. `deferred_trade`, `combo_not_in_catalog`) and **do not** run the solver.
+5. **Tier 1:** `infer_military_score_build` for the case player on turn `N+1`. For `minimal` / `routine`: require `exact`, at least one solution, and programmatic verification of hard equalities on the top solution. For `heavy`: same, or allow `time_limited` with at least one feasible solution. CI fixed rows are `minimal` / `routine` with implicit `exact` expectation; manifest may add `expectedStatus` for known regressions.
+6. **Tier 2** (when enabled, e.g. `--tier 2`): assert ground truth is **compatible** with inventory (hard fail on mismatch).
+7. **Top-K ranking check** (default `K=3`, `--top-k`): when ground truth is available and catalog coverage passed, require the ground-truth action multiset to appear among the top `K` ranked solutions. A miss is an **investigation signal** (soft by default; manifest may set `requireTopK: true` for hard fail on selected CI rows). Levels 0-1: soft everywhere until priors stabilize.
+
+#### Outcome buckets (reporting)
+
+| Bucket | Meaning |
+|--------|---------|
+| `passed` | Tier 1 (and Tier 2 if enabled) satisfied |
+| `failed` | Hard Tier 1/2 failure |
+| `skipped_complexity` | Above `--max-complexity` |
+| `skipped_incomplete_multi_view` | Adjunct hypothesis needs missing perspectives |
+| `out_of_search_space` | Ground truth not expressible in current catalog (distinct from solver `no_exact_solution`) |
+| `ranking_miss` | `exact` but ground truth not in top-K (investigation, optionally hard) |
+
+Script exit code `0` when no hard failures; stdout supports human summary and optional `--json`.
+
+#### CI fixed corpus content
+
+- Small trimmed finished-game slice under `tests/fixtures/inference_corpus/`.
+- Manifest lists explicit cases with `hostTurn`, `perspective`, `complexity`, optional `requiredPerspectives`, optional `requireTopK`.
+- Most rows: `minimal` / `routine`, Tier 1 `exact` only.
+- Optional second snippet with multiple perspectives for future adjunct / coverage regressions.
+
+#### Ordering relative to solver work (GitHub epic #39)
+
+| When | Corpus milestone |
+|------|------------------|
+| Parallel with #50 | Harness + Tier 1 + CI fixed corpus on current flat catalog |
+| After #50 | Fewer false `no_exact_solution` from priority-point gaps; corpus Tier 1 more meaningful |
+| After #51, #52 | Revisit catalog coverage mapping for **ship build combos**; expand fixed corpus with combo-tier regressions |
+| After #53 | Optional manifest rows tied to combo diagnostics shapes |
+| With #49 (deferred effects) | Expand ground truth + coverage for trades/losses; adjunct fixtures |
+
+Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Corpus issues are siblings under #39 (see issue tracker).
 
 ---
 
