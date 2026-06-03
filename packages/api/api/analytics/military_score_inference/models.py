@@ -44,6 +44,7 @@ class InferenceProblem:
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
     max_solutions: int = 20
     time_limit_seconds: float = 1.0
+    enforce_priority_point_constraint: bool = False
 
 
 @dataclass(frozen=True)

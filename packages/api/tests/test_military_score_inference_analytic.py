@@ -15,9 +15,11 @@ from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     inference_result_to_api_payload,
     is_after_ship_limit,
+    observation_to_constraints_payload,
     prior_turn_score_data_available,
 )
 from api.analytics.military_score_inference.models import (
+    InferenceObservation,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
@@ -181,6 +183,27 @@ def test_inference_result_payload_serializes_solutions(sample_turn):
     assert payload["solutions"][0]["actions"][0]["actionId"] == "build_24_empty"
 
 
+def test_constraints_payload_exposes_requested_pp_as_diagnostic_only():
+    observation = InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=0,
+        warship_delta=0,
+        freighter_delta=0,
+        priority_point_delta=54,
+        starbases_owned=3,
+        is_after_ship_limit=False,
+    )
+    constraints = observation_to_constraints_payload(observation)
+
+    assert constraints["requestedPriorityPointDelta"] == 54
+    assert constraints["priorityPointConstraintEnforced"] is False
+    assert "not a hard solver constraint" in str(constraints["priorityPointConstraintNote"])
+    assert "priorityPointDelta" not in constraints
+    applied = constraints["appliedEqualities"]
+    assert not any("priorityPointDelta" in equality for equality in applied)
+
+
 def test_enabled_output_includes_structured_solver_diagnostics(sample_turn):
     data = get_scores_table(
         sample_turn,
@@ -193,6 +216,8 @@ def test_enabled_output_includes_structured_solver_diagnostics(sample_turn):
     assert "actionCatalog" in diagnostics
     assert "solver" in diagnostics
     assert isinstance(diagnostics["constraints"]["appliedEqualities"], list)
+    assert diagnostics["constraints"]["priorityPointConstraintEnforced"] is False
+    assert "priorityPointConstraintNote" in diagnostics["constraints"]
     assert isinstance(diagnostics["actionCatalog"]["actions"], list)
     assert "meta" in diagnostics["actionCatalog"]
     assert "shipBuildActions" in diagnostics["actionCatalog"]

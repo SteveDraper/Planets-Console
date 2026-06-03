@@ -133,6 +133,54 @@ def test_solve_solution_with_negative_action_contribution():
     assert counts["transfer_to_starbase"] == 1
 
 
+def test_solve_non_zero_priority_points_with_zero_pp_catalog_actions():
+    """Regression: PP delta is diagnostic-only until queue semantics model per-build PP."""
+    build_warship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=400,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=400, warship_delta=1, priority_point_delta=54),
+            build_warship,
+        )
+    )
+
+    assert result.status == STATUS_EXACT
+    assert result.solutions[0].actions[0].action_id == "build_rush"
+
+
+def test_solve_enforced_priority_point_constraint_requires_catalog_pp_deltas():
+    build_warship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=400,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    problem = InferenceProblem(
+        observation=_observation(
+            military_delta_2x=400,
+            warship_delta=1,
+            priority_point_delta=54,
+        ),
+        actions=(build_warship,),
+        probability_buckets_by_action_id={},
+        enforce_priority_point_constraint=True,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.solutions == ()
+
+
 def test_solve_infeasible_problem_returns_no_exact_solution():
     build_warship = CandidateAction(
         id="build_rush",

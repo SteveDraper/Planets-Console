@@ -121,10 +121,11 @@ def _build_model(problem: InferenceProblem) -> _BuiltModel:
         sum(action.freighter_delta * count_vars[action.id] for action in problem.actions)
         == observation.freighter_delta
     )
-    model.add(
-        sum(action.priority_point_delta * count_vars[action.id] for action in problem.actions)
-        == observation.priority_point_delta
-    )
+    if problem.enforce_priority_point_constraint:
+        model.add(
+            sum(action.priority_point_delta * count_vars[action.id] for action in problem.actions)
+            == observation.priority_point_delta
+        )
     model.add(
         sum(action.build_slot_usage * count_vars[action.id] for action in problem.actions)
         <= observation.starbases_owned
