@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { ReactNode } from 'react'
 import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
+import type { ScoresTableParams } from '../analytics/scores/api'
 import { MainArea } from './MainArea'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
@@ -75,6 +76,10 @@ function createWrapper() {
   }
 }
 
+const defaultScoresTableParams: ScoresTableParams = {
+  includeBuildInference: false,
+}
+
 function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
   return {
     viewMode,
@@ -87,6 +92,7 @@ function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
     turnEnsureError: null,
     turnBlockedNoLogin: false,
     connectionsMapParams: defaultConnectionsParams,
+    scoresTableParams: defaultScoresTableParams,
     futureTurnOffset: 0,
     onMapZoomChange: vi.fn(),
     onSetZoomReady: vi.fn(),

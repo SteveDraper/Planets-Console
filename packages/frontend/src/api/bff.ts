@@ -544,13 +544,12 @@ export type AnalyticShellScope = {
   perspective: number
 }
 
-function analyticScopeQuery(scope: AnalyticShellScope): string {
-  const params = new URLSearchParams({
+function analyticScopeParams(scope: AnalyticShellScope): URLSearchParams {
+  return new URLSearchParams({
     gameId: scope.gameId,
     turn: String(scope.turn),
     perspective: String(scope.perspective),
   })
-  return `?${params.toString()}`
 }
 
 function analyticMapQueryString(
@@ -558,11 +557,7 @@ function analyticMapQueryString(
   analyticId: string,
   connectionsParams: ConnectionsMapParams | undefined
 ): string {
-  const params = new URLSearchParams({
-    gameId: scope.gameId,
-    turn: String(scope.turn),
-    perspective: String(scope.perspective),
-  })
+  const params = analyticScopeParams(scope)
   if (analyticId === 'connections' && connectionsParams != null) {
     appendConnectionsMapQueryParams(params, connectionsParams)
   }
@@ -575,11 +570,7 @@ export async function fetchAnalyticTable(
   scoresTableParams?: ScoresTableParams
 ): Promise<TableDataResponse> {
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/table`
-  const params = new URLSearchParams({
-    gameId: scope.gameId,
-    turn: String(scope.turn),
-    perspective: String(scope.perspective),
-  })
+  const params = analyticScopeParams(scope)
   if (analyticId === 'scores' && scoresTableParams != null) {
     appendScoresTableQueryParams(params, scoresTableParams)
   }

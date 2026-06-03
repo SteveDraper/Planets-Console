@@ -278,7 +278,9 @@ def test_ship_build_presets_exclude_build_time_ammo(synthetic_catalog_context):
 
     expected_score = ship_construction_score_delta_2x(
         hull.cost + engine.cost * hull.engines,
-        hull.tritanium + hull.duranium + hull.molybdenum
+        hull.tritanium
+        + hull.duranium
+        + hull.molybdenum
         + (engine.tritanium + engine.duranium + engine.molybdenum) * hull.engines,
     )
     assert carrier_empty.score_delta_2x == expected_score

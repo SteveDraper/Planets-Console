@@ -145,6 +145,7 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                includeBuildInference?: boolean;
                 includeDiagnostics?: boolean;
             };
             header?: never;
