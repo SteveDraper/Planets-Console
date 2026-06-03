@@ -216,9 +216,29 @@ export type ScoresInferenceSolutionAction = {
   count: number
 }
 
+export type ScoresInferenceMilitaryScoreLineItem = {
+  actionId: string
+  label: string
+  count: number
+  scoreDelta2xPerUnit: number
+  militaryChangePerUnit: number
+  scoreDelta2xSubtotal: number
+  militaryChangeSubtotal: number
+}
+
+export type ScoresInferenceMilitaryScoreArithmetic = {
+  observedMilitaryChange: number
+  observedMilitaryDelta2x: number
+  explainedMilitaryChange: number
+  explainedMilitaryDelta2x: number
+  matchesObserved: boolean
+  lineItems: ScoresInferenceMilitaryScoreLineItem[]
+}
+
 export type ScoresInferenceSolution = {
   objectiveValue: number
   actions: ScoresInferenceSolutionAction[]
+  militaryScoreArithmetic?: ScoresInferenceMilitaryScoreArithmetic
 }
 
 export type ScoresInferenceRowDetail = {

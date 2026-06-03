@@ -19,11 +19,15 @@ from api.analytics.military_score_inference.analytic import (
     prior_turn_score_data_available,
 )
 from api.analytics.military_score_inference.models import (
+    CandidateAction,
     InferenceObservation,
     InferenceProblem,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
+)
+from api.analytics.military_score_inference.score_arithmetic import (
+    solution_military_score_arithmetic_payload,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -194,6 +198,95 @@ def test_inference_result_payload_serializes_solutions(sample_turn):
     assert payload["solutionCount"] == 1
     assert payload["solutions"][0]["objectiveValue"] == 42
     assert payload["solutions"][0]["actions"][0]["actionId"] == "build_24_empty"
+
+
+def test_inference_result_payload_includes_military_score_arithmetic(sample_turn):
+    defense_action = CandidateAction(
+        id="planet_defense",
+        label="Planet defense post",
+        score_delta_2x=22,
+        lower_bound=0,
+        upper_bound=10,
+    )
+    catalog = ActionCatalog(
+        actions=(defense_action,),
+        probability_buckets_by_action_id={},
+    )
+    score = sample_turn.scores[0]
+    observation = InferenceObservation(
+        player_id=score.ownerid,
+        turn=12,
+        military_delta_2x=44,
+        warship_delta=0,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    problem = _minimal_inference_problem(observation, catalog)
+    result = InferenceResult(
+        status=STATUS_EXACT,
+        solutions=(
+            InferenceSolution(
+                objective_value=99,
+                actions=(
+                    InferenceSolutionAction(
+                        action_id="planet_defense",
+                        label="Planet defense post",
+                        count=2,
+                    ),
+                ),
+            ),
+        ),
+        diagnostics={},
+    )
+    payload = inference_result_to_api_payload(result, catalog, observation, sample_turn, problem)
+    arithmetic = payload["solutions"][0]["militaryScoreArithmetic"]
+    assert arithmetic["observedMilitaryChange"] == 22
+    assert arithmetic["observedMilitaryDelta2x"] == 44
+    assert arithmetic["explainedMilitaryChange"] == 22
+    assert arithmetic["explainedMilitaryDelta2x"] == 44
+    assert arithmetic["matchesObserved"] is True
+    line_item = arithmetic["lineItems"][0]
+    assert line_item["count"] == 2
+    assert line_item["scoreDelta2xPerUnit"] == 22
+    assert line_item["militaryChangePerUnit"] == 11
+    assert line_item["militaryChangeSubtotal"] == 22
+
+
+def test_solution_military_score_arithmetic_flags_mismatch():
+    observation = InferenceObservation(
+        player_id=1,
+        turn=3,
+        military_delta_2x=100,
+        warship_delta=0,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=1,
+        is_after_ship_limit=False,
+    )
+    action = CandidateAction(
+        id="starbase_fighter",
+        label="Starbase fighter",
+        score_delta_2x=125,
+    )
+    solution = InferenceSolution(
+        objective_value=1,
+        actions=(
+            InferenceSolutionAction(
+                action_id="starbase_fighter",
+                label="Starbase fighter",
+                count=1,
+            ),
+        ),
+    )
+    arithmetic = solution_military_score_arithmetic_payload(
+        solution,
+        observation,
+        {action.id: action},
+    )
+    assert arithmetic["matchesObserved"] is False
+    assert arithmetic["explainedMilitaryChange"] == 62
 
 
 def test_constraints_payload_exposes_requested_pp_as_diagnostic_only():

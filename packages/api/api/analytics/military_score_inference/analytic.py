@@ -15,6 +15,9 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.score_arithmetic import (
+    solution_military_score_arithmetic_payload,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
@@ -219,6 +222,8 @@ def inference_result_to_api_payload(
         summary=format_inference_summary(result),
         solutions=result.solutions,
         diagnostics=diagnostics,
+        observation=observation,
+        catalog=catalog,
     )
 
 
@@ -265,18 +270,48 @@ def _inference_api_payload(
     summary: str,
     solutions: tuple[InferenceSolution, ...],
     diagnostics: dict[str, object],
+    observation: InferenceObservation | None = None,
+    catalog: ActionCatalog | None = None,
 ) -> dict[str, object]:
     return {
         "status": status,
         "summary": summary,
         "solutionCount": len(solutions),
         "isComplete": status != STATUS_TIME_LIMITED,
-        "solutions": [_serialize_solution(solution) for solution in solutions],
+        "solutions": (
+            [_serialize_solution(solution, observation, catalog) for solution in solutions]
+            if observation is not None and catalog is not None
+            else [_serialize_solution_without_arithmetic(solution) for solution in solutions]
+        ),
         "diagnostics": diagnostics,
     }
 
 
-def _serialize_solution(solution: InferenceSolution) -> dict[str, object]:
+def _serialize_solution(
+    solution: InferenceSolution,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+) -> dict[str, object]:
+    actions_by_id = {action.id: action for action in catalog.actions}
+    return {
+        "objectiveValue": solution.objective_value,
+        "actions": [
+            {
+                "actionId": action.action_id,
+                "label": action.label,
+                "count": action.count,
+            }
+            for action in solution.actions
+        ],
+        "militaryScoreArithmetic": solution_military_score_arithmetic_payload(
+            solution,
+            observation,
+            actions_by_id,
+        ),
+    }
+
+
+def _serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[str, object]:
     return {
         "objectiveValue": solution.objective_value,
         "actions": [
