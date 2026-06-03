@@ -45,11 +45,11 @@ export async function fetchSystem(id: string): Promise<SystemView> {
 - Slices must be generated from the BFF-only schema (filtered from the full BFF dump), not from a whole-process backend schema
 - Do not add a barrel `schema.ts` that re-exports every slice
 
-## BFF types — when to use Zod instead of `schema.ts`
+## BFF types — when to use Zod instead of OpenAPI codegen
 
 See **Frontend BFF contracts: OpenAPI codegen and Zod** in `architecture.mdc` for the full rule. In short:
 
-- **Default:** `schema.ts` + typed fetch helpers for normal REST JSON.
+- **Default:** `schema-<slice>.ts` (or monolithic `schema.ts` during parity) + typed fetch helpers in `bff.ts` for normal REST JSON.
 - **Zod + `z.infer`:** stream/NDJSON lines and other wire data that needs runtime validation; one module owns both types and parsing (example: `src/api/loadAllStreamEventSchema.ts` + `parseLoadAllStreamEvent.ts`).
 - **Never** duplicate the same shape in OpenAPI-generated types and hand-written (or second) Zod schemas.
 

@@ -27,6 +27,6 @@ We split **central** codegen by **regeneration boundary** aligned with BFF route
 - When adding BFF routes, know which slice regens (games vs shell, etc.).
 - New **turn analytics**: type payloads in `src/analytics/<id>/`; only promote to OpenAPI + a generated slice when a strict shared contract is worth the cost.
 - New **streams** or line protocols: Zod-owned module, not a new OpenAPI monolith.
-- `architecture.mdc`, `frontend-react.mdc`, and **CONTEXT.md** (**BFF contract codegen slice**, **Filtered OpenAPI dump**, **Generated schema import rule**, **Turn analytic wire contract**) are the operational references; migrate off monolithic `schema.ts` when the pipeline lands.
+- `architecture.mdc`, `frontend-react.mdc`, and **CONTEXT.md** (**BFF contract codegen slice**, **Filtered OpenAPI dump**, **Generated schema import rule**, **Turn analytic wire contract**) are the operational references. `make generate` / `npm run generate:api` runs dump → filter → per-slice codegen; monolithic `schema.ts` remains during parity until import cutover (#58 CI follows).
 
 See also: [CONTEXT.md](../../CONTEXT.md), [architecture.mdc](../../.cursor/rules/architecture.mdc) (Frontend BFF contracts), [ADR 0002](0002-analytic-persistence.md) (homeworld and other persisted analytics).

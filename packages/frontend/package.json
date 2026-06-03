@@ -11,7 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "generate:api:dump": "cd ../bff && uv run python -c \"from bff.app import app; import json; print(json.dumps(app.openapi()))\" > ../frontend/.bff-openapi.json",
-    "generate:api": "npm run generate:api:dump && openapi-typescript .bff-openapi.json -o src/api/schema.ts",
+    "generate:api:filter": "cd ../.. && uv run python scripts/filter_bff_openapi.py packages/frontend/.bff-openapi.json packages/frontend/.bff-openapi-slices",
+    "generate:api:slices": "sh -c 'for slice in games analytics shell diagnostics; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts; done'",
+    "generate:api": "npm run generate:api:dump && npm run generate:api:filter && openapi-typescript .bff-openapi.json -o src/api/schema.ts && npm run generate:api:slices",
     "generate:api:live": "openapi-typescript http://localhost:8000/bff/openapi.json -o src/api/schema.ts"
   },
   "dependencies": {

@@ -13,8 +13,9 @@ dist-ssr
 .vite
 *.local
 
-# Intermediate OpenAPI dump for `npm run generate:api` (input to openapi-typescript)
+# Intermediate OpenAPI dumps for `npm run generate:api` (not committed)
 .bff-openapi.json
+.bff-openapi-slices/
 
 # Editor directories and files
 .vscode/*
