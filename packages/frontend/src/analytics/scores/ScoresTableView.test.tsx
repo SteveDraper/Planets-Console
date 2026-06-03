@@ -1,13 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { TableDataResponse } from '../../api/bff'
+import type { ScoresTableWithInferenceData } from '../../api/bff'
 import { ScoresTableView } from './ScoresTableView'
 
 function tableData(
-  overrides: Partial<TableDataResponse> & Pick<TableDataResponse, 'columns' | 'rows'>
-): TableDataResponse {
+  overrides: Partial<ScoresTableWithInferenceData> &
+    Pick<ScoresTableWithInferenceData, 'columns' | 'rows' | 'inferenceByRow'>
+): ScoresTableWithInferenceData {
   return {
     analyticId: 'scores',
+    includeBuildInference: true,
     ...overrides,
   }
 }
@@ -17,7 +19,6 @@ describe('ScoresTableView', () => {
     render(
       <ScoresTableView
         data={tableData({
-          includeBuildInference: true,
           columns: ['Race (player)', 'Military', 'Build inference'],
           rows: [['Federation (alice)', '100']],
           inferenceByRow: [
@@ -43,7 +44,6 @@ describe('ScoresTableView', () => {
     render(
       <ScoresTableView
         data={tableData({
-          includeBuildInference: true,
           columns: ['Race (player)', 'Military', 'Build inference'],
           rows: [['Federation (alice)', '100', '']],
           inferenceByRow: [
@@ -69,7 +69,6 @@ describe('ScoresTableView', () => {
     render(
       <ScoresTableView
         data={tableData({
-          includeBuildInference: true,
           columns: ['Race (player)', 'Build inference'],
           rows: [['Federation (alice)']],
           inferenceByRow: [

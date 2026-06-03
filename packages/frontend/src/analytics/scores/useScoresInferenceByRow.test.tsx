@@ -50,7 +50,7 @@ describe('useScoresInferenceByRow', () => {
   })
 
   it('merges settled inference independently per player', async () => {
-    vi.spyOn(bff, 'fetchScoresRowInference').mockImplementation(async (s, playerId) => {
+    vi.spyOn(bff, 'fetchScoresRowInference').mockImplementation(async (_scope, playerId) => {
       if (playerId === 8) {
         return {
           playerId: 8,

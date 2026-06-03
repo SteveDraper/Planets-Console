@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, Hourglass, X } from 'lucide-react'
-import type { TableDataResponse } from '../../api/bff'
+import type { ScoresInferenceRowDetail, ScoresTableWithInferenceData } from '../../api/bff'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import {
   canOpenInferenceDetail,
@@ -8,14 +8,14 @@ import {
 } from './inferenceStatus'
 
 type ScoresTableViewProps = {
-  data: TableDataResponse
+  data: ScoresTableWithInferenceData
 }
 
 function InferenceStatusCell({
   detail,
   onOpenDetail,
 }: {
-  detail: NonNullable<TableDataResponse['inferenceByRow']>[number]
+  detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
 }) {
   const label = inferenceAccessibleLabel(detail)

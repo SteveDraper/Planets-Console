@@ -1,8 +1,5 @@
-import type {
-  AnalyticShellScope,
-  ScoresInferenceRowDetail,
-  TableDataResponse,
-} from '../../api/bff'
+import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
+import { isScoresInferenceRowDetail } from '../../api/bff'
 import type { ScoresAnalyticDiagnostics } from '../../stores/analyticDiagnostics'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,7 +73,7 @@ export function scoresDiagnosticsFromTable(
 
   const players = data.rows.flatMap((row, rowIndex) => {
     const detail = inferenceByRow[rowIndex]
-    if (detail == null) {
+    if (detail == null || !isScoresInferenceRowDetail(detail)) {
       return []
     }
     const parsed = playerDiagnosticsFromRow(String(row[0] ?? ''), detail, rowIndex)

@@ -202,12 +202,17 @@ export type AnalyticsListResponse = {
   analytics: AnalyticItem[]
 }
 
+/** Initial table payload before per-row inference GETs complete. */
+export type ScoresInferenceRowStub = {
+  playerId?: number
+}
+
 export type TableDataResponse = {
   analyticId: string
   columns: string[]
   rows: string[][]
   includeBuildInference?: boolean
-  inferenceByRow?: ScoresInferenceRowDetail[]
+  inferenceByRow?: Array<ScoresInferenceRowStub | ScoresInferenceRowDetail>
 }
 
 export type ScoresInferenceSolutionAction = {
@@ -250,6 +255,21 @@ export type ScoresInferenceRowDetail = {
   isComplete: boolean
   solutions: ScoresInferenceSolution[]
   diagnostics: Record<string, unknown>
+}
+
+/** Scores table after per-row inference queries have been merged for display. */
+export type ScoresTableWithInferenceData = Omit<
+  TableDataResponse,
+  'includeBuildInference' | 'inferenceByRow'
+> & {
+  includeBuildInference: true
+  inferenceByRow: ScoresInferenceRowDetail[]
+}
+
+export function isScoresInferenceRowDetail(
+  row: ScoresInferenceRowStub | ScoresInferenceRowDetail
+): row is ScoresInferenceRowDetail {
+  return 'displayStatus' in row
 }
 
 export type StoredGameItem = {
