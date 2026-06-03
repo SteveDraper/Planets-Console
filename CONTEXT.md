@@ -14,6 +14,14 @@ _Avoid_: API layer (ambiguous with BFF), backend (when meaning the whole Python 
 The Backend-for-Frontend mounted at `/bff/...`. Aggregates and reshapes Core responses into SPA-oriented contracts. The frontend calls only the BFF, never Core routes directly.
 _Avoid_: API gateway, middleware layer
 
+**BFF contract codegen slice**:
+A domain-scoped generated TypeScript module produced from part of the BFF OpenAPI document. Slices exist so **regeneration** after a route change rewrites only the contract types for that domain, not the entire SPA API surface in one file.
+_Avoid_: schema chunk (implementation), splitting by line count
+
+**Regeneration boundary**:
+The line between two **BFF contract codegen slices** (or between a slice and a Zod-owned wire module). A change on one side of the boundary must not require regenerating or re-validating types on the other unless the wire contract itself changed.
+_Avoid_: file size limit (as the primary reason to split)
+
 **Shell**:
 The SPA chrome -- header bar, analytics selector, and main display area -- plus the **shell context** that scopes what is being analyzed.
 _Avoid_: layout, chrome (without "shell" context)
@@ -87,6 +95,42 @@ _Avoid_: widget, report, metric
 **Turn analytic**:
 An **analytic** computed from **TurnInfo** for a specific game, turn, and **perspective**. Invoked through the shared Core route `.../turns/{turn}/analytics/{analytic_id}` and corresponding BFF routes.
 _Avoid_: query, dashboard tile
+
+**Generic analytics route**:
+The BFF paths `GET /analytics/{analytic_id}/table` and `.../map` shared by every **turn analytic**. The path parameter selects the handler; response bodies are shaped per analytic in code, not as separate OpenAPI paths per id.
+_Avoid_: per-analytic endpoint (when meaning this shared route pattern)
+
+**Turn analytic wire contract**:
+The JSON table or map payload one **turn analytic** returns through the **generic analytics route** (or any analytic-specific BFF route). Default: owned in the SPA under `src/analytics/<analytic_id>/` (hand types, Zod, normalizers) -- not in central OpenAPI codegen. Per-analytic OpenAPI models are optional when a strict shared contract is required.
+_Avoid_: analytics schema.ts (implies all analytics share one generated file)
+
+**Central BFF contract codegen (default layout)**:
+Generated TypeScript from OpenAPI is split by BFF router **regeneration boundary** (e.g. games, shell, diagnostics, analytics catalog). Each slice OpenAPI dump includes **full `$ref` closure** for its paths (duplicate cross-router schemas across slices is acceptable in v1). Turn analytic table/map payloads stay out of those slices unless explicitly promoted to OpenAPI. See [ADR 0003](docs/adr/0003-frontend-bff-contract-codegen.md).
+_Avoid_: one schema.ts for the whole BFF, splitting generated files by line count only
+
+**Filtered OpenAPI dump**:
+A build step that subsets the full BFF OpenAPI document by path prefix (and pulled-in component schemas) before `openapi-typescript` runs, producing one generated module per slice. Preferred v1 mechanism for **central BFF contract codegen** (over multiple live OpenAPI endpoints or Redocly-only workflows).
+_Avoid_: hand-editing generated TypeScript to split it after the fact
+
+**Schema slice migration (parity then cutover)**:
+When replacing monolithic `schema.ts`, emit sliced modules alongside the monolith first; verify shared `$ref` closure and TypeScript compile against slice-only imports; then migrate `bff.ts` (and any other importers) and delete the monolith. Avoid a long period where feature code imports both `./schema` and `schema-<slice>.ts`.
+_Avoid_: slice-by-slice import migration while the monolith remains the default in half the tree
+
+**BFF OpenAPI filter script**:
+Python under repo `scripts/` (e.g. `filter_bff_openapi.py`) subsets the dumped BFF spec before `openapi-typescript`; invoked from `npm run generate:api` after `generate:api:dump`. Keeps JSON `$ref` walking in the same toolchain as the OpenAPI dump, not in `packages/frontend`.
+_Avoid_: fragile shell-only filters without component closure
+
+**OpenAPI slice closure (v1)**:
+Each filtered slice includes every `components.schemas` entry reachable from that slice's paths. Cross-router schemas may be duplicated in multiple slice dumps and generated TypeScript modules; a separate shared slice is deferred until import duplication becomes a problem.
+_Avoid_: schema-shared as a required v1 dependency for every slice to compile
+
+**Generated slice CI**:
+While sliced codegen is in use, CI verifies committed `schema-<slice>.ts` files match the filtered OpenAPI dumps. After monolith cutover, CI also fails if `src/api/schema.ts` reappears.
+_Avoid_: relying on reviewers to notice stale or monolithic generated types
+
+**Generated schema import rule**:
+Application code imports the smallest matching `schema-<slice>.ts` module for types; `bff.ts` remains the facade for HTTP calls. Do not add a barrel `schema.ts` that re-exports every slice (that recreates a single monolith in git and in review).
+_Avoid_: `import from './schema'` as the default in feature folders
 
 **Analytic descriptor**:
 The single BFF registration object for one **turn analytic** -- catalog fields plus optional table/map handlers and diagnostic hooks. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.
