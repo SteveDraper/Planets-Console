@@ -7,7 +7,7 @@ api:
   storage_backend: file
   storage_root: ./.data
   storage_asset_path: null   # ephemeral only; ignored for file backend
-  include_dummy_data: true   # seed sample paths if missing (set false for production)
+  include_dummy_data: false   # seed sample paths if missing (set false for production)
 
 bff:
   cors_origins:

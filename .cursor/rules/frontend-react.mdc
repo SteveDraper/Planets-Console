@@ -15,22 +15,22 @@ alwaysApply: false
 
 ## BFF Types — OpenAPI Codegen
 
-TypeScript types for all BFF responses are **generated from the BFF-only OpenAPI spec** — never written by hand. This ensures the frontend and BFF stay in sync: a BFF response shape change will produce a TypeScript compile error in the frontend.
+TypeScript types for router-stable BFF REST are **generated from filtered BFF OpenAPI dumps** — never hand-written for those shapes. See [ADR 0003](../../docs/adr/0003-frontend-bff-contract-codegen.md).
 
-The generated file is `src/api/schema.ts` (committed to the repo, never hand-edited). Regenerate it by running:
+Generated modules are `src/api/schema-<slice>.ts` (e.g. `schema-games.ts`, `schema-shared.ts`; committed, never hand-edited). Regenerate all slices by running:
 
 ```bash
 npm run generate:api
 ```
 
-Use the generated path types via `openapi-typescript`'s path-based interface:
+Import the smallest slice you need (see **Generated schema import rule** in `CONTEXT.md`). `bff.ts` centralizes fetch calls. Example path types:
 
 ```ts
 // src/api/systems.ts
-import type { paths } from './schema'
+import type { paths } from './schema-games'
 
 type SystemView =
-  paths['/bff/systems/{id}']['get']['responses']['200']['content']['application/json']
+  paths['/games/{id}']['get']['responses']['200']['content']['application/json']
 
 export async function fetchSystem(id: string): Promise<SystemView> {
   const res = await fetch(`/bff/systems/${id}`)
@@ -41,8 +41,17 @@ export async function fetchSystem(id: string): Promise<SystemView> {
 
 - Define one API client file per domain resource in `src/api/` (e.g. `src/api/systems.ts`)
 - TanStack Query hooks in feature folders import from `src/api/` — they never call `fetch` directly
-- If `src/api/schema.ts` is out of date, run `generate:api` and fix any resulting type errors before merging
-- `schema.ts` must be generated from the BFF-only schema endpoint, not from a whole-process backend schema
+- If generated slices are out of date, run `generate:api` and fix any resulting type errors before merging; verify with `npm run check:api:slices` or `make check_frontend_api_slices` (also run by `make ci`)
+- Slices must be generated from the BFF-only schema (filtered from the full BFF dump), not from a whole-process backend schema
+- Do not add a barrel `schema.ts` that re-exports every slice; CI fails if `src/api/schema.ts` exists (`make check_frontend_api_no_monolithic_schema`, part of `make ci`)
+
+## BFF types — when to use Zod instead of OpenAPI codegen
+
+See **Frontend BFF contracts: OpenAPI codegen and Zod** in `architecture.mdc` for the full rule. In short:
+
+- **Default:** `schema-<slice>.ts` + typed fetch helpers in `bff.ts` for normal REST JSON.
+- **Zod + `z.infer`:** stream/NDJSON lines and other wire data that needs runtime validation; one module owns both types and parsing (example: `src/api/loadAllStreamEventSchema.ts` + `parseLoadAllStreamEvent.ts`).
+- **Never** duplicate the same shape in OpenAPI-generated types and hand-written (or second) Zod schemas.
 
 ## State Management — The Core Rule
 
@@ -80,7 +89,8 @@ const useItemsStore = create()(() => ({ items: [] }));
 ```
 src/
 ├── api/
-│   ├── schema.ts      # Generated — do not edit. Run `npm run generate:api` to update.
+│   ├── schema-*.ts    # Generated per router slice — do not edit. `npm run generate:api`
+│   ├── *Schema.ts     # Zod wire contracts (types via z.infer) when architecture.mdc applies
 │   ├── systems.ts     # (illustrative) Typed fetch functions for one domain resource
 │   └── ...            # One file per domain resource
 ├── components/    # Genuinely shared components reused across multiple features

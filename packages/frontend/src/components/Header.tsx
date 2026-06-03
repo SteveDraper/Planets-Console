@@ -6,7 +6,7 @@ import { mapSliderToZoom, mapZoomToSlider } from '../lib/mapZoom'
 import { formatViewpointRowLabel } from '../lib/displayFormatters'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
-import { GameControl } from './GameControl'
+import { GameControl, type GameSelectionOptions } from './GameControl'
 import { LoginModal } from './LoginModal'
 import { AboutModal } from './AboutModal'
 import { DiagnosticsModal } from './DiagnosticsModal'
@@ -21,8 +21,11 @@ type HeaderProps = {
   onMapZoomSliderChange: (zoom: number) => void
   selectedGameId: string | null
   /** Called when the user commits a game id (list pick or add form). Triggers BFF refresh. */
-  onCommitGameSelection: (gameId: string) => void
+  onCommitGameSelection: (gameId: string, options?: GameSelectionOptions) => void
   isGameRefreshPending: boolean
+  isLoadAllTurnsPending?: boolean
+  isLoadAllTurnsDisabled?: boolean
+  onLoadAllTurns?: () => void
   reportShellError: (message: string) => void
   /** Max turn from game info (inclusive); null if unknown or invalid. */
   shellTurnMax: number | null
@@ -47,6 +50,9 @@ export function Header({
   selectedGameId,
   onCommitGameSelection,
   isGameRefreshPending,
+  isLoadAllTurnsPending = false,
+  isLoadAllTurnsDisabled = false,
+  onLoadAllTurns,
   reportShellError,
   shellTurnMax,
   shellTurnValue,
@@ -374,6 +380,31 @@ export function Header({
                 }}
               >
                 Diagnostics
+              </button>
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                className="my-1 h-px bg-[#52575d]"
+              />
+              <button
+                type="button"
+                disabled={
+                  isLoadAllTurnsDisabled ||
+                  isLoadAllTurnsPending ||
+                  isGameRefreshPending ||
+                  selectedGameId == null ||
+                  onLoadAllTurns == null
+                }
+                className={cn(
+                  'w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/10',
+                  'disabled:cursor-not-allowed disabled:opacity-50'
+                )}
+                onClick={() => {
+                  closeHeaderMenu()
+                  onLoadAllTurns?.()
+                }}
+              >
+                {isLoadAllTurnsPending ? 'Loading all turns…' : 'Load all turns'}
               </button>
               <div
                 role="separator"

@@ -2,7 +2,8 @@
 
 from dacite.exceptions import DaciteError
 
-from api.errors import LoginCredentialsRequiredError, ValidationError
+from api.errors import ValidationError
+from api.models.enums import GameStatus
 from api.models.game import GameInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
 from api.planets_nu import PlanetsNuClient
@@ -24,6 +25,21 @@ class GameService:
     ) -> None:
         self._storage = storage
         self._credentials = credentials or CredentialService(storage)
+
+    @staticmethod
+    def is_game_finished(info: GameInfo) -> bool:
+        return info.game.status == GameStatus.FINISHED
+
+    @staticmethod
+    def perspective_for_username(info: GameInfo, username: str, game_id: int) -> int:
+        """1-based perspective slot for a player username; raises if not in the game."""
+        needle = username.strip().lower()
+        if not needle:
+            raise ValidationError("username is required to resolve the player perspective.")
+        for index, player in enumerate(info.players):
+            if player.username.strip().lower() == needle:
+                return index + 1
+        raise ValidationError(f"Login {username!r} is not a player in game {game_id}.")
 
     @staticmethod
     def player_id_for_perspective(info: GameInfo, perspective: int, game_id: int) -> int:
@@ -57,13 +73,7 @@ class GameService:
     ) -> GameInfo:
         if not params.username.strip():
             raise ValidationError("username is required to refresh game info.")
-        if self._credentials.get_stored_api_key(params.username) is None:
-            if params.password is None:
-                raise LoginCredentialsRequiredError("Login credentials are required.")
-            self._credentials.store_api_key(
-                params.username,
-                planets.login(params.username, params.password),
-            )
+        self._credentials.ensure_api_key_for_user(params.username, params.password, planets)
 
         remote = planets.load_game_info(game_id)
         try:

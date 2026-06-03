@@ -20,6 +20,8 @@ when missing), using the same credential rules as game info refresh.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
@@ -28,8 +30,10 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest
+from api.transport.load_all_turns import stream_load_all_turns
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, Path, Query
+from fastapi.responses import StreamingResponse
 
 from bff.core_client import get_core_client
 from bff.diagnostics_dep import (
@@ -41,6 +45,8 @@ from bff.diagnostics_dep import (
 from bff.transport.game_responses import (
     BffGameInfoResponse,
     BffTurnInfoResponse,
+    LoadAllTurnsRequest,
+    LoadAllTurnsStatusResponse,
     StellarCartographyTurnSummaryResponse,
     StoredTurnPerspectivesResponse,
 )
@@ -134,6 +140,63 @@ def post_game_info(
         lambda: core.refresh_game_info(game_id, body),
     )
     return finish_response(updated, root)
+
+
+@router.get("/{game_id}/turns/load-all-status", response_model=LoadAllTurnsStatusResponse)
+def get_load_all_turns_status(
+    game_id: int,
+    username: Annotated[str, Query()] = "",
+    include: IncludeDiagnostics = False,
+) -> object:
+    """Whether storage already has every turn expected after a bulk load."""
+    core = get_core_client()
+    root = optional_request_root(
+        include,
+        "GET",
+        f"/games/{game_id}/turns/load-all-status",
+        gameId=game_id,
+        handler="get_load_all_turns_status",
+    )
+    result = with_timed_child(
+        root,
+        "get_load_all_turns_status",
+        "total",
+        lambda: core.load_all_turns_status(game_id, username),
+    )
+    return finish_response(result, root)
+
+
+@router.post(
+    "/{game_id}/turns/load-all/stream",
+    responses={
+        200: {
+            "description": "NDJSON stream of progress, complete, and error events.",
+            "content": {
+                "application/x-ndjson": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/LoadAllStreamProgressEvent"},
+                            {"$ref": "#/components/schemas/LoadAllStreamCompleteEvent"},
+                            {"$ref": "#/components/schemas/LoadAllStreamErrorEvent"},
+                        ]
+                    }
+                }
+            },
+        }
+    },
+)
+def post_load_all_turns_stream(
+    game_id: int,
+    body: LoadAllTurnsRequest,
+) -> StreamingResponse:
+    """Load all turns, streaming NDJSON progress events."""
+    core = get_core_client()
+    return StreamingResponse(
+        stream_load_all_turns(
+            lambda: core.iter_load_all_turns(game_id, body.username, body.password)
+        ),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.post("/{game_id}/turns/ensure", response_model=BffTurnInfoResponse)

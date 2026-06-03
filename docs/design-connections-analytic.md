@@ -142,7 +142,7 @@ Controls live in **`ConnectionsMapTile`**: **Flares** and **Depth** are shown wh
 - **`packages/api/tests/test_planet_connections.py`** -- routing modes, spatial index, flare vs direct (e.g. waypoint farther than `warp²`).
 - **`packages/bff/tests/test_analytics.py`** -- BFF map response shape and query forwarding for `connections`.
 
-Regenerate the SPA OpenAPI types (`packages/frontend/src/api/schema.ts`) if BFF query or response models change (`openapi-typescript` against `/bff/openapi.json`).
+Regenerate SPA OpenAPI types if BFF query or response models change: `make generate` (or `cd packages/frontend && npm run generate:api`). Updates per-slice `schema-<slice>.ts`; see [ADR 0003](adr/0003-frontend-bff-contract-codegen.md).
 
 ---
 

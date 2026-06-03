@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TypeVar
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
@@ -17,6 +17,7 @@ from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
+from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import build_service_stack
 from api.services.store_service import StoreService
 from api.services.turn_analytic_service import TurnAnalyticService
@@ -35,6 +36,7 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.load_all_turns import LoadAllStreamItem
 from api.transport.sector_display import (
     sector_display_name_from_game_info,
     sector_display_name_from_stored_payload,
@@ -42,7 +44,12 @@ from api.transport.sector_display import (
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
 
-from bff.transport.game_responses import StoredTurnPerspectivesResponse
+from bff.transport.game_responses import (
+    LoadAllTurnsStatusResponse as BffLoadAllTurnsStatusResponse,
+)
+from bff.transport.game_responses import (
+    StoredTurnPerspectivesResponse,
+)
 
 T = TypeVar("T")
 
@@ -57,6 +64,7 @@ class CoreClient:
         *,
         game_service: GameService | None = None,
         turn_load_service: TurnLoadService | None = None,
+        load_all_turns_service: LoadAllTurnsService | None = None,
         turn_concept_service: TurnConceptService | None = None,
         turn_analytic_service: TurnAnalyticService | None = None,
         store_service: StoreService | None = None,
@@ -64,9 +72,10 @@ class CoreClient:
         storage: StorageBackend | None = None,
     ) -> None:
         backend = storage or get_storage()
-        games, turns, concepts, analytics = build_service_stack(backend)
+        games, turns, load_all, concepts, analytics = build_service_stack(backend)
         self._games = game_service or games
         self._turns = turn_load_service or turns
+        self._load_all = load_all_turns_service or load_all
         self._concepts = turn_concept_service or concepts
         self._analytics = turn_analytic_service or analytics
         self._store = store_service or StoreService(backend)
@@ -142,6 +151,20 @@ class CoreClient:
         updated = self._invoke(work)
         self.remember_sector_title_for_game(game_id, updated)
         return updated
+
+    def load_all_turns_status(self, game_id: int, username: str) -> BffLoadAllTurnsStatusResponse:
+        def work() -> BffLoadAllTurnsStatusResponse:
+            core_status = self._load_all.load_all_turns_status_for_user(game_id, username)
+            return BffLoadAllTurnsStatusResponse.model_validate(core_status.model_dump())
+
+        return self._invoke(work)
+
+    def iter_load_all_turns(
+        self, game_id: int, username: str, password: str | None
+    ) -> Iterator[LoadAllStreamItem]:
+        params = RefreshGameInfoParams(username=username, password=password)
+        planets = self._planets_client_factory()
+        yield from self._load_all.iter_load_all_turns(game_id, params, planets)
 
     def ensure_turn(self, game_id: int, body: TurnEnsureRequest) -> TurnInfo:
         params = RefreshGameInfoParams(username=body.username, password=body.password)

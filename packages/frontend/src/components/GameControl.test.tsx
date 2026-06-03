@@ -7,7 +7,7 @@ import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 
 function renderGameControl(
   selectedGameId: string | null,
-  onCommitGameSelection: (id: string) => void,
+  onCommitGameSelection: (id: string, options?: { loadAllTurns?: boolean }) => void,
   options?: { isGameRefreshPending?: boolean; reportShellError?: (m: string) => void }
 ) {
   const client = new QueryClient({
@@ -118,6 +118,24 @@ describe('GameControl', () => {
     await user.type(newIdInput, '999')
     await waitFor(() => expect(newIdInput).toHaveValue('999'))
     await user.click(screen.getByRole('button', { name: /^add$/i }))
-    expect(onCommit).toHaveBeenCalledWith('999')
+    expect(onCommit).toHaveBeenCalledWith('999', undefined)
+  })
+
+  it('add game with load-all checkbox passes option', async () => {
+    const user = userEvent.setup()
+    const onCommit = vi.fn()
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ games: [] }),
+    }) as unknown as typeof fetch
+
+    renderGameControl(null, onCommit)
+    await user.click(screen.getByRole('button', { name: /game:/i }))
+    const newIdInput = (await screen.findByLabelText(/new game id/i)) as HTMLInputElement
+    await user.click(newIdInput)
+    await user.type(newIdInput, '999')
+    await user.click(screen.getByRole('checkbox', { name: /load all turns/i }))
+    await user.click(screen.getByRole('button', { name: /^add$/i }))
+    expect(onCommit).toHaveBeenCalledWith('999', { loadAllTurns: true })
   })
 })

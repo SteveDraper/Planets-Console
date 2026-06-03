@@ -13,6 +13,10 @@ dist-ssr
 .vite
 *.local
 
+# Intermediate OpenAPI dumps for `npm run generate:api` (not committed)
+.bff-openapi.json
+.bff-openapi-slices/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

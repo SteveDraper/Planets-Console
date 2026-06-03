@@ -59,27 +59,26 @@ The BFF exposes a dedicated OpenAPI schema endpoint, such as `/bff/openapi.json`
 
 ### Generating types
 
-Run from `packages/frontend/`:
+From the repo root (or `packages/frontend/` via npm):
 
 ```bash
-npx openapi-typescript http://localhost:8000/bff/openapi.json -o src/api/schema.ts
+make generate
+# or: cd packages/frontend && npm run generate:api
 ```
 
-- Regenerate `src/api/schema.ts` whenever BFF response shapes change
-- Commit `src/api/schema.ts` to the repo — it is generated but should be treated as a checked-in artefact so frontend type errors surface in CI
-- Never hand-edit `src/api/schema.ts`
+Pipeline: dump full BFF OpenAPI from `bff.app` → `scripts/filter_bff_openapi.py` (per-router slices) → `openapi-typescript` emits committed `src/api/schema-<slice>.ts` for v1 slices (`games`, `analytics`, `shell`, `diagnostics`). Intermediate JSON (`.bff-openapi.json`, `.bff-openapi-slices/`) is gitignored.
+
+Application code imports the smallest `schema-<slice>.ts` only (see [ADR 0003](../../docs/adr/0003-frontend-bff-contract-codegen.md)). Do not add monolithic or barrel `schema.ts`; CI fails if `src/api/schema.ts` exists (`make check_frontend_api_no_monolithic_schema`, part of `make ci`).
+
+- Regenerate whenever BFF response shapes change
+- Commit generated TypeScript — never hand-edit `schema-*.ts`
+- CI and local pre-merge: `make check_frontend_api_slices` (or `cd packages/frontend && npm run check:api:slices`) — same dump/filter pipeline as generate, then `openapi-typescript --check` per slice; plus `make check_frontend_api_no_monolithic_schema` to block monolithic `schema.ts`
 - If the app also exposes a full-process schema, do not use it for frontend codegen
 
-### Keeping the spec up to date
+Live server fallback (fetch OpenAPI JSON, then filter + slices):
 
-Add a script to `packages/frontend/package.json`:
-
-```json
-{
-  "scripts": {
-    "generate:api": "openapi-typescript http://localhost:8000/bff/openapi.json -o src/api/schema.ts"
-  }
-}
+```bash
+cd packages/frontend && npm run generate:api:live
 ```
 
 ## Testing

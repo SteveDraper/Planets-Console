@@ -3,6 +3,8 @@
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
+from api.errors import UpstreamPlanetsError
 from api.planets_nu import PlanetsNuClient, _safe_httpx_error_summary
 
 
@@ -79,3 +81,38 @@ def test_load_turn_omits_turn_from_form_when_none() -> None:
         "https://api.planets.nu/game/loadturn",
         data={"gameid": 673864, "playerid": 0, "apikey": "key123"},
     )
+
+
+def test_load_all_gets_zip_bytes() -> None:
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = b"PK\x03\x04"
+    mock_response.raise_for_status = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.get.return_value = mock_response
+
+    with patch("api.planets_nu.httpx.Client", return_value=mock_client):
+        client = PlanetsNuClient("https://api.planets.nu", timeout_seconds=60.0)
+        body = client.load_all(628580)
+
+    assert body == b"PK\x03\x04"
+    mock_client.get.assert_called_once_with(
+        "https://api.planets.nu/game/loadall",
+        params={"gameid": 628580},
+    )
+
+
+def test_load_all_raises_on_json_error_payload() -> None:
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = b'{"success":false,"error":"game not finished"}'
+    mock_response.raise_for_status = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.get.return_value = mock_response
+
+    with patch("api.planets_nu.httpx.Client", return_value=mock_client):
+        client = PlanetsNuClient("https://api.planets.nu")
+        with pytest.raises(UpstreamPlanetsError, match="game not finished"):
+            client.load_all(1)

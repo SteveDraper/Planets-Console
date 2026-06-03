@@ -10,6 +10,14 @@ import type {
   StellarCartographyTurnSummaryResponse,
 } from './bffCartographyTypes'
 import { normalizeMapDataResponse } from './normalizeMapDataResponse'
+import {
+  parseLoadAllStreamEvent,
+  type LoadAllProgressUpdate,
+  type LoadAllStreamEvent,
+  type LoadAllTurnsResponse,
+} from './parseLoadAllStreamEvent'
+import { readNdjsonStream } from './readNdjsonStream'
+import type { components } from './schema-games'
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 
@@ -280,6 +288,107 @@ export async function fetchStoredTurnPerspectives(
   turn: number
 ): Promise<StoredTurnPerspectivesResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/${encodeURIComponent(String(turn))}/stored-perspectives`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  return r.json()
+}
+
+export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
+
+export type LoadAllTurnsStatusResponse = components['schemas']['LoadAllTurnsStatusResponse']
+
+export type { LoadAllProgressUpdate, LoadAllTurnsResponse }
+
+/** Load all turns with streaming progress (NDJSON). */
+export async function loadAllTurnsWithProgress(
+  gameId: string,
+  params: RefreshGameInfoParams,
+  onProgress: (update: LoadAllProgressUpdate) => void
+): Promise<LoadAllTurnsResponse> {
+  const trimmedUser = params.username.trim()
+  if (!trimmedUser) {
+    throw new Error('Set login name in the header before loading all turns.')
+  }
+  const body: LoadAllTurnsRequestBody = { username: trimmedUser }
+  if (params.password) {
+    body.password = params.password
+  }
+  const path = `/bff/games/${encodeURIComponent(gameId)}/turns/load-all/stream`
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    endpointLabel
+  )
+  if (!r.ok) {
+    let detail = r.statusText
+    try {
+      const j: { detail?: string | unknown } = await r.json()
+      if (j?.detail != null) {
+        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      }
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+  }
+  if (!r.body) {
+    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
+  }
+
+  let result: LoadAllTurnsResponse | null = null
+
+  const dispatchLoadAllEvent = (event: LoadAllStreamEvent) => {
+    if (event.type === 'progress') {
+      const { type: _type, ...progress } = event
+      onProgress(progress)
+    } else if (event.type === 'complete') {
+      result = event.result
+    } else if (event.type === 'error') {
+      throw new Error(withEndpointIfGeneric(event.detail, endpointLabel))
+    }
+  }
+
+  await readNdjsonStream(r.body, (line) => {
+    const event = parseLoadAllStreamEvent(line)
+    if (event) {
+      dispatchLoadAllEvent(event)
+    }
+  })
+
+  if (!result) {
+    throw new Error(withEndpointIfGeneric('Load all turns ended without a result', endpointLabel))
+  }
+  return result
+}
+
+/** Whether storage already has every turn from a full bulk load for this login. */
+export async function fetchLoadAllTurnsStatus(
+  gameId: string,
+  username: string
+): Promise<LoadAllTurnsStatusResponse> {
+  const params = new URLSearchParams()
+  if (username.trim()) {
+    params.set('username', username.trim())
+  }
+  const qs = params.toString()
+  const path = `/bff/games/${encodeURIComponent(gameId)}/turns/load-all-status${qs ? `?${qs}` : ''}`
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {

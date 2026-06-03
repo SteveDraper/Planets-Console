@@ -2,7 +2,8 @@
 
 import re
 
-from api.errors import NotFoundError, ValidationError
+from api.errors import LoginCredentialsRequiredError, NotFoundError, ValidationError
+from api.planets_nu import PlanetsNuClient
 from api.storage.base import StorageBackend
 
 _USERNAME_SAFE = re.compile(r"^[a-zA-Z0-9_.-]+$")
@@ -34,3 +35,16 @@ class CredentialService:
 
     def store_api_key(self, username: str, api_key: str) -> None:
         self._storage.put(self._api_key_path(username), api_key)
+
+    def ensure_api_key_for_user(
+        self, username: str, password: str | None, planets: PlanetsNuClient
+    ) -> str:
+        """Return a stored API key, logging in and persisting when missing."""
+        if self.get_stored_api_key(username) is None:
+            if password is None:
+                raise LoginCredentialsRequiredError("Login credentials are required.")
+            self.store_api_key(username, planets.login(username, password))
+        api_key = self.get_stored_api_key(username)
+        if not api_key:
+            raise LoginCredentialsRequiredError("Login credentials are required.")
+        return api_key

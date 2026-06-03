@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import fields
-from typing import Any, get_type_hints
+from typing import Any, Literal, get_type_hints
 
 from api.models.game import GameInfo, TurnInfo
+from api.transport.game_info_update import RefreshGameInfoParams
+from api.transport.load_all_turns import LoadAllProgressUpdate as CoreLoadAllProgressUpdate
+from api.transport.load_all_turns import LoadAllTurnsResponse as CoreLoadAllTurnsResponse
+from api.transport.load_all_turns import (
+    LoadAllTurnsStatusResponse as CoreLoadAllTurnsStatusResponse,
+)
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer
 
 
@@ -45,8 +51,62 @@ def bff_dataclass_response_with_diagnostics(
     )
 
 
+def bff_pydantic_mirror(
+    pydantic_model_name: str,
+    source_model: type[BaseModel],
+) -> type[BaseModel]:
+    """Pydantic model mirroring ``source_model`` field-for-field (OpenAPI components)."""
+    field_defs = {
+        name: (field_info.annotation, field_info)
+        for name, field_info in source_model.model_fields.items()
+    }
+    return create_model(
+        pydantic_model_name,
+        __config__=ConfigDict(),
+        __module__=__name__,
+        **field_defs,
+    )
+
+
 BffGameInfoResponse = bff_dataclass_response_with_diagnostics("BffGameInfoResponse", GameInfo)
 BffTurnInfoResponse = bff_dataclass_response_with_diagnostics("BffTurnInfoResponse", TurnInfo)
+
+LoadAllTurnsRequest = bff_pydantic_mirror("LoadAllTurnsRequest", RefreshGameInfoParams)
+
+LoadAllTurnsStatusResponse = bff_pydantic_mirror(
+    "LoadAllTurnsStatusResponse",
+    CoreLoadAllTurnsStatusResponse,
+)
+
+LoadAllProgressUpdate = bff_pydantic_mirror(
+    "LoadAllProgressUpdate",
+    CoreLoadAllProgressUpdate,
+)
+
+LoadAllTurnsResponse = bff_pydantic_mirror(
+    "LoadAllTurnsResponse",
+    CoreLoadAllTurnsResponse,
+)
+
+
+class LoadAllStreamProgressEvent(LoadAllProgressUpdate):
+    """One NDJSON line while bulk-loading turns (``type: progress``)."""
+
+    type: Literal["progress"]
+
+
+class LoadAllStreamCompleteEvent(BaseModel):
+    """Final NDJSON line after bulk load (``type: complete``)."""
+
+    type: Literal["complete"]
+    result: LoadAllTurnsResponse
+
+
+class LoadAllStreamErrorEvent(BaseModel):
+    """NDJSON line when bulk load fails (``type: error``)."""
+
+    type: Literal["error"]
+    detail: str
 
 
 class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
@@ -60,3 +120,19 @@ class StellarCartographyTurnSummaryResponse(OmitNullDiagnosticsBase):
 
     ionStormCount: int
     nuIonStorms: bool
+
+
+__all__ = [
+    "BffGameInfoResponse",
+    "BffTurnInfoResponse",
+    "LoadAllProgressUpdate",
+    "LoadAllStreamCompleteEvent",
+    "LoadAllStreamErrorEvent",
+    "LoadAllStreamProgressEvent",
+    "LoadAllTurnsRequest",
+    "LoadAllTurnsResponse",
+    "LoadAllTurnsStatusResponse",
+    "OmitNullDiagnosticsBase",
+    "StoredTurnPerspectivesResponse",
+    "StellarCartographyTurnSummaryResponse",
+]

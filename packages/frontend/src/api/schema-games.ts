@@ -4,93 +4,6 @@
  */
 
 export interface paths {
-    "/analytics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Analytics
-         * @description Return analytics available to the console.
-         */
-        get: operations["list_analytics_analytics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/analytics/{analytic_id}/table": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Analytic Table
-         * @description Tabular data scoped to the selected game, turn, and perspective.
-         */
-        get: operations["get_analytic_table_analytics__analytic_id__table_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/analytics/{analytic_id}/map": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Analytic Map
-         * @description Map data (nodes/edges). **base-map** returns planet nodes only (empty edges).
-         *
-         *     **connections** returns route pairs for the SPA to draw as edges on those nodes.
-         *
-         *     **stellar-cartography** returns overlay circles and wormhole graph geometry.
-         *
-         *     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
-         *     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
-         */
-        get: operations["get_analytic_map_analytics__analytic_id__map_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/diagnostics/recent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Recent Diagnostics
-         * @description Return entries captured when handlers were invoked with ``includeDiagnostics``.
-         */
-        get: operations["get_recent_diagnostics_diagnostics_recent_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/games": {
         parameters: {
             query?: never;
@@ -159,6 +72,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/turns/load-all-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Load All Turns Status
+         * @description Whether storage already has every turn expected after a bulk load.
+         */
+        get: operations["get_load_all_turns_status_games__game_id__turns_load_all_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/turns/load-all/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Load All Turns Stream
+         * @description Load all turns, streaming NDJSON progress events.
+         */
+        post: operations["post_load_all_turns_stream_games__game_id__turns_load_all_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/turns/ensure": {
         parameters: {
             query?: never;
@@ -219,7 +172,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/shell/bootstrap": {
+    "/games/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/sample": {
         parameters: {
             query?: never;
             header?: never;
@@ -227,10 +180,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Shell Bootstrap
-         * @description Return shell-oriented server config for the SPA (e.g. optional default game id).
+         * Get Stellar Cartography Sample
+         * @description Turn-scoped Stellar Cartography cell sample via ``CoreClient``.
          */
-        get: operations["get_shell_bootstrap_shell_bootstrap_get"];
+        get: operations["get_stellar_cartography_sample_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_sample_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -239,15 +192,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/health": {
+    "/games/{game_id}/{perspective}/turns/{turn_number}/concepts/stellar-cartography/summary": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Health */
-        get: operations["health_health_get"];
+        /**
+         * Get Stellar Cartography Turn Summary
+         * @description Turn-scoped lightweight Stellar Cartography facts via ``CoreClient``.
+         */
+        get: operations["get_stellar_cartography_turn_summary_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -278,12 +234,6 @@ export interface components {
             inside: boolean;
         };
         /**
-         * FlareConnectionMode
-         * @description How flare-assisted routes are combined with direct warp-well reachability.
-         * @enum {string}
-         */
-        FlareConnectionMode: "off" | "include" | "only";
-        /**
          * GameInfoUpdateOperation
          * @enum {string}
          */
@@ -301,6 +251,108 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * LoadAllStreamCompleteEvent
+         * @description Final NDJSON line after bulk load (``type: complete``).
+         */
+        LoadAllStreamCompleteEvent: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "complete";
+            result: components["schemas"]["LoadAllTurnsResponse"];
+        };
+        /**
+         * LoadAllStreamErrorEvent
+         * @description NDJSON line when bulk load fails (``type: error``).
+         */
+        LoadAllStreamErrorEvent: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "error";
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * LoadAllStreamProgressEvent
+         * @description One NDJSON line while bulk-loading turns (``type: progress``).
+         */
+        LoadAllStreamProgressEvent: {
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "download" | "import" | "final_turn";
+            /**
+             * Perspective
+             * @description 1-based perspective index; 0 during download.
+             */
+            perspective: number;
+            /** Perspective Total */
+            perspective_total: number;
+            /**
+             * Turn
+             * @description 1-based turn step within the current perspective.
+             */
+            turn: number;
+            /** Turn Total */
+            turn_total: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "progress";
+        };
+        /** LoadAllTurnsRequest */
+        LoadAllTurnsRequest: {
+            /**
+             * Username
+             * @description Non-empty required for refresh; ensure-turn may omit when data is local.
+             * @default
+             */
+            username: string;
+            /** Password */
+            password?: string | null;
+        };
+        /** LoadAllTurnsResponse */
+        LoadAllTurnsResponse: {
+            /** Game Id */
+            game_id: number;
+            /** Is Game Finished */
+            is_game_finished: boolean;
+            /** Turns Written */
+            turns_written: number;
+            /** Turns Skipped */
+            turns_skipped: number;
+            /** Perspectives Touched */
+            perspectives_touched?: number[];
+            /**
+             * Final Turn Load Failures
+             * @description 1-based perspective slots where the final turn could not be fetched via loadturn after a finished-game loadall archive import.
+             */
+            final_turn_load_failures?: number[];
+        };
+        /** LoadAllTurnsStatusResponse */
+        LoadAllTurnsStatusResponse: {
+            /** Game Id */
+            game_id: number;
+            /** Complete */
+            complete: boolean;
+            /** Is Game Finished */
+            is_game_finished: boolean;
+            /** Expected Perspectives */
+            expected_perspectives?: number[];
+            /** Latest Turn */
+            latest_turn: number;
+        };
         /** MapCellModel */
         MapCellModel: {
             /** X */
@@ -308,103 +360,26 @@ export interface components {
             /** Y */
             y: number;
         };
-        /** Message */
-        Message: {
-            /** Id */
-            id: number;
-            /** Ownerid */
-            ownerid: number;
-            messagetype: components["schemas"]["MessageType"];
-            /** Headline */
-            headline: string;
-            /** Body */
-            body: string;
-            /** Target */
-            target: number;
-            /** Turn */
-            turn: number;
+        /** StellarCartographySampleEntry */
+        StellarCartographySampleEntry: {
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "debris-disks" | "nebulae" | "ion-storms" | "star-clusters" | "neutron-clusters" | "black-holes" | "wormholes";
+            /** Lines */
+            lines: string[];
+        };
+        /** StellarCartographySampleResponse */
+        StellarCartographySampleResponse: {
             /** X */
             x: number;
             /** Y */
             y: number;
+            /** Entries */
+            entries?: components["schemas"]["StellarCartographySampleEntry"][];
         };
-        /**
-         * MessageType
-         * @enum {integer}
-         */
-        MessageType: -1 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
-        /** Player */
-        Player: {
-            /** Id */
-            id: number;
-            /** Status */
-            status: number;
-            /** Statusturn */
-            statusturn: number;
-            /** Accountid */
-            accountid: number;
-            /** Username */
-            username: string;
-            /** Email */
-            email: string;
-            /** Raceid */
-            raceid: number;
-            /** Teamid */
-            teamid: number;
-            /** Prioritypoints */
-            prioritypoints: number;
-            /** Joinrank */
-            joinrank: number;
-            /** Finishrank */
-            finishrank: number;
-            /** Turnjoined */
-            turnjoined: number;
-            /** Turnready */
-            turnready: boolean;
-            /** Turnreadydate */
-            turnreadydate: string;
-            /** Turnstatus */
-            turnstatus: number;
-            /** Turnsmissed */
-            turnsmissed: number;
-            /** Turnsmissedtotal */
-            turnsmissedtotal: number;
-            /** Turnsholiday */
-            turnsholiday: number;
-            /** Turnsearly */
-            turnsearly: number;
-            /** Turn */
-            turn: number;
-            /** Timcontinuum */
-            timcontinuum: number;
-            /** Savekey */
-            savekey: string;
-            /** Tutorialid */
-            tutorialid: number;
-            /** Tutorialtaskid */
-            tutorialtaskid: number;
-            /** Megacredits */
-            megacredits: number;
-            /** Duranium */
-            duranium: number;
-            /** Tritanium */
-            tritanium: number;
-            /** Molybdenum */
-            molybdenum: number;
-            /** Leagueteamid */
-            leagueteamid: number;
-            /** Activehulls */
-            activehulls: string;
-            /** Activeadvantages */
-            activeadvantages: string;
-            /** Activeengines */
-            activeengines: string;
-            /** Activebeams */
-            activebeams: string;
-            /** Activetorps */
-            activetorps: string;
-        };
-        ShellBootstrapResponse: unknown;
+        StellarCartographyTurnSummaryResponse: unknown;
         StoredTurnPerspectivesResponse: unknown;
         /**
          * TurnEnsureRequest
@@ -437,59 +412,6 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
-        /** VcrSide */
-        VcrSide: {
-            /** Id */
-            id: number;
-            /** Vcrid */
-            vcrid: number;
-            /** Objectid */
-            objectid: number;
-            /** Name */
-            name: string;
-            /** Side */
-            side: number;
-            /** Beamcount */
-            beamcount: number;
-            /** Launchercount */
-            launchercount: number;
-            /** Baycount */
-            baycount: number;
-            /** Hullid */
-            hullid: number;
-            /** Beamid */
-            beamid: number;
-            /** Torpedoid */
-            torpedoid: number;
-            /** Shield */
-            shield: number;
-            /** Damage */
-            damage: number;
-            /** Crew */
-            crew: number;
-            /** Mass */
-            mass: number;
-            /** Raceid */
-            raceid: number;
-            /** Beamkillbonus */
-            beamkillbonus: number;
-            /** Beamchargerate */
-            beamchargerate: number;
-            /** Torpchargerate */
-            torpchargerate: number;
-            /** Torpmisspercent */
-            torpmisspercent: number;
-            /** Crewdefensepercent */
-            crewdefensepercent: number;
-            /** Torpedos */
-            torpedos: number;
-            /** Fighters */
-            fighters: number;
-            /** Temperature */
-            temperature: number;
-            /** Hasstarbase */
-            hasstarbase: boolean;
-        };
         /** WarpWellCellsResponse */
         WarpWellCellsResponse: {
             /** Cells */
@@ -509,136 +431,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_analytics_analytics_get: {
-        parameters: {
-            query?: {
-                includeDiagnostics?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_analytic_table_analytics__analytic_id__table_get: {
-        parameters: {
-            query: {
-                gameId: number;
-                turn: number;
-                perspective: number;
-                includeDiagnostics?: boolean;
-            };
-            header?: never;
-            path: {
-                analytic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_analytic_map_analytics__analytic_id__map_get: {
-        parameters: {
-            query: {
-                gameId: number;
-                turn: number;
-                perspective: number;
-                warpSpeed?: number;
-                gravitonicMovement?: boolean;
-                flareMode?: components["schemas"]["FlareConnectionMode"];
-                /** @description Max hops (1–3) for mixed normal-move + flare paths; at least one hop must be a flare. Larger values add annulus pair candidates. Ignored when flareMode is off. */
-                flareDepth?: number;
-                /** @description When true, flare routes may include per-hop illustrativeRoute steps (Core). */
-                includeIllustrativeRoutes?: boolean;
-                includeDiagnostics?: boolean;
-            };
-            header?: never;
-            path: {
-                analytic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_recent_diagnostics_diagnostics_recent_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     list_stored_games_games_get: {
         parameters: {
             query?: {
@@ -774,6 +566,76 @@ export interface operations {
             };
         };
     };
+    get_load_all_turns_status_games__game_id__turns_load_all_status_get: {
+        parameters: {
+            query?: {
+                username?: string;
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadAllTurnsStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_load_all_turns_stream_games__game_id__turns_load_all_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoadAllTurnsRequest"];
+            };
+        };
+        responses: {
+            /** @description NDJSON stream of progress, complete, and error events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/x-ndjson": components["schemas"]["LoadAllStreamProgressEvent"] | components["schemas"]["LoadAllStreamCompleteEvent"] | components["schemas"]["LoadAllStreamErrorEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_ensure_turn_games__game_id__turns_ensure_post: {
         parameters: {
             query?: {
@@ -887,13 +749,19 @@ export interface operations {
             };
         };
     };
-    get_shell_bootstrap_shell_bootstrap_get: {
+    get_stellar_cartography_sample_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_sample_get: {
         parameters: {
-            query?: {
+            query: {
+                x: number;
+                y: number;
                 includeDiagnostics?: boolean;
             };
             header?: never;
-            path?: never;
+            path: {
+                game_id: number;
+                perspective: number;
+                turn_number: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -904,7 +772,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ShellBootstrapResponse"];
+                    "application/json": components["schemas"]["StellarCartographySampleResponse"];
                 };
             };
             /** @description Validation Error */
@@ -918,11 +786,17 @@ export interface operations {
             };
         };
     };
-    health_health_get: {
+    get_stellar_cartography_turn_summary_games__game_id___perspective__turns__turn_number__concepts_stellar_cartography_summary_get: {
         parameters: {
-            query?: never;
+            query?: {
+                includeDiagnostics?: boolean;
+            };
             header?: never;
-            path?: never;
+            path: {
+                game_id: number;
+                perspective: number;
+                turn_number: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -933,7 +807,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["StellarCartographyTurnSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
