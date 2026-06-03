@@ -5,6 +5,7 @@ import { restoreFocusToElementOrFallback } from '../../lib/restoreFocus'
 import { cn } from '../../lib/utils'
 import {
   formatSignedDelta,
+  militaryChangeFromDelta2x,
   readInferenceConstraints,
   readMilitaryScoreArithmetic,
   type MilitaryScoreArithmetic,
@@ -218,7 +219,9 @@ export function InferenceDetailModal({
                 <>
                   <dt className="text-slate-400">Military change</dt>
                   <dd className="tabular-nums">
-                    {formatSignedDelta(constraints.militaryDelta2x / 2)}
+                    {formatSignedDelta(
+                      militaryChangeFromDelta2x(constraints.militaryDelta2x)
+                    )}
                     <span className="ml-1 text-slate-500">
                       (2× scale {formatSignedDelta(constraints.militaryDelta2x)})
                     </span>

@@ -84,6 +84,29 @@ describe('InferenceDetailModal', () => {
     expect(screen.queryByText(/score 999/i)).toBeNull()
   })
 
+  it('shows negative military change using integer halving of 2× scale', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          diagnostics: {
+            constraints: {
+              militaryDelta2x: -107738,
+              warshipDelta: 0,
+              freighterDelta: 0,
+            },
+          },
+          solutions: [],
+        })}
+      />
+    )
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('-53869')
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('-53869.5')
+  })
+
   it('does not render when closed', () => {
     render(
       <InferenceDetailModal

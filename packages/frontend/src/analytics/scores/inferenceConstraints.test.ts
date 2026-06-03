@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatSignedDelta,
+  militaryChangeFromDelta2x,
   readInferenceConstraints,
   readMilitaryScoreArithmetic,
 } from './inferenceConstraints'
@@ -48,6 +49,15 @@ describe('readMilitaryScoreArithmetic', () => {
     })
     expect(arithmetic?.matchesObserved).toBe(true)
     expect(arithmetic?.lineItems[0]?.militaryChangeSubtotal).toBe(22)
+  })
+})
+
+describe('militaryChangeFromDelta2x', () => {
+  it('matches Python floor division for positive and negative 2× scale', () => {
+    expect(militaryChangeFromDelta2x(44)).toBe(22)
+    expect(militaryChangeFromDelta2x(45)).toBe(22)
+    expect(militaryChangeFromDelta2x(-107738)).toBe(-53869)
+    expect(militaryChangeFromDelta2x(-107737)).toBe(-53869)
   })
 })
 

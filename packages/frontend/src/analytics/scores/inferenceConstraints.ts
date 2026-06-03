@@ -118,6 +118,11 @@ export function readMilitaryScoreArithmetic(value: unknown): MilitaryScoreArithm
   }
 }
 
+/** Scoreboard military change from solver 2× scale (matches Core `military_delta_2x // 2`). */
+export function militaryChangeFromDelta2x(militaryDelta2x: number): number {
+  return Math.floor(militaryDelta2x / 2)
+}
+
 export function formatSignedDelta(value: number): string {
   if (value > 0) {
     return `+${value}`
