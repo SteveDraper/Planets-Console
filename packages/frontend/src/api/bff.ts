@@ -17,7 +17,7 @@ import {
   type LoadAllTurnsResponse,
 } from './parseLoadAllStreamEvent'
 import { readNdjsonStream } from './readNdjsonStream'
-import type { components } from './schema'
+import type { components } from './schema-games'
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
 

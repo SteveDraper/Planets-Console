@@ -15,8 +15,8 @@
     "generate:api:slices": "sh -c 'set -e; for slice in games analytics shell diagnostics; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts; done'",
     "check:api:slices": "npm run generate:api:dump && npm run generate:api:filter && npm run check:api:slices:typescript",
     "check:api:slices:typescript": "sh -c 'set -e; for slice in games analytics shell diagnostics; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts --check; done'",
-    "generate:api": "npm run generate:api:dump && npm run generate:api:filter && openapi-typescript .bff-openapi.json -o src/api/schema.ts && npm run generate:api:slices",
-    "generate:api:live": "openapi-typescript http://localhost:8000/bff/openapi.json -o src/api/schema.ts"
+    "generate:api": "npm run generate:api:dump && npm run generate:api:filter && npm run generate:api:slices",
+    "generate:api:live": "curl -sf http://localhost:8000/bff/openapi.json -o .bff-openapi.json && npm run generate:api:filter && npm run generate:api:slices"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.60.0",

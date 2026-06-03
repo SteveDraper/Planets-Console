@@ -68,14 +68,14 @@ make generate
 
 Pipeline: dump full BFF OpenAPI from `bff.app` → `scripts/filter_bff_openapi.py` (per-router slices) → `openapi-typescript` emits committed `src/api/schema-<slice>.ts` for v1 slices (`games`, `analytics`, `shell`, `diagnostics`). Intermediate JSON (`.bff-openapi.json`, `.bff-openapi-slices/`) is gitignored.
 
-During **parity migration**, `generate:api` also regenerates monolithic `src/api/schema.ts`; application code still imports `./schema` until cutover (see [ADR 0003](../../docs/adr/0003-frontend-bff-contract-codegen.md)). After cutover, imports use the smallest `schema-<slice>.ts` only.
+Application code imports the smallest `schema-<slice>.ts` only (see [ADR 0003](../../docs/adr/0003-frontend-bff-contract-codegen.md)). Do not add monolithic or barrel `schema.ts`.
 
 - Regenerate whenever BFF response shapes change
-- Commit generated TypeScript — never hand-edit `schema.ts` or `schema-*.ts`
+- Commit generated TypeScript — never hand-edit `schema-*.ts`
 - CI and local pre-merge: `make check_frontend_api_slices` (or `cd packages/frontend && npm run check:api:slices`) — same dump/filter pipeline as generate, then `openapi-typescript --check` per slice
 - If the app also exposes a full-process schema, do not use it for frontend codegen
 
-Live server fallback (monolith only):
+Live server fallback (fetch OpenAPI JSON, then filter + slices):
 
 ```bash
 cd packages/frontend && npm run generate:api:live

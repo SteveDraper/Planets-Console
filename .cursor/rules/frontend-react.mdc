@@ -49,7 +49,7 @@ export async function fetchSystem(id: string): Promise<SystemView> {
 
 See **Frontend BFF contracts: OpenAPI codegen and Zod** in `architecture.mdc` for the full rule. In short:
 
-- **Default:** `schema-<slice>.ts` (or monolithic `schema.ts` during parity) + typed fetch helpers in `bff.ts` for normal REST JSON.
+- **Default:** `schema-<slice>.ts` + typed fetch helpers in `bff.ts` for normal REST JSON.
 - **Zod + `z.infer`:** stream/NDJSON lines and other wire data that needs runtime validation; one module owns both types and parsing (example: `src/api/loadAllStreamEventSchema.ts` + `parseLoadAllStreamEvent.ts`).
 - **Never** duplicate the same shape in OpenAPI-generated types and hand-written (or second) Zod schemas.
 

@@ -3,7 +3,7 @@
  * Wire JSON normalization lives in `normalizeMapDataResponse.ts`.
  */
 
-import type { components } from './schema'
+import type { components } from './schema-games'
 
 /** Game map cell coordinates from OpenAPI `MapCellModel`. */
 export type MapCell = components['schemas']['MapCellModel']

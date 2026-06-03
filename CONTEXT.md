@@ -112,10 +112,6 @@ _Avoid_: one schema.ts for the whole BFF, splitting generated files by line coun
 A build step that subsets the full BFF OpenAPI document by path prefix (and pulled-in component schemas) before `openapi-typescript` runs, producing one generated module per slice. Preferred v1 mechanism for **central BFF contract codegen** (over multiple live OpenAPI endpoints or Redocly-only workflows).
 _Avoid_: hand-editing generated TypeScript to split it after the fact
 
-**Schema slice migration (parity then cutover)**:
-When replacing monolithic `schema.ts`, emit sliced modules alongside the monolith first; verify shared `$ref` closure and TypeScript compile against slice-only imports; then migrate `bff.ts` (and any other importers) and delete the monolith. Avoid a long period where feature code imports both `./schema` and `schema-<slice>.ts`.
-_Avoid_: slice-by-slice import migration while the monolith remains the default in half the tree
-
 **BFF OpenAPI filter script**:
 Python under repo `scripts/` (e.g. `filter_bff_openapi.py`) subsets the dumped BFF spec before `openapi-typescript`; invoked from `npm run generate:api` after `generate:api:dump`. Keeps JSON `$ref` walking in the same toolchain as the OpenAPI dump, not in `packages/frontend`.
 _Avoid_: fragile shell-only filters without component closure
@@ -125,7 +121,7 @@ Each filtered slice includes every `components.schemas` entry reachable from tha
 _Avoid_: schema-shared as a required v1 dependency for every slice to compile
 
 **Generated slice CI**:
-While sliced codegen is in use, CI verifies committed `schema-<slice>.ts` files match the filtered OpenAPI dumps. After monolith cutover, CI also fails if `src/api/schema.ts` reappears.
+CI verifies committed `schema-<slice>.ts` files match the filtered OpenAPI dumps (`make check_frontend_api_slices`). A guard against reintroducing monolithic `src/api/schema.ts` is tracked separately (issue #60).
 _Avoid_: relying on reviewers to notice stale or monolithic generated types
 
 **Generated schema import rule**:

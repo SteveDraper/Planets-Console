@@ -179,7 +179,7 @@ Generic paths (no frontend module required):
 - **Table:** `MainArea` calls `fetchAnalyticTable(analyticId, analyticScope)`.
 - **Map (no extra params):** `fetchAnalyticMap(analyticId, analyticScope)`.
 
-After BFF response shape changes, regenerate OpenAPI types (`make generate` or `cd packages/frontend && npm run generate:api`). Produces monolithic `schema.ts` and per-router `schema-<slice>.ts` files; see [ADR 0003](adr/0003-frontend-bff-contract-codegen.md).
+After BFF response shape changes, regenerate OpenAPI types (`make generate` or `cd packages/frontend && npm run generate:api`). Produces per-router `schema-<slice>.ts` files; see [ADR 0003](adr/0003-frontend-bff-contract-codegen.md).
 
 (Requires a running server with BFF OpenAPI endpoint.)
 
