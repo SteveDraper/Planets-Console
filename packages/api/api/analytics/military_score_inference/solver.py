@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
+from api.analytics.military_score_inference.constraints import InferenceHardConstraints
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
@@ -107,29 +108,7 @@ def _build_model(problem: InferenceProblem) -> _BuiltModel:
         else:
             objective_terms.append(count_vars[action.id] * action.probability_weight)
 
-    observation = problem.observation
-
-    model.add(
-        sum(action.score_delta_2x * count_vars[action.id] for action in problem.actions)
-        == observation.military_delta_2x
-    )
-    model.add(
-        sum(action.warship_delta * count_vars[action.id] for action in problem.actions)
-        == observation.warship_delta
-    )
-    model.add(
-        sum(action.freighter_delta * count_vars[action.id] for action in problem.actions)
-        == observation.freighter_delta
-    )
-    if problem.enforce_priority_point_constraint:
-        model.add(
-            sum(action.priority_point_delta * count_vars[action.id] for action in problem.actions)
-            == observation.priority_point_delta
-        )
-    model.add(
-        sum(action.build_slot_usage * count_vars[action.id] for action in problem.actions)
-        <= observation.starbases_owned
-    )
+    InferenceHardConstraints.from_problem(problem).add_to_model(model, problem, count_vars)
     model.maximize(sum(objective_terms))
     return _BuiltModel(
         model=model,

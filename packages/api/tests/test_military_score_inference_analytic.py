@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.analytic import (
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
+    InferenceProblem,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
@@ -142,15 +143,26 @@ def test_solver_failure_is_isolated_per_player(sample_turn):
     assert all("inference" in row for row in other_rows)
 
 
+def _minimal_inference_problem(
+    observation: InferenceObservation, catalog: ActionCatalog
+) -> InferenceProblem:
+    return InferenceProblem(
+        observation=observation,
+        actions=catalog.actions,
+        probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
+    )
+
+
 def test_inference_result_payload_merges_catalog_diagnostics(sample_turn):
     catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
     observation = build_inference_observation(sample_turn.scores[0], sample_turn)
+    problem = _minimal_inference_problem(observation, catalog)
     result = InferenceResult(
         status=STATUS_INVALID_PROBLEM,
         solutions=(),
         diagnostics={"reason": "empty catalog"},
     )
-    payload = inference_result_to_api_payload(result, catalog, observation, sample_turn)
+    payload = inference_result_to_api_payload(result, catalog, observation, sample_turn, problem)
     assert payload["status"] == STATUS_INVALID_PROBLEM
     assert payload["diagnostics"]["solver"]["reason"] == "empty catalog"
     assert payload["diagnostics"]["catalog_size"] == 0
@@ -161,6 +173,7 @@ def test_inference_result_payload_merges_catalog_diagnostics(sample_turn):
 def test_inference_result_payload_serializes_solutions(sample_turn):
     catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
     observation = build_inference_observation(sample_turn.scores[0], sample_turn)
+    problem = _minimal_inference_problem(observation, catalog)
     result = InferenceResult(
         status=STATUS_EXACT,
         solutions=(
@@ -177,7 +190,7 @@ def test_inference_result_payload_serializes_solutions(sample_turn):
         ),
         diagnostics={"solution_count": 1},
     )
-    payload = inference_result_to_api_payload(result, catalog, observation, sample_turn)
+    payload = inference_result_to_api_payload(result, catalog, observation, sample_turn, problem)
     assert payload["solutionCount"] == 1
     assert payload["solutions"][0]["objectiveValue"] == 42
     assert payload["solutions"][0]["actions"][0]["actionId"] == "build_24_empty"

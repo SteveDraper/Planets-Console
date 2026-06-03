@@ -5,8 +5,13 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog_from_turn,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.constraints import (
+    InferenceHardConstraints,
+    observation_to_constraints_payload,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
+    InferenceProblem,
     InferenceResult,
     InferenceSolution,
 )
@@ -57,45 +62,6 @@ def build_inference_observation(score: Score, turn: TurnInfo) -> InferenceObserv
         starbases_owned=score.starbases,
         is_after_ship_limit=is_after_ship_limit(turn, score),
     )
-
-
-_PRIORITY_POINT_DIAGNOSTIC_NOTE = (
-    "Priority-point equality is not a hard solver constraint until production-queue "
-    "semantics assign per-build priority_point_delta values."
-)
-
-
-def observation_to_constraints_payload(
-    observation: InferenceObservation,
-    *,
-    enforce_priority_point_constraint: bool = False,
-) -> dict[str, object]:
-    """Serialize hard solver constraints for diagnostics."""
-    applied_equalities = [
-        f"sum(scoreDelta2x * count) == {observation.military_delta_2x}",
-        f"sum(warshipDelta * count) == {observation.warship_delta}",
-        f"sum(freighterDelta * count) == {observation.freighter_delta}",
-    ]
-    if enforce_priority_point_constraint:
-        applied_equalities.append(
-            f"sum(priorityPointDelta * count) == {observation.priority_point_delta}"
-        )
-    applied_equalities.append(f"sum(buildSlotUsage * count) <= {observation.starbases_owned}")
-    payload: dict[str, object] = {
-        "turn": observation.turn,
-        "playerId": observation.player_id,
-        "militaryDelta2x": observation.military_delta_2x,
-        "warshipDelta": observation.warship_delta,
-        "freighterDelta": observation.freighter_delta,
-        "requestedPriorityPointDelta": observation.priority_point_delta,
-        "priorityPointConstraintEnforced": enforce_priority_point_constraint,
-        "starbasesOwned": observation.starbases_owned,
-        "isAfterShipLimit": observation.is_after_ship_limit,
-        "appliedEqualities": applied_equalities,
-    }
-    if not enforce_priority_point_constraint:
-        payload["priorityPointConstraintNote"] = _PRIORITY_POINT_DIAGNOSTIC_NOTE
-    return payload
 
 
 def catalog_to_actions_payload(
@@ -157,18 +123,23 @@ def build_inference_solver_diagnostics(
     *,
     turn: int,
     observation: InferenceObservation | None = None,
+    problem: InferenceProblem | None = None,
     catalog: ActionCatalog | None = None,
     turn_info: TurnInfo | None = None,
     solver: dict[str, object] | None = None,
     extra: dict[str, object] | None = None,
-    enforce_priority_point_constraint: bool = False,
 ) -> dict[str, object]:
     """Structured solver diagnostics for the diagnostics panel."""
     payload: dict[str, object] = {"turn": turn}
     if observation is not None:
+        hard_constraints = (
+            InferenceHardConstraints.from_problem(problem)
+            if problem is not None
+            else InferenceHardConstraints()
+        )
         payload["constraints"] = observation_to_constraints_payload(
             observation,
-            enforce_priority_point_constraint=enforce_priority_point_constraint,
+            hard_constraints=hard_constraints,
         )
     if catalog is not None:
         payload["actionCatalog"] = catalog_to_actions_payload(
@@ -207,13 +178,7 @@ def infer_military_score_build(score: Score, turn: TurnInfo) -> dict[str, object
         catalog = build_action_catalog_from_turn(observation, turn)
         problem = build_inference_problem(observation, catalog)
         result = solve_inference_problem(problem)
-        return inference_result_to_api_payload(
-            result,
-            catalog,
-            observation,
-            turn,
-            enforce_priority_point_constraint=problem.enforce_priority_point_constraint,
-        )
+        return inference_result_to_api_payload(result, catalog, observation, turn, problem)
     except Exception as exc:
         return _inference_api_payload(
             status=STATUS_SOLVER_ERROR,
@@ -234,8 +199,7 @@ def inference_result_to_api_payload(
     catalog: ActionCatalog,
     observation: InferenceObservation,
     turn: TurnInfo,
-    *,
-    enforce_priority_point_constraint: bool = False,
+    problem: InferenceProblem,
 ) -> dict[str, object]:
     """Shape a solver result into the Core scores row inference object."""
     solver_diagnostics = {
@@ -245,10 +209,10 @@ def inference_result_to_api_payload(
     diagnostics = build_inference_solver_diagnostics(
         turn=turn.settings.turn,
         observation=observation,
+        problem=problem,
         catalog=catalog,
         turn_info=turn,
         solver=solver_diagnostics,
-        enforce_priority_point_constraint=enforce_priority_point_constraint,
     )
     return _inference_api_payload(
         status=result.status,
