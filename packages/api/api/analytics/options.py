@@ -13,5 +13,4 @@ class TurnAnalyticsOptions:
     connection_flare_mode: FlareConnectionMode | str = FlareConnectionMode.OFF
     connection_flare_depth: int = 1
     connection_include_illustrative_routes: bool = False
-    include_military_score_inference: bool = False
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS

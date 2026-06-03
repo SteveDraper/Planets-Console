@@ -50,6 +50,28 @@ def get_table_response(
     return descriptor.get_table(scope, load_core, diagnostics)
 
 
+def get_inference_response(
+    analytic_id: str,
+    scope: TurnScope,
+    load_core: CoreAnalyticsLoader,
+    diagnostics: Diagnostics,
+    *,
+    player_id: int,
+) -> dict:
+    if analytic_id != "scores":
+        raise BFFValidationError(f"Analytic {analytic_id!r} does not support inference")
+    core_inference = load_core(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        analytic_id,
+        diagnostics=diagnostics,
+        player_id=player_id,
+        inference_only=True,
+    )
+    return scores.inference_from_core(core_inference, player_id=player_id)
+
+
 def map_diagnostic_values(analytic_id: str, query: ConnectionsMapQuery) -> dict:
     descriptor = _BY_ID.get(analytic_id)
     if descriptor is None or descriptor.map_diagnostic_values is None:

@@ -603,6 +603,22 @@ export async function fetchAnalyticTable(
   return r.json()
 }
 
+export async function fetchScoresRowInference(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<ScoresInferenceRowDetail> {
+  const path = '/bff/analytics/scores/inference'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
 export async function fetchAnalyticMap(
   analyticId: string,
   scope: AnalyticShellScope,

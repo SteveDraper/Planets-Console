@@ -10,6 +10,7 @@ import type {
 import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
+import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
 import { isStellarCartographyMapEnabled } from '../analytics/mapShellCartography'
 import {
@@ -62,6 +63,7 @@ function TableTile({
   scoresTableParams: ScoresTableParams
 }) {
   const isScores = analyticId === 'scores'
+  const inferenceEnabled = isScores && scoresTableParams.includeBuildInference
   const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
     queryKey: [
@@ -79,17 +81,28 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
+  const inferenceByRow = useScoresInferenceByRow(
+    data,
+    analyticScope,
+    inferenceEnabled && fetchEnabled
+  )
+  const scoresTableData =
+    data != null && inferenceByRow != null
+      ? { ...data, inferenceByRow }
+      : data
 
   useEffect(() => {
     if (!isScores || analyticScope == null) {
       return
     }
-    if (data?.includeBuildInference === true) {
-      setScoresDiagnostics(scoresDiagnosticsFromTable(data, analyticScope))
+    if (scoresTableData?.includeBuildInference === true && inferenceByRow != null) {
+      setScoresDiagnostics(
+        scoresDiagnosticsFromTable({ ...scoresTableData, inferenceByRow }, analyticScope)
+      )
       return
     }
     setScoresDiagnostics(null)
-  }, [isScores, analyticScope, data, setScoresDiagnostics])
+  }, [isScores, analyticScope, scoresTableData, inferenceByRow, setScoresDiagnostics])
 
   if (analyticScope == null) {
     return (
@@ -107,8 +120,8 @@ function TableTile({
     )
   }
   if (!data) return null
-  if (isScores && data.includeBuildInference === true) {
-    return <ScoresTableView data={data} />
+  if (isScores && scoresTableData?.includeBuildInference === true && inferenceByRow != null) {
+    return <ScoresTableView data={{ ...scoresTableData, inferenceByRow }} />
   }
   return (
     <div className="overflow-auto">

@@ -34,7 +34,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     solve_inference_problem,
 )
-from api.analytics.scores import get_scores_table
+from api.analytics.scores import get_scores_row_inference, get_scores_table
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -61,12 +61,18 @@ def test_scores_output_unchanged_when_inference_disabled(sample_turn):
     assert "inference" not in disabled["rows"][0]
 
 
-def test_scores_output_includes_inference_when_enabled(sample_turn):
+def test_scores_table_never_includes_inference(sample_turn):
     data = get_scores_table(
         sample_turn,
-        TurnAnalyticsOptions(include_military_score_inference=True),
+        TurnAnalyticsOptions(),
     )
-    inference = data["rows"][0]["inference"]
+    assert "inference" not in data["rows"][0]
+
+
+def test_scores_row_inference_returns_solver_payload(sample_turn):
+    player_id = sample_turn.scores[0].ownerid
+    inference = get_scores_row_inference(sample_turn, player_id)
+    assert inference["playerId"] == player_id
     assert inference["status"] in {
         STATUS_EXACT,
         STATUS_INVALID_PROBLEM,
@@ -86,13 +92,12 @@ def test_first_turn_produces_no_prior_turn_status(first_turn):
     assert inference["diagnostics"]["reason"] == "first_turn"
 
 
-def test_enabled_first_turn_attaches_row_level_diagnostic(first_turn):
-    data = get_scores_table(
-        first_turn,
-        TurnAnalyticsOptions(include_military_score_inference=True),
-    )
-    for row in data["rows"]:
-        assert row["inference"]["status"] == STATUS_NO_PRIOR_TURN
+def test_first_turn_row_inference_produces_no_prior_turn_status(first_turn):
+    score = first_turn.scores[0]
+    inference = get_scores_row_inference(first_turn, score.ownerid)
+    assert inference["status"] == STATUS_NO_PRIOR_TURN
+    assert inference["summary"] == "Prior turn score data unavailable"
+    assert inference["diagnostics"]["reason"] == "first_turn"
 
 
 def test_build_inference_observation_maps_score_deltas(sample_turn):
@@ -135,16 +140,16 @@ def test_solver_failure_is_isolated_per_player(sample_turn):
         "api.analytics.military_score_inference.analytic.solve_inference_problem",
         side_effect=_solve_side_effect,
     ):
-        data = get_scores_table(
-            sample_turn,
-            TurnAnalyticsOptions(include_military_score_inference=True),
-        )
+        failing_inference = get_scores_row_inference(sample_turn, failing_player_id)
+        other_inferences = [
+            get_scores_row_inference(sample_turn, row.ownerid)
+            for row in sample_turn.scores
+            if row.ownerid != failing_player_id
+        ]
 
-    failed_rows = [row for row in data["rows"] if row["playerId"] == failing_player_id]
-    other_rows = [row for row in data["rows"] if row["playerId"] != failing_player_id]
-    assert len(data["rows"]) == len(sample_turn.scores)
-    assert failed_rows[0]["inference"]["status"] == STATUS_SOLVER_ERROR
-    assert all("inference" in row for row in other_rows)
+    assert failing_inference["status"] == STATUS_SOLVER_ERROR
+    assert len(other_inferences) == len(sample_turn.scores) - 1
+    assert all("status" in inference for inference in other_inferences)
 
 
 def _minimal_inference_problem(
@@ -310,12 +315,9 @@ def test_constraints_payload_exposes_requested_pp_as_diagnostic_only():
     assert not any("priorityPointDelta" in equality for equality in applied)
 
 
-def test_enabled_output_includes_structured_solver_diagnostics(sample_turn):
-    data = get_scores_table(
-        sample_turn,
-        TurnAnalyticsOptions(include_military_score_inference=True),
-    )
-    inference = data["rows"][0]["inference"]
+def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
+    player_id = sample_turn.scores[0].ownerid
+    inference = get_scores_row_inference(sample_turn, player_id)
     diagnostics = inference["diagnostics"]
     assert diagnostics["turn"] == sample_turn.settings.turn
     assert "constraints" in diagnostics
@@ -336,7 +338,7 @@ def test_registry_still_exposes_only_scores_analytic(sample_turn):
     data = get_turn_analytic(
         "scores",
         sample_turn,
-        TurnAnalyticsOptions(include_military_score_inference=True),
+        TurnAnalyticsOptions(),
     )
     assert data["analyticId"] == "scores"
-    assert "inference" in data["rows"][0]
+    assert "inference" not in data["rows"][0]

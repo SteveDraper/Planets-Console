@@ -3,6 +3,7 @@
 from bff.analytics.models import ConnectionsMapQuery, FlareConnectionMode, TurnScope
 from bff.analytics.registry import (
     ANALYTICS_LIST,
+    get_inference_response,
     get_map_response,
     get_table_response,
     map_diagnostic_values,
@@ -14,6 +15,7 @@ __all__ = [
     "ConnectionsMapQuery",
     "FlareConnectionMode",
     "TurnScope",
+    "get_inference_response",
     "get_map_response",
     "get_table_response",
     "map_diagnostic_values",

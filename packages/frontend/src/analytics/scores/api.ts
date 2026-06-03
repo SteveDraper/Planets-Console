@@ -1,3 +1,5 @@
+import type { AnalyticShellScope } from '../../api/bff'
+
 /** Wire query names for Scores table GETs. */
 export const SCORES_QUERY_WIRE = {
   includeBuildInference: 'includeBuildInference',
@@ -19,4 +21,11 @@ export function appendScoresTableQueryParams(
 
 export function scoresTableQueryKey(scoresParams: ScoresTableParams): readonly [boolean] {
   return [scoresParams.includeBuildInference] as const
+}
+
+export function scoresRowInferenceQueryKey(
+  scope: AnalyticShellScope,
+  playerId: number
+): readonly ['analytic', 'scores', 'inference', AnalyticShellScope, number] {
+  return ['analytic', 'scores', 'inference', scope, playerId] as const
 }

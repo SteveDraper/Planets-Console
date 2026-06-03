@@ -83,6 +83,13 @@ def _shape_inference_detail(
     return shaped
 
 
+def _pending_inference_stub(player_id: object) -> dict[str, object]:
+    stub: dict[str, object] = {}
+    if isinstance(player_id, int):
+        stub["playerId"] = player_id
+    return stub
+
+
 def table_from_core(core_data: dict, *, include_build_inference: bool = False) -> dict:
     columns = list(TABLE_COLUMNS)
     if include_build_inference:
@@ -98,9 +105,7 @@ def table_from_core(core_data: dict, *, include_build_inference: bool = False) -
             *[_format_score_cell(row.get(field)) for field in TABLE_FIELDS],
         ]
         if include_build_inference:
-            inference_by_row.append(
-                _shape_inference_detail(row.get("inference"), player_id=row.get("playerId"))
-            )
+            inference_by_row.append(_pending_inference_stub(row.get("playerId")))
         rows.append(table_row)
 
     payload: dict[str, object] = {
@@ -126,9 +131,13 @@ def get_table(
         scope,
         ANALYTIC_ID,
         diagnostics=diagnostics,
-        include_military_score_inference=include_build_inference,
     )
     return table_from_core(core_data, include_build_inference=include_build_inference)
+
+
+def inference_from_core(core_inference: object, *, player_id: int) -> dict[str, object]:
+    """Shape one Core scores-row inference payload for the SPA."""
+    return _shape_inference_detail(core_inference, player_id=player_id)
 
 
 DESCRIPTOR = AnalyticDescriptor(

@@ -97,7 +97,7 @@ def test_scores_table_dispatch_shapes_core_rows():
     def load_core(game_id, perspective, turn, analytic_id, **kwargs):
         assert (game_id, perspective, turn, analytic_id) == (628580, 1, 111, "scores")
         assert kwargs["diagnostics"] is NOOP_DIAGNOSTICS
-        assert kwargs.get("include_military_score_inference") is False
+        assert kwargs.get("include_military_score_inference") is None
         return {
             "analyticId": "scores",
             "rows": [
@@ -125,7 +125,7 @@ def test_scores_table_dispatch_shapes_core_rows():
     ]
 
 
-def test_scores_table_dispatch_forwards_build_inference_to_core():
+def test_scores_table_dispatch_with_build_inference_returns_player_stubs():
     calls = []
 
     def load_core(game_id, perspective, turn, analytic_id, **kwargs):
@@ -134,6 +134,7 @@ def test_scores_table_dispatch_forwards_build_inference_to_core():
             "analyticId": "scores",
             "rows": [
                 {
+                    "playerId": 8,
                     "racePlayer": "The Solar Federation (sylk)",
                     "planets": {"value": 76, "change": 1},
                     "starbases": {"value": 23, "change": 0},
@@ -141,14 +142,6 @@ def test_scores_table_dispatch_forwards_build_inference_to_core():
                     "freighters": {"value": 18, "change": -1},
                     "military": {"value": 639101, "change": -1594},
                     "priorityPoints": {"value": 17, "change": 0},
-                    "inference": {
-                        "status": "exact",
-                        "summary": "Best: Build Serpent Class Escort (empty)",
-                        "solutionCount": 1,
-                        "isComplete": True,
-                        "solutions": [],
-                        "diagnostics": {"catalog_size": 3},
-                    },
                 }
             ],
         }
@@ -162,8 +155,8 @@ def test_scores_table_dispatch_forwards_build_inference_to_core():
     )
     assert data["includeBuildInference"] is True
     assert data["columns"][-1] == "Build inference"
-    assert data["inferenceByRow"][0]["displayStatus"] == "success"
-    assert calls[0][4]["include_military_score_inference"] is True
+    assert data["inferenceByRow"] == [{"playerId": 8}]
+    assert calls[0][4].get("include_military_score_inference") is None
 
 
 def test_connections_map_dispatch_forwards_query_as_core_kwargs():

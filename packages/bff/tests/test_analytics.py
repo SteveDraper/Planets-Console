@@ -99,14 +99,20 @@ def test_scores_table_returns_scoreboard_columns_and_deltas():
     ]
 
 
-def test_scores_table_with_build_inference_adds_column_and_details():
+def test_scores_table_with_build_inference_adds_column_and_player_stubs():
     response = client.get(f"/analytics/scores/table?{SCOPE_QS}&includeBuildInference=true")
     assert response.status_code == 200
     data = response.json()
     assert data["includeBuildInference"] is True
     assert data["columns"][-1] == "Build inference"
     assert len(data["rows"][0]) == len(data["columns"]) - 1
-    inference = data["inferenceByRow"][0]
+    assert data["inferenceByRow"][0] == {"playerId": 8}
+
+
+def test_scores_inference_returns_row_detail():
+    response = client.get(f"/analytics/scores/inference?{SCOPE_QS}&playerId=8")
+    assert response.status_code == 200
+    inference = response.json()
     assert inference["displayStatus"] in {"success", "failure", "pending"}
     assert isinstance(inference["summary"], str)
     assert "status" in inference

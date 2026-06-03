@@ -19,6 +19,7 @@ from bff.analytics import (
     ANALYTICS_LIST,
     ConnectionsMapQuery,
     TurnScope,
+    get_inference_response,
     get_map_response,
     get_table_response,
     map_diagnostic_values,
@@ -44,6 +45,19 @@ def _turn_analytics_from_core(
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     **kwargs: object,
 ) -> dict:
+    if kwargs.pop("inference_only", False):
+        player_id = kwargs.pop("player_id", None)
+        if not isinstance(player_id, int):
+            raise ValueError("player_id is required for scores inference")
+        if kwargs:
+            raise ValueError(f"Unexpected kwargs for scores inference: {sorted(kwargs)}")
+        return get_core_client().get_scores_row_inference(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            diagnostics=diagnostics,
+        )
     return get_core_client().get_turn_analytics(
         game_id,
         perspective,
@@ -96,6 +110,41 @@ def get_analytic_table(
             _turn_analytics_from_core,
             table_node,
             include_build_inference=include_build_inference,
+        )
+    return finish_response(body, root)
+
+
+@router.get("/{analytic_id}/inference")
+def get_analytic_inference(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+    include: IncludeDiagnostics = False,
+):
+    """Per-row military score build inference for the Scores analytic."""
+    bff_path = f"/analytics/{analytic_id}/inference"
+    scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn)
+
+    root = optional_request_root(
+        include,
+        "GET",
+        bff_path,
+        gameId=game_id,
+        turn=turn,
+        perspective=perspective,
+        playerId=player_id,
+        handler="get_analytic_inference",
+    )
+    inference_node = root.child("get_analytic_inference")
+    with timed_section(inference_node, "total"):
+        body = get_inference_response(
+            analytic_id,
+            scope,
+            _turn_analytics_from_core,
+            inference_node,
+            player_id=player_id,
         )
     return finish_response(body, root)
 
