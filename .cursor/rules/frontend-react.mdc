@@ -44,6 +44,14 @@ export async function fetchSystem(id: string): Promise<SystemView> {
 - If `src/api/schema.ts` is out of date, run `generate:api` and fix any resulting type errors before merging
 - `schema.ts` must be generated from the BFF-only schema endpoint, not from a whole-process backend schema
 
+## BFF types — when to use Zod instead of `schema.ts`
+
+See **Frontend BFF contracts: OpenAPI codegen and Zod** in `architecture.mdc` for the full rule. In short:
+
+- **Default:** `schema.ts` + typed fetch helpers for normal REST JSON.
+- **Zod + `z.infer`:** stream/NDJSON lines and other wire data that needs runtime validation; one module owns both types and parsing (example: `src/api/loadAllStreamEventSchema.ts` + `parseLoadAllStreamEvent.ts`).
+- **Never** duplicate the same shape in OpenAPI-generated types and hand-written (or second) Zod schemas.
+
 ## State Management — The Core Rule
 
 | Data type | Tool |
@@ -81,6 +89,7 @@ const useItemsStore = create()(() => ({ items: [] }));
 src/
 ├── api/
 │   ├── schema.ts      # Generated — do not edit. Run `npm run generate:api` to update.
+│   ├── *Schema.ts     # Zod wire contracts (types via z.infer) when architecture.mdc applies
 │   ├── systems.ts     # (illustrative) Typed fetch functions for one domain resource
 │   └── ...            # One file per domain resource
 ├── components/    # Genuinely shared components reused across multiple features

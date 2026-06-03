@@ -80,6 +80,27 @@ This keeps deployment simple while giving each layer its own routing and OpenAPI
 - **Server state**: TanStack Query · **Client state**: Zustand (see [docs/design-frontend-and-backend-state.md](../../docs/design-frontend-and-backend-state.md) for what belongs in each, plus backend statelessness and storage)
 - **Graphs**: React Flow · **Tables**: TanStack Table · **Tests**: Vitest + RTL
 
+## Frontend BFF contracts: OpenAPI codegen and Zod
+
+The BFF OpenAPI schema (`/bff/openapi.json`) is the default source of frontend TypeScript types. Generated output lives in `packages/frontend/src/api/schema.ts` (see `bff.mdc` and `frontend-react.mdc` for regeneration). Use `components['schemas'][...]` or `paths[...]` from that file for ordinary REST JSON: single request bodies, single JSON responses, and query-shaped reads.
+
+**Prefer Zod as the single source of types and runtime validation** when the frontend must validate untrusted wire data before use, especially:
+
+- **NDJSON or other line/stream protocols** where each chunk is parsed independently (e.g. load-all progress streams).
+- **Discriminated unions consumed incrementally** where duplicating the same shapes in OpenAPI types and a second validator would drift.
+- **Client-only or partially typed payloads** where `response.json()` or stream bytes are not fully described by one OpenAPI response model.
+
+In those cases:
+
+1. Define Zod schemas in a dedicated module under `src/api/` (e.g. `loadAllStreamEventSchema.ts`), colocated with the parser.
+2. Export shared TypeScript types with `z.infer<typeof ...>` from that module -- not from `schema.ts` and not as hand-written duplicates.
+3. Parse through `safeParse` (or equivalent), map failures to stable user-facing messages in one place, and re-export types from a thin parser module if convenient (`parseLoadAllStreamEvent.ts`).
+4. Keep using `schema.ts` for the rest of the feature (status endpoints, request bodies, non-stream responses).
+
+Do **not** maintain the same wire shape in both `components['schemas'][...]` imports and parallel Zod objects. Pick one owner per shape. The BFF may still document stream event variants in OpenAPI for contract visibility; the frontend stream path treats the Zod module as authoritative for types and validation.
+
+**Adding a new Zod-owned contract:** extend the BFF OpenAPI when the route should appear in the spec, add Zod schemas + parser under `src/api/`, wire the BFF client to the parser, and add unit tests on parse success and failure. Regenerate `schema.ts` only for types that remain OpenAPI-owned.
+
 ## Adding New Features
 
 1. Define the data model in `packages/api/models/` as dataclasses
