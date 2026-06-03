@@ -858,7 +858,9 @@ Prefer synthetic fixtures with small combo catalogs. Large real-turn fixtures sh
 
 ### 11.2 Inference corpus (real-turn regression)
 
-The **inference corpus** exercises production inference APIs against stored **TurnInfo** from finished games. Harness code lives under the API **test hierarchy** (`packages/api/tests/inference_corpus/`), not under `api/` business modules. A thin Typer entrypoint lives at `scripts/run_inference_corpus.py`.
+**Authoritative contract:** [design-inference-corpus.md](design-inference-corpus.md) (manifest schema, complexity rubric, ground truth v1, coverage reasons, Tier 1 re-check, discovery, issue map #62–#66). This subsection is a summary only.
+
+The **inference corpus** exercises production inference APIs against stored **TurnInfo** from finished games. Harness code lives under the API **test hierarchy** (`packages/api/tests/inference_corpus/`), not under `api/` business modules. A thin Typer entrypoint lives at `scripts/run_inference_corpus.py`. Import as `tests.inference_corpus` with API package `pythonpath` `.` (see spec section 1).
 
 Glossary terms: repo root `CONTEXT.md` (**Inference corpus case**, **Inference host turn**, **Catalog coverage**, **Out of search space**, etc.).
 
@@ -929,7 +931,7 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 | After #53 | Optional manifest rows tied to combo diagnostics shapes |
 | With #49 (deferred effects) | Expand ground truth + coverage for trades/losses; adjunct fixtures |
 
-Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Corpus issues are siblings under #39 (see issue tracker).
+Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
 
 ---
 
