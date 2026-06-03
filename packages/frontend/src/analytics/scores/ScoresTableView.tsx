@@ -6,6 +6,10 @@ import {
   canOpenInferenceDetail,
   inferenceAccessibleLabel,
 } from './inferenceStatus'
+import {
+  isBuildInferenceColumn,
+  scoresTableCellForColumn,
+} from './scoresTableColumns'
 
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
@@ -56,15 +60,9 @@ function InferenceStatusCell({
   )
 }
 
-const BUILD_INFERENCE_COLUMN = 'Build inference'
-
 export function ScoresTableView({ data }: ScoresTableViewProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
   const inferenceByRow = data.inferenceByRow
-  const inferenceColumnIndex =
-    data.includeBuildInference === true && inferenceByRow != null
-      ? data.columns.indexOf(BUILD_INFERENCE_COLUMN)
-      : -1
   const selectedDetail =
     selectedRowIndex != null && inferenceByRow != null
       ? inferenceByRow[selectedRowIndex]
@@ -88,12 +86,12 @@ export function ScoresTableView({ data }: ScoresTableViewProps) {
           <tbody>
             {data.rows.map((row, rowIndex) => (
               <tr key={rowIndex} className="border-b border-[#52575d]/60">
-                {data.columns.map((column, columnIndex) => {
-                  if (columnIndex === inferenceColumnIndex) {
+                {data.columns.map((column) => {
+                  if (isBuildInferenceColumn(column) && inferenceByRow != null) {
                     return (
                       <td key={column} className="px-3 py-2 text-gray-400">
                         <InferenceStatusCell
-                          detail={inferenceByRow![rowIndex]}
+                          detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
                         />
                       </td>
@@ -101,7 +99,7 @@ export function ScoresTableView({ data }: ScoresTableViewProps) {
                   }
                   return (
                     <td key={column} className="px-3 py-2 text-gray-400">
-                      {row[columnIndex] ?? ''}
+                      {scoresTableCellForColumn(row, column)}
                     </td>
                   )
                 })}

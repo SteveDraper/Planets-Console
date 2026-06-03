@@ -15,12 +15,56 @@ function tableData(
 }
 
 describe('ScoresTableView', () => {
+  it('keeps priority points in the data column when build inference column is appended', () => {
+    render(
+      <ScoresTableView
+        data={tableData({
+          columns: [
+            'Race (player)',
+            'Planets',
+            'Starbases',
+            'War Ships',
+            'Freighters',
+            'Military',
+            'Priority Points',
+            'Build inference',
+          ],
+          rows: [
+            [
+              'Federation (alice)',
+              '10 (+1)',
+              '5',
+              '3',
+              '2',
+              '1000 (-50)',
+              '217 (+54)',
+            ],
+          ],
+          inferenceByRow: [
+            {
+              displayStatus: 'success',
+              status: 'exact',
+              summary: 'Best: one build',
+              solutionCount: 1,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByText('217 (+54)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Best: one build')).toBeInTheDocument()
+  })
+
   it('renders inference status from inferenceByRow when row has no placeholder cell', () => {
     render(
       <ScoresTableView
         data={tableData({
           columns: ['Race (player)', 'Military', 'Build inference'],
-          rows: [['Federation (alice)', '100']],
+          rows: [['Federation (alice)', '', '', '', '', '100', '']],
           inferenceByRow: [
             {
               displayStatus: 'success',
@@ -40,12 +84,12 @@ describe('ScoresTableView', () => {
     expect(screen.getByText('100')).toBeInTheDocument()
   })
 
-  it('renders inference icons from inferenceByRow even when a legacy row has a trailing empty cell', () => {
+  it('ignores a legacy trailing empty cell when resolving data column values', () => {
     render(
       <ScoresTableView
         data={tableData({
           columns: ['Race (player)', 'Military', 'Build inference'],
-          rows: [['Federation (alice)', '100', '']],
+          rows: [['Federation (alice)', '', '', '', '', '100', '']],
           inferenceByRow: [
             {
               displayStatus: 'pending',
