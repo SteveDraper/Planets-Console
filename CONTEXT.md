@@ -121,7 +121,7 @@ Each filtered slice includes every `components.schemas` entry reachable from tha
 _Avoid_: schema-shared as a required v1 dependency for every slice to compile
 
 **Generated slice CI**:
-CI verifies committed `schema-<slice>.ts` files match the filtered OpenAPI dumps (`make check_frontend_api_slices`). A guard against reintroducing monolithic `src/api/schema.ts` is tracked separately (issue #60).
+CI verifies committed `schema-<slice>.ts` files match the filtered OpenAPI dumps (`make check_frontend_api_slices`) and fails if monolithic `src/api/schema.ts` reappears (`make check_frontend_api_no_monolithic_schema`; both run in `make ci`).
 _Avoid_: relying on reviewers to notice stale or monolithic generated types
 
 **Generated schema import rule**:

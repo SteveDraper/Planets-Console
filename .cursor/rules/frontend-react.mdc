@@ -43,7 +43,7 @@ export async function fetchSystem(id: string): Promise<SystemView> {
 - TanStack Query hooks in feature folders import from `src/api/` — they never call `fetch` directly
 - If generated slices are out of date, run `generate:api` and fix any resulting type errors before merging; verify with `npm run check:api:slices` or `make check_frontend_api_slices` (also run by `make ci`)
 - Slices must be generated from the BFF-only schema (filtered from the full BFF dump), not from a whole-process backend schema
-- Do not add a barrel `schema.ts` that re-exports every slice
+- Do not add a barrel `schema.ts` that re-exports every slice; CI fails if `src/api/schema.ts` exists (`make check_frontend_api_no_monolithic_schema`, part of `make ci`)
 
 ## BFF types — when to use Zod instead of OpenAPI codegen
 
