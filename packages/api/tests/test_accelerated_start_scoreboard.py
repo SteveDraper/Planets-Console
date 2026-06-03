@@ -16,10 +16,14 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
+    infer_military_score_build,
     prior_turn_score_data_available,
 )
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
+
+from tests.inference_corpus.fixtures import load_turn_fixture
+from tests.inference_corpus.manifest import load_manifest, resolve_player_id
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -126,3 +130,26 @@ def test_turn4_uses_scoreboard_delta_fields():
     assert military_delta_2x == 2 * score.militarychange
     assert warship_delta == score.shipchange
     assert freighter_delta == score.freighterchange
+
+
+def test_fixture_turn3_observation_uses_accelerated_baseline():
+    _, cases = load_manifest()
+    turn = load_turn_fixture(cases[0].score_turn_path)
+    player_id = resolve_player_id(cases[0])
+    score = next(s for s in turn.scores if s.ownerid == player_id)
+    assert turn.settings.acceleratedturns == 3
+    observation = build_inference_observation(score, turn)
+    baseline = starting_scoreboard_snapshot(turn.settings)
+    assert observation.military_delta_2x == 2 * (score.militaryscore - baseline.militaryscore)
+    assert observation.freighter_delta == score.freighterchange
+
+
+def test_corpus_case_still_infers_exact_with_accelerated_adjustment():
+    _, cases = load_manifest()
+    case = cases[0]
+    turn = load_turn_fixture(case.score_turn_path)
+    player_id = resolve_player_id(case)
+    score = next(s for s in turn.scores if s.ownerid == player_id)
+    result = infer_military_score_build(score, turn)
+    assert result["status"] == "exact"
+    assert result["solutionCount"] >= 1
