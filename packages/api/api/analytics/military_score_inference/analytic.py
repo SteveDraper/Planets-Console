@@ -1,5 +1,9 @@
 """Scores analytic integration for military score build inference."""
 
+from api.analytics.military_score_inference.accelerated_start import (
+    accelerated_turn_count,
+    observation_deltas_from_score,
+)
 from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_action_catalog_from_turn,
@@ -33,7 +37,13 @@ STATUS_SOLVER_ERROR = "solver_error"
 
 def prior_turn_score_data_available(turn: TurnInfo) -> bool:
     """Return whether this turn has a prior scoreboard row to infer from."""
-    return turn.settings.turn > 1
+    turn_number = turn.settings.turn
+    if turn_number <= 1:
+        return False
+    accelerated = accelerated_turn_count(turn.settings)
+    if accelerated > 0 and turn_number < accelerated:
+        return False
+    return True
 
 
 def is_after_ship_limit(turn: TurnInfo, score: Score) -> bool:
@@ -55,13 +65,16 @@ def is_after_ship_limit(turn: TurnInfo, score: Score) -> bool:
 
 def build_inference_observation(score: Score, turn: TurnInfo) -> InferenceObservation:
     """Build solver observation from one scoreboard row and turn context."""
+    military_delta_2x, warship_delta, freighter_delta, priority_point_delta = (
+        observation_deltas_from_score(score, turn)
+    )
     return InferenceObservation(
         player_id=score.ownerid,
         turn=turn.settings.turn,
-        military_delta_2x=2 * score.militarychange,
-        warship_delta=score.shipchange,
-        freighter_delta=score.freighterchange,
-        priority_point_delta=score.prioritypointchange,
+        military_delta_2x=military_delta_2x,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        priority_point_delta=priority_point_delta,
         starbases_owned=score.starbases,
         is_after_ship_limit=is_after_ship_limit(turn, score),
     )

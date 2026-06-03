@@ -52,6 +52,7 @@ Start with a small Core API subpackage so the solver and scoring model do not cr
 ```text
 packages/api/api/analytics/military_score_inference/
 |-- __init__.py
+|-- accelerated_start.py  # accelerated scoreboard baselines and observation deltas
 |-- actions.py            # aggregate noisy actions (defense, ammo load, transfers)
 |-- ship_build_combos.py  # eligible hull/engine/beam/torp combos and tier policy (Phase 1G+)
 |-- models.py             # dataclasses for observations, actions, problems, solutions
@@ -61,6 +62,24 @@ packages/api/api/analytics/military_score_inference/
 ```
 
 Phase 1F shipped an interim flat `build_{hull}_{preset}` catalog in `actions.py`. Phase 1G moves ship builds into `ship_build_combos.py` and leaves aggregate actions in `actions.py`.
+
+### 3.1 Accelerated start scoreboard (`accelerated_start.py`)
+
+**Domain rules:** [design-military-score-build-inference.md](design-military-score-build-inference.md) section 3.3.
+
+When `settings.acceleratedturns = N` with `N > 0`:
+
+- `prior_turn_score_data_available(turn)` in `analytic.py` returns false for `turn < N` (and turn 1), so `infer_military_score_build` emits `no_prior_turn` without calling the solver.
+- `build_inference_observation` uses `observation_deltas_from_score(score, turn)` instead of raw `militarychange` / `shipchange` / `freighterchange` on the first reliable row (`turn == N`).
+
+**Homeworld baseline:** `starting_scoreboard_snapshot(settings)` derives turn-1 military totals from Starmap flags (e.g. `homeworldhasstarbase`, standard homeworld starbase fighters and defense posts, one starting freighter). Shared homeworld constants used by the action catalog (e.g. Evil Empire free starbase fighter caps) also live in this module.
+
+**Diagnostics (not solver inputs):**
+
+- `synthetic_scoreboard_before_reported_deltas(score)` -- totals at host turn `N-1` inferred by subtracting row deltas from turn `N` totals.
+- `infer_accelerated_window_ship_builds(score, turn)` -- splits freighter/warship build counts across the accelerated window vs the reported host turn `N-1` delta fields; used in tests and future UI copy, not in CP-SAT constraints today.
+
+**Tests:** `packages/api/tests/test_accelerated_start_scoreboard.py` (store-backed cases when `.data` is present; fixture-backed cases that need committed corpus JSON live alongside the inference corpus harness tests).
 
 Do not register `military_score_inference` as a separate user-facing analytic. The solver package should be called by the existing `scores` analytic when inference is requested.
 

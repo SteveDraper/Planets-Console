@@ -2,6 +2,12 @@
 
 from dataclasses import dataclass
 
+from api.analytics.military_score_inference.accelerated_start import (
+    EVIL_EMPIRE_RACE_ID,
+    HOMEBASE_STARBASE_FIGHTERS,
+    STANDARD_STARBASE_MAX_FIGHTERS,
+    evil_empire_free_starbase_fighters_per_host_turn,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -18,13 +24,8 @@ from api.analytics.military_score_inference.scoring import (
     starbase_fighter_score_delta_2x,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
-from api.models.game import GameSettings, TurnInfo
+from api.models.game import TurnInfo
 from api.models.player import Player, Race
-
-EVIL_EMPIRE_RACE_ID = 8
-HOMEBASE_STARBASE_FIGHTERS = 20
-STANDARD_STARBASE_MAX_FIGHTERS = 60
-EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_BASE = 5
 
 LOADOUT_PRESET_EMPTY = "empty"
 LOADOUT_PRESET_TORPEDOES = "torpedoes"
@@ -63,11 +64,6 @@ BUCKETED_ACTION_IDS = frozenset(
         "ship_fighters_added_total",
     }
 )
-
-
-def evil_empire_free_starbase_fighters_per_host_turn(settings: GameSettings) -> int:
-    """Free fighters an Evil Empire starbase may build each host turn when stocked."""
-    return EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_BASE + settings.freestarbasefighters5adjustment
 
 
 @dataclass(frozen=True)
