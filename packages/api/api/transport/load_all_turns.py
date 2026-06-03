@@ -1,6 +1,7 @@
 """Request and response models for bulk turn loading."""
 
 import json
+import logging
 from collections.abc import Callable, Iterator
 from typing import Any, Literal, TypeAlias
 
@@ -8,6 +9,10 @@ from pydantic import BaseModel, Field
 
 from api.errors import PlanetsConsoleError
 from api.transport.game_info_update import RefreshGameInfoParams
+
+logger = logging.getLogger(__name__)
+
+_LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
 LoadAllTurnsRequest = RefreshGameInfoParams
 
@@ -66,15 +71,25 @@ def iter_load_all_ndjson_lines(iterator: Iterator[LoadAllStreamItem]) -> Iterato
         yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
 
 
+def _load_all_stream_error_detail(exc: BaseException) -> str:
+    if isinstance(exc, PlanetsConsoleError):
+        return str(exc) or _LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL
+    return _LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL
+
+
 def stream_load_all_turns(
     load_iterator: Callable[[], Iterator[LoadAllStreamItem]],
 ) -> Iterator[str]:
     """Run bulk load and yield NDJSON lines, including one error line on failure.
 
-    ``PlanetsConsoleError`` raised while iterating is not propagated to FastAPI;
-    callers always get HTTP 200 with a final ``{"type": "error", ...}`` line instead.
+    Failures while iterating are not propagated to FastAPI; callers always get HTTP 200
+    with a final ``{"type": "error", "detail": ...}`` line (after any progress lines).
+    ``PlanetsConsoleError`` uses the exception message; other exceptions are logged and
+    surfaced with a generic detail string.
     """
     try:
         yield from iter_load_all_ndjson_lines(load_iterator())
-    except PlanetsConsoleError as exc:
-        yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+    except Exception as exc:
+        if not isinstance(exc, PlanetsConsoleError):
+            logger.exception("Load-all NDJSON stream failed")
+        yield json.dumps({"type": "error", "detail": _load_all_stream_error_detail(exc)}) + "\n"
