@@ -110,8 +110,9 @@ The frontend **only** calls the BFF; it never calls the Core API directly.
 From the repo root (install frontend deps first: `cd packages/frontend && npm ci`):
 
 ```bash
-make test    # lint + unit tests
+make test    # lint + unit tests (packages + scripts/)
 make ci      # lint, BFF schema slice freshness, frontend typecheck, all tests
+make test_scripts   # scripts/ pytest only (also run via make test / make ci)
 ```
 
 After changing BFF response shapes, regenerate and commit types:
