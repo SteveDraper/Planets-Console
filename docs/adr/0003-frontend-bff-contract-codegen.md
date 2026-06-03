@@ -23,7 +23,7 @@ We split **central** codegen by **regeneration boundary** aligned with BFF route
 
 - Add and maintain `scripts/filter_bff_openapi.py` (Python) to subset the dump before `openapi-typescript`; extend `npm run generate:api` / `make generate` to run dump → filter → per-slice codegen.
 - **Migration:** emit slices alongside monolithic `schema.ts` first; verify `$ref` closure and `tsc` with slice-only imports; then switch `bff.ts` / `bffCartographyTypes.ts` and delete the monolith (**parity then cutover**). Do not leave the tree importing both `./schema` and slices for an extended period.
-- **CI:** after slices exist, generated TypeScript must be up to date with the BFF dump (regen + clean git diff, or `openapi-typescript --check` per slice). After cutover, CI must fail if monolithic `src/api/schema.ts` returns (guard script or lint step).
+- **CI:** `make ci` runs `make check_frontend_api_slices` (`openapi-typescript --check` per slice after dump + filter). After cutover, CI must fail if monolithic `src/api/schema.ts` returns (guard script or lint step).
 - When adding BFF routes, know which slice regens (games vs shell, etc.).
 - New **turn analytics**: type payloads in `src/analytics/<id>/`; only promote to OpenAPI + a generated slice when a strict shared contract is worth the cost.
 - New **streams** or line protocols: Zod-owned module, not a new OpenAPI monolith.

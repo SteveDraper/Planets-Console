@@ -41,7 +41,7 @@ export async function fetchSystem(id: string): Promise<SystemView> {
 
 - Define one API client file per domain resource in `src/api/` (e.g. `src/api/systems.ts`)
 - TanStack Query hooks in feature folders import from `src/api/` — they never call `fetch` directly
-- If generated slices are out of date, run `generate:api` and fix any resulting type errors before merging
+- If generated slices are out of date, run `generate:api` and fix any resulting type errors before merging; verify with `npm run check:api:slices` or `make check_frontend_api_slices` (also run by `make ci`)
 - Slices must be generated from the BFF-only schema (filtered from the full BFF dump), not from a whole-process backend schema
 - Do not add a barrel `schema.ts` that re-exports every slice
 

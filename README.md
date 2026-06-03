@@ -105,6 +105,24 @@ packages/
 
 The frontend **only** calls the BFF; it never calls the Core API directly.
 
+## Tests and CI
+
+From the repo root (install frontend deps first: `cd packages/frontend && npm ci`):
+
+```bash
+make test    # lint + unit tests
+make ci      # lint, BFF schema slice freshness, frontend typecheck, all tests
+```
+
+After changing BFF response shapes, regenerate and commit types:
+
+```bash
+make generate
+make check_frontend_api_slices   # should pass when slices are committed and current
+```
+
+`make check_frontend_api_slices` dumps the BFF OpenAPI spec, filters per-router slices, and runs `openapi-typescript --check` on each committed `packages/frontend/src/api/schema-<slice>.ts`.
+
 ## Documentation
 
 ### User documentation

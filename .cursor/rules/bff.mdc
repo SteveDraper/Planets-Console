@@ -72,6 +72,7 @@ During **parity migration**, `generate:api` also regenerates monolithic `src/api
 
 - Regenerate whenever BFF response shapes change
 - Commit generated TypeScript — never hand-edit `schema.ts` or `schema-*.ts`
+- CI and local pre-merge: `make check_frontend_api_slices` (or `cd packages/frontend && npm run check:api:slices`) — same dump/filter pipeline as generate, then `openapi-typescript --check` per slice
 - If the app also exposes a full-process schema, do not use it for frontend codegen
 
 Live server fallback (monolith only):
