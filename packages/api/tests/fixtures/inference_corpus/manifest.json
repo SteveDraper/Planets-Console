@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "gameInfoPath": "628580/info.json",
+  "cases": [
+    {
+      "id": "628580-p1-host2",
+      "gameId": 628580,
+      "perspective": 1,
+      "hostTurn": 2,
+      "playerId": null,
+      "priorTurnPath": "628580/1/turns/2.json",
+      "scoreTurnPath": "628580/1/turns/3.json",
+      "complexity": "minimal",
+      "tier": 1,
+      "expectedStatus": "exact",
+      "requireTopK": false,
+      "expectCoverage": false,
+      "requiredPerspectives": [],
+      "notes": "Perspective 1 (dead); host turn 2 build explained on score turn 3; trimmed from local store game 628580."
+    }
+  ]
+}

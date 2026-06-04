@@ -329,7 +329,7 @@ _Avoid_: log buffer, audit trail
 ### Game concepts
 
 **Game concept**:
-Host-aligned rules, geometry, or static catalogs the console computes or holds -- warp wells, flare points, planet-connection reachability. Lives in Core `concepts/`; may be exposed as concept HTTP routes and reused inside **turn analytics**.
+Host-aligned rules, geometry, or static catalogs the console computes or holds -- warp wells, flare points, planet-connection reachability, race-specific numeric traits. Lives in Core `concepts/`; may be exposed as concept HTTP routes and reused inside **turn analytics**. Do not embed race-specific `raceid` constants or per-race mechanics inside analytic modules (e.g. accelerated-start scoreboard helpers); use **`api.concepts.races`** instead.
 _Avoid_: domain service, utility module
 
 **Turn-scoped concept**:
@@ -339,6 +339,10 @@ _Avoid_: per-turn helper
 **Global concept**:
 A **game concept** that does not depend on loaded game state (e.g. flare-point offset tables keyed by warp speed). Exposed under Core `/v1/concepts/...` without a turn path.
 _Avoid_: static lookup, catalog endpoint
+
+**Race-specific game concept**:
+Planets.nu mechanics that depend on **`raceid`** (Evil Empire free starbase fighters, Fascist-only hull rules, and similar). Consolidated in **`packages/api/api/concepts/races.py`** -- constants, helpers, and settings-aware formulas. **Turn analytics** and inference catalogs import from there; they do not define new race ids or race-only numbers locally. Game-wide defaults (homeworld starting inventory, accelerated-start scoreboard baselines) stay in the module that owns that cross-race behavior (e.g. `accelerated_start.py`), not in `races.py`.
+_Avoid_: scattering `raceid == 8` in `analytics/`, duplicating race tables per feature
 
 **Connections engine**:
 The public entry for planet-pair reachability in one turn (`connection_engine.py` under `planet_connections/`). The **Connections** turn analytic calls `connection_routes_with_options`; spatial index, annuli, and flare BFS stay private to the package.
@@ -433,6 +437,9 @@ Use **perspective** in storage paths and API path segments; use **viewpoint** in
 
 **Dev:** Should warp-well math live in the BFF or a new analytic module?  
 **Expert:** In Core as a **game concept** (`api.concepts.warp_well`). **Normal** well cells ship on **base-map** nodes as `normalWellCells`; **hyperjump** stays on turn-scoped concept routes. The SPA renders server cells only -- no duplicate geometry in TypeScript. **Connections** uses the same module's reachability helpers.
+
+**Dev:** Military score inference needs Evil Empire free fighter counts. Where do those live?  
+**Expert:** In **`api.concepts.races`** as a **race-specific game concept** -- `raceid`, base free-fighter count, and `freestarbasefighters5adjustment` from settings. The inference action catalog imports the helper; it does not define Evil Empire constants beside accelerated-start or scoring code.
 
 **Dev:** Can the frontend call `GET /api/v1/games/.../analytics/connections` directly?  
 **Expert:** No. The SPA talks only to the **BFF**. Core owns **turn analytics**; the shell never bypasses that layer.

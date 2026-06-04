@@ -2,6 +2,10 @@
 
 from dataclasses import dataclass
 
+from api.analytics.military_score_inference.accelerated_start import (
+    HOMEBASE_STARBASE_FIGHTERS,
+    STANDARD_STARBASE_MAX_FIGHTERS,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -16,6 +20,10 @@ from api.analytics.military_score_inference.scoring import (
     ship_construction_score_delta_2x,
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
+)
+from api.concepts.races import (
+    evil_empire_free_starbase_fighters_per_host_turn,
+    is_evil_empire,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
@@ -72,6 +80,7 @@ class ActionCatalogConfig:
     torpedo_ship_build_probability_weight: int = 85
     noisy_action_probability_weight: int = 10
     fighter_transfer_probability_weight: int = 15
+    evil_empire_free_starbase_fighter_probability_weight: int = 75
 
 
 @dataclass(frozen=True)
@@ -153,6 +162,7 @@ def build_action_catalog_from_turn(
         buildable_hull_ids=buildable_hull_ids,
         default_engine_id=default_engine_id,
         config=config,
+        turn=turn,
     )
 
 
@@ -166,12 +176,17 @@ def build_action_catalog(
     buildable_hull_ids: frozenset[int],
     default_engine_id: int | None,
     config: ActionCatalogConfig | None = None,
+    turn: TurnInfo | None = None,
 ) -> ActionCatalog:
     catalog_config = config or ActionCatalogConfig()
     actions: list[CandidateAction] = []
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
 
     actions.extend(_aggregate_noisy_actions(observation, catalog_config, torpedos_by_id))
+    if turn is not None:
+        actions.extend(
+            _evil_empire_free_starbase_fighter_actions(observation, turn, catalog_config)
+        )
     actions.extend(
         _fighter_transfer_actions(observation, catalog_config),
     )
@@ -241,6 +256,48 @@ def _residual_count_bound(
     abs_score = abs(score_delta_2x)
     abs_residual = abs(observation.military_delta_2x)
     return min(configured_cap, abs_residual // abs_score)
+
+
+def _evil_empire_free_starbase_fighter_actions(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    config: ActionCatalogConfig,
+) -> list[CandidateAction]:
+    """High-probability free starbase fighters for Evil Empire when resources allow."""
+    player = _player_by_id(turn, observation.player_id)
+    if not is_evil_empire(player.raceid):
+        return []
+
+    free_per_host_turn = evil_empire_free_starbase_fighters_per_host_turn(turn.settings)
+    if free_per_host_turn <= 0 or observation.starbases_owned <= 0:
+        return []
+
+    host_turns_elapsed = max(0, observation.turn - 1)
+    fighter_room_per_starbase = max(0, STANDARD_STARBASE_MAX_FIGHTERS - HOMEBASE_STARBASE_FIGHTERS)
+    per_starbase_cap = min(
+        free_per_host_turn * host_turns_elapsed,
+        fighter_room_per_starbase,
+    )
+    count_upper = min(
+        _residual_count_bound(
+            observation,
+            starbase_fighter_score_delta_2x(),
+            config.max_starbase_fighters,
+        ),
+        per_starbase_cap * observation.starbases_owned,
+    )
+    if count_upper <= 0:
+        return []
+
+    return [
+        CandidateAction(
+            id="evil_empire_free_starbase_fighters",
+            label="Evil Empire free starbase fighters (likely)",
+            score_delta_2x=starbase_fighter_score_delta_2x(),
+            upper_bound=count_upper,
+            probability_weight=config.evil_empire_free_starbase_fighter_probability_weight,
+        )
+    ]
 
 
 def _aggregate_noisy_actions(

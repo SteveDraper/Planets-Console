@@ -12,14 +12,20 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog_from_turn,
     buildable_hull_ids_for_player,
 )
+from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
 )
+from api.concepts.races import evil_empire_free_starbase_fighters_per_host_turn
 from api.models.components import Beam, Engine, Hull, Torpedo
+from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EE_TURN_PATH = REPO_ROOT / ".data" / "games" / "628580" / "8" / "turns" / "3.json"
+GAME_INFO_PATH = REPO_ROOT / ".data" / "games" / "628580" / "info.json"
 
 
 def _observation(
@@ -362,3 +368,28 @@ def test_build_action_catalog_from_turn_sample(sample_turn):
         buildable_in_catalog = buildable_hulls & catalog_hull_ids
         if buildable_in_catalog:
             assert ship_build_actions
+
+
+@pytest.mark.skipif(not GAME_INFO_PATH.is_file(), reason="local store only")
+def test_evil_empire_free_fighters_per_turn_from_game_settings():
+    with open(GAME_INFO_PATH) as handle:
+        game_info = game_info_from_json(json.load(handle))
+    assert evil_empire_free_starbase_fighters_per_host_turn(game_info.settings) == 5
+
+
+@pytest.mark.skipif(not EE_TURN_PATH.is_file(), reason="local store only")
+def test_evil_empire_catalog_includes_likely_free_starbase_fighters():
+    with open(GAME_INFO_PATH) as handle:
+        settings_defaults = json.load(handle)["settings"]
+    with open(EE_TURN_PATH) as handle:
+        turn = turn_info_from_json(json.load(handle), settings_defaults=settings_defaults)
+    score = next(s for s in turn.scores if s.ownerid == 8)
+    observation = build_inference_observation(score, turn)
+    catalog = build_action_catalog_from_turn(observation, turn)
+    free_action = next(
+        (action for action in catalog.actions if action.id == "evil_empire_free_starbase_fighters"),
+        None,
+    )
+    assert free_action is not None
+    assert free_action.probability_weight == 75
+    assert free_action.upper_bound > 0

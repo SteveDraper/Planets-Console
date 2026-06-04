@@ -37,6 +37,7 @@ Guidelines:
 - Input is always `TurnInfo` + `TurnAnalyticsOptions` (see `api/analytics/options.py`).
 - Return a JSON-serializable dict with domain field names. BFF reshapes for the SPA if needed.
 - Reuse **game concepts** from `api/concepts/` rather than duplicating rules.
+- **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 - Attach **request diagnostics** at meaningful boundaries (`diagnostics.child(...)`) when work is non-trivial.
 
 ### 2.2 Register in Core

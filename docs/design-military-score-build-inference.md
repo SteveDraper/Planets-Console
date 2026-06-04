@@ -10,7 +10,7 @@ The goal is not to prove what happened. Military score is deliberately lossy: se
 
 ## 1. Purpose
 
-Given two adjacent scoreboard turns, infer possible actions for each player that explain:
+Given scoreboard data for a player on turn **T**, infer possible actions that explain the observation deltas for that row (normally the transition from turn **T-1** to **T**; see [section 3.3](#33-accelerated-start-scoreboard) when **Accelerated Start** applies). The inputs are:
 
 - change in military score,
 - change in number of military ships,
@@ -73,11 +73,38 @@ The first version should not try to explain:
 
 The design should still make those extensions natural. Deferred effects should be added as new action families and constraints, not as special-case patches to the solver.
 
+### 3.3 Accelerated start scoreboard
+
+Planets.nu **Accelerated Start** (`settings.acceleratedturns = N`, `N > 0`) lets players run their first **N** host turns without waiting for the full game. During that window the persisted **scoreboard rows on turns 1..N-1 are unreliable** (zeroed or incomplete totals and deltas). The **first reliable scoreboard row** is on host turn **N**.
+
+Inference implications:
+
+| Turn | Prior row available? | Observation source |
+|------|----------------------|--------------------|
+| `T < N` (accelerated window) | No -- treat as `no_prior_turn` | Do not run build inference |
+| `T = N` (first reliable row) | Synthetic -- homeworld baseline, not turn `N-1` | See below |
+| `T > N` | Yes -- normal prior row | `militarychange`, `shipchange`, `freighterchange` on row **T** |
+
+**First reliable row (`T = N`):** The score row shows **current totals** plus **deltas for host turn N-1 only** (not cumulative over the whole accelerated window). Military inference must still explain **all military score gained since game start**, because builds on host turns 1..N-1 are folded into the totals even when their per-turn deltas were not reported correctly.
+
+Observation mapping on turn **N** (implementation: `observation_deltas_from_score` in `accelerated_start.py`):
+
+- **Military (2x):** `2 * (militaryscore - homeworld_baseline.militaryscore)` -- cumulative since turn-1 baseline under normal Starmap homeworld rules (`homeworldhasstarbase`, starting starbase fighters and defense posts, one starting freighter when applicable).
+- **Warships:** `capitalships - homeworld_baseline.capitalships` -- cumulative warship builds since baseline (not only `shipchange`).
+- **Freighters:** `freighterchange` on the row -- **host N-1 only**; freighters built earlier in the accelerated window appear in totals (`freighters` count) but not in `freighterchange`. Diagnostics may use `infer_accelerated_window_ship_builds` to split window vs reported-host-turn ship counts; the solver observation still uses `freighterchange` as the hard freighter constraint.
+- **Priority points:** `prioritypointchange` as on a normal row.
+
+**After turn N:** Use the same hard constraints as section 4, with observation fields taken from the score row delta columns (`militarychange`, `shipchange`, `freighterchange`, `prioritypointchange`) scaled for military score as elsewhere in this document.
+
+Corpus and regression fixtures for accelerated games (e.g. game `628580`) should document that a case with `scoreTurn = N` is explaining activity through the first reliable scoreboard snapshot, not a single host turn in isolation. See [design-inference-corpus.md](design-inference-corpus.md) case notes when authoring manifests.
+
+**Race-specific candidate actions** (e.g. Evil Empire free starbase fighters) use Planets.nu race ids and settings from **`api.concepts.races`**. **`accelerated_start.py`** holds only cross-race accelerated-start and homeworld baseline logic. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
+
 ---
 
 ## 4. Problem formulation
 
-For one player and one turn transition, define candidate actions in **two layers**:
+For one player and one scoreboard observation (see section 3.3 when accelerated start applies), define candidate actions in **two layers**:
 
 1. **Aggregate actions** -- flat integer variables for defense posts, starbase fighters, ship ammo loading, fighter transfers, and similar location-agnostic effects.
 2. **Ship build combos** -- sparse integer variables for `(hull, engine, beam?, torp?, beam_count, launcher_count)` configurations. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.
@@ -95,12 +122,14 @@ Each aggregate action or ship build combo has:
 The solver chooses non-negative integer counts subject to hard constraints summed over **both** layers:
 
 ```text
-sum(action.score_delta_2x * count) == 2 * militarychange
-sum(action.warship_delta * count) == shipchange
-sum(action.freighter_delta * count) == freighterchange
-sum(action.priority_delta * count) == prioritypointchange
+sum(action.score_delta_2x * count) == observation.military_delta_2x
+sum(action.warship_delta * count) == observation.warship_delta
+sum(action.freighter_delta * count) == observation.freighter_delta
+sum(action.priority_delta * count) == observation.priority_point_delta
 sum(action.build_slot_usage * count) <= starbases_owned
 ```
+
+(`observation.*` is built from adjacent score rows in the normal case, or from accelerated-start rules on the first reliable row; see section 3.3.)
 
 Additional constraints depend on the queue and ship-limit state. Before the ship limit, the build-slot constraint dominates. **Priority-point equality is diagnostic-only in the initial model** until production-queue semantics (standard vs priority build) are encoded per ship-build combo.
 

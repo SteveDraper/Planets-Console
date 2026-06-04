@@ -31,6 +31,18 @@ Related docs:
 
 **Core registry shape:** a flat `TURN_ANALYTICS` dict (id → handler). Core does not use BFF-style descriptors -- it only computes from `TurnInfo`. Catalog metadata and response shaping stay in BFF. The parity test in `test_analytics_registry.py` keeps Core ids aligned with BFF `REGISTERED_ANALYTICS`.
 
+### Race-specific rules vs analytic modules
+
+Planets.nu mechanics that depend on **`raceid`** belong in **`packages/api/api/concepts/races.py`**, not inside individual analytic packages (for example `military_score_inference/accelerated_start.py`). Analytics import helpers such as `is_evil_empire()` or `evil_empire_free_starbase_fighters_per_host_turn()` from that module.
+
+| Kind of rule | Where it lives |
+|--------------|----------------|
+| Per-race ids, caps, and formulas | `api/concepts/races.py` |
+| Game-wide homeworld / accelerated-start baselines | The module that owns that cross-race behavior (e.g. `accelerated_start.py`) |
+| Geometry / reachability shared across features | Other `api/concepts/` modules (`warp_well`, `flare_points`, …) |
+
+See [CONTEXT.md](../CONTEXT.md) (**Race-specific game concept**) and [design-adding-a-turn-analytic.md](design-adding-a-turn-analytic.md) (reuse game concepts).
+
 ## BFF
 
 - Shared routes in `packages/bff/bff/routers/analytics.py`.
