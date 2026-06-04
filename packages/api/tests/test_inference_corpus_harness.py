@@ -42,3 +42,25 @@ def test_manifest_rejects_empty_cases(tmp_path):
     manifest_path.write_text('{"version": 1, "cases": []}')
     with pytest.raises(ValueError, match="non-empty"):
         load_manifest(manifest_path)
+
+
+def test_manifest_rejects_non_integer_required_perspectives(tmp_path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        """
+        {
+          "version": 1,
+          "cases": [{
+            "id": "bad-required",
+            "gameId": 1,
+            "perspective": 1,
+            "hostTurn": 2,
+            "priorTurnPath": "a/1/turns/2.json",
+            "scoreTurnPath": "a/1/turns/3.json",
+            "requiredPerspectives": [1, "2"]
+          }]
+        }
+        """
+    )
+    with pytest.raises(ValueError, match=r"requiredPerspectives\[1\] must be an integer"):
+        load_manifest(manifest_path)

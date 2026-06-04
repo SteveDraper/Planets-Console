@@ -28,13 +28,11 @@ def verify_top_solution_hard_equalities(
     military_sum = 0
     warship_sum = 0
     freighter_sum = 0
-    for entry in action_entries:
-        if not isinstance(entry, dict):
-            continue
-        action_id = entry.get("actionId")
-        count = entry.get("count")
-        if not isinstance(action_id, str) or not isinstance(count, int) or count == 0:
-            continue
+    for index, entry in enumerate(action_entries):
+        parsed = _parse_solution_action_entry(index, entry)
+        if isinstance(parsed, str):
+            return parsed
+        action_id, count = parsed
         catalog_action = actions_by_id.get(action_id)
         if catalog_action is None:
             return f"unknown action id in top solution: {action_id}"
@@ -57,3 +55,24 @@ def verify_top_solution_hard_equalities(
             f"observed={observation.freighter_delta}"
         )
     return None
+
+
+def _parse_solution_action_entry(
+    index: int,
+    entry: object,
+) -> tuple[str, int] | str:
+    """Return (actionId, count) or an error message for a malformed serialized action."""
+    if not isinstance(entry, dict):
+        return f"top solution actions[{index}] must be an object, got {type(entry).__name__}"
+
+    action_id = entry.get("actionId")
+    if not isinstance(action_id, str) or not action_id:
+        return f"top solution actions[{index}].actionId must be a non-empty string"
+
+    count = entry.get("count")
+    if not isinstance(count, int):
+        return f"top solution actions[{index}].count must be an integer"
+    if count <= 0:
+        return f"top solution actions[{index}].count must be positive, got {count}"
+
+    return action_id, count

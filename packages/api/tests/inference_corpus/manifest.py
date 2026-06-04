@@ -97,11 +97,15 @@ def _parse_case(
     required_perspectives_raw = entry.get("requiredPerspectives", [])
     if not isinstance(required_perspectives_raw, list):
         raise ValueError(f"case {case_id}: requiredPerspectives must be an array")
-    required_perspectives = tuple(
-        perspective_slot
-        for perspective_slot in required_perspectives_raw
-        if isinstance(perspective_slot, int)
-    )
+    required_perspectives_list: list[int] = []
+    for index, perspective_slot in enumerate(required_perspectives_raw):
+        if not isinstance(perspective_slot, int):
+            raise ValueError(
+                f"case {case_id}: requiredPerspectives[{index}] must be an integer, "
+                f"got {type(perspective_slot).__name__}"
+            )
+        required_perspectives_list.append(perspective_slot)
+    required_perspectives = tuple(required_perspectives_list)
 
     notes = entry.get("notes")
     if notes is not None and not isinstance(notes, str):
