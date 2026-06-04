@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from api.analytics.military_score_inference.analytic import infer_military_score_build
+from api.analytics.military_score_inference.analytic import run_inference_with_artifacts
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED
 from api.models.player import Score
 
@@ -78,7 +78,7 @@ def run_manifest_case(
             failure_message=str(exc),
         )
 
-    inference = infer_military_score_build(score, score_turn)
+    inference, observation, catalog = run_inference_with_artifacts(score, score_turn)
     status = inference.get("status")
     if not isinstance(status, str):
         return CorpusCaseResult(
@@ -106,11 +106,14 @@ def run_manifest_case(
         )
 
     if status in {STATUS_EXACT, STATUS_TIME_LIMITED} and solution_count >= 1:
-        verify_failure = verify_top_solution_hard_equalities(
-            score=score,
-            turn=score_turn,
-            inference_payload=inference,
-        )
+        if catalog is None:
+            verify_failure = "constraint re-check requires catalog from inference run"
+        else:
+            verify_failure = verify_top_solution_hard_equalities(
+                observation=observation,
+                catalog=catalog,
+                inference_payload=inference,
+            )
         if verify_failure is not None:
             return CorpusCaseResult(
                 case_id=case.id,

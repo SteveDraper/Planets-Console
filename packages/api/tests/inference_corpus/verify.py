@@ -1,21 +1,16 @@
 """Tier 1 constraint re-check for inference corpus cases."""
 
-from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
-from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.models import CandidateAction
-from api.models.game import TurnInfo
-from api.models.player import Score
+from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.models import CandidateAction, InferenceObservation
 
 
 def verify_top_solution_hard_equalities(
     *,
-    score: Score,
-    turn: TurnInfo,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
     inference_payload: dict[str, object],
 ) -> str | None:
     """Return an error message when the top solution violates hard equalities."""
-    observation = build_inference_observation(score, turn)
-    catalog = build_action_catalog_from_turn(observation, turn)
     actions_by_id: dict[str, CandidateAction] = {action.id: action for action in catalog.actions}
 
     solutions = inference_payload.get("solutions")
