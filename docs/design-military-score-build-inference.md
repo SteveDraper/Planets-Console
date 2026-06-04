@@ -98,6 +98,8 @@ Observation mapping on turn **N** (implementation: `observation_deltas_from_scor
 
 Corpus and regression fixtures for accelerated games (e.g. game `628580`) should document that a case with `scoreTurn = N` is explaining activity through the first reliable scoreboard snapshot, not a single host turn in isolation. See [design-inference-corpus.md](design-inference-corpus.md) case notes when authoring manifests.
 
+**Race-specific candidate actions** (e.g. Evil Empire free starbase fighters) use Planets.nu race ids and settings from **`api.concepts.races`**. **`accelerated_start.py`** holds only cross-race accelerated-start and homeworld baseline logic. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
+
 ---
 
 ## 4. Problem formulation

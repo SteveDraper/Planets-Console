@@ -1,7 +1,10 @@
 """Pure game-domain rules (no HTTP, no storage).
 
-Concept modules are imported by services and tests. Routers load state via services
-then call into this package.
+Concept modules are imported by services, analytics, and tests. Routers load state via
+services then call into this package.
+
+Race-specific ``raceid`` constants and mechanics live in ``races.py`` (see CONTEXT.md
+**Race-specific game concept** and docs/design-analytics-structure.md).
 """
 
 from api.concepts.flare_points import (
@@ -9,6 +12,11 @@ from api.concepts.flare_points import (
     FLARE_POINT_TUPLES_REGULAR_MOVEMENT,
     FlareMovementKind,
     flare_points_for_warp,
+)
+from api.concepts.races import (
+    EVIL_EMPIRE_RACE_ID,
+    evil_empire_free_starbase_fighters_per_host_turn,
+    is_evil_empire,
 )
 from api.concepts.warp_well import (
     WarpWellKind,
@@ -21,9 +29,12 @@ from api.concepts.warp_well import (
 )
 
 __all__ = [
+    "EVIL_EMPIRE_RACE_ID",
     "FLARE_POINT_TUPLES_GRAVITONIC_MOVEMENT",
     "FLARE_POINT_TUPLES_REGULAR_MOVEMENT",
     "FlareMovementKind",
+    "evil_empire_free_starbase_fighters_per_host_turn",
+    "is_evil_empire",
     "WarpWellKind",
     "coordinate_in_warp_well",
     "flare_points_for_warp",

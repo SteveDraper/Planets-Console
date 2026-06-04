@@ -13,6 +13,11 @@ This layer owns the data model and all business logic. It has no knowledge of th
 ```
 packages/api/
 ├── models/       # Dataclass definitions — the data model
+├── concepts/     # Host-aligned game rules (no HTTP, no storage); see CONTEXT.md "Game concept"
+│   ├── races.py  # Race-specific raceid constants and mechanics — do not duplicate in analytics/
+│   ├── warp_well.py
+│   └── …
+├── analytics/    # Turn-scoped analytic handlers; import race rules from concepts/races.py
 ├── services/     # Business logic (called by routers, call storage via injected backend)
 ├── routers/      # FastAPI APIRouter definitions (one file per domain resource)
 ├── transport/    # Optional request/response contract models when HTTP contracts differ from domain models
@@ -21,6 +26,8 @@ packages/api/
 ├── config.py     # AppConfig dataclass + load_config() (see python-tooling.mdc)
 └── app.py        # Core REST API FastAPI sub-app assembly — mounts API routers only
 ```
+
+**Race-specific rules:** Anything keyed to a Planets.nu `raceid` lives in `concepts/races.py`. Analytic modules (including `analytics/military_score_inference/`) import helpers from there; they do not define new per-race constants locally. Game-wide rules (homeworld baselines, accelerated start) stay in the module that owns that behavior.
 
 ## Data Model
 

@@ -22,9 +22,7 @@ from api.analytics.military_score_inference.scoring import (
     starbase_fighter_score_delta_2x,
 )
 from api.models.game import GameSettings, TurnInfo
-from api.models.player import Player, Score
-
-EVIL_EMPIRE_RACE_ID = 8
+from api.models.player import Score
 
 # Standard Planets.nu homeworld starbase starting inventory when ``homeworldhasstarbase``.
 HOMEBASE_STARBASE_DEFENSE_POSTS = 100
@@ -34,7 +32,6 @@ HOMEBASE_STARTING_FREIGHTERS = 1
 HOMEBASE_STARTING_CAPITAL_SHIPS = 0
 HOMEBASE_STARTING_STARBASES = 1
 STANDARD_STARBASE_MAX_FIGHTERS = 60
-EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_BASE = 5
 
 
 @dataclass(frozen=True)
@@ -65,10 +62,6 @@ def accelerated_turn_count(settings: GameSettings) -> int:
     return max(0, settings.acceleratedturns)
 
 
-def has_accelerated_start(settings: GameSettings) -> bool:
-    return accelerated_turn_count(settings) > 0
-
-
 def is_unreliable_accelerated_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
     """Return whether persisted scoreboard rows omit reliable totals on this turn."""
     accelerated = accelerated_turn_count(settings)
@@ -79,11 +72,6 @@ def is_first_reliable_scoreboard_turn(turn_number: int, settings: GameSettings) 
     """Return whether this is the first host turn with a filled-in scoreboard row."""
     accelerated = accelerated_turn_count(settings)
     return accelerated > 0 and turn_number == accelerated
-
-
-def evil_empire_free_starbase_fighters_per_host_turn(settings: GameSettings) -> int:
-    """Free fighters an Evil Empire starbase may build each host turn when stocked."""
-    return EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_BASE + settings.freestarbasefighters5adjustment
 
 
 def starting_scoreboard_snapshot(settings: GameSettings) -> ScoreboardSnapshot:
@@ -118,25 +106,6 @@ def synthetic_scoreboard_before_reported_deltas(score: Score) -> ScoreboardSnaps
         starbases=score.starbases - score.starbasechange,
         prioritypoints=score.prioritypoints - score.prioritypointchange,
     )
-
-
-def _player_race_id(turn: TurnInfo, player_id: int) -> int:
-    if turn.player.id == player_id:
-        return turn.player.raceid
-    for player in turn.players:
-        if player.id == player_id:
-            return player.raceid
-    return 0
-
-
-def effective_score_row(score: Score, turn: TurnInfo) -> Score:
-    """Return scoreboard fields to use when persisted rows are missing accelerated data."""
-    turn_number = turn.settings.turn
-    settings = turn.settings
-    if is_unreliable_accelerated_scoreboard_turn(turn_number, settings) and turn_number == 1:
-        baseline = starting_scoreboard_snapshot(settings)
-        return _apply_snapshot(score, baseline)
-    return score
 
 
 def infer_accelerated_window_ship_builds(
@@ -222,12 +191,3 @@ def _apply_snapshot(score: Score, snapshot: ScoreboardSnapshot) -> Score:
         inventorychange=0,
         planetchange=0,
     )
-
-
-def find_player(turn: TurnInfo, player_id: int) -> Player | None:
-    if turn.player.id == player_id:
-        return turn.player
-    for player in turn.players:
-        if player.id == player_id:
-            return player
-    return None

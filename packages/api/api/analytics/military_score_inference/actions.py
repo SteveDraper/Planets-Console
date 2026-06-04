@@ -3,10 +3,8 @@
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.accelerated_start import (
-    EVIL_EMPIRE_RACE_ID,
     HOMEBASE_STARBASE_FIGHTERS,
     STANDARD_STARBASE_MAX_FIGHTERS,
-    evil_empire_free_starbase_fighters_per_host_turn,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -22,6 +20,10 @@ from api.analytics.military_score_inference.scoring import (
     ship_construction_score_delta_2x,
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
+)
+from api.concepts.races import (
+    evil_empire_free_starbase_fighters_per_host_turn,
+    is_evil_empire,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
@@ -263,7 +265,7 @@ def _evil_empire_free_starbase_fighter_actions(
 ) -> list[CandidateAction]:
     """High-probability free starbase fighters for Evil Empire when resources allow."""
     player = _player_by_id(turn, observation.player_id)
-    if player.raceid != EVIL_EMPIRE_RACE_ID:
+    if not is_evil_empire(player.raceid):
         return []
 
     free_per_host_turn = evil_empire_free_starbase_fighters_per_host_turn(turn.settings)

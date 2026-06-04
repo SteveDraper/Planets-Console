@@ -11,13 +11,13 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog,
     build_action_catalog_from_turn,
     buildable_hull_ids_for_player,
-    evil_empire_free_starbase_fighters_per_host_turn,
 )
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
 )
+from api.concepts.races import evil_empire_free_starbase_fighters_per_host_turn
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
