@@ -24,6 +24,14 @@ COMPLEXITY_ORDINAL: dict[ComplexityLevel, int] = {
 
 
 @dataclass(frozen=True)
+class DiscoveredCase:
+    id: str
+    game_id: int
+    perspective: int
+    host_turn: int
+
+
+@dataclass(frozen=True)
 class ManifestCase:
     id: str
     game_id: int
@@ -50,6 +58,7 @@ class CorpusCaseResult:
     solution_count: int | None = None
     complexity: ComplexityLevel | None = None
     complexity_reasons: tuple[str, ...] = ()
+    ground_truth_available: bool | None = None
     coverage_reason: str | None = None
     skip_reason: str | None = None
     failure_message: str | None = None
