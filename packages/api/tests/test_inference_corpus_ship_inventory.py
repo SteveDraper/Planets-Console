@@ -12,6 +12,7 @@ from tests.inference_corpus.ship_inventory import (
     loaded_fighter_count,
     loaded_torpedo_count,
     new_owned_ships,
+    ship_to_build_combo_id,
     torpedo_load_delta_by_type,
 )
 
@@ -53,6 +54,12 @@ def test_torp_delta_uses_ammo_not_launcher_count():
     assert deltas == {}
     full_deltas = torpedo_load_delta_by_type(prior_turn, score_turn, player_id=1)
     assert full_deltas.get(6) == 40
+
+
+def test_missouri_maps_to_factored_combo_id():
+    prior_turn, score_turn = _turn_pair()
+    new_ship = new_owned_ships(prior_turn, score_turn, player_id=1)[0]
+    assert ship_to_build_combo_id(new_ship, score_turn) == "combo_13_9_3_6_8_6"
 
 
 def test_describe_new_ship_build_includes_components():

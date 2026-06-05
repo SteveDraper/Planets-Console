@@ -16,7 +16,7 @@
       "requireTopK": false,
       "expectCoverage": false,
       "requiredPerspectives": [],
-      "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth unavailable until combo catalog (#51)."
+      "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth unavailable (build-time torp load vs military delta)."
     },
     {
       "id": "628580-p1-host51",

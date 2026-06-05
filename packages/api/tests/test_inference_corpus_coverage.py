@@ -19,7 +19,12 @@ from tests.inference_corpus.catalog_coverage import (
     resolve_coverage_for_case,
 )
 from tests.inference_corpus.fixtures import load_turn_fixture
-from tests.inference_corpus.ground_truth import GroundTruthExtraction, extract_ground_truth_v1
+from tests.inference_corpus.ground_truth import (
+    GroundTruthExtraction,
+    extract_ground_truth_v1,
+    format_ground_truth_summary,
+)
+from tests.inference_corpus.ship_inventory import new_owned_ships, ship_to_build_combo_id
 from tests.inference_corpus.manifest import FIXTURES_ROOT, load_manifest, resolve_player_id
 from tests.inference_corpus.models import CaseOutcome
 from tests.inference_corpus.run import run_manifest_case
@@ -63,7 +68,7 @@ def test_evaluate_catalog_coverage_combo_not_in_catalog():
         ship_build_combos=(),
         probability_buckets_by_action_id={},
     )
-    result = evaluate_catalog_coverage((("build_99_torpedoes", 1),), catalog)
+    result = evaluate_catalog_coverage((("combo_99_1_none_none_0_0", 1),), catalog)
     assert result.in_search_space is False
     assert result.coverage_reason == COVERAGE_REASON_COMBO_NOT_IN_CATALOG
 
@@ -103,6 +108,22 @@ def test_resolve_coverage_skips_when_ground_truth_unavailable():
         complexity_reasons=(),
     )
     assert result is None
+
+
+def test_host2_missouri_combo_id_and_summary_label():
+    _, cases = load_manifest()
+    host2 = next(case for case in cases if case.id == "628580-p1-host2")
+    prior = load_turn_fixture(host2.prior_turn_path, fixtures_root=FIXTURES_ROOT)
+    score_turn = load_turn_fixture(host2.score_turn_path, fixtures_root=FIXTURES_ROOT)
+    player_id = resolve_player_id(host2, fixtures_root=FIXTURES_ROOT)
+    new_ship = new_owned_ships(prior, score_turn, player_id)[0]
+    combo_id = ship_to_build_combo_id(new_ship, score_turn)
+    assert combo_id == "combo_13_9_3_6_8_6"
+    summary = format_ground_truth_summary(((combo_id, 1),), score_turn=score_turn)
+    assert "Missouri Class Battleship" in summary
+    assert "Transwarp Drive" in summary
+    assert "Plasma Bolt" in summary
+    assert "Mark 4 Photon" in summary
 
 
 def test_seed_host2_strict_ground_truth_unavailable():

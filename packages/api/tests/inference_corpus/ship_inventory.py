@@ -2,6 +2,7 @@
 
 from collections import Counter
 
+from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.ship import Ship
@@ -67,6 +68,23 @@ def loaded_torpedo_count(ship: Ship, hull: Hull) -> int:
     if is_fighter_capable(ship, hull):
         return 0
     return ship.ammo if is_torp_capable(ship, hull) else 0
+
+
+def ship_to_build_combo_id(ship: Ship, turn: TurnInfo) -> str | None:
+    """Map a ship's fitted components to the inference catalog combo id scheme."""
+    hull = hulls_by_id(turn).get(ship.hullid)
+    if hull is None:
+        return None
+    beam_id = ship.beamid if ship.beams > 0 else None
+    torp_id = ship.torpedoid if ship.torps > 0 else None
+    return ship_build_combo_id(
+        hull_id=ship.hullid,
+        engine_id=ship.engineid,
+        beam_id=beam_id,
+        torp_id=torp_id,
+        beam_count=ship.beams,
+        launcher_count=ship.torps,
+    )
 
 
 def describe_new_ship_build(ship: Ship, turn: TurnInfo) -> str:
