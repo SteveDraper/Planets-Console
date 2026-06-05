@@ -2,7 +2,7 @@
 
 from dacite.exceptions import DaciteError
 
-from api.errors import ValidationError
+from api.errors import NotFoundError, ValidationError
 from api.models.enums import GameStatus
 from api.models.game import GameInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
@@ -13,6 +13,16 @@ from api.services.credential_service import CredentialService
 from api.services.storage_json import require_dict
 from api.storage.base import StorageBackend
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.sector_display import (
+    sector_display_name_from_game_info,
+    sector_display_name_from_stored_payload,
+)
+
+_sector_title_by_stored_game_id: dict[str, str | None] = {}
+
+
+def clear_sector_title_cache() -> None:
+    _sector_title_by_stored_game_id.clear()
 
 
 class GameService:
@@ -92,7 +102,43 @@ class GameService:
 
         store_key = f"games/{game_id}/info"
         self._storage.put(store_key, remote)
+        self.remember_sector_title_for_game(game_id, info)
         return info
+
+    def remember_sector_title_for_game(self, game_id: int, info: GameInfo) -> None:
+        title = sector_display_name_from_game_info(info)
+        _sector_title_by_stored_game_id[str(game_id)] = title
+
+    def list_stored_games(self) -> dict[str, list[dict[str, str]]]:
+        """Stored game ids with optional sector titles (cache or stored info)."""
+        try:
+            children = self._storage.list("games")
+        except NotFoundError:
+            return {"games": []}
+        games: list[dict[str, str]] = []
+        for child in children:
+            game_id = str(child)
+            entry: dict[str, str] = {"id": game_id}
+            sector = self._resolved_sector_title_for_listed_game(game_id)
+            if sector is not None:
+                entry["sectorName"] = sector
+            games.append(entry)
+        return {"games": games}
+
+    def _resolved_sector_title_for_listed_game(self, game_id: str) -> str | None:
+        cached = _sector_title_by_stored_game_id.get(game_id)
+        if cached is not None or game_id in _sector_title_by_stored_game_id:
+            return cached
+
+        try:
+            raw = self._storage.get(f"games/{game_id}/info")
+        except NotFoundError:
+            title = None
+        else:
+            title = sector_display_name_from_stored_payload(raw)
+
+        _sector_title_by_stored_game_id[game_id] = title
+        return title
 
     def get_game_info(self, game_id: int) -> GameInfo:
         data = self._storage.get(f"games/{game_id}/info")

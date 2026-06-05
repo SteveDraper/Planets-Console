@@ -1,5 +1,6 @@
 """BFF Scores table analytic handler."""
 
+from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor
@@ -140,11 +141,7 @@ def inference_from_core(core_inference: object, *, player_id: int) -> dict[str, 
     return _shape_inference_detail(core_inference, player_id=player_id)
 
 
-DESCRIPTOR = AnalyticDescriptor(
-    id=ANALYTIC_ID,
-    name="Scores",
-    supports_table=True,
-    supports_map=False,
-    type="selectable",
+DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(
+    catalog_entry(ANALYTIC_ID),
     get_table=get_table,
 )

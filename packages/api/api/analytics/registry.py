@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from api.analytics.base_map import ANALYTIC_ID as BASE_MAP_ID
 from api.analytics.base_map import get_base_map
+from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
 from api.analytics.connections import ANALYTIC_ID as CONNECTIONS_ID
 from api.analytics.connections import get_connections_map
 from api.analytics.options import TurnAnalyticsOptions
@@ -25,12 +26,18 @@ def _scores_handler(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
     return get_scores_table(turn, options)
 
 
-TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
+_HANDLERS_BY_ID: dict[str, TurnAnalyticHandler] = {
     BASE_MAP_ID: _base_map_handler,
     SCORES_ID: _scores_handler,
     CONNECTIONS_ID: get_connections_map,
     STELLAR_CARTOGRAPHY_ID: get_stellar_cartography_map,
 }
+
+
+TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = dict_aligned_with_turn_analytic_catalog(
+    _HANDLERS_BY_ID,
+    role="Core handlers",
+)
 
 
 def get_turn_analytic(analytic_id: str, turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:

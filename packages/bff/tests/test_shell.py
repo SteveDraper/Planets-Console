@@ -7,6 +7,7 @@ from api.storage import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
+from bff.core_client import clear_core_client_cache
 from bff.diagnostics_buffer import get_diagnostics_buffer
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _reset():
     clear_backend_cache()
+    clear_core_client_cache()
     set_bff_config(BffConfig())
     get_diagnostics_buffer().clear()
     set_api_config(
@@ -27,6 +29,7 @@ def _reset():
     )
     yield
     clear_backend_cache()
+    clear_core_client_cache()
 
 
 def test_shell_bootstrap_null_when_unconfigured():

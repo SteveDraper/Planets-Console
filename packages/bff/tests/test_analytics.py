@@ -10,6 +10,7 @@ from api.config import set_config as set_api_config
 from api.storage import clear_backend_cache, get_storage
 from bff.analytics import ANALYTICS_LIST
 from bff.app import app
+from bff.core_client import clear_core_client_cache
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -24,6 +25,7 @@ ASSETS_DIR = REPO_PACKAGES_DIR / "api" / "api" / "storage" / "assets"
 def _setup_storage_for_core_calls():
     """Seed Core storage so BFF can call Core via ASGI transport."""
     clear_backend_cache()
+    clear_core_client_cache()
     set_api_config(
         ApiConfig(
             storage_backend="ephemeral",
@@ -38,6 +40,7 @@ def _setup_storage_for_core_calls():
         storage.put("games/628580/1/turns/111", json.load(f))
     yield
     clear_backend_cache()
+    clear_core_client_cache()
 
 
 def test_list_analytics_returns_analytics_list():

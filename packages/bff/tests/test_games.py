@@ -7,12 +7,12 @@ from unittest.mock import patch
 import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
-from api.services.store_service import StoreService
+from api.services.game_service import clear_sector_title_cache
 from api.storage import clear_backend_cache, get_storage
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
-from bff.core_client import clear_sector_title_cache
+from bff.core_client import clear_core_client_cache
 from bff.diagnostics_buffer import get_diagnostics_buffer
 from fastapi.testclient import TestClient
 
@@ -24,6 +24,7 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "api" / "api" / "st
 @pytest.fixture(autouse=True)
 def _reset_storage():
     clear_backend_cache()
+    clear_core_client_cache()
     clear_sector_title_cache()
     set_bff_config(BffConfig())
     get_diagnostics_buffer().clear()
@@ -36,6 +37,7 @@ def _reset_storage():
     )
     yield
     clear_backend_cache()
+    clear_core_client_cache()
 
 
 def test_list_games_empty_when_no_games_path():
@@ -82,14 +84,14 @@ def test_list_games_does_not_re_read_info_when_sector_titles_are_cached():
     storage.put("games/222/info", payload)
 
     info_reads: list[str] = []
-    original_read = StoreService.read
+    original_get = storage.get
 
-    def counting_read(self, path: str) -> object:
+    def counting_get(path: str) -> object:
         if path.startswith("games/") and path.endswith("/info"):
             info_reads.append(path)
-        return original_read(self, path)
+        return original_get(path)
 
-    with patch.object(StoreService, "read", counting_read):
+    with patch.object(storage, "get", counting_get):
         r1 = client.get("/games")
         r2 = client.get("/games")
 

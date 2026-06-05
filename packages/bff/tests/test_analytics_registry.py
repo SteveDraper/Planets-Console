@@ -1,6 +1,7 @@
 """Tests for BFF analytics modules and registry dispatch."""
 
 import pytest
+from api.analytics.catalog import TURN_ANALYTIC_CATALOG
 from api.diagnostics import NOOP_DIAGNOSTICS
 from api.transport.connections_options import derive_include_illustrative_routes
 from bff.analytics import (
@@ -16,6 +17,12 @@ from bff.analytics.registry import REGISTERED_ANALYTICS
 from bff.errors import BFFValidationError
 
 
+def test_registered_analytics_follow_catalog_order():
+    assert [descriptor.id for descriptor in REGISTERED_ANALYTICS] == [
+        entry.id for entry in TURN_ANALYTIC_CATALOG
+    ]
+
+
 def test_registered_analytics_have_unique_ids_and_handlers():
     ids = [descriptor.id for descriptor in REGISTERED_ANALYTICS]
     assert len(ids) == len(set(ids))
@@ -24,18 +31,6 @@ def test_registered_analytics_have_unique_ids_and_handlers():
             assert descriptor.get_table is not None
         if descriptor.supports_map:
             assert descriptor.get_map is not None
-
-
-def test_bff_descriptors_match_core_turn_analytics_registry():
-    """BFF catalog ids must match Core TURN_ANALYTICS keys (both directions)."""
-    from api.analytics.registry import TURN_ANALYTICS
-
-    bff_ids = {descriptor.id for descriptor in REGISTERED_ANALYTICS}
-    core_ids = set(TURN_ANALYTICS)
-    assert bff_ids == core_ids, (
-        f"Registry mismatch: BFF-only={sorted(bff_ids - core_ids)!r}, "
-        f"Core-only={sorted(core_ids - bff_ids)!r}"
-    )
 
 
 def test_registry_metadata_keeps_scores_selectable_table_only():

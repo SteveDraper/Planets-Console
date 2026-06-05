@@ -18,13 +18,10 @@ from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
 from api.services.load_all_turns import LoadAllTurnsService
-from api.services.stack import build_service_stack
-from api.services.store_service import StoreService
+from api.services.stack import build_default_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
-from api.storage import get_storage
-from api.storage.base import StorageBackend
 from api.transport.concept_stellar_cartography import (
     StellarCartographySampleResponse,
     StellarCartographyTurnSummaryResponse,
@@ -37,10 +34,6 @@ from api.transport.concept_warp_well import (
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 from api.transport.load_all_turns import LoadAllStreamItem
-from api.transport.sector_display import (
-    sector_display_name_from_game_info,
-    sector_display_name_from_stored_payload,
-)
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
 
@@ -53,8 +46,6 @@ from bff.transport.game_responses import (
 
 T = TypeVar("T")
 
-_sector_title_by_stored_game_id: dict[str, str | None] = {}
-
 
 class CoreClient:
     """Allowed Core surface for BFF routers: services only, no direct storage in routes."""
@@ -62,23 +53,18 @@ class CoreClient:
     def __init__(
         self,
         *,
-        game_service: GameService | None = None,
-        turn_load_service: TurnLoadService | None = None,
-        load_all_turns_service: LoadAllTurnsService | None = None,
-        turn_concept_service: TurnConceptService | None = None,
-        turn_analytic_service: TurnAnalyticService | None = None,
-        store_service: StoreService | None = None,
+        game_service: GameService,
+        turn_load_service: TurnLoadService,
+        load_all_turns_service: LoadAllTurnsService,
+        turn_concept_service: TurnConceptService,
+        turn_analytic_service: TurnAnalyticService,
         planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
-        storage: StorageBackend | None = None,
     ) -> None:
-        backend = storage or get_storage()
-        games, turns, load_all, concepts, analytics = build_service_stack(backend)
-        self._games = game_service or games
-        self._turns = turn_load_service or turns
-        self._load_all = load_all_turns_service or load_all
-        self._concepts = turn_concept_service or concepts
-        self._analytics = turn_analytic_service or analytics
-        self._store = store_service or StoreService(backend)
+        self._games = game_service
+        self._turns = turn_load_service
+        self._load_all = load_all_turns_service
+        self._concepts = turn_concept_service
+        self._analytics = turn_analytic_service
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
 
     def _invoke(self, fn: Callable[[], T]) -> T:
@@ -91,43 +77,7 @@ class CoreClient:
             ) from exc
 
     def list_stored_games(self) -> dict[str, list[dict[str, str]]]:
-        def work() -> dict[str, list[dict[str, str]]]:
-            try:
-                shallow = self._store.read_shallow("games")
-            except NotFoundError:
-                return {"games": []}
-            children = shallow.get("children") or []
-            games: list[dict[str, str]] = []
-            for child in children:
-                game_id = str(child)
-                entry: dict[str, str] = {"id": game_id}
-                sector = self._resolved_sector_title_for_listed_game(game_id)
-                if sector is not None:
-                    entry["sectorName"] = sector
-                games.append(entry)
-            return {"games": games}
-
-        return self._invoke(work)
-
-    def _resolved_sector_title_for_listed_game(self, game_id: str) -> str | None:
-        cached = _sector_title_by_stored_game_id.get(game_id)
-        if cached is not None or game_id in _sector_title_by_stored_game_id:
-            return cached
-
-        def read_title() -> str | None:
-            try:
-                raw = self._store.read(f"games/{game_id}/info")
-            except NotFoundError:
-                return None
-            return sector_display_name_from_stored_payload(raw)
-
-        title = self._invoke(read_title)
-        _sector_title_by_stored_game_id[game_id] = title
-        return title
-
-    def remember_sector_title_for_game(self, game_id: int, info: GameInfo) -> None:
-        title = sector_display_name_from_game_info(info)
-        _sector_title_by_stored_game_id[str(game_id)] = title
+        return self._invoke(self._games.list_stored_games)
 
     def list_stored_turn_perspectives(
         self,
@@ -148,9 +98,7 @@ class CoreClient:
         def work() -> GameInfo:
             return self._games.update_game_info(game_id, body, planets)
 
-        updated = self._invoke(work)
-        self.remember_sector_title_for_game(game_id, updated)
-        return updated
+        return self._invoke(work)
 
     def load_all_turns_status(self, game_id: int, username: str) -> BffLoadAllTurnsStatusResponse:
         def work() -> BffLoadAllTurnsStatusResponse:
@@ -289,9 +237,29 @@ class CoreClient:
         )
 
 
+_core_client_singleton: CoreClient | None = None
+
+
+def clear_core_client_cache() -> None:
+    """Drop the cached client (tests after ``clear_backend_cache`` / config change)."""
+    global _core_client_singleton
+    _core_client_singleton = None
+
+
+def _build_core_client() -> CoreClient:
+    games, turns, load_all, concepts, analytics = build_default_service_stack()
+    return CoreClient(
+        game_service=games,
+        turn_load_service=turns,
+        load_all_turns_service=load_all,
+        turn_concept_service=concepts,
+        turn_analytic_service=analytics,
+    )
+
+
 def get_core_client() -> CoreClient:
-    return CoreClient()
-
-
-def clear_sector_title_cache() -> None:
-    _sector_title_by_stored_game_id.clear()
+    """Process-singleton in-process Core facade (one service stack per storage backend)."""
+    global _core_client_singleton
+    if _core_client_singleton is None:
+        _core_client_singleton = _build_core_client()
+    return _core_client_singleton
