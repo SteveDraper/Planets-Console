@@ -1,12 +1,17 @@
 """Run one inference corpus case through the production inference API."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
+from api.analytics.military_score_inference.actions import (
+    ActionCatalog,
+    build_action_catalog_from_turn,
+)
 from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
     run_inference_with_artifacts,
 )
+from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -14,13 +19,16 @@ from api.services.game_service import GameService
 from api.services.store_service import StoreService
 from api.services.turn_load_service import TurnLoadService
 
-from tests.inference_corpus.catalog_coverage import resolve_coverage_for_case
+from tests.inference_corpus.case_helpers import score_for_player
+from tests.inference_corpus.catalog_coverage import (
+    COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
+    resolve_coverage_for_case,
+)
 from tests.inference_corpus.complexity import (
-    MergedTurnInventory,
     classify_complexity,
     merge_turn_inventories,
+    merged_inventory_for_case,
 )
-from tests.inference_corpus.discovery import list_perspectives_with_turn_pair
 from tests.inference_corpus.fixtures import (
     assert_required_perspectives_present,
     load_turn_fixture,
@@ -39,6 +47,21 @@ from tests.inference_corpus.storage_loader import resolve_player_id_for_case
 from tests.inference_corpus.verify import verify_top_solution_hard_equalities
 
 DEFAULT_MAX_COMPLEXITY: ComplexityLevel = "heavy"
+
+
+@dataclass(frozen=True)
+class LoadedCorpusCase:
+    """Turn data and run parameters shared by manifest and discovered cases."""
+
+    case_id: str
+    prior_turn: TurnInfo
+    score_turn: TurnInfo
+    player_id: int
+    score: Score
+    complexity: ComplexityLevel
+    complexity_reasons: tuple[str, ...]
+    expected_status: str
+    expect_coverage: bool
 
 
 def run_manifest_case(
@@ -124,16 +147,18 @@ def run_manifest_case(
             skip_reason=skip_reason,
         )
 
-    return _run_case_pipeline(
-        case_id=case.id,
-        prior_turn=prior_turn,
-        score_turn=score_turn,
-        player_id=player_id,
-        score=score,
-        complexity=complexity,
-        complexity_reasons=complexity_reasons,
-        expected_status=case.expected_status,
-        expect_coverage=case.expect_coverage,
+    return run_loaded_case(
+        LoadedCorpusCase(
+            case_id=case.id,
+            prior_turn=prior_turn,
+            score_turn=score_turn,
+            player_id=player_id,
+            score=score,
+            complexity=complexity,
+            complexity_reasons=complexity_reasons,
+            expected_status=case.expected_status,
+            expect_coverage=case.expect_coverage,
+        )
     )
 
 
@@ -198,98 +223,87 @@ def run_discovered_case(
             skip_reason=skip_reason,
         )
 
-    return _run_case_pipeline(
-        case_id=case.id,
-        prior_turn=prior_turn,
-        score_turn=score_turn,
-        player_id=player_id,
-        score=score,
-        complexity=complexity,
-        complexity_reasons=complexity_reasons,
-        expected_status=expected_status,
-        expect_coverage=expect_coverage,
-    )
-
-
-def merged_inventory_for_case(
-    case: DiscoveredCase,
-    *,
-    turn_load: TurnLoadService,
-    store: StoreService,
-    prior_turn: TurnInfo,
-    score_turn: TurnInfo,
-) -> MergedTurnInventory:
-    score_turn_number = case.host_turn + 1
-    other_perspectives = [
-        perspective
-        for perspective in list_perspectives_with_turn_pair(
-            store,
-            game_id=case.game_id,
-            host_turn=case.host_turn,
-            score_turn=score_turn_number,
+    return run_loaded_case(
+        LoadedCorpusCase(
+            case_id=case.id,
+            prior_turn=prior_turn,
+            score_turn=score_turn,
+            player_id=player_id,
+            score=score,
+            complexity=complexity,
+            complexity_reasons=complexity_reasons,
+            expected_status=expected_status,
+            expect_coverage=expect_coverage,
         )
-        if perspective != case.perspective
-    ]
-    other_prior: list[TurnInfo] = []
-    other_score: list[TurnInfo] = []
-    for perspective in other_perspectives:
-        other_prior.append(turn_load.get_turn_info(case.game_id, perspective, case.host_turn))
-        other_score.append(turn_load.get_turn_info(case.game_id, perspective, score_turn_number))
-    return merge_turn_inventories(
-        case_perspective_prior=prior_turn,
-        case_perspective_score=score_turn,
-        other_prior_turns=tuple(other_prior),
-        other_score_turns=tuple(other_score),
     )
 
 
-def _run_case_pipeline(
-    *,
-    case_id: str,
-    prior_turn: TurnInfo,
-    score_turn: TurnInfo,
-    player_id: int,
-    score: Score,
-    complexity: ComplexityLevel,
-    complexity_reasons: tuple[str, ...],
-    expected_status: str,
-    expect_coverage: bool,
-) -> CorpusCaseResult:
+def run_loaded_case(loaded: LoadedCorpusCase) -> CorpusCaseResult:
+    """Ground truth, coverage, and Tier 1 on one observation and catalog build."""
     extraction = extract_ground_truth_v1(
-        prior_turn=prior_turn,
-        score_turn=score_turn,
-        player_id=player_id,
-        score=score,
-        complexity=complexity,
+        prior_turn=loaded.prior_turn,
+        score_turn=loaded.score_turn,
+        player_id=loaded.player_id,
+        score=loaded.score,
+        complexity=loaded.complexity,
     )
-    observation = build_inference_observation(score, score_turn)
-    catalog = build_action_catalog_from_turn(observation, score_turn)
+    observation = build_inference_observation(loaded.score, loaded.score_turn)
+    catalog = build_action_catalog_from_turn(observation, loaded.score_turn)
     coverage_block = resolve_coverage_for_case(
         extraction=extraction,
         ground_truth=extraction.ground_truth,
         catalog=catalog,
-        complexity_reasons=complexity_reasons,
-        expect_coverage=expect_coverage,
+        complexity_reasons=loaded.complexity_reasons,
     )
+
+    if loaded.expect_coverage:
+        if not extraction.available:
+            return CorpusCaseResult(
+                case_id=loaded.case_id,
+                outcome=CaseOutcome.FAILED,
+                complexity=loaded.complexity,
+                complexity_reasons=loaded.complexity_reasons,
+                ground_truth_available=False,
+                coverage_reason=COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
+                failure_message=(
+                    "expectCoverage requires ground truth in search space; "
+                    "groundTruthAvailable is false"
+                ),
+            )
+        if coverage_block is not None and not coverage_block.in_search_space:
+            return CorpusCaseResult(
+                case_id=loaded.case_id,
+                outcome=CaseOutcome.FAILED,
+                complexity=loaded.complexity,
+                complexity_reasons=loaded.complexity_reasons,
+                ground_truth_available=True,
+                coverage_reason=coverage_block.coverage_reason,
+                failure_message=(
+                    f"expectCoverage requires in-search-space catalog coverage; "
+                    f"got {coverage_block.coverage_reason!r}"
+                ),
+            )
+
     if coverage_block is not None and not coverage_block.in_search_space:
         return CorpusCaseResult(
-            case_id=case_id,
+            case_id=loaded.case_id,
             outcome=CaseOutcome.OUT_OF_SEARCH_SPACE,
-            complexity=complexity,
-            complexity_reasons=complexity_reasons,
+            complexity=loaded.complexity,
+            complexity_reasons=loaded.complexity_reasons,
             ground_truth_available=extraction.available,
             coverage_reason=coverage_block.coverage_reason,
         )
 
     return _run_tier1_for_loaded_case(
-        case_id=case_id,
-        score_turn=score_turn,
-        player_id=player_id,
-        score=score,
-        complexity=complexity,
-        complexity_reasons=complexity_reasons,
-        expected_status=expected_status,
+        case_id=loaded.case_id,
+        score_turn=loaded.score_turn,
+        score=loaded.score,
+        complexity=loaded.complexity,
+        complexity_reasons=loaded.complexity_reasons,
+        expected_status=loaded.expected_status,
         ground_truth_available=extraction.available,
+        observation=observation,
+        catalog=catalog,
     )
 
 
@@ -297,14 +311,20 @@ def _run_tier1_for_loaded_case(
     *,
     case_id: str,
     score_turn: TurnInfo,
-    player_id: int,
     score: Score,
     complexity: ComplexityLevel | None,
     complexity_reasons: tuple[str, ...],
     expected_status: str,
     ground_truth_available: bool | None = None,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
 ) -> CorpusCaseResult:
-    inference, observation, catalog = run_inference_with_artifacts(score, score_turn)
+    inference, _, _ = run_inference_with_artifacts(
+        score,
+        score_turn,
+        observation=observation,
+        catalog=catalog,
+    )
     status = inference.get("status")
     if not isinstance(status, str):
         return CorpusCaseResult(
@@ -338,14 +358,11 @@ def _run_tier1_for_loaded_case(
         )
 
     if status in {STATUS_EXACT, STATUS_TIME_LIMITED} and solution_count >= 1:
-        if catalog is None:
-            verify_failure = "constraint re-check requires catalog from inference run"
-        else:
-            verify_failure = verify_top_solution_hard_equalities(
-                observation=observation,
-                catalog=catalog,
-                inference_payload=inference,
-            )
+        verify_failure = verify_top_solution_hard_equalities(
+            observation=observation,
+            catalog=catalog,
+            inference_payload=inference,
+        )
         if verify_failure is not None:
             return CorpusCaseResult(
                 case_id=case_id,
@@ -367,13 +384,6 @@ def _run_tier1_for_loaded_case(
         complexity_reasons=complexity_reasons,
         ground_truth_available=ground_truth_available,
     )
-
-
-def score_for_player(scores: list[Score], player_id: int, case_id: str) -> Score:
-    for score in scores:
-        if score.ownerid == player_id:
-            return score
-    raise ValueError(f"case {case_id}: no score row for playerId {player_id}")
 
 
 def _complexity_skip_reason(

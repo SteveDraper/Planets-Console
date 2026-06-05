@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.models import CandidateAction
 
+from tests.inference_corpus.case_helpers import score_for_player
 from tests.inference_corpus.catalog_coverage import (
     COVERAGE_REASON_ACTION_NOT_IN_CATALOG,
     COVERAGE_REASON_COMBO_NOT_IN_CATALOG,
@@ -21,7 +22,7 @@ from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.inference_corpus.ground_truth import GroundTruthExtraction, extract_ground_truth_v1
 from tests.inference_corpus.manifest import FIXTURES_ROOT, load_manifest, resolve_player_id
 from tests.inference_corpus.models import CaseOutcome
-from tests.inference_corpus.run import run_manifest_case, score_for_player
+from tests.inference_corpus.run import run_manifest_case
 
 
 def test_evaluate_catalog_coverage_accepts_empty_ground_truth():
@@ -78,7 +79,7 @@ def test_evaluate_catalog_coverage_count_above_upper_bound():
     assert result.coverage_reason == COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND
 
 
-def test_resolve_coverage_requires_available_ground_truth():
+def test_resolve_coverage_skips_when_ground_truth_unavailable():
     catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
     extraction = GroundTruthExtraction(available=False, unavailable_reason="residual_unexplained")
     result = resolve_coverage_for_case(
@@ -86,11 +87,8 @@ def test_resolve_coverage_requires_available_ground_truth():
         ground_truth=(),
         catalog=catalog,
         complexity_reasons=(),
-        expect_coverage=True,
     )
-    assert result is not None
-    assert result.in_search_space is False
-    assert result.coverage_reason == COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE
+    assert result is None
 
 
 def test_seed_host2_strict_ground_truth_unavailable():
@@ -129,15 +127,37 @@ def test_host2_manifest_runs_tier1_without_coverage_gate():
     assert result.ground_truth_available is False
 
 
-def test_expect_coverage_blocks_solver_when_ground_truth_unavailable():
+def test_expect_coverage_fails_without_solver_when_ground_truth_unavailable():
     _, cases = load_manifest()
     host2 = next(case for case in cases if case.id == "628580-p1-host2")
     coverage_required = host2.__class__(**{**host2.__dict__, "expect_coverage": True})
     with patch("tests.inference_corpus.run.run_inference_with_artifacts") as run_inference:
         result = run_manifest_case(coverage_required)
         run_inference.assert_not_called()
-    assert result.outcome == CaseOutcome.OUT_OF_SEARCH_SPACE
+    assert result.outcome == CaseOutcome.FAILED
     assert result.coverage_reason == COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE
+
+
+def test_available_ground_truth_action_not_in_catalog_out_of_search_without_expect_coverage():
+    _, cases = load_manifest()
+    host51 = next(case for case in cases if case.id == "628580-p1-host51")
+    no_expect_coverage = host51.__class__(**{**host51.__dict__, "expect_coverage": False})
+    forced_extraction = GroundTruthExtraction(
+        available=True,
+        ground_truth=(("missing_action", 1),),
+    )
+    with (
+        patch(
+            "tests.inference_corpus.run.extract_ground_truth_v1",
+            return_value=forced_extraction,
+        ),
+        patch("tests.inference_corpus.run.run_inference_with_artifacts") as run_inference,
+    ):
+        result = run_manifest_case(no_expect_coverage)
+        run_inference.assert_not_called()
+    assert result.outcome == CaseOutcome.OUT_OF_SEARCH_SPACE
+    assert result.ground_truth_available is True
+    assert result.coverage_reason == COVERAGE_REASON_ACTION_NOT_IN_CATALOG
 
 
 def test_host51_fixture_ground_truth_in_catalog():

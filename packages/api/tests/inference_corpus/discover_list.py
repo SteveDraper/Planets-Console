@@ -7,7 +7,8 @@ from api.services.game_service import GameService
 from api.services.store_service import StoreService
 from api.services.turn_load_service import TurnLoadService
 
-from tests.inference_corpus.complexity import classify_complexity
+from tests.inference_corpus.case_helpers import score_for_player
+from tests.inference_corpus.complexity import classify_complexity, merged_inventory_for_case
 from tests.inference_corpus.discovery import discover_cases_for_game
 from tests.inference_corpus.ground_truth import (
     describe_inventory_activity,
@@ -15,7 +16,6 @@ from tests.inference_corpus.ground_truth import (
     format_ground_truth_summary,
 )
 from tests.inference_corpus.models import ComplexityLevel, DiscoveredCase
-from tests.inference_corpus.run import merged_inventory_for_case, score_for_player
 
 
 @dataclass(frozen=True)

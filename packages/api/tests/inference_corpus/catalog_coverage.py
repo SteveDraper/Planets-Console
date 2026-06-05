@@ -77,20 +77,13 @@ def resolve_coverage_for_case(
     ground_truth: GroundTruth,
     catalog: ActionCatalog,
     complexity_reasons: tuple[str, ...],
-    expect_coverage: bool,
 ) -> CatalogCoverageResult | None:
-    """When coverage is required, return a failing result or None if the case may run Tier 1."""
-    if not expect_coverage:
+    """Evaluate catalog coverage when ground truth is available; otherwise skip (Tier 1 may run)."""
+    if not extraction.available:
         return None
 
     deferred_reason = coverage_reason_from_complexity(complexity_reasons)
     if deferred_reason is not None:
         return CatalogCoverageResult(in_search_space=False, coverage_reason=deferred_reason)
-
-    if not extraction.available:
-        return CatalogCoverageResult(
-            in_search_space=False,
-            coverage_reason=COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
-        )
 
     return evaluate_catalog_coverage(ground_truth, catalog)

@@ -1,4 +1,4 @@
-"""Ship inventory helpers for inference corpus ground truth and complexity."""
+"""Inventory delta helpers for inference corpus ground truth and complexity."""
 
 from collections import Counter
 
@@ -183,3 +183,84 @@ def _loaded_torpedo_counts_excluding(
         if loaded > 0 and ship.torpedoid:
             counts[ship.torpedoid] = counts.get(ship.torpedoid, 0) + loaded
     return counts
+
+
+def planet_counts_by_owner(turn: TurnInfo) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for planet in turn.planets:
+        counts[planet.ownerid] = counts.get(planet.ownerid, 0) + 1
+    return counts
+
+
+def starbase_planet_ids(turn: TurnInfo) -> set[int]:
+    return {starbase.planetid for starbase in turn.starbases}
+
+
+def starbase_counts_by_owner(turn: TurnInfo) -> dict[int, int]:
+    starbase_planets = starbase_planet_ids(turn)
+    counts: dict[int, int] = {}
+    for planet in turn.planets:
+        if planet.id in starbase_planets:
+            counts[planet.ownerid] = counts.get(planet.ownerid, 0) + 1
+    return counts
+
+
+def starbase_fighters_by_planet(turn: TurnInfo) -> dict[int, int]:
+    return {starbase.planetid: starbase.fighters for starbase in turn.starbases}
+
+
+def starbase_defense_by_planet(turn: TurnInfo) -> dict[int, int]:
+    return {starbase.planetid: starbase.defense for starbase in turn.starbases}
+
+
+def starbase_fighters_for_owner(turn: TurnInfo, player_id: int) -> int:
+    fighters_by_planet = starbase_fighters_by_planet(turn)
+    return sum(
+        fighters_by_planet.get(planet.id, 0)
+        for planet in turn.planets
+        if planet.ownerid == player_id
+    )
+
+
+def starbase_defense_for_owner(turn: TurnInfo, player_id: int) -> int:
+    defense_by_planet = starbase_defense_by_planet(turn)
+    return sum(
+        defense_by_planet.get(planet.id, 0)
+        for planet in turn.planets
+        if planet.ownerid == player_id
+    )
+
+
+def planet_defense_for_owner(turn: TurnInfo, player_id: int) -> int:
+    return sum(planet.defense for planet in turn.planets if planet.ownerid == player_id)
+
+
+def _positive_inventory_delta(prior_value: int, score_value: int) -> int:
+    return max(0, score_value - prior_value)
+
+
+def starbase_fighter_inventory_delta(
+    prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int
+) -> int:
+    return _positive_inventory_delta(
+        starbase_fighters_for_owner(prior_turn, player_id),
+        starbase_fighters_for_owner(score_turn, player_id),
+    )
+
+
+def starbase_defense_inventory_delta(
+    prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int
+) -> int:
+    return _positive_inventory_delta(
+        starbase_defense_for_owner(prior_turn, player_id),
+        starbase_defense_for_owner(score_turn, player_id),
+    )
+
+
+def planet_defense_inventory_delta(
+    prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int
+) -> int:
+    return _positive_inventory_delta(
+        planet_defense_for_owner(prior_turn, player_id),
+        planet_defense_for_owner(score_turn, player_id),
+    )

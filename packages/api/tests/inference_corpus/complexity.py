@@ -5,12 +5,20 @@ from dataclasses import dataclass
 from api.models.game import TurnInfo
 from api.models.player import Score
 from api.models.ship import Ship
+from api.services.store_service import StoreService
+from api.services.turn_load_service import TurnLoadService
 
-from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel
+from tests.inference_corpus.discovery import list_perspectives_with_turn_pair
+from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel, DiscoveredCase
 from tests.inference_corpus.ship_inventory import (
     fighter_load_delta,
     new_owned_ships,
     owned_active_ships,
+    planet_counts_by_owner,
+    planet_defense_inventory_delta,
+    starbase_counts_by_owner,
+    starbase_defense_inventory_delta,
+    starbase_fighter_inventory_delta,
     torpedo_load_delta_by_type,
 )
 
@@ -62,7 +70,7 @@ def classify_complexity(
     """Return the highest complexity level and human-readable reason strings."""
     reasons: list[str] = []
 
-    new_ships = _new_owned_ships(prior_turn, score_turn, player_id)
+    new_ships = new_owned_ships(prior_turn, score_turn, player_id)
     new_ship_count = len(new_ships)
     aggregate_load_units, aggregate_families = _aggregate_load_signals(
         prior_turn, score_turn, player_id
@@ -135,24 +143,48 @@ def merge_turn_inventories(
     return MergedTurnInventory(
         prior_ships=prior_ships,
         score_ships=score_ships,
-        prior_planet_count_by_owner=_planet_counts_by_owner(case_perspective_prior),
-        score_planet_count_by_owner=_planet_counts_by_owner(case_perspective_score),
-        prior_starbase_count_by_owner=_starbase_counts_by_owner(case_perspective_prior),
-        score_starbase_count_by_owner=_starbase_counts_by_owner(case_perspective_score),
+        prior_planet_count_by_owner=planet_counts_by_owner(case_perspective_prior),
+        score_planet_count_by_owner=planet_counts_by_owner(case_perspective_score),
+        prior_starbase_count_by_owner=starbase_counts_by_owner(case_perspective_prior),
+        score_starbase_count_by_owner=starbase_counts_by_owner(case_perspective_score),
     )
 
 
-def _owned_active_ships(turn: TurnInfo, player_id: int) -> list[Ship]:
-    return owned_active_ships(turn, player_id)
-
-
-def _new_owned_ships(prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int) -> list[Ship]:
-    return new_owned_ships(prior_turn, score_turn, player_id)
+def merged_inventory_for_case(
+    case: DiscoveredCase,
+    *,
+    turn_load: TurnLoadService,
+    store: StoreService,
+    prior_turn: TurnInfo,
+    score_turn: TurnInfo,
+) -> MergedTurnInventory:
+    score_turn_number = case.host_turn + 1
+    other_perspectives = [
+        perspective
+        for perspective in list_perspectives_with_turn_pair(
+            store,
+            game_id=case.game_id,
+            host_turn=case.host_turn,
+            score_turn=score_turn_number,
+        )
+        if perspective != case.perspective
+    ]
+    other_prior: list[TurnInfo] = []
+    other_score: list[TurnInfo] = []
+    for perspective in other_perspectives:
+        other_prior.append(turn_load.get_turn_info(case.game_id, perspective, case.host_turn))
+        other_score.append(turn_load.get_turn_info(case.game_id, perspective, score_turn_number))
+    return merge_turn_inventories(
+        case_perspective_prior=prior_turn,
+        case_perspective_score=score_turn,
+        other_prior_turns=tuple(other_prior),
+        other_score_turns=tuple(other_score),
+    )
 
 
 def _has_ship_count_decrease(prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int) -> bool:
-    prior_count = len(_owned_active_ships(prior_turn, player_id))
-    score_count = len(_owned_active_ships(score_turn, player_id))
+    prior_count = len(owned_active_ships(prior_turn, player_id))
+    score_count = len(owned_active_ships(score_turn, player_id))
     if score_count < prior_count:
         return True
 
@@ -163,30 +195,10 @@ def _has_ship_count_decrease(prior_turn: TurnInfo, score_turn: TurnInfo, player_
         if ship.turnkilled != 0 and ship.turnkilled > prior_turn.settings.turn:
             return True
         if ship.id in prior_ids and ship.id not in {
-            active.id for active in _owned_active_ships(score_turn, player_id)
+            active.id for active in owned_active_ships(score_turn, player_id)
         }:
             return True
     return False
-
-
-def _planet_counts_by_owner(turn: TurnInfo) -> dict[int, int]:
-    counts: dict[int, int] = {}
-    for planet in turn.planets:
-        counts[planet.ownerid] = counts.get(planet.ownerid, 0) + 1
-    return counts
-
-
-def _starbase_planet_ids(turn: TurnInfo) -> set[int]:
-    return {starbase.planetid for starbase in turn.starbases}
-
-
-def _starbase_counts_by_owner(turn: TurnInfo) -> dict[int, int]:
-    starbase_planets = _starbase_planet_ids(turn)
-    counts: dict[int, int] = {}
-    for planet in turn.planets:
-        if planet.id in starbase_planets:
-            counts[planet.ownerid] = counts.get(planet.ownerid, 0) + 1
-    return counts
 
 
 def _has_base_or_planet_count_decrease(merged: MergedTurnInventory, player_id: int) -> bool:
@@ -242,63 +254,25 @@ def _aggregate_load_signals(
         families.add("ship_torps")
         units += ship_torp_delta
 
-    prior_starbase_fighters = _starbase_fighters_for_owner(prior_turn, player_id)
-    score_starbase_fighters = _starbase_fighters_for_owner(score_turn, player_id)
-    starbase_fighter_delta = score_starbase_fighters - prior_starbase_fighters
+    starbase_fighter_delta = starbase_fighter_inventory_delta(prior_turn, score_turn, player_id)
     if starbase_fighter_delta > 0:
         families.add("starbase_fighters")
         units += starbase_fighter_delta
 
-    prior_starbase_defense = _starbase_defense_for_owner(prior_turn, player_id)
-    score_starbase_defense = _starbase_defense_for_owner(score_turn, player_id)
-    starbase_defense_delta = score_starbase_defense - prior_starbase_defense
+    starbase_defense_delta = starbase_defense_inventory_delta(prior_turn, score_turn, player_id)
     if starbase_defense_delta > 0:
         families.add("starbase_defense")
         units += starbase_defense_delta
 
-    prior_planet_defense = _planet_defense_for_owner(prior_turn, player_id)
-    score_planet_defense = _planet_defense_for_owner(score_turn, player_id)
-    planet_defense_delta = score_planet_defense - prior_planet_defense
+    planet_defense_delta = planet_defense_inventory_delta(prior_turn, score_turn, player_id)
     if planet_defense_delta > 0:
         families.add("planet_defense")
         units += planet_defense_delta
 
-    if _new_owned_ships(prior_turn, score_turn, player_id):
+    if new_owned_ships(prior_turn, score_turn, player_id):
         families.add("ship_build")
 
     return units, families
-
-
-def _starbase_by_planet(turn: TurnInfo) -> dict[int, int]:
-    return {starbase.planetid: starbase.fighters for starbase in turn.starbases}
-
-
-def _starbase_defense_by_planet(turn: TurnInfo) -> dict[int, int]:
-    return {starbase.planetid: starbase.defense for starbase in turn.starbases}
-
-
-def _starbase_fighters_for_owner(turn: TurnInfo, player_id: int) -> int:
-    fighters_by_planet = _starbase_by_planet(turn)
-    return sum(
-        fighters
-        for planet in turn.planets
-        if planet.ownerid == player_id
-        for fighters in [fighters_by_planet.get(planet.id, 0)]
-    )
-
-
-def _starbase_defense_for_owner(turn: TurnInfo, player_id: int) -> int:
-    defense_by_planet = _starbase_defense_by_planet(turn)
-    return sum(
-        defense
-        for planet in turn.planets
-        if planet.ownerid == player_id
-        for defense in [defense_by_planet.get(planet.id, 0)]
-    )
-
-
-def _planet_defense_for_owner(turn: TurnInfo, player_id: int) -> int:
-    return sum(planet.defense for planet in turn.planets if planet.ownerid == player_id)
 
 
 def _unexplained_military_change(
