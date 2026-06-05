@@ -291,6 +291,8 @@ GroundTruth = tuple[tuple[str, int], ...]  # (action_id, count) ascending by act
 
 Extract only when **adjunct** is false and complexity <= `heavy`. Otherwise set `groundTruthAvailable: false` and skip coverage/ranking/Tier 2.
 
+**Turn-pair residual scope:** Ground truth is built from inventory deltas between the manifest's `priorTurnPath` and `scoreTurnPath` snapshots (host turn pair). Residual validation compares the explained multiset to **`2 * score.militarychange`** on the score row -- not `build_inference_observation(...).military_delta_2x`. On the first reliable accelerated-start scoreboard row, inference observation is cumulative since homeworld baseline (`observation_deltas_from_score`), while `militarychange` on that row is still the delta for host turn N-1 only. Comparing turn-pair GT to cumulative observation falsely marks explainable cases as `residual_unexplained` (e.g. `628580-p1-host2`). Accelerated-window activity before host turn N-1 is out of scope for turn-pair GT unless extraction is extended to include it explicitly.
+
 **Ship builds (combo catalog, #51+):**
 
 - New ship ids at N+1 not at N, `ownerid == playerId`, `turnkilled == 0`.
@@ -318,7 +320,7 @@ If residual cannot be assigned without deferred effects, set `groundTruthAvailab
 
 ### 9.3 Catalog coverage (v1)
 
-After `build_action_catalog_from_turn(observation, scoreTurn)`:
+When `groundTruthAvailable: true`, for each `(action_id, count)` in ground truth, check against `build_action_catalog_from_turn(observation, scoreTurn)` at escalating `ship_build_tier` values (0 through max), matching solver tier progression. Ship-build combos such as Missouri may only appear at higher tiers.
 
 When `groundTruthAvailable: true`, for each `(action_id, count)` in ground truth:
 

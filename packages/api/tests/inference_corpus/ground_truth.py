@@ -3,7 +3,6 @@
 from collections import Counter
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
     loaded_ship_torpedo_score_delta_2x,
@@ -78,12 +77,11 @@ def extract_ground_truth_v1(
         multiset[action_id] += 1
     multiset.update(new_ship_load_action_counts(new_ships, score_turn))
 
-    observation = build_inference_observation(score, score_turn)
     explained_2x = sum(
         _catalog_score_delta_2x_for_action_id(action_id, score_turn) * multiset[action_id]
         for action_id in multiset
     )
-    residual_2x = observation.military_delta_2x - explained_2x
+    residual_2x = _ground_truth_military_delta_2x(score) - explained_2x
     if residual_2x < 0:
         return GroundTruthExtraction(
             available=False,
@@ -222,6 +220,17 @@ def format_unavailable_ground_truth(
     if activity == "no inventory changes detected":
         return f"ground truth unavailable ({reason})"
     return f"{activity} (strict ground truth unavailable: {reason})"
+
+
+def _ground_truth_military_delta_2x(score: Score) -> int:
+    """Turn-pair military delta for residual checks against inventory-derived GT.
+
+    Ground truth is built from inventory deltas between ``prior_turn`` and
+    ``score_turn`` files. That scope matches ``score.militarychange`` on the
+    score row (including accelerated-start games on the first reliable row,
+    where inference uses cumulative totals since homeworld baseline instead).
+    """
+    return 2 * score.militarychange
 
 
 def _sorted_multiset(counter: Counter[str]) -> GroundTruth:

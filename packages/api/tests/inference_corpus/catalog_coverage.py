@@ -2,8 +2,20 @@
 
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.models import CandidateAction, ShipBuildCombo
+from api.analytics.military_score_inference.actions import (
+    ActionCatalog,
+    build_action_catalog_from_turn,
+)
+from api.analytics.military_score_inference.models import (
+    CandidateAction,
+    InferenceObservation,
+    ShipBuildCombo,
+)
+from api.analytics.military_score_inference.ship_build_combos import (
+    MAX_SHIP_BUILD_TIER,
+    START_SHIP_BUILD_TIER,
+)
+from api.models.game import TurnInfo
 
 from tests.inference_corpus.ground_truth import GroundTruth, GroundTruthExtraction
 
@@ -92,12 +104,38 @@ def evaluate_catalog_coverage(
     return CatalogCoverageResult(in_search_space=True)
 
 
+def evaluate_ground_truth_catalog_coverage(
+    *,
+    ground_truth: GroundTruth,
+    observation: InferenceObservation,
+    score_turn: TurnInfo,
+) -> CatalogCoverageResult:
+    """Check GT against escalating ship-build tiers, matching solver tier progression."""
+    last_result = CatalogCoverageResult(
+        in_search_space=False,
+        coverage_reason=COVERAGE_REASON_COMBO_NOT_IN_CATALOG,
+    )
+    for tier in range(START_SHIP_BUILD_TIER, MAX_SHIP_BUILD_TIER + 1):
+        catalog = build_action_catalog_from_turn(
+            observation,
+            score_turn,
+            ship_build_tier=tier,
+        )
+        result = evaluate_catalog_coverage(ground_truth, catalog)
+        if result.in_search_space:
+            return result
+        last_result = result
+    return last_result
+
+
 def resolve_coverage_for_case(
     *,
     extraction: GroundTruthExtraction,
     ground_truth: GroundTruth,
     catalog: ActionCatalog,
     complexity_reasons: tuple[str, ...],
+    observation: InferenceObservation | None = None,
+    score_turn: TurnInfo | None = None,
 ) -> CatalogCoverageResult | None:
     """Evaluate catalog coverage when ground truth is available; otherwise skip (Tier 1 may run)."""
     if not extraction.available:
@@ -107,4 +145,10 @@ def resolve_coverage_for_case(
     if deferred_reason is not None:
         return CatalogCoverageResult(in_search_space=False, coverage_reason=deferred_reason)
 
+    if observation is not None and score_turn is not None:
+        return evaluate_ground_truth_catalog_coverage(
+            ground_truth=ground_truth,
+            observation=observation,
+            score_turn=score_turn,
+        )
     return evaluate_catalog_coverage(ground_truth, catalog)
