@@ -25,7 +25,7 @@ from api.analytics.military_score_inference.ship_build_presets import ship_build
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.serialization.turn import turn_info_from_json
 
-from tests.test_military_score_inference_actions import _observation
+from tests.fixtures.military_score_inference import _observation
 
 FIXTURES_ROOT = Path(__file__).resolve().parent / "fixtures" / "inference_corpus"
 

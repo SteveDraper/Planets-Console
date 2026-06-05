@@ -1,8 +1,6 @@
 """Tests for military score inference integration with the scores analytic."""
 
-import json
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -35,15 +33,6 @@ from api.analytics.military_score_inference.solver import (
     solve_inference_problem,
 )
 from api.analytics.scores import get_scores_row_inference, get_scores_table
-from api.serialization.turn import turn_info_from_json
-
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-@pytest.fixture
-def sample_turn():
-    with open(ASSETS_DIR / "turn_sample.json") as handle:
-        return turn_info_from_json(json.load(handle))
 
 
 @pytest.fixture
