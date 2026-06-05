@@ -104,7 +104,7 @@ def test_inference_problem_carries_actions_and_buckets():
     )
     problem = InferenceProblem(
         observation=observation,
-        actions=(action,),
+        aggregate_actions=(action,),
         probability_buckets_by_action_id={action.id: (bucket,)},
     )
     result = InferenceResult(
@@ -124,6 +124,6 @@ def test_inference_problem_carries_actions_and_buckets():
         diagnostics={"solver_status": "OPTIMAL"},
     )
 
-    assert problem.actions[0].score_delta_2x == 11
+    assert problem.aggregate_actions[0].score_delta_2x == 11
     assert problem.probability_buckets_by_action_id[action.id][0].marginal_weight == 100
     assert result.solutions[0].actions[0].count == 1

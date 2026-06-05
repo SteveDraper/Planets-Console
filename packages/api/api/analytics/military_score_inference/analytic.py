@@ -87,10 +87,11 @@ def catalog_to_actions_payload(
     observation: InferenceObservation | None = None,
 ) -> dict[str, object]:
     """Serialize the bounded action catalog for diagnostics."""
-    ship_build_actions = [action for action in catalog.actions if action.id.startswith("build_")]
     payload: dict[str, object] = {
         "catalogSize": catalog.catalog_size,
-        "shipBuildActionCount": len(ship_build_actions),
+        "aggregateActionCount": len(catalog.aggregate_actions),
+        "shipBuildComboCount": len(catalog.ship_build_combos),
+        "shipBuildTier": catalog.ship_build_tier,
         "actions": [
             {
                 "id": action.id,
@@ -104,20 +105,28 @@ def catalog_to_actions_payload(
                 "upperBound": action.upper_bound,
                 "probabilityWeight": action.probability_weight,
             }
-            for action in catalog.actions
+            for action in catalog.aggregate_actions
         ],
-        "shipBuildActions": [
+        "shipBuildCombos": [
             {
-                "id": action.id,
-                "label": action.label,
-                "upperBound": action.upper_bound,
-                "scoreDelta2x": action.score_delta_2x,
+                "comboId": combo.combo_id,
+                "label": combo.label,
+                "hullId": combo.hull_id,
+                "engineId": combo.engine_id,
+                "beamId": combo.beam_id,
+                "torpId": combo.torp_id,
+                "beamCount": combo.beam_count,
+                "launcherCount": combo.launcher_count,
+                "upperBound": combo.upper_bound,
+                "scoreDelta2x": combo.score_delta_2x,
             }
-            for action in ship_build_actions
+            for combo in catalog.ship_build_combos
         ],
     }
     if turn is not None and observation is not None:
-        from api.analytics.military_score_inference.actions import buildable_hull_ids_for_player
+        from api.analytics.military_score_inference.component_eligibility import (
+            buildable_hull_ids_for_player,
+        )
 
         buildable_hull_ids = buildable_hull_ids_for_player(turn, observation.player_id)
         hulls_by_id = {hull.id: hull for hull in turn.hulls}
@@ -130,7 +139,7 @@ def catalog_to_actions_payload(
             "buildableHullIdsMissingFromCatalog": sorted(
                 hull_id for hull_id in buildable_hull_ids if hull_id not in hulls_by_id
             ),
-            "shipBuildActionIds": [action.id for action in ship_build_actions],
+            "shipBuildComboIds": [combo.combo_id for combo in catalog.ship_build_combos],
         }
     return payload
 
@@ -307,6 +316,11 @@ def _format_solution_brief(solution: InferenceSolution) -> str:
             parts.append(action.label)
         else:
             parts.append(f"{action.count}x {action.label}")
+    for ship_build in solution.ship_builds:
+        if ship_build.count == 1:
+            parts.append(ship_build.label)
+        else:
+            parts.append(f"{ship_build.count}x {ship_build.label}")
     return "; ".join(parts) if parts else "no actions"
 
 
@@ -338,7 +352,8 @@ def _serialize_solution(
     observation: InferenceObservation,
     catalog: ActionCatalog,
 ) -> dict[str, object]:
-    actions_by_id = {action.id: action for action in catalog.actions}
+    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
+    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
     return {
         "objectiveValue": solution.objective_value,
         "actions": [
@@ -349,10 +364,25 @@ def _serialize_solution(
             }
             for action in solution.actions
         ],
+        "shipBuilds": [
+            {
+                "comboId": ship_build.combo_id,
+                "label": ship_build.label,
+                "count": ship_build.count,
+                "hullId": ship_build.hull_id,
+                "engineId": ship_build.engine_id,
+                "beamId": ship_build.beam_id,
+                "torpId": ship_build.torp_id,
+                "beamCount": ship_build.beam_count,
+                "launcherCount": ship_build.launcher_count,
+            }
+            for ship_build in solution.ship_builds
+        ],
         "militaryScoreArithmetic": solution_military_score_arithmetic_payload(
             solution,
             observation,
             actions_by_id,
+            combos_by_id,
         ),
     }
 
@@ -367,5 +397,19 @@ def _serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[
                 "count": action.count,
             }
             for action in solution.actions
+        ],
+        "shipBuilds": [
+            {
+                "comboId": ship_build.combo_id,
+                "label": ship_build.label,
+                "count": ship_build.count,
+                "hullId": ship_build.hull_id,
+                "engineId": ship_build.engine_id,
+                "beamId": ship_build.beam_id,
+                "torpId": ship_build.torp_id,
+                "beamCount": ship_build.beam_count,
+                "launcherCount": ship_build.launcher_count,
+            }
+            for ship_build in solution.ship_builds
         ],
     }

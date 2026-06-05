@@ -146,7 +146,7 @@ class InferenceProblem:
     actions: tuple[CandidateAction, ...]
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
     max_solutions: int = 20
-    time_limit_seconds: float = 1.0
+    time_limit_seconds: float = 20.0
 ```
 
 **Target extension (Phase 1G+):** ship builds become structured combos; aggregate noisy actions stay flat.
@@ -176,7 +176,7 @@ class InferenceProblem:
     ship_build_tier: int
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
     max_solutions: int = 20
-    time_limit_seconds: float = 1.0
+    time_limit_seconds: float = 20.0
 ```
 
 The solver sums contributions from **both** aggregate action counts and ship-build combo counts into the same hard constraints.
@@ -281,6 +281,8 @@ Use repeated optimization:
 
 A no-good cut can be encoded with indicator variables that detect whether each action count differs from its previous value, then require at least one difference. Keep this inside `solver.py` so the rest of the analytic only sees top-K results.
 
+**Phase 1H (#71):** the same top-K loop can emit each discovered solution on the wire before the row is complete, so the UI can show a green tick (and open a partial modal) while later alternatives are still enumerating. Until that ships, the batch JSON path returns only after top-K or time budget.
+
 The solver should return:
 
 - `exact` when at least one feasible solution is found,
@@ -312,11 +314,11 @@ When inference is enabled, add one extra column to the existing scoreboard table
 
 | Icon | Meaning | Hover text | Click behavior |
 |------|---------|------------|----------------|
-| Green tick | At least one feasible solution found | summarize top solution and alternative count | open modal with detailed ranked solutions |
-| Hourglass | solving is in progress for this player row | show that inference is still running | no modal until a result is available |
+| Green tick | At least one feasible solution found (search may continue until `isComplete`) | summarize top solution and alternative count | open modal with ranked solutions (grows while streaming) |
+| Hourglass | No feasible solution yet for this player row | show that inference is still running | no modal until at least one solution arrives |
 | Red cross | no solution, timeout, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 
-The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending.
+The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event arrives, not when top-K enumeration finishes.
 
 ### 7.3 Modal details
 
@@ -344,7 +346,9 @@ Keep the Core solver as an internal component. The Core `scores` analytic should
 }
 ```
 
-The BFF can decide whether to include detailed solutions in the initial table response or fetch them lazily when the modal opens. The initial implementation should prefer a simple table response unless row-level solve time requires lazy per-player requests.
+The BFF fetches inference **per scoreboard row** (`GET .../scores/inference?playerId=...`). The initial batch JSON response returns only after top-K enumeration or the per-row time budget.
+
+**Planned (Phase 1H, #71):** NDJSON stream per row (`solution`, optional `progress`, terminal `complete` / `error`), following the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). The hourglass clears on the first `solution`; the modal can list partial results while search continues. Keep the batch JSON path for the inference corpus harness until the stream is proven.
 
 ---
 
@@ -508,10 +512,10 @@ Use these bounds before building the CP-SAT model:
 - **Capacity bound:** ship fighters and torpedoes should be capped by plausible loadout capacity where known.
 - **Noisy-action cap:** defense posts, starbase fighters, and generic ammo adjustments should have conservative caps and lower probability weights.
 - **Combo tier cap:** stop widening ship-build tiers when feasible or when the per-player time budget is exhausted.
-- **Top-K cap:** default to a small solution count, such as 10 or 20 per player.
-- **Time cap:** use a per-player solver budget so a pathological player does not block the whole analytic.
+- **Top-K cap:** default to 20 per player; when combo cardinality exceeds **5000**, interim policy forces `max_solutions=1` so enumeration finishes within the time budget (remove once #71 streams first solution without waiting for full top-K).
+- **Time cap:** default **20 seconds** per player (`DEFAULT_INFERENCE_TIME_LIMIT_SECONDS` in `actions.py`). Row-level requests already isolate slow players; #71 will further decouple first-solution latency from top-K enumeration.
 
-Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving is the primary mitigation. Column generation remains a later option if tier search is still too slow.
+Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving (#52) and solution streaming (#71) are the primary mitigations. Column generation remains a later option if tier search is still too slow.
 
 ---
 
@@ -712,6 +716,34 @@ Done when:
 - real-turn cases that failed under Phase 1F (wrong engine/torp/beam type) become feasible at an documented tier,
 - diagnostics report tier and combo cardinality,
 - `make lint` and inference package tests pass.
+
+### Phase 1H: Per-row solution streaming (NDJSON)
+
+Goal: expose ranked solutions **within each scoreboard row** as they are discovered, so the UI is not blocked on full top-K enumeration.
+
+GitHub: **#71**.
+
+Files:
+
+- `packages/api/api/analytics/military_score_inference/solver.py` (yield/callback per solution),
+- Core + BFF inference routes (NDJSON stream alongside existing batch JSON),
+- `packages/frontend/src/api/` (Zod schemas + parser for stream events),
+- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, partial modal),
+- tests at API, BFF, and frontend layers.
+
+Steps:
+
+1. Define NDJSON event types: `solution`, optional `progress`, terminal `complete` / `error`.
+2. Refactor the top-K loop to flush each feasible solution before the next no-good cut.
+3. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
+4. Update row UI: hourglass until first `solution`; tick when `solutionCount >= 1`; `isComplete` when `complete` arrives; abort on game/turn/perspective change.
+5. Retain batch JSON for corpus harness (`infer_military_score_build`) until stream parity is verified; then revisit `max_solutions=1` combo-count fallback.
+
+Done when:
+
+- first solution appears before top-K completes on large catalogs,
+- partial rows are not misclassified as failure,
+- `make lint` and relevant package tests pass.
 
 ### Phase 2: Integrate with the existing Core scores analytic
 
@@ -950,7 +982,7 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 | After #53 | Optional manifest rows tied to combo diagnostics shapes |
 | With #49 (deferred effects) | Expand ground truth + coverage for trades/losses; adjunct fixtures |
 
-Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
+Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Per-row solution streaming: **#71** (Phase 1H). Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
 
 ---
 
@@ -965,7 +997,7 @@ Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Corpus harness: #62, #6
 | Incorrect priority-point model | priority-point equality soft/diagnostic until queue semantics are modeled |
 | False confidence | return multiple explanations and expose ambiguity |
 | Scoreboard regression | keep inference disabled by default and test the existing table contract |
-| Row-level solving blocks the table | track per-row status and consider lazy or asynchronous detail loading |
+| Row-level solving blocks the table | per-row requests (shipped); stream solutions within a row (#71) so hourglass clears on first feasible explanation |
 | Dependency/platform issue | keep solver isolated behind an adapter so a fallback can be added |
 | Hard-to-debug CP-SAT models | emit diagnostics with tier, combo counts, bounds, constraint targets, solver status |
 

@@ -157,13 +157,19 @@ def _minimal_inference_problem(
 ) -> InferenceProblem:
     return InferenceProblem(
         observation=observation,
-        actions=catalog.actions,
+        aggregate_actions=catalog.aggregate_actions,
+        ship_build_combos=catalog.ship_build_combos,
+        ship_build_tier=catalog.ship_build_tier,
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
     )
 
 
 def test_inference_result_payload_merges_catalog_diagnostics(sample_turn):
-    catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
     observation = build_inference_observation(sample_turn.scores[0], sample_turn)
     problem = _minimal_inference_problem(observation, catalog)
     result = InferenceResult(
@@ -180,7 +186,11 @@ def test_inference_result_payload_merges_catalog_diagnostics(sample_turn):
 
 
 def test_inference_result_payload_serializes_solutions(sample_turn):
-    catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
     observation = build_inference_observation(sample_turn.scores[0], sample_turn)
     problem = _minimal_inference_problem(observation, catalog)
     result = InferenceResult(
@@ -190,9 +200,9 @@ def test_inference_result_payload_serializes_solutions(sample_turn):
                 objective_value=42,
                 actions=(
                     InferenceSolutionAction(
-                        action_id="build_24_empty",
-                        label="Build Serpent Class Escort (empty)",
-                        count=1,
+                        action_id="planet_defense",
+                        label="Planet defense post",
+                        count=2,
                     ),
                 ),
             ),
@@ -202,7 +212,7 @@ def test_inference_result_payload_serializes_solutions(sample_turn):
     payload = inference_result_to_api_payload(result, catalog, observation, sample_turn, problem)
     assert payload["solutionCount"] == 1
     assert payload["solutions"][0]["objectiveValue"] == 42
-    assert payload["solutions"][0]["actions"][0]["actionId"] == "build_24_empty"
+    assert payload["solutions"][0]["actions"][0]["actionId"] == "planet_defense"
 
 
 def test_inference_result_payload_includes_military_score_arithmetic(sample_turn):
@@ -214,7 +224,8 @@ def test_inference_result_payload_includes_military_score_arithmetic(sample_turn
         upper_bound=10,
     )
     catalog = ActionCatalog(
-        actions=(defense_action,),
+        aggregate_actions=(defense_action,),
+        ship_build_combos=(),
         probability_buckets_by_action_id={},
     )
     score = sample_turn.scores[0]
@@ -328,7 +339,7 @@ def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
     assert "priorityPointConstraintNote" in diagnostics["constraints"]
     assert isinstance(diagnostics["actionCatalog"]["actions"], list)
     assert "meta" in diagnostics["actionCatalog"]
-    assert "shipBuildActions" in diagnostics["actionCatalog"]
+    assert "shipBuildCombos" in diagnostics["actionCatalog"]
 
 
 def test_registry_still_exposes_only_scores_analytic(sample_turn):

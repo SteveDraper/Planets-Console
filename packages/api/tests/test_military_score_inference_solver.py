@@ -50,7 +50,7 @@ def _problem(
 ) -> InferenceProblem:
     return InferenceProblem(
         observation=observation,
-        actions=actions,
+        aggregate_actions=actions,
         probability_buckets_by_action_id=probability_buckets_by_action_id or {},
         max_solutions=max_solutions,
         time_limit_seconds=time_limit_seconds,
@@ -171,7 +171,7 @@ def test_solve_enforced_priority_point_constraint_requires_catalog_pp_deltas():
             warship_delta=1,
             priority_point_delta=54,
         ),
-        actions=(build_warship,),
+        aggregate_actions=(build_warship,),
         probability_buckets_by_action_id={},
         enforce_priority_point_constraint=True,
     )

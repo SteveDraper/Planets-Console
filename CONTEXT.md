@@ -281,8 +281,12 @@ Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=
 _Avoid_: full hwdistribution support (v1 claim)
 
 **Military score build inference**:
-Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
+Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row**; default per-row solver budget is **20s** with top-K **20** (combo catalogs above **5000** combos temporarily force `max_solutions=1` until streaming ships). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
 _Avoid_: build solver, score guesser
+
+**Inference solution streaming**:
+Planned NDJSON wire protocol (**#71**, Phase 1H) that emits each ranked explanation for one scoreboard row as the CP-SAT top-K loop discovers it, so the hourglass clears before enumeration finishes. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
+_Avoid_: websocket inference, whole-table stream
 
 **Inference host turn**:
 The host turn whose activity is being explained. Scoreboard deltas are read from the **later** stored **TurnInfo** document (turn *N+1*); the **earlier** document (turn *N*) supplies inventory ground truth for complexity grading and Tier 2 checks.

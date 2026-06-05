@@ -26,7 +26,11 @@ from tests.inference_corpus.run import run_manifest_case
 
 
 def test_evaluate_catalog_coverage_accepts_empty_ground_truth():
-    catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
     result = evaluate_catalog_coverage((), catalog)
     assert result.in_search_space is True
     assert result.coverage_reason is None
@@ -34,7 +38,7 @@ def test_evaluate_catalog_coverage_accepts_empty_ground_truth():
 
 def test_evaluate_catalog_coverage_unknown_action():
     catalog = ActionCatalog(
-        actions=(
+        aggregate_actions=(
             CandidateAction(
                 id="ship_fighters_added_total",
                 label="fighters",
@@ -45,6 +49,7 @@ def test_evaluate_catalog_coverage_unknown_action():
                 upper_bound=10,
             ),
         ),
+        ship_build_combos=(),
         probability_buckets_by_action_id={},
     )
     result = evaluate_catalog_coverage((("missing_action", 1),), catalog)
@@ -53,7 +58,11 @@ def test_evaluate_catalog_coverage_unknown_action():
 
 
 def test_evaluate_catalog_coverage_combo_not_in_catalog():
-    catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
     result = evaluate_catalog_coverage((("build_99_torpedoes", 1),), catalog)
     assert result.in_search_space is False
     assert result.coverage_reason == COVERAGE_REASON_COMBO_NOT_IN_CATALOG
@@ -61,7 +70,7 @@ def test_evaluate_catalog_coverage_combo_not_in_catalog():
 
 def test_evaluate_catalog_coverage_count_above_upper_bound():
     catalog = ActionCatalog(
-        actions=(
+        aggregate_actions=(
             CandidateAction(
                 id="ship_fighters_added_total",
                 label="fighters",
@@ -72,6 +81,7 @@ def test_evaluate_catalog_coverage_count_above_upper_bound():
                 upper_bound=2,
             ),
         ),
+        ship_build_combos=(),
         probability_buckets_by_action_id={},
     )
     result = evaluate_catalog_coverage((("ship_fighters_added_total", 5),), catalog)
@@ -80,7 +90,11 @@ def test_evaluate_catalog_coverage_count_above_upper_bound():
 
 
 def test_resolve_coverage_skips_when_ground_truth_unavailable():
-    catalog = ActionCatalog(actions=(), probability_buckets_by_action_id={})
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
     extraction = GroundTruthExtraction(available=False, unavailable_reason="residual_unexplained")
     result = resolve_coverage_for_case(
         extraction=extraction,

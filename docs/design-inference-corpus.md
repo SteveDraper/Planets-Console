@@ -400,7 +400,7 @@ Print summary counts and optional `--json` array of per-case records (`caseId`, 
 | #65 | 10–11, 12 |
 | #66 | 4, 8, manifest `requiredPerspectives` |
 
-**Solver epic ordering:** #62 parallel #50; refresh fixtures after #51/#52; #66 with #49 when trades modeled.
+**Solver epic ordering:** #62 parallel #50; refresh fixtures after #51/#52; #66 with #49 when trades modeled. UI per-row NDJSON streaming (#71) does not change corpus Tier 1 -- harness keeps calling batch `infer_military_score_build` until stream parity is proven.
 
 ---
 
