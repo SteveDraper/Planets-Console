@@ -1,5 +1,6 @@
 """BFF analytics catalog and dispatch."""
 
+from api.analytics.catalog import tuple_aligned_with_turn_analytic_catalog
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor
@@ -8,11 +9,17 @@ from bff.errors import BFFValidationError
 
 from . import base_map, connections, scores, stellar_cartography
 
-REGISTERED_ANALYTICS: tuple[AnalyticDescriptor, ...] = (
-    base_map.DESCRIPTOR,
-    scores.DESCRIPTOR,
-    connections.DESCRIPTOR,
-    stellar_cartography.DESCRIPTOR,
+_BFF_DESCRIPTORS_BY_ID: dict[str, AnalyticDescriptor] = {
+    base_map.DESCRIPTOR.id: base_map.DESCRIPTOR,
+    scores.DESCRIPTOR.id: scores.DESCRIPTOR,
+    connections.DESCRIPTOR.id: connections.DESCRIPTOR,
+    stellar_cartography.DESCRIPTOR.id: stellar_cartography.DESCRIPTOR,
+}
+
+
+REGISTERED_ANALYTICS: tuple[AnalyticDescriptor, ...] = tuple_aligned_with_turn_analytic_catalog(
+    _BFF_DESCRIPTORS_BY_ID,
+    role="BFF descriptors",
 )
 
 _BY_ID: dict[str, AnalyticDescriptor] = {

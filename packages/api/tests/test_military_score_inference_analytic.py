@@ -332,9 +332,10 @@ def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
 
 
 def test_registry_still_exposes_only_scores_analytic(sample_turn):
+    from api.analytics.catalog import TURN_ANALYTIC_CATALOG
     from api.analytics.registry import TURN_ANALYTICS
 
-    assert set(TURN_ANALYTICS) == {"base-map", "connections", "scores", "stellar-cartography"}
+    assert set(TURN_ANALYTICS) == {entry.id for entry in TURN_ANALYTIC_CATALOG}
     data = get_turn_analytic(
         "scores",
         sample_turn,

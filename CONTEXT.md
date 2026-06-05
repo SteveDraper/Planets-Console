@@ -128,8 +128,12 @@ _Avoid_: relying on reviewers to notice stale or monolithic generated types
 Application code imports the smallest matching `schema-<slice>.ts` module for types; `bff.ts` remains the facade for HTTP calls. Do not add a barrel `schema.ts` that re-exports every slice (that recreates a single monolith in git and in review).
 _Avoid_: `import from './schema'` as the default in feature folders
 
+**Turn analytic catalog**:
+Shared declarative list (`TURN_ANALYTIC_CATALOG` in `api/analytics/catalog.py`) of turn analytic ids and SPA-facing metadata (`name`, `supports_table`, `supports_map`, `type`). Core and BFF both import it; handler and descriptor registries are validated against it at import. Adding an analytic still requires three registrations: one **catalog** entry (identity + metadata), one Core `_HANDLERS_BY_ID` entry (computation), and one BFF `_BFF_DESCRIPTORS_BY_ID` entry (table/map shaping). The catalog does not replace handler or descriptor registration -- it prevents metadata and id drift between layers.
+_Avoid_: single registration list (handlers and shapers are still per-layer dicts)
+
 **Analytic descriptor**:
-The single BFF registration object for one **turn analytic** -- catalog fields plus optional table/map handlers and diagnostic hooks. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.
+The BFF registration object for one **turn analytic** -- optional table/map handlers and diagnostic hooks, with catalog metadata from `TURN_ANALYTIC_CATALOG` via `from_catalog_entry`. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.
 _Avoid_: METADATA dict, handler registry (when meaning the consolidated descriptor)
 
 **Base map**:

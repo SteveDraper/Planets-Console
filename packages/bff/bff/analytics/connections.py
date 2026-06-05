@@ -1,5 +1,6 @@
 """BFF Connections map analytic handler."""
 
+from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
 from api.transport.connections_options import (
     FLARE_DEPTH_QUERY,
@@ -49,12 +50,8 @@ def get_map(
     )
 
 
-DESCRIPTOR = AnalyticDescriptor(
-    id=ANALYTIC_ID,
-    name="Connections",
-    supports_table=False,
-    supports_map=True,
-    type="selectable",
+DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(
+    catalog_entry(ANALYTIC_ID),
     get_map=get_map,
     map_diagnostic_values=diagnostic_values,
 )

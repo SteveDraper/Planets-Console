@@ -25,11 +25,12 @@ Related docs:
   - `scores.py`
   - `connections.py`
   - `stellar_cartography.py`
-  - `registry.py` -- `TURN_ANALYTICS` id-to-handler map
+  - `catalog.py` -- `TURN_ANALYTIC_CATALOG` (shared ids and SPA catalog metadata)
+  - `registry.py` -- `TURN_ANALYTICS` id-to-handler map (aligned with the catalog at import)
 
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
 
-**Core registry shape:** a flat `TURN_ANALYTICS` dict (id → handler). Core does not use BFF-style descriptors -- it only computes from `TurnInfo`. Catalog metadata and response shaping stay in BFF. The parity test in `test_analytics_registry.py` keeps Core ids aligned with BFF `REGISTERED_ANALYTICS`.
+**Shared catalog:** `TURN_ANALYTIC_CATALOG` is the single declarative list of turn analytic ids and SPA metadata. Core attaches computation handlers; BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. `dict_aligned_with_turn_analytic_catalog` / `tuple_aligned_with_turn_analytic_catalog` in `catalog.py` validate each layer's registry keys and preserve catalog order at import. Id or metadata drift raises `RuntimeError` on startup. Handlers and descriptors are still registered separately (see [Registration touch points](#registration-touch-points)).
 
 ### Race-specific rules vs analytic modules
 
@@ -67,7 +68,7 @@ Each BFF analytic module exports a single `DESCRIPTOR: AnalyticDescriptor` (`bff
 
 | Field | Purpose |
 |-------|---------|
-| `id`, `name`, `supports_table`, `supports_map`, `type` | Catalog entry (`type` is `base` or `selectable`) |
+| `id`, `name`, `supports_table`, `supports_map`, `type` | From `TurnAnalyticCatalogEntry` via `from_catalog_entry` (`type` is `base` or `selectable`) |
 | `get_table` | Optional handler: Core fetch + BFF table shaping |
 | `get_map` | Optional handler: Core fetch + BFF map shaping (receives `ConnectionsMapQuery`; ignore when unused) |
 | `map_diagnostic_values` | Optional hook for request diagnostics on map GETs |
@@ -75,14 +76,13 @@ Each BFF analytic module exports a single `DESCRIPTOR: AnalyticDescriptor` (`bff
 
 Adding a new analytic to the BFF requires:
 
-1. Create `bff/analytics/<id>.py` with handlers and `DESCRIPTOR`.
-2. Append `module.DESCRIPTOR` to `REGISTERED_ANALYTICS` in `registry.py`.
+1. Add a `TurnAnalyticCatalogEntry` to `TURN_ANALYTIC_CATALOG` in `api/analytics/catalog.py`.
+2. Create `bff/analytics/<id>.py` with handlers and `DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(catalog_entry(...), ...)`.
+3. Register the module descriptor in `_BFF_DESCRIPTORS_BY_ID` in `bff/analytics/registry.py`.
 
 Dispatch is descriptor-driven -- no per-id `if/elif` chains in `registry.py`.
 
 Unknown analytic ids and unsupported view modes return **422** (`BFFValidationError`).
-
-**Registry parity:** `packages/bff/tests/test_analytics_registry.py` asserts BFF descriptor ids match Core `TURN_ANALYTICS` keys. Keep both registries in sync when adding or removing analytics.
 
 ### Map route query params (intentional gap)
 
@@ -94,12 +94,13 @@ This is deliberate for now: one route, one OpenAPI shape, Connections works with
 
 **Possible future direction (not implemented):** descriptor-driven query parsing -- e.g. each `AnalyticDescriptor` declares whether it uses map query params (and optionally a parser type); the router only binds/forwards params when declared. Alternatively, analytic-specific map sub-routes if contracts diverge sharply. Until then, new parametric map analytics follow the Connections pattern: extend the shared `ConnectionsMapQuery` / router params only when wire names are shared; otherwise trigger this re-examination.
 
-## Registration touch points (target model)
+## Registration touch points
 
-Adding a **turn analytic** intentionally touches **two** registration points:
+Adding a **turn analytic** touches:
 
-1. **Core** -- module + one line in `TURN_ANALYTICS`
-2. **BFF** -- module + one line in `REGISTERED_ANALYTICS`
+1. **Catalog** -- one `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
+2. **Core** -- module + handler in `_HANDLERS_BY_ID` (`registry.py`)
+3. **BFF** -- module with `from_catalog_entry` descriptor + entry in `_BFF_DESCRIPTORS_BY_ID` (`registry.py`)
 
 Frontend registration is **optional** and only needed when generic shells are insufficient (custom sidebar controls, non-default query keys, bespoke map merge logic). See [design-adding-a-turn-analytic.md](design-adding-a-turn-analytic.md).
 

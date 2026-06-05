@@ -1,5 +1,6 @@
 """BFF base-map analytic handler."""
 
+from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor
@@ -22,11 +23,7 @@ def get_map(
     return load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
 
 
-DESCRIPTOR = AnalyticDescriptor(
-    id=ANALYTIC_ID,
-    name="Map",
-    supports_table=False,
-    supports_map=True,
-    type="base",
+DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(
+    catalog_entry(ANALYTIC_ID),
     get_map=get_map,
 )

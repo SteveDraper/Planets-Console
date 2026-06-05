@@ -40,21 +40,25 @@ Guidelines:
 - **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 - Attach **request diagnostics** at meaningful boundaries (`diagnostics.child(...)`) when work is non-trivial.
 
+### 2.1a Register in the shared catalog
+
+In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to `TURN_ANALYTIC_CATALOG` (id, name, `supports_table`, `supports_map`, `type`).
+
 ### 2.2 Register in Core
 
-In `packages/api/api/analytics/registry.py`:
+In `packages/api/api/analytics/registry.py`, add the handler to `_HANDLERS_BY_ID`:
 
 ```python
 from api.analytics.my_analytic import ANALYTIC_ID as MY_ANALYTIC_ID
 from api.analytics.my_analytic import get_my_analytic
 
-TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
+_HANDLERS_BY_ID: dict[str, TurnAnalyticHandler] = {
     ...
     MY_ANALYTIC_ID: get_my_analytic,
 }
 ```
 
-Core registration stays a **handler dict** only (no descriptor type). Metadata and SPA shaping belong in BFF.
+`TURN_ANALYTICS` is derived from the catalog at import; a missing or extra handler raises `RuntimeError` on startup.
 
 ### 2.3 Core tests
 
@@ -82,6 +86,7 @@ Add `packages/bff/bff/analytics/<id>.py` exporting **`DESCRIPTOR`**.
 **Table-only example (Scores pattern):**
 
 ```python
+from api.analytics.catalog import catalog_entry
 from bff.analytics.descriptor import AnalyticDescriptor
 
 ANALYTIC_ID = "my-table-analytic"
@@ -90,12 +95,8 @@ def get_table(scope, load_core, diagnostics) -> dict:
     core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
     return shape_for_spa(core_data)
 
-DESCRIPTOR = AnalyticDescriptor(
-    id=ANALYTIC_ID,
-    name="My Table",
-    supports_table=True,
-    supports_map=False,
-    type="selectable",
+DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(
+    catalog_entry(ANALYTIC_ID),
     get_table=get_table,
 )
 ```
@@ -106,12 +107,8 @@ DESCRIPTOR = AnalyticDescriptor(
 def get_map(scope, _query, load_core, diagnostics) -> dict:
     return load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
 
-DESCRIPTOR = AnalyticDescriptor(
-    id=ANALYTIC_ID,
-    name="My Map",
-    supports_table=False,
-    supports_map=True,
-    type="selectable",  # or "base" if always-on like base-map
+DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(
+    catalog_entry(ANALYTIC_ID),
     get_map=get_map,
 )
 ```
@@ -127,18 +124,16 @@ If a new analytic needs **different** query params (not an extension of the Conn
 
 ### 3.2 Register in BFF
 
-In `packages/bff/bff/analytics/registry.py`:
+In `packages/bff/bff/analytics/registry.py`, add the module descriptor to `_BFF_DESCRIPTORS_BY_ID`:
 
 ```python
-from . import my_analytic
-
-REGISTERED_ANALYTICS: tuple[AnalyticDescriptor, ...] = (
+_BFF_DESCRIPTORS_BY_ID: dict[str, AnalyticDescriptor] = {
     ...
-    my_analytic.DESCRIPTOR,
-)
+    my_analytic.DESCRIPTOR.id: my_analytic.DESCRIPTOR,
+}
 ```
 
-That is the **only** BFF registration edit. Metadata, table dispatch, map dispatch, and optional diagnostic hooks come from the descriptor.
+`REGISTERED_ANALYTICS` is ordered from `TURN_ANALYTIC_CATALOG` at import. Catalog metadata comes from `from_catalog_entry`; handlers stay in the BFF module.
 
 ### 3.3 BFF tests
 
@@ -151,7 +146,7 @@ Add or extend tests under `packages/bff/tests/`:
 
 Registry tests should mock `load_core` rather than hitting storage when testing shaping only.
 
-`test_bff_descriptors_match_core_turn_analytics_registry` asserts BFF `REGISTERED_ANALYTICS` ids match Core `TURN_ANALYTICS` keys in both directions. Update both registries when adding an analytic.
+Registry tests assert each layer follows `TURN_ANALYTIC_CATALOG` order; catalog/handler/descriptor mismatch fails at import or in those tests.
 
 ### 3.4 Verify catalog
 
@@ -233,9 +228,10 @@ When triggered, prefer a small registry refactor over accumulating `MainArea` br
 
 Use this before opening a PR:
 
-- [ ] **Core:** module + `TURN_ANALYTICS` entry + unit tests
+- [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
+- [ ] **Core:** module + `_HANDLERS_BY_ID` entry + unit tests
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
-- [ ] **BFF:** module with `DESCRIPTOR` + `REGISTERED_ANALYTICS` entry
+- [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
 - [ ] **BFF:** unit/integration tests for dispatch and HTTP shape
 - [ ] **Frontend:** only if generic shells insufficient; query wire names aligned with BFF
 - [ ] **Frontend:** if adding a `MainArea` map-fetch branch, confirm [§4.1 re-examination triggers](#41-map-fetch-orchestration-current-vs-future) are not met
@@ -249,7 +245,7 @@ Use this before opening a PR:
 
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
-| Core handler registered, BFF descriptor missing | 422 on BFF GET; analytic absent from sidebar list | Add BFF module + `REGISTERED_ANALYTICS` |
+| Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add catalog entry + BFF module + `_BFF_DESCRIPTORS_BY_ID` |
 | BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Add Core registry entry |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |
 | Frontend query param names drift from BFF | Silent wrong results or ignored params | Share wire names via `api/transport/` |

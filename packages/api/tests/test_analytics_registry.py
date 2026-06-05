@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
-from api.analytics import TurnAnalyticsOptions, get_turn_analytic
+from api.analytics import TURN_ANALYTIC_CATALOG, TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.base_map import get_base_map
+from api.analytics.registry import TURN_ANALYTICS
 from api.analytics.scores import get_scores_table
 from api.errors import ValidationError
 from api.serialization.turn import turn_info_from_json
@@ -44,3 +45,18 @@ def test_registry_scores_dispatch_unchanged_without_inference_option(sample_turn
 def test_registry_rejects_unknown_analytic(sample_turn):
     with pytest.raises(ValidationError, match="Unknown analytic_id"):
         get_turn_analytic("missing", sample_turn, TurnAnalyticsOptions())
+
+
+def test_turn_analytics_registry_follows_catalog():
+    assert list(TURN_ANALYTICS) == [entry.id for entry in TURN_ANALYTIC_CATALOG]
+    assert set(TURN_ANALYTICS) == {entry.id for entry in TURN_ANALYTIC_CATALOG}
+
+
+def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
+    from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
+
+    with pytest.raises(RuntimeError, match="Core handlers"):
+        dict_aligned_with_turn_analytic_catalog(
+            {"not-in-catalog": object()},
+            role="Core handlers",
+        )
