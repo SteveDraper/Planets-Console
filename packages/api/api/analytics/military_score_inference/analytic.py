@@ -33,9 +33,11 @@ from api.analytics.military_score_inference.ship_build_combos import (
     START_SHIP_BUILD_TIER,
 )
 from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_TIME_LIMITED,
+    solution_signature,
     solve_inference_problem,
 )
 from api.models.game import TurnInfo
@@ -275,16 +277,31 @@ def _solve_with_tier_retry(
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[int]]:
-    """Try ship-build tiers from narrow to wide until feasible or budget exhausted."""
+    """Try ship-build tiers from narrow to wide, accumulating distinct feasible solutions.
+
+    Continues while each tier adds at least one new feasible solution (by action/combo
+    counts). Stops when a tier is feasible but contributes no new signatures, when a
+    tier is infeasible and no further tiers remain, on invalid problem, or when time
+    budget is exhausted.
+
+    Higher tiers may surface solutions ranked above earlier tiers once build
+    probability weights are refined; merged results are sorted by objective value.
+    """
     started_at = time.monotonic()
     tiers_attempted: list[int] = []
-    result: InferenceResult | None = None
+    merged_solutions: list[InferenceSolution] = []
+    seen_signatures: set[tuple[tuple[str, int], ...]] = set()
     catalog: ActionCatalog | None = None
     problem: InferenceProblem | None = None
+    last_status = STATUS_NO_EXACT_SOLUTION
+    last_diagnostics: dict[str, object] = {}
+    resolved_max_solutions = max_solutions if max_solutions is not None else 20
+    time_limited = False
 
     for tier in range(START_SHIP_BUILD_TIER, MAX_SHIP_BUILD_TIER + 1):
         remaining = time_limit_seconds - (time.monotonic() - started_at)
         if remaining <= 0:
+            time_limited = True
             break
         tiers_attempted.append(tier)
         catalog = build_action_catalog_from_turn(
@@ -292,19 +309,40 @@ def _solve_with_tier_retry(
             turn,
             ship_build_tier=tier,
         )
+        remaining_slots = max(0, resolved_max_solutions - len(merged_solutions))
+        if remaining_slots == 0:
+            break
         problem = build_inference_problem(
             observation,
             catalog,
-            max_solutions=max_solutions,
+            max_solutions=remaining_slots,
             time_limit_seconds=remaining,
         )
-        result = solve_inference_problem(problem)
-        if result.solutions:
+        tier_result = solve_inference_problem(problem)
+        last_status = tier_result.status
+        last_diagnostics = dict(tier_result.diagnostics)
+        if tier_result.status == STATUS_INVALID_PROBLEM:
             break
-        if result.status == STATUS_INVALID_PROBLEM:
-            break
+        if not tier_result.solutions:
+            continue
 
-    if result is None or catalog is None or problem is None:
+        new_solutions = 0
+        for solution in tier_result.solutions:
+            signature = solution_signature(solution)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            merged_solutions.append(solution)
+            new_solutions += 1
+            if len(merged_solutions) >= resolved_max_solutions:
+                break
+
+        if new_solutions == 0:
+            break
+        if tier_result.status == STATUS_TIME_LIMITED:
+            time_limited = True
+
+    if catalog is None or problem is None:
         tiers_attempted.append(START_SHIP_BUILD_TIER)
         catalog = build_action_catalog_from_turn(
             observation,
@@ -312,8 +350,33 @@ def _solve_with_tier_retry(
             ship_build_tier=START_SHIP_BUILD_TIER,
         )
         problem = build_inference_problem(observation, catalog, max_solutions=max_solutions)
-        result = solve_inference_problem(problem)
+        tier_result = solve_inference_problem(problem)
+        last_status = tier_result.status
+        last_diagnostics = dict(tier_result.diagnostics)
+        for solution in tier_result.solutions:
+            signature = solution_signature(solution)
+            if signature not in seen_signatures:
+                seen_signatures.add(signature)
+                merged_solutions.append(solution)
 
+    merged_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
+    if merged_solutions:
+        status = STATUS_TIME_LIMITED if time_limited else STATUS_EXACT
+    else:
+        status = STATUS_TIME_LIMITED if time_limited else last_status
+
+    result = InferenceResult(
+        status=status,
+        solutions=tuple(merged_solutions),
+        diagnostics={
+            **last_diagnostics,
+            "ship_build_tier": catalog.ship_build_tier,
+            "solution_count": len(merged_solutions),
+            "stopped_reason": "no_new_solutions_at_tier"
+            if merged_solutions and len(tiers_attempted) > 1
+            else last_diagnostics.get("stopped_reason", "exhausted"),
+        },
+    )
     return result, catalog, problem, tiers_attempted
 
 

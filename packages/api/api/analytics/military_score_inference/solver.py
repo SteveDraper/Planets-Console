@@ -377,7 +377,7 @@ def _add_no_good_cut(
     model.add_at_least_one(differs)
 
 
-def _solution_signature(solution: InferenceSolution) -> tuple[tuple[str, int], ...]:
+def solution_signature(solution: InferenceSolution) -> tuple[tuple[str, int], ...]:
     action_counts = ((action.action_id, action.count) for action in solution.actions)
     combo_counts = ((build.combo_id, build.count) for build in solution.ship_builds)
     return tuple(sorted(action_counts) + sorted(combo_counts))
@@ -465,7 +465,7 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
             if len(solutions) >= problem.max_solutions:
                 stopped_reason = "max_solutions"
                 break
-            signature = _solution_signature(solution)
+            signature = solution_signature(solution)
             if signature in seen_signatures:
                 continue
             seen_signatures.add(signature)

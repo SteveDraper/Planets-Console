@@ -477,11 +477,15 @@ Search tiers (increase component eligibility and, in later tiers, partial beam/l
 Per player:
 
 1. Build combo list for tier *n* plus aggregate actions.
-2. Solve.
-3. Stop on FEASIBLE (or TIME_LIMITED with at least one solution).
-4. Else advance tier and retry until max tier or time budget.
+2. Solve for up to the remaining top-K slots.
+3. Merge any **new** feasible solution signatures not seen at prior tiers.
+4. Stop when a tier is feasible but adds no new signatures, when all tiers are exhausted, or when the time budget runs out.
 
-Record `ship_build_tier`, `tiers_attempted`, and `combo_count` in diagnostics.
+Record `ship_build_tier` (widest tier reached), `tiers_attempted`, and `combo_count` in diagnostics.
+
+**Interim tier policy (Phase 1G):** continue through tiers while each attempt adds at least one new feasible explanation. Do not stop at the first feasible tier. Once per-build probability weights land, higher tiers may still contribute solutions that outrank earlier ones after merge and sort by objective value.
+
+**Spike (follow-on):** revisit tier axis definitions and progression; interim false positives at low tiers often involve low-weight aggregate "noise" filling score slack before the true build combo appears at a higher tier. Longer term, tiers may become probability thresholds on which catalog entries to include rather than hard component-eligibility stages.
 
 **Future refinement:** order tiers and intra-tier weights from fleet priors (histogram of engines, beams, and torps on existing ships). Likelihood informs search order and objective weights; it should not hard-exclude legal combos unless the product explicitly chooses a "most likely only" mode.
 

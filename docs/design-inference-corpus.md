@@ -291,13 +291,13 @@ GroundTruth = tuple[tuple[str, int], ...]  # (action_id, count) ascending by act
 
 Extract only when **adjunct** is false and complexity <= `heavy`. Otherwise set `groundTruthAvailable: false` and skip coverage/ranking/Tier 2.
 
-**Ship builds (interim catalog, pre-#51):**
+**Ship builds (combo catalog, #51+):**
 
 - New ship ids at N+1 not at N, `ownerid == playerId`, `turnkilled == 0`.
-- Map each to `build_{hullid}_{preset}` using the same preset rules as `_ship_build_actions` in `actions.py`:
-  - `empty` -- non-military freighter-style hull or warship with no armed preset match
-  - `torpedoes` -- only when hull `launchers > 0` and the interim catalog would add the torpedo preset (armed build score)
-  - If hull/beam/tube state does not match either catalog preset, set `groundTruthAvailable: false`
+- Map each to a factored combo id via `ship_build_combo_id` from fitted hull/engine/beam/torp/count fields.
+- If any new ship cannot be mapped, set `groundTruthAvailable: false`.
+
+**Ammo on newly built ships:** do not attribute fighters or torpedoes loaded onto **new** ships to aggregate load actions. Turn snapshots reflect post-order ship state while scoreboard military deltas reflect pre-order totals; client-side build/transfer actions create a systematic mismatch. Loads on **existing** ships still use inventory deltas (with new-ship ids excluded).
 
 **Aggregate loads (score-derived v1):**
 
@@ -305,8 +305,8 @@ When ship builds alone do not explain `militarychange`, allocate residual scaled
 
 | Action id | When |
 |-----------|------|
-| `ship_fighters_added_total` | Positive fighter-related military delta remainder |
-| `ship_torps_loaded_{torpedoId}` | Torp MC remainder matching a loaded torp type on new/existing ships |
+| `ship_fighters_added_total` | Positive fighter load delta on **existing** ships (new-ship ids excluded) |
+| `ship_torps_loaded_{torpedoId}` | Torp load delta on **existing** ships (new-ship ids excluded) |
 | `starbase_fighters_added_total` | Starbase fighter remainder |
 | `starbase_defense_posts_added_total` | Starbase defense remainder |
 | `planet_defense_posts_added_total` | Planet defense remainder |
@@ -314,7 +314,7 @@ When ship builds alone do not explain `militarychange`, allocate residual scaled
 
 If residual cannot be assigned without deferred effects, set `groundTruthAvailable: false`.
 
-**Post-#51:** Replace `build_{hull}_{preset}` mapping with combo ids from `ship_build_combos.py`; update manifest notes and coverage mapper.
+**Follow-on:** edge cases from other client-side actions (starbase torp builds, transfers) that appear in turn snapshots but not scoreboard deltas -- see tracker issue.
 
 ### 9.3 Catalog coverage (v1)
 

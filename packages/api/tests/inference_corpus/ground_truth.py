@@ -12,7 +12,7 @@ from api.analytics.military_score_inference.scoring import (
     starbase_fighter_score_delta_2x,
 )
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_label
-from api.analytics.military_score_inference.ship_build_presets import ship_build_score_delta_2x
+from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
 from api.models.components import Torpedo
 from api.models.game import TurnInfo
 from api.models.player import Score

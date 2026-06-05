@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.ship_build_combos import MAX_SHIP_BUILD_TIER
-from api.analytics.military_score_inference.ship_build_presets import default_build_components
+from api.analytics.military_score_inference.ship_build_scoring import default_build_components
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.player import Player, Race

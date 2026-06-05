@@ -14,14 +14,14 @@ from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
     run_inference_with_artifacts,
 )
-from api.analytics.military_score_inference.models import InferenceObservation, InferenceResult
+from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
     MAX_SHIP_BUILD_TIER,
     generate_ship_build_combos,
     ship_build_combo_id,
 )
-from api.analytics.military_score_inference.ship_build_presets import ship_build_score_delta_2x
+from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.serialization.turn import turn_info_from_json
 
@@ -405,27 +405,64 @@ def test_tier_zero_catalog_uses_single_default_engine_beam_and_torp(sample_turn)
     assert {combo.beam_id for combo in combos if combo.beam_id is not None} <= {default_beam_id}
 
 
-def test_solve_with_tier_retry_advances_until_feasible(sample_turn):
+def test_solve_with_tier_retry_accumulates_until_no_new_solutions(sample_turn):
     from unittest.mock import patch
 
     from api.analytics.military_score_inference.analytic import _solve_with_tier_retry
-    from api.analytics.military_score_inference.models import InferenceSolution
-    from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
+    from api.analytics.military_score_inference.models import (
+        InferenceResult,
+        InferenceSolution,
+        InferenceSolutionShipBuild,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 
     score = sample_turn.scores[0]
     observation = build_inference_observation(score, sample_turn)
-    feasible_solution = InferenceSolution(objective_value=1, actions=())
+    solution_a = InferenceSolution(
+        objective_value=100,
+        actions=(),
+        ship_builds=(),
+    )
+    solution_b = InferenceSolution(
+        objective_value=50,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(
+                combo_id="combo_a",
+                label="Build A",
+                count=1,
+                hull_id=1,
+                engine_id=1,
+                beam_id=None,
+                torp_id=None,
+                beam_count=0,
+                launcher_count=0,
+            ),
+        ),
+    )
 
     call_tiers: list[int] = []
 
     def _solve_side_effect(problem):
         call_tiers.append(problem.ship_build_tier)
-        if problem.ship_build_tier < 2:
+        if problem.ship_build_tier == 0:
             return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+        if problem.ship_build_tier == 1:
+            return InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution_a,),
+                diagnostics={"ship_build_tier": 1},
+            )
+        if problem.ship_build_tier == 2:
+            return InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution_a, solution_b),
+                diagnostics={"ship_build_tier": 2},
+            )
         return InferenceResult(
             status=STATUS_EXACT,
-            solutions=(feasible_solution,),
-            diagnostics={"ship_build_tier": problem.ship_build_tier},
+            solutions=(solution_a,),
+            diagnostics={"ship_build_tier": 3},
         )
 
     with patch(
@@ -434,11 +471,11 @@ def test_solve_with_tier_retry_advances_until_feasible(sample_turn):
     ):
         result, catalog, problem, tiers_attempted = _solve_with_tier_retry(observation, sample_turn)
 
-    assert tiers_attempted == [0, 1, 2]
-    assert call_tiers == [0, 1, 2]
-    assert result.solutions == (feasible_solution,)
-    assert catalog.ship_build_tier == 2
-    assert problem.ship_build_tier == 2
+    assert tiers_attempted == [0, 1, 2, 3]
+    assert call_tiers == [0, 1, 2, 3]
+    assert [solution.objective_value for solution in result.solutions] == [100, 50]
+    assert catalog.ship_build_tier == 3
+    assert problem.ship_build_tier == 3
 
 
 def test_missouri_host_turn_2_regression_reports_tier_retry_diagnostics():

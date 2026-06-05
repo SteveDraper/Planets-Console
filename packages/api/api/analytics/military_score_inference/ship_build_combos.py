@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.models import InferenceObservation, ShipBuildCombo
-from api.analytics.military_score_inference.ship_build_presets import (
+from api.analytics.military_score_inference.ship_build_scoring import (
     is_military_hull,
     ship_build_score_delta_2x,
 )
