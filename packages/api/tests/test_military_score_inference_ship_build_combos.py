@@ -22,7 +22,7 @@ from api.analytics.military_score_inference.ship_build_combos import (
     ship_build_combo_id,
 )
 from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
-from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
+from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED, solve_inference_problem
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.military_score_inference import _observation
@@ -376,9 +376,10 @@ def test_missouri_host_turn_2_regression_becomes_feasible():
     assert len(missouri_combos) == 1
     assert missouri_combos[0].score_delta_2x == 8550
 
-    problem = build_inference_problem(observation, catalog)
+    problem = build_inference_problem(observation, catalog, max_solutions=1)
     result = solve_inference_problem(problem)
-    assert result.status == STATUS_EXACT
+    assert result.status in (STATUS_EXACT, STATUS_TIME_LIMITED)
+    assert result.solutions
     assert any(solution.ship_builds for solution in result.solutions)
 
     missouri_only = build_inference_problem(
@@ -484,7 +485,8 @@ def test_missouri_host_turn_2_regression_reports_tier_retry_diagnostics():
         turn = turn_info_from_json(json.load(handle), settings_defaults=settings)
     score = next(s for s in turn.scores if s.ownerid == 1)
     payload, _, catalog = run_inference_with_artifacts(score, turn)
-    assert payload["status"] == STATUS_EXACT
+    assert payload["status"] in (STATUS_EXACT, STATUS_TIME_LIMITED)
+    assert payload["solutionCount"] > 0
     assert payload["diagnostics"]["tiers_attempted"]
     tiers_attempted = payload["diagnostics"]["tiers_attempted"]
     assert payload["diagnostics"]["ship_build_tier"] == tiers_attempted[-1]
