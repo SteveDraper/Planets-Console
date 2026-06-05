@@ -59,8 +59,6 @@ def buildable_hull_ids_for_player(turn: TurnInfo, player_id: int) -> frozenset[i
 
 
 def eligible_component_ids_for_player(
-    turn: TurnInfo,
-    player_id: int,
     *,
     active_component_csv: str,
     turn_catalog_ids: frozenset[int],
@@ -106,8 +104,6 @@ def turn_catalog_context_for_tier(
         eligible_engine_ids = turn_engine_ids
     else:
         eligible_engine_ids = eligible_component_ids_for_player(
-            turn,
-            player_id,
             active_component_csv=player.activeengines,
             turn_catalog_ids=turn_engine_ids,
         )
@@ -118,8 +114,6 @@ def turn_catalog_context_for_tier(
         eligible_beam_ids = turn_beam_ids
     else:
         eligible_beam_ids = eligible_component_ids_for_player(
-            turn,
-            player_id,
             active_component_csv=player.activebeams,
             turn_catalog_ids=turn_beam_ids,
         )
@@ -130,8 +124,6 @@ def turn_catalog_context_for_tier(
         eligible_torp_ids = turn_torp_ids
     else:
         eligible_torp_ids = eligible_component_ids_for_player(
-            turn,
-            player_id,
             active_component_csv=player.activetorps,
             turn_catalog_ids=turn_torp_ids,
         )
