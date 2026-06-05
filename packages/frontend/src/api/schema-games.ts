@@ -13,11 +13,9 @@ export interface paths {
         };
         /**
          * List Stored Games
-         * @description Return game ids present under store path `games` (next-hop segment names).
+         * @description Return stored game ids (optional sector names) via Core ``GameService``.
          *
-         *     Route: **GET /games** on the BFF app; **GET /bff/games** when the BFF is mounted at `/bff`.
-         *
-         *     Uses the same shallow enumeration as GET /api/v1/store/games?view=shallow.
+         *     Route: **GET /games** on the BFF app; **GET /bff/games** when mounted at `/bff`.
          */
         get: operations["list_stored_games_games_get"];
         put?: never;

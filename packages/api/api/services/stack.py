@@ -25,3 +25,16 @@ def build_service_stack(
     concepts = TurnConceptService(turns)
     analytics = TurnAnalyticService(turns)
     return games, turns, load_all, concepts, analytics
+
+
+def build_default_service_stack() -> tuple[
+    GameService,
+    TurnLoadService,
+    LoadAllTurnsService,
+    TurnConceptService,
+    TurnAnalyticService,
+]:
+    """Service graph for the active process storage backend (BFF in-process adapter, tests)."""
+    from api.storage import get_storage
+
+    return build_service_stack(get_storage())

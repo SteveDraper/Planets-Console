@@ -8,7 +8,7 @@ import pytest
 from api.errors import LoginCredentialsRequiredError, NotFoundError, ValidationError
 from api.models.game import GameInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
-from api.services.game_service import GameService
+from api.services.game_service import GameService, clear_sector_title_cache
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.game_info_update import GameInfoUpdateRequest
@@ -37,6 +37,59 @@ def seeded_backend():
 def service(seeded_backend):
     games, _, _, _, _ = build_service_stack(seeded_backend)
     return games
+
+
+@pytest.fixture(autouse=True)
+def _clear_sector_title_cache():
+    clear_sector_title_cache()
+    yield
+    clear_sector_title_cache()
+
+
+class TestListStoredGames:
+    def test_returns_empty_when_games_path_missing(self):
+        backend = MemoryAssetBackend(initial={})
+        games, _, _, _, _ = build_service_stack(backend)
+        assert games.list_stored_games() == {"games": []}
+
+    def test_includes_sector_name_from_stored_info(self, service):
+        result = service.list_stored_games()
+        hit = next(g for g in result["games"] if g["id"] == "628580")
+        assert hit.get("sectorName") == "Serada 9 Sector"
+
+    def test_remember_sector_title_avoids_re_read_on_second_list(self):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            payload = json.load(f)
+        backend.put("games/111/info", payload)
+        backend.put("games/222/info", payload)
+        games, _, _, _, _ = build_service_stack(backend)
+
+        info_reads: list[str] = []
+        original_get = backend.get
+
+        def counting_get(path: str) -> object:
+            if path.startswith("games/") and path.endswith("/info"):
+                info_reads.append(path)
+            return original_get(path)
+
+        backend.get = counting_get  # type: ignore[method-assign]
+        games.list_stored_games()
+        games.list_stored_games()
+        assert info_reads == ["games/111/info", "games/222/info"]
+
+    def test_refresh_updates_sector_title_cache(self, game_info_sample_data):
+        backend = MemoryAssetBackend(initial={})
+        games, _, _, _, _ = build_service_stack(backend)
+        planets = FakePlanetsNu(game_info_sample_data, login_returns="key")
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "secret"},
+        )
+        games.update_game_info(628580, body, planets)
+        result = games.list_stored_games()
+        hit = next(g for g in result["games"] if g["id"] == "628580")
+        assert hit.get("sectorName") == "Serada 9 Sector"
 
 
 class TestGetGameInfo:
