@@ -1,10 +1,13 @@
 """Scores analytic integration for military score build inference."""
 
+import time
+
 from api.analytics.military_score_inference.accelerated_start import (
     accelerated_turn_count,
     observation_deltas_from_score,
 )
 from api.analytics.military_score_inference.actions import (
+    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
     build_action_catalog_from_turn,
     build_inference_problem,
@@ -21,6 +24,10 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
+)
+from api.analytics.military_score_inference.ship_build_combos import (
+    MAX_SHIP_BUILD_TIER,
+    START_SHIP_BUILD_TIER,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
@@ -217,12 +224,22 @@ def run_inference_with_artifacts(
     solve_catalog = catalog
     try:
         if solve_catalog is None:
-            solve_catalog = build_action_catalog_from_turn(resolved_observation, turn)
-        problem = build_inference_problem(resolved_observation, solve_catalog)
-        result = solve_inference_problem(problem)
+            result, solve_catalog, problem, tiers_attempted = _solve_with_tier_retry(
+                resolved_observation,
+                turn,
+            )
+        else:
+            tiers_attempted = [solve_catalog.ship_build_tier]
+            problem = build_inference_problem(resolved_observation, solve_catalog)
+            result = solve_inference_problem(problem)
         return (
             inference_result_to_api_payload(
-                result, solve_catalog, resolved_observation, turn, problem
+                result,
+                solve_catalog,
+                resolved_observation,
+                turn,
+                problem,
+                tiers_attempted=tiers_attempted,
             ),
             resolved_observation,
             solve_catalog,
@@ -252,12 +269,63 @@ def infer_military_score_build(score: Score, turn: TurnInfo) -> dict[str, object
     return payload
 
 
+def _solve_with_tier_retry(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    *,
+    max_solutions: int | None = None,
+    time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[int]]:
+    """Try ship-build tiers from narrow to wide until feasible or budget exhausted."""
+    started_at = time.monotonic()
+    tiers_attempted: list[int] = []
+    result: InferenceResult | None = None
+    catalog: ActionCatalog | None = None
+    problem: InferenceProblem | None = None
+
+    for tier in range(START_SHIP_BUILD_TIER, MAX_SHIP_BUILD_TIER + 1):
+        remaining = time_limit_seconds - (time.monotonic() - started_at)
+        if remaining <= 0:
+            break
+        tiers_attempted.append(tier)
+        catalog = build_action_catalog_from_turn(
+            observation,
+            turn,
+            ship_build_tier=tier,
+        )
+        problem = build_inference_problem(
+            observation,
+            catalog,
+            max_solutions=max_solutions,
+            time_limit_seconds=remaining,
+        )
+        result = solve_inference_problem(problem)
+        if result.solutions:
+            break
+        if result.status == STATUS_INVALID_PROBLEM:
+            break
+
+    if result is None or catalog is None or problem is None:
+        tiers_attempted.append(START_SHIP_BUILD_TIER)
+        catalog = build_action_catalog_from_turn(
+            observation,
+            turn,
+            ship_build_tier=START_SHIP_BUILD_TIER,
+        )
+        problem = build_inference_problem(observation, catalog, max_solutions=max_solutions)
+        result = solve_inference_problem(problem)
+
+    return result, catalog, problem, tiers_attempted
+
+
 def inference_result_to_api_payload(
     result: InferenceResult,
     catalog: ActionCatalog,
     observation: InferenceObservation,
     turn: TurnInfo,
     problem: InferenceProblem,
+    *,
+    tiers_attempted: list[int] | None = None,
 ) -> dict[str, object]:
     """Shape a solver result into the Core scores row inference object."""
     solver_diagnostics = {
@@ -271,6 +339,9 @@ def inference_result_to_api_payload(
         catalog=catalog,
         turn_info=turn,
         solver=solver_diagnostics,
+        extra={
+            "tiers_attempted": tiers_attempted or [catalog.ship_build_tier],
+        },
     )
     return _inference_api_payload(
         status=result.status,

@@ -256,9 +256,7 @@ def _objective_value(
         else:
             objective_value += action.probability_weight * action_counts[action.id]
     for ship_build in ship_builds:
-        objective_value += (
-            combo_probability_weight_by_id[ship_build.combo_id] * ship_build.count
-        )
+        objective_value += combo_probability_weight_by_id[ship_build.combo_id] * ship_build.count
     return objective_value
 
 

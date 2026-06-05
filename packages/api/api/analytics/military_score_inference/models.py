@@ -61,7 +61,7 @@ class InferenceProblem:
     observation: InferenceObservation
     aggregate_actions: tuple[CandidateAction, ...]
     ship_build_combos: tuple[ShipBuildCombo, ...] = ()
-    ship_build_tier: int = 3
+    ship_build_tier: int = 0
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]] = field(
         default_factory=dict
     )

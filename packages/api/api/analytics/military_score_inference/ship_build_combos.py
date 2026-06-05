@@ -9,8 +9,9 @@ from api.analytics.military_score_inference.ship_build_presets import (
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 
-# Tier 3: active engines, beams, and torps (jump to turn catalog when active lists are empty).
-DEFAULT_SHIP_BUILD_TIER = 3
+START_SHIP_BUILD_TIER = 0
+MAX_SHIP_BUILD_TIER = 4
+DEFAULT_SHIP_BUILD_TIER = START_SHIP_BUILD_TIER
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,22 @@ def ship_build_combo_label(
     return f"Build {hull.name} (unarmed)"
 
 
+def beam_count_options_for_tier(hull: Hull, tier: int) -> tuple[int, ...]:
+    if hull.beams == 0:
+        return (0,)
+    if tier >= MAX_SHIP_BUILD_TIER:
+        return tuple(range(0, hull.beams + 1))
+    return (0, hull.beams)
+
+
+def launcher_count_options_for_tier(hull: Hull, tier: int) -> tuple[int, ...]:
+    if hull.launchers == 0:
+        return (0,)
+    if tier >= MAX_SHIP_BUILD_TIER:
+        return tuple(range(0, hull.launchers + 1))
+    return (0, hull.launchers)
+
+
 def ship_build_upper_bound(
     observation: InferenceObservation,
     *,
@@ -83,6 +100,7 @@ def generate_ship_build_combos(
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
     config: ShipBuildComboConfig | None = None,
+    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
 ) -> tuple[ShipBuildCombo, ...]:
     combo_config = config or ShipBuildComboConfig()
     combos: list[ShipBuildCombo] = []
@@ -102,8 +120,8 @@ def generate_ship_build_combos(
         if build_upper_bound <= 0:
             continue
 
-        beam_count_options = (0,) if hull.beams == 0 else (0, hull.beams)
-        launcher_count_options = (0,) if hull.launchers == 0 else (0, hull.launchers)
+        beam_count_options = beam_count_options_for_tier(hull, ship_build_tier)
+        launcher_count_options = launcher_count_options_for_tier(hull, ship_build_tier)
 
         for engine_id in sorted(eligible_engine_ids):
             engine = engines_by_id.get(engine_id)

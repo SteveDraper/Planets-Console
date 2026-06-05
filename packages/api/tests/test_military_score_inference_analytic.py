@@ -342,6 +342,17 @@ def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
     assert "shipBuildCombos" in diagnostics["actionCatalog"]
 
 
+def test_inference_diagnostics_include_tier_retry_fields(sample_turn):
+    score = sample_turn.scores[0]
+    inference = infer_military_score_build(score, sample_turn)
+    diagnostics = inference["diagnostics"]
+    assert "ship_build_tier" in diagnostics
+    assert "ship_build_combo_count" in diagnostics
+    assert "tiers_attempted" in diagnostics
+    assert isinstance(diagnostics["tiers_attempted"], list)
+    assert diagnostics["tiers_attempted"]
+
+
 def test_registry_still_exposes_only_scores_analytic(sample_turn):
     from api.analytics.catalog import TURN_ANALYTIC_CATALOG
     from api.analytics.registry import TURN_ANALYTICS

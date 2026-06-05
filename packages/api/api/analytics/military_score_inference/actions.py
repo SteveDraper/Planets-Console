@@ -8,7 +8,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
-    turn_catalog_context_for_player,
+    turn_catalog_context_for_tier,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -64,7 +64,6 @@ SHIP_TORPEDO_BUCKETS = (
 )
 
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
-LARGE_COMBO_CATALOG_MAX_SOLUTIONS_ONE_THRESHOLD = 5000
 
 BUCKETED_ACTION_IDS = frozenset(
     {
@@ -120,20 +119,13 @@ def build_inference_problem(
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> InferenceProblem:
-    resolved_max_solutions = max_solutions
-    if resolved_max_solutions is None:
-        resolved_max_solutions = (
-            1
-            if len(catalog.ship_build_combos) > LARGE_COMBO_CATALOG_MAX_SOLUTIONS_ONE_THRESHOLD
-            else 20
-        )
     return InferenceProblem(
         observation=observation,
         aggregate_actions=catalog.aggregate_actions,
         ship_build_combos=catalog.ship_build_combos,
         ship_build_tier=catalog.ship_build_tier,
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
-        max_solutions=resolved_max_solutions,
+        max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
     )
 
@@ -145,7 +137,11 @@ def build_action_catalog_from_turn(
     config: ActionCatalogConfig | None = None,
     ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
 ) -> ActionCatalog:
-    catalog_context = turn_catalog_context_for_player(turn, observation.player_id)
+    catalog_context = turn_catalog_context_for_tier(
+        turn,
+        observation.player_id,
+        ship_build_tier,
+    )
     return build_action_catalog(
         observation,
         hulls_by_id=catalog_context.hulls_by_id,
@@ -211,6 +207,7 @@ def build_action_catalog(
         eligible_beam_ids=eligible_beam_ids,
         eligible_torp_ids=eligible_torp_ids,
         config=catalog_config.ship_build_combo_config,
+        ship_build_tier=ship_build_tier,
     )
 
     return ActionCatalog(
