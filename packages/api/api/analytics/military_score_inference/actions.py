@@ -7,9 +7,8 @@ from api.analytics.military_score_inference.accelerated_start import (
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
 from api.analytics.military_score_inference.component_eligibility import (
-    buildable_hull_ids_for_player,
-    eligible_component_ids_for_player,
     player_by_id,
+    turn_catalog_context_for_player,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -146,40 +145,17 @@ def build_action_catalog_from_turn(
     config: ActionCatalogConfig | None = None,
     ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
 ) -> ActionCatalog:
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
-    engines_by_id = {engine.id: engine for engine in turn.engines}
-    beams_by_id = {beam.id: beam for beam in turn.beams}
-    torpedos_by_id = {torpedo.id: torpedo for torpedo in turn.torpedos}
-    buildable_hull_ids = buildable_hull_ids_for_player(turn, observation.player_id)
-    player = player_by_id(turn, observation.player_id)
-    eligible_engine_ids = eligible_component_ids_for_player(
-        turn,
-        observation.player_id,
-        active_component_csv=player.activeengines,
-        turn_catalog_ids=frozenset(engines_by_id),
-    )
-    eligible_beam_ids = eligible_component_ids_for_player(
-        turn,
-        observation.player_id,
-        active_component_csv=player.activebeams,
-        turn_catalog_ids=frozenset(beams_by_id),
-    )
-    eligible_torp_ids = eligible_component_ids_for_player(
-        turn,
-        observation.player_id,
-        active_component_csv=player.activetorps,
-        turn_catalog_ids=frozenset(torpedos_by_id),
-    )
+    catalog_context = turn_catalog_context_for_player(turn, observation.player_id)
     return build_action_catalog(
         observation,
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
-        eligible_engine_ids=eligible_engine_ids,
-        eligible_beam_ids=eligible_beam_ids,
-        eligible_torp_ids=eligible_torp_ids,
+        hulls_by_id=catalog_context.hulls_by_id,
+        engines_by_id=catalog_context.engines_by_id,
+        beams_by_id=catalog_context.beams_by_id,
+        torpedos_by_id=catalog_context.torpedos_by_id,
+        buildable_hull_ids=catalog_context.buildable_hull_ids,
+        eligible_engine_ids=catalog_context.eligible_engine_ids,
+        eligible_beam_ids=catalog_context.eligible_beam_ids,
+        eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
         turn=turn,
         ship_build_tier=ship_build_tier,

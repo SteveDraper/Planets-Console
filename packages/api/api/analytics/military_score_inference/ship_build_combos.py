@@ -2,17 +2,12 @@
 
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.component_eligibility import (
-    buildable_hull_ids_for_player,
-    eligible_component_ids_for_player,
-)
 from api.analytics.military_score_inference.models import InferenceObservation, ShipBuildCombo
 from api.analytics.military_score_inference.ship_build_presets import (
     is_military_hull,
     ship_build_score_delta_2x,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
-from api.models.game import TurnInfo
 
 # Tier 3: active engines, beams, and torps (jump to turn catalog when active lists are empty).
 DEFAULT_SHIP_BUILD_TIER = 3
@@ -220,58 +215,3 @@ def prune_combos_for_observation(
         if narrowed:
             kept = narrowed
     return tuple(kept)
-
-
-def generate_ship_build_combos_from_turn(
-    observation: InferenceObservation,
-    turn: TurnInfo,
-    *,
-    config: ShipBuildComboConfig | None = None,
-    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
-) -> tuple[ShipBuildCombo, ...]:
-    del ship_build_tier  # tier escalation is handled in a follow-on ticket
-    player = turn.player if turn.player.id == observation.player_id else None
-    if player is None:
-        for candidate in turn.players:
-            if candidate.id == observation.player_id:
-                player = candidate
-                break
-    if player is None:
-        return ()
-
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
-    engines_by_id = {engine.id: engine for engine in turn.engines}
-    beams_by_id = {beam.id: beam for beam in turn.beams}
-    torpedos_by_id = {torpedo.id: torpedo for torpedo in turn.torpedos}
-
-    eligible_engine_ids = eligible_component_ids_for_player(
-        turn,
-        observation.player_id,
-        active_component_csv=player.activeengines,
-        turn_catalog_ids=frozenset(engines_by_id),
-    )
-    eligible_beam_ids = eligible_component_ids_for_player(
-        turn,
-        observation.player_id,
-        active_component_csv=player.activebeams,
-        turn_catalog_ids=frozenset(beams_by_id),
-    )
-    eligible_torp_ids = eligible_component_ids_for_player(
-        turn,
-        observation.player_id,
-        active_component_csv=player.activetorps,
-        turn_catalog_ids=frozenset(torpedos_by_id),
-    )
-
-    return generate_ship_build_combos(
-        observation,
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids_for_player(turn, observation.player_id),
-        eligible_engine_ids=eligible_engine_ids,
-        eligible_beam_ids=eligible_beam_ids,
-        eligible_torp_ids=eligible_torp_ids,
-        config=config,
-    )

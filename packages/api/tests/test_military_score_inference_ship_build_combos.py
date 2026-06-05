@@ -14,7 +14,6 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
     generate_ship_build_combos,
-    generate_ship_build_combos_from_turn,
     ship_build_combo_id,
 )
 from api.analytics.military_score_inference.ship_build_presets import ship_build_score_delta_2x
@@ -126,7 +125,8 @@ def test_empty_active_lists_jump_to_turn_catalog_for_components():
         turn = turn_info_from_json(json.load(handle), settings_defaults=settings)
     score = next(s for s in turn.scores if s.ownerid == 1)
     observation = build_inference_observation(score, turn)
-    combos = generate_ship_build_combos_from_turn(observation, turn)
+    catalog = build_action_catalog_from_turn(observation, turn)
+    combos = catalog.ship_build_combos
     missouri = next(
         (
             combo

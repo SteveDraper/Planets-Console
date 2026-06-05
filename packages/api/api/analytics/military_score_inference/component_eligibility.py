@@ -1,7 +1,22 @@
 """Shared hull and component eligibility helpers for military score inference."""
 
+from dataclasses import dataclass
+
+from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.player import Player, Race
+
+
+@dataclass(frozen=True)
+class TurnCatalogContext:
+    hulls_by_id: dict[int, Hull]
+    engines_by_id: dict[int, Engine]
+    beams_by_id: dict[int, Beam]
+    torpedos_by_id: dict[int, Torpedo]
+    buildable_hull_ids: frozenset[int]
+    eligible_engine_ids: frozenset[int]
+    eligible_beam_ids: frozenset[int]
+    eligible_torp_ids: frozenset[int]
 
 
 def parse_component_id_csv(component_ids: str) -> frozenset[int]:
@@ -53,3 +68,36 @@ def eligible_component_ids_for_player(
     if not active_ids:
         return turn_catalog_ids
     return active_ids & turn_catalog_ids
+
+
+def turn_catalog_context_for_player(turn: TurnInfo, player_id: int) -> TurnCatalogContext:
+    hulls_by_id = {hull.id: hull for hull in turn.hulls}
+    engines_by_id = {engine.id: engine for engine in turn.engines}
+    beams_by_id = {beam.id: beam for beam in turn.beams}
+    torpedos_by_id = {torpedo.id: torpedo for torpedo in turn.torpedos}
+    player = player_by_id(turn, player_id)
+    return TurnCatalogContext(
+        hulls_by_id=hulls_by_id,
+        engines_by_id=engines_by_id,
+        beams_by_id=beams_by_id,
+        torpedos_by_id=torpedos_by_id,
+        buildable_hull_ids=buildable_hull_ids_for_player(turn, player_id),
+        eligible_engine_ids=eligible_component_ids_for_player(
+            turn,
+            player_id,
+            active_component_csv=player.activeengines,
+            turn_catalog_ids=frozenset(engines_by_id),
+        ),
+        eligible_beam_ids=eligible_component_ids_for_player(
+            turn,
+            player_id,
+            active_component_csv=player.activebeams,
+            turn_catalog_ids=frozenset(beams_by_id),
+        ),
+        eligible_torp_ids=eligible_component_ids_for_player(
+            turn,
+            player_id,
+            active_component_csv=player.activetorps,
+            turn_catalog_ids=frozenset(torpedos_by_id),
+        ),
+    )
