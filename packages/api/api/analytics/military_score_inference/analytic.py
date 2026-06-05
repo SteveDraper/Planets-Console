@@ -174,10 +174,20 @@ def build_inference_solver_diagnostics(
 def run_inference_with_artifacts(
     score: Score,
     turn: TurnInfo,
+    *,
+    observation: InferenceObservation | None = None,
+    catalog: ActionCatalog | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
-    """Run inference once; return API payload plus observation and catalog for re-checks."""
+    """Run inference once; return API payload plus observation and catalog for re-checks.
+
+    When ``observation`` and ``catalog`` are supplied (e.g. corpus harness), they are
+    reused for solving and returned unchanged so constraint re-check uses the same
+    catalog instance as coverage evaluation.
+    """
     turn_number = turn.settings.turn
-    observation = build_inference_observation(score, turn)
+    resolved_observation = (
+        observation if observation is not None else build_inference_observation(score, turn)
+    )
     if not prior_turn_score_data_available(turn):
         return (
             _inference_api_payload(
@@ -186,24 +196,27 @@ def run_inference_with_artifacts(
                 solutions=(),
                 diagnostics=build_inference_solver_diagnostics(
                     turn=turn_number,
-                    observation=observation,
+                    observation=resolved_observation,
                     turn_info=turn,
                     extra={"reason": "first_turn"},
                 ),
             ),
-            observation,
+            resolved_observation,
             None,
         )
 
-    catalog: ActionCatalog | None = None
+    solve_catalog = catalog
     try:
-        catalog = build_action_catalog_from_turn(observation, turn)
-        problem = build_inference_problem(observation, catalog)
+        if solve_catalog is None:
+            solve_catalog = build_action_catalog_from_turn(resolved_observation, turn)
+        problem = build_inference_problem(resolved_observation, solve_catalog)
         result = solve_inference_problem(problem)
         return (
-            inference_result_to_api_payload(result, catalog, observation, turn, problem),
-            observation,
-            catalog,
+            inference_result_to_api_payload(
+                result, solve_catalog, resolved_observation, turn, problem
+            ),
+            resolved_observation,
+            solve_catalog,
         )
     except Exception as exc:
         return (
@@ -213,14 +226,14 @@ def run_inference_with_artifacts(
                 solutions=(),
                 diagnostics=build_inference_solver_diagnostics(
                     turn=turn_number,
-                    observation=observation,
-                    catalog=catalog,
+                    observation=resolved_observation,
+                    catalog=solve_catalog,
                     turn_info=turn,
                     extra={"error": str(exc)},
                 ),
             ),
-            observation,
-            catalog,
+            resolved_observation,
+            solve_catalog,
         )
 
 

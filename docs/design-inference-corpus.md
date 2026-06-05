@@ -71,7 +71,23 @@ File: `packages/api/tests/fixtures/inference_corpus/manifest.json`
       "requireTopK": false,
       "expectCoverage": false,
       "requiredPerspectives": [],
-      "notes": "Seed case; refresh paths after fixture trim"
+      "notes": "Seed build case; strict ground truth may be unavailable until combo catalog (#51)"
+    },
+    {
+      "id": "628580-p1-host51",
+      "gameId": 628580,
+      "perspective": 1,
+      "hostTurn": 51,
+      "playerId": null,
+      "priorTurnPath": "628580/1/turns/51.json",
+      "scoreTurnPath": "628580/1/turns/52.json",
+      "complexity": "minimal",
+      "tier": 1,
+      "expectedStatus": "exact",
+      "requireTopK": false,
+      "expectCoverage": true,
+      "requiredPerspectives": [],
+      "notes": "Catalog-covered empty ground truth; Tier 1 regression for #64"
     }
   ]
 }
@@ -93,7 +109,7 @@ File: `packages/api/tests/fixtures/inference_corpus/manifest.json`
 | `tier` | no | `1` or `2`; default `1` |
 | `expectedStatus` | no | Default `exact` for Tier 1; see section 7 |
 | `requireTopK` | no | Default `false`; if `true`, ranking miss is hard fail (#65) |
-| `expectCoverage` | no | If `true`, case must be in search space (#64) |
+| `expectCoverage` | no | If `true`, CI hard-fails unless `groundTruthAvailable` and catalog coverage pass (#64) |
 | `requiredPerspectives` | no | Other slots required for multi-view (#66) |
 | `notes` | no | Human context |
 
@@ -158,6 +174,21 @@ Enumerate without a manifest:
 3. For each consecutive pair `(N, N+1)` in sorted turns, emit a case with `hostTurn=N`, `perspective=p`.
 
 Use `FileStorageBackend` with `ApiConfig(storage_backend="file", storage_root=...)`. Default storage root: load via `api.config.load_config()` (typically repo `.data`).
+
+```bash
+# From repo root (requires game turns under .data/games/{id}/)
+make inference_corpus GAME_ID=628580
+
+# Or directly:
+uv run python scripts/run_inference_corpus.py --game-id 628580
+
+# List discovered cases with ground-truth build summaries (no solver):
+uv run python scripts/run_inference_corpus.py discover --game-id 628580 --from-turn 2 --to-turn 10
+
+# Scan every stored game, cap at routine complexity, JSON output:
+PYTHONPATH=packages/api uv run python scripts/run_inference_corpus.py \
+  --max-complexity routine --json
+```
 
 **Finished game:** Script does not require load-all completeness; sparse pairs are valid. Optionally warn if `games/{id}/info.json` missing.
 
@@ -289,7 +320,7 @@ If residual cannot be assigned without deferred effects, set `groundTruthAvailab
 
 After `build_action_catalog_from_turn(observation, scoreTurn)`:
 
-For each `(action_id, count)` in ground truth:
+When `groundTruthAvailable: true`, for each `(action_id, count)` in ground truth:
 
 - Catalog contains `action_id`
 - `count <= action.upper_bound` and `count >= action.lower_bound`
@@ -297,6 +328,8 @@ For each `(action_id, count)` in ground truth:
 If any fail -> outcome `out_of_search_space`, `coverageReason` from section 9.4, **do not** call solver.
 
 If `groundTruthAvailable: false` -> skip coverage and ranking; still run Tier 1.
+
+Manifest `expectCoverage` is a **CI assertion** only: when `true`, the case must have `groundTruthAvailable: true` and pass catalog coverage (otherwise outcome `failed`, exit code 1). It does **not** gate whether coverage is evaluated; that follows `groundTruthAvailable` only.
 
 ### 9.4 `coverageReason` enum (stable strings)
 

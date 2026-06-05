@@ -16,7 +16,23 @@
       "requireTopK": false,
       "expectCoverage": false,
       "requiredPerspectives": [],
-      "notes": "Perspective 1 (dead); host turn 2 build explained on score turn 3; trimmed from local store game 628580."
+      "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth unavailable until combo catalog (#51)."
+    },
+    {
+      "id": "628580-p1-host51",
+      "gameId": 628580,
+      "perspective": 1,
+      "hostTurn": 51,
+      "playerId": null,
+      "priorTurnPath": "628580/1/turns/51.json",
+      "scoreTurnPath": "628580/1/turns/52.json",
+      "complexity": "minimal",
+      "tier": 1,
+      "expectedStatus": "exact",
+      "requireTopK": false,
+      "expectCoverage": true,
+      "requiredPerspectives": [],
+      "notes": "No military activity; empty ground truth multiset is catalog-covered (#64)."
     }
   ]
 }

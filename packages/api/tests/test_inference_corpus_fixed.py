@@ -8,10 +8,19 @@ def test_fixed_inference_corpus_tier1_passes():
     report = run_fixed_corpus()
     assert report.failed_count == 0, "\n".join(report.summary_lines())
     assert report.passed_count == len(report.results)
+    assert len(report.results) == 2
     for result in report.results:
         assert result.outcome == CaseOutcome.PASSED, (
             f"{result.case_id}: {result.outcome} ({result.failure_message or result.skip_reason})"
         )
+
+
+def test_fixed_corpus_coverage_case_has_ground_truth_available():
+    report = run_fixed_corpus()
+    coverage_case = next(
+        result for result in report.results if result.case_id == "628580-p1-host51"
+    )
+    assert coverage_case.ground_truth_available is True
 
 
 def test_fixed_inference_corpus_report_distinguishes_skip_buckets():

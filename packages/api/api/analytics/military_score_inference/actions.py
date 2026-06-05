@@ -17,9 +17,17 @@ from api.analytics.military_score_inference.scoring import (
     loaded_ship_fighter_score_delta_2x,
     loaded_ship_torpedo_score_delta_2x,
     planet_defense_post_score_delta_2x,
-    ship_construction_score_delta_2x,
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
+)
+from api.analytics.military_score_inference.ship_build_presets import (
+    LOADOUT_PRESET_EMPTY,
+    LOADOUT_PRESET_TORPEDOES,
+    build_action_id,
+    default_build_components,
+    is_military_hull,
+    ship_build_score_delta_2x,
+    torpedo_preset_catalog_eligible,
 )
 from api.concepts.races import (
     evil_empire_free_starbase_fighters_per_host_turn,
@@ -28,9 +36,6 @@ from api.concepts.races import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.player import Player, Race
-
-LOADOUT_PRESET_EMPTY = "empty"
-LOADOUT_PRESET_TORPEDOES = "torpedoes"
 
 PLANET_DEFENSE_POST_BUCKETS = (
     ProbabilityBucket("modest build-up", 0, 10, 100),
@@ -235,14 +240,6 @@ def _race_by_id_or_none(turn: TurnInfo, race_id: int) -> Race | None:
     return None
 
 
-def _component_minerals(component: Hull | Engine | Beam | Torpedo) -> int:
-    return component.tritanium + component.duranium + component.molybdenum
-
-
-def _is_military_hull(hull: Hull) -> bool:
-    return hull.beams > 0 or hull.launchers > 0 or hull.fighterbays > 0
-
-
 def _residual_count_bound(
     observation: InferenceObservation,
     score_delta_2x: int,
@@ -429,13 +426,18 @@ def _ship_build_actions(
     if default_engine_id is None or default_engine_id not in engines_by_id:
         return []
 
-    default_engine = engines_by_id[default_engine_id]
-    default_beam = min(beams_by_id.values(), key=lambda beam: beam.id) if beams_by_id else None
-    default_torpedo = (
-        min(torpedos_by_id.values(), key=lambda torpedo: torpedo.techlevel)
-        if torpedos_by_id
-        else None
+    defaults = default_build_components(
+        engines_by_id=engines_by_id,
+        beams_by_id=beams_by_id,
+        torpedos_by_id=torpedos_by_id,
+        default_engine_id=default_engine_id,
     )
+    default_engine = defaults.engine
+    default_beam = defaults.beam
+    default_torpedo = defaults.torpedo
+    if default_engine is None:
+        return []
+
     actions: list[CandidateAction] = []
 
     for hull_id in sorted(buildable_hull_ids):
@@ -443,7 +445,7 @@ def _ship_build_actions(
         if hull is None:
             continue
 
-        is_warship = _is_military_hull(hull)
+        is_warship = is_military_hull(hull)
         is_freighter = not is_warship
         build_upper_bound = _ship_build_upper_bound(
             observation,
@@ -456,14 +458,14 @@ def _ship_build_actions(
         presets: list[tuple[str, int]] = [
             (LOADOUT_PRESET_EMPTY, config.default_ship_build_probability_weight),
         ]
-        if hull.launchers > 0 and default_torpedo is not None:
+        if torpedo_preset_catalog_eligible(hull, default_torpedo):
             presets.append(
                 (LOADOUT_PRESET_TORPEDOES, config.torpedo_ship_build_probability_weight),
             )
 
         for preset_id, probability_weight in presets:
             armed_build = preset_id == LOADOUT_PRESET_TORPEDOES
-            score_delta_2x = _ship_build_score_delta_2x(
+            score_delta_2x = ship_build_score_delta_2x(
                 hull,
                 default_engine,
                 default_beam,
@@ -475,7 +477,7 @@ def _ship_build_actions(
                 continue
             actions.append(
                 CandidateAction(
-                    id=f"build_{hull_id}_{preset_id}",
+                    id=build_action_id(hull_id, preset_id),
                     label=f"Build {hull.name} ({preset_id})",
                     score_delta_2x=score_delta_2x,
                     warship_delta=1 if is_warship else 0,
@@ -487,34 +489,6 @@ def _ship_build_actions(
             )
 
     return actions
-
-
-def _ship_build_score_delta_2x(
-    hull: Hull,
-    engine: Engine,
-    beam: Beam | None,
-    torpedo: Torpedo | None,
-    *,
-    beam_count: int,
-    launcher_count: int,
-) -> int:
-    """Hull construction score only; ammo is modeled by separate catalog actions."""
-    engine_count = hull.engines
-    construction_megacredits = hull.cost + engine.cost * engine_count
-    construction_minerals = _component_minerals(hull) + _component_minerals(engine) * engine_count
-
-    if beam is not None and beam_count > 0:
-        construction_megacredits += beam.cost * beam_count
-        construction_minerals += _component_minerals(beam) * beam_count
-
-    if torpedo is not None and launcher_count > 0:
-        construction_megacredits += torpedo.launchercost * launcher_count
-        construction_minerals += _component_minerals(torpedo) * launcher_count
-
-    return ship_construction_score_delta_2x(
-        construction_megacredits,
-        construction_minerals,
-    )
 
 
 def _probability_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...]:

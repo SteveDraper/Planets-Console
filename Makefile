@@ -1,4 +1,4 @@
-.PHONY: test lint ci typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_server test_scripts test_frontend generate generate_frontend_api
+.PHONY: test lint ci typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_server test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
 # `test` runs lint and unit tests. `ci` also runs the full frontend `tsc -b` (see `typecheck_frontend`).
@@ -51,3 +51,17 @@ test_scripts:
 
 test_frontend:
 	cd packages/frontend && npm run test
+
+inference_corpus:
+	uv sync --extra dev
+ifndef GAME_ID
+	$(error GAME_ID is required, e.g. make inference_corpus GAME_ID=628580)
+endif
+	PYTHONPATH=packages/api uv run python scripts/run_inference_corpus.py --game-id $(GAME_ID) $(if $(STORAGE_ROOT),--storage-root $(STORAGE_ROOT),) $(if $(FROM_TURN),--from-turn $(FROM_TURN),) $(if $(TO_TURN),--to-turn $(TO_TURN),)
+
+inference_corpus_discover:
+	uv sync --extra dev
+ifndef GAME_ID
+	$(error GAME_ID is required, e.g. make inference_corpus_discover GAME_ID=628580)
+endif
+	uv run python scripts/run_inference_corpus.py discover --game-id $(GAME_ID) $(if $(STORAGE_ROOT),--storage-root $(STORAGE_ROOT),) $(if $(FROM_TURN),--from-turn $(FROM_TURN),) $(if $(TO_TURN),--to-turn $(TO_TURN),)
