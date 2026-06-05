@@ -119,7 +119,6 @@ def format_ground_truth_summary(
     if not ground_truth:
         return "no modeled activity"
 
-    hulls_by_id = {hull.id: hull for hull in score_turn.hulls}
     torpedos_by_id = {torp.id: torp for torp in score_turn.torpedos}
     parts: list[str] = []
 

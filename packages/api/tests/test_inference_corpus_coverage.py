@@ -24,10 +24,10 @@ from tests.inference_corpus.ground_truth import (
     extract_ground_truth_v1,
     format_ground_truth_summary,
 )
-from tests.inference_corpus.ship_inventory import new_owned_ships, ship_to_build_combo_id
 from tests.inference_corpus.manifest import FIXTURES_ROOT, load_manifest, resolve_player_id
 from tests.inference_corpus.models import CaseOutcome
 from tests.inference_corpus.run import run_manifest_case
+from tests.inference_corpus.ship_inventory import new_owned_ships, ship_to_build_combo_id
 
 
 def test_evaluate_catalog_coverage_accepts_empty_ground_truth():
