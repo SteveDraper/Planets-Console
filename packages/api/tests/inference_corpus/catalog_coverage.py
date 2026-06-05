@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.models import CandidateAction
+from api.analytics.military_score_inference.models import CandidateAction, ShipBuildCombo
 
 from tests.inference_corpus.ground_truth import GroundTruth, GroundTruthExtraction
 
@@ -45,29 +45,50 @@ def evaluate_catalog_coverage(
     catalog: ActionCatalog,
 ) -> CatalogCoverageResult:
     """Return whether every ground-truth tuple lies in the action catalog within bounds."""
-    actions_by_id: dict[str, CandidateAction] = {action.id: action for action in catalog.actions}
+    actions_by_id: dict[str, CandidateAction] = {
+        action.id: action for action in catalog.aggregate_actions
+    }
+    combos_by_id: dict[str, ShipBuildCombo] = {
+        combo.combo_id: combo for combo in catalog.ship_build_combos
+    }
     for action_id, count in ground_truth:
         catalog_action = actions_by_id.get(action_id)
-        if catalog_action is None:
-            if action_id.startswith("build_"):
+        if catalog_action is not None:
+            if count > catalog_action.upper_bound:
+                return CatalogCoverageResult(
+                    in_search_space=False,
+                    coverage_reason=COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND,
+                )
+            if count < catalog_action.lower_bound:
+                return CatalogCoverageResult(
+                    in_search_space=False,
+                    coverage_reason=COVERAGE_REASON_ACTION_NOT_IN_CATALOG,
+                )
+            continue
+
+        if action_id.startswith("build_") or action_id.startswith("combo_"):
+            catalog_combo = combos_by_id.get(action_id)
+            if catalog_combo is None:
                 return CatalogCoverageResult(
                     in_search_space=False,
                     coverage_reason=COVERAGE_REASON_COMBO_NOT_IN_CATALOG,
                 )
-            return CatalogCoverageResult(
-                in_search_space=False,
-                coverage_reason=COVERAGE_REASON_ACTION_NOT_IN_CATALOG,
-            )
-        if count > catalog_action.upper_bound:
-            return CatalogCoverageResult(
-                in_search_space=False,
-                coverage_reason=COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND,
-            )
-        if count < catalog_action.lower_bound:
-            return CatalogCoverageResult(
-                in_search_space=False,
-                coverage_reason=COVERAGE_REASON_ACTION_NOT_IN_CATALOG,
-            )
+            if count > catalog_combo.upper_bound:
+                return CatalogCoverageResult(
+                    in_search_space=False,
+                    coverage_reason=COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND,
+                )
+            if count < catalog_combo.lower_bound:
+                return CatalogCoverageResult(
+                    in_search_space=False,
+                    coverage_reason=COVERAGE_REASON_COMBO_NOT_IN_CATALOG,
+                )
+            continue
+
+        return CatalogCoverageResult(
+            in_search_space=False,
+            coverage_reason=COVERAGE_REASON_ACTION_NOT_IN_CATALOG,
+        )
     return CatalogCoverageResult(in_search_space=True)
 
 

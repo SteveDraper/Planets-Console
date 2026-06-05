@@ -8,6 +8,7 @@ from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
+    ShipBuildCombo,
 )
 
 PRIORITY_POINT_DIAGNOSTIC_NOTE = (
@@ -29,14 +30,21 @@ class _SumEqualityConstraint:
     def add_to_model(
         self,
         model: cp_model.CpModel,
-        actions: tuple[CandidateAction, ...],
-        count_vars: dict[str, cp_model.IntVar],
+        aggregate_actions: tuple[CandidateAction, ...],
+        ship_build_combos: tuple[ShipBuildCombo, ...],
+        action_count_vars: dict[str, cp_model.IntVar],
+        combo_count_vars: dict[str, cp_model.IntVar],
         observation: InferenceObservation,
     ) -> None:
         rhs = getattr(observation, self.observation_attr)
         model.add(
             sum(
-                getattr(action, self.coefficient_attr) * count_vars[action.id] for action in actions
+                getattr(action, self.coefficient_attr) * action_count_vars[action.id]
+                for action in aggregate_actions
+            )
+            + sum(
+                getattr(combo, self.coefficient_attr) * combo_count_vars[combo.combo_id]
+                for combo in ship_build_combos
             )
             == rhs
         )
@@ -85,14 +93,28 @@ class InferenceHardConstraints:
         self,
         model: cp_model.CpModel,
         problem: InferenceProblem,
-        count_vars: dict[str, cp_model.IntVar],
+        action_count_vars: dict[str, cp_model.IntVar],
+        combo_count_vars: dict[str, cp_model.IntVar],
     ) -> None:
         observation = problem.observation
-        actions = problem.actions
         for constraint in self.enforced_equalities():
-            constraint.add_to_model(model, actions, count_vars, observation)
+            constraint.add_to_model(
+                model,
+                problem.aggregate_actions,
+                problem.ship_build_combos,
+                action_count_vars,
+                combo_count_vars,
+                observation,
+            )
         model.add(
-            sum(action.build_slot_usage * count_vars[action.id] for action in actions)
+            sum(
+                action.build_slot_usage * action_count_vars[action.id]
+                for action in problem.aggregate_actions
+            )
+            + sum(
+                combo.build_slot_usage * combo_count_vars[combo.combo_id]
+                for combo in problem.ship_build_combos
+            )
             <= observation.starbases_owned
         )
 

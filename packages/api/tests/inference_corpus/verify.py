@@ -11,7 +11,10 @@ def verify_top_solution_hard_equalities(
     inference_payload: dict[str, object],
 ) -> str | None:
     """Return an error message when the top solution violates hard equalities."""
-    actions_by_id: dict[str, CandidateAction] = {action.id: action for action in catalog.actions}
+    actions_by_id: dict[str, CandidateAction] = {
+        action.id: action for action in catalog.aggregate_actions
+    }
+    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
 
     solutions = inference_payload.get("solutions")
     if not isinstance(solutions, list) or not solutions:
@@ -24,6 +27,12 @@ def verify_top_solution_hard_equalities(
     action_entries = top.get("actions")
     if not isinstance(action_entries, list):
         return "top solution actions missing"
+
+    ship_build_entries = top.get("shipBuilds")
+    if ship_build_entries is None:
+        ship_build_entries = []
+    if not isinstance(ship_build_entries, list):
+        return "top solution shipBuilds must be a list"
 
     military_sum = 0
     warship_sum = 0
@@ -39,6 +48,18 @@ def verify_top_solution_hard_equalities(
         military_sum += catalog_action.score_delta_2x * count
         warship_sum += catalog_action.warship_delta * count
         freighter_sum += catalog_action.freighter_delta * count
+
+    for index, entry in enumerate(ship_build_entries):
+        parsed = _parse_solution_ship_build_entry(index, entry)
+        if isinstance(parsed, str):
+            return parsed
+        combo_id, count = parsed
+        catalog_combo = combos_by_id.get(combo_id)
+        if catalog_combo is None:
+            return f"unknown combo id in top solution: {combo_id}"
+        military_sum += catalog_combo.score_delta_2x * count
+        warship_sum += catalog_combo.warship_delta * count
+        freighter_sum += catalog_combo.freighter_delta * count
 
     if military_sum != observation.military_delta_2x:
         return (
@@ -76,3 +97,23 @@ def _parse_solution_action_entry(
         return f"top solution actions[{index}].count must be positive, got {count}"
 
     return action_id, count
+
+
+def _parse_solution_ship_build_entry(
+    index: int,
+    entry: object,
+) -> tuple[str, int] | str:
+    if not isinstance(entry, dict):
+        return f"top solution shipBuilds[{index}] must be an object, got {type(entry).__name__}"
+
+    combo_id = entry.get("comboId")
+    if not isinstance(combo_id, str) or not combo_id:
+        return f"top solution shipBuilds[{index}].comboId must be a non-empty string"
+
+    count = entry.get("count")
+    if not isinstance(count, int):
+        return f"top solution shipBuilds[{index}].count must be an integer"
+    if count <= 0:
+        return f"top solution shipBuilds[{index}].count must be positive, got {count}"
+
+    return combo_id, count

@@ -1,13 +1,19 @@
 """Scores analytic integration for military score build inference."""
 
+import time
+
 from api.analytics.military_score_inference.accelerated_start import (
     accelerated_turn_count,
     observation_deltas_from_score,
 )
 from api.analytics.military_score_inference.actions import (
+    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
     build_action_catalog_from_turn,
     build_inference_problem,
+)
+from api.analytics.military_score_inference.component_eligibility import (
+    buildable_hull_ids_for_player,
 )
 from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
@@ -22,10 +28,16 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
+from api.analytics.military_score_inference.ship_build_combos import (
+    MAX_SHIP_BUILD_TIER,
+    START_SHIP_BUILD_TIER,
+)
 from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_TIME_LIMITED,
+    solution_signature,
     solve_inference_problem,
 )
 from api.models.game import TurnInfo
@@ -87,10 +99,11 @@ def catalog_to_actions_payload(
     observation: InferenceObservation | None = None,
 ) -> dict[str, object]:
     """Serialize the bounded action catalog for diagnostics."""
-    ship_build_actions = [action for action in catalog.actions if action.id.startswith("build_")]
     payload: dict[str, object] = {
         "catalogSize": catalog.catalog_size,
-        "shipBuildActionCount": len(ship_build_actions),
+        "aggregateActionCount": len(catalog.aggregate_actions),
+        "shipBuildComboCount": len(catalog.ship_build_combos),
+        "shipBuildTier": catalog.ship_build_tier,
         "actions": [
             {
                 "id": action.id,
@@ -104,21 +117,25 @@ def catalog_to_actions_payload(
                 "upperBound": action.upper_bound,
                 "probabilityWeight": action.probability_weight,
             }
-            for action in catalog.actions
+            for action in catalog.aggregate_actions
         ],
-        "shipBuildActions": [
+        "shipBuildCombos": [
             {
-                "id": action.id,
-                "label": action.label,
-                "upperBound": action.upper_bound,
-                "scoreDelta2x": action.score_delta_2x,
+                "comboId": combo.combo_id,
+                "label": combo.labels[0],
+                "hullId": combo.hull_id,
+                "engineId": combo.engine_id,
+                "beamId": combo.beam_id,
+                "torpId": combo.torp_id,
+                "beamCount": combo.beam_count,
+                "launcherCount": combo.launcher_count,
+                "upperBound": combo.upper_bound,
+                "scoreDelta2x": combo.score_delta_2x,
             }
-            for action in ship_build_actions
+            for combo in catalog.ship_build_combos
         ],
     }
     if turn is not None and observation is not None:
-        from api.analytics.military_score_inference.actions import buildable_hull_ids_for_player
-
         buildable_hull_ids = buildable_hull_ids_for_player(turn, observation.player_id)
         hulls_by_id = {hull.id: hull for hull in turn.hulls}
         buildable_starship_hull_ids = sorted(
@@ -130,7 +147,7 @@ def catalog_to_actions_payload(
             "buildableHullIdsMissingFromCatalog": sorted(
                 hull_id for hull_id in buildable_hull_ids if hull_id not in hulls_by_id
             ),
-            "shipBuildActionIds": [action.id for action in ship_build_actions],
+            "shipBuildComboIds": [combo.combo_id for combo in catalog.ship_build_combos],
         }
     return payload
 
@@ -208,12 +225,22 @@ def run_inference_with_artifacts(
     solve_catalog = catalog
     try:
         if solve_catalog is None:
-            solve_catalog = build_action_catalog_from_turn(resolved_observation, turn)
-        problem = build_inference_problem(resolved_observation, solve_catalog)
-        result = solve_inference_problem(problem)
+            result, solve_catalog, problem, tiers_attempted = _solve_with_tier_retry(
+                resolved_observation,
+                turn,
+            )
+        else:
+            tiers_attempted = [solve_catalog.ship_build_tier]
+            problem = build_inference_problem(resolved_observation, solve_catalog)
+            result = solve_inference_problem(problem)
         return (
             inference_result_to_api_payload(
-                result, solve_catalog, resolved_observation, turn, problem
+                result,
+                solve_catalog,
+                resolved_observation,
+                turn,
+                problem,
+                tiers_attempted=tiers_attempted,
             ),
             resolved_observation,
             solve_catalog,
@@ -243,12 +270,124 @@ def infer_military_score_build(score: Score, turn: TurnInfo) -> dict[str, object
     return payload
 
 
+def _solve_with_tier_retry(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    *,
+    max_solutions: int | None = None,
+    time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[int]]:
+    """Try ship-build tiers from narrow to wide, accumulating distinct feasible solutions.
+
+    Continues while each tier adds at least one new feasible solution (by action/combo
+    counts). Stops when a tier is feasible but contributes no new signatures, when a
+    tier is infeasible and no further tiers remain, on invalid problem, or when time
+    budget is exhausted.
+
+    Higher tiers may surface solutions ranked above earlier tiers once build
+    probability weights are refined; merged results are sorted by objective value.
+    """
+    started_at = time.monotonic()
+    tiers_attempted: list[int] = []
+    merged_solutions: list[InferenceSolution] = []
+    seen_signatures: set[tuple[tuple[str, int], ...]] = set()
+    catalog: ActionCatalog | None = None
+    problem: InferenceProblem | None = None
+    last_status = STATUS_NO_EXACT_SOLUTION
+    last_diagnostics: dict[str, object] = {}
+    resolved_max_solutions = max_solutions if max_solutions is not None else 20
+    time_limited = False
+
+    for tier in range(START_SHIP_BUILD_TIER, MAX_SHIP_BUILD_TIER + 1):
+        remaining = time_limit_seconds - (time.monotonic() - started_at)
+        if remaining <= 0:
+            time_limited = True
+            break
+        tiers_attempted.append(tier)
+        catalog = build_action_catalog_from_turn(
+            observation,
+            turn,
+            ship_build_tier=tier,
+        )
+        remaining_slots = max(0, resolved_max_solutions - len(merged_solutions))
+        if remaining_slots == 0:
+            break
+        problem = build_inference_problem(
+            observation,
+            catalog,
+            max_solutions=remaining_slots,
+            time_limit_seconds=remaining,
+        )
+        tier_result = solve_inference_problem(problem)
+        last_status = tier_result.status
+        last_diagnostics = dict(tier_result.diagnostics)
+        if tier_result.status == STATUS_INVALID_PROBLEM:
+            break
+        if not tier_result.solutions:
+            continue
+
+        new_solutions = 0
+        for solution in tier_result.solutions:
+            signature = solution_signature(solution)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            merged_solutions.append(solution)
+            new_solutions += 1
+            if len(merged_solutions) >= resolved_max_solutions:
+                break
+
+        if new_solutions == 0:
+            break
+        if tier_result.status == STATUS_TIME_LIMITED:
+            time_limited = True
+
+    if catalog is None or problem is None:
+        tiers_attempted.append(START_SHIP_BUILD_TIER)
+        catalog = build_action_catalog_from_turn(
+            observation,
+            turn,
+            ship_build_tier=START_SHIP_BUILD_TIER,
+        )
+        problem = build_inference_problem(observation, catalog, max_solutions=max_solutions)
+        tier_result = solve_inference_problem(problem)
+        last_status = tier_result.status
+        last_diagnostics = dict(tier_result.diagnostics)
+        for solution in tier_result.solutions:
+            signature = solution_signature(solution)
+            if signature not in seen_signatures:
+                seen_signatures.add(signature)
+                merged_solutions.append(solution)
+
+    merged_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
+    if merged_solutions:
+        status = STATUS_TIME_LIMITED if time_limited else STATUS_EXACT
+    else:
+        status = STATUS_TIME_LIMITED if time_limited else last_status
+
+    result = InferenceResult(
+        status=status,
+        solutions=tuple(merged_solutions),
+        diagnostics={
+            **last_diagnostics,
+            "ship_build_tier": catalog.ship_build_tier,
+            "solution_count": len(merged_solutions),
+            "stopped_reason": "no_new_solutions_at_tier"
+            if merged_solutions and len(tiers_attempted) > 1
+            else last_diagnostics.get("stopped_reason", "exhausted"),
+        },
+    )
+    return result, catalog, problem, tiers_attempted
+
+
 def inference_result_to_api_payload(
     result: InferenceResult,
     catalog: ActionCatalog,
     observation: InferenceObservation,
     turn: TurnInfo,
     problem: InferenceProblem,
+    *,
+    tiers_attempted: list[int] | None = None,
 ) -> dict[str, object]:
     """Shape a solver result into the Core scores row inference object."""
     solver_diagnostics = {
@@ -262,6 +401,9 @@ def inference_result_to_api_payload(
         catalog=catalog,
         turn_info=turn,
         solver=solver_diagnostics,
+        extra={
+            "tiers_attempted": tiers_attempted or [catalog.ship_build_tier],
+        },
     )
     return _inference_api_payload(
         status=result.status,
@@ -307,6 +449,11 @@ def _format_solution_brief(solution: InferenceSolution) -> str:
             parts.append(action.label)
         else:
             parts.append(f"{action.count}x {action.label}")
+    for ship_build in solution.ship_builds:
+        if ship_build.count == 1:
+            parts.append(ship_build.label)
+        else:
+            parts.append(f"{ship_build.count}x {ship_build.label}")
     return "; ".join(parts) if parts else "no actions"
 
 
@@ -333,39 +480,62 @@ def _inference_api_payload(
     }
 
 
+def _serialize_solution_actions(
+    solution: InferenceSolution,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "actionId": action.action_id,
+            "label": action.label,
+            "count": action.count,
+        }
+        for action in solution.actions
+    ]
+
+
+def _serialize_solution_ship_builds(
+    solution: InferenceSolution,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "comboId": ship_build.combo_id,
+            "label": ship_build.label,
+            "count": ship_build.count,
+            "hullId": ship_build.hull_id,
+            "engineId": ship_build.engine_id,
+            "beamId": ship_build.beam_id,
+            "torpId": ship_build.torp_id,
+            "beamCount": ship_build.beam_count,
+            "launcherCount": ship_build.launcher_count,
+        }
+        for ship_build in solution.ship_builds
+    ]
+
+
+def _serialize_solution_core(solution: InferenceSolution) -> dict[str, object]:
+    return {
+        "objectiveValue": solution.objective_value,
+        "actions": _serialize_solution_actions(solution),
+        "shipBuilds": _serialize_solution_ship_builds(solution),
+    }
+
+
 def _serialize_solution(
     solution: InferenceSolution,
     observation: InferenceObservation,
     catalog: ActionCatalog,
 ) -> dict[str, object]:
-    actions_by_id = {action.id: action for action in catalog.actions}
-    return {
-        "objectiveValue": solution.objective_value,
-        "actions": [
-            {
-                "actionId": action.action_id,
-                "label": action.label,
-                "count": action.count,
-            }
-            for action in solution.actions
-        ],
-        "militaryScoreArithmetic": solution_military_score_arithmetic_payload(
-            solution,
-            observation,
-            actions_by_id,
-        ),
-    }
+    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
+    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
+    payload = _serialize_solution_core(solution)
+    payload["militaryScoreArithmetic"] = solution_military_score_arithmetic_payload(
+        solution,
+        observation,
+        actions_by_id,
+        combos_by_id,
+    )
+    return payload
 
 
 def _serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[str, object]:
-    return {
-        "objectiveValue": solution.objective_value,
-        "actions": [
-            {
-                "actionId": action.action_id,
-                "label": action.label,
-                "count": action.count,
-            }
-            for action in solution.actions
-        ],
-    }
+    return _serialize_solution_core(solution)

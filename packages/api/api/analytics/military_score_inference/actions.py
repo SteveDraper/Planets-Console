@@ -1,4 +1,4 @@
-"""Bounded candidate action catalog for military score build inference."""
+"""Bounded aggregate action catalog for military score build inference."""
 
 from dataclasses import dataclass
 
@@ -6,11 +6,16 @@ from api.analytics.military_score_inference.accelerated_start import (
     HOMEBASE_STARBASE_FIGHTERS,
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
+from api.analytics.military_score_inference.component_eligibility import (
+    player_by_id,
+    turn_catalog_context_for_tier,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
     ProbabilityBucket,
+    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
@@ -20,14 +25,10 @@ from api.analytics.military_score_inference.scoring import (
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
 )
-from api.analytics.military_score_inference.ship_build_presets import (
-    LOADOUT_PRESET_EMPTY,
-    LOADOUT_PRESET_TORPEDOES,
-    build_action_id,
-    default_build_components,
-    is_military_hull,
-    ship_build_score_delta_2x,
-    torpedo_preset_catalog_eligible,
+from api.analytics.military_score_inference.ship_build_combos import (
+    DEFAULT_SHIP_BUILD_TIER,
+    ShipBuildComboConfig,
+    generate_ship_build_combos,
 )
 from api.concepts.races import (
     evil_empire_free_starbase_fighters_per_host_turn,
@@ -35,7 +36,6 @@ from api.concepts.races import (
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
-from api.models.player import Player, Race
 
 PLANET_DEFENSE_POST_BUCKETS = (
     ProbabilityBucket("modest build-up", 0, 10, 100),
@@ -63,6 +63,8 @@ SHIP_TORPEDO_BUCKETS = (
     ProbabilityBucket("extreme load", 101, 200, 5),
 )
 
+DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
+
 BUCKETED_ACTION_IDS = frozenset(
     {
         "planet_defense_posts_added_total",
@@ -81,8 +83,7 @@ class ActionCatalogConfig:
     max_ship_fighters: int = 500
     max_ship_torpedoes_per_type: int = 200
     max_fighter_transfers: int = 50
-    default_ship_build_probability_weight: int = 80
-    torpedo_ship_build_probability_weight: int = 85
+    ship_build_combo_config: ShipBuildComboConfig | None = None
     noisy_action_probability_weight: int = 10
     fighter_transfer_probability_weight: int = 15
     evil_empire_free_starbase_fighter_probability_weight: int = 75
@@ -90,21 +91,23 @@ class ActionCatalogConfig:
 
 @dataclass(frozen=True)
 class ActionCatalog:
-    actions: tuple[CandidateAction, ...]
+    aggregate_actions: tuple[CandidateAction, ...]
+    ship_build_combos: tuple[ShipBuildCombo, ...]
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
+    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER
 
     @property
     def catalog_size(self) -> int:
-        return len(self.actions)
+        return len(self.aggregate_actions) + len(self.ship_build_combos)
 
     def diagnostics(self) -> dict[str, object]:
         return {
             "catalog_size": self.catalog_size,
+            "aggregate_action_count": len(self.aggregate_actions),
+            "ship_build_combo_count": len(self.ship_build_combos),
+            "ship_build_tier": self.ship_build_tier,
             "bucketed_action_count": sum(
-                1 for action in self.actions if action.id in BUCKETED_ACTION_IDS
-            ),
-            "ship_build_action_count": sum(
-                1 for action in self.actions if action.id.startswith("build_")
+                1 for action in self.aggregate_actions if action.id in BUCKETED_ACTION_IDS
             ),
         }
 
@@ -113,37 +116,18 @@ def build_inference_problem(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     *,
-    max_solutions: int = 20,
-    time_limit_seconds: float = 1.0,
+    max_solutions: int | None = None,
+    time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> InferenceProblem:
     return InferenceProblem(
         observation=observation,
-        actions=catalog.actions,
+        aggregate_actions=catalog.aggregate_actions,
+        ship_build_combos=catalog.ship_build_combos,
+        ship_build_tier=catalog.ship_build_tier,
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
-        max_solutions=max_solutions,
+        max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
     )
-
-
-def parse_component_id_csv(component_ids: str) -> frozenset[int]:
-    if not component_ids.strip():
-        return frozenset()
-    return frozenset(int(component_id) for component_id in component_ids.split(",") if component_id)
-
-
-def buildable_hull_ids_for_player(turn: TurnInfo, player_id: int) -> frozenset[int]:
-    player = _player_by_id(turn, player_id)
-    race = _race_by_id_or_none(turn, player.raceid)
-    active_hull_ids = parse_component_id_csv(player.activehulls)
-    if race is not None:
-        eligible_hull_ids = active_hull_ids & (
-            parse_component_id_csv(race.hulls) | parse_component_id_csv(race.basehulls)
-        )
-    else:
-        eligible_hull_ids = active_hull_ids
-    turn_hull_ids = frozenset(turn.racehulls)
-    catalog_hull_ids = frozenset(hull.id for hull in turn.hulls)
-    return eligible_hull_ids & turn_hull_ids & catalog_hull_ids
 
 
 def build_action_catalog_from_turn(
@@ -151,23 +135,26 @@ def build_action_catalog_from_turn(
     turn: TurnInfo,
     *,
     config: ActionCatalogConfig | None = None,
+    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
 ) -> ActionCatalog:
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
-    engines_by_id = {engine.id: engine for engine in turn.engines}
-    beams_by_id = {beam.id: beam for beam in turn.beams}
-    torpedos_by_id = {torpedo.id: torpedo for torpedo in turn.torpedos}
-    default_engine_id = min(engines_by_id) if engines_by_id else None
-    buildable_hull_ids = buildable_hull_ids_for_player(turn, observation.player_id)
+    catalog_context = turn_catalog_context_for_tier(
+        turn,
+        observation.player_id,
+        ship_build_tier,
+    )
     return build_action_catalog(
         observation,
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
-        default_engine_id=default_engine_id,
+        hulls_by_id=catalog_context.hulls_by_id,
+        engines_by_id=catalog_context.engines_by_id,
+        beams_by_id=catalog_context.beams_by_id,
+        torpedos_by_id=catalog_context.torpedos_by_id,
+        buildable_hull_ids=catalog_context.buildable_hull_ids,
+        eligible_engine_ids=catalog_context.eligible_engine_ids,
+        eligible_beam_ids=catalog_context.eligible_beam_ids,
+        eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
         turn=turn,
+        ship_build_tier=ship_build_tier,
     )
 
 
@@ -179,9 +166,12 @@ def build_action_catalog(
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
     buildable_hull_ids: frozenset[int],
-    default_engine_id: int | None,
+    eligible_engine_ids: frozenset[int],
+    eligible_beam_ids: frozenset[int],
+    eligible_torp_ids: frozenset[int],
     config: ActionCatalogConfig | None = None,
     turn: TurnInfo | None = None,
+    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
 ) -> ActionCatalog:
     catalog_config = config or ActionCatalogConfig()
     actions: list[CandidateAction] = []
@@ -195,18 +185,6 @@ def build_action_catalog(
     actions.extend(
         _fighter_transfer_actions(observation, catalog_config),
     )
-    actions.extend(
-        _ship_build_actions(
-            observation,
-            catalog_config,
-            hulls_by_id=hulls_by_id,
-            engines_by_id=engines_by_id,
-            beams_by_id=beams_by_id,
-            torpedos_by_id=torpedos_by_id,
-            buildable_hull_ids=buildable_hull_ids,
-            default_engine_id=default_engine_id,
-        )
-    )
 
     kept_actions: list[CandidateAction] = []
     for action in actions:
@@ -218,26 +196,26 @@ def build_action_catalog(
         elif action.id.startswith("ship_torps_loaded_"):
             probability_buckets[action.id] = SHIP_TORPEDO_BUCKETS
 
-    return ActionCatalog(
-        actions=tuple(kept_actions),
-        probability_buckets_by_action_id=probability_buckets,
+    ship_build_combos = generate_ship_build_combos(
+        observation,
+        hulls_by_id=hulls_by_id,
+        engines_by_id=engines_by_id,
+        beams_by_id=beams_by_id,
+        torpedos_by_id=torpedos_by_id,
+        buildable_hull_ids=buildable_hull_ids,
+        eligible_engine_ids=eligible_engine_ids,
+        eligible_beam_ids=eligible_beam_ids,
+        eligible_torp_ids=eligible_torp_ids,
+        config=catalog_config.ship_build_combo_config,
+        ship_build_tier=ship_build_tier,
     )
 
-
-def _player_by_id(turn: TurnInfo, player_id: int) -> Player:
-    if turn.player.id == player_id:
-        return turn.player
-    for player in turn.players:
-        if player.id == player_id:
-            return player
-    raise ValueError(f"unknown player id: {player_id}")
-
-
-def _race_by_id_or_none(turn: TurnInfo, race_id: int) -> Race | None:
-    for race in turn.races:
-        if race.id == race_id:
-            return race
-    return None
+    return ActionCatalog(
+        aggregate_actions=tuple(kept_actions),
+        ship_build_combos=ship_build_combos,
+        probability_buckets_by_action_id=probability_buckets,
+        ship_build_tier=ship_build_tier,
+    )
 
 
 def _residual_count_bound(
@@ -261,7 +239,7 @@ def _evil_empire_free_starbase_fighter_actions(
     config: ActionCatalogConfig,
 ) -> list[CandidateAction]:
     """High-probability free starbase fighters for Evil Empire when resources allow."""
-    player = _player_by_id(turn, observation.player_id)
+    player = player_by_id(turn, observation.player_id)
     if not is_evil_empire(player.raceid):
         return []
 
@@ -395,100 +373,6 @@ def _fighter_transfer_actions(
             probability_weight=config.fighter_transfer_probability_weight,
         ),
     ]
-
-
-def _ship_build_upper_bound(
-    observation: InferenceObservation,
-    *,
-    is_warship: bool,
-    is_freighter: bool,
-) -> int:
-    if is_warship:
-        count_delta = max(0, observation.warship_delta)
-    elif is_freighter:
-        count_delta = max(0, observation.freighter_delta)
-    else:
-        return 0
-    return min(count_delta, observation.starbases_owned)
-
-
-def _ship_build_actions(
-    observation: InferenceObservation,
-    config: ActionCatalogConfig,
-    *,
-    hulls_by_id: dict[int, Hull],
-    engines_by_id: dict[int, Engine],
-    beams_by_id: dict[int, Beam],
-    torpedos_by_id: dict[int, Torpedo],
-    buildable_hull_ids: frozenset[int],
-    default_engine_id: int | None,
-) -> list[CandidateAction]:
-    if default_engine_id is None or default_engine_id not in engines_by_id:
-        return []
-
-    defaults = default_build_components(
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        default_engine_id=default_engine_id,
-    )
-    default_engine = defaults.engine
-    default_beam = defaults.beam
-    default_torpedo = defaults.torpedo
-    if default_engine is None:
-        return []
-
-    actions: list[CandidateAction] = []
-
-    for hull_id in sorted(buildable_hull_ids):
-        hull = hulls_by_id.get(hull_id)
-        if hull is None:
-            continue
-
-        is_warship = is_military_hull(hull)
-        is_freighter = not is_warship
-        build_upper_bound = _ship_build_upper_bound(
-            observation,
-            is_warship=is_warship,
-            is_freighter=is_freighter,
-        )
-        if build_upper_bound <= 0:
-            continue
-
-        presets: list[tuple[str, int]] = [
-            (LOADOUT_PRESET_EMPTY, config.default_ship_build_probability_weight),
-        ]
-        if torpedo_preset_catalog_eligible(hull, default_torpedo):
-            presets.append(
-                (LOADOUT_PRESET_TORPEDOES, config.torpedo_ship_build_probability_weight),
-            )
-
-        for preset_id, probability_weight in presets:
-            armed_build = preset_id == LOADOUT_PRESET_TORPEDOES
-            score_delta_2x = ship_build_score_delta_2x(
-                hull,
-                default_engine,
-                default_beam,
-                default_torpedo,
-                beam_count=hull.beams if armed_build else 0,
-                launcher_count=hull.launchers if armed_build else 0,
-            )
-            if score_delta_2x == 0:
-                continue
-            actions.append(
-                CandidateAction(
-                    id=build_action_id(hull_id, preset_id),
-                    label=f"Build {hull.name} ({preset_id})",
-                    score_delta_2x=score_delta_2x,
-                    warship_delta=1 if is_warship else 0,
-                    freighter_delta=1 if is_freighter else 0,
-                    build_slot_usage=1,
-                    upper_bound=build_upper_bound,
-                    probability_weight=probability_weight,
-                )
-            )
-
-    return actions
 
 
 def _probability_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...]:

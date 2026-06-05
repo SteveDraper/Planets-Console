@@ -22,7 +22,11 @@ def _observation(**overrides: int) -> InferenceObservation:
 
 
 def _catalog(*actions: CandidateAction) -> ActionCatalog:
-    return ActionCatalog(actions=actions, probability_buckets_by_action_id={})
+    return ActionCatalog(
+        aggregate_actions=actions,
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
 
 
 def _payload(*, actions: list[object]) -> dict[str, object]:

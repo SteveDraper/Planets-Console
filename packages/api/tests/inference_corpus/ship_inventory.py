@@ -2,6 +2,7 @@
 
 from collections import Counter
 
+from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.ship import Ship
@@ -33,20 +34,15 @@ def new_owned_ships(prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int) 
 
 
 def new_ship_load_action_counts(new_ships: list[Ship], score_turn: TurnInfo) -> Counter[str]:
-    """Count catalog load action ids for fighters and torpedoes on newly built ships."""
-    hull_map = hulls_by_id(score_turn)
-    counts: Counter[str] = Counter()
-    for ship in new_ships:
-        hull = hull_map.get(ship.hullid)
-        if hull is None:
-            continue
-        fighters = loaded_fighter_count(ship, hull)
-        if fighters > 0:
-            counts["ship_fighters_added_total"] += fighters
-        loaded_torps = loaded_torpedo_count(ship, hull)
-        if loaded_torps > 0 and ship.torpedoid:
-            counts[f"ship_torps_loaded_{ship.torpedoid}"] += loaded_torps
-    return counts
+    """Return load action counts attributable to newly built ships.
+
+    Returns empty: turn snapshots reflect post-order ship state while scoreboard
+    military deltas reflect pre-order totals. Fighters and torpedoes visible on a
+    new ship at turn end are often loaded via client-side build/transfer actions that
+    are not reflected in ``militarychange`` for that row.
+    """
+    del new_ships, score_turn
+    return Counter()
 
 
 def is_fighter_capable(ship: Ship, hull: Hull) -> bool:
@@ -67,6 +63,23 @@ def loaded_torpedo_count(ship: Ship, hull: Hull) -> int:
     if is_fighter_capable(ship, hull):
         return 0
     return ship.ammo if is_torp_capable(ship, hull) else 0
+
+
+def ship_to_build_combo_id(ship: Ship, turn: TurnInfo) -> str | None:
+    """Map a ship's fitted components to the inference catalog combo id scheme."""
+    hull = hulls_by_id(turn).get(ship.hullid)
+    if hull is None:
+        return None
+    beam_id = ship.beamid if ship.beams > 0 else None
+    torp_id = ship.torpedoid if ship.torps > 0 else None
+    return ship_build_combo_id(
+        hull_id=ship.hullid,
+        engine_id=ship.engineid,
+        beam_id=beam_id,
+        torp_id=torp_id,
+        beam_count=ship.beams,
+        launcher_count=ship.torps,
+    )
 
 
 def describe_new_ship_build(ship: Ship, turn: TurnInfo) -> str:

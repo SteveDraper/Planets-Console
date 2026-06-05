@@ -11,23 +11,23 @@ from api.analytics.military_score_inference.scoring import (
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
 )
-from api.analytics.military_score_inference.ship_build_presets import (
-    default_build_components_from_turn,
-    ship_build_score_delta_2x_for_action_id,
-    ship_to_build_action_id,
-)
+from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_label
+from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
 from api.models.components import Torpedo
 from api.models.game import TurnInfo
 from api.models.player import Score
 
 from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel
 from tests.inference_corpus.ship_inventory import (
+    beams_by_id,
     describe_new_ship_build,
+    engines_by_id,
     fighter_load_delta,
     hulls_by_id,
     new_owned_ships,
     new_ship_load_action_counts,
     planet_defense_inventory_delta,
+    ship_to_build_combo_id,
     starbase_defense_inventory_delta,
     starbase_fighter_inventory_delta,
     starbase_fighters_for_owner,
@@ -63,16 +63,11 @@ def extract_ground_truth_v1(
             unavailable_reason="complexity_out_of_scope",
         )
 
-    ship_build_ids = _extract_ship_build_action_ids(
-        prior_turn,
-        score_turn,
-        player_id,
-        score_turn,
-    )
+    ship_build_ids = _extract_ship_build_combo_ids(prior_turn, score_turn, player_id)
     if ship_build_ids is None:
         return GroundTruthExtraction(
             available=False,
-            unavailable_reason="ship_build_preset_unmapped",
+            unavailable_reason="ship_build_combo_unmapped",
         )
 
     new_ships = new_owned_ships(prior_turn, score_turn, player_id)
@@ -124,17 +119,13 @@ def format_ground_truth_summary(
     if not ground_truth:
         return "no modeled activity"
 
-    hulls_by_id = {hull.id: hull for hull in score_turn.hulls}
     torpedos_by_id = {torp.id: torp for torp in score_turn.torpedos}
     parts: list[str] = []
 
     for action_id, count in ground_truth:
-        if action_id.startswith("build_"):
-            hull_id_str, preset = action_id.removeprefix("build_").rsplit("_", 1)
-            hull_id = int(hull_id_str)
-            hull = hulls_by_id.get(hull_id)
-            hull_name = hull.name if hull is not None else f"hull {hull_id}"
-            parts.append(f"built {count}x {hull_name} ({preset})")
+        if action_id.startswith("combo_"):
+            label = _combo_ground_truth_label(action_id, score_turn)
+            parts.append(f"{count}x {label}" if count != 1 else label)
             continue
         if action_id == "ship_fighters_added_total":
             parts.append(f"loaded {count} ship fighter{'s' if count != 1 else ''}")
@@ -237,29 +228,82 @@ def _sorted_multiset(counter: Counter[str]) -> GroundTruth:
     return tuple(sorted((action_id, count) for action_id, count in counter.items() if count > 0))
 
 
-def _extract_ship_build_action_ids(
+def _extract_ship_build_combo_ids(
     prior_turn: TurnInfo,
     score_turn: TurnInfo,
     player_id: int,
-    catalog_turn: TurnInfo,
 ) -> list[str] | None:
-    hulls_by_id_map = hulls_by_id(catalog_turn)
-    default_torpedo = default_build_components_from_turn(catalog_turn).torpedo
     action_ids: list[str] = []
     for ship in new_owned_ships(prior_turn, score_turn, player_id):
-        hull = hulls_by_id_map.get(ship.hullid)
-        if hull is None:
+        combo_id = ship_to_build_combo_id(ship, score_turn)
+        if combo_id is None:
             return None
-        action_id = ship_to_build_action_id(ship, hull, default_torpedo=default_torpedo)
-        if action_id is None:
-            return None
-        action_ids.append(action_id)
+        action_ids.append(combo_id)
     return action_ids
 
 
+def _parse_combo_id(
+    combo_id: str,
+) -> tuple[int, int, int | None, int | None, int, int] | None:
+    if not combo_id.startswith("combo_"):
+        return None
+    parts = combo_id.removeprefix("combo_").split("_")
+    if len(parts) != 6:
+        return None
+    hull_id = int(parts[0])
+    engine_id = int(parts[1])
+    beam_id = None if parts[2] == "none" else int(parts[2])
+    torp_id = None if parts[3] == "none" else int(parts[3])
+    beam_count = int(parts[4])
+    launcher_count = int(parts[5])
+    return hull_id, engine_id, beam_id, torp_id, beam_count, launcher_count
+
+
+def _combo_ground_truth_label(combo_id: str, turn: TurnInfo) -> str:
+    parsed = _parse_combo_id(combo_id)
+    if parsed is None:
+        return combo_id
+    hull_id, engine_id, beam_id, torp_id, beam_count, launcher_count = parsed
+    hull = hulls_by_id(turn).get(hull_id)
+    engine = engines_by_id(turn).get(engine_id)
+    beam = beams_by_id(turn).get(beam_id) if beam_id is not None else None
+    torpedo = torpedos_by_id_from_turn(turn).get(torp_id) if torp_id is not None else None
+    if hull is None or engine is None:
+        return combo_id
+    return ship_build_combo_label(
+        hull,
+        engine,
+        beam,
+        torpedo,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
+    )
+
+
+def _combo_score_delta_2x(combo_id: str, turn: TurnInfo) -> int:
+    parsed = _parse_combo_id(combo_id)
+    if parsed is None:
+        return 0
+    hull_id, engine_id, beam_id, torp_id, beam_count, launcher_count = parsed
+    hull = hulls_by_id(turn).get(hull_id)
+    engine = engines_by_id(turn).get(engine_id)
+    if hull is None or engine is None:
+        return 0
+    beam = beams_by_id(turn).get(beam_id) if beam_id is not None else None
+    torpedo = torpedos_by_id_from_turn(turn).get(torp_id) if torp_id is not None else None
+    return ship_build_score_delta_2x(
+        hull,
+        engine,
+        beam,
+        torpedo,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
+    )
+
+
 def _catalog_score_delta_2x_for_action_id(action_id: str, turn: TurnInfo) -> int:
-    if action_id.startswith("build_"):
-        return ship_build_score_delta_2x_for_action_id(action_id, turn)
+    if action_id.startswith("combo_"):
+        return _combo_score_delta_2x(action_id, turn)
     if action_id == "ship_fighters_added_total":
         return LOADED_SHIP_FIGHTER_SCORE_DELTA_2X
     if action_id.startswith("ship_torps_loaded_"):

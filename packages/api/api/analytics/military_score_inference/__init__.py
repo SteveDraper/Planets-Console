@@ -14,7 +14,9 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
+    InferenceSolutionShipBuild,
     ProbabilityBucket,
+    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
@@ -54,7 +56,9 @@ __all__ = [
     "InferenceResult",
     "InferenceSolution",
     "InferenceSolutionAction",
+    "InferenceSolutionShipBuild",
     "ProbabilityBucket",
+    "ShipBuildCombo",
     "build_action_catalog",
     "build_action_catalog_from_turn",
     "build_inference_problem",

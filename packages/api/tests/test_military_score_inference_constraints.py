@@ -67,7 +67,7 @@ def test_applied_equalities_from_problem_matches_hard_constraints_descriptor():
     for enforce in (False, True):
         problem = InferenceProblem(
             observation=observation,
-            actions=(_build_warship_action(),),
+            aggregate_actions=(_build_warship_action(),),
             probability_buckets_by_action_id={},
             enforce_priority_point_constraint=enforce,
         )
@@ -91,12 +91,12 @@ def test_solver_behavior_tracks_enforced_priority_point_flag():
 
     without_pp = InferenceProblem(
         observation=observation,
-        actions=(build_action,),
+        aggregate_actions=(build_action,),
         probability_buckets_by_action_id={},
     )
     with_pp = InferenceProblem(
         observation=observation,
-        actions=(build_action,),
+        aggregate_actions=(build_action,),
         probability_buckets_by_action_id={},
         enforce_priority_point_constraint=True,
     )
@@ -120,7 +120,7 @@ def test_enforced_priority_point_equality_satisfiable_when_catalog_matches():
     observation = _observation(priority_point_delta=54)
     problem = InferenceProblem(
         observation=observation,
-        actions=(build_action,),
+        aggregate_actions=(build_action,),
         probability_buckets_by_action_id={},
         enforce_priority_point_constraint=True,
     )
