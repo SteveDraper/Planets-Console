@@ -16,6 +16,7 @@ from tests.inference_corpus.catalog_coverage import (
     COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND,
     COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
     evaluate_catalog_coverage,
+    evaluate_ground_truth_catalog_coverage,
     resolve_coverage_for_case,
 )
 from tests.inference_corpus.fixtures import load_turn_fixture
@@ -126,7 +127,7 @@ def test_host2_missouri_combo_id_and_summary_label():
     assert "Mark 4 Photon" in summary
 
 
-def test_seed_host2_strict_ground_truth_unavailable():
+def test_seed_host2_strict_ground_truth_available():
     _, cases = load_manifest()
     host2 = next(case for case in cases if case.id == "628580-p1-host2")
     prior = load_turn_fixture(host2.prior_turn_path, fixtures_root=FIXTURES_ROOT)
@@ -140,8 +141,10 @@ def test_seed_host2_strict_ground_truth_unavailable():
         score=score,
         complexity="minimal",
     )
-    assert extraction.available is False
-    assert extraction.unavailable_reason == "residual_unexplained"
+    new_ship = new_owned_ships(prior, score_turn, player_id)[0]
+    combo_id = ship_to_build_combo_id(new_ship, score_turn)
+    assert extraction.available is True
+    assert extraction.ground_truth == ((combo_id, 1),)
 
 
 def test_host51_manifest_case_coverage_passes_tier1():
@@ -154,19 +157,57 @@ def test_host51_manifest_case_coverage_passes_tier1():
     assert result.status == "exact"
 
 
+def test_host2_ground_truth_passes_catalog_coverage_with_tier_escalation():
+    _, cases = load_manifest()
+    host2 = next(case for case in cases if case.id == "628580-p1-host2")
+    prior = load_turn_fixture(host2.prior_turn_path, fixtures_root=FIXTURES_ROOT)
+    score_turn = load_turn_fixture(host2.score_turn_path, fixtures_root=FIXTURES_ROOT)
+    player_id = resolve_player_id(host2, fixtures_root=FIXTURES_ROOT)
+    score = score_for_player(score_turn.scores, player_id, host2.id)
+    extraction = extract_ground_truth_v1(
+        prior_turn=prior,
+        score_turn=score_turn,
+        player_id=player_id,
+        score=score,
+        complexity="minimal",
+    )
+    observation = build_inference_observation(score, score_turn)
+    tier0_catalog = build_action_catalog_from_turn(observation, score_turn)
+    tier0_coverage = evaluate_catalog_coverage(extraction.ground_truth, tier0_catalog)
+    assert tier0_coverage.in_search_space is False
+    assert (
+        evaluate_ground_truth_catalog_coverage(
+            ground_truth=extraction.ground_truth,
+            observation=observation,
+            score_turn=score_turn,
+        ).in_search_space
+        is True
+    )
+
+
 def test_host2_manifest_runs_tier1_without_coverage_gate():
     _, cases = load_manifest()
     host2 = next(case for case in cases if case.id == "628580-p1-host2")
     result = run_manifest_case(host2)
     assert result.outcome == CaseOutcome.PASSED
-    assert result.ground_truth_available is False
+    assert result.ground_truth_available is True
 
 
 def test_expect_coverage_fails_without_solver_when_ground_truth_unavailable():
     _, cases = load_manifest()
-    host2 = next(case for case in cases if case.id == "628580-p1-host2")
-    coverage_required = host2.__class__(**{**host2.__dict__, "expect_coverage": True})
-    with patch("tests.inference_corpus.run.run_inference_with_artifacts") as run_inference:
+    host51 = next(case for case in cases if case.id == "628580-p1-host51")
+    coverage_required = host51.__class__(**{**host51.__dict__, "expect_coverage": True})
+    unavailable_extraction = GroundTruthExtraction(
+        available=False,
+        unavailable_reason="residual_unexplained",
+    )
+    with (
+        patch(
+            "tests.inference_corpus.run.extract_ground_truth_v1",
+            return_value=unavailable_extraction,
+        ),
+        patch("tests.inference_corpus.run.run_inference_with_artifacts") as run_inference,
+    ):
         result = run_manifest_case(coverage_required)
         run_inference.assert_not_called()
     assert result.outcome == CaseOutcome.FAILED
@@ -193,6 +234,19 @@ def test_available_ground_truth_action_not_in_catalog_out_of_search_without_expe
     assert result.outcome == CaseOutcome.OUT_OF_SEARCH_SPACE
     assert result.ground_truth_available is True
     assert result.coverage_reason == COVERAGE_REASON_ACTION_NOT_IN_CATALOG
+
+
+def test_host2_ground_truth_residual_uses_turn_pair_not_cumulative_observation():
+    _, cases = load_manifest()
+    host2 = next(case for case in cases if case.id == "628580-p1-host2")
+    score_turn = load_turn_fixture(host2.score_turn_path, fixtures_root=FIXTURES_ROOT)
+    player_id = resolve_player_id(host2, fixtures_root=FIXTURES_ROOT)
+    score = score_for_player(score_turn.scores, player_id, host2.id)
+    observation = build_inference_observation(score, score_turn)
+    assert score.militarychange == 4275
+    assert observation.military_delta_2x == 8660
+    assert 2 * score.militarychange == 8550
+    assert observation.military_delta_2x != 2 * score.militarychange
 
 
 def test_host51_fixture_ground_truth_in_catalog():

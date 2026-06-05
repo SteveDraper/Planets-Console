@@ -16,7 +16,7 @@
       "requireTopK": false,
       "expectCoverage": false,
       "requiredPerspectives": [],
-      "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth unavailable (110 score residual after construction; turn snapshot vs scoreboard timing)."
+      "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth is Missouri combo (turn-pair scope; Tier 1 inference uses cumulative accel observation on turn 3)."
     },
     {
       "id": "628580-p1-host51",

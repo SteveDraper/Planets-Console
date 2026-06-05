@@ -77,5 +77,5 @@ def test_discover_case_listings_human_readable(listing_storage):
     lines = format_listing_report(listings, game_id=628580)
     joined = "\n".join(lines)
     assert "perspective 1" in joined
-    assert "built 1x" in joined
+    assert "Missouri Class Battleship" in joined
     assert listings[0].summary

@@ -254,6 +254,8 @@ def run_loaded_case(loaded: LoadedCorpusCase) -> CorpusCaseResult:
         ground_truth=extraction.ground_truth,
         catalog=catalog,
         complexity_reasons=loaded.complexity_reasons,
+        observation=observation,
+        score_turn=loaded.score_turn,
     )
 
     if loaded.expect_coverage:
