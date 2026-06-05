@@ -22,7 +22,11 @@ from api.analytics.military_score_inference.ship_build_combos import (
     ship_build_combo_id,
 )
 from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
-from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED, solve_inference_problem
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_TIME_LIMITED,
+    solve_inference_problem,
+)
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.military_score_inference import _observation
