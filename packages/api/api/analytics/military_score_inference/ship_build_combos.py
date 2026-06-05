@@ -1,7 +1,6 @@
 """Factored ship build combo generation for military score inference."""
 
-from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
@@ -177,13 +176,15 @@ def generate_ship_build_combos(
                                     torp_id=torpedo.id if torpedo is not None else None,
                                     beam_count=beam_count,
                                     launcher_count=launcher_count,
-                                    label=ship_build_combo_label(
-                                        hull,
-                                        engine,
-                                        beam,
-                                        torpedo,
-                                        beam_count=beam_count,
-                                        launcher_count=launcher_count,
+                                    labels=(
+                                        ship_build_combo_label(
+                                            hull,
+                                            engine,
+                                            beam,
+                                            torpedo,
+                                            beam_count=beam_count,
+                                            launcher_count=launcher_count,
+                                        ),
                                     ),
                                     score_delta_2x=score_delta_2x,
                                     warship_delta=1 if is_warship else 0,
@@ -198,7 +199,7 @@ def generate_ship_build_combos(
         tuple(combos),
         max_aggregate_residual_when_ship_builds=combo_config.max_aggregate_residual_when_ship_builds,
     )
-    return merge_score_equivalent_combos(pruned)
+    return pruned
 
 
 def prune_combos_for_observation(
@@ -219,32 +220,6 @@ def prune_combos_for_observation(
         if narrowed:
             kept = narrowed
     return tuple(kept)
-
-
-def merge_score_equivalent_combos(
-    combos: tuple[ShipBuildCombo, ...],
-) -> tuple[ShipBuildCombo, ...]:
-    """Merge combos that share score and ship-count vectors for CP-SAT feasibility."""
-    groups: dict[tuple[int, int, int], list[ShipBuildCombo]] = defaultdict(list)
-    for combo in combos:
-        groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(combo)
-
-    merged: list[ShipBuildCombo] = []
-    for members in groups.values():
-        representative = max(members, key=lambda combo: (combo.probability_weight, combo.combo_id))
-        if len(members) == 1:
-            merged.append(representative)
-            continue
-        merged.append(
-            replace(
-                representative,
-                combo_id=(
-                    f"combo_equiv_{representative.score_delta_2x}_"
-                    f"{representative.warship_delta}_{representative.freighter_delta}"
-                ),
-            )
-        )
-    return tuple(merged)
 
 
 def generate_ship_build_combos_from_turn(

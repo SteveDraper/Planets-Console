@@ -46,7 +46,7 @@ class ShipBuildCombo:
     torp_id: int | None
     beam_count: int
     launcher_count: int
-    label: str
+    labels: tuple[str, ...]
     score_delta_2x: int
     warship_delta: int = 0
     freighter_delta: int = 0

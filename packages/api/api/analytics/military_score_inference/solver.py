@@ -1,7 +1,9 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
 import time
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, replace
+from itertools import product
 
 from ortools.sat.python import cp_model
 
@@ -13,6 +15,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionAction,
     InferenceSolutionShipBuild,
     ProbabilityBucket,
+    ShipBuildCombo,
 )
 
 STATUS_EXACT = "exact"
@@ -24,11 +27,18 @@ _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
 
 
 @dataclass(frozen=True)
+class _MergedComboCatalog:
+    combos: tuple[ShipBuildCombo, ...]
+    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]]
+
+
+@dataclass(frozen=True)
 class _BuiltModel:
     model: cp_model.CpModel
     action_count_vars: dict[str, cp_model.IntVar]
     combo_count_vars: dict[str, cp_model.IntVar]
     bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]]
+    merged_combo_catalog: _MergedComboCatalog
 
 
 def _validate_problem(problem: InferenceProblem) -> str | None:
@@ -86,6 +96,49 @@ def _bucket_capacity(bucket: ProbabilityBucket) -> int:
     return bucket.upper_count - bucket.lower_count + 1
 
 
+def _merge_score_equivalent_combos(
+    combos: tuple[ShipBuildCombo, ...],
+) -> _MergedComboCatalog:
+    """Merge score-equivalent combos for CP-SAT feasibility; members kept for extraction."""
+    groups: dict[tuple[int, int, int], list[ShipBuildCombo]] = defaultdict(list)
+    for combo in combos:
+        groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(combo)
+
+    merged: list[ShipBuildCombo] = []
+    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]] = {}
+    for members in groups.values():
+        sorted_members = tuple(sorted(members, key=lambda combo: combo.combo_id))
+        if len(sorted_members) == 1:
+            combo = sorted_members[0]
+            merged.append(combo)
+            members_by_merged_id[combo.combo_id] = sorted_members
+            continue
+
+        representative = max(
+            sorted_members,
+            key=lambda combo: (combo.probability_weight, combo.combo_id),
+        )
+        merged_id = (
+            f"combo_equiv_{representative.score_delta_2x}_"
+            f"{representative.warship_delta}_{representative.freighter_delta}"
+        )
+        merged.append(
+            replace(
+                representative,
+                combo_id=merged_id,
+                labels=tuple(label for member in sorted_members for label in member.labels),
+                probability_weight=max(member.probability_weight for member in sorted_members),
+                upper_bound=max(member.upper_bound for member in sorted_members),
+            )
+        )
+        members_by_merged_id[merged_id] = sorted_members
+
+    return _MergedComboCatalog(
+        combos=tuple(merged),
+        members_by_merged_id=members_by_merged_id,
+    )
+
+
 def _observation_has_no_deltas(problem: InferenceProblem) -> bool:
     observation = problem.observation
     return (
@@ -100,7 +153,10 @@ def _problem_has_catalog_entries(problem: InferenceProblem) -> bool:
     return bool(problem.aggregate_actions or problem.ship_build_combos)
 
 
-def _build_model(problem: InferenceProblem) -> _BuiltModel:
+def _build_model(
+    problem: InferenceProblem,
+    merged_combo_catalog: _MergedComboCatalog,
+) -> _BuiltModel:
     model = cp_model.CpModel()
     action_count_vars = {
         action.id: model.new_int_var(action.lower_bound, action.upper_bound, action.id)
@@ -108,7 +164,7 @@ def _build_model(problem: InferenceProblem) -> _BuiltModel:
     }
     combo_count_vars = {
         combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
-        for combo in problem.ship_build_combos
+        for combo in merged_combo_catalog.combos
     }
     bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]] = {}
     objective_terms: list[cp_model.LinearExpr] = []
@@ -130,12 +186,13 @@ def _build_model(problem: InferenceProblem) -> _BuiltModel:
         else:
             objective_terms.append(action_count_vars[action.id] * action.probability_weight)
 
-    for combo in problem.ship_build_combos:
+    for combo in merged_combo_catalog.combos:
         objective_terms.append(combo_count_vars[combo.combo_id] * combo.probability_weight)
 
-    InferenceHardConstraints.from_problem(problem).add_to_model(
+    merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
+    InferenceHardConstraints.from_problem(merged_problem).add_to_model(
         model,
-        problem,
+        merged_problem,
         action_count_vars,
         combo_count_vars,
     )
@@ -145,6 +202,7 @@ def _build_model(problem: InferenceProblem) -> _BuiltModel:
         action_count_vars=action_count_vars,
         combo_count_vars=combo_count_vars,
         bucket_vars_by_action_id=bucket_vars_by_action_id,
+        merged_combo_catalog=merged_combo_catalog,
     )
 
 
@@ -160,13 +218,13 @@ def _read_action_counts(
 
 
 def _read_combo_counts(
-    problem: InferenceProblem,
+    merged_combo_catalog: _MergedComboCatalog,
     combo_count_vars: dict[str, cp_model.IntVar],
     solver: cp_model.CpSolver,
 ) -> dict[str, int]:
     return {
         combo.combo_id: solver.value(combo_count_vars[combo.combo_id])
-        for combo in problem.ship_build_combos
+        for combo in merged_combo_catalog.combos
     }
 
 
@@ -183,8 +241,10 @@ def _read_bucket_counts(
 def _objective_value(
     problem: InferenceProblem,
     action_counts: dict[str, int],
-    combo_counts: dict[str, int],
+    ship_builds: tuple[InferenceSolutionShipBuild, ...],
     bucket_counts_by_action_id: dict[str, tuple[int, ...]],
+    *,
+    combo_probability_weight_by_id: dict[str, int],
 ) -> int:
     objective_value = 0
     for action in problem.aggregate_actions:
@@ -195,19 +255,61 @@ def _objective_value(
                 objective_value += bucket.marginal_weight * count
         else:
             objective_value += action.probability_weight * action_counts[action.id]
-    for combo in problem.ship_build_combos:
-        objective_value += combo.probability_weight * combo_counts[combo.combo_id]
+    for ship_build in ship_builds:
+        objective_value += (
+            combo_probability_weight_by_id[ship_build.combo_id] * ship_build.count
+        )
     return objective_value
 
 
-def _extract_solution(
+def _ship_build_from_member(
+    member: ShipBuildCombo,
+    count: int,
+) -> InferenceSolutionShipBuild:
+    return InferenceSolutionShipBuild(
+        combo_id=member.combo_id,
+        label=member.labels[0],
+        count=count,
+        hull_id=member.hull_id,
+        engine_id=member.engine_id,
+        beam_id=member.beam_id,
+        torp_id=member.torp_id,
+        beam_count=member.beam_count,
+        launcher_count=member.launcher_count,
+    )
+
+
+def _ship_build_variants_for_merged_count(
+    merged_combo_id: str,
+    count: int,
+    merged_combo_catalog: _MergedComboCatalog,
+) -> tuple[InferenceSolutionShipBuild, ...]:
+    members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
+    if len(members) == 1:
+        return (_ship_build_from_member(members[0], count),)
+
+    distinct_weights = {member.probability_weight for member in members}
+    if len(distinct_weights) <= 1:
+        representative = max(members, key=lambda member: member.combo_id)
+        return (_ship_build_from_member(representative, count),)
+
+    by_weight: dict[int, list[ShipBuildCombo]] = defaultdict(list)
+    for member in members:
+        by_weight[member.probability_weight].append(member)
+    return tuple(
+        _ship_build_from_member(max(group, key=lambda member: member.combo_id), count)
+        for group in by_weight.values()
+    )
+
+
+def _expand_score_equivalent_solutions(
     problem: InferenceProblem,
     action_counts: dict[str, int],
     combo_counts: dict[str, int],
     bucket_counts_by_action_id: dict[str, tuple[int, ...]],
-) -> InferenceSolution:
+    merged_combo_catalog: _MergedComboCatalog,
+) -> list[InferenceSolution]:
     action_by_id = {action.id: action for action in problem.aggregate_actions}
-    combo_by_id = {combo.combo_id: combo for combo in problem.ship_build_combos}
     solution_actions: list[InferenceSolutionAction] = []
     for action_id, count in action_counts.items():
         if count == 0:
@@ -220,34 +322,31 @@ def _extract_solution(
                 count=count,
             )
         )
-    solution_ship_builds: list[InferenceSolutionShipBuild] = []
-    for combo_id, count in combo_counts.items():
-        if count == 0:
-            continue
-        combo = combo_by_id[combo_id]
-        solution_ship_builds.append(
-            InferenceSolutionShipBuild(
-                combo_id=combo.combo_id,
-                label=combo.label,
-                count=count,
-                hull_id=combo.hull_id,
-                engine_id=combo.engine_id,
-                beam_id=combo.beam_id,
-                torp_id=combo.torp_id,
-                beam_count=combo.beam_count,
-                launcher_count=combo.launcher_count,
+    ship_build_variant_lists = [
+        _ship_build_variants_for_merged_count(merged_combo_id, count, merged_combo_catalog)
+        for merged_combo_id, count in combo_counts.items()
+        if count > 0
+    ]
+    combo_probability_weight_by_id = {
+        combo.combo_id: combo.probability_weight for combo in problem.ship_build_combos
+    }
+    solutions: list[InferenceSolution] = []
+    for ship_build_variant in product(*ship_build_variant_lists):
+        ship_builds = tuple(ship_build_variant)
+        solutions.append(
+            InferenceSolution(
+                objective_value=_objective_value(
+                    problem,
+                    action_counts,
+                    ship_builds,
+                    bucket_counts_by_action_id,
+                    combo_probability_weight_by_id=combo_probability_weight_by_id,
+                ),
+                actions=tuple(solution_actions),
+                ship_builds=ship_builds,
             )
         )
-    return InferenceSolution(
-        objective_value=_objective_value(
-            problem,
-            action_counts,
-            combo_counts,
-            bucket_counts_by_action_id,
-        ),
-        actions=tuple(solution_actions),
-        ship_builds=tuple(solution_ship_builds),
-    )
+    return solutions
 
 
 def _add_no_good_cut(
@@ -309,7 +408,8 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
             diagnostics={"reason": "no candidate actions for non-zero observation deltas"},
         )
 
-    built_model = _build_model(problem)
+    merged_combo_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)
+    built_model = _build_model(problem, merged_combo_catalog)
     model = built_model.model
     action_count_vars = built_model.action_count_vars
     combo_count_vars = built_model.combo_count_vars
@@ -352,17 +452,35 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
                 stopped_reason = "time_budget"
 
         action_counts = _read_action_counts(problem, action_count_vars, solver)
-        combo_counts = _read_combo_counts(problem, combo_count_vars, solver)
+        combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)
         bucket_counts = _read_bucket_counts(bucket_vars_by_action_id, solver)
-        solution = _extract_solution(problem, action_counts, combo_counts, bucket_counts)
-        signature = _solution_signature(solution)
-        if signature in seen_signatures:
+        expanded_solutions = _expand_score_equivalent_solutions(
+            problem,
+            action_counts,
+            combo_counts,
+            bucket_counts,
+            merged_combo_catalog,
+        )
+        expanded_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
+        added_solution = False
+        for solution in expanded_solutions:
+            if len(solutions) >= problem.max_solutions:
+                stopped_reason = "max_solutions"
+                break
+            signature = _solution_signature(solution)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            solutions.append(solution)
+            top_solution_bucket_counts = bucket_counts
+            added_solution = True
+
+        if stopped_reason == "max_solutions":
+            break
+        if not added_solution:
             stopped_reason = "duplicate_solution"
             break
 
-        seen_signatures.add(signature)
-        solutions.append(solution)
-        top_solution_bucket_counts = bucket_counts
         _add_no_good_cut(
             model,
             action_count_vars,

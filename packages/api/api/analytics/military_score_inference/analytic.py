@@ -110,7 +110,7 @@ def catalog_to_actions_payload(
         "shipBuildCombos": [
             {
                 "comboId": combo.combo_id,
-                "label": combo.label,
+                "label": combo.labels[0],
                 "hullId": combo.hull_id,
                 "engineId": combo.engine_id,
                 "beamId": combo.beam_id,

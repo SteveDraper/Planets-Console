@@ -177,7 +177,7 @@ def test_solver_joint_constraints_with_combo_and_aggregate():
         torp_id=6,
         beam_count=8,
         launcher_count=6,
-        label="Build Missouri",
+        labels=("Build Missouri",),
         score_delta_2x=8500,
         warship_delta=1,
         upper_bound=1,
@@ -203,6 +203,65 @@ def test_solver_joint_constraints_with_combo_and_aggregate():
     assert result.solutions[0].actions[0].count == 40
 
 
+def test_score_equivalent_merge_preserves_distinct_probability_ranked_solutions():
+    """Design section 8.6: merged feasibility vars expand to distinct ranked rows."""
+    from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
+
+    combo_high = ShipBuildCombo(
+        combo_id="combo_high",
+        hull_id=1,
+        engine_id=1,
+        beam_id=None,
+        torp_id=None,
+        beam_count=0,
+        launcher_count=0,
+        labels=("Build High",),
+        score_delta_2x=400,
+        warship_delta=1,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    combo_low = ShipBuildCombo(
+        combo_id="combo_low",
+        hull_id=2,
+        engine_id=1,
+        beam_id=None,
+        torp_id=None,
+        beam_count=0,
+        launcher_count=0,
+        labels=("Build Low",),
+        score_delta_2x=400,
+        warship_delta=1,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    observation = InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=400,
+        warship_delta=1,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=1,
+        is_after_ship_limit=False,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(),
+        ship_build_combos=(combo_high, combo_low),
+        max_solutions=5,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_EXACT
+    assert len(result.solutions) == 2
+    objective_values = [solution.objective_value for solution in result.solutions]
+    assert objective_values == sorted(objective_values, reverse=True)
+    assert objective_values == [100, 50]
+    combo_ids = {solution.ship_builds[0].combo_id for solution in result.solutions}
+    assert combo_ids == {"combo_high", "combo_low"}
+
+
 def test_solver_no_good_cuts_include_combo_variables():
     from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
 
@@ -214,7 +273,7 @@ def test_solver_no_good_cuts_include_combo_variables():
         torp_id=None,
         beam_count=0,
         launcher_count=0,
-        label="Build A",
+        labels=("Build A",),
         score_delta_2x=400,
         warship_delta=1,
         upper_bound=1,
@@ -228,7 +287,7 @@ def test_solver_no_good_cuts_include_combo_variables():
         torp_id=None,
         beam_count=0,
         launcher_count=0,
-        label="Build B",
+        labels=("Build B",),
         score_delta_2x=400,
         warship_delta=1,
         upper_bound=1,
