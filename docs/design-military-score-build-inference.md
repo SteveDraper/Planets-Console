@@ -376,11 +376,11 @@ The inference engine should return a per-player list of explanations that can en
 
 - observed deltas,
 - constraints used,
-- status: exact, exact-with-deferred-risk, no-exact-solution, or skipped,
-- ranked explanations,
+- status: exact, no-exact-solution, or skipped (`exact-with-deferred-risk` reserved for deferred-effect modeling in #49),
+- ranked explanations (exact only in user-facing top-K; band-feasible near-solutions from tier search are internal seeds -- section 8.5.5 of implementation doc),
 - explanation probability or score,
 - action breakdown,
-- residuals if any constraint was relaxed,
+- residuals in diagnostics when the full policy ladder yields zero exact solutions (band retry best miss),
 - warnings about ignored deferred effects,
 - a compact summary suitable for a scoreboard cell.
 
@@ -417,10 +417,14 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Beams vs tubes | May be omitted independently; same-type rule within each fitted component |
 | Partial slot fills | Allowed; `{0, max}` counts in early tiers; intermediate counts in later tier (niche) |
 | Ship build catalog shape | Factored combos (Phase 1G), not flat cross-product preset IDs |
-| Catalog widening | Tiered search with jump when `active*` lists are empty |
+| Catalog widening | Variable-length **inference search tier** ladder from YAML policy (#77); jump when `active*` lists are empty |
+| Fine-grained slack | Deferred to higher policy steps via **tier aggregate allowlist** (planet/SB defense posts, ship torps); not always-on |
+| Score band + seeding | Exact-first per step; band retry when infeasible and `alpha > 0`; near-solutions seed next step only (max 5); final step `alpha = 0` |
+| User-facing exact | Any policy step may contribute exact solutions to top-K; band results never shown directly |
+| Policy overlay | Hook in #77; merge semantics in #78; signal sources out of scope |
 | Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
 | Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
-| Fleet priors | Deferred; will inform tier order and weights, not hard exclusion |
+| Fleet priors | Deferred; **inference tier policy overlay** (#78), not hard exclusion |
 
 ### Still open
 
