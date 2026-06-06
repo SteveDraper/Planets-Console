@@ -284,6 +284,42 @@ _Avoid_: full hwdistribution support (v1 claim)
 Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row**; default per-row solver budget is **20s** with top-K **20** (combo catalogs above **5000** combos temporarily force `max_solutions=1` until streaming ships). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
 _Avoid_: build solver, score guesser
 
+**Inference search tier**:
+One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to the merged top-K.
+_Avoid_: ship build tier (too narrow; implies only hull combos), phase
+
+**Fine-grained slack action**:
+An aggregate inference action with a small per-unit military-score increment that can pad an explanation without changing the main build story -- e.g. planet or starbase defense posts and ship torpedo loads. Deferred to higher **inference search tiers** so lower tiers prioritize ship-build explanations. Large-increment loads (starbase fighters, ship fighters) and race-specific exceptions (e.g. Evil Empire free starbase fighters) are not fine-grained slack actions unless a tier policy explicitly treats them as such.
+_Avoid_: noise action, filler variable
+
+**Tier aggregate allowlist**:
+Per **inference search tier**, the set of aggregate actions permitted at that step, each with a maximum count. Each tier's allowlist is a strict superset of the previous tier's (new action ids and/or relaxed caps). Ship-build combos are governed by the same tier policy, not a separate fixed four-step ladder.
+_Avoid_: noisy action list, tier catalog
+
+**Inference tier policy**:
+The declarative record for one **inference search tier** on the unified ladder -- constraints on the full action catalog (ship-build component filters such as permitted tech levels, **tier aggregate allowlist** and caps, military-score band tolerance `alpha` in 2x units, seed budget). Later tiers loosen constraints; the final tier uses `alpha = 0`. Policies are loaded from a static asset (YAML); runtime parameter injection (e.g. fleet-known launcher/torp types) is a follow-on overlay on that base.
+_Avoid_: tier config, search phase
+
+**Inference catalog constraint**:
+A filter applied at an **inference search tier** to shrink the full turn catalog. Ship-build filters use **explicit tech-level allowlists** per axis -- hulls, engines, beams, and **launcher torpedo types** (tube ammunition tech levels; not hull launcher slot counts). Component ids are derived at runtime by intersecting those tech levels with the turn catalog and player active lists. Aggregate actions use **tier aggregate allowlist** entries with max counts. Tier 0 reflects early-game tech bands from policy, not lowest component id.
+_Avoid_: component eligibility (implementation name), preset, torp id list
+
+**Inference near-solution seed**:
+A band-feasible action multiset from tier *n* (exact pass at that tier was infeasible) carried into tier *n+1* to narrow search: fix ship-build counts from the seed, admit newly unlocked aggregate actions to close residual, then widen to a neighborhood if still infeasible before free search. Multiple seeds may be carried forward (capped per tier). An exact-feasible tier *n* result is emitted immediately; it is not a seed because there is no military-score remainder to refine.
+_Avoid_: warm start, hint
+
+**Inference score band**:
+Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into top-K (green tick). If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics.
+_Avoid_: slack constraint, approximate solve
+
+**Inference tier policy overlay** (follow-on):
+Solver-side merge of injected parameters into the static **inference tier policy asset** at solve time (e.g. extra launcher torpedo tech levels, earlier beam tech bands). Defines how overlays combine with the base YAML -- not which upstream features produce overlay values (fleet histogram, prior builds, user settings, etc.). Separate ticket from the static-policy refactor.
+_Avoid_: fleet prior, runtime tier config, injection source
+
+**Inference tier policy asset**:
+Static YAML ladder under `assets/analytics/military_score_build_inference/` (repo root). Defines ordered **inference tier policy** steps: per-axis tech-level allowlists, aggregate allowlists and caps, `alpha`, beam/launcher slot-count widening at named steps, and flags such as use-player-active-lists. Loaded at solve time via a resolver that accepts an optional **inference tier policy overlay** (no-op when absent). Not mixed with storage seed fixtures.
+_Avoid_: tier_policy.yaml (filename in prose only when citing path)
+
 **Inference solution streaming**:
 Planned NDJSON wire protocol (**#71**, Phase 1H) that emits each ranked explanation for one scoreboard row as the CP-SAT top-K loop discovers it, so the hourglass clears before enumeration finishes. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
 _Avoid_: websocket inference, whole-table stream

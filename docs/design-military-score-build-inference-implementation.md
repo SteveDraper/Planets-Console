@@ -54,7 +54,8 @@ packages/api/api/analytics/military_score_inference/
 |-- __init__.py
 |-- accelerated_start.py  # accelerated scoreboard baselines and observation deltas
 |-- actions.py            # aggregate noisy actions (defense, ammo load, transfers)
-|-- ship_build_combos.py  # eligible hull/engine/beam/torp combos and tier policy (Phase 1G+)
+|-- ship_build_combos.py  # eligible hull/engine/beam/torp combos (Phase 1G+)
+|-- tier_policy.py        # YAML policy load, resolve, optional overlay hook (#77, #78)
 |-- models.py             # dataclasses for observations, actions, problems, solutions
 |-- scoring.py            # scaled military-score contribution formulas
 |-- solver.py             # OR-Tools CP-SAT adapter
@@ -448,6 +449,8 @@ Aggregate actions where location detail is not yet known:
 
 These variables still have exact score contributions, but they avoid one variable per planet or starbase in the initial version.
 
+**#77 deferral:** interim code includes all of section 8.3 at every search step. Target behavior (section 8.5.2): only **fine-grained slack actions** enter via cumulative **tier aggregate allowlist** on higher policy steps; large-increment fighter loads and race-specific actions follow separate rules.
+
 ### 8.4 Negative actions
 
 Support signed contribution vectors from the start:
@@ -458,36 +461,94 @@ Support signed contribution vectors from the start:
 
 Negative actions need explicit upper bounds. Without bounds, positive and negative actions can create cancellation loops and a huge number of equivalent solutions.
 
-### 8.5 Tiered catalog expansion
+### 8.5 Inference search tier ladder (#77)
 
-A full cross product of buildable hulls times eligible engines, beams, and torps can reach **low thousands to ~10k** combo variables in worst cases (many torp hulls, full turn catalogs, empty `active*` lists). Prefer **staged widening** over a single hand-tuned subset.
+**GitHub:** #77 (static YAML policy), #78 (overlay injection follow-on). **Supersedes** interim hardcoded tiers 0--4 (#52, #72) and partial-slot step #54 (absorbed into policy). Glossary: `CONTEXT.md` (**Inference search tier**, **Inference tier policy**, **Fine-grained slack action**, etc.).
 
-Search tiers (increase component eligibility and, in later tiers, partial beam/launcher counts):
+A full cross product of buildable hulls times eligible engines, beams, and launcher torpedo types can reach **low thousands to ~10k** combo variables in worst cases. Prefer a **variable-length unified ladder** loaded from static YAML over a fixed four-step ship-build loop with always-on aggregate actions.
 
-| Tier | Engines | Beams | Torps (tube cost) | Partial beam/launcher counts |
-|------|---------|-------|-------------------|----------------------------|
-| 0 | single default (min id) | default | default | no |
-| 1 | `activeengines` or jump if empty | default | default | no |
-| 2 | active or full turn catalog if active empty | `activebeams` or jump | default | no |
-| 3 | active or full | active or full | `activetorps` or full | no |
-| 4 | full `turn.*` catalog | full | full | yes (niche counts) |
+#### 8.5.1 Interim implementation (pre-#77)
 
-**Empty `active*` lists:** do not linger on narrow tiers. **Jump** to the next tier that uses a usable component set (typically full turn-catalog intersection for that axis) rather than solving repeatedly with a single default component.
+Phase 1G shipped `_solve_with_tier_retry` with hardcoded tiers 0--4 in code (`START_SHIP_BUILD_TIER`, `MAX_SHIP_BUILD_TIER`). Component defaults use **lowest engine/beam id** and **lowest torpedo tech level** -- not explicit early-game tech bands. **All** aggregate noisy actions from section 8.3 are included at every tier. That combination produces false positives: **fine-grained slack actions** pad military score before the true ship build appears at a higher tier.
 
-Per player:
+#### 8.5.2 Policy asset
 
-1. Build combo list for tier *n* plus aggregate actions.
-2. Solve for up to the remaining top-K slots.
-3. Merge any **new** feasible solution signatures not seen at prior tiers.
-4. Stop when a tier is feasible but adds no new signatures, when all tiers are exhausted, or when the time budget runs out.
+- **Path:** `assets/analytics/military_score_build_inference/tier_policy.yaml` at repo root (`assets/analytics/<analytic_id>/` pattern for analytic static config; distinct from `packages/api/api/storage/assets/` test/seed JSON).
+- **Loader:** `resolve_tier_policies(base_path, overlay: TierPolicyOverlay | None = None)` in `tier_policy.py`. Overlay types and merge contract documented in #77; merge implementation in #78.
+- **Steps:** ordered list of **inference tier policy** records. Each step is a strict superset of the prior step on every dimension it controls.
 
-Record `ship_build_tier` (widest tier reached), `tiers_attempted`, and `combo_count` in diagnostics.
+Per-step fields (informal schema; exact YAML shape is implementation-owned):
 
-**Interim tier policy (Phase 1G):** continue through tiers while each attempt adds at least one new feasible explanation. Do not stop at the first feasible tier. Once per-build probability weights land, higher tiers may still contribute solutions that outrank earlier ones after merge and sort by objective value.
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable step id for diagnostics |
+| `hullTechLevels` | Explicit allowlist of hull tech levels; component ids derived at runtime |
+| `engineTechLevels` | Same for engines |
+| `beamTechLevels` | Same for beams |
+| `launcherTorpTechLevels` | Launcher **torpedo type** tech levels (`Torpedo` catalog); not hull launcher **slot** counts |
+| `usePlayerActiveLists` | When set, widen an axis from player `activeengines` / `activebeams` / `activetorps` intersect turn catalog; **empty active list jumps to full turn catalog** for that axis (existing rule) |
+| `beamSlotCounts` / `launcherSlotCounts` | `none` (0 or max only) vs `partial` (niche intermediate counts); dedicated policy step before `partial` |
+| `aggregateAllowlist` | Cumulative **tier aggregate allowlist**: action id -> max count |
+| `alpha` | Military-score band tolerance in **2x** units; **final step must be `0`** |
+| `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
 
-**Spike (follow-on):** revisit tier axis definitions and progression; interim false positives at low tiers often involve low-weight aggregate "noise" filling score slack before the true build combo appears at a higher tier. Longer term, tiers may become probability thresholds on which catalog entries to include rather than hard component-eligibility stages.
+**Tech levels, not component ids:** YAML lists tech levels per axis. Runtime intersects with `turn.*` catalogs and player actives. Static YAML steps widen by **strict superset on tech-level lists** unless `usePlayerActiveLists` is explicitly enabled on that step (mode switch, not necessarily a literal id superset).
 
-**Future refinement:** order tiers and intra-tier weights from fleet priors (histogram of engines, beams, and torps on existing ships). Likelihood informs search order and objective weights; it should not hard-exclude legal combos unless the product explicitly chooses a "most likely only" mode.
+**Fine-grained slack deferral:** v1 **tier aggregate allowlist** admits only:
+
+- `planet_defense_posts_added_total`
+- `starbase_defense_posts_added_total`
+- `ship_torps_loaded_{torpedo_id}` (per type, with per-type caps)
+
+Not deferred as fine-grained slack by default: `starbase_fighters_added_total`, `ship_fighters_added_total` (large per-unit score increments). `fighters_*_transfer` and `evil_empire_free_starbase_fighters` stay governed by existing aggregate rules unless a future policy step adds them explicitly.
+
+#### 8.5.3 v1 ladder (sketch A)
+
+Tunable constants in YAML; illustrative starting point from design review:
+
+| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` |
+|------|------------------|---------------------------------------|---------|
+| 0 | Early-game tech bands on all four axes | none | 50 |
+| 1 | Widen engine tech / `usePlayerActiveLists` for engines | none | 50 |
+| 2 | Widen beam tech | none | 50 |
+| 3 | Widen launcher torpedo tech | none | 50 |
+| 4 | Enable partial beam/launcher **slot** counts on hulls | none | 50 |
+| 5 | + planet defense posts | max 5 | 50 |
+| 6 | + starbase defense posts | max 5 | 30 |
+| 7 | + ship torpedoes per type | max 10 each | 30 |
+| 8 | Full ship-build catalog; slack at full policy caps | full | 0 |
+
+#### 8.5.4 Per-player solve loop
+
+Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
+
+1. Walk policy steps until per-row time budget exhausted or a step adds **no new distinct exact solution signatures** to the merged top-K.
+2. Build catalog: policy constraints intersect turn catalog intersect player actives; apply **tier aggregate allowlist** and caps.
+3. **Exact solve first** (military, warship, freighter equalities -- section constraints module).
+4. If INFEASIBLE and `alpha > 0`, **band retry** on military score only: `explained_2x >= observed_2x - alpha`; warship and freighter stay exact.
+5. **Exact solutions** from any step merge into top-K immediately (user-facing). **Do not** carry exact solutions forward as seeds -- no remainder to refine.
+6. **Band near-solutions** (up to `maxSeeds` distinct per step) seed the **next** step only:
+   - **Fix** ship-build combo counts from the seed.
+   - Admit newly unlocked aggregate actions to close residual military score.
+   - If infeasible, **widen** to a neighborhood around fixed counts.
+   - If still infeasible, **free search** on the step catalog.
+7. Band-feasible results are **internal**; they do not appear in the UI unless the full ladder produces zero exact solutions (see section 8.5.5).
+
+Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used.
+
+#### 8.5.5 User-facing outcomes
+
+| Outcome | UI |
+|---------|-----|
+| At least one **exact** solution from any policy step | Green tick; merged top-K across steps |
+| Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
+| Band near-solution | Never shown directly; seeds next step only |
+
+Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that status remains for future deferred-effect modeling (#49).
+
+#### 8.5.6 Runtime overlay (#78, follow-on)
+
+**Fleet-informed tier promotion** and other external signals merge via **inference tier policy overlay** at resolve time (append tech levels, bump aggregate caps, etc.). #77 defines the hook (`overlay=None`); #78 implements merge semantics. Overlay producers (fleet histogram, prior builds, UI) are out of scope for both tickets.
 
 ### 8.6 Score-equivalent combos (solver-side merge)
 
@@ -502,6 +563,10 @@ For **top-K enumeration**, equal score does **not** imply equal probability. Dis
 
 Do not treat score-equivalent combos as interchangeable in the UI ranking solely because the military score constraint cannot distinguish them.
 
+### 8.7 Inference tier policy overlay (#78)
+
+Solver-side merge of `TierPolicyOverlay` into the resolved policy list before catalog build. Deterministic precedence per constraint type (document augment vs replace). No production caller required in #78. See `CONTEXT.md` **Inference tier policy overlay**.
+
 ---
 
 ## 9. Bounds and performance
@@ -515,7 +580,7 @@ Use these bounds before building the CP-SAT model:
 - **Count-delta bound:** warship and freighter build actions are bounded by the observed count deltas when losses and trades are out of scope.
 - **Capacity bound:** ship fighters and torpedoes should be capped by plausible loadout capacity where known.
 - **Noisy-action cap:** defense posts, starbase fighters, and generic ammo adjustments should have conservative caps and lower probability weights.
-- **Combo tier cap:** stop widening ship-build tiers when feasible or when the per-player time budget is exhausted.
+- **Policy step cap:** stop climbing the inference search tier ladder when a step adds no new exact signatures or the per-player time budget is exhausted (section 8.5.4).
 - **Top-K cap:** default to 20 per player; when combo cardinality exceeds **5000**, interim policy forces `max_solutions=1` so enumeration finishes within the time budget (remove once #71 streams first solution without waiting for full top-K).
 - **Time cap:** default **20 seconds** per player (`DEFAULT_INFERENCE_TIME_LIMIT_SECONDS` in `actions.py`). Row-level requests already isolate slow players; #71 will further decouple first-solution latency from top-K enumeration.
 
@@ -720,6 +785,23 @@ Done when:
 - real-turn cases that failed under Phase 1F (wrong engine/torp/beam type) become feasible at an documented tier,
 - diagnostics report tier and combo cardinality,
 - `make lint` and inference package tests pass.
+
+### Phase 1I: YAML inference search tier policy (#77)
+
+Goal: replace hardcoded ship-build tiers 0--4 and always-on aggregate slack with the unified policy ladder (section 8.5).
+
+GitHub: **#77** (supersedes #52, #72, absorbs #54). Follow-on: **#78** (overlay merge).
+
+Files:
+
+- `assets/analytics/military_score_build_inference/tier_policy.yaml` (new),
+- `packages/api/api/analytics/military_score_inference/tier_policy.py` (new),
+- refactors to `actions.py`, `ship_build_combos.py`, `component_eligibility.py`, `analytic.py`, `constraints.py` (band retry only; warship/freighter stay exact).
+
+Done when:
+
+- acceptance criteria in #77 are met,
+- section 8.5 is authoritative over interim Phase 1G tier code paths.
 
 ### Phase 1H: Per-row solution streaming (NDJSON)
 
