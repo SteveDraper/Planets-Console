@@ -202,6 +202,41 @@ def _no_prior_turn_inference_result(
     )
 
 
+def _accelerated_split_missing_reported_segment_result(
+    score: Score,
+    turn: TurnInfo,
+    *,
+    segment_payloads: list[dict[str, object]],
+    segment_artifacts: dict[int, AcceleratedSegmentArtifacts],
+) -> tuple[
+    dict[str, object],
+    InferenceObservation,
+    ActionCatalog | None,
+    dict[int, AcceleratedSegmentArtifacts],
+]:
+    reason = "accelerated_split_missing_reported_segment"
+    fallback_observation = build_inference_observation(score, turn)
+    return (
+        _inference_api_payload(
+            status=STATUS_INVALID_PROBLEM,
+            summary=f"Invalid inference problem: {reason}",
+            solutions=(),
+            diagnostics=build_inference_solver_diagnostics(
+                turn=turn.settings.turn,
+                observation=fallback_observation,
+                turn_info=turn,
+                extra={
+                    "reason": reason,
+                    "accelerated_segments": segment_payloads,
+                },
+            ),
+        ),
+        fallback_observation,
+        None,
+        segment_artifacts,
+    )
+
+
 def _run_accelerated_backfill_inference(
     score: Score,
     turn: TurnInfo,
@@ -563,10 +598,18 @@ def _run_accelerated_split_inference(
             }
         )
 
-    assert reported_observation is not None
-    assert reported_catalog is not None
-    assert reported_problem is not None
-    assert reported_result is not None
+    if (
+        reported_observation is None
+        or reported_catalog is None
+        or reported_problem is None
+        or reported_result is None
+    ):
+        return _accelerated_split_missing_reported_segment_result(
+            score,
+            turn,
+            segment_payloads=segment_payloads,
+            segment_artifacts=segment_artifacts,
+        )
 
     overall_status = _accelerated_split_status(segment_payloads, combined_time_limited)
     primary_result = InferenceResult(
