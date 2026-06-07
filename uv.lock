@@ -69,6 +69,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "ortools" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -83,6 +84,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "ortools", specifier = ">=9.15.6755" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 provides-extras = ["dev"]
 

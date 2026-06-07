@@ -192,6 +192,57 @@ PYTHONPATH=packages/api uv run python scripts/run_inference_corpus.py \
 
 **Finished game:** Script does not require load-all completeness; sparse pairs are valid. Optionally warn if `games/{id}/info.json` missing.
 
+### 5.1 Local probe (`make inference_corpus_probe`)
+
+Quick scan of a stored game (default `628580`) in **host-turn discovery order**. Stops when either:
+
+- `--stop-after-failures` inference failures accumulate (default **10**), or
+- `--probe-time-limit-seconds` elapses (default **300**).
+
+Inference failures = `failed`, `out_of_search_space`, or `ranking_miss`. Skips do not count.
+
+```bash
+make inference_corpus_probe GAME_ID=628580 STORAGE_ROOT=.data
+# overrides: STOP_AFTER_FAILURES, PROBE_TIME_LIMIT_SECONDS, PROBE_WORKERS (default 4)
+```
+
+Save machine-readable output on the first run you intend to analyze:
+
+```bash
+PYTHONPATH=packages/api uv run python scripts/run_inference_corpus.py \
+  --game-id 628580 --storage-root .data \
+  --stop-after-failures 100 --probe-time-limit-seconds 300 --workers 4 \
+  --json > /tmp/probe.json
+```
+
+### 5.2 Investigating probe failures (do not re-run the probe)
+
+When an agent needs **which cases failed** and **what ground truth says**, a prior probe JSON plus ground-truth extraction is enough. **Do not re-run the probe** for that question.
+
+**What probe output includes**
+
+| Source | Case ids | `coverageReason` / status | Ground truth |
+|--------|----------|---------------------------|--------------|
+| Text summary | Only `failed` (solver mismatch) rows | No | No |
+| `--json` per-case records | Yes | Yes (`outcome`, `status`, `coverageReason`, ...) | **No** |
+
+Most probe budget stops are **`out_of_search_space`** (catalog coverage gaps). They appear in JSON but **not** in the text summary.
+
+**Better path (two steps)**
+
+1. **Failure list** -- parse saved `--json` (or one full run with a high `--stop-after-failures` budget). Filter `outcome` in `failed`, `out_of_search_space`, `ranking_miss`. Cases appear in **discovery order**; the first *N* failures match a probe stopped at `--stop-after-failures N`.
+
+2. **Ground truth** -- probe JSON does not carry GT. For each `caseId`, use either:
+   - **`discover` subcommand** (human-readable inventory summaries, no solver):
+
+     ```bash
+     make inference_corpus_discover GAME_ID=628580 FROM_TURN=2 TO_TURN=12 STORAGE_ROOT=.data
+     ```
+
+   - **Harness APIs** (multiset + `format_ground_truth_summary`): `discover_cases_for_game`, `extract_ground_truth_v1`, `format_ground_truth_summary` in `tests/inference_corpus/ground_truth.py` (see `discover_list.py` for the listing wrapper).
+
+**When to re-run the probe:** only after changing inference, tier policy, coverage rules, or corpus harness code -- not to look up failures or ground truth from an existing run.
+
 ---
 
 ## 6. Complexity classification
@@ -291,7 +342,7 @@ GroundTruth = tuple[tuple[str, int], ...]  # (action_id, count) ascending by act
 
 Extract only when **adjunct** is false and complexity <= `heavy`. Otherwise set `groundTruthAvailable: false` and skip coverage/ranking/Tier 2.
 
-**Turn-pair residual scope:** Ground truth is built from inventory deltas between the manifest's `priorTurnPath` and `scoreTurnPath` snapshots (host turn pair). Residual validation compares the explained multiset to **`2 * score.militarychange`** on the score row -- not `build_inference_observation(...).military_delta_2x`. On the first reliable accelerated-start scoreboard row, inference observation is cumulative since homeworld baseline (`observation_deltas_from_score`), while `militarychange` on that row is still the delta for host turn N-1 only. Comparing turn-pair GT to cumulative observation falsely marks explainable cases as `residual_unexplained` (e.g. `628580-p1-host2`). Accelerated-window activity before host turn N-1 is out of scope for turn-pair GT unless extraction is extended to include it explicitly.
+**Inventory-only scope:** Ground truth is built entirely from inventory deltas between the manifest's `priorTurnPath` and `scoreTurnPath` snapshots (host turn pair). Scoreboard fields such as ``militarychange`` are **not** used for extraction or validation -- during accelerated start those scoreboard rows are unreliable while ship, planet, and starbase inventory remain authoritative. The same new ship may therefore appear in consecutive turn-pair extractions (e.g. Cat's Paw on both host turns 1 and 2 in game 628580 player 9) when earlier scoreboard rows omit reliable totals but inventory diffs still reveal the build.
 
 **Ship builds (combo catalog, #51+):**
 
@@ -301,26 +352,28 @@ Extract only when **adjunct** is false and complexity <= `heavy`. Otherwise set 
 
 **Ammo on newly built ships:** do not attribute fighters or torpedoes loaded onto **new** ships to aggregate load actions. Turn snapshots reflect post-order ship state while scoreboard military deltas reflect pre-order totals; client-side build/transfer actions create a systematic mismatch. Loads on **existing** ships still use inventory deltas (with new-ship ids excluded).
 
-**Aggregate loads (score-derived v1):**
+**Aggregate loads (inventory-derived v1):**
 
-When ship builds alone do not explain `militarychange`, allocate residual scaled delta to aggregate action ids in priority order (first fit):
+When inventory shows activity on **existing** ships, planets, or starbases, map deltas directly to aggregate catalog action ids:
 
 | Action id | When |
 |-----------|------|
 | `ship_fighters_added_total` | Positive fighter load delta on **existing** ships (new-ship ids excluded) |
 | `ship_torps_loaded_{torpedoId}` | Torp load delta on **existing** ships (new-ship ids excluded) |
-| `starbase_fighters_added_total` | Starbase fighter remainder |
-| `starbase_defense_posts_added_total` | Starbase defense remainder |
-| `planet_defense_posts_added_total` | Planet defense remainder |
+| `starbase_fighters_added_total` | Positive starbase fighter inventory delta |
+| `starbase_defense_posts_added_total` | Positive starbase defense inventory delta |
+| `planet_defense_posts_added_total` | Positive planet defense inventory delta |
 | `fighters_starbase_to_ship` / `fighters_ship_to_starbase` | Only when inventory shows starbase vs ship fighter counts support transfer |
 
-If residual cannot be assigned without deferred effects, set `groundTruthAvailable: false`.
+If a new ship cannot be mapped to a combo id, set `groundTruthAvailable: false`. An empty inventory delta yields an empty ground-truth multiset (still available).
 
 **Follow-on:** edge cases from other client-side actions (starbase torp builds, transfers) that appear in turn snapshots but not scoreboard deltas -- see tracker issue.
 
 ### 9.3 Catalog coverage (v1)
 
 When `groundTruthAvailable: true`, for each `(action_id, count)` in ground truth, check against `build_action_catalog_from_turn(observation, scoreTurn)` at escalating `ship_build_tier` values (0 through max), matching solver tier progression. Ship-build combos such as Missouri may only appear at higher tiers.
+
+**Accelerated context:** Coverage must use the same resolved observation and ``TurnInfo`` as inference for the case host turn. Unreliable accelerated scoreboard rows (score turn `< acceleratedturns`) backfill from the first reliable split via ``resolve_inference_target_for_host_turn``; the first reliable row selects the matching accelerated segment. Do not evaluate coverage against the raw unreliable score row alone.
 
 When `groundTruthAvailable: true`, for each `(action_id, count)` in ground truth:
 
@@ -388,7 +441,7 @@ Skip Tier 2 when `groundTruthAvailable: false`.
 - `0` -- no `failed` cases
 - `1` -- one or more `failed`
 
-Print summary counts and optional `--json` array of per-case records (`caseId`, `outcome`, `status`, `complexity`, `coverageReason`, ...).
+Print summary counts and optional `--json` array of per-case records (`caseId`, `outcome`, `status`, `complexity`, `coverageReason`, ...). JSON does **not** include ground truth; see **section 5.2** for investigating failures without re-running the probe.
 
 ---
 

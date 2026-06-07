@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 _API_ROOT = Path(__file__).resolve().parents[1] / "packages" / "api"
-if str(_API_ROOT) not in sys.path:
-    sys.path.insert(0, str(_API_ROOT))
+_api_root_str = str(_API_ROOT)
+if _api_root_str in sys.path:
+    sys.path.remove(_api_root_str)
+sys.path.insert(0, _api_root_str)
 
 import typer  # noqa: E402
 from api.services.store_service import StoreService  # noqa: E402
@@ -94,6 +96,30 @@ def run_command(
         "--top-k",
         help="Reserved for ground-truth ranking checks (#65); accepted for CLI stability.",
     ),
+    stop_after_failures: int | None = typer.Option(
+        None,
+        "--stop-after-failures",
+        min=1,
+        help=(
+            "Stop after this many inference failures (failed, out_of_search_space, "
+            "ranking_miss). Skipped cases do not count."
+        ),
+    ),
+    probe_time_limit_seconds: float | None = typer.Option(
+        None,
+        "--probe-time-limit-seconds",
+        min=0,
+        help=(
+            "Stop the run once this many wall-clock seconds have elapsed (checked "
+            "between cases). Use 0 for no limit."
+        ),
+    ),
+    workers: int = typer.Option(
+        1,
+        "--workers",
+        min=1,
+        help="Process pool size for running discovered cases in parallel.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -126,6 +152,12 @@ def run_command(
         max_host_turn=to_turn,
         max_complexity=complexity_cap,
         include_adjunct=include_adjunct,
+        stop_after_failures=stop_after_failures,
+        probe_time_limit_seconds=(
+            None if probe_time_limit_seconds == 0 else probe_time_limit_seconds
+        ),
+        workers=workers,
+        storage_root=storage_root,
     )
 
     if json_output:
@@ -134,6 +166,8 @@ def run_command(
         for line in report.summary_lines():
             typer.echo(line)
 
+    if stop_after_failures is not None or report.stopped_early:
+        raise typer.Exit(code=0)
     raise typer.Exit(code=report.exit_code)
 
 

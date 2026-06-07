@@ -148,7 +148,8 @@ def _minimal_inference_problem(
         observation=observation,
         aggregate_actions=catalog.aggregate_actions,
         ship_build_combos=catalog.ship_build_combos,
-        ship_build_tier=catalog.ship_build_tier,
+        policy_step_id=catalog.policy_step_id,
+        policy_step_index=catalog.policy_step_index,
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
     )
 
@@ -331,15 +332,17 @@ def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
     assert "shipBuildCombos" in diagnostics["actionCatalog"]
 
 
-def test_inference_diagnostics_include_tier_retry_fields(sample_turn):
+def test_inference_diagnostics_include_policy_ladder_fields(sample_turn):
     score = sample_turn.scores[0]
     inference = infer_military_score_build(score, sample_turn)
     diagnostics = inference["diagnostics"]
-    assert "ship_build_tier" in diagnostics
+    assert "policy_step_id" in diagnostics
+    assert "policy_step_index" in diagnostics
     assert "ship_build_combo_count" in diagnostics
-    assert "tiers_attempted" in diagnostics
-    assert isinstance(diagnostics["tiers_attempted"], list)
-    assert diagnostics["tiers_attempted"]
+    assert "policy_steps_attempted" in diagnostics
+    assert isinstance(diagnostics["policy_steps_attempted"], list)
+    assert diagnostics["policy_steps_attempted"]
+    assert "policy_step_attempts" in diagnostics
 
 
 def test_registry_still_exposes_only_scores_analytic(sample_turn):

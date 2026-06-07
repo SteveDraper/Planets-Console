@@ -68,3 +68,24 @@ def test_discover_cases_ignores_non_numeric_perspective_segments(discovery_stora
     """Non-numeric game child segments are ignored; only perspective 1 has turn pairs."""
     cases = discover_cases_for_game(discovery_storage, 628580)
     assert all(case.perspective == 1 for case in cases)
+
+
+def test_discover_cases_orders_host_turn_before_perspective(tmp_path):
+    backend = FileStorageBackend(tmp_path / "data")
+    backend.put("games/42/info", {"settings": {}, "players": [{"id": 1}, {"id": 2}]})
+    for perspective in (1, 2):
+        for turn_number in (1, 2, 3):
+            backend.put(
+                f"games/42/{perspective}/turns/{turn_number}",
+                {"settings": {"turn": turn_number}, "scores": []},
+            )
+    store = StoreService(backend)
+
+    cases = discover_cases_for_game(store, 42)
+
+    assert [case.id for case in cases] == [
+        "42-p1-host1",
+        "42-p2-host1",
+        "42-p1-host2",
+        "42-p2-host2",
+    ]

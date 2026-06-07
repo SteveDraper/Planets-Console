@@ -11,10 +11,7 @@ from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.ship_build_combos import (
-    MAX_SHIP_BUILD_TIER,
-    START_SHIP_BUILD_TIER,
-)
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
 
 from tests.inference_corpus.ground_truth import GroundTruth, GroundTruthExtraction
@@ -110,16 +107,17 @@ def evaluate_ground_truth_catalog_coverage(
     observation: InferenceObservation,
     score_turn: TurnInfo,
 ) -> CatalogCoverageResult:
-    """Check GT against escalating ship-build tiers, matching solver tier progression."""
+    """Check GT against escalating policy steps, matching solver ladder progression."""
     last_result = CatalogCoverageResult(
         in_search_space=False,
         coverage_reason=COVERAGE_REASON_COMBO_NOT_IN_CATALOG,
     )
-    for tier in range(START_SHIP_BUILD_TIER, MAX_SHIP_BUILD_TIER + 1):
+    for step_index, policy_step in enumerate(resolve_tier_policies()):
         catalog = build_action_catalog_from_turn(
             observation,
             score_turn,
-            ship_build_tier=tier,
+            policy_step=policy_step,
+            policy_step_index=step_index,
         )
         result = evaluate_catalog_coverage(ground_truth, catalog)
         if result.in_search_space:

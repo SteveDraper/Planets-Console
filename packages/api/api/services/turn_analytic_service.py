@@ -2,6 +2,7 @@
 
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
+from api.errors import NotFoundError
 from api.services.turn_load_service import TurnLoadService
 from api.transport.connections_options import FlareConnectionMode
 
@@ -50,4 +51,19 @@ class TurnAnalyticService:
         from api.analytics.scores import get_scores_row_inference
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        return get_scores_row_inference(turn, player_id)
+
+        def load_scoreboard_turn(stored_turn_number: int):
+            try:
+                return self._turns.get_turn_info(
+                    game_id,
+                    perspective,
+                    stored_turn_number,
+                )
+            except OSError, ValueError, KeyError, NotFoundError:
+                return None
+
+        return get_scores_row_inference(
+            turn,
+            player_id,
+            load_scoreboard_turn=load_scoreboard_turn,
+        )

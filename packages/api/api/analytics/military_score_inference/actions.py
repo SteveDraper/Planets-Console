@@ -1,6 +1,6 @@
 """Bounded aggregate action catalog for military score build inference."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from api.analytics.military_score_inference.accelerated_start import (
     HOMEBASE_STARBASE_FIGHTERS,
@@ -8,7 +8,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
-    turn_catalog_context_for_tier,
+    turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -26,9 +26,13 @@ from api.analytics.military_score_inference.scoring import (
     starbase_fighter_score_delta_2x,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
-    DEFAULT_SHIP_BUILD_TIER,
     ShipBuildComboConfig,
     generate_ship_build_combos,
+)
+from api.analytics.military_score_inference.tier_policy import (
+    InferenceTierPolicyStep,
+    resolve_tier_policies,
+    resolved_aggregate_cap,
 )
 from api.concepts.races import (
     evil_empire_free_starbase_fighters_per_host_turn,
@@ -94,7 +98,8 @@ class ActionCatalog:
     aggregate_actions: tuple[CandidateAction, ...]
     ship_build_combos: tuple[ShipBuildCombo, ...]
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
-    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER
+    policy_step_id: str = ""
+    policy_step_index: int = 0
 
     @property
     def catalog_size(self) -> int:
@@ -105,7 +110,8 @@ class ActionCatalog:
             "catalog_size": self.catalog_size,
             "aggregate_action_count": len(self.aggregate_actions),
             "ship_build_combo_count": len(self.ship_build_combos),
-            "ship_build_tier": self.ship_build_tier,
+            "policy_step_id": self.policy_step_id,
+            "policy_step_index": self.policy_step_index,
             "bucketed_action_count": sum(
                 1 for action in self.aggregate_actions if action.id in BUCKETED_ACTION_IDS
             ),
@@ -118,15 +124,28 @@ def build_inference_problem(
     *,
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+    military_score_alpha: int = 0,
+    fixed_combo_counts: dict[str, int] | None = None,
+    combo_count_neighborhood: int = 0,
 ) -> InferenceProblem:
+    aggregate_actions = catalog.aggregate_actions
+    ship_build_combos = catalog.ship_build_combos
+    if fixed_combo_counts:
+        ship_build_combos = _apply_combo_count_constraints(
+            ship_build_combos,
+            fixed_combo_counts=fixed_combo_counts,
+            neighborhood=combo_count_neighborhood,
+        )
     return InferenceProblem(
         observation=observation,
-        aggregate_actions=catalog.aggregate_actions,
-        ship_build_combos=catalog.ship_build_combos,
-        ship_build_tier=catalog.ship_build_tier,
+        aggregate_actions=aggregate_actions,
+        ship_build_combos=ship_build_combos,
+        policy_step_id=catalog.policy_step_id,
+        policy_step_index=catalog.policy_step_index,
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
         max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
+        military_score_alpha=military_score_alpha,
     )
 
 
@@ -135,12 +154,16 @@ def build_action_catalog_from_turn(
     turn: TurnInfo,
     *,
     config: ActionCatalogConfig | None = None,
-    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
+    policy_step: InferenceTierPolicyStep | None = None,
+    policy_step_index: int = 0,
 ) -> ActionCatalog:
-    catalog_context = turn_catalog_context_for_tier(
+    resolved_policy_step = policy_step
+    if resolved_policy_step is None:
+        resolved_policy_step = resolve_tier_policies()[0]
+    catalog_context = turn_catalog_context_for_policy_step(
         turn,
         observation.player_id,
-        ship_build_tier,
+        resolved_policy_step,
     )
     return build_action_catalog(
         observation,
@@ -154,7 +177,8 @@ def build_action_catalog_from_turn(
         eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
         turn=turn,
-        ship_build_tier=ship_build_tier,
+        policy_step=resolved_policy_step,
+        policy_step_index=policy_step_index,
     )
 
 
@@ -171,20 +195,26 @@ def build_action_catalog(
     eligible_torp_ids: frozenset[int],
     config: ActionCatalogConfig | None = None,
     turn: TurnInfo | None = None,
-    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
+    policy_step: InferenceTierPolicyStep | None = None,
+    policy_step_index: int = 0,
 ) -> ActionCatalog:
+    resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
     actions: list[CandidateAction] = []
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
 
-    actions.extend(_aggregate_noisy_actions(observation, catalog_config, torpedos_by_id))
+    actions.extend(
+        _aggregate_noisy_actions(
+            observation,
+            catalog_config,
+            torpedos_by_id,
+            resolved_policy_step.aggregate_allowlist,
+        )
+    )
     if turn is not None:
         actions.extend(
             _evil_empire_free_starbase_fighter_actions(observation, turn, catalog_config)
         )
-    actions.extend(
-        _fighter_transfer_actions(observation, catalog_config),
-    )
 
     kept_actions: list[CandidateAction] = []
     for action in actions:
@@ -207,15 +237,38 @@ def build_action_catalog(
         eligible_beam_ids=eligible_beam_ids,
         eligible_torp_ids=eligible_torp_ids,
         config=catalog_config.ship_build_combo_config,
-        ship_build_tier=ship_build_tier,
+        beam_slot_counts=resolved_policy_step.beam_slot_counts,
+        launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
     )
 
     return ActionCatalog(
         aggregate_actions=tuple(kept_actions),
         ship_build_combos=ship_build_combos,
         probability_buckets_by_action_id=probability_buckets,
-        ship_build_tier=ship_build_tier,
+        policy_step_id=resolved_policy_step.id,
+        policy_step_index=policy_step_index,
     )
+
+
+def _apply_combo_count_constraints(
+    combos: tuple[ShipBuildCombo, ...],
+    *,
+    fixed_combo_counts: dict[str, int],
+    neighborhood: int,
+) -> tuple[ShipBuildCombo, ...]:
+    constrained: list[ShipBuildCombo] = []
+    for combo in combos:
+        if combo.combo_id not in fixed_combo_counts:
+            constrained.append(replace(combo, lower_bound=0, upper_bound=0))
+            continue
+        seed_count = fixed_combo_counts[combo.combo_id]
+        if neighborhood <= 0:
+            constrained.append(replace(combo, lower_bound=seed_count, upper_bound=seed_count))
+            continue
+        lower_bound = max(combo.lower_bound, max(0, seed_count - neighborhood))
+        upper_bound = min(combo.upper_bound, seed_count + neighborhood)
+        constrained.append(replace(combo, lower_bound=lower_bound, upper_bound=upper_bound))
+    return tuple(constrained)
 
 
 def _residual_count_bound(
@@ -229,7 +282,7 @@ def _residual_count_bound(
         return 0
 
     abs_score = abs(score_delta_2x)
-    abs_residual = abs(observation.military_delta_2x)
+    abs_residual = abs(observation.military_delta_2x) + observation.military_partition_slack_2x
     return min(configured_cap, abs_residual // abs_score)
 
 
@@ -279,8 +332,11 @@ def _aggregate_noisy_actions(
     observation: InferenceObservation,
     config: ActionCatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
+    aggregate_allowlist: dict[str, int],
 ) -> list[CandidateAction]:
-    actions = [
+    actions: list[CandidateAction] = []
+
+    fine_grained_candidates = [
         CandidateAction(
             id="planet_defense_posts_added_total",
             label="Planet defense posts added",
@@ -329,7 +385,7 @@ def _aggregate_noisy_actions(
     for torpedo_id in sorted(torpedos_by_id):
         torpedo = torpedos_by_id[torpedo_id]
         per_torpedo_score = loaded_ship_torpedo_score_delta_2x(torpedo.torpedocost)
-        actions.append(
+        fine_grained_candidates.append(
             CandidateAction(
                 id=f"ship_torps_loaded_{torpedo_id}",
                 label=f"Ship torpedoes loaded ({torpedo.name})",
@@ -342,13 +398,7 @@ def _aggregate_noisy_actions(
                 probability_weight=config.noisy_action_probability_weight,
             )
         )
-    return actions
 
-
-def _fighter_transfer_actions(
-    observation: InferenceObservation,
-    config: ActionCatalogConfig,
-) -> list[CandidateAction]:
     transfer_cap = min(
         config.max_fighter_transfers,
         _residual_count_bound(
@@ -357,22 +407,35 @@ def _fighter_transfer_actions(
             config.max_fighter_transfers,
         ),
     )
-    return [
-        CandidateAction(
-            id="fighters_starbase_to_ship",
-            label="Fighters transferred starbase to ship",
-            score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
-            upper_bound=transfer_cap,
-            probability_weight=config.fighter_transfer_probability_weight,
-        ),
-        CandidateAction(
-            id="fighters_ship_to_starbase",
-            label="Fighters transferred ship to starbase",
-            score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
-            upper_bound=transfer_cap,
-            probability_weight=config.fighter_transfer_probability_weight,
-        ),
-    ]
+    fine_grained_candidates.extend(
+        [
+            CandidateAction(
+                id="fighters_starbase_to_ship",
+                label="Fighters transferred starbase to ship",
+                score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
+                upper_bound=transfer_cap,
+                probability_weight=config.fighter_transfer_probability_weight,
+            ),
+            CandidateAction(
+                id="fighters_ship_to_starbase",
+                label="Fighters transferred ship to starbase",
+                score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
+                upper_bound=transfer_cap,
+                probability_weight=config.fighter_transfer_probability_weight,
+            ),
+        ]
+    )
+
+    for action in fine_grained_candidates:
+        allowlist_cap = resolved_aggregate_cap(action.id, aggregate_allowlist)
+        if allowlist_cap is None:
+            continue
+        capped_upper = min(action.upper_bound, allowlist_cap)
+        if capped_upper <= 0:
+            continue
+        actions.append(replace(action, upper_bound=capped_upper))
+
+    return actions
 
 
 def _probability_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...]:

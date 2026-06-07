@@ -17,6 +17,7 @@ def _observation(
     warship_delta: int = 1,
     freighter_delta: int = 0,
     starbases_owned: int = 3,
+    military_partition_slack_2x: int = 0,
 ) -> InferenceObservation:
     return InferenceObservation(
         player_id=8,
@@ -27,6 +28,7 @@ def _observation(
         priority_point_delta=0,
         starbases_owned=starbases_owned,
         is_after_ship_limit=False,
+        military_partition_slack_2x=military_partition_slack_2x,
     )
 
 

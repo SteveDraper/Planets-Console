@@ -14,6 +14,15 @@ class CaseOutcome(StrEnum):
     RANKING_MISS = "ranking_miss"
 
 
+INFERENCE_FAILURE_OUTCOMES = frozenset(
+    {
+        CaseOutcome.FAILED,
+        CaseOutcome.OUT_OF_SEARCH_SPACE,
+        CaseOutcome.RANKING_MISS,
+    }
+)
+
+
 ComplexityLevel = Literal["minimal", "routine", "heavy", "adjunct"]
 COMPLEXITY_ORDINAL: dict[ComplexityLevel, int] = {
     "minimal": 0,
@@ -67,6 +76,8 @@ class CorpusCaseResult:
 @dataclass
 class CorpusReport:
     results: list[CorpusCaseResult] = field(default_factory=list)
+    stopped_early: bool = False
+    stop_reason: str | None = None
 
     @property
     def passed_count(self) -> int:
@@ -75,6 +86,10 @@ class CorpusReport:
     @property
     def failed_count(self) -> int:
         return sum(1 for result in self.results if result.outcome == CaseOutcome.FAILED)
+
+    @property
+    def inference_failure_count(self) -> int:
+        return sum(1 for result in self.results if result.outcome in INFERENCE_FAILURE_OUTCOMES)
 
     @property
     def skipped_complexity_count(self) -> int:
@@ -106,4 +121,6 @@ class CorpusReport:
         ]
         for result in self.hard_failures:
             lines.append(f"  FAIL {result.case_id}: {result.failure_message}")
+        if self.stopped_early and self.stop_reason is not None:
+            lines.append(f"  stopped_early={self.stop_reason}")
         return lines

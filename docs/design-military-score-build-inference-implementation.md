@@ -449,7 +449,7 @@ Aggregate actions where location detail is not yet known:
 
 These variables still have exact score contributions, but they avoid one variable per planet or starbase in the initial version.
 
-**#77 deferral:** interim code includes all of section 8.3 at every search step. Target behavior (section 8.5.2): only **fine-grained slack actions** enter via cumulative **tier aggregate allowlist** on higher policy steps; large-increment fighter loads and race-specific actions follow separate rules.
+**#77 deferral:** aggregate noisy actions from section 8.3 enter only via cumulative **tier aggregate allowlist** on higher policy steps (section 8.5.2). `evil_empire_free_starbase_fighters` remains outside the allowlist.
 
 ### 8.4 Negative actions
 
@@ -482,25 +482,32 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | Field | Meaning |
 |-------|---------|
 | `id` | Stable step id for diagnostics |
-| `hullTechLevels` | Explicit allowlist of hull tech levels; component ids derived at runtime |
-| `engineTechLevels` | Same for engines |
-| `beamTechLevels` | Same for beams |
-| `launcherTorpTechLevels` | Launcher **torpedo type** tech levels (`Torpedo` catalog); not hull launcher **slot** counts |
-| `usePlayerActiveLists` | When set, widen an axis from player `activeengines` / `activebeams` / `activetorps` intersect turn catalog; **empty active list jumps to full turn catalog** for that axis (existing rule) |
+| `filters` | Catalog constraints for all four ship-build axes (see below) |
 | `beamSlotCounts` / `launcherSlotCounts` | `none` (0 or max only) vs `partial` (niche intermediate counts); dedicated policy step before `partial` |
 | `aggregateAllowlist` | Cumulative **tier aggregate allowlist**: action id -> max count |
 | `alpha` | Military-score band tolerance in **2x** units; **final step must be `0`** |
 | `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
 
-**Tech levels, not component ids:** YAML lists tech levels per axis. Runtime intersects with `turn.*` catalogs and player actives. Static YAML steps widen by **strict superset on tech-level lists** unless `usePlayerActiveLists` is explicitly enabled on that step (mode switch, not necessarily a literal id superset).
+**`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
+
+| Subfield | Meaning |
+|----------|---------|
+| `all: true` | **Widened** eligibility on that axis (not "every turn-catalog id"). **hulls:** all buildable hull ids for the player, no tech band. **engines / beams / launchers:** player `active*` intersect turn catalog; **empty active list jumps to full turn catalog** for that axis. Mutually exclusive with `techLevels`. |
+| `techLevels: [...]` | Non-empty tech-level allowlist; component ids derived at runtime. **hulls:** intersect buildable hull set. **Other axes:** filter turn catalog by `techlevel`. Required when `all` is false or absent. |
+| `componentIds: [...]` | Optional future refinement: further restrict resolved ids (e.g. when multiple ids share a tech level). Parsed but unused in v1 eligibility unless non-empty. |
+
+Static YAML steps widen by **strict superset on `techLevels` lists** or by switching an axis from `techLevels` to `all: true` (one-way; cannot narrow back).
 
 **Fine-grained slack deferral:** v1 **tier aggregate allowlist** admits only:
 
 - `planet_defense_posts_added_total`
 - `starbase_defense_posts_added_total`
+- `starbase_fighters_added_total`
+- `ship_fighters_added_total`
 - `ship_torps_loaded_{torpedo_id}` (per type, with per-type caps)
+- `fighters_starbase_to_ship` / `fighters_ship_to_starbase` (via `fighter_transfers_per_direction`)
 
-Not deferred as fine-grained slack by default: `starbase_fighters_added_total`, `ship_fighters_added_total` (large per-unit score increments). `fighters_*_transfer` and `evil_empire_free_starbase_fighters` stay governed by existing aggregate rules unless a future policy step adds them explicitly.
+**Not** deferred: `evil_empire_free_starbase_fighters` (race-specific, high-probability informational action when EE resources allow).
 
 #### 8.5.3 v1 ladder (sketch A)
 
@@ -508,15 +515,13 @@ Tunable constants in YAML; illustrative starting point from design review:
 
 | Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` |
 |------|------------------|---------------------------------------|---------|
-| 0 | Early-game tech bands on all four axes | none | 50 |
-| 1 | Widen engine tech / `usePlayerActiveLists` for engines | none | 50 |
-| 2 | Widen beam tech | none | 50 |
-| 3 | Widen launcher torpedo tech | none | 50 |
-| 4 | Enable partial beam/launcher **slot** counts on hulls | none | 50 |
-| 5 | + planet defense posts | max 5 | 50 |
-| 6 | + starbase defense posts | max 5 | 30 |
-| 7 | + ship torpedoes per type | max 10 each | 30 |
-| 8 | Full ship-build catalog; slack at full policy caps | full | 0 |
+| 0 | Early game: hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 |
+| 1 | Widen launchers to tech 1--8 | none | 50 |
+| 2 | Widen hulls (`filters.hulls.all`) | none | 50 |
+| 3 | All component axes; partial beam/launcher **slot** counts | planet defense max 16; starbase/ship fighters max 50/20; fighter transfers max 50/dir | 50 |
+| 4 | + starbase defense posts | + starbase defense max 5 | 30 |
+| 5 | + ship torpedoes per type | + ship torps max 10 each | 30 |
+| 6 | Full ship-build catalog; slack at full policy caps | full (fighters 200/500, transfers 100/dir) | 0 |
 
 #### 8.5.4 Per-player solve loop
 
