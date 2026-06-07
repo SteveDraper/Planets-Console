@@ -25,7 +25,6 @@ from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.military_score_inference import _observation
-from tests.inference_corpus.fixtures import load_turn_fixture
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EE_TURN_PATH = REPO_ROOT / ".data" / "games" / "628580" / "8" / "turns" / "3.json"

@@ -7,7 +7,6 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog,
     build_action_catalog_from_turn,
 )
-from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.component_eligibility import (
     eligible_component_ids_for_filter,
     turn_catalog_context_for_policy_step,
@@ -17,6 +16,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionShipBuild,
 )
+from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
