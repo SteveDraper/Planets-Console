@@ -203,7 +203,12 @@ def test_unreliable_turn2_backfills_host_turn1_when_turn3_stored():
     assert with_loader["diagnostics"]["accelerated_backfill_host_turn"] == 1
     assert with_loader["diagnostics"]["accelerated_backfill_source_turn"] == 3
     assert observation.military_delta_2x == 110
-    assert "Planet defense" in with_loader["summary"]
+    action_labels = [
+        action["label"]
+        for solution in with_loader["solutions"]
+        for action in solution["actions"]
+    ]
+    assert any("Planet defense" in label for label in action_labels)
 
 
 @pytest.mark.skipif(not DATA_ROOT.joinpath("3.json").is_file(), reason="local store only")

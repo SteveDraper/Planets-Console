@@ -480,6 +480,14 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
         _solve_side_effect,
     )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder._solution_fully_explained_by_ship_builds_only",
+        lambda solution, observation, catalog: False,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder._solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
     result, catalog, _, attempted, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
@@ -532,6 +540,10 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
         "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
         _solve_side_effect,
     )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder._solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
     result, _, _, _, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
@@ -539,3 +551,102 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
     )
 
     assert result.status == STATUS_EXACT
+
+
+def _ship_build_solution(*, combo_id: str, objective_value: int, label: str | None = None):
+    return InferenceSolution(
+        objective_value=objective_value,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(
+                combo_id=combo_id,
+                label=label or combo_id,
+                count=1,
+                hull_id=1,
+                engine_id=1,
+                beam_id=None,
+                torp_id=None,
+                beam_count=0,
+                launcher_count=0,
+            ),
+        ),
+    )
+
+
+def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, monkeypatch):
+    observation = _observation(warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    early_solution = _ship_build_solution(combo_id="combo_early", objective_value=100)
+
+    def _solve_side_effect(problem):
+        if problem.policy_step_id == policy_steps[0].id:
+            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+        if problem.policy_step_id == policy_steps[1].id:
+            return InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(early_solution,),
+                diagnostics={"policy_step_id": policy_steps[1].id},
+            )
+        return InferenceResult(
+            status=STATUS_NO_EXACT_SOLUTION,
+            solutions=(),
+            diagnostics={"policy_step_id": problem.policy_step_id},
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        _solve_side_effect,
+    )
+    result, _, _, attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+    )
+
+    assert policy_steps[1].id in attempted
+    assert policy_steps[2].id in attempted
+    assert any(solution.ship_builds[0].combo_id == "combo_early" for solution in result.solutions)
+
+
+def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, monkeypatch):
+    observation = _observation(warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    low_solution = _ship_build_solution(combo_id="combo_low", objective_value=40)
+    mid_solution = _ship_build_solution(combo_id="combo_mid", objective_value=50)
+    high_solution = _ship_build_solution(combo_id="combo_high", objective_value=100)
+
+    def _solve_side_effect(problem):
+        if problem.policy_step_id == policy_steps[0].id:
+            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+        if problem.policy_step_id == policy_steps[1].id:
+            return InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(mid_solution, low_solution),
+                diagnostics={"policy_step_id": policy_steps[1].id},
+            )
+        if problem.policy_step_id == policy_steps[2].id:
+            return InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(high_solution,),
+                diagnostics={"policy_step_id": policy_steps[2].id},
+            )
+        return InferenceResult(
+            status=STATUS_NO_EXACT_SOLUTION,
+            solutions=(),
+            diagnostics={"policy_step_id": problem.policy_step_id},
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        _solve_side_effect,
+    )
+    result, _, _, _, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        max_solutions=2,
+    )
+
+    assert [solution.objective_value for solution in result.solutions] == [100, 50]
+    assert {solution.ship_builds[0].combo_id for solution in result.solutions} == {
+        "combo_high",
+        "combo_mid",
+    }

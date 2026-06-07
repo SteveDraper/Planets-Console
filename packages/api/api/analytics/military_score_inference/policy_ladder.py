@@ -96,6 +96,13 @@ def _explained_military_score_2x(
     return explained
 
 
+def _catalog_solve_max_solutions(merged_count: int, resolved_max_solutions: int) -> int:
+    remaining_slots = max(0, resolved_max_solutions - merged_count)
+    if remaining_slots > 0:
+        return remaining_slots
+    return resolved_max_solutions
+
+
 def _merge_exact_solutions(
     merged_solutions: list[InferenceSolution],
     seen_signatures: set[tuple[tuple[str, int], ...]],
@@ -108,11 +115,22 @@ def _merge_exact_solutions(
         signature = solution_signature(solution)
         if signature in seen_signatures:
             continue
+        if len(merged_solutions) < resolved_max_solutions:
+            seen_signatures.add(signature)
+            merged_solutions.append(solution)
+            new_solutions += 1
+            continue
+        worst_index = min(
+            range(len(merged_solutions)),
+            key=lambda index: merged_solutions[index].objective_value,
+        )
+        worst_solution = merged_solutions[worst_index]
+        if solution.objective_value <= worst_solution.objective_value:
+            continue
+        seen_signatures.remove(solution_signature(worst_solution))
         seen_signatures.add(signature)
-        merged_solutions.append(solution)
+        merged_solutions[worst_index] = solution
         new_solutions += 1
-        if len(merged_solutions) >= resolved_max_solutions:
-            break
     return new_solutions
 
 
@@ -257,9 +275,6 @@ def solve_with_policy_ladder(
         added_combo_ids = (
             current_combo_ids if prior_combo_ids is None else current_combo_ids - prior_combo_ids
         )
-        if added_combo_ids:
-            merged_solutions.clear()
-            seen_signatures.clear()
         prior_combo_ids = current_combo_ids
         current_aggregate_action_ids = frozenset(action.id for action in catalog.aggregate_actions)
         added_aggregate_action_ids = (
@@ -269,9 +284,10 @@ def solve_with_policy_ladder(
         )
         prior_aggregate_action_ids = current_aggregate_action_ids
 
-        remaining_slots = max(0, resolved_max_solutions - len(merged_solutions))
-        if remaining_slots == 0:
-            break
+        catalog_solve_max = _catalog_solve_max_solutions(
+            len(merged_solutions),
+            resolved_max_solutions,
+        )
 
         new_exact_before_step = len(merged_solutions)
         seeds_for_step = list(band_seeds)
@@ -286,7 +302,7 @@ def solve_with_policy_ladder(
                 observation,
                 catalog,
                 seed,
-                max_solutions=remaining_slots,
+                max_solutions=catalog_solve_max,
                 time_limit_seconds=seed_remaining,
             )
             if seed_result is None or seed_problem is None:
@@ -296,9 +312,10 @@ def solve_with_policy_ladder(
                 last_diagnostics = dict(seed_result.diagnostics)
                 problem = seed_problem
                 break
-            remaining_slots = max(0, resolved_max_solutions - len(merged_solutions))
-            if remaining_slots == 0:
-                break
+            catalog_solve_max = _catalog_solve_max_solutions(
+                len(merged_solutions),
+                resolved_max_solutions,
+            )
             _merge_exact_solutions(
                 merged_solutions,
                 seen_signatures,
@@ -316,14 +333,15 @@ def solve_with_policy_ladder(
         if remaining <= 0:
             time_limited = True
             break
-        remaining_slots = max(0, resolved_max_solutions - len(merged_solutions))
-        if remaining_slots == 0:
-            break
+        catalog_solve_max = _catalog_solve_max_solutions(
+            len(merged_solutions),
+            resolved_max_solutions,
+        )
 
         exact_result, problem = _solve_catalog(
             observation,
             catalog,
-            max_solutions=remaining_slots,
+            max_solutions=catalog_solve_max,
             time_limit_seconds=remaining,
         )
         last_status = exact_result.status
@@ -415,14 +433,15 @@ def solve_with_policy_ladder(
 
     merged_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
     if merged_solutions:
-        if _solution_satisfies_exact_hard_equalities(
-            merged_solutions[0],
-            observation,
-            catalog,
+        if any(
+            _solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+            for solution in merged_solutions
         ):
             status = STATUS_EXACT
+        elif time_limited:
+            status = STATUS_TIME_LIMITED
         else:
-            status = STATUS_TIME_LIMITED if time_limited else STATUS_EXACT
+            status = STATUS_NO_EXACT_SOLUTION
     else:
         status = STATUS_TIME_LIMITED if time_limited else last_status
 
