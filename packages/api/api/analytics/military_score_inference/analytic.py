@@ -2,8 +2,6 @@
 
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
-    accelerated_inference_segments,
-    accelerated_turn_count,
     needs_accelerated_backfill,
     observation_deltas_from_score,
     scoreboard_host_turn,
@@ -20,14 +18,10 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
-from api.analytics.military_score_inference.models import (
-    InferenceObservation,
-    InferenceProblem,
-    InferenceResult,
-    InferenceSolution,
-)
-from api.analytics.military_score_inference.score_arithmetic import (
-    solution_military_score_arithmetic_payload,
+from api.analytics.military_score_inference.inference_path import (
+    InferencePath,
+    prior_turn_score_data_available,
+    resolve_inference_path,
 )
 from api.analytics.military_score_inference.inference_target import (
     ScoreboardTurnLoader,
@@ -36,7 +30,16 @@ from api.analytics.military_score_inference.inference_target import (
     observation_from_accelerated_segment,
     observation_from_deltas,
 )
+from api.analytics.military_score_inference.models import (
+    InferenceObservation,
+    InferenceProblem,
+    InferenceResult,
+    InferenceSolution,
+)
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.score_arithmetic import (
+    solution_military_score_arithmetic_payload,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
@@ -50,18 +53,13 @@ from api.models.player import Score
 STATUS_NO_PRIOR_TURN = "no_prior_turn"
 STATUS_SOLVER_ERROR = "solver_error"
 
+__all__ = [
+    "is_after_ship_limit",
+    "prior_turn_score_data_available",
+    "run_inference_with_artifacts",
+]
+
 AcceleratedSegmentArtifacts = tuple[InferenceObservation, ActionCatalog]
-
-
-def prior_turn_score_data_available(turn: TurnInfo) -> bool:
-    """Return whether this turn has a prior scoreboard row to infer from."""
-    turn_number = turn.settings.turn
-    if turn_number <= 1:
-        return False
-    accelerated = accelerated_turn_count(turn.settings)
-    if accelerated > 0 and turn_number < accelerated:
-        return False
-    return True
 
 
 def _no_prior_turn_reason(turn: TurnInfo) -> str:
@@ -183,67 +181,125 @@ def build_inference_solver_diagnostics(
     return payload
 
 
-def run_inference_with_artifacts(
+def _no_prior_turn_inference_result(
+    turn: TurnInfo,
+    resolved_observation: InferenceObservation,
+) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
+    return (
+        _inference_api_payload(
+            status=STATUS_NO_PRIOR_TURN,
+            summary="Prior turn score data unavailable",
+            solutions=(),
+            diagnostics=build_inference_solver_diagnostics(
+                turn=turn.settings.turn,
+                observation=resolved_observation,
+                turn_info=turn,
+                extra={"reason": _no_prior_turn_reason(turn)},
+            ),
+        ),
+        resolved_observation,
+        None,
+    )
+
+
+def _run_accelerated_backfill_inference(
     score: Score,
     turn: TurnInfo,
+    resolved_observation: InferenceObservation,
     *,
-    observation: InferenceObservation | None = None,
-    catalog: ActionCatalog | None = None,
-    load_scoreboard_turn: ScoreboardTurnLoader | None = None,
+    load_scoreboard_turn: ScoreboardTurnLoader | None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
-    """Run inference once; return API payload plus observation and catalog for re-checks.
-
-    When ``observation`` and ``catalog`` are supplied (e.g. corpus harness), they are
-    reused for solving and returned unchanged so constraint re-check uses the same
-    catalog instance as coverage evaluation.
-    """
-    turn_number = turn.settings.turn
-    resolved_observation = (
-        observation if observation is not None else build_inference_observation(score, turn)
+    backfill = _try_accelerated_backfill_inference(
+        score,
+        turn,
+        load_scoreboard_turn=load_scoreboard_turn,
     )
-    if not prior_turn_score_data_available(turn):
-        backfill = _try_accelerated_backfill_inference(
-            score,
-            turn,
-            load_scoreboard_turn=load_scoreboard_turn,
-        )
-        if backfill is not None:
-            return backfill
-        return (
-            _inference_api_payload(
-                status=STATUS_NO_PRIOR_TURN,
-                summary="Prior turn score data unavailable",
-                solutions=(),
-                diagnostics=build_inference_solver_diagnostics(
-                    turn=turn_number,
-                    observation=resolved_observation,
-                    turn_info=turn,
-                    extra={"reason": _no_prior_turn_reason(turn)},
-                ),
+    if backfill is not None:
+        return backfill
+    return _no_prior_turn_inference_result(turn, resolved_observation)
+
+
+def _run_accelerated_split_inference_path(
+    score: Score,
+    turn: TurnInfo,
+    segments: tuple[AcceleratedInferenceSegment, ...],
+) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
+    payload, reported_observation, reported_catalog, _ = _run_accelerated_split_inference(
+        score,
+        turn,
+        segments,
+    )
+    return payload, reported_observation, reported_catalog
+
+
+def _run_policy_ladder_inference(
+    resolved_observation: InferenceObservation,
+    turn: TurnInfo,
+) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
+    return solve_with_policy_ladder(
+        resolved_observation,
+        turn,
+    )
+
+
+def _run_corpus_prebuilt_inference(
+    resolved_observation: InferenceObservation,
+    catalog: ActionCatalog,
+) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
+    problem = build_inference_problem(resolved_observation, catalog)
+    result = solve_inference_problem(problem)
+    return result, catalog, problem, [catalog.policy_step_id], []
+
+
+def _solver_error_inference_result(
+    turn: TurnInfo,
+    resolved_observation: InferenceObservation,
+    solve_catalog: ActionCatalog | None,
+    exc: Exception,
+) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
+    return (
+        _inference_api_payload(
+            status=STATUS_SOLVER_ERROR,
+            summary="Build inference failed",
+            solutions=(),
+            diagnostics=build_inference_solver_diagnostics(
+                turn=turn.settings.turn,
+                observation=resolved_observation,
+                catalog=solve_catalog,
+                turn_info=turn,
+                extra={"error": str(exc)},
             ),
-            resolved_observation,
-            None,
-        )
+        ),
+        resolved_observation,
+        solve_catalog,
+    )
+
+
+def _run_solver_inference_path(
+    path: InferencePath,
+    score: Score,
+    turn: TurnInfo,
+    resolved_observation: InferenceObservation,
+    *,
+    catalog: ActionCatalog | None,
+    accelerated_segments: tuple[AcceleratedInferenceSegment, ...] | None,
+) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
+    if path == InferencePath.ACCELERATED_SPLIT:
+        assert accelerated_segments is not None
+        return _run_accelerated_split_inference_path(score, turn, accelerated_segments)
 
     solve_catalog = catalog
     try:
-        if solve_catalog is None:
-            segments = accelerated_inference_segments(score, turn)
-            if segments is not None:
-                split_result = _run_accelerated_split_inference(score, turn, segments)
-                payload, reported_observation, reported_catalog, _ = split_result
-                return payload, reported_observation, reported_catalog
+        if path == InferencePath.POLICY_LADDER:
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
-                solve_with_policy_ladder(
-                    resolved_observation,
-                    turn,
-                )
+                _run_policy_ladder_inference(resolved_observation, turn)
             )
         else:
-            policy_steps_attempted = [solve_catalog.policy_step_id]
-            step_diagnostics = []
-            problem = build_inference_problem(resolved_observation, solve_catalog)
-            result = solve_inference_problem(problem)
+            assert path == InferencePath.CORPUS_PREBUILT
+            assert solve_catalog is not None
+            result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
+                _run_corpus_prebuilt_inference(resolved_observation, solve_catalog)
+            )
         return (
             inference_result_to_api_payload(
                 result,
@@ -258,22 +314,50 @@ def run_inference_with_artifacts(
             solve_catalog,
         )
     except Exception as exc:
-        return (
-            _inference_api_payload(
-                status=STATUS_SOLVER_ERROR,
-                summary="Build inference failed",
-                solutions=(),
-                diagnostics=build_inference_solver_diagnostics(
-                    turn=turn_number,
-                    observation=resolved_observation,
-                    catalog=solve_catalog,
-                    turn_info=turn,
-                    extra={"error": str(exc)},
-                ),
-            ),
+        return _solver_error_inference_result(turn, resolved_observation, solve_catalog, exc)
+
+
+def run_inference_with_artifacts(
+    score: Score,
+    turn: TurnInfo,
+    *,
+    observation: InferenceObservation | None = None,
+    catalog: ActionCatalog | None = None,
+    load_scoreboard_turn: ScoreboardTurnLoader | None = None,
+) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
+    """Run inference once; return API payload plus observation and catalog for re-checks.
+
+    When ``observation`` and ``catalog`` are supplied (e.g. corpus harness), they are
+    reused for solving and returned unchanged so constraint re-check uses the same
+    catalog instance as coverage evaluation.
+    """
+    resolved_observation = (
+        observation if observation is not None else build_inference_observation(score, turn)
+    )
+    path, accelerated_segments = resolve_inference_path(
+        score,
+        turn,
+        catalog=catalog,
+        load_scoreboard_turn=load_scoreboard_turn,
+    )
+
+    if path == InferencePath.NO_PRIOR_TURN:
+        return _no_prior_turn_inference_result(turn, resolved_observation)
+    if path == InferencePath.ACCELERATED_BACKFILL:
+        return _run_accelerated_backfill_inference(
+            score,
+            turn,
             resolved_observation,
-            solve_catalog,
+            load_scoreboard_turn=load_scoreboard_turn,
         )
+    return _run_solver_inference_path(
+        path,
+        score,
+        turn,
+        resolved_observation,
+        catalog=catalog,
+        accelerated_segments=accelerated_segments,
+    )
 
 
 def _try_accelerated_backfill_inference(
