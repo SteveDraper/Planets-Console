@@ -126,7 +126,7 @@ def test_solver_failure_is_isolated_per_player(sample_turn):
         return solve_inference_problem(problem)
 
     with patch(
-        "api.analytics.military_score_inference.analytic.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
         side_effect=_solve_side_effect,
     ):
         failing_inference = get_scores_row_inference(sample_turn, failing_player_id)

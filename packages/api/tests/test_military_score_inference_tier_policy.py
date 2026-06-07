@@ -7,7 +7,7 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog,
     build_action_catalog_from_turn,
 )
-from api.analytics.military_score_inference.analytic import _solve_with_policy_ladder
+from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.component_eligibility import (
     eligible_component_ids_for_filter,
     turn_catalog_context_for_policy_step,
@@ -370,10 +370,10 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.analytic.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
         _solve_side_effect,
     )
-    result, catalog, problem, attempted, step_diagnostics = _solve_with_policy_ladder(
+    result, catalog, problem, attempted, step_diagnostics = solve_with_policy_ladder(
         observation,
         sample_turn,
     )
@@ -477,10 +477,10 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.analytic.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
         _solve_side_effect,
     )
-    result, catalog, _, attempted, _ = _solve_with_policy_ladder(
+    result, catalog, _, attempted, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
     )
@@ -529,10 +529,10 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.analytic.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
         _solve_side_effect,
     )
-    result, _, _, _, _ = _solve_with_policy_ladder(
+    result, _, _, _, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
         time_limit_seconds=60.0,
