@@ -306,7 +306,7 @@ Use repeated optimization:
 
 A no-good cut can be encoded with indicator variables that detect whether each action count differs from its previous value, then require at least one difference. Keep this inside `solver.py` so the rest of the analytic only sees top-K results.
 
-**Phase 1H (#71):** the same top-K loop can emit each discovered solution on the wire before the row is complete, so the UI can show a green tick (and open a partial modal) while later alternatives are still enumerating. Until that ships, the batch JSON path returns only after top-K or time budget.
+**Phase 1H (#71):** the policy ladder and per-tier top-K loop can emit each newly discovered exact explanation on the wire before the row is complete, so the UI can show an **inference solution count indicator** (and open a partial modal) while later alternatives are still enumerating. Until that ships, the batch JSON path returns only after top-K or time budget.
 
 The solver should return:
 
@@ -339,15 +339,15 @@ When inference is enabled, add one extra column to the existing scoreboard table
 
 | Icon | Meaning | Hover text | Click behavior |
 |------|---------|------------|----------------|
-| Green tick | At least one feasible solution found (search may continue until `isComplete`) | summarize top solution and alternative count | open modal with ranked solutions (grows while streaming) |
-| Hourglass | No feasible solution yet for this player row | show that inference is still running | no modal until at least one solution arrives |
+| **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K** (`N > 0`). Search may continue until `isComplete`. | summarize top solution; note when search is still running | open modal with ranked held solutions (grows while streaming until plateau at K) |
+| Hourglass | No exact explanation held yet for this player row (`N = 0`) | show that inference is still running | no modal until the first held exact arrives |
 | Red cross | no solution, timeout, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 
-The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event arrives, not when top-K enumeration finishes.
+The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event is admitted to the held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
 
 ### 7.3 Modal details
 
-The modal for a green tick should show:
+The modal for a row with **N > 0** should show:
 
 - player and turn transition,
 - observed deltas used as constraints,
@@ -373,7 +373,9 @@ Keep the Core solver as an internal component. The Core `scores` analytic should
 
 The BFF fetches inference **per scoreboard row** (`GET .../scores/inference?playerId=...`). The initial batch JSON response returns only after top-K enumeration or the per-row time budget.
 
-**Planned (Phase 1H, #71):** NDJSON stream per row (`solution`, optional `progress`, terminal `complete` / `error`), following the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). The hourglass clears on the first `solution`; the modal can list partial results while search continues. Keep the batch JSON path for the inference corpus harness until the stream is proven.
+**Planned (Phase 1H, #71):** NDJSON stream per row (`solution`, optional `progress`, terminal `complete` / `error`), following the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries one newly admitted exact explanation plus **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and maintains **inference merged top-K** ordering. The hourglass clears when the first `solution` is admitted (`N = 1`); the count badge and modal grow while search continues. Keep the batch JSON path for the inference corpus harness until the stream is proven.
+
+**#77 batch path (before #71):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
 
 ---
 
@@ -555,7 +557,11 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
 2. Build catalog: policy constraints intersect turn catalog intersect player actives; apply **tier aggregate allowlist** and caps.
 3. **Exact solve first** (military, warship, freighter equalities -- section constraints module).
 4. If INFEASIBLE and `alpha > 0`, **band retry** on military score only: `explained_2x >= observed_2x - alpha`; warship and freighter stay exact.
-5. **Exact solutions** from any step merge into top-K immediately (user-facing). **Do not** carry exact solutions forward as seeds -- no remainder to refine.
+5. **Exact solutions** from any step merge into **inference merged top-K** immediately (user-facing). **Do not** carry exact solutions forward as seeds -- no remainder to refine. Merge rules:
+   - **Accumulate across the full ladder.** Catalog widen at a step (new ship-build combo ids and/or newly admitted aggregate action ids) does **not** discard previously merged exact solutions. Later tiers are strict supersets on every dimension they control; an explanation exact at step *N* remains valid for the observation when re-checked against the final catalog reached.
+   - **Dedup:** identity is **inference explanation signature** (sorted multiset of aggregate action ids with counts plus ship-build combo ids with counts). Re-discovery at a later step is suppressed; first discovery wins. The same rule applies to batch merge and to stream emission in #71.
+   - **K-best retention:** default top-K is 20. When *K* distinct signatures are held, the ladder **continues** climbing tiers (do not stop solely because the buffer is full). A new signature is admitted only if its **inference solution rank weight** exceeds the current worst held row, which is then evicted.
+   - **Batch terminal status:** `exact` when **any** held row satisfies hard equalities (military, warship, freighter) against the **final** catalog at ladder end. Do not emit `exact` when rank-1 alone fails hard equalities but another held row would pass.
 6. **Band near-solutions** (up to `maxSeeds` distinct per step) seed the **next** step only:
    - **Fix** ship-build combo counts from the seed.
    - Admit newly unlocked aggregate actions to close residual military score.
@@ -569,9 +575,11 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 
 | Outcome | UI |
 |---------|-----|
-| At least one **exact** solution from any policy step | Green tick; merged top-K across steps |
+| At least one **exact** solution from any policy step | **Inference solution count indicator** with **N** = held top-K size; merged top-K across steps |
 | Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
 | Band near-solution | Never shown directly; seeds next step only |
+
+While search is in flight (#71), **N** rises from 1 toward K as new signatures are admitted, then plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Hourglass until **N > 0**; red cross only after terminal `complete` / batch response with zero held exact.
 
 Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that status remains for future deferred-effect modeling (#49).
 
@@ -834,29 +842,32 @@ Done when:
 
 ### Phase 1H: Per-row solution streaming (NDJSON)
 
-Goal: expose ranked solutions **within each scoreboard row** as they are discovered, so the UI is not blocked on full top-K enumeration.
+Goal: expose exact explanations **within each scoreboard row** as they are admitted to **inference merged top-K**, so the UI is not blocked on full top-K enumeration or full policy-ladder completion.
 
-GitHub: **#71**.
+GitHub: **#71**. Depends on **#77** ladder merge semantics (section 8.5.4): cross-tier accumulation, signature dedup, K-best eviction.
 
 Files:
 
-- `packages/api/api/analytics/military_score_inference/solver.py` (yield/callback per solution),
+- `packages/api/api/analytics/military_score_inference/policy_ladder.py` (emit hook on merge admit),
+- `packages/api/api/analytics/military_score_inference/solver.py` (yield/callback per within-tier solution),
 - Core + BFF inference routes (NDJSON stream alongside existing batch JSON),
 - `packages/frontend/src/api/` (Zod schemas + parser for stream events),
-- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, partial modal),
+- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, count badge, partial modal),
 - tests at API, BFF, and frontend layers.
 
 Steps:
 
 1. Define NDJSON event types: `solution`, optional `progress`, terminal `complete` / `error`.
-2. Refactor the top-K loop to flush each feasible solution before the next no-good cut.
-3. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
-4. Update row UI: hourglass until first `solution`; tick when `solutionCount >= 1`; `isComplete` when `complete` arrives; abort on game/turn/perspective change.
-5. Retain batch JSON for corpus harness (`infer_military_score_build`) until stream parity is verified; then revisit `max_solutions=1` combo-count fallback.
+2. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K (within-tier enumeration and cross-tier ladder progress). Payload includes full explanation rows plus **inference solution rank weight**. Do not re-emit suppressed re-discoveries.
+3. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
+4. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
+5. Update row UI: hourglass until first admitted `solution` (`N = 0`); **inference solution count indicator** with **N** = held top-K size once `N > 0`; subtle in-progress affordance while `!isComplete`; `complete` sets terminal `status` (`exact` when any held row passes final-catalog hard equalities). Abort on game/turn/perspective change.
+6. Retain batch JSON for corpus harness (`infer_military_score_build`) until stream parity is verified; then revisit `max_solutions=1` combo-count fallback.
 
 Done when:
 
-- first solution appears before top-K completes on large catalogs,
+- first admitted solution appears before top-K enumeration and policy-ladder completion on large catalogs,
+- count badge **N** always matches modal row count (held top-K, not cumulative discoveries above K),
 - partial rows are not misclassified as failure,
 - `make lint` and relevant package tests pass.
 
@@ -940,7 +951,7 @@ Steps:
 1. Add a checkbox labeled `Include build inference` to the Scores analytic controls.
 2. Include the checkbox state in the scores query key.
 3. Render the inference column only when enabled.
-4. Render green tick, hourglass, or red cross based on row status.
+4. Render inference solution count indicator, hourglass, or red cross based on row status.
 5. Add hover text with the row summary.
 6. Keep the normal scoreboard table fast and unchanged when the checkbox is off.
 
@@ -968,7 +979,7 @@ Files:
 
 Steps:
 
-1. Open the modal when the user clicks a green tick.
+1. Open the modal when the user clicks a row with **N > 0**.
 2. Show solutions in descending objective/probability order.
 3. Show observed deltas, action breakdown, score arithmetic, and warnings.
 4. Do not open a solution modal for hourglass rows.
@@ -976,7 +987,7 @@ Steps:
 
 Tests:
 
-- clicking a green tick opens the modal,
+- clicking a count badge opens the modal,
 - solutions are displayed in order,
 - hourglass rows are non-clickable or explain that solving is pending,
 - modal closes cleanly and does not reset the Scores checkbox.
@@ -1135,6 +1146,6 @@ The user-facing scoreboard integration should be considered complete when:
 - the existing Scores table contract is unchanged when inference is disabled,
 - the Scores tile includes an `Include build inference` checkbox,
 - enabling inference adds an inference column with row-level status,
-- green tick rows open a modal with ranked solution details,
+- rows with **N > 0** open a modal with ranked held solution details,
 - BFF and frontend code never import OR-Tools or encode solver rules directly,
 - `make lint` and the relevant API, BFF, and frontend tests pass.

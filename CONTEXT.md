@@ -285,7 +285,7 @@ Core **turn analytic** behavior (optional on the **Scores** analytic) that expla
 _Avoid_: build solver, score guesser
 
 **Inference search tier**:
-One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to the merged top-K.
+One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to **inference merged top-K** (the ladder continues when K is full; see K-best retention there).
 _Avoid_: ship build tier (too narrow; implies only hull combos), phase
 
 **Fine-grained slack action**:
@@ -309,8 +309,20 @@ A band-feasible action multiset from tier *n* (exact pass at that tier was infea
 _Avoid_: warm start, hint
 
 **Inference score band**:
-Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into top-K (green tick). If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics.
+Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into **inference merged top-K**. If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics.
 _Avoid_: slack constraint, approximate solve
+
+**Inference explanation signature**:
+Identity of one feasible explanation as the sorted multiset of aggregate action ids with counts plus ship-build combo ids with counts. Two ranked rows with the same signature are the same explanation for merge dedup and **inference solution streaming** -- regardless of display labels or which **inference search tier** found them. Re-discovery at a later tier is suppressed; first discovery wins.
+_Avoid_: solution hash, fingerprint
+
+**Inference merged top-K**:
+Up to K distinct exact explanations held across the full **inference search tier** ladder, ranked by **inference solution rank weight**. When K is full the ladder still climbs: a new signature evicts the current worst held row only if its weight is higher. Distinctness is by **inference explanation signature**.
+_Avoid_: per-tier top-K, solution buffer
+
+**Inference solution rank weight**:
+The solver likelihood objective attached to one explanation. Orders the merged top-K and each streamed `solution` event; the consumer may maintain final ranked order incrementally from this weight without waiting for the full ladder to finish.
+_Avoid_: probability score, objective value (implementation field name)
 
 **Inference tier policy overlay** (follow-on):
 Solver-side merge of injected parameters into the static **inference tier policy asset** at solve time (e.g. extra launcher torpedo tech levels, earlier beam tech bands). Defines how overlays combine with the base YAML -- not which upstream features produce overlay values (fleet histogram, prior builds, user settings, etc.). Separate ticket from the static-policy refactor.
@@ -321,8 +333,12 @@ Static YAML ladder under `assets/analytics/military_score_build_inference/` (rep
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
 
 **Inference solution streaming**:
-Planned NDJSON wire protocol (**#71**, Phase 1H) that emits each ranked explanation for one scoreboard row as the CP-SAT top-K loop discovers it, so the hourglass clears before enumeration finishes. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
+Planned NDJSON wire protocol (**#71**, Phase 1H) that emits each new exact explanation for one scoreboard row as soon as any **inference search tier** finds it -- within-tier enumeration and cross-tier ladder progress -- so the hourglass clears before top-K is full. Each `solution` event carries **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and applies final ordering. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
 _Avoid_: websocket inference, whole-table stream
+
+**Inference solution count indicator**:
+Per scoreboard row chrome replacing the binary green tick: a green outlined badge showing **N** = the number of rows currently held in **inference merged top-K** (not cumulative discoveries above K). **N > 0** as soon as the first exact explanation is held; rises toward K then plateaus while eviction swaps membership. Hourglass while **N = 0** and search is in flight; red cross when the row completes with no exact explanation. Click opens the ranked modal.
+_Avoid_: green tick, checkmark column
 
 **Inference host turn**:
 The host turn whose activity is being explained. Scoreboard deltas are read from the **later** stored **TurnInfo** document (turn *N+1*); the **earlier** document (turn *N*) supplies inventory ground truth for complexity grading and Tier 2 checks.
