@@ -52,14 +52,20 @@ Start with a small Core API subpackage so the solver and scoring model do not cr
 ```text
 packages/api/api/analytics/military_score_inference/
 |-- __init__.py
-|-- accelerated_start.py  # accelerated scoreboard baselines and observation deltas
-|-- actions.py            # aggregate noisy actions (defense, ammo load, transfers)
-|-- ship_build_combos.py  # eligible hull/engine/beam/torp combos (Phase 1G+)
-|-- tier_policy.py        # YAML policy load, resolve, optional overlay hook (#77, #78)
-|-- models.py             # dataclasses for observations, actions, problems, solutions
-|-- scoring.py            # scaled military-score contribution formulas
-|-- solver.py             # OR-Tools CP-SAT adapter
-`-- analytic.py           # turn-level analytic assembly
+|-- accelerated_start.py    # accelerated scoreboard baselines, segment split, observation deltas
+|-- actions.py              # aggregate noisy actions (defense, ammo load, transfers)
+|-- ship_build_combos.py    # eligible hull/engine/beam/torp combos (Phase 1G+)
+|-- component_eligibility.py # hull/component id resolution for policy filters and catalog build
+|-- tier_policy.py          # YAML policy load, resolve, optional overlay hook (#77, #78)
+|-- policy_ladder.py        # walk YAML policy steps, seed carry-forward, merge top-K
+|-- inference_path.py       # prior-turn gate and InferencePath resolve-then-dispatch
+|-- inference_target.py     # observation/catalog context; accelerated backfill source loading
+|-- constraints.py          # hard equality targets and band-retry slack for observations
+|-- models.py               # dataclasses for observations, actions, problems, solutions
+|-- scoring.py              # scaled military-score contribution formulas
+|-- score_arithmetic.py     # solution score breakdown for API diagnostics
+|-- solver.py               # OR-Tools CP-SAT adapter
+`-- analytic.py             # run_inference_with_artifacts entry; path dispatch to solver paths
 ```
 
 Phase 1F shipped an interim flat `build_{hull}_{preset}` catalog in `actions.py`. Phase 1G moves ship builds into `ship_build_combos.py` and leaves aggregate actions in `actions.py`.
@@ -70,8 +76,26 @@ Phase 1F shipped an interim flat `build_{hull}_{preset}` catalog in `actions.py`
 
 When `settings.acceleratedturns = N` with `N > 0`:
 
-- `prior_turn_score_data_available(turn)` in `analytic.py` returns false for `turn < N` (and turn 1), so `infer_military_score_build` emits `no_prior_turn` without calling the solver.
-- `build_inference_observation` uses `observation_deltas_from_score(score, turn)` instead of raw `militarychange` / `shipchange` / `freighterchange` on the first reliable row (`turn == N`).
+- **Unreliable rows** (`1 <= turn < N`): scoreboard deltas are not trustworthy for a single-host-turn solve. `prior_turn_score_data_available(turn)` in `inference_path.py` returns false for these rows (and for turn 1).
+- **First reliable row** (`turn == N`): `accelerated_inference_segments(score, turn)` splits activity into an optional `accel_window` segment (host turn `N-2`) and a `reported_host_turn` segment (host turn `N-1`). Each segment gets its own observation and a full YAML **policy ladder** solve via `policy_ladder.py` (`ACCELERATED_SPLIT` path).
+- **Later rows** (`turn > N`): use normal scoreboard deltas through `observation_deltas_from_score(score, turn)` and the single-row policy ladder (`POLICY_LADDER` path).
+
+**Resolve-then-dispatch:** `run_inference_with_artifacts` in `analytic.py` calls `resolve_inference_path` in `inference_path.py` before any solver work. The `InferencePath` enum selects orchestration:
+
+| Path | When | Solver behavior |
+|------|------|-----------------|
+| `NO_PRIOR_TURN` | Turn 1, or unreliable accelerated row with no backfill | Return `no_prior_turn` without CP-SAT |
+| `ACCELERATED_BACKFILL` | Unreliable accelerated row; first reliable turn stored | Re-run split inference from stored turn `N`; return the segment matching this row's host turn |
+| `ACCELERATED_SPLIT` | First reliable row (`turn == N`) | Per-segment policy ladders; primary API payload from `reported_host_turn` |
+| `POLICY_LADDER` | Normal rows with a prior scoreboard row | Single `solve_with_policy_ladder` call |
+| `CORPUS_PREBUILT` | Corpus harness passes a prebuilt catalog | Single solve on supplied catalog |
+
+**Accelerated backfill:** Unreliable accelerated rows (`turn < N`) can still produce inference when the game store holds turn `N`. `inference_target.py` loads the first reliable scoreboard turn via `load_scoreboard_turn`, recomputes `accelerated_inference_segments` from that stored row, and `analytic.py` runs the same split solve once. The row's host turn (`turn - 1`) selects which segment's solutions and catalog are returned. Diagnostics include `accelerated_backfill`, `accelerated_backfill_source_turn`, and `accelerated_backfill_host_turn`. The scores analytic supplies `load_scoreboard_turn` when storage is available; callers without it (e.g. bare `infer_military_score_build`) cannot backfill.
+
+**When `no_prior_turn` still applies:**
+
+- **Turn 1** -- no prior host turn (`diagnostics.reason`: `first_turn`).
+- **Unreliable accelerated row** (`turn < N`) when backfill cannot run: no `load_scoreboard_turn`, first reliable turn not stored, player missing on source turn, or no segment for the target host turn (`diagnostics.reason`: `accelerated_backfill_unavailable`).
 
 **Homeworld baseline:** `starting_scoreboard_snapshot(settings)` derives turn-1 military totals from Starmap flags (e.g. `homeworldhasstarbase`, standard homeworld starbase fighters and defense posts, one starting freighter). Shared homeworld constants used by the action catalog (e.g. Evil Empire free starbase fighter caps) also live in this module.
 
