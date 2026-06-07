@@ -7,8 +7,8 @@ from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_action_catalog_from_turn,
 )
-from api.analytics.military_score_inference.analytic import (
-    build_inference_observation,
+from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.inference_target import (
     resolve_inference_target_for_host_turn,
 )
 from api.analytics.military_score_inference.models import CandidateAction

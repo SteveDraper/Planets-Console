@@ -1,14 +1,9 @@
 """Scores analytic integration for military score build inference."""
 
-from collections.abc import Callable
-from dataclasses import dataclass
-
 from api.analytics.military_score_inference.accelerated_start import (
-    SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
     AcceleratedInferenceSegment,
     accelerated_inference_segments,
     accelerated_turn_count,
-    first_reliable_accelerated_scoreboard_turn,
     needs_accelerated_backfill,
     observation_deltas_from_score,
     scoreboard_host_turn,
@@ -34,6 +29,13 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
+from api.analytics.military_score_inference.inference_target import (
+    ScoreboardTurnLoader,
+    is_after_ship_limit,
+    load_accelerated_backfill_source_for_host_turn,
+    observation_from_accelerated_segment,
+    observation_from_deltas,
+)
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -48,114 +50,7 @@ from api.models.player import Score
 STATUS_NO_PRIOR_TURN = "no_prior_turn"
 STATUS_SOLVER_ERROR = "solver_error"
 
-ScoreboardTurnLoader = Callable[[int], TurnInfo | None]
-
 AcceleratedSegmentArtifacts = tuple[InferenceObservation, ActionCatalog]
-
-
-@dataclass(frozen=True)
-class ResolvedInferenceTarget:
-    """Observation and turn snapshot used to build the action catalog for one host turn."""
-
-    observation: InferenceObservation
-    turn_info: TurnInfo
-    score: Score
-
-
-def resolve_inference_target_for_host_turn(
-    score: Score,
-    turn: TurnInfo,
-    *,
-    host_turn: int,
-    load_scoreboard_turn: ScoreboardTurnLoader | None = None,
-) -> ResolvedInferenceTarget | None:
-    """Resolve catalog context for a host-turn target using inference-equivalent rules.
-
-    Unreliable accelerated scoreboard rows backfill from the first reliable split;
-    the first reliable row uses accelerated segments; later rows use score deltas.
-    Returns None when accelerated context is required but cannot be loaded.
-    """
-    if needs_accelerated_backfill(turn.settings.turn, turn.settings):
-        return _resolve_backfill_inference_target(
-            score,
-            turn,
-            host_turn=host_turn,
-            load_scoreboard_turn=load_scoreboard_turn,
-        )
-
-    segments = accelerated_inference_segments(score, turn)
-    if segments is not None:
-        segment = _accelerated_segment_for_host_turn(segments, host_turn)
-        if segment is None:
-            return None
-        return ResolvedInferenceTarget(
-            observation=_observation_from_accelerated_segment(score, turn, segment),
-            turn_info=turn,
-            score=score,
-        )
-
-    expected_host_turn = scoreboard_host_turn(turn.settings.turn)
-    if expected_host_turn is None or expected_host_turn != host_turn:
-        return None
-    return ResolvedInferenceTarget(
-        observation=build_inference_observation(score, turn),
-        turn_info=turn,
-        score=score,
-    )
-
-
-def _resolve_backfill_inference_target(
-    score: Score,
-    turn: TurnInfo,
-    *,
-    host_turn: int,
-    load_scoreboard_turn: ScoreboardTurnLoader | None,
-) -> ResolvedInferenceTarget | None:
-    if load_scoreboard_turn is None:
-        return None
-
-    scoreboard_turn_host = scoreboard_host_turn(turn.settings.turn)
-    if scoreboard_turn_host is None or scoreboard_turn_host != host_turn:
-        return None
-
-    source_turn_number = first_reliable_accelerated_scoreboard_turn(turn.settings)
-    if source_turn_number is None:
-        return None
-
-    source_turn = load_scoreboard_turn(source_turn_number)
-    if source_turn is None:
-        return None
-
-    source_score = next(
-        (row for row in source_turn.scores if row.ownerid == score.ownerid),
-        None,
-    )
-    if source_score is None:
-        return None
-
-    segments = accelerated_inference_segments(source_score, source_turn)
-    if segments is None:
-        return None
-
-    segment = _accelerated_segment_for_host_turn(segments, host_turn)
-    if segment is None:
-        return None
-
-    return ResolvedInferenceTarget(
-        observation=_observation_from_accelerated_segment(source_score, source_turn, segment),
-        turn_info=source_turn,
-        score=source_score,
-    )
-
-
-def _accelerated_segment_for_host_turn(
-    segments: tuple[AcceleratedInferenceSegment, ...],
-    host_turn: int,
-) -> AcceleratedInferenceSegment | None:
-    for segment in segments:
-        if segment.host_turn == host_turn:
-            return segment
-    return None
 
 
 def prior_turn_score_data_available(turn: TurnInfo) -> bool:
@@ -177,67 +72,12 @@ def _no_prior_turn_reason(turn: TurnInfo) -> str:
     return "first_turn"
 
 
-def is_after_ship_limit(turn: TurnInfo, score: Score) -> bool:
-    """Return whether ship-limit queue rules apply for this player on this turn."""
-    settings = turn.settings
-    player_ships = score.capitalships + score.freighters
-    if settings.shiplimittype != 0:
-        player_limit = (
-            settings.plsminships
-            + settings.plsextraships
-            + settings.plsshipsperplanet * score.planets
-        )
-        return player_ships >= player_limit
-    total_ships = sum(
-        other_score.capitalships + other_score.freighters for other_score in turn.scores
-    )
-    return total_ships >= settings.shiplimit
-
-
 def build_inference_observation(score: Score, turn: TurnInfo) -> InferenceObservation:
     """Build solver observation for the reported host turn on this scoreboard row."""
-    return _observation_from_deltas(
+    return observation_from_deltas(
         score,
         turn,
         observation_deltas_from_score(score, turn),
-    )
-
-
-def _observation_from_deltas(
-    score: Score,
-    turn: TurnInfo,
-    deltas: tuple[int, int, int, int],
-    *,
-    military_partition_slack_2x: int = SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
-) -> InferenceObservation:
-    military_delta_2x, warship_delta, freighter_delta, priority_point_delta = deltas
-    return InferenceObservation(
-        player_id=score.ownerid,
-        turn=turn.settings.turn,
-        military_delta_2x=military_delta_2x,
-        warship_delta=warship_delta,
-        freighter_delta=freighter_delta,
-        priority_point_delta=priority_point_delta,
-        starbases_owned=score.starbases,
-        is_after_ship_limit=is_after_ship_limit(turn, score),
-        military_partition_slack_2x=military_partition_slack_2x,
-    )
-
-
-def _observation_from_accelerated_segment(
-    score: Score,
-    turn: TurnInfo,
-    segment: AcceleratedInferenceSegment,
-) -> InferenceObservation:
-    return _observation_from_deltas(
-        score,
-        turn,
-        (
-            segment.military_delta_2x,
-            segment.warship_delta,
-            segment.freighter_delta,
-            segment.priority_point_delta,
-        ),
     )
 
 
@@ -445,33 +285,24 @@ def _try_accelerated_backfill_inference(
     """Fill unreliable accelerated rows from the first reliable split when that turn is stored."""
     if load_scoreboard_turn is None:
         return None
-    if not needs_accelerated_backfill(turn.settings.turn, turn.settings):
-        return None
 
     target_host_turn = scoreboard_host_turn(turn.settings.turn)
-    source_turn_number = first_reliable_accelerated_scoreboard_turn(turn.settings)
-    if target_host_turn is None or source_turn_number is None:
+    if target_host_turn is None:
         return None
 
-    source_turn = load_scoreboard_turn(source_turn_number)
-    if source_turn is None:
-        return None
-
-    source_score = next(
-        (row for row in source_turn.scores if row.ownerid == score.ownerid),
-        None,
+    backfill_source = load_accelerated_backfill_source_for_host_turn(
+        score,
+        turn,
+        host_turn=target_host_turn,
+        load_scoreboard_turn=load_scoreboard_turn,
     )
-    if source_score is None:
-        return None
-
-    segments = accelerated_inference_segments(source_score, source_turn)
-    if segments is None:
+    if backfill_source is None:
         return None
 
     payload, _, _, segment_artifacts = _run_accelerated_split_inference(
-        source_score,
-        source_turn,
-        segments,
+        backfill_source.source_score,
+        backfill_source.source_turn,
+        backfill_source.segments,
     )
     segment_payload = _segment_payload_for_host_turn(
         payload,
@@ -509,10 +340,10 @@ def _try_accelerated_backfill_inference(
                 turn=turn.settings.turn,
                 observation=segment_observation,
                 catalog=segment_catalog,
-                turn_info=source_turn,
+                turn_info=backfill_source.source_turn,
                 extra={
                     "accelerated_backfill": True,
-                    "accelerated_backfill_source_turn": source_turn_number,
+                    "accelerated_backfill_source_turn": backfill_source.source_turn_number,
                     "accelerated_backfill_host_turn": target_host_turn,
                     "accelerated_backfill_segment_id": segment_payload.get("segmentId"),
                     "accelerated_segments": accelerated_segments,
@@ -608,7 +439,7 @@ def _run_accelerated_split_inference(
     combined_time_limited = False
 
     for segment in segments:
-        segment_observation = _observation_from_accelerated_segment(score, turn, segment)
+        segment_observation = observation_from_accelerated_segment(score, turn, segment)
         if segment.segment_id == "reported_host_turn":
             reported_observation = segment_observation
 

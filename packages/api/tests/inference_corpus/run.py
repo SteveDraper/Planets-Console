@@ -10,8 +10,10 @@ from api.analytics.military_score_inference.actions import (
 )
 from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
-    resolve_inference_target_for_host_turn,
     run_inference_with_artifacts,
+)
+from api.analytics.military_score_inference.inference_target import (
+    resolve_inference_target_for_host_turn,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED
