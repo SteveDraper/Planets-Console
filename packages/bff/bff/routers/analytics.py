@@ -13,21 +13,19 @@ from api.transport.connections_options import (
     WARP_SPEED_QUERY,
     FlareConnectionMode,
 )
-from api.transport.inference_stream import stream_inference_row
 from fastapi import APIRouter, Query
-from fastapi.responses import StreamingResponse
 
 from bff.analytics import (
     ANALYTICS_LIST,
     ConnectionsMapQuery,
     TurnScope,
-    get_inference_response,
     get_map_response,
     get_table_response,
     map_diagnostic_values,
     map_timing_section,
 )
 from bff.core_client import get_core_client
+from bff.routers import scores_inference
 from bff.diagnostics_dep import (
     IncludeDiagnostics,
     finish_response,
@@ -36,6 +34,7 @@ from bff.diagnostics_dep import (
 )
 
 router = APIRouter()
+router.include_router(scores_inference.router, prefix="/scores")
 
 
 def _turn_analytics_from_core(
@@ -47,19 +46,6 @@ def _turn_analytics_from_core(
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     **kwargs: object,
 ) -> dict:
-    if kwargs.pop("inference_only", False):
-        player_id = kwargs.pop("player_id", None)
-        if not isinstance(player_id, int):
-            raise ValueError("player_id is required for scores inference")
-        if kwargs:
-            raise ValueError(f"Unexpected kwargs for scores inference: {sorted(kwargs)}")
-        return get_core_client().get_scores_row_inference(
-            game_id,
-            perspective,
-            turn_number,
-            player_id,
-            diagnostics=diagnostics,
-        )
     return get_core_client().get_turn_analytics(
         game_id,
         perspective,
@@ -114,203 +100,6 @@ def get_analytic_table(
             include_build_inference=include_build_inference,
         )
     return finish_response(body, root)
-
-
-@router.get("/{analytic_id}/inference")
-def get_analytic_inference(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-    include: IncludeDiagnostics = False,
-):
-    """Per-row military score build inference for the Scores analytic."""
-    bff_path = f"/analytics/{analytic_id}/inference"
-    scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn)
-
-    root = optional_request_root(
-        include,
-        "GET",
-        bff_path,
-        gameId=game_id,
-        turn=turn,
-        perspective=perspective,
-        playerId=player_id,
-        handler="get_analytic_inference",
-    )
-    inference_node = root.child("get_analytic_inference")
-    with timed_section(inference_node, "total"):
-        body = get_inference_response(
-            analytic_id,
-            scope,
-            _turn_analytics_from_core,
-            inference_node,
-            player_id=player_id,
-        )
-    return finish_response(body, root)
-
-
-@router.get(
-    "/{analytic_id}/inference/stream",
-    responses={
-        200: {
-            "description": "NDJSON stream of solution, progress, complete, and error events.",
-            "content": {
-                "application/x-ndjson": {
-                    "schema": {
-                        "oneOf": [
-                            {"$ref": "#/components/schemas/InferenceStreamSolutionEvent"},
-                            {"$ref": "#/components/schemas/InferenceStreamProgressEvent"},
-                            {"$ref": "#/components/schemas/InferenceStreamCompleteEvent"},
-                            {"$ref": "#/components/schemas/InferenceStreamErrorEvent"},
-                        ]
-                    }
-                }
-            },
-        }
-    },
-)
-def get_analytic_inference_stream(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Stream per-row military score build inference for the Scores analytic (NDJSON)."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-
-    core = get_core_client()
-    return StreamingResponse(
-        stream_inference_row(
-            lambda: core.iter_scores_row_inference_stream(
-                game_id,
-                perspective,
-                turn,
-                player_id,
-            )
-        ),
-        media_type="application/x-ndjson",
-    )
-
-
-@router.get(
-    "/{analytic_id}/inference/table-stream",
-    responses={
-        200: {
-            "description": "NDJSON stream of tagged inference events.",
-            "content": {"application/x-ndjson": {}},
-        }
-    },
-)
-def get_analytic_inference_table_stream(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_ids: str = Query(..., alias="playerIds"),
-):
-    """Stream build inference for all scoreboard rows on one NDJSON connection."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-
-    parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
-    core = get_core_client()
-    return StreamingResponse(
-        stream_inference_row(
-            lambda: core.iter_scores_table_inference_stream(
-                game_id,
-                perspective,
-                turn,
-                parsed_player_ids,
-            )
-        ),
-        media_type="application/x-ndjson",
-    )
-
-
-@router.post("/{analytic_id}/inference/stop")
-def post_analytic_inference_stop(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Halt build inference for one scoreboard row."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().stop_scores_row_inference(
-        game_id,
-        perspective,
-        turn,
-        player_id,
-    )
-
-
-@router.get("/{analytic_id}/inference/global-pause")
-def get_analytic_inference_global_pause(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-):
-    """Whether scoreboard inference is globally paused for this turn scope."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().get_inference_global_pause_status(
-        game_id,
-        perspective,
-        turn,
-    )
-
-
-@router.post("/{analytic_id}/inference/global-pause")
-def post_analytic_inference_global_pause(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-):
-    """Pause all scoreboard inference jobs for this turn scope."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().pause_inference_globally(
-        game_id,
-        perspective,
-        turn,
-    )
-
-
-@router.delete("/{analytic_id}/inference/global-pause")
-def delete_analytic_inference_global_pause(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-):
-    """Resume globally paused scoreboard inference for this turn scope."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().resume_inference_globally(
-        game_id,
-        perspective,
-        turn,
-    )
 
 
 @router.get("/{analytic_id}/map")
