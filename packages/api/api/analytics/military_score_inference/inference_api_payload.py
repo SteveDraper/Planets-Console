@@ -206,6 +206,5 @@ def serialize_solutions_with_arithmetic(
     """Rank and serialize held top-K rows for NDJSON solution events."""
     ranked = sorted(solutions, key=lambda solution: solution.objective_value, reverse=True)
     return [
-        _serialize_solution_with_arithmetic(observation, catalog, solution)
-        for solution in ranked
+        _serialize_solution_with_arithmetic(observation, catalog, solution) for solution in ranked
     ]

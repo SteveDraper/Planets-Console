@@ -25,13 +25,13 @@ from bff.analytics import (
     map_timing_section,
 )
 from bff.core_client import get_core_client
-from bff.routers import scores_inference
 from bff.diagnostics_dep import (
     IncludeDiagnostics,
     finish_response,
     optional_request_root,
     with_timed_child,
 )
+from bff.routers import scores_inference
 
 router = APIRouter()
 router.include_router(scores_inference.router, prefix="/scores")

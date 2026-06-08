@@ -471,9 +471,7 @@ class InferenceRowScheduler:
 
         observation, turn = self._solve_context(session)
         orchestration = session.orchestration
-        emit_solutions = (
-            orchestration is None or orchestration.should_emit_streaming_solutions()
-        )
+        emit_solutions = orchestration is None or orchestration.should_emit_streaming_solutions()
 
         def on_admitted(_solution: InferenceSolution) -> None:
             if emit_solutions:
