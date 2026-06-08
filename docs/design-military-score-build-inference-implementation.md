@@ -833,12 +833,28 @@ Files:
 
 - `assets/analytics/military_score_build_inference/tier_policy.yaml` (new),
 - `packages/api/api/analytics/military_score_inference/tier_policy.py` (new),
+- `packages/api/api/analytics/military_score_inference/policy_ladder.py` (ladder walk and top-K merge),
 - refactors to `actions.py`, `ship_build_combos.py`, `component_eligibility.py`, `analytic.py`, `constraints.py` (band retry only; warship/freighter stay exact).
 
 Done when:
 
 - acceptance criteria in #77 are met,
 - section 8.5 is authoritative over interim Phase 1G tier code paths.
+
+#### Branch composition and merge planning
+
+The **Issue_77** branch may bundle tier policy, accelerated-start inference, corpus probe tooling, and frontend diagnostics in one PR. The slices below are **logical review units** for attribution and merge discussion -- not a mandate to split git history unless explicitly requested.
+
+| Slice | Role | Primary ownership |
+|-------|------|-------------------|
+| **A** (merge gate) | Tier policy core per section 8.5; satisfies **#77** acceptance criteria | `tier_policy.yaml`, `tier_policy.py`, `policy_ladder.py`, `component_eligibility.py`; refactors to `actions.py`, `constraints.py` (band retry), `ship_build_combos.py`, `solver.py`, `analytic.py`; `test_military_score_inference_tier_policy.py` and related inference tests |
+| **B** (companion) | Accelerated-start inference dispatch | `accelerated_start.py`, `inference_target.py`, `inference_path.py`; scoreboard wiring in `scores.py`, `turn_analytic_service.py`; `test_accelerated_start_scoreboard.py` |
+| **C** (companion, optional split) | Corpus probe harness; inventory-only ground truth | `Makefile` targets (`inference_corpus`, `inference_corpus_discover`, `inference_corpus_probe`), `scripts/run_inference_corpus.py`, `packages/api/tests/inference_corpus/` (`worker.py`, `ground_truth.py`, `run.py`, `verify.py`, discovery/coverage/report), `test_inference_corpus_*.py`; spec touch-ups in `docs/design-inference-corpus.md` |
+| **D** (companion, optional split) | Frontend accelerated segments and wire parsing | `acceleratedInferenceSegments.ts`, `scoresWireParsers.ts`, `diagnosticsFromTable.ts`, `inferenceConstraints.ts`, `InferenceDetailModal.tsx`; matching `*.test.ts(x)` |
+
+**Merge gate:** slice **A** closes **#77**. Slices **B--D** are companion changes on the same branch that depend on or exercise the ladder but are not required to meet **#77** acceptance criteria.
+
+**Review recommendation:** approve **A + B** as one unit (backend tier policy plus accelerated-start solve dispatch). **C** and **D** can ship with the branch or split into follow-on PRs under epic **#39** (corpus harness **#62--#66**, frontend diagnostic polish) without blocking **#77** merge once **A** (and typically **B**) pass.
 
 ### Phase 1H: Per-row solution streaming (NDJSON)
 
