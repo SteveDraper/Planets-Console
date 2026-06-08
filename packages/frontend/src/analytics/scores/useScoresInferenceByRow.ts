@@ -10,8 +10,38 @@ import {
   fetchScoresTableInferenceStream,
   stopScoresRowInference,
 } from '../../api/bff'
-import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
+import type {
+  InferenceStreamEvent,
+  InferenceStreamSolutionPayload,
+} from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
+
+function omitNull<T>(value: T | null | undefined): T | undefined {
+  return value ?? undefined
+}
+
+function streamSolutionsToRowSolutions(
+  solutions: InferenceStreamSolutionPayload[]
+): ScoresInferenceSolution[] {
+  return solutions.map((solution) => ({
+    objectiveValue: solution.objectiveValue,
+    actions: solution.actions,
+    shipBuilds: solution.shipBuilds?.map((shipBuild) => ({
+      comboId: shipBuild.comboId,
+      label: shipBuild.label,
+      count: shipBuild.count,
+      hullId: omitNull(shipBuild.hullId),
+      engineId: omitNull(shipBuild.engineId),
+      beamId: omitNull(shipBuild.beamId),
+      torpId: omitNull(shipBuild.torpId),
+      beamCount: omitNull(shipBuild.beamCount),
+      launcherCount: omitNull(shipBuild.launcherCount),
+    })),
+    militaryScoreArithmetic: solution.militaryScoreArithmetic as
+      | ScoresInferenceSolution['militaryScoreArithmetic']
+      | undefined,
+  }))
+}
 
 function pendingDetail(
   playerId: number,
@@ -193,7 +223,7 @@ export function useScoresInferenceByRow(
       }
 
       if (event.type === 'solution') {
-        state.heldSolutions = event.solutions
+        state.heldSolutions = streamSolutionsToRowSolutions(event.solutions)
         publishPlayerState(playerId)
         return
       }

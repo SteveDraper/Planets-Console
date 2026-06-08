@@ -264,7 +264,7 @@ export function InferenceDetailModal({
               <p className="mt-1 text-xs text-slate-400">
                 Scoreboard row turn {scoreboardTurn}
                 {hostTurn != null ? ` · Host turn ${hostTurn} deltas` : ''}
-                {constraints.playerId != null ? ` · Player ${constraints.playerId}` : ''}
+                {constraints?.playerId != null ? ` · Player ${constraints?.playerId}` : ''}
               </p>
             ) : null}
           </div>

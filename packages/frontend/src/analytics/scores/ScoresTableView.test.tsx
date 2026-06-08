@@ -297,9 +297,9 @@ describe('ScoresTableView', () => {
           rows: [['Federation (alice)', '1000']],
           inferenceByRow: [
             {
-              displayStatus: 'idle',
-              status: 'idle',
-              summary: 'Build inference not started',
+              displayStatus: 'pending',
+              status: 'pending',
+              summary: 'Build inference in progress',
               solutionCount: 0,
               isComplete: false,
               solutions: [],
