@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_SOLVER_ERROR,
     _inference_api_payload,
     _serialize_solution_with_arithmetic,
+    format_inference_summary,
     inference_result_to_api_payload,
 )
 from api.analytics.military_score_inference.inference_path import (
@@ -281,7 +282,13 @@ def _run_accelerated_split_inference_path(
 def _run_policy_ladder_inference(
     resolved_observation: InferenceObservation,
     turn: TurnInfo,
-) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
+) -> tuple[
+    InferenceResult,
+    ActionCatalog | None,
+    InferenceProblem | None,
+    list[str],
+    list[dict[str, object]],
+]:
     return solve_with_policy_ladder(
         resolved_observation,
         turn,
@@ -352,6 +359,26 @@ def _run_solver_inference_path(
             assert solve_catalog is not None
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
                 _run_corpus_prebuilt_inference(resolved_observation, solve_catalog)
+            )
+        if solve_catalog is None or problem is None:
+            return (
+                _inference_api_payload(
+                    status=result.status,
+                    summary=format_inference_summary(result),
+                    solutions=result.solutions,
+                    diagnostics=build_inference_solver_diagnostics(
+                        turn=turn.settings.turn,
+                        observation=resolved_observation,
+                        turn_info=turn,
+                        solver={"status": result.status, **result.diagnostics},
+                        extra={
+                            "policy_steps_attempted": policy_steps_attempted,
+                            "policy_step_attempts": step_diagnostics,
+                        },
+                    ),
+                ),
+                resolved_observation,
+                None,
             )
         return (
             inference_result_to_api_payload(
@@ -611,10 +638,18 @@ def _run_accelerated_split_inference(
                 "freighterDelta": segment.freighter_delta,
                 "policyStepsAttempted": policy_steps_attempted,
                 "policyStepAttempts": step_diagnostics,
-                "solutions": [
-                    _serialize_solution_with_arithmetic(segment_observation, catalog, solution)
-                    for solution in result.solutions
-                ],
+                "solutions": (
+                    [
+                        _serialize_solution_with_arithmetic(
+                            segment_observation,
+                            catalog,
+                            solution,
+                        )
+                        for solution in result.solutions
+                    ]
+                    if catalog is not None
+                    else []
+                ),
             }
         )
 

@@ -512,6 +512,43 @@ def run_policy_ladder_tier_step(
         state.ladder_complete = True
 
 
+def _missing_tier_state_result(
+    state: PolicyLadderState,
+    merged_solutions: list[InferenceSolution],
+) -> InferenceResult:
+    """Build a terminal result when finalize runs without tier catalog/problem state."""
+    if state.cancelled:
+        status = STATUS_STOPPED
+        stopped_reason = "cancelled"
+    elif state.time_limited:
+        status = STATUS_TIME_LIMITED
+        stopped_reason = state.ladder_early_stop_reason or state.last_diagnostics.get(
+            "stopped_reason",
+            "exhausted",
+        )
+    elif not state.policy_steps:
+        status = STATUS_INVALID_PROBLEM
+        stopped_reason = "empty_policy_ladder"
+    else:
+        status = STATUS_INVALID_PROBLEM
+        stopped_reason = "policy_ladder_finalize_without_tier_state"
+
+    diagnostics: dict[str, object] = {
+        **state.last_diagnostics,
+        "solution_count": len(merged_solutions),
+        "best_band_residual_2x": state.best_band_residual_2x,
+        "stopped_reason": stopped_reason,
+    }
+    if status == STATUS_INVALID_PROBLEM:
+        diagnostics["reason"] = stopped_reason
+
+    return InferenceResult(
+        status=status,
+        solutions=tuple(merged_solutions),
+        diagnostics=diagnostics,
+    )
+
+
 def finalize_policy_ladder_result(
     state: PolicyLadderState,
     observation: InferenceObservation,
@@ -520,38 +557,24 @@ def finalize_policy_ladder_result(
     max_solutions: int | None = None,
 ) -> tuple[
     InferenceResult,
-    ActionCatalog,
-    InferenceProblem,
+    ActionCatalog | None,
+    InferenceProblem | None,
     list[str],
     list[dict[str, object]],
 ]:
     """Build the terminal inference result from ladder state."""
     catalog = state.catalog
     problem = state.problem
-    merged_solutions = state.merged_solutions
+    merged_solutions = list(state.merged_solutions)
 
     if catalog is None or problem is None:
-        first_step = state.policy_steps[0]
-        state.policy_steps_attempted.append(first_step.id)
-        catalog = build_action_catalog_from_turn(
-            observation,
-            turn,
-            policy_step=first_step,
-            policy_step_index=0,
+        return (
+            _missing_tier_state_result(state, merged_solutions),
+            None,
+            None,
+            state.policy_steps_attempted,
+            state.step_diagnostics,
         )
-        problem = build_inference_problem(observation, catalog, max_solutions=max_solutions)
-        tier_result = solve_inference_problem(problem)
-        state.last_status = tier_result.status
-        state.last_diagnostics = dict(tier_result.diagnostics)
-        _merge_exact_solutions(
-            state.merged_solutions,
-            state.seen_signatures,
-            tier_result.solutions,
-            resolved_max_solutions=state.resolved_max_solutions,
-        )
-        merged_solutions = state.merged_solutions
-
-    merged_solutions = list(merged_solutions)
     merged_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
 
     if state.cancelled:
@@ -607,8 +630,8 @@ def solve_with_policy_ladder(
     on_admitted: Callable[[InferenceSolution], None] | None = None,
 ) -> tuple[
     InferenceResult,
-    ActionCatalog,
-    InferenceProblem,
+    ActionCatalog | None,
+    InferenceProblem | None,
     list[str],
     list[dict[str, object]],
 ]:
