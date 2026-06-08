@@ -4,22 +4,24 @@ import { useModalKeydownFocusTrap } from '../../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../../lib/restoreFocus'
 import { cn } from '../../lib/utils'
 import {
+  acceleratedSegmentTitle,
+  readAcceleratedInferenceSegments,
+  type AcceleratedInferenceSegment,
+} from './acceleratedInferenceSegments'
+import {
   formatSignedDelta,
   militaryChangeFromDelta2x,
   readInferenceConstraints,
   readMilitaryScoreArithmetic,
   type MilitaryScoreArithmetic,
 } from './inferenceConstraints'
+import { isRecord } from './scoresWireParsers'
 
 type InferenceDetailModalProps = {
   isOpen: boolean
   onClose: () => void
   racePlayer: string
   detail: ScoresInferenceRowDetail | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function readSolverSummary(diagnostics: Record<string, unknown>): {
@@ -101,6 +103,50 @@ function MilitaryScoreArithmeticTable({ arithmetic }: { arithmetic: MilitaryScor
   )
 }
 
+function SegmentConstraints({ segment }: { segment: AcceleratedInferenceSegment }) {
+  return (
+    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-300">
+      <dt className="text-slate-400">Military change</dt>
+      <dd className="tabular-nums">
+        {formatSignedDelta(militaryChangeFromDelta2x(segment.militaryDelta2x))}
+        <span className="ml-1 text-slate-500">
+          (2× scale {formatSignedDelta(segment.militaryDelta2x)})
+        </span>
+      </dd>
+      <dt className="text-slate-400">Warship change</dt>
+      <dd className="tabular-nums">{formatSignedDelta(segment.warshipDelta)}</dd>
+      <dt className="text-slate-400">Freighter change</dt>
+      <dd className="tabular-nums">{formatSignedDelta(segment.freighterDelta)}</dd>
+    </dl>
+  )
+}
+
+function AcceleratedSegmentSection({
+  segment,
+  scoreboardTurn,
+}: {
+  segment: AcceleratedInferenceSegment
+  scoreboardTurn: number | undefined
+}) {
+  return (
+    <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
+      <h3 className="text-xs font-medium text-slate-200">
+        {acceleratedSegmentTitle(segment, scoreboardTurn)}
+      </h3>
+      <SegmentConstraints segment={segment} />
+      {segment.solutions.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-3">
+          {segment.solutions.map((solution, index) => (
+            <SolutionSection key={`${segment.segmentId}-solution-${index}`} solution={solution} index={index} />
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-slate-500">No feasible build explanation found.</p>
+      )}
+    </section>
+  )
+}
+
 function SolutionSection({
   solution,
   index,
@@ -163,6 +209,7 @@ export function InferenceDetailModal({
 
   const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
   const constraints = readInferenceConstraints(diagnostics)
+  const acceleratedSegments = readAcceleratedInferenceSegments(diagnostics)
   const solver = readSolverSummary(diagnostics)
   const priorTurn =
     constraints?.turn != null && constraints.turn > 1 ? constraints.turn - 1 : null
@@ -213,7 +260,11 @@ export function InferenceDetailModal({
 
         {constraints != null ? (
           <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
-            <h3 className="text-xs font-medium text-slate-200">Observed constraints</h3>
+            <h3 className="text-xs font-medium text-slate-200">
+              {acceleratedSegments != null
+                ? 'Scoreboard row constraints'
+                : 'Observed constraints'}
+            </h3>
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-300">
               {constraints.militaryDelta2x != null ? (
                 <>
@@ -276,11 +327,26 @@ export function InferenceDetailModal({
           </p>
         ) : null}
 
-        <div className="flex flex-col gap-3">
-          {detail.solutions.map((solution, index) => (
-            <SolutionSection key={`solution-${index}`} solution={solution} index={index} />
-          ))}
-        </div>
+        {acceleratedSegments != null ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-slate-400">
+              Accelerated-start game: build inference split by host turn.
+            </p>
+            {acceleratedSegments.map((segment) => (
+              <AcceleratedSegmentSection
+                key={segment.segmentId}
+                segment={segment}
+                scoreboardTurn={constraints?.turn}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {detail.solutions.map((solution, index) => (
+              <SolutionSection key={`solution-${index}`} solution={solution} index={index} />
+            ))}
+          </div>
+        )}
 
         {!detail.isComplete ? (
           <p className="text-xs text-amber-300/90">

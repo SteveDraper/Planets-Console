@@ -384,9 +384,9 @@ The inference engine should return a per-player list of explanations that can en
 - warnings about ignored deferred effects,
 - a compact summary suitable for a scoreboard cell.
 
-The user-facing feature should be an optional capability of the existing Scores analytic rather than a separate analytic. When enabled, the scoreboard adds an inference column with row-level status: green tick for at least one solution, hourglass while a row has no solution yet, and red cross for no solution or solver failure. Hover text should summarize the result. Clicking a green tick should open a modal with the detailed ranked explanations, including action vectors and score arithmetic.
+The user-facing feature should be an optional capability of the existing Scores analytic rather than a separate analytic. When enabled, the scoreboard adds an inference column with row-level status: an **inference solution count indicator** (green outlined badge with **N** = held top-K size) when **N > 0**, hourglass while **N = 0** and search is in flight, and red cross when the row completes with no exact explanation or on solver failure. Hover text should summarize the result. Clicking the badge opens a modal with the detailed ranked held explanations, including action vectors and score arithmetic.
 
-**Streaming (#71):** each row's solver should eventually stream ranked solutions over NDJSON as they are found (hourglass clears on the first solution; the modal can grow while top-K enumeration continues). Until that ships, the UI waits for the full per-row JSON response. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) Phase 1H.
+**Streaming (#71):** each row's policy ladder should stream newly admitted exact explanations over NDJSON as they are found (hourglass clears when **N** becomes 1; the badge and modal grow while search continues). Until that ships, the UI waits for the full per-row JSON response. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) Phase 1H and section 8.5.4.
 
 ---
 

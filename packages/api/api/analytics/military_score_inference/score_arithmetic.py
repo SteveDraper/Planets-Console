@@ -61,11 +61,13 @@ def solution_military_score_arithmetic_payload(
     observed_military_delta_2x = observation.military_delta_2x
     observed_military_change = observed_military_delta_2x // 2
     explained_military_change = explained_military_delta_2x // 2
+    slack = observation.military_partition_slack_2x
     return {
         "observedMilitaryChange": observed_military_change,
         "observedMilitaryDelta2x": observed_military_delta_2x,
         "explainedMilitaryChange": explained_military_change,
         "explainedMilitaryDelta2x": explained_military_delta_2x,
-        "matchesObserved": explained_military_delta_2x == observed_military_delta_2x,
+        "militaryPartitionSlack2x": slack,
+        "matchesObserved": abs(explained_military_delta_2x - observed_military_delta_2x) <= slack,
         "lineItems": line_items,
     }

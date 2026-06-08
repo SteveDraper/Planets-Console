@@ -1,5 +1,6 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
+import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -24,6 +25,15 @@ STATUS_NO_EXACT_SOLUTION = "no_exact_solution"
 STATUS_TIME_LIMITED = "time_limited"
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+
+def _configured_num_search_workers(combo_count: int) -> int | None:
+    raw = os.environ.get("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS")
+    if raw is not None:
+        return int(raw)
+    if combo_count > 100:
+        return 8
+    return None
 
 
 @dataclass(frozen=True)
@@ -139,14 +149,18 @@ def _merge_score_equivalent_combos(
     )
 
 
-def _observation_has_no_deltas(problem: InferenceProblem) -> bool:
+def _observation_is_solver_idle(problem: InferenceProblem) -> bool:
+    """True when the solver has no modeled deltas to explain."""
     observation = problem.observation
-    return (
-        observation.military_delta_2x == 0
-        and observation.warship_delta == 0
-        and observation.freighter_delta == 0
-        and observation.priority_point_delta == 0
-    )
+    if (
+        observation.military_delta_2x != 0
+        or observation.warship_delta != 0
+        or observation.freighter_delta != 0
+    ):
+        return False
+    if observation.priority_point_delta == 0:
+        return True
+    return not problem.enforce_priority_point_constraint
 
 
 def _problem_has_catalog_entries(problem: InferenceProblem) -> bool:
@@ -394,7 +408,7 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
         )
 
     if not _problem_has_catalog_entries(problem):
-        if _observation_has_no_deltas(problem):
+        if _observation_is_solver_idle(problem):
             return InferenceResult(
                 status=STATUS_EXACT,
                 solutions=(InferenceSolution(objective_value=0, actions=()),),
@@ -430,8 +444,9 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
             break
 
         solver.parameters.max_time_in_seconds = remaining_seconds
-        if len(problem.ship_build_combos) > 100:
-            solver.parameters.num_search_workers = 8
+        num_search_workers = _configured_num_search_workers(len(problem.ship_build_combos))
+        if num_search_workers is not None:
+            solver.parameters.num_search_workers = num_search_workers
         last_solver_status = solver.solve(model)
         if last_solver_status not in _SUCCESS_STATUSES:
             if last_solver_status == cp_model.UNKNOWN and solutions:
@@ -497,7 +512,9 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
         "solution_count": len(solutions),
         "stopped_reason": stopped_reason,
         "wall_time_seconds": time.monotonic() - started_at,
-        "ship_build_tier": problem.ship_build_tier,
+        "policy_step_id": problem.policy_step_id,
+        "policy_step_index": problem.policy_step_index,
+        "military_score_alpha": problem.military_score_alpha,
     }
     if time_limited:
         diagnostics["time_limited"] = True

@@ -13,6 +13,7 @@ class InferenceObservation:
     priority_point_delta: int
     starbases_owned: int
     is_after_ship_limit: bool
+    military_partition_slack_2x: int = 0
 
 
 @dataclass(frozen=True)
@@ -61,13 +62,15 @@ class InferenceProblem:
     observation: InferenceObservation
     aggregate_actions: tuple[CandidateAction, ...]
     ship_build_combos: tuple[ShipBuildCombo, ...] = ()
-    ship_build_tier: int = 0
+    policy_step_id: str = ""
+    policy_step_index: int = 0
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]] = field(
         default_factory=dict
     )
     max_solutions: int = 20
     time_limit_seconds: float = 20.0
     enforce_priority_point_constraint: bool = False
+    military_score_alpha: int = 0
 
 
 @dataclass(frozen=True)

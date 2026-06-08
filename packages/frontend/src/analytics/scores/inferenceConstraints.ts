@@ -1,3 +1,5 @@
+import { isRecord } from './scoresWireParsers'
+
 export type InferenceConstraintsSection = {
   turn?: number
   playerId?: number
@@ -26,10 +28,6 @@ export type MilitaryScoreArithmetic = {
   explainedMilitaryDelta2x: number
   matchesObserved: boolean
   lineItems: MilitaryScoreLineItem[]
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
 export function readInferenceConstraints(
@@ -78,8 +76,14 @@ export function readMilitaryScoreArithmetic(value: unknown): MilitaryScoreArithm
     if (!isRecord(item)) {
       continue
     }
+    const lineId =
+      typeof item.actionId === 'string'
+        ? item.actionId
+        : typeof item.comboId === 'string'
+          ? item.comboId
+          : null
     if (
-      typeof item.actionId !== 'string' ||
+      lineId == null ||
       typeof item.label !== 'string' ||
       typeof item.count !== 'number' ||
       typeof item.scoreDelta2xPerUnit !== 'number' ||
@@ -90,7 +94,7 @@ export function readMilitaryScoreArithmetic(value: unknown): MilitaryScoreArithm
       continue
     }
     lineItems.push({
-      actionId: item.actionId,
+      actionId: lineId,
       label: item.label,
       count: item.count,
       scoreDelta2xPerUnit: item.scoreDelta2xPerUnit,

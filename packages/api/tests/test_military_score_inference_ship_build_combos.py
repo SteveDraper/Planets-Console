@@ -14,10 +14,12 @@ from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
     run_inference_with_artifacts,
 )
+from api.analytics.military_score_inference.component_eligibility import (
+    turn_catalog_context_for_policy_step,
+)
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
-    MAX_SHIP_BUILD_TIER,
     generate_ship_build_combos,
     ship_build_combo_id,
 )
@@ -27,6 +29,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_TIME_LIMITED,
     solve_inference_problem,
 )
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.military_score_inference import _observation
@@ -88,6 +91,22 @@ def test_minimal_beam_only_and_fully_armed_scores(synthetic_catalog_context):
     )
 
 
+def test_freighter_combo_has_zero_military_score(synthetic_catalog_context):
+    combos = generate_ship_build_combos(
+        _observation(military_delta_2x=0, warship_delta=0, freighter_delta=1),
+        **synthetic_catalog_context,
+    )
+    freighter_combos = [combo for combo in combos if combo.freighter_delta == 1]
+    assert freighter_combos
+    assert all(combo.score_delta_2x == 0 for combo in freighter_combos)
+
+    warship_combos = generate_ship_build_combos(
+        _observation(warship_delta=1),
+        **synthetic_catalog_context,
+    )
+    assert all(combo.score_delta_2x > 0 for combo in warship_combos if combo.warship_delta == 1)
+
+
 def test_beams_and_launchers_may_be_omitted_independently(synthetic_catalog_context):
     torp_hull = replace(
         synthetic_catalog_context["hulls_by_id"][24],
@@ -134,7 +153,8 @@ def test_empty_active_lists_jump_to_turn_catalog_for_components():
         turn = turn_info_from_json(json.load(handle), settings_defaults=settings)
     score = next(s for s in turn.scores if s.ownerid == 1)
     observation = build_inference_observation(score, turn)
-    catalog = build_action_catalog_from_turn(observation, turn, ship_build_tier=3)
+    full_step = next(step for step in resolve_tier_policies() if step.id == "full_catalog_exact")
+    catalog = build_action_catalog_from_turn(observation, turn, policy_step=full_step)
     combos = catalog.ship_build_combos
     missouri = next(
         (
@@ -161,7 +181,8 @@ def test_early_tier_limits_beam_counts_to_zero_or_max(synthetic_catalog_context)
     }
     combos = generate_ship_build_combos(
         _observation(warship_delta=1),
-        ship_build_tier=0,
+        beam_slot_counts="none",
+        launcher_slot_counts="none",
         **context,
     )
     beam_counts = {combo.beam_count for combo in combos if combo.hull_id == hull.id}
@@ -181,7 +202,8 @@ def test_max_tier_includes_partial_beam_and_launcher_counts(synthetic_catalog_co
     }
     combos = generate_ship_build_combos(
         _observation(warship_delta=1),
-        ship_build_tier=MAX_SHIP_BUILD_TIER,
+        beam_slot_counts="partial",
+        launcher_slot_counts="partial",
         **context,
     )
     hull_combos = [combo for combo in combos if combo.hull_id == hull.id]
@@ -366,7 +388,8 @@ def test_missouri_host_turn_2_regression_becomes_feasible():
         turn = turn_info_from_json(json.load(handle), settings_defaults=settings)
     score = next(s for s in turn.scores if s.ownerid == 1)
     observation = build_inference_observation(score, turn)
-    catalog = build_action_catalog_from_turn(observation, turn, ship_build_tier=3)
+    full_step = next(step for step in resolve_tier_policies() if step.id == "full_catalog_exact")
+    catalog = build_action_catalog_from_turn(observation, turn, policy_step=full_step)
     missouri_combos = [
         combo
         for combo in catalog.ship_build_combos
@@ -392,98 +415,36 @@ def test_missouri_host_turn_2_regression_becomes_feasible():
             aggregate_actions=catalog.aggregate_actions,
             ship_build_combos=tuple(missouri_combos),
             probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
-            ship_build_tier=catalog.ship_build_tier,
+            policy_step_id=catalog.policy_step_id,
+            policy_step_index=catalog.policy_step_index,
         ),
     )
     assert solve_inference_problem(missouri_only).status == STATUS_EXACT
 
 
-def test_tier_zero_catalog_uses_single_default_engine_beam_and_torp(sample_turn):
+def test_early_policy_step_catalog_uses_early_game_band_filters(sample_turn):
     observation = _observation(warship_delta=1, freighter_delta=1, starbases_owned=5)
-    catalog = build_action_catalog_from_turn(observation, sample_turn, ship_build_tier=0)
+    early_step = resolve_tier_policies()[0]
+    context = turn_catalog_context_for_policy_step(sample_turn, observation.player_id, early_step)
+    catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=early_step,
+        policy_step_index=0,
+    )
     combos = catalog.ship_build_combos
     if not combos:
         pytest.skip("sample turn has no buildable hull combos for observation")
-    default_engine_id = min(engine.id for engine in sample_turn.engines)
-    default_beam_id = min(beam.id for beam in sample_turn.beams)
-    assert {combo.engine_id for combo in combos} == {default_engine_id}
-    assert {combo.beam_id for combo in combos if combo.beam_id is not None} <= {default_beam_id}
+    assert early_step.filters.engines.all
+    assert {combo.hull_id for combo in combos} <= context.buildable_hull_ids
+    assert {combo.engine_id for combo in combos} <= context.eligible_engine_ids
+    combo_beam_ids = {combo.beam_id for combo in combos if combo.beam_id is not None}
+    combo_torp_ids = {combo.torp_id for combo in combos if combo.torp_id is not None}
+    assert combo_beam_ids <= context.eligible_beam_ids
+    assert combo_torp_ids <= context.eligible_torp_ids
 
 
-def test_solve_with_tier_retry_accumulates_until_no_new_solutions(sample_turn):
-    from unittest.mock import patch
-
-    from api.analytics.military_score_inference.analytic import _solve_with_tier_retry
-    from api.analytics.military_score_inference.models import (
-        InferenceResult,
-        InferenceSolution,
-        InferenceSolutionShipBuild,
-    )
-    from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
-
-    score = sample_turn.scores[0]
-    observation = build_inference_observation(score, sample_turn)
-    solution_a = InferenceSolution(
-        objective_value=100,
-        actions=(),
-        ship_builds=(),
-    )
-    solution_b = InferenceSolution(
-        objective_value=50,
-        actions=(),
-        ship_builds=(
-            InferenceSolutionShipBuild(
-                combo_id="combo_a",
-                label="Build A",
-                count=1,
-                hull_id=1,
-                engine_id=1,
-                beam_id=None,
-                torp_id=None,
-                beam_count=0,
-                launcher_count=0,
-            ),
-        ),
-    )
-
-    call_tiers: list[int] = []
-
-    def _solve_side_effect(problem):
-        call_tiers.append(problem.ship_build_tier)
-        if problem.ship_build_tier == 0:
-            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
-        if problem.ship_build_tier == 1:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution_a,),
-                diagnostics={"ship_build_tier": 1},
-            )
-        if problem.ship_build_tier == 2:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution_a, solution_b),
-                diagnostics={"ship_build_tier": 2},
-            )
-        return InferenceResult(
-            status=STATUS_EXACT,
-            solutions=(solution_a,),
-            diagnostics={"ship_build_tier": 3},
-        )
-
-    with patch(
-        "api.analytics.military_score_inference.analytic.solve_inference_problem",
-        side_effect=_solve_side_effect,
-    ):
-        result, catalog, problem, tiers_attempted = _solve_with_tier_retry(observation, sample_turn)
-
-    assert tiers_attempted == [0, 1, 2, 3]
-    assert call_tiers == [0, 1, 2, 3]
-    assert [solution.objective_value for solution in result.solutions] == [100, 50]
-    assert catalog.ship_build_tier == 3
-    assert problem.ship_build_tier == 3
-
-
-def test_missouri_host_turn_2_regression_reports_tier_retry_diagnostics():
+def test_missouri_host_turn_2_regression_reports_policy_ladder_diagnostics():
     settings = json.loads((FIXTURES_ROOT / "628580/info.json").read_text())["settings"]
     with open(FIXTURES_ROOT / "628580/1/turns/3.json") as handle:
         turn = turn_info_from_json(json.load(handle), settings_defaults=settings)
@@ -491,8 +452,12 @@ def test_missouri_host_turn_2_regression_reports_tier_retry_diagnostics():
     payload, _, catalog = run_inference_with_artifacts(score, turn)
     assert payload["status"] in (STATUS_EXACT, STATUS_TIME_LIMITED)
     assert payload["solutionCount"] > 0
-    assert payload["diagnostics"]["tiers_attempted"]
-    tiers_attempted = payload["diagnostics"]["tiers_attempted"]
-    assert payload["diagnostics"]["ship_build_tier"] == tiers_attempted[-1]
+    assert payload["diagnostics"]["policy_steps_attempted"]
+    policy_steps_attempted = payload["diagnostics"]["policy_steps_attempted"]
+    assert payload["diagnostics"]["policy_step_id"] == policy_steps_attempted[-1]
     assert catalog is not None
     assert payload["diagnostics"]["ship_build_combo_count"] > 0
+    missouri_combo_id = "combo_13_9_3_6_8_6"
+    top_ship_builds = payload["solutions"][0]["shipBuilds"]
+    assert any(build["comboId"] == missouri_combo_id for build in top_ship_builds)
+    assert "accelerated_segments" in payload["diagnostics"]

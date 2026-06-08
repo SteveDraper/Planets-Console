@@ -119,6 +119,135 @@ describe('InferenceDetailModal', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('shows accelerated-start segments instead of duplicate top-level solutions', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          summary: 'Best: Missouri',
+          diagnostics: {
+            turn: 3,
+            constraints: {
+              turn: 3,
+              playerId: 1,
+              militaryDelta2x: 220,
+              warshipDelta: 1,
+              freighterDelta: 0,
+            },
+            accelerated_segments: [
+              {
+                segmentId: 'accel_window',
+                hostTurn: 1,
+                status: 'exact',
+                solutionCount: 1,
+                militaryDelta2x: 220,
+                warshipDelta: 0,
+                freighterDelta: 0,
+                solutions: [
+                  {
+                    objectiveValue: 999,
+                    actions: [
+                      {
+                        actionId: 'planet_defense',
+                        label: 'Planet defense post',
+                        count: 10,
+                      },
+                    ],
+                    militaryScoreArithmetic: {
+                      observedMilitaryChange: 110,
+                      observedMilitaryDelta2x: 220,
+                      explainedMilitaryChange: 110,
+                      explainedMilitaryDelta2x: 220,
+                      matchesObserved: true,
+                      lineItems: [
+                        {
+                          actionId: 'planet_defense',
+                          label: 'Planet defense post',
+                          count: 10,
+                          scoreDelta2xPerUnit: 22,
+                          militaryChangePerUnit: 11,
+                          scoreDelta2xSubtotal: 220,
+                          militaryChangeSubtotal: 110,
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+              {
+                segmentId: 'reported_host_turn',
+                hostTurn: 2,
+                status: 'exact',
+                solutionCount: 1,
+                militaryDelta2x: 220,
+                warshipDelta: 1,
+                freighterDelta: 0,
+                solutions: [
+                  {
+                    objectiveValue: 100,
+                    actions: [],
+                    militaryScoreArithmetic: {
+                      observedMilitaryChange: 110,
+                      observedMilitaryDelta2x: 220,
+                      explainedMilitaryChange: 110,
+                      explainedMilitaryDelta2x: 220,
+                      matchesObserved: true,
+                      lineItems: [
+                        {
+                          comboId: 'combo_13_9_3_6_8_6',
+                          label: 'Missouri',
+                          count: 1,
+                          scoreDelta2xPerUnit: 220,
+                          militaryChangePerUnit: 110,
+                          scoreDelta2xSubtotal: 220,
+                          militaryChangeSubtotal: 110,
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          solutions: [
+            {
+              objectiveValue: 100,
+              actions: [],
+              militaryScoreArithmetic: {
+                observedMilitaryChange: 110,
+                observedMilitaryDelta2x: 220,
+                explainedMilitaryChange: 110,
+                explainedMilitaryDelta2x: 220,
+                matchesObserved: true,
+                lineItems: [
+                  {
+                    comboId: 'combo_13_9_3_6_8_6',
+                    label: 'Missouri',
+                    count: 1,
+                    scoreDelta2xPerUnit: 220,
+                    militaryChangePerUnit: 110,
+                    scoreDelta2xSubtotal: 220,
+                    militaryChangeSubtotal: 110,
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByText('Accelerated-start game: build inference split by host turn.')).toBeInTheDocument()
+    expect(screen.getByText('Host turn 1 (accelerated window)')).toBeInTheDocument()
+    expect(screen.getByText('Host turn 2 (on scoreboard row turn 3)')).toBeInTheDocument()
+    expect(screen.getByText('Planet defense post')).toBeInTheDocument()
+    expect(screen.getByText('Missouri')).toBeInTheDocument()
+    expect(screen.getByText('Scoreboard row constraints')).toBeInTheDocument()
+    expect(screen.queryAllByText('Solution 1')).toHaveLength(2)
+  })
+
   it('calls onClose from the close button', () => {
     const onClose = vi.fn()
     render(

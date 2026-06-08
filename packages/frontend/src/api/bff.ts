@@ -222,7 +222,8 @@ export type ScoresInferenceSolutionAction = {
 }
 
 export type ScoresInferenceMilitaryScoreLineItem = {
-  actionId: string
+  actionId?: string
+  comboId?: string
   label: string
   count: number
   scoreDelta2xPerUnit: number

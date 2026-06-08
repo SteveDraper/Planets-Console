@@ -52,14 +52,21 @@ Start with a small Core API subpackage so the solver and scoring model do not cr
 ```text
 packages/api/api/analytics/military_score_inference/
 |-- __init__.py
-|-- accelerated_start.py  # accelerated scoreboard baselines and observation deltas
-|-- actions.py            # aggregate noisy actions (defense, ammo load, transfers)
-|-- ship_build_combos.py  # eligible hull/engine/beam/torp combos (Phase 1G+)
-|-- tier_policy.py        # YAML policy load, resolve, optional overlay hook (#77, #78)
-|-- models.py             # dataclasses for observations, actions, problems, solutions
-|-- scoring.py            # scaled military-score contribution formulas
-|-- solver.py             # OR-Tools CP-SAT adapter
-`-- analytic.py           # turn-level analytic assembly
+|-- accelerated_start.py    # accelerated scoreboard baselines, segment split, observation deltas
+|-- actions.py              # aggregate noisy actions (defense, ammo load, transfers)
+|-- ship_build_combos.py    # eligible hull/engine/beam/torp combos (Phase 1G+)
+|-- component_eligibility.py # hull/component id resolution for policy filters and catalog build
+|-- tier_policy.py          # YAML policy load, resolve, optional overlay hook (#77, #78)
+|-- policy_ladder.py        # walk YAML policy steps, seed carry-forward, merge top-K
+|-- inference_path.py       # prior-turn gate and InferencePath resolve-then-dispatch
+|-- inference_target.py     # observation/catalog context; accelerated backfill source loading
+|-- constraints.py          # hard equality targets and band-retry slack for observations
+|-- models.py               # dataclasses for observations, actions, problems, solutions
+|-- scoring.py              # scaled military-score contribution formulas
+|-- score_arithmetic.py     # solution score breakdown for API diagnostics
+|-- solver.py               # OR-Tools CP-SAT adapter
+|-- inference_api_payload.py # inference result and solution API payload serialization
+`-- analytic.py             # run_inference_with_artifacts entry; path dispatch to solver paths
 ```
 
 Phase 1F shipped an interim flat `build_{hull}_{preset}` catalog in `actions.py`. Phase 1G moves ship builds into `ship_build_combos.py` and leaves aggregate actions in `actions.py`.
@@ -70,8 +77,26 @@ Phase 1F shipped an interim flat `build_{hull}_{preset}` catalog in `actions.py`
 
 When `settings.acceleratedturns = N` with `N > 0`:
 
-- `prior_turn_score_data_available(turn)` in `analytic.py` returns false for `turn < N` (and turn 1), so `infer_military_score_build` emits `no_prior_turn` without calling the solver.
-- `build_inference_observation` uses `observation_deltas_from_score(score, turn)` instead of raw `militarychange` / `shipchange` / `freighterchange` on the first reliable row (`turn == N`).
+- **Unreliable rows** (`1 <= turn < N`): scoreboard deltas are not trustworthy for a single-host-turn solve. `prior_turn_score_data_available(turn)` in `inference_path.py` returns false for these rows (and for turn 1).
+- **First reliable row** (`turn == N`): `accelerated_inference_segments(score, turn)` splits activity into an optional `accel_window` segment (host turn `N-2`) and a `reported_host_turn` segment (host turn `N-1`). Each segment gets its own observation and a full YAML **policy ladder** solve via `policy_ladder.py` (`ACCELERATED_SPLIT` path).
+- **Later rows** (`turn > N`): use normal scoreboard deltas through `observation_deltas_from_score(score, turn)` and the single-row policy ladder (`POLICY_LADDER` path).
+
+**Resolve-then-dispatch:** `run_inference_with_artifacts` in `analytic.py` calls `resolve_inference_path` in `inference_path.py` before any solver work. The `InferencePath` enum selects orchestration:
+
+| Path | When | Solver behavior |
+|------|------|-----------------|
+| `NO_PRIOR_TURN` | Turn 1, or unreliable accelerated row with no backfill | Return `no_prior_turn` without CP-SAT |
+| `ACCELERATED_BACKFILL` | Unreliable accelerated row; first reliable turn stored | Re-run split inference from stored turn `N`; return the segment matching this row's host turn |
+| `ACCELERATED_SPLIT` | First reliable row (`turn == N`) | Per-segment policy ladders; primary API payload from `reported_host_turn` |
+| `POLICY_LADDER` | Normal rows with a prior scoreboard row | Single `solve_with_policy_ladder` call |
+| `CORPUS_PREBUILT` | Corpus harness passes a prebuilt catalog | Single solve on supplied catalog |
+
+**Accelerated backfill:** Unreliable accelerated rows (`turn < N`) can still produce inference when the game store holds turn `N`. `inference_target.py` loads the first reliable scoreboard turn via `load_scoreboard_turn`, recomputes `accelerated_inference_segments` from that stored row, and `analytic.py` runs the same split solve once. The row's host turn (`turn - 1`) selects which segment's solutions and catalog are returned. Diagnostics include `accelerated_backfill`, `accelerated_backfill_source_turn`, and `accelerated_backfill_host_turn`. The scores analytic supplies `load_scoreboard_turn` when storage is available; callers without it (e.g. bare `infer_military_score_build`) cannot backfill.
+
+**When `no_prior_turn` still applies:**
+
+- **Turn 1** -- no prior host turn (`diagnostics.reason`: `first_turn`).
+- **Unreliable accelerated row** (`turn < N`) when backfill cannot run: no `load_scoreboard_turn`, first reliable turn not stored, player missing on source turn, or no segment for the target host turn (`diagnostics.reason`: `accelerated_backfill_unavailable`).
 
 **Homeworld baseline:** `starting_scoreboard_snapshot(settings)` derives turn-1 military totals from Starmap flags (e.g. `homeworldhasstarbase`, standard homeworld starbase fighters and defense posts, one starting freighter). Shared homeworld constants used by the action catalog (e.g. Evil Empire free starbase fighter caps) also live in this module.
 
@@ -282,7 +307,7 @@ Use repeated optimization:
 
 A no-good cut can be encoded with indicator variables that detect whether each action count differs from its previous value, then require at least one difference. Keep this inside `solver.py` so the rest of the analytic only sees top-K results.
 
-**Phase 1H (#71):** the same top-K loop can emit each discovered solution on the wire before the row is complete, so the UI can show a green tick (and open a partial modal) while later alternatives are still enumerating. Until that ships, the batch JSON path returns only after top-K or time budget.
+**Phase 1H (#71):** the policy ladder and per-tier top-K loop can emit each newly discovered exact explanation on the wire before the row is complete, so the UI can show an **inference solution count indicator** (and open a partial modal) while later alternatives are still enumerating. Until that ships, the batch JSON path returns only after top-K or time budget.
 
 The solver should return:
 
@@ -315,15 +340,15 @@ When inference is enabled, add one extra column to the existing scoreboard table
 
 | Icon | Meaning | Hover text | Click behavior |
 |------|---------|------------|----------------|
-| Green tick | At least one feasible solution found (search may continue until `isComplete`) | summarize top solution and alternative count | open modal with ranked solutions (grows while streaming) |
-| Hourglass | No feasible solution yet for this player row | show that inference is still running | no modal until at least one solution arrives |
+| **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K** (`N > 0`). Search may continue until `isComplete`. | summarize top solution; note when search is still running | open modal with ranked held solutions (grows while streaming until plateau at K) |
+| Hourglass | No exact explanation held yet for this player row (`N = 0`) | show that inference is still running | no modal until the first held exact arrives |
 | Red cross | no solution, timeout, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 
-The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event arrives, not when top-K enumeration finishes.
+The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event is admitted to the held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
 
 ### 7.3 Modal details
 
-The modal for a green tick should show:
+The modal for a row with **N > 0** should show:
 
 - player and turn transition,
 - observed deltas used as constraints,
@@ -349,7 +374,9 @@ Keep the Core solver as an internal component. The Core `scores` analytic should
 
 The BFF fetches inference **per scoreboard row** (`GET .../scores/inference?playerId=...`). The initial batch JSON response returns only after top-K enumeration or the per-row time budget.
 
-**Planned (Phase 1H, #71):** NDJSON stream per row (`solution`, optional `progress`, terminal `complete` / `error`), following the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). The hourglass clears on the first `solution`; the modal can list partial results while search continues. Keep the batch JSON path for the inference corpus harness until the stream is proven.
+**Planned (Phase 1H, #71):** NDJSON stream per row (`solution`, optional `progress`, terminal `complete` / `error`), following the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries one newly admitted exact explanation plus **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and maintains **inference merged top-K** ordering. The hourglass clears when the first `solution` is admitted (`N = 1`); the count badge and modal grow while search continues. Keep the batch JSON path for the inference corpus harness until the stream is proven.
+
+**#77 batch path (before #71):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
 
 ---
 
@@ -449,7 +476,7 @@ Aggregate actions where location detail is not yet known:
 
 These variables still have exact score contributions, but they avoid one variable per planet or starbase in the initial version.
 
-**#77 deferral:** interim code includes all of section 8.3 at every search step. Target behavior (section 8.5.2): only **fine-grained slack actions** enter via cumulative **tier aggregate allowlist** on higher policy steps; large-increment fighter loads and race-specific actions follow separate rules.
+**#77 deferral:** aggregate noisy actions from section 8.3 enter only via cumulative **tier aggregate allowlist** on higher policy steps (section 8.5.2). `evil_empire_free_starbase_fighters` remains outside the allowlist.
 
 ### 8.4 Negative actions
 
@@ -482,25 +509,32 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | Field | Meaning |
 |-------|---------|
 | `id` | Stable step id for diagnostics |
-| `hullTechLevels` | Explicit allowlist of hull tech levels; component ids derived at runtime |
-| `engineTechLevels` | Same for engines |
-| `beamTechLevels` | Same for beams |
-| `launcherTorpTechLevels` | Launcher **torpedo type** tech levels (`Torpedo` catalog); not hull launcher **slot** counts |
-| `usePlayerActiveLists` | When set, widen an axis from player `activeengines` / `activebeams` / `activetorps` intersect turn catalog; **empty active list jumps to full turn catalog** for that axis (existing rule) |
+| `filters` | Catalog constraints for all four ship-build axes (see below) |
 | `beamSlotCounts` / `launcherSlotCounts` | `none` (0 or max only) vs `partial` (niche intermediate counts); dedicated policy step before `partial` |
 | `aggregateAllowlist` | Cumulative **tier aggregate allowlist**: action id -> max count |
 | `alpha` | Military-score band tolerance in **2x** units; **final step must be `0`** |
 | `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
 
-**Tech levels, not component ids:** YAML lists tech levels per axis. Runtime intersects with `turn.*` catalogs and player actives. Static YAML steps widen by **strict superset on tech-level lists** unless `usePlayerActiveLists` is explicitly enabled on that step (mode switch, not necessarily a literal id superset).
+**`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
+
+| Subfield | Meaning |
+|----------|---------|
+| `all: true` | **Widened** eligibility on that axis (not "every turn-catalog id"). **hulls:** all buildable hull ids for the player, no tech band. **engines / beams / launchers:** player `active*` intersect turn catalog; **empty active list jumps to full turn catalog** for that axis. Mutually exclusive with `techLevels`. |
+| `techLevels: [...]` | Non-empty tech-level allowlist; component ids derived at runtime. **hulls:** intersect buildable hull set. **Other axes:** filter turn catalog by `techlevel`. Required when `all` is false or absent. |
+| `componentIds: [...]` | Optional future refinement: further restrict resolved ids (e.g. when multiple ids share a tech level). Parsed but unused in v1 eligibility unless non-empty. |
+
+Static YAML steps widen by **strict superset on `techLevels` lists** or by switching an axis from `techLevels` to `all: true` (one-way; cannot narrow back).
 
 **Fine-grained slack deferral:** v1 **tier aggregate allowlist** admits only:
 
 - `planet_defense_posts_added_total`
 - `starbase_defense_posts_added_total`
+- `starbase_fighters_added_total`
+- `ship_fighters_added_total`
 - `ship_torps_loaded_{torpedo_id}` (per type, with per-type caps)
+- `fighters_starbase_to_ship` / `fighters_ship_to_starbase` (via `fighter_transfers_per_direction`)
 
-Not deferred as fine-grained slack by default: `starbase_fighters_added_total`, `ship_fighters_added_total` (large per-unit score increments). `fighters_*_transfer` and `evil_empire_free_starbase_fighters` stay governed by existing aggregate rules unless a future policy step adds them explicitly.
+**Not** deferred: `evil_empire_free_starbase_fighters` (race-specific, high-probability informational action when EE resources allow).
 
 #### 8.5.3 v1 ladder (sketch A)
 
@@ -508,15 +542,13 @@ Tunable constants in YAML; illustrative starting point from design review:
 
 | Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` |
 |------|------------------|---------------------------------------|---------|
-| 0 | Early-game tech bands on all four axes | none | 50 |
-| 1 | Widen engine tech / `usePlayerActiveLists` for engines | none | 50 |
-| 2 | Widen beam tech | none | 50 |
-| 3 | Widen launcher torpedo tech | none | 50 |
-| 4 | Enable partial beam/launcher **slot** counts on hulls | none | 50 |
-| 5 | + planet defense posts | max 5 | 50 |
-| 6 | + starbase defense posts | max 5 | 30 |
-| 7 | + ship torpedoes per type | max 10 each | 30 |
-| 8 | Full ship-build catalog; slack at full policy caps | full | 0 |
+| 0 | Early game: hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 |
+| 1 | Widen launchers to tech 1--8 | none | 50 |
+| 2 | Widen hulls (`filters.hulls.all`) | none | 50 |
+| 3 | All component axes; partial beam/launcher **slot** counts | planet defense max 16; starbase/ship fighters max 50/20; fighter transfers max 50/dir | 50 |
+| 4 | + starbase defense posts | + starbase defense max 5 | 30 |
+| 5 | + ship torpedoes per type | + ship torps max 10 each | 30 |
+| 6 | Full ship-build catalog; slack at full policy caps | full (fighters 200/500, transfers 100/dir) | 0 |
 
 #### 8.5.4 Per-player solve loop
 
@@ -526,7 +558,11 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
 2. Build catalog: policy constraints intersect turn catalog intersect player actives; apply **tier aggregate allowlist** and caps.
 3. **Exact solve first** (military, warship, freighter equalities -- section constraints module).
 4. If INFEASIBLE and `alpha > 0`, **band retry** on military score only: `explained_2x >= observed_2x - alpha`; warship and freighter stay exact.
-5. **Exact solutions** from any step merge into top-K immediately (user-facing). **Do not** carry exact solutions forward as seeds -- no remainder to refine.
+5. **Exact solutions** from any step merge into **inference merged top-K** immediately (user-facing). **Do not** carry exact solutions forward as seeds -- no remainder to refine. Merge rules:
+   - **Accumulate across the full ladder.** Catalog widen at a step (new ship-build combo ids and/or newly admitted aggregate action ids) does **not** discard previously merged exact solutions. Later tiers are strict supersets on every dimension they control; an explanation exact at step *N* remains valid for the observation when re-checked against the final catalog reached.
+   - **Dedup:** identity is **inference explanation signature** (sorted multiset of aggregate action ids with counts plus ship-build combo ids with counts). Re-discovery at a later step is suppressed; first discovery wins. The same rule applies to batch merge and to stream emission in #71.
+   - **K-best retention:** default top-K is 20. When *K* distinct signatures are held, the ladder **continues** climbing tiers (do not stop solely because the buffer is full). A new signature is admitted only if its **inference solution rank weight** exceeds the current worst held row, which is then evicted.
+   - **Batch terminal status:** `exact` when **any** held row satisfies hard equalities (military, warship, freighter) against the **final** catalog at ladder end. Do not emit `exact` when rank-1 alone fails hard equalities but another held row would pass.
 6. **Band near-solutions** (up to `maxSeeds` distinct per step) seed the **next** step only:
    - **Fix** ship-build combo counts from the seed.
    - Admit newly unlocked aggregate actions to close residual military score.
@@ -540,9 +576,11 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 
 | Outcome | UI |
 |---------|-----|
-| At least one **exact** solution from any policy step | Green tick; merged top-K across steps |
+| At least one **exact** solution from any policy step | **Inference solution count indicator** with **N** = held top-K size; merged top-K across steps |
 | Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
 | Band near-solution | Never shown directly; seeds next step only |
+
+While search is in flight (#71), **N** rises from 1 toward K as new signatures are admitted, then plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Hourglass until **N > 0**; red cross only after terminal `complete` / batch response with zero held exact.
 
 Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that status remains for future deferred-effect modeling (#49).
 
@@ -796,6 +834,7 @@ Files:
 
 - `assets/analytics/military_score_build_inference/tier_policy.yaml` (new),
 - `packages/api/api/analytics/military_score_inference/tier_policy.py` (new),
+- `packages/api/api/analytics/military_score_inference/policy_ladder.py` (ladder walk and top-K merge),
 - refactors to `actions.py`, `ship_build_combos.py`, `component_eligibility.py`, `analytic.py`, `constraints.py` (band retry only; warship/freighter stay exact).
 
 Done when:
@@ -803,31 +842,49 @@ Done when:
 - acceptance criteria in #77 are met,
 - section 8.5 is authoritative over interim Phase 1G tier code paths.
 
+#### Branch composition and merge planning
+
+The **Issue_77** branch may bundle tier policy, accelerated-start inference, corpus probe tooling, and frontend diagnostics in one PR. The slices below are **logical review units** for attribution and merge discussion -- not a mandate to split git history unless explicitly requested.
+
+| Slice | Role | Primary ownership |
+|-------|------|-------------------|
+| **A** (merge gate) | Tier policy core per section 8.5; satisfies **#77** acceptance criteria | `tier_policy.yaml`, `tier_policy.py`, `policy_ladder.py`, `component_eligibility.py`; refactors to `actions.py`, `constraints.py` (band retry), `ship_build_combos.py`, `solver.py`, `analytic.py`; `test_military_score_inference_tier_policy.py` and related inference tests |
+| **B** (companion) | Accelerated-start inference dispatch | `accelerated_start.py`, `inference_target.py`, `inference_path.py`; scoreboard wiring in `scores.py`, `turn_analytic_service.py`; `test_accelerated_start_scoreboard.py` |
+| **C** (companion, optional split) | Corpus probe harness; inventory-only ground truth | `Makefile` targets (`inference_corpus`, `inference_corpus_discover`, `inference_corpus_probe`), `scripts/run_inference_corpus.py`, `packages/api/tests/inference_corpus/` (`worker.py`, `ground_truth.py`, `run.py`, `verify.py`, discovery/coverage/report), `test_inference_corpus_*.py`; spec touch-ups in `docs/design-inference-corpus.md` |
+| **D** (companion, optional split) | Frontend accelerated segments and wire parsing | `acceleratedInferenceSegments.ts`, `scoresWireParsers.ts`, `diagnosticsFromTable.ts`, `inferenceConstraints.ts`, `InferenceDetailModal.tsx`; matching `*.test.ts(x)` |
+
+**Merge gate:** slice **A** closes **#77**. Slices **B--D** are companion changes on the same branch that depend on or exercise the ladder but are not required to meet **#77** acceptance criteria.
+
+**Review recommendation:** approve **A + B** as one unit (backend tier policy plus accelerated-start solve dispatch). **C** and **D** can ship with the branch or split into follow-on PRs under epic **#39** (corpus harness **#62--#66**, frontend diagnostic polish) without blocking **#77** merge once **A** (and typically **B**) pass.
+
 ### Phase 1H: Per-row solution streaming (NDJSON)
 
-Goal: expose ranked solutions **within each scoreboard row** as they are discovered, so the UI is not blocked on full top-K enumeration.
+Goal: expose exact explanations **within each scoreboard row** as they are admitted to **inference merged top-K**, so the UI is not blocked on full top-K enumeration or full policy-ladder completion.
 
-GitHub: **#71**.
+GitHub: **#71**. Depends on **#77** ladder merge semantics (section 8.5.4): cross-tier accumulation, signature dedup, K-best eviction.
 
 Files:
 
-- `packages/api/api/analytics/military_score_inference/solver.py` (yield/callback per solution),
+- `packages/api/api/analytics/military_score_inference/policy_ladder.py` (emit hook on merge admit),
+- `packages/api/api/analytics/military_score_inference/solver.py` (yield/callback per within-tier solution),
 - Core + BFF inference routes (NDJSON stream alongside existing batch JSON),
 - `packages/frontend/src/api/` (Zod schemas + parser for stream events),
-- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, partial modal),
+- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, count badge, partial modal),
 - tests at API, BFF, and frontend layers.
 
 Steps:
 
 1. Define NDJSON event types: `solution`, optional `progress`, terminal `complete` / `error`.
-2. Refactor the top-K loop to flush each feasible solution before the next no-good cut.
-3. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
-4. Update row UI: hourglass until first `solution`; tick when `solutionCount >= 1`; `isComplete` when `complete` arrives; abort on game/turn/perspective change.
-5. Retain batch JSON for corpus harness (`infer_military_score_build`) until stream parity is verified; then revisit `max_solutions=1` combo-count fallback.
+2. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K (within-tier enumeration and cross-tier ladder progress). Payload includes full explanation rows plus **inference solution rank weight**. Do not re-emit suppressed re-discoveries.
+3. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
+4. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
+5. Update row UI: hourglass until first admitted `solution` (`N = 0`); **inference solution count indicator** with **N** = held top-K size once `N > 0`; subtle in-progress affordance while `!isComplete`; `complete` sets terminal `status` (`exact` when any held row passes final-catalog hard equalities). Abort on game/turn/perspective change.
+6. Retain batch JSON for corpus harness (`infer_military_score_build`) until stream parity is verified; then revisit `max_solutions=1` combo-count fallback.
 
 Done when:
 
-- first solution appears before top-K completes on large catalogs,
+- first admitted solution appears before top-K enumeration and policy-ladder completion on large catalogs,
+- count badge **N** always matches modal row count (held top-K, not cumulative discoveries above K),
 - partial rows are not misclassified as failure,
 - `make lint` and relevant package tests pass.
 
@@ -911,7 +968,7 @@ Steps:
 1. Add a checkbox labeled `Include build inference` to the Scores analytic controls.
 2. Include the checkbox state in the scores query key.
 3. Render the inference column only when enabled.
-4. Render green tick, hourglass, or red cross based on row status.
+4. Render inference solution count indicator, hourglass, or red cross based on row status.
 5. Add hover text with the row summary.
 6. Keep the normal scoreboard table fast and unchanged when the checkbox is off.
 
@@ -939,7 +996,7 @@ Files:
 
 Steps:
 
-1. Open the modal when the user clicks a green tick.
+1. Open the modal when the user clicks a row with **N > 0**.
 2. Show solutions in descending objective/probability order.
 3. Show observed deltas, action breakdown, score arithmetic, and warnings.
 4. Do not open a solution modal for hourglass rows.
@@ -947,7 +1004,7 @@ Steps:
 
 Tests:
 
-- clicking a green tick opens the modal,
+- clicking a count badge opens the modal,
 - solutions are displayed in order,
 - hourglass rows are non-clickable or explain that solving is pending,
 - modal closes cleanly and does not reset the Scores checkbox.
@@ -1106,6 +1163,6 @@ The user-facing scoreboard integration should be considered complete when:
 - the existing Scores table contract is unchanged when inference is disabled,
 - the Scores tile includes an `Include build inference` checkbox,
 - enabling inference adds an inference column with row-level status,
-- green tick rows open a modal with ranked solution details,
+- rows with **N > 0** open a modal with ranked held solution details,
 - BFF and frontend code never import OR-Tools or encode solver rules directly,
 - `make lint` and the relevant API, BFF, and frontend tests pass.

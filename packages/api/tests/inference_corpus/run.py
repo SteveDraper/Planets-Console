@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
 from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_action_catalog_from_turn,
@@ -10,6 +11,9 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
     run_inference_with_artifacts,
+)
+from api.analytics.military_score_inference.inference_target import (
+    resolve_inference_target_for_host_turn,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED
@@ -223,6 +227,12 @@ def run_discovered_case(
             skip_reason=skip_reason,
         )
 
+    def load_scoreboard_turn(turn_number: int) -> TurnInfo | None:
+        try:
+            return turn_load.get_turn_info(case.game_id, case.perspective, turn_number)
+        except OSError, ValueError, KeyError:
+            return None
+
     return run_loaded_case(
         LoadedCorpusCase(
             case_id=case.id,
@@ -234,11 +244,16 @@ def run_discovered_case(
             complexity_reasons=complexity_reasons,
             expected_status=expected_status,
             expect_coverage=expect_coverage,
-        )
+        ),
+        load_scoreboard_turn=load_scoreboard_turn,
     )
 
 
-def run_loaded_case(loaded: LoadedCorpusCase) -> CorpusCaseResult:
+def run_loaded_case(
+    loaded: LoadedCorpusCase,
+    *,
+    load_scoreboard_turn=None,
+) -> CorpusCaseResult:
     """Ground truth, coverage, and Tier 1 on one observation and catalog build."""
     extraction = extract_ground_truth_v1(
         prior_turn=loaded.prior_turn,
@@ -247,15 +262,37 @@ def run_loaded_case(loaded: LoadedCorpusCase) -> CorpusCaseResult:
         score=loaded.score,
         complexity=loaded.complexity,
     )
-    observation = build_inference_observation(loaded.score, loaded.score_turn)
-    catalog = build_action_catalog_from_turn(observation, loaded.score_turn)
-    coverage_block = resolve_coverage_for_case(
-        extraction=extraction,
-        ground_truth=extraction.ground_truth,
-        catalog=catalog,
-        complexity_reasons=loaded.complexity_reasons,
-        observation=observation,
-        score_turn=loaded.score_turn,
+    host_turn = loaded.score_turn.settings.turn - 1
+    resolved = resolve_inference_target_for_host_turn(
+        loaded.score,
+        loaded.score_turn,
+        host_turn=host_turn,
+        load_scoreboard_turn=load_scoreboard_turn,
+    )
+    if resolved is not None:
+        observation = resolved.observation
+        catalog_turn = resolved.turn_info
+    else:
+        observation = build_inference_observation(loaded.score, loaded.score_turn)
+        catalog_turn = loaded.score_turn
+
+    catalog = build_action_catalog_from_turn(observation, catalog_turn)
+    skip_coverage = (
+        extraction.available
+        and resolved is None
+        and needs_accelerated_backfill(loaded.score_turn.settings.turn, loaded.score_turn.settings)
+    )
+    coverage_block = (
+        None
+        if skip_coverage
+        else resolve_coverage_for_case(
+            extraction=extraction,
+            ground_truth=extraction.ground_truth,
+            catalog=catalog,
+            complexity_reasons=loaded.complexity_reasons,
+            observation=observation,
+            score_turn=catalog_turn,
+        )
     )
 
     if loaded.expect_coverage:
@@ -306,6 +343,7 @@ def run_loaded_case(loaded: LoadedCorpusCase) -> CorpusCaseResult:
         ground_truth_available=extraction.available,
         observation=observation,
         catalog=catalog,
+        load_scoreboard_turn=load_scoreboard_turn,
     )
 
 
@@ -320,12 +358,12 @@ def _run_tier1_for_loaded_case(
     ground_truth_available: bool | None = None,
     observation: InferenceObservation,
     catalog: ActionCatalog,
+    load_scoreboard_turn=None,
 ) -> CorpusCaseResult:
-    inference, _, _ = run_inference_with_artifacts(
+    inference, inference_observation, solve_catalog = run_inference_with_artifacts(
         score,
         score_turn,
-        observation=observation,
-        catalog=catalog,
+        load_scoreboard_turn=load_scoreboard_turn,
     )
     status = inference.get("status")
     if not isinstance(status, str):
@@ -361,8 +399,8 @@ def _run_tier1_for_loaded_case(
 
     if status in {STATUS_EXACT, STATUS_TIME_LIMITED} and solution_count >= 1:
         verify_failure = verify_top_solution_hard_equalities(
-            observation=observation,
-            catalog=catalog,
+            observation=inference_observation,
+            catalog=solve_catalog if solve_catalog is not None else catalog,
             inference_payload=inference,
         )
         if verify_failure is not None:

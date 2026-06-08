@@ -61,10 +61,11 @@ def verify_top_solution_hard_equalities(
         warship_sum += catalog_combo.warship_delta * count
         freighter_sum += catalog_combo.freighter_delta * count
 
-    if military_sum != observation.military_delta_2x:
+    if abs(military_sum - observation.military_delta_2x) > observation.military_partition_slack_2x:
         return (
             f"military delta mismatch: explained 2x={military_sum} "
-            f"observed 2x={observation.military_delta_2x}"
+            f"observed 2x={observation.military_delta_2x} "
+            f"(slack 2x={observation.military_partition_slack_2x})"
         )
     if warship_sum != observation.warship_delta:
         return (

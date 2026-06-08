@@ -16,6 +16,39 @@ PRIORITY_POINT_DIAGNOSTIC_NOTE = (
     "semantics assign per-build priority_point_delta values."
 )
 
+FIGHTERS_STARBASE_TO_SHIP_ID = "fighters_starbase_to_ship"
+FIGHTERS_SHIP_TO_STARBASE_ID = "fighters_ship_to_starbase"
+FIGHTER_TRANSFER_DIRECTIONS_EXCLUSIVE_DIAGNOSTIC = (
+    "at most one of fighters_starbase_to_ship and fighters_ship_to_starbase counts may be non-zero"
+)
+
+
+def _fighter_transfer_actions_both_present(
+    aggregate_action_ids: frozenset[str],
+) -> bool:
+    return (
+        FIGHTERS_STARBASE_TO_SHIP_ID in aggregate_action_ids
+        and FIGHTERS_SHIP_TO_STARBASE_ID in aggregate_action_ids
+    )
+
+
+def _add_fighter_transfer_direction_exclusivity(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    """Forbid using both transfer directions in one explanation."""
+    starbase_to_ship = action_count_vars[FIGHTERS_STARBASE_TO_SHIP_ID]
+    ship_to_starbase = action_count_vars[FIGHTERS_SHIP_TO_STARBASE_ID]
+
+    uses_starbase_to_ship = model.new_bool_var("fighter_transfer_starbase_to_ship_active")
+    uses_ship_to_starbase = model.new_bool_var("fighter_transfer_ship_to_starbase_active")
+
+    model.add(starbase_to_ship >= 1).only_enforce_if(uses_starbase_to_ship)
+    model.add(starbase_to_ship == 0).only_enforce_if(uses_starbase_to_ship.negated())
+    model.add(ship_to_starbase >= 1).only_enforce_if(uses_ship_to_starbase)
+    model.add(ship_to_starbase == 0).only_enforce_if(uses_ship_to_starbase.negated())
+    model.add(uses_starbase_to_ship + uses_ship_to_starbase <= 1)
+
 
 @dataclass(frozen=True)
 class _SumEqualityConstraint:
@@ -35,19 +68,29 @@ class _SumEqualityConstraint:
         action_count_vars: dict[str, cp_model.IntVar],
         combo_count_vars: dict[str, cp_model.IntVar],
         observation: InferenceObservation,
+        *,
+        military_score_alpha: int = 0,
     ) -> None:
         rhs = getattr(observation, self.observation_attr)
-        model.add(
-            sum(
-                getattr(action, self.coefficient_attr) * action_count_vars[action.id]
-                for action in aggregate_actions
-            )
-            + sum(
-                getattr(combo, self.coefficient_attr) * combo_count_vars[combo.combo_id]
-                for combo in ship_build_combos
-            )
-            == rhs
+        lhs = sum(
+            getattr(action, self.coefficient_attr) * action_count_vars[action.id]
+            for action in aggregate_actions
+        ) + sum(
+            getattr(combo, self.coefficient_attr) * combo_count_vars[combo.combo_id]
+            for combo in ship_build_combos
         )
+        if self.coefficient_attr != "score_delta_2x":
+            model.add(lhs == rhs)
+            return
+        partition_slack = observation.military_partition_slack_2x
+        if partition_slack > 0:
+            model.add(lhs >= rhs - partition_slack)
+            model.add(lhs <= rhs + partition_slack)
+            return
+        if military_score_alpha > 0:
+            model.add(lhs >= rhs - military_score_alpha)
+            return
+        model.add(lhs == rhs)
 
 
 _MILITARY_SCORE_EQUALITY = _SumEqualityConstraint(
@@ -71,22 +114,49 @@ class InferenceHardConstraints:
     """Which hard equalities and inequalities apply for one inference solve."""
 
     enforce_priority_point_constraint: bool = False
+    military_score_alpha: int = 0
 
     @classmethod
     def from_problem(cls, problem: InferenceProblem) -> InferenceHardConstraints:
-        return cls(enforce_priority_point_constraint=problem.enforce_priority_point_constraint)
+        return cls(
+            enforce_priority_point_constraint=problem.enforce_priority_point_constraint,
+            military_score_alpha=problem.military_score_alpha,
+        )
 
     def enforced_equalities(self) -> tuple[_SumEqualityConstraint, ...]:
         if self.enforce_priority_point_constraint:
             return _ALWAYS_ENFORCED_EQUALITIES + (_PRIORITY_POINT_EQUALITY,)
         return _ALWAYS_ENFORCED_EQUALITIES
 
-    def applied_equalities(self, observation: InferenceObservation) -> list[str]:
-        strings = [
-            constraint.applied_equality_string(observation)
-            for constraint in self.enforced_equalities()
-        ]
+    def applied_equalities(
+        self,
+        observation: InferenceObservation,
+        *,
+        aggregate_action_ids: frozenset[str] | None = None,
+    ) -> list[str]:
+        strings: list[str] = []
+        for constraint in self.enforced_equalities():
+            if (
+                constraint.coefficient_attr == "score_delta_2x"
+                and observation.military_partition_slack_2x > 0
+            ):
+                slack = observation.military_partition_slack_2x
+                strings.append(
+                    f"{observation.military_delta_2x - slack} <= "
+                    f"sum(scoreDelta2x * count) <= {observation.military_delta_2x + slack}"
+                )
+            elif constraint.coefficient_attr == "score_delta_2x" and self.military_score_alpha > 0:
+                strings.append(
+                    "sum(scoreDelta2x * count) >= "
+                    f"{observation.military_delta_2x - self.military_score_alpha}"
+                )
+            else:
+                strings.append(constraint.applied_equality_string(observation))
         strings.append(f"sum(buildSlotUsage * count) <= {observation.starbases_owned}")
+        if aggregate_action_ids is not None and _fighter_transfer_actions_both_present(
+            aggregate_action_ids
+        ):
+            strings.append(FIGHTER_TRANSFER_DIRECTIONS_EXCLUSIVE_DIAGNOSTIC)
         return strings
 
     def add_to_model(
@@ -105,6 +175,7 @@ class InferenceHardConstraints:
                 action_count_vars,
                 combo_count_vars,
                 observation,
+                military_score_alpha=self.military_score_alpha,
             )
         model.add(
             sum(
@@ -117,12 +188,16 @@ class InferenceHardConstraints:
             )
             <= observation.starbases_owned
         )
+        aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
+        if _fighter_transfer_actions_both_present(aggregate_action_ids):
+            _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
 
 
 def observation_to_constraints_payload(
     observation: InferenceObservation,
     *,
     hard_constraints: InferenceHardConstraints | None = None,
+    aggregate_action_ids: frozenset[str] | None = None,
 ) -> dict[str, object]:
     """Serialize hard solver constraints for diagnostics."""
     constraints = hard_constraints or InferenceHardConstraints()
@@ -130,13 +205,18 @@ def observation_to_constraints_payload(
         "turn": observation.turn,
         "playerId": observation.player_id,
         "militaryDelta2x": observation.military_delta_2x,
+        "militaryPartitionSlack2x": observation.military_partition_slack_2x,
         "warshipDelta": observation.warship_delta,
         "freighterDelta": observation.freighter_delta,
         "requestedPriorityPointDelta": observation.priority_point_delta,
         "priorityPointConstraintEnforced": constraints.enforce_priority_point_constraint,
         "starbasesOwned": observation.starbases_owned,
         "isAfterShipLimit": observation.is_after_ship_limit,
-        "appliedEqualities": constraints.applied_equalities(observation),
+        "militaryScoreAlpha": constraints.military_score_alpha,
+        "appliedEqualities": constraints.applied_equalities(
+            observation,
+            aggregate_action_ids=aggregate_action_ids,
+        ),
     }
     if not constraints.enforce_priority_point_constraint:
         payload["priorityPointConstraintNote"] = PRIORITY_POINT_DIAGNOSTIC_NOTE

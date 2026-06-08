@@ -17,29 +17,34 @@ def discover_cases_for_game(
     min_host_turn: int | None = None,
     max_host_turn: int | None = None,
 ) -> list[DiscoveredCase]:
-    """Emit one case per consecutive stored turn pair (N, N+1) for each perspective."""
-    cases: list[DiscoveredCase] = []
-    try:
-        game_shallow = store.read_shallow(f"games/{game_id}")
-    except NotFoundError:
+    """Emit one case per consecutive stored turn pair (N, N+1) for each perspective.
+
+    Cases are ordered by host turn first, then perspective, so progressive-turn probes
+    surface simpler failures before later turns and secondary perspectives.
+    """
+    perspectives = _list_game_perspectives(store, game_id)
+    if not perspectives:
         return []
 
-    for perspective_segment in game_shallow["children"]:
-        if not perspective_segment.isdigit():
-            continue
-        perspective = int(perspective_segment)
-        if perspective < 1:
-            continue
-        cases.extend(
-            _discover_cases_for_perspective(
-                store,
-                game_id=game_id,
-                perspective=perspective,
-                min_host_turn=min_host_turn,
-                max_host_turn=max_host_turn,
-            )
-        )
-    return sorted(cases, key=lambda case: (case.perspective, case.host_turn))
+    cases_by_host_turn_and_perspective: dict[tuple[int, int], DiscoveredCase] = {}
+    for perspective in perspectives:
+        for case in _discover_cases_for_perspective(
+            store,
+            game_id=game_id,
+            perspective=perspective,
+            min_host_turn=min_host_turn,
+            max_host_turn=max_host_turn,
+        ):
+            cases_by_host_turn_and_perspective[(case.host_turn, case.perspective)] = case
+
+    host_turns = sorted({host_turn for host_turn, _ in cases_by_host_turn_and_perspective})
+    cases: list[DiscoveredCase] = []
+    for host_turn in host_turns:
+        for perspective in perspectives:
+            case = cases_by_host_turn_and_perspective.get((host_turn, perspective))
+            if case is not None:
+                cases.append(case)
+    return cases
 
 
 def discover_cases(
@@ -77,7 +82,23 @@ def discover_cases(
                 max_host_turn=max_host_turn,
             )
         )
-    return sorted(cases, key=lambda case: (case.game_id, case.perspective, case.host_turn))
+    return sorted(cases, key=lambda case: (case.game_id, case.host_turn, case.perspective))
+
+
+def _list_game_perspectives(store: StoreService, game_id: int) -> list[int]:
+    try:
+        game_shallow = store.read_shallow(f"games/{game_id}")
+    except NotFoundError:
+        return []
+
+    perspectives: list[int] = []
+    for perspective_segment in game_shallow["children"]:
+        if not perspective_segment.isdigit():
+            continue
+        perspective = int(perspective_segment)
+        if perspective >= 1:
+            perspectives.append(perspective)
+    return sorted(perspectives)
 
 
 def list_perspectives_with_turn_pair(

@@ -3,16 +3,7 @@
 from collections import Counter
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.scoring import (
-    LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
-    loaded_ship_torpedo_score_delta_2x,
-    planet_defense_post_score_delta_2x,
-    starbase_defense_post_score_delta_2x,
-    starbase_fighter_score_delta_2x,
-)
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_label
-from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
-from api.models.components import Torpedo
 from api.models.game import TurnInfo
 from api.models.player import Score
 
@@ -55,7 +46,13 @@ def extract_ground_truth_v1(
     score: Score,
     complexity: ComplexityLevel,
 ) -> GroundTruthExtraction:
-    """Build a normalized action multiset when v1 rules apply."""
+    """Build a normalized action multiset from inventory deltas when v1 rules apply.
+
+    Ground truth is inventory-only. Scoreboard rows (including ``militarychange``) are
+    not used for extraction or validation -- during accelerated start those fields are
+    unreliable while ship/planet/starbase inventory diffs remain authoritative.
+    """
+    del score
     if complexity == "adjunct" or COMPLEXITY_ORDINAL[complexity] > COMPLEXITY_ORDINAL["heavy"]:
         return GroundTruthExtraction(
             available=False,
@@ -76,35 +73,14 @@ def extract_ground_truth_v1(
     for action_id in ship_build_ids:
         multiset[action_id] += 1
     multiset.update(new_ship_load_action_counts(new_ships, score_turn))
-
-    explained_2x = sum(
-        _catalog_score_delta_2x_for_action_id(action_id, score_turn) * multiset[action_id]
-        for action_id in multiset
-    )
-    residual_2x = _ground_truth_military_delta_2x(score) - explained_2x
-    if residual_2x < 0:
-        return GroundTruthExtraction(
-            available=False,
-            unavailable_reason="residual_unexplained",
+    multiset.update(
+        _inventory_aggregate_actions(
+            prior_turn,
+            score_turn,
+            player_id,
+            exclude_ship_ids=new_ship_ids,
         )
-
-    aggregate_result = _allocate_aggregate_residual(
-        prior_turn,
-        score_turn,
-        player_id,
-        residual_2x=residual_2x,
-        torpedos_by_id={torp.id: torp for torp in score_turn.torpedos},
-        exclude_ship_ids=new_ship_ids,
     )
-    if aggregate_result is None:
-        if residual_2x == 0:
-            return GroundTruthExtraction(available=True, ground_truth=_sorted_multiset(multiset))
-        return GroundTruthExtraction(
-            available=False,
-            unavailable_reason="residual_unexplained",
-        )
-
-    multiset.update(aggregate_result)
     return GroundTruthExtraction(available=True, ground_truth=_sorted_multiset(multiset))
 
 
@@ -222,19 +198,59 @@ def format_unavailable_ground_truth(
     return f"{activity} (strict ground truth unavailable: {reason})"
 
 
-def _ground_truth_military_delta_2x(score: Score) -> int:
-    """Turn-pair military delta for residual checks against inventory-derived GT.
-
-    Ground truth is built from inventory deltas between ``prior_turn`` and
-    ``score_turn`` files. That scope matches ``score.militarychange`` on the
-    score row (including accelerated-start games on the first reliable row,
-    where inference uses cumulative totals since homeworld baseline instead).
-    """
-    return 2 * score.militarychange
-
-
 def _sorted_multiset(counter: Counter[str]) -> GroundTruth:
     return tuple(sorted((action_id, count) for action_id, count in counter.items() if count > 0))
+
+
+def _inventory_aggregate_actions(
+    prior_turn: TurnInfo,
+    score_turn: TurnInfo,
+    player_id: int,
+    *,
+    exclude_ship_ids: frozenset[int],
+) -> Counter[str]:
+    """Map non-ship-build inventory deltas to aggregate catalog action ids."""
+    allocated: Counter[str] = Counter()
+
+    ship_fighter_delta = fighter_load_delta(
+        prior_turn,
+        score_turn,
+        player_id,
+        exclude_ship_ids=exclude_ship_ids,
+    )
+    if ship_fighter_delta > 0:
+        allocated["ship_fighters_added_total"] += ship_fighter_delta
+
+    for torp_id, torp_delta in sorted(
+        torpedo_load_delta_by_type(
+            prior_turn,
+            score_turn,
+            player_id,
+            exclude_ship_ids=exclude_ship_ids,
+        ).items()
+    ):
+        if torp_delta > 0:
+            allocated[f"ship_torps_loaded_{torp_id}"] += torp_delta
+
+    starbase_fighter_delta = starbase_fighter_inventory_delta(prior_turn, score_turn, player_id)
+    if starbase_fighter_delta > 0:
+        allocated["starbase_fighters_added_total"] += starbase_fighter_delta
+
+    starbase_defense_delta = starbase_defense_inventory_delta(prior_turn, score_turn, player_id)
+    if starbase_defense_delta > 0:
+        allocated["starbase_defense_posts_added_total"] += starbase_defense_delta
+
+    planet_defense_delta = planet_defense_inventory_delta(prior_turn, score_turn, player_id)
+    if planet_defense_delta > 0:
+        allocated["planet_defense_posts_added_total"] += planet_defense_delta
+
+    transfer = _fighter_transfer_counts(prior_turn, score_turn, player_id)
+    if transfer is not None:
+        direction, count = transfer
+        if count > 0:
+            allocated[direction] += count
+
+    return allocated
 
 
 def _extract_ship_build_combo_ids(
@@ -287,122 +303,6 @@ def _combo_ground_truth_label(combo_id: str, turn: TurnInfo) -> str:
         beam_count=beam_count,
         launcher_count=launcher_count,
     )
-
-
-def _combo_score_delta_2x(combo_id: str, turn: TurnInfo) -> int:
-    parsed = _parse_combo_id(combo_id)
-    if parsed is None:
-        return 0
-    hull_id, engine_id, beam_id, torp_id, beam_count, launcher_count = parsed
-    hull = hulls_by_id(turn).get(hull_id)
-    engine = engines_by_id(turn).get(engine_id)
-    if hull is None or engine is None:
-        return 0
-    beam = beams_by_id(turn).get(beam_id) if beam_id is not None else None
-    torpedo = torpedos_by_id_from_turn(turn).get(torp_id) if torp_id is not None else None
-    return ship_build_score_delta_2x(
-        hull,
-        engine,
-        beam,
-        torpedo,
-        beam_count=beam_count,
-        launcher_count=launcher_count,
-    )
-
-
-def _catalog_score_delta_2x_for_action_id(action_id: str, turn: TurnInfo) -> int:
-    if action_id.startswith("combo_"):
-        return _combo_score_delta_2x(action_id, turn)
-    if action_id == "ship_fighters_added_total":
-        return LOADED_SHIP_FIGHTER_SCORE_DELTA_2X
-    if action_id.startswith("ship_torps_loaded_"):
-        torp_id = int(action_id.removeprefix("ship_torps_loaded_"))
-        torp = next((candidate for candidate in turn.torpedos if candidate.id == torp_id), None)
-        if torp is None:
-            return 0
-        return loaded_ship_torpedo_score_delta_2x(torp.torpedocost)
-    if action_id == "starbase_fighters_added_total":
-        return starbase_fighter_score_delta_2x()
-    if action_id == "starbase_defense_posts_added_total":
-        return starbase_defense_post_score_delta_2x()
-    if action_id == "planet_defense_posts_added_total":
-        return planet_defense_post_score_delta_2x()
-    if action_id in {"fighters_starbase_to_ship", "fighters_ship_to_starbase"}:
-        return starbase_fighter_score_delta_2x()
-    return 0
-
-
-def _allocate_aggregate_residual(
-    prior_turn: TurnInfo,
-    score_turn: TurnInfo,
-    player_id: int,
-    *,
-    residual_2x: int,
-    torpedos_by_id: dict[int, Torpedo],
-    exclude_ship_ids: frozenset[int] = frozenset(),
-) -> Counter[str] | None:
-    if residual_2x == 0:
-        return Counter()
-
-    remaining = residual_2x
-    allocated: Counter[str] = Counter()
-
-    ship_fighter_delta = fighter_load_delta(
-        prior_turn, score_turn, player_id, exclude_ship_ids=exclude_ship_ids
-    )
-    if ship_fighter_delta > 0 and remaining >= LOADED_SHIP_FIGHTER_SCORE_DELTA_2X:
-        count = min(ship_fighter_delta, remaining // LOADED_SHIP_FIGHTER_SCORE_DELTA_2X)
-        if count > 0:
-            allocated["ship_fighters_added_total"] += count
-            remaining -= count * LOADED_SHIP_FIGHTER_SCORE_DELTA_2X
-
-    for torp_id in sorted(torpedos_by_id):
-        torp = torpedos_by_id[torp_id]
-        unit = loaded_ship_torpedo_score_delta_2x(torp.torpedocost)
-        if unit <= 0:
-            continue
-        torp_delta = torpedo_load_delta_by_type(
-            prior_turn, score_turn, player_id, exclude_ship_ids=exclude_ship_ids
-        ).get(torp_id, 0)
-        if torp_delta <= 0 or remaining < unit:
-            continue
-        count = min(torp_delta, remaining // unit)
-        if count > 0:
-            allocated[f"ship_torps_loaded_{torp_id}"] += count
-            remaining -= count * unit
-
-    starbase_fighter_delta = starbase_fighter_inventory_delta(prior_turn, score_turn, player_id)
-    if starbase_fighter_delta > 0 and remaining >= starbase_fighter_score_delta_2x():
-        count = min(starbase_fighter_delta, remaining // starbase_fighter_score_delta_2x())
-        if count > 0:
-            allocated["starbase_fighters_added_total"] += count
-            remaining -= count * starbase_fighter_score_delta_2x()
-
-    starbase_defense_delta = starbase_defense_inventory_delta(prior_turn, score_turn, player_id)
-    if starbase_defense_delta > 0 and remaining >= starbase_defense_post_score_delta_2x():
-        count = min(starbase_defense_delta, remaining // starbase_defense_post_score_delta_2x())
-        if count > 0:
-            allocated["starbase_defense_posts_added_total"] += count
-            remaining -= count * starbase_defense_post_score_delta_2x()
-
-    planet_defense_delta = planet_defense_inventory_delta(prior_turn, score_turn, player_id)
-    if planet_defense_delta > 0 and remaining >= planet_defense_post_score_delta_2x():
-        count = min(planet_defense_delta, remaining // planet_defense_post_score_delta_2x())
-        if count > 0:
-            allocated["planet_defense_posts_added_total"] += count
-            remaining -= count * planet_defense_post_score_delta_2x()
-
-    transfer = _fighter_transfer_counts(prior_turn, score_turn, player_id)
-    if transfer is not None:
-        direction, count = transfer
-        unit = starbase_fighter_score_delta_2x()
-        if count > 0 and remaining >= count * unit:
-            allocated[direction] += count
-            remaining -= count * unit
-
-    if remaining != 0:
-        return None
-    return allocated
 
 
 def _fighter_transfer_counts(

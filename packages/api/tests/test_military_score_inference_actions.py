@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     ship_construction_score_delta_2x,
 )
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.concepts.races import evil_empire_free_starbase_fighters_per_host_turn
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
@@ -27,6 +28,7 @@ from tests.fixtures.military_score_inference import _observation
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EE_TURN_PATH = REPO_ROOT / ".data" / "games" / "628580" / "8" / "turns" / "3.json"
+P5_TURN6_PATH = REPO_ROOT / ".data" / "games" / "628580" / "5" / "turns" / "6.json"
 GAME_INFO_PATH = REPO_ROOT / ".data" / "games" / "628580" / "info.json"
 
 
@@ -98,8 +100,29 @@ def test_residual_count_bound_uses_abs_residual_regardless_of_sign(
     assert _residual_count_bound(observation, score_delta_2x, configured_cap) == expected
 
 
+def test_residual_count_bound_applies_scoreboard_partition_slack():
+    from api.analytics.military_score_inference.accelerated_start import (
+        SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
+    )
+    from api.analytics.military_score_inference.scoring import STARBASE_FIGHTER_SCORE_DELTA_2X
+
+    observation = _observation(
+        military_delta_2x=624,
+        military_partition_slack_2x=SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
+    )
+    assert (
+        _residual_count_bound(
+            observation,
+            STARBASE_FIGHTER_SCORE_DELTA_2X,
+            100,
+        )
+        == 5
+    )
+
+
 def test_negative_fighter_transfer_cannot_create_unbounded_cancellation_loops():
     config = ActionCatalogConfig(max_fighter_transfers=7)
+    full_step = resolve_tier_policies()[-1]
     catalog = build_action_catalog(
         _observation(military_delta_2x=500),
         hulls_by_id={},
@@ -111,6 +134,7 @@ def test_negative_fighter_transfer_cannot_create_unbounded_cancellation_loops():
         eligible_beam_ids=frozenset(),
         eligible_torp_ids=frozenset(),
         config=config,
+        policy_step=full_step,
     )
 
     negative_transfer = next(
@@ -201,6 +225,18 @@ def test_no_flat_build_preset_actions_remain(synthetic_catalog_context):
     assert not any(action.id.startswith("build_") for action in catalog.aggregate_actions)
 
 
+@pytest.mark.skipif(not P5_TURN6_PATH.is_file(), reason="local store only")
+def test_buildable_hull_ids_from_turn_racehulls_not_activehulls():
+    """Br5 Kaye (45) is in turn.racehulls but not player.activehulls for Privateer."""
+    with open(GAME_INFO_PATH) as handle:
+        settings_defaults = json.load(handle)["settings"]
+    with open(P5_TURN6_PATH) as handle:
+        turn = turn_info_from_json(json.load(handle), settings_defaults=settings_defaults)
+    buildable_hulls = buildable_hull_ids_for_player(turn, 5)
+    assert 45 in buildable_hulls
+    assert "45" not in turn.player.activehulls
+
+
 def test_build_action_catalog_from_turn_sample(sample_turn):
     observation = _observation(
         military_delta_2x=110,
@@ -209,7 +245,8 @@ def test_build_action_catalog_from_turn_sample(sample_turn):
         starbases_owned=10,
     )
     buildable_hulls = buildable_hull_ids_for_player(sample_turn, observation.player_id)
-    catalog = build_action_catalog_from_turn(observation, sample_turn)
+    full_step = resolve_tier_policies()[-1]
+    catalog = build_action_catalog_from_turn(observation, sample_turn, policy_step=full_step)
 
     assert catalog.catalog_size > 0
     assert "planet_defense_posts_added_total" in {action.id for action in catalog.aggregate_actions}

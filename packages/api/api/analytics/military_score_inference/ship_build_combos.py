@@ -5,13 +5,10 @@ from dataclasses import dataclass
 from api.analytics.military_score_inference.models import InferenceObservation, ShipBuildCombo
 from api.analytics.military_score_inference.ship_build_scoring import (
     is_military_hull,
-    ship_build_score_delta_2x,
+    ship_build_military_score_delta_2x,
 )
+from api.analytics.military_score_inference.tier_policy import SlotCountMode
 from api.models.components import Beam, Engine, Hull, Torpedo
-
-START_SHIP_BUILD_TIER = 0
-MAX_SHIP_BUILD_TIER = 4
-DEFAULT_SHIP_BUILD_TIER = START_SHIP_BUILD_TIER
 
 
 @dataclass(frozen=True)
@@ -57,18 +54,18 @@ def ship_build_combo_label(
     return f"Build {hull.name} (unarmed)"
 
 
-def beam_count_options_for_tier(hull: Hull, tier: int) -> tuple[int, ...]:
+def beam_count_options_for_slot_mode(hull: Hull, slot_mode: SlotCountMode) -> tuple[int, ...]:
     if hull.beams == 0:
         return (0,)
-    if tier >= MAX_SHIP_BUILD_TIER:
+    if slot_mode == "partial":
         return tuple(range(0, hull.beams + 1))
     return (0, hull.beams)
 
 
-def launcher_count_options_for_tier(hull: Hull, tier: int) -> tuple[int, ...]:
+def launcher_count_options_for_slot_mode(hull: Hull, slot_mode: SlotCountMode) -> tuple[int, ...]:
     if hull.launchers == 0:
         return (0,)
-    if tier >= MAX_SHIP_BUILD_TIER:
+    if slot_mode == "partial":
         return tuple(range(0, hull.launchers + 1))
     return (0, hull.launchers)
 
@@ -100,7 +97,8 @@ def generate_ship_build_combos(
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
     config: ShipBuildComboConfig | None = None,
-    ship_build_tier: int = DEFAULT_SHIP_BUILD_TIER,
+    beam_slot_counts: SlotCountMode = "none",
+    launcher_slot_counts: SlotCountMode = "none",
 ) -> tuple[ShipBuildCombo, ...]:
     combo_config = config or ShipBuildComboConfig()
     combos: list[ShipBuildCombo] = []
@@ -120,8 +118,8 @@ def generate_ship_build_combos(
         if build_upper_bound <= 0:
             continue
 
-        beam_count_options = beam_count_options_for_tier(hull, ship_build_tier)
-        launcher_count_options = launcher_count_options_for_tier(hull, ship_build_tier)
+        beam_count_options = beam_count_options_for_slot_mode(hull, beam_slot_counts)
+        launcher_count_options = launcher_count_options_for_slot_mode(hull, launcher_slot_counts)
 
         for engine_id in sorted(eligible_engine_ids):
             engine = engines_by_id.get(engine_id)
@@ -156,7 +154,7 @@ def generate_ship_build_combos(
 
                     for beam in beam_choices:
                         for torpedo in torp_choices:
-                            score_delta_2x = ship_build_score_delta_2x(
+                            score_delta_2x = ship_build_military_score_delta_2x(
                                 hull,
                                 engine,
                                 beam,
@@ -164,7 +162,7 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            if score_delta_2x == 0:
+                            if score_delta_2x == 0 and not is_warship and not is_freighter:
                                 continue
 
                             armed = beam_count > 0 or launcher_count > 0
@@ -225,11 +223,22 @@ def prune_combos_for_observation(
     if observation.military_delta_2x <= 0:
         return combos
     abs_military_delta = observation.military_delta_2x
-    kept = [combo for combo in combos if combo.upper_bound > 0 and combo.score_delta_2x > 0]
+    kept = [
+        combo
+        for combo in combos
+        if combo.upper_bound > 0
+        and (combo.score_delta_2x > 0 or combo.warship_delta > 0 or combo.freighter_delta > 0)
+    ]
     required_builds = observation.warship_delta + observation.freighter_delta
     if required_builds > 0 and max_aggregate_residual_when_ship_builds is not None:
         score_floor = abs_military_delta - max_aggregate_residual_when_ship_builds
-        narrowed = [combo for combo in kept if combo.score_delta_2x >= score_floor]
+        narrowed = [
+            combo
+            for combo in kept
+            if combo.score_delta_2x >= score_floor
+            or combo.warship_delta > 0
+            or combo.freighter_delta > 0
+        ]
         if narrowed:
             kept = narrowed
     return tuple(kept)

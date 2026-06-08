@@ -66,5 +66,27 @@ def ship_build_score_delta_2x(
     )
 
 
+def ship_build_military_score_delta_2x(
+    hull: Hull,
+    engine: Engine,
+    beam: Beam | None,
+    torpedo: Torpedo | None,
+    *,
+    beam_count: int,
+    launcher_count: int,
+) -> int:
+    """Military-score contribution for a ship build; pure freighters contribute zero."""
+    if not is_military_hull(hull):
+        return 0
+    return ship_build_score_delta_2x(
+        hull,
+        engine,
+        beam,
+        torpedo,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
+    )
+
+
 def _component_minerals(component: Hull | Engine | Beam | Torpedo) -> int:
     return component.tritanium + component.duranium + component.molybdenum

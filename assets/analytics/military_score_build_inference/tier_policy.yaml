@@ -1,0 +1,153 @@
+# Inference search tier ladder (sketch A, section 8.5.3).
+# filters.*.all widens eligibility (see tier_policy.py module docstring).
+# filters.*.techLevels narrows by component techlevel; ids derived at runtime.
+version: 1
+steps:
+  - id: early_game_bands
+    filters:
+      hulls:
+        techLevels: [1, 2, 3, 4, 5, 6]
+      engines:
+        all: true
+      beams:
+        techLevels: [1, 2, 3, 4, 5]
+      launchers:
+        techLevels: [1, 2, 3, 4, 5]
+    beamSlotCounts: none
+    launcherSlotCounts: none
+    aggregateAllowlist: {}
+    alpha: 50
+    maxSeeds: 5
+
+  - id: widen_launchers
+    filters:
+      hulls:
+        techLevels: [1, 2, 3, 4, 5, 6]
+      engines:
+        all: true
+      beams:
+        techLevels: [1, 2, 3, 4, 5]
+      launchers:
+        techLevels: [1, 2, 3, 4, 5, 6, 7, 8]
+    beamSlotCounts: none
+    launcherSlotCounts: none
+    aggregateAllowlist: {}
+    alpha: 50
+    maxSeeds: 5
+
+  - id: widen_hulls
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        techLevels: [1, 2, 3, 4, 5]
+      launchers:
+        techLevels: [1, 2, 3, 4, 5, 6, 7, 8]
+    beamSlotCounts: none
+    launcherSlotCounts: none
+    aggregateAllowlist: {}
+    alpha: 50
+    maxSeeds: 5
+
+  - id: full_components
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist: {}
+    alpha: 50
+    maxSeeds: 5
+
+  - id: full_components_planet_defense
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      planet_defense_posts_added_total: 16
+      starbase_fighters_added_total: 50
+      ship_fighters_added_total: 20
+      fighter_transfers_per_direction: 50
+    alpha: 50
+    maxSeeds: 5
+
+  - id: admit_starbase_defense_posts
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      planet_defense_posts_added_total: 16
+      starbase_defense_posts_added_total: 5
+      starbase_fighters_added_total: 50
+      ship_fighters_added_total: 20
+      fighter_transfers_per_direction: 50
+    alpha: 30
+    maxSeeds: 5
+
+  - id: admit_ship_torpedoes
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      planet_defense_posts_added_total: 16
+      starbase_defense_posts_added_total: 5
+      ship_torps_per_type: 10
+      starbase_fighters_added_total: 50
+      ship_fighters_added_total: 20
+      fighter_transfers_per_direction: 50
+    alpha: 30
+    maxSeeds: 5
+
+  - id: full_catalog_exact
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      planet_defense_posts_added_total: 100
+      starbase_defense_posts_added_total: 100
+      ship_torps_per_type: 200
+      starbase_fighters_added_total: 200
+      ship_fighters_added_total: 500
+      fighter_transfers_per_direction: 100
+    alpha: 0
+    maxSeeds: 5

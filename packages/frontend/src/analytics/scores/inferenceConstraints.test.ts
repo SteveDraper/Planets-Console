@@ -50,6 +50,29 @@ describe('readMilitaryScoreArithmetic', () => {
     expect(arithmetic?.matchesObserved).toBe(true)
     expect(arithmetic?.lineItems[0]?.militaryChangeSubtotal).toBe(22)
   })
+
+  it('parses ship-build line items that use comboId', () => {
+    const arithmetic = readMilitaryScoreArithmetic({
+      observedMilitaryChange: 110,
+      observedMilitaryDelta2x: 220,
+      explainedMilitaryChange: 110,
+      explainedMilitaryDelta2x: 220,
+      matchesObserved: true,
+      lineItems: [
+        {
+          comboId: 'combo_13_9_3_6_8_6',
+          label: 'Missouri',
+          count: 1,
+          scoreDelta2xPerUnit: 220,
+          militaryChangePerUnit: 110,
+          scoreDelta2xSubtotal: 220,
+          militaryChangeSubtotal: 110,
+        },
+      ],
+    })
+    expect(arithmetic?.lineItems[0]?.actionId).toBe('combo_13_9_3_6_8_6')
+    expect(arithmetic?.lineItems[0]?.label).toBe('Missouri')
+  })
 })
 
 describe('militaryChangeFromDelta2x', () => {
