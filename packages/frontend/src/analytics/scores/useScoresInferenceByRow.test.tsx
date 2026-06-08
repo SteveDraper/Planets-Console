@@ -90,4 +90,74 @@ describe('useScoresInferenceByRow', () => {
       expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(false)
     })
   })
+
+  it('pauses in-progress rows from globalPause stream events', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [
+            {
+              objectiveValue: 10,
+              actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+            },
+          ],
+        })
+        handlers.onEvent({ type: 'globalPause', paused: true })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('paused')
+      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('paused')
+    })
+    expect(result.current.inferenceByRow?.[0]?.summary).toBe('Paused with 1 held solution(s)')
+    expect(result.current.inferenceByRow?.[1]?.summary).toBe('Build inference paused')
+  })
+
+  it('resumes paused rows from globalPause stream events', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({ type: 'globalPause', paused: true })
+        handlers.onEvent({ type: 'globalPause', paused: false })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')
+      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('pending')
+    })
+    expect(result.current.inferenceByRow?.[0]?.summary).toBe('Build inference in progress')
+  })
+
+  it('does not pause complete rows on globalPause stream events', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'Player 8 ok',
+          solutionCount: 1,
+          isComplete: true,
+        })
+        handlers.onEvent({ type: 'globalPause', paused: true })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('success')
+      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('paused')
+    })
+  })
 })

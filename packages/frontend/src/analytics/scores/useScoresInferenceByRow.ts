@@ -121,8 +121,7 @@ function initialRowStreamState(
 export function useScoresInferenceByRow(
   tableData: TableDataResponse | undefined,
   scope: AnalyticShellScope | null,
-  enabled: boolean,
-  isGloballyPaused = false
+  enabled: boolean
 ): UseScoresInferenceByRowResult {
   const stubs =
     enabled && tableData?.inferenceByRow != null ? tableData.inferenceByRow : []
@@ -292,59 +291,6 @@ export function useScoresInferenceByRow(
     },
     [scope, applyGlobalPauseEvent, applyStreamEvent, publishPlayerState]
   )
-
-  useEffect(() => {
-    if (!enabled) {
-      return
-    }
-    if (!isGloballyPaused) {
-      setDetailsByPlayerId((previous) => {
-        let changed = false
-        const next = new Map(previous)
-        for (const [playerId, detail] of previous) {
-          if (detail.displayStatus !== 'paused' || detail.isComplete) {
-            continue
-          }
-          changed = true
-          next.set(playerId, {
-            ...detail,
-            displayStatus: 'pending',
-            status: 'pending',
-            summary: 'Build inference in progress',
-          })
-          const state = rowStreamStateRef.current.get(playerId)
-          if (state != null) {
-            state.status = 'pending'
-            state.summary = 'Build inference in progress'
-          }
-        }
-        return changed ? next : previous
-      })
-      return
-    }
-    setDetailsByPlayerId((previous) => {
-      let changed = false
-      const next = new Map(previous)
-      for (const [playerId, detail] of previous) {
-        if (detail.isComplete || detail.displayStatus === 'paused') {
-          continue
-        }
-        changed = true
-        next.set(playerId, {
-          ...detail,
-          displayStatus: 'paused',
-          status: 'paused',
-          summary: pausedSummaryFromSolutions(detail.solutions),
-        })
-        const state = rowStreamStateRef.current.get(playerId)
-        if (state != null) {
-          state.status = 'paused'
-          state.summary = pausedSummaryFromSolutions(state.heldSolutions)
-        }
-      }
-      return changed ? next : previous
-    })
-  }, [isGloballyPaused])
 
   const stopRow = useCallback(
     (playerId: number) => {

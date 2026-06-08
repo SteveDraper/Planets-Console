@@ -135,8 +135,7 @@ function TableTile({
   const { inferenceByRow, stopRow, resumeRow } = useScoresInferenceByRow(
     data,
     analyticScope,
-    inferenceEnabled && fetchEnabled,
-    globalInferencePause.isGloballyPaused
+    inferenceEnabled && fetchEnabled
   )
   const scoresTableWithInference =
     data != null && inferenceByRow != null
