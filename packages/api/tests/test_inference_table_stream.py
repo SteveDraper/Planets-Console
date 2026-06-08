@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     _TierJob,
     reset_inference_row_scheduler_for_tests,
 )
+from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_rows import (
     ScheduledInferenceRow,
     drain_available_multiplex_events,
@@ -16,7 +17,8 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     tag_inference_stream_event,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.transport.inference_stream import inference_complete_event
+from api.analytics.military_score_inference.models import InferenceResult
+from api.analytics.military_score_inference.solver import STATUS_EXACT
 
 
 def _session_for_player(sample_turn, *, player_id: int) -> InferenceRowStreamSession:
@@ -31,13 +33,19 @@ def _session_for_player(sample_turn, *, player_id: int) -> InferenceRowStreamSes
     )
 
 
+def _wire_complete_event(*, summary: str) -> dict[str, object]:
+    return {
+        "type": "complete",
+        "status": STATUS_EXACT,
+        "summary": summary,
+        "solutionCount": 1,
+        "isComplete": True,
+    }
+
+
 def test_tag_inference_stream_event_adds_player_id_except_global_pause():
     tagged = tag_inference_stream_event(
-        inference_complete_event(
-            status="exact",
-            summary="done",
-            solution_count=1,
-        ),
+        _wire_complete_event(summary="done"),
         player_id=3,
     )
     assert tagged["playerId"] == 3
@@ -53,10 +61,9 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
     for player_id in player_ids:
         session = _session_for_player(sample_turn, player_id=player_id)
         session.event_queue.put(
-            inference_complete_event(
-                status="exact",
-                summary=f"Player {player_id} ok",
-                solution_count=1,
+            RowComplete(
+                result=InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                summary_override=f"Player {player_id} ok",
             )
         )
         rows.append(ScheduledInferenceRow(player_id=player_id, session=session))
@@ -79,10 +86,9 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
     for player_id in player_ids:
         session = _session_for_player(sample_turn, player_id=player_id)
         session.event_queue.put(
-            inference_complete_event(
-                status="exact",
-                summary=f"Player {player_id} ok",
-                solution_count=1,
+            RowComplete(
+                result=InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                summary_override=f"Player {player_id} ok",
             )
         )
         rows.append(ScheduledInferenceRow(player_id=player_id, session=session))

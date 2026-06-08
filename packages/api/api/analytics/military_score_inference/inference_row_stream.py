@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     cleanup_inference_stream_sessions,
     immediate_row_inference_events,
     schedule_inference_row,
+    session_domain_event_to_wire_events,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.models.game import TurnInfo
@@ -54,9 +55,10 @@ def iter_scores_row_inference_events(
     session = scheduled.session
     try:
         while True:
-            event = session.event_queue.get()
-            yield event
-            if event.get("type") in ("complete", "error"):
-                break
+            domain_event = session.event_queue.get()
+            for event in session_domain_event_to_wire_events(session, domain_event):
+                yield event
+                if event.get("type") in ("complete", "error"):
+                    return
     finally:
         cleanup_inference_stream_sessions(scheduler, (session,))

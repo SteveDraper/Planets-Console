@@ -10,12 +10,16 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from api.analytics.military_score_inference.inference_api_payload import (
-    _inference_api_payload,
-    inference_result_to_api_payload,
-    serialize_solutions_with_arithmetic,
-)
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    GlobalPauseChanged,
+    HeldSolutionsUpdated,
+    InferenceStreamDomainEvent,
+    RowApiPayloadReady,
+    RowComplete,
+    RowFailed,
+    TierProgress,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -30,12 +34,6 @@ from api.analytics.military_score_inference.policy_ladder import (
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
-from api.transport.inference_stream import (
-    inference_complete_event,
-    inference_global_pause_event,
-    inference_progress_event,
-    inference_solution_event,
-)
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
@@ -59,7 +57,7 @@ class InferenceRowStreamSession:
     perspective: int
     turn_number: int
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
-    event_queue: queue.Queue[dict[str, object]] = field(default_factory=queue.Queue)
+    event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     ladder_state: PolicyLadderState | None = None
     on_finalize: Callable[[dict[str, object]], None] | None = None
@@ -331,7 +329,7 @@ class InferenceRowScheduler:
         self._continuation_round_robin.clear()
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
-        event = inference_global_pause_event(paused=paused)
+        event = GlobalPauseChanged(paused=paused)
         for session in self._sessions.values():
             session.event_queue.put(event)
 
@@ -361,19 +359,19 @@ class InferenceRowScheduler:
         state = session.ladder_state
         if state is None or state.catalog is None or not state.merged_solutions:
             return
-        serialized = serialize_solutions_with_arithmetic(
-            session.observation,
-            state.catalog,
-            state.merged_solutions,
+        session.event_queue.put(
+            HeldSolutionsUpdated(
+                solutions=state.merged_solutions,
+                catalog=state.catalog,
+            )
         )
-        session.event_queue.put(inference_solution_event(serialized))
 
     def _emit_progress(self, session: InferenceRowStreamSession) -> None:
         state = session.ladder_state
         if state is None or state.catalog is None:
             return
         session.event_queue.put(
-            inference_progress_event(
+            TierProgress(
                 policy_step_id=state.catalog.policy_step_id,
                 combo_count=len(state.catalog.ship_build_combos),
                 held_count=len(state.merged_solutions),
@@ -386,30 +384,14 @@ class InferenceRowScheduler:
             return
         step = state.policy_steps[state.next_step_index]
         session.event_queue.put(
-            inference_progress_event(
+            TierProgress(
                 policy_step_id=step.id,
                 held_count=len(state.merged_solutions),
             )
         )
 
-    def _emit_complete_from_payload(
-        self,
-        session: InferenceRowStreamSession,
-        payload: dict[str, object],
-    ) -> None:
-        session.event_queue.put(
-            inference_complete_event(
-                status=str(payload.get("status", "")),
-                summary=str(payload.get("summary", "")),
-                solution_count=int(payload.get("solutionCount", 0)),
-                is_complete=bool(payload.get("isComplete", True)),
-                diagnostics=(
-                    payload.get("diagnostics")
-                    if isinstance(payload.get("diagnostics"), dict)
-                    else None
-                ),
-            )
-        )
+    def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
+        session.event_queue.put(event)
         self.unregister_session(session.run_id)
 
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
@@ -455,18 +437,16 @@ class InferenceRowScheduler:
                 session.turn,
             )
         )
-        payload = inference_result_to_api_payload(
-            result,
-            catalog,
-            session.observation,
-            session.turn,
-            problem,
-            policy_steps_attempted=policy_steps_attempted,
-            step_diagnostics=step_diagnostics,
+        self._emit_row_complete(
+            session,
+            RowComplete(
+                result=result,
+                catalog=catalog,
+                problem=problem,
+                policy_steps_attempted=policy_steps_attempted,
+                step_diagnostics=step_diagnostics,
+            ),
         )
-        if session.on_finalize is not None:
-            session.on_finalize(payload)
-        self._emit_complete_from_payload(session, payload)
 
     def _finalize_stopped(self, session: InferenceRowStreamSession) -> None:
         state = session.ladder_state
@@ -483,26 +463,31 @@ class InferenceRowScheduler:
                 solutions=result.solutions,
                 diagnostics={**result.diagnostics, "stopped_reason": "cancelled"},
             )
-            payload = inference_result_to_api_payload(
-                stopped_result,
-                catalog,
-                session.observation,
-                session.turn,
-                problem,
-                policy_steps_attempted=policy_steps_attempted,
-                step_diagnostics=step_diagnostics,
+            self._emit_row_complete(
+                session,
+                RowComplete(
+                    result=stopped_result,
+                    catalog=catalog,
+                    problem=problem,
+                    policy_steps_attempted=policy_steps_attempted,
+                    step_diagnostics=step_diagnostics,
+                    force_is_complete=True,
+                ),
             )
-            payload["isComplete"] = True
-        else:
-            payload = _inference_api_payload(
-                status=STATUS_STOPPED,
-                summary="Build inference halted",
-                solutions=(),
-                diagnostics={"stopped_reason": "cancelled"},
-            )
-            payload["isComplete"] = True
+            return
 
-        self._emit_complete_from_payload(session, payload)
+        self._emit_row_complete(
+            session,
+            RowComplete(
+                result=InferenceResult(
+                    status=STATUS_STOPPED,
+                    solutions=(),
+                    diagnostics={"stopped_reason": "cancelled"},
+                ),
+                summary_override="Build inference halted",
+                force_is_complete=True,
+            ),
+        )
 
     def _run_full_row_job(self, job: _FullRowJob) -> None:
         session = job.session
@@ -512,17 +497,11 @@ class InferenceRowScheduler:
         try:
             payload = job.run_inference(session)
         except Exception:
-            from api.transport.inference_stream import inference_error_event
-
-            session.event_queue.put(inference_error_event("Build inference failed"))
+            session.event_queue.put(RowFailed(detail="Build inference failed"))
             self.unregister_session(session.run_id)
             return
-        solutions_raw = payload.get("solutions")
-        if isinstance(solutions_raw, list):
-            serialized = [solution for solution in solutions_raw if isinstance(solution, dict)]
-            if serialized:
-                session.event_queue.put(inference_solution_event(serialized))
-        self._emit_complete_from_payload(session, payload)
+        session.event_queue.put(RowApiPayloadReady(payload=payload))
+        self.unregister_session(session.run_id)
 
 
 _scheduler: InferenceRowScheduler | None = None

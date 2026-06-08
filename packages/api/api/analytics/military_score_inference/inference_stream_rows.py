@@ -13,6 +13,9 @@ from api.analytics.military_score_inference.analytic import (
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     _inference_api_payload,
+    format_inference_summary,
+    inference_result_to_api_payload,
+    serialize_solutions_with_arithmetic,
 )
 from api.analytics.military_score_inference.inference_path import (
     InferencePath,
@@ -22,11 +25,146 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    GlobalPauseChanged,
+    HeldSolutionsUpdated,
+    InferenceStreamDomainEvent,
+    RowApiPayloadReady,
+    RowComplete,
+    RowFailed,
+    TierProgress,
+)
+from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.models.game import Score, TurnInfo
-from api.transport.inference_stream import inference_complete_event
+from api.transport.inference_stream import (
+    inference_complete_event,
+    inference_error_event,
+    inference_global_pause_event,
+    inference_progress_event,
+    inference_solution_event,
+)
 
 _MULTiplexWaitSeconds = 0.05
+
+
+def domain_event_to_wire_events(
+    event: InferenceStreamDomainEvent,
+    *,
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    on_finalize: Callable[[dict[str, object]], None] | None = None,
+) -> list[dict[str, object]]:
+    """Convert one scheduler domain event into zero or more NDJSON wire dicts."""
+    if isinstance(event, HeldSolutionsUpdated):
+        serialized = serialize_solutions_with_arithmetic(
+            observation,
+            event.catalog,
+            event.solutions,
+        )
+        return [inference_solution_event(serialized)]
+
+    if isinstance(event, TierProgress):
+        return [
+            inference_progress_event(
+                policy_step_id=event.policy_step_id,
+                combo_count=event.combo_count,
+                held_count=event.held_count,
+            )
+        ]
+
+    if isinstance(event, RowComplete):
+        if event.catalog is not None and event.problem is not None:
+            payload = inference_result_to_api_payload(
+                event.result,
+                event.catalog,
+                observation,
+                turn,
+                event.problem,
+                policy_steps_attempted=event.policy_steps_attempted,
+                step_diagnostics=event.step_diagnostics,
+            )
+        else:
+            summary = event.summary_override or format_inference_summary(event.result)
+            payload = _inference_api_payload(
+                status=event.result.status,
+                summary=summary,
+                solutions=event.result.solutions,
+                diagnostics=event.result.diagnostics,
+            )
+        if event.force_is_complete is not None:
+            payload["isComplete"] = event.force_is_complete
+        if on_finalize is not None:
+            on_finalize(payload)
+        return [
+            inference_complete_event(
+                status=str(payload.get("status", "")),
+                summary=str(payload.get("summary", "")),
+                solution_count=int(payload.get("solutionCount", 0)),
+                is_complete=bool(payload.get("isComplete", True)),
+                diagnostics=(
+                    payload.get("diagnostics")
+                    if isinstance(payload.get("diagnostics"), dict)
+                    else None
+                ),
+            )
+        ]
+
+    if isinstance(event, RowApiPayloadReady):
+        payload = event.payload
+        wire_events: list[dict[str, object]] = []
+        if event.emit_solution_event:
+            solutions_raw = payload.get("solutions")
+            if isinstance(solutions_raw, list):
+                serialized = [solution for solution in solutions_raw if isinstance(solution, dict)]
+                if serialized:
+                    wire_events.append(inference_solution_event(serialized))
+        wire_events.append(
+            inference_complete_event(
+                status=str(payload.get("status", "")),
+                summary=str(payload.get("summary", "")),
+                solution_count=int(payload.get("solutionCount", 0)),
+                is_complete=bool(payload.get("isComplete", True)),
+                diagnostics=(
+                    payload.get("diagnostics")
+                    if isinstance(payload.get("diagnostics"), dict)
+                    else None
+                ),
+            )
+        )
+        return wire_events
+
+    if isinstance(event, RowFailed):
+        return [inference_error_event(event.detail)]
+
+    if isinstance(event, GlobalPauseChanged):
+        return [inference_global_pause_event(paused=event.paused)]
+
+    raise TypeError(f"Unsupported inference stream domain event: {type(event)!r}")
+
+
+def row_domain_event_to_wire_events(
+    row: ScheduledInferenceRow,
+    event: InferenceStreamDomainEvent,
+) -> list[dict[str, object]]:
+    return domain_event_to_wire_events(
+        event,
+        observation=row.session.observation,
+        turn=row.session.turn,
+        on_finalize=row.session.on_finalize,
+    )
+
+
+def session_domain_event_to_wire_events(
+    session: InferenceRowStreamSession,
+    event: InferenceStreamDomainEvent,
+) -> list[dict[str, object]]:
+    return domain_event_to_wire_events(
+        event,
+        observation=session.observation,
+        turn=session.turn,
+        on_finalize=session.on_finalize,
+    )
 
 
 @dataclass(frozen=True)
@@ -164,14 +302,15 @@ def drain_available_multiplex_events(
             continue
         while True:
             try:
-                event = row.session.event_queue.get_nowait()
+                domain_event = row.session.event_queue.get_nowait()
             except queue.Empty:
                 break
-            if tag_player_id:
-                event = tag_inference_stream_event(event, player_id=row.player_id)
-            if event.get("type") in ("complete", "error"):
-                finished_run_ids.add(row.session.run_id)
-            yield event
+            for event in row_domain_event_to_wire_events(row, domain_event):
+                if tag_player_id:
+                    event = tag_inference_stream_event(event, player_id=row.player_id)
+                if event.get("type") in ("complete", "error"):
+                    finished_run_ids.add(row.session.run_id)
+                yield event
 
 
 def iter_multiplexed_inference_events(
@@ -191,15 +330,16 @@ def iter_multiplexed_inference_events(
         if row.session.run_id not in pending_run_ids:
             continue
         try:
-            event = row.session.event_queue.get(timeout=_MULTiplexWaitSeconds)
+            domain_event = row.session.event_queue.get(timeout=_MULTiplexWaitSeconds)
         except queue.Empty:
             continue
-        if event.get("type") in ("complete", "error"):
-            pending_run_ids.discard(row.session.run_id)
-        if tag_player_id:
-            yield tag_inference_stream_event(event, player_id=row.player_id)
-        else:
-            yield event
+        for event in row_domain_event_to_wire_events(row, domain_event):
+            if event.get("type") in ("complete", "error"):
+                pending_run_ids.discard(row.session.run_id)
+            if tag_player_id:
+                yield tag_inference_stream_event(event, player_id=row.player_id)
+            else:
+                yield event
 
 
 def cleanup_inference_stream_sessions(
