@@ -10,7 +10,6 @@ from api.analytics.military_score_inference.analytic import (
     build_inference_observation,
     run_inference_with_artifacts,
 )
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     _inference_api_payload,
@@ -103,7 +102,6 @@ def schedule_inference_row(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> ScheduledInferenceRow:
     observation = build_inference_observation(
         score,
@@ -123,7 +121,6 @@ def schedule_inference_row(
         game_id=game_id,
         perspective=perspective,
         turn_number=turn_number,
-        resolved_mask=resolved_mask,
     )
     if path == InferencePath.POLICY_LADDER:
         scheduler.enqueue_tier_ladder(session)
@@ -141,7 +138,6 @@ def schedule_inference_row(
                 score,
                 turn,
                 load_scoreboard_turn=load_scoreboard_turn,
-                resolved_mask=row_session.resolved_mask,
             )
             if row_session.cancel_token.is_cancelled():
                 payload = {

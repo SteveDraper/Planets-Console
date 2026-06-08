@@ -149,11 +149,9 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
     session_b = _session_for_player(sample_turn, player_id=player_ids[1])
     session_a.ladder_state = PolicyLadderState(
         policy_steps=short_ladder,
-        resolved_mask=session_a.resolved_mask,
     )
     session_b.ladder_state = PolicyLadderState(
         policy_steps=short_ladder,
-        resolved_mask=session_b.resolved_mask,
     )
 
     scheduler.register_session(session_a)

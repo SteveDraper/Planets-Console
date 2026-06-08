@@ -10,7 +10,6 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     _inference_api_payload,
     inference_result_to_api_payload,
@@ -59,7 +58,6 @@ class InferenceRowStreamSession:
     game_id: int
     perspective: int
     turn_number: int
-    resolved_mask: ResolvedHullCatalogMask | None = None
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[dict[str, object]] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -229,7 +227,6 @@ class InferenceRowScheduler:
         policy_steps = tuple(resolve_tier_policies(None))
         session.ladder_state = PolicyLadderState(
             policy_steps=policy_steps,
-            resolved_mask=session.resolved_mask,
         )
         self.register_session(session)
         self._enqueue_job(_TierJob(session=session))

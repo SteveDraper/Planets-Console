@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import get_inference_row_scheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
     cleanup_inference_stream_sessions,
@@ -22,7 +21,6 @@ def iter_scores_row_inference_events(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield inference stream wire events for one scoreboard row."""
     immediate = immediate_row_inference_events(
@@ -52,7 +50,6 @@ def iter_scores_row_inference_events(
         game_id=game_id,
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
-        resolved_mask=resolved_mask,
     )
     session = scheduled.session
     try:

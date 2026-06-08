@@ -13,7 +13,6 @@ from api.transport.connections_options import (
     WARP_SPEED_QUERY,
     FlareConnectionMode,
 )
-from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_row
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -250,71 +249,6 @@ def post_analytic_inference_stop(
 
         raise NotFoundError(f"Unknown analytic: {analytic_id}")
     return get_core_client().stop_scores_row_inference(
-        game_id,
-        perspective,
-        turn,
-        player_id,
-    )
-
-
-@router.get("/{analytic_id}/inference/hull-catalog")
-def get_analytic_inference_hull_catalog(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Master hull catalog and effective mask for one Scores inference row."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().get_inference_hull_catalog_mask(
-        game_id,
-        perspective,
-        turn,
-        player_id,
-    )
-
-
-@router.put("/{analytic_id}/inference/hull-catalog")
-def put_analytic_inference_hull_catalog(
-    analytic_id: str,
-    body: InferenceHullCatalogMaskUpdateRequest,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Persist a user hull catalog mask override for one Scores inference row."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().put_inference_hull_catalog_mask(
-        game_id,
-        perspective,
-        turn,
-        player_id,
-        body.enabled_hull_ids,
-    )
-
-
-@router.delete("/{analytic_id}/inference/hull-catalog")
-def delete_analytic_inference_hull_catalog(
-    analytic_id: str,
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Clear a user hull catalog mask override for one Scores inference row."""
-    if analytic_id != "scores":
-        from bff.errors import NotFoundError
-
-        raise NotFoundError(f"Unknown analytic: {analytic_id}")
-    return get_core_client().reset_inference_hull_catalog_mask(
         game_id,
         perspective,
         turn,

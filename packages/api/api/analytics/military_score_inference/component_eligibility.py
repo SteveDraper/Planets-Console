@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.hull_catalog_mask import (
-    ResolvedHullCatalogMask,
     default_enabled_hull_ids_for_player,
 )
 from api.analytics.military_score_inference.inference_turn_lookup import (
@@ -34,13 +33,8 @@ class TurnCatalogContext:
 def buildable_hull_ids_for_player(
     turn: TurnInfo,
     player_id: int,
-    *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> frozenset[int]:
     """Return hull ids buildable for the inference target player on this turn snapshot."""
-    catalog_hull_ids = frozenset(hull.id for hull in turn.hulls)
-    if resolved_mask is not None:
-        return resolved_mask.effective_enabled_hull_ids & catalog_hull_ids
     return default_enabled_hull_ids_for_player(turn, player_id)
 
 
@@ -82,22 +76,12 @@ def eligible_hull_ids_for_filter(
     turn: TurnInfo,
     player_id: int,
     hull_filter: ComponentFilter,
-    *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> frozenset[int]:
     """Resolve hull ids from a policy ``filters.hulls`` entry."""
     if hull_filter.all:
-        eligible_ids = buildable_hull_ids_for_player(
-            turn,
-            player_id,
-            resolved_mask=resolved_mask,
-        )
+        eligible_ids = buildable_hull_ids_for_player(turn, player_id)
     else:
-        buildable_hull_ids = buildable_hull_ids_for_player(
-            turn,
-            player_id,
-            resolved_mask=resolved_mask,
-        )
+        buildable_hull_ids = buildable_hull_ids_for_player(turn, player_id)
         hulls_by_id = {hull.id: hull for hull in turn.hulls}
         eligible_ids = frozenset(
             hull_id
@@ -132,8 +116,6 @@ def turn_catalog_context_for_policy_step(
     turn: TurnInfo,
     player_id: int,
     policy_step: InferenceTierPolicyStep,
-    *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> TurnCatalogContext:
     hulls_by_id = {hull.id: hull for hull in turn.hulls}
     engines_by_id = {engine.id: engine for engine in turn.engines}
@@ -151,7 +133,6 @@ def turn_catalog_context_for_policy_step(
             turn,
             player_id,
             filters.hulls,
-            resolved_mask=resolved_mask,
         ),
         eligible_engine_ids=eligible_component_ids_for_filter(
             filters.engines,

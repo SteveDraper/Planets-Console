@@ -10,7 +10,6 @@ from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
     turn_catalog_context_for_policy_step,
 )
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -157,7 +156,6 @@ def build_action_catalog_from_turn(
     config: ActionCatalogConfig | None = None,
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step
     if resolved_policy_step is None:
@@ -166,7 +164,6 @@ def build_action_catalog_from_turn(
         turn,
         observation.player_id,
         resolved_policy_step,
-        resolved_mask=resolved_mask,
     )
     return build_action_catalog(
         observation,

@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { ListFilter, Octagon, Play, X } from 'lucide-react'
+import { Octagon, Play, X } from 'lucide-react'
 import type {
   AnalyticShellScope,
   ScoresInferenceRowDetail,
   ScoresTableWithInferenceData,
 } from '../../api/bff'
 import { GlobalInferencePauseControl } from './GlobalInferencePauseControl'
-import { HullCatalogMaskDialog } from './HullCatalogMaskDialog'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
 import { InferenceStopIcon } from './InferenceStopIcon'
@@ -65,14 +64,12 @@ function ResumeInferenceButton({ onResumeRow }: { onResumeRow: () => void }) {
 function InferenceStatusCell({
   detail,
   onOpenDetail,
-  onOpenHullCatalog,
   onStopRow,
   onResumeRow,
   isGloballyPaused = false,
 }: {
   detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
-  onOpenHullCatalog: () => void
   onStopRow?: (playerId: number) => void
   onResumeRow?: (playerId: number) => void
   isGloballyPaused?: boolean
@@ -84,21 +81,6 @@ function InferenceStatusCell({
     canResumeInferenceRow(detail, { isGloballyPaused }) &&
     typeof playerId === 'number' &&
     onResumeRow != null
-  const showHullCatalog = typeof playerId === 'number'
-
-  const hullCatalogButton =
-    showHullCatalog ? (
-      <button
-        type="button"
-        data-hull-catalog-opener
-        title="Adjust buildable hull catalog"
-        aria-label="Adjust buildable hull catalog"
-        onClick={onOpenHullCatalog}
-        className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
-      >
-        <ListFilter className="h-3.5 w-3.5" aria-hidden />
-      </button>
-    ) : null
 
   if (isIncompleteInferenceRow(detail)) {
     const activelySearching = isActivelySearchingInference(detail, isGloballyPaused)
@@ -112,7 +94,6 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
-        {hullCatalogButton}
         {showStop ? <StopInferenceButton onStopRow={() => onStopRow(playerId)} /> : null}
         {showResume ? (
           <ResumeInferenceButton onResumeRow={() => onResumeRow(playerId)} />
@@ -131,7 +112,6 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
-        {hullCatalogButton}
       </div>
     )
   }
@@ -146,7 +126,6 @@ function InferenceStatusCell({
         >
           <Octagon className="h-4 w-4" aria-hidden />
         </span>
-        {hullCatalogButton}
       </div>
     )
   }
@@ -160,21 +139,19 @@ function InferenceStatusCell({
       >
         <X className="h-4 w-4" aria-hidden />
       </span>
-      {hullCatalogButton}
     </div>
   )
 }
 
 export function ScoresTableView({
   data,
-  analyticScope,
+  analyticScope: _analyticScope,
   onStopRow,
   onResumeRow,
   isGloballyPaused = false,
   globalInferencePause,
 }: ScoresTableViewProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
-  const [hullCatalogRowIndex, setHullCatalogRowIndex] = useState<number | null>(null)
   const inferenceByRow = data.inferenceByRow
   const selectedDetail =
     selectedRowIndex != null && inferenceByRow != null
@@ -182,13 +159,6 @@ export function ScoresTableView({
       : null
   const selectedRacePlayer =
     selectedRowIndex != null ? data.rows[selectedRowIndex]?.[0] ?? '' : ''
-  const hullCatalogDetail =
-    hullCatalogRowIndex != null && inferenceByRow != null
-      ? inferenceByRow[hullCatalogRowIndex]
-      : null
-  const hullCatalogRacePlayer =
-    hullCatalogRowIndex != null ? data.rows[hullCatalogRowIndex]?.[0] ?? '' : ''
-  const hullCatalogPlayerId = hullCatalogDetail?.playerId
 
   const showGlobalPauseControl =
     data.includeBuildInference && globalInferencePause != null
@@ -226,7 +196,6 @@ export function ScoresTableView({
                         <InferenceStatusCell
                           detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
-                          onOpenHullCatalog={() => setHullCatalogRowIndex(rowIndex)}
                           onStopRow={onStopRow}
                           onResumeRow={onResumeRow}
                           isGloballyPaused={isGloballyPaused}
@@ -251,16 +220,6 @@ export function ScoresTableView({
         racePlayer={selectedRacePlayer}
         detail={selectedDetail}
       />
-      {typeof hullCatalogPlayerId === 'number' ? (
-        <HullCatalogMaskDialog
-          isOpen={hullCatalogRowIndex != null}
-          onClose={() => setHullCatalogRowIndex(null)}
-          scope={analyticScope}
-          playerId={hullCatalogPlayerId}
-          racePlayer={hullCatalogRacePlayer}
-          onSaved={() => onResumeRow?.(hullCatalogPlayerId)}
-        />
-      ) : null}
     </>
   )
 }

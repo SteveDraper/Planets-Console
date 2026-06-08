@@ -18,7 +18,6 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
@@ -270,14 +269,11 @@ def _run_accelerated_split_inference_path(
     score: Score,
     turn: TurnInfo,
     segments: tuple[AcceleratedInferenceSegment, ...],
-    *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     payload, reported_observation, reported_catalog, _ = _run_accelerated_split_inference(
         score,
         turn,
         segments,
-        resolved_mask=resolved_mask,
     )
     return payload, reported_observation, reported_catalog
 
@@ -285,13 +281,10 @@ def _run_accelerated_split_inference_path(
 def _run_policy_ladder_inference(
     resolved_observation: InferenceObservation,
     turn: TurnInfo,
-    *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
     return solve_with_policy_ladder(
         resolved_observation,
         turn,
-        resolved_mask=resolved_mask,
     )
 
 
@@ -336,7 +329,6 @@ def _run_solver_inference_path(
     *,
     catalog: ActionCatalog | None,
     accelerated_segments: tuple[AcceleratedInferenceSegment, ...] | None,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     if path == InferencePath.ACCELERATED_SPLIT:
         assert accelerated_segments is not None
@@ -344,7 +336,6 @@ def _run_solver_inference_path(
             score,
             turn,
             accelerated_segments,
-            resolved_mask=resolved_mask,
         )
 
     solve_catalog = catalog
@@ -354,7 +345,6 @@ def _run_solver_inference_path(
                 _run_policy_ladder_inference(
                     resolved_observation,
                     turn,
-                    resolved_mask=resolved_mask,
                 )
             )
         else:
@@ -387,7 +377,6 @@ def run_inference_with_artifacts(
     observation: InferenceObservation | None = None,
     catalog: ActionCatalog | None = None,
     load_scoreboard_turn: ScoreboardTurnLoader | None = None,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     """Run inference once; return API payload plus observation and catalog for re-checks.
 
@@ -423,7 +412,6 @@ def run_inference_with_artifacts(
         resolved_observation,
         catalog=catalog,
         accelerated_segments=accelerated_segments,
-        resolved_mask=resolved_mask,
     )
 
 
@@ -568,8 +556,6 @@ def _run_accelerated_split_inference(
     score: Score,
     turn: TurnInfo,
     segments: tuple[AcceleratedInferenceSegment, ...],
-    *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[
     dict[str, object],
     InferenceObservation,
@@ -602,7 +588,6 @@ def _run_accelerated_split_inference(
                 turn,
                 max_solutions=per_segment_max_solutions,
                 time_limit_seconds=per_segment_time,
-                resolved_mask=resolved_mask,
             )
         )
         segment_artifacts[segment.host_turn] = (segment_observation, catalog)

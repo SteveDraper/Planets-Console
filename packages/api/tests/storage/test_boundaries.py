@@ -37,9 +37,9 @@ def test_resolve_breakpoint_credentials():
 
 
 def test_resolve_breakpoint_game_global_analytic_persistence():
-    bp, suffix = resolve_breakpoint("games/628580/analytics/scores/inference_hull_catalog_masks/5")
+    bp, suffix = resolve_breakpoint("games/628580/analytics/scores/settings/5")
     assert bp == "games/628580/analytics/scores"
-    assert suffix == "inference_hull_catalog_masks/5"
+    assert suffix == "settings/5"
 
 
 def test_resolve_breakpoint_perspective_analytic_persistence():
