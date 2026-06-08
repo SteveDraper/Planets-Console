@@ -324,6 +324,26 @@ def _ship_build_variants_for_merged_count(
     )
 
 
+def _score_equivalent_expansion_budget(
+    problem: InferenceProblem,
+    action_counts: dict[str, int],
+    *,
+    solutions_found: int,
+) -> int:
+    """Cap per-CP-SAT expansion so aggregate-action alternatives can surface.
+
+    Score-equivalent ship-build variants can exhaust ``max_solutions`` in one
+    iteration and prevent no-good cuts from reaching distinct aggregate patterns
+    (for example planet defense vs torpedo loads).
+    """
+    remaining = problem.max_solutions - solutions_found
+    if remaining <= 0:
+        return 0
+    if any(count > 0 for count in action_counts.values()):
+        return 1
+    return remaining
+
+
 def _expand_score_equivalent_solutions(
     problem: InferenceProblem,
     action_counts: dict[str, int],
@@ -512,13 +532,18 @@ def solve_inference_problem(
         action_counts = _read_action_counts(problem, action_count_vars, solver)
         combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)
         bucket_counts = _read_bucket_counts(bucket_vars_by_action_id, solver)
+        expansion_budget = _score_equivalent_expansion_budget(
+            problem,
+            action_counts,
+            solutions_found=len(solutions),
+        )
         expanded_solutions = _expand_score_equivalent_solutions(
             problem,
             action_counts,
             combo_counts,
             bucket_counts,
             merged_combo_catalog,
-            max_expansions=problem.max_solutions - len(solutions),
+            max_expansions=expansion_budget,
         )
         expanded_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
         added_solution = False
