@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     no_prior_turn_inference_api_payload,
@@ -121,6 +122,7 @@ def schedule_inference_row(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> ScheduledInferenceRow:
     observation = build_inference_observation(
         score,
@@ -140,6 +142,7 @@ def schedule_inference_row(
         game_id=game_id,
         perspective=perspective,
         turn_number=turn_number,
+        resolved_mask=resolved_mask,
     )
     orchestration = create_inference_stream_orchestration(
         path,
@@ -221,6 +224,7 @@ def iter_scores_table_inference_events(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged inference events for all scoreboard rows on one NDJSON stream."""
     turn_number = turn.settings.turn
@@ -248,6 +252,9 @@ def iter_scores_table_inference_events(
             continue
 
         score = next(row for row in turn.scores if row.ownerid == player_id)
+        resolved_mask = (
+            resolve_mask_for_player(player_id) if resolve_mask_for_player is not None else None
+        )
         scheduled_rows.append(
             schedule_inference_row(
                 scheduler,
@@ -257,6 +264,7 @@ def iter_scores_table_inference_events(
                 game_id=game_id,
                 perspective=perspective,
                 load_scoreboard_turn=load_scoreboard_turn,
+                resolved_mask=resolved_mask,
             )
         )
         yield from drain_available_multiplex_events(

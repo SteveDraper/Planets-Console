@@ -199,10 +199,15 @@ class InferenceRowScheduler:
         run = self._get_or_create_run(session)
         run.orchestration = orchestration
         if orchestration is not None:
-            run.ladder_state = orchestration.new_ladder_state()
+            run.ladder_state = orchestration.new_ladder_state(
+                resolved_mask=session.resolved_mask,
+            )
         else:
             policy_steps = tuple(resolve_tier_policies(None))
-            run.ladder_state = PolicyLadderState(policy_steps=policy_steps)
+            run.ladder_state = PolicyLadderState(
+                policy_steps=policy_steps,
+                resolved_mask=session.resolved_mask,
+            )
         self._enqueue_job(TierJob(session=session))
 
     def _enqueue_job(self, job: TierJob) -> None:

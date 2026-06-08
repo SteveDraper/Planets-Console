@@ -6,6 +6,7 @@ import queue
 import uuid
 from dataclasses import dataclass, field
 
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     InferenceStreamDomainEvent,
@@ -25,6 +26,7 @@ class InferenceRowStreamSession:
     game_id: int
     perspective: int
     turn_number: int
+    resolved_mask: ResolvedHullCatalogMask | None = None
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))

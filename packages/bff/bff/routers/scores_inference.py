@@ -5,6 +5,7 @@ Included from the analytics router at prefix ``/scores`` so paths match
 """
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
+from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_ndjson
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -107,6 +108,57 @@ def get_scores_inference_table_stream(
             )
         ),
         media_type="application/x-ndjson",
+    )
+
+
+
+@router.get("/inference/hull-catalog")
+def get_scores_inference_hull_catalog(
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Master hull catalog and effective mask for one Scores inference row."""
+    return get_core_client().get_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn,
+        player_id,
+    )
+
+
+@router.put("/inference/hull-catalog")
+def put_scores_inference_hull_catalog(
+    body: InferenceHullCatalogMaskUpdateRequest,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Persist a user hull catalog mask override for one Scores inference row."""
+    return get_core_client().put_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn,
+        player_id,
+        body.enabled_hull_ids,
+    )
+
+
+@router.delete("/inference/hull-catalog")
+def delete_scores_inference_hull_catalog(
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Clear a user hull catalog mask override for one Scores inference row."""
+    return get_core_client().reset_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn,
+        player_id,
     )
 
 

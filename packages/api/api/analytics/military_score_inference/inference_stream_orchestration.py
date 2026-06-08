@@ -15,6 +15,7 @@ from api.analytics.military_score_inference.inference_accelerated import (
     build_accelerated_segment_payload,
     build_accelerated_split_stream_row_complete,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_target import (
@@ -86,8 +87,15 @@ class InferenceStreamOrchestration:
         segment = self.current_segment()
         return segment is not None and segment.is_streaming_target
 
-    def new_ladder_state(self) -> PolicyLadderState:
-        return PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)))
+    def new_ladder_state(
+        self,
+        *,
+        resolved_mask: ResolvedHullCatalogMask | None = None,
+    ) -> PolicyLadderState:
+        return PolicyLadderState(
+            policy_steps=tuple(resolve_tier_policies(None)),
+            resolved_mask=resolved_mask,
+        )
 
     def record_segment_ladder_complete(
         self,

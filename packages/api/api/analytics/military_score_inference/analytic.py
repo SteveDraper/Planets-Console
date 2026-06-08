@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_split_inference,
 )
@@ -198,11 +199,13 @@ def _run_accelerated_backfill_inference(
     resolved_observation: InferenceObservation,
     *,
     load_scoreboard_turn: ScoreboardTurnLoader | None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     backfill = _try_accelerated_backfill_inference(
         score,
         turn,
         load_scoreboard_turn=load_scoreboard_turn,
+        resolved_mask=resolved_mask,
     )
     if backfill is not None:
         return backfill
@@ -213,11 +216,14 @@ def _run_accelerated_split_inference_path(
     score: Score,
     turn: TurnInfo,
     segments: tuple[AcceleratedInferenceSegment, ...],
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     payload, reported_observation, reported_catalog, _ = run_accelerated_split_inference(
         score,
         turn,
         segments,
+        resolved_mask=resolved_mask,
     )
     return payload, reported_observation, reported_catalog
 
@@ -225,6 +231,8 @@ def _run_accelerated_split_inference_path(
 def _run_policy_ladder_inference(
     resolved_observation: InferenceObservation,
     turn: TurnInfo,
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[
     InferenceResult,
     ActionCatalog | None,
@@ -235,6 +243,7 @@ def _run_policy_ladder_inference(
     return solve_with_policy_ladder(
         resolved_observation,
         turn,
+        resolved_mask=resolved_mask,
     )
 
 
@@ -279,6 +288,7 @@ def _run_solver_inference_path(
     *,
     catalog: ActionCatalog | None,
     accelerated_segments: tuple[AcceleratedInferenceSegment, ...] | None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     if path == InferencePath.ACCELERATED_SPLIT:
         assert accelerated_segments is not None
@@ -286,6 +296,7 @@ def _run_solver_inference_path(
             score,
             turn,
             accelerated_segments,
+            resolved_mask=resolved_mask,
         )
 
     solve_catalog = catalog
@@ -295,6 +306,7 @@ def _run_solver_inference_path(
                 _run_policy_ladder_inference(
                     resolved_observation,
                     turn,
+                    resolved_mask=resolved_mask,
                 )
             )
         else:
@@ -347,6 +359,7 @@ def run_inference_with_artifacts(
     observation: InferenceObservation | None = None,
     catalog: ActionCatalog | None = None,
     load_scoreboard_turn: ScoreboardTurnLoader | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     """Run inference once; return API payload plus observation and catalog for re-checks.
 
@@ -374,6 +387,7 @@ def run_inference_with_artifacts(
             turn,
             resolved_observation,
             load_scoreboard_turn=load_scoreboard_turn,
+            resolved_mask=resolved_mask,
         )
     return _run_solver_inference_path(
         path,
@@ -382,6 +396,7 @@ def run_inference_with_artifacts(
         resolved_observation,
         catalog=catalog,
         accelerated_segments=accelerated_segments,
+        resolved_mask=resolved_mask,
     )
 
 
@@ -390,6 +405,7 @@ def _try_accelerated_backfill_inference(
     turn: TurnInfo,
     *,
     load_scoreboard_turn: ScoreboardTurnLoader | None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None] | None:
     """Fill unreliable accelerated rows from the first reliable split when that turn is stored."""
     if load_scoreboard_turn is None:
@@ -412,6 +428,7 @@ def _try_accelerated_backfill_inference(
         backfill_source.source_score,
         backfill_source.source_turn,
         backfill_source.segments,
+        resolved_mask=resolved_mask,
     )
     segment_payload = _segment_payload_for_host_turn(
         payload,

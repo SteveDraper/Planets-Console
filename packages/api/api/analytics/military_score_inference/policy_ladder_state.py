@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
@@ -38,3 +39,4 @@ class PolicyLadderState:
     ladder_complete: bool = False
     cancelled: bool = False
     started_at: float = field(default_factory=time.monotonic)
+    resolved_mask: ResolvedHullCatalogMask | None = None

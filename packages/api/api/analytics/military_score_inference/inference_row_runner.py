@@ -64,7 +64,9 @@ def _outcome_after_ladder_complete(
         if advance.continue_next_segment:
             return TierJobOutcome(
                 enqueue_continuation=True,
-                next_ladder_state=orchestration.new_ladder_state(),
+                next_ladder_state=orchestration.new_ladder_state(
+                    resolved_mask=run.session.resolved_mask,
+                ),
             )
         if advance.row_complete is not None:
             return TierJobOutcome(row_complete=advance.row_complete)

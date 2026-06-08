@@ -659,6 +659,85 @@ export async function fetchScoresRowInference(
 
 export type { InferenceStreamEvent }
 
+export type InferenceHullCatalogEntry = {
+  hullId: number
+  name: string
+  defaultEnabled: boolean
+  userEnabled: boolean
+  effectiveEnabled: boolean
+}
+
+export type InferenceHullCatalogMaskResponse = {
+  gameId: number
+  playerId: number
+  perspective: number
+  turn: number
+  campaignMode: boolean
+  raceId: number
+  raceName: string
+  masterCatalog: InferenceHullCatalogEntry[]
+  defaultEnabledHullIds: number[]
+  userEnabledHullIds: number[] | null
+  effectiveEnabledHullIds: number[]
+  hasUserOverride: boolean
+}
+
+export async function fetchInferenceHullCatalogMask(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<InferenceHullCatalogMaskResponse> {
+  const path = '/bff/analytics/scores/inference/hull-catalog'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function putInferenceHullCatalogMask(
+  scope: AnalyticShellScope,
+  playerId: number,
+  enabledHullIds: number[]
+): Promise<InferenceHullCatalogMaskResponse> {
+  const path = '/bff/analytics/scores/inference/hull-catalog'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `PUT ${path}`
+  const r = await bffRequest(
+    `${path}${qs}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabledHullIds }),
+    },
+    endpointLabel
+  )
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function resetInferenceHullCatalogMask(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<InferenceHullCatalogMaskResponse> {
+  const path = '/bff/analytics/scores/inference/hull-catalog'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `DELETE ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'DELETE' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
 
 export type InferenceGlobalPauseStatus = {
   gameId: number

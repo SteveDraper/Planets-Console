@@ -19,6 +19,7 @@ export type UseScoresInferenceByRowOptions = {
 
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
+  refreshInference: () => void
 }
 
 export function useScoresInferenceByRow(
@@ -34,6 +35,10 @@ export function useScoresInferenceByRow(
     .map((stub) => stub.playerId)
     .filter((id): id is number => typeof id === 'number')
   const playerIdsKey = useMemo(() => stablePlayerIdsKey(playerIds), [playerIds])
+  const [refreshToken, setRefreshToken] = useState(0)
+  const refreshInference = useCallback(() => {
+    setRefreshToken((value) => value + 1)
+  }, [])
 
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<
     Map<number, ScoresInferenceRowDetail>
@@ -137,10 +142,10 @@ export function useScoresInferenceByRow(
       tableAbortControllerRef.current = null
       onGlobalPauseChange?.(false)
     }
-  }, [enabled, scope, playerIdsKey, handleTableStreamEvent, onGlobalPauseChange])
+  }, [enabled, scope, playerIdsKey, refreshToken, handleTableStreamEvent, onGlobalPauseChange])
 
   if (!enabled || tableData?.inferenceByRow == null) {
-    return { inferenceByRow: undefined }
+    return { inferenceByRow: undefined, refreshInference }
   }
 
   const inferenceByRow = stubs.map((stub, rowIndex) => {
@@ -151,5 +156,5 @@ export function useScoresInferenceByRow(
     return detailsByPlayerId.get(playerId) ?? pendingDetail(playerId)
   })
 
-  return { inferenceByRow }
+  return { inferenceByRow, refreshInference }
 }
