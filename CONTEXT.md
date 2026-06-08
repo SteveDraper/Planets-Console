@@ -281,7 +281,7 @@ Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=
 _Avoid_: full hwdistribution support (v1 claim)
 
 **Military score build inference**:
-Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row**; default per-row solver budget is **20s** with top-K **20** (combo catalogs above **5000** combos temporarily force `max_solutions=1` until streaming ships). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
+Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row** with top-K **20**. No fixed row time budget once **#71** ships -- runs continue until the ladder finishes, the user halts that row, or the stream is cancelled (scope change, disable build inference, disconnect). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
 _Avoid_: build solver, score guesser
 
 **Inference search tier**:
@@ -333,12 +333,28 @@ Static YAML ladder under `assets/analytics/military_score_build_inference/` (rep
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
 
 **Inference solution streaming**:
-Planned NDJSON wire protocol (**#71**, Phase 1H) that emits each new exact explanation for one scoreboard row as soon as any **inference search tier** finds it -- within-tier enumeration and cross-tier ladder progress -- so the hourglass clears before top-K is full. Each `solution` event carries **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and applies final ordering. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
+Planned NDJSON wire protocol (**#71**, Phase 1H) with **one NDJSON response per scoreboard row** (parallel row requests, same as today). Emits each new exact explanation as soon as any **inference search tier** finds it -- within-tier enumeration and cross-tier ladder progress -- so the hourglass clears before top-K is full. Each `solution` event carries **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and applies final ordering. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
 _Avoid_: websocket inference, whole-table stream
 
+**Inference row scheduler**:
+Process-wide backend facility (**#71** companion) that fair-schedules **inference search tier** work across concurrent per-row inference streams. One schedulable **inference tier job** = one full **inference search tier** step for one scoreboard row (catalog build, exact/band passes, within-tier top-K, merge admit, seed output). Each row's ladder is sequential (tier *n+1* needs tier *n* job outputs). Cross-row fairness: enqueue tier-1 when the row stream opens, append tier *n+1* after tier *n* completes, shared FIFO queue drained by a worker pool (default **4** workers, configurable). Distinct from **inference corpus runner** `--workers` (batch case parallelism). `solution` events emit from inside the tier job via merge-admit hooks. Wire shape stays per-row NDJSON.
+_Avoid_: turn-level inference stream, frontend job queue, per-solve queue jobs
+
+**Inference solve interrupt boundary**:
+Where **inference row halt** and stream cancellation can take effect without losing tier progress. v1 (**#71**): cooperative checks at sub-step boundaries inside a tier job -- top-K no-good iterations, seed attempts, exact vs band passes -- plus `StopSearch()` in a CP-SAT callback when halt fires mid-`Solve()`. OR-Tools CP-SAT cannot resume internal search state across `Solve()` calls; only complete solutions can warm-start the next pass via hints. **Known gap:** a single long first-feasible `Solve()` on a huge catalog may block halt until that call returns. **Follow-on (if needed):** retry `UNKNOWN` sub-steps until feasible or halt (logical continuation; CP-SAT restarts internally each retry).
+_Avoid_: routine short-solve slice loops (wastes search), assuming CP-SAT pause/resume
+
 **Inference solution count indicator**:
-Per scoreboard row chrome replacing the binary green tick: a green outlined badge showing **N** = the number of rows currently held in **inference merged top-K** (not cumulative discoveries above K). **N > 0** as soon as the first exact explanation is held; rises toward K then plateaus while eviction swaps membership. Hourglass while **N = 0** and search is in flight; red cross when the row completes with no exact explanation. Click opens the ranked modal.
+Per scoreboard row chrome replacing the binary green tick: a green outlined badge showing **N** = the number of rows currently held in **inference merged top-K** (not cumulative discoveries above K). **N > 0** as soon as the first exact explanation is held; rises toward K then plateaus while eviction swaps membership. Hourglass while **N = 0** and search is in flight; red cross when the row completes with no exact explanation. While search is in flight, a per-row **halt control** cancels that row's stream and tier jobs. Click on the badge (or row chrome when **N > 0**) opens the ranked modal.
 _Avoid_: green tick, checkmark column
+
+**Accelerated-start inference row** (SPA):
+A scoreboard row whose host turn falls in an accelerated-start window may run multiple internal segments (accel window + reported host turn). v1 **#71** uses the same per-row NDJSON stream and **inference row scheduler** as other rows; segments stay inside the row's inference path with no per-segment SPA time split (user **inference row halt** or natural completion ends the row).
+_Avoid_: per-segment stream, segment-level halt (v1)
+
+**Inference row halt**:
+User-initiated or implicit cancellation of one scoreboard row's in-flight build inference. **Explicit:** per-row halt control in the inference column. **Implicit:** shell scope change (game, turn, **perspective**), disabling build inference, or client disconnect -- same cancellation for that row's stream. The **inference row scheduler** drops queued and in-flight **inference tier jobs** for the cancelled run. Terminal `complete` uses `status: stopped`, `isComplete: true`, and preserves any rows already held in **inference merged top-K** (`solutionCount` = held **N**). Distinct from failure (`no_exact_solution`, solver error) and from natural completion (`exact` when final-catalog equalities pass).
+_Avoid_: global stop-all, time_limited (as the primary stop mechanism once **#71** ships)
 
 **Inference host turn**:
 The host turn whose activity is being explained. Scoreboard deltas are read from the **later** stored **TurnInfo** document (turn *N+1*); the **earlier** document (turn *N*) supplies inventory ground truth for complexity grading and Tier 2 checks.
@@ -357,7 +373,7 @@ Inventory truth for a corpus case assembled from one or more stored **TurnInfo**
 _Avoid_: omniscient turn (informal)
 
 **Inference corpus runner**:
-Test-harness code (not shipped in the Core REST API package) that performs discovery, complexity grading, **catalog coverage**, case execution, and reporting. Two modes: **fixed corpus** (committed fixtures and manifest for CI) and **local corpus** (script `game_id` against a completed game in the **file backend** store). Invokes production inference APIs only; no corpus logic in `api/` business modules.
+Test-harness code (not shipped in the Core REST API package) that performs discovery, complexity grading, **catalog coverage**, case execution, and reporting. Two modes: **fixed corpus** (committed fixtures and manifest for CI) and **local corpus** (script `game_id` against a completed game in the **file backend** store). Invokes production inference via the **batch JSON** path (not the SPA NDJSON stream). **Orchestration-level** wall-clock caps (e.g. `--probe-time-limit-seconds`) stop the run between cases; per-case solver time limits remain on the batch path so CI and probes stay bounded after the SPA drops row time budgets. Probe options should surface `time_limited` outcomes and support deeper diagnosis of slow sub-steps (per-case time override, timeout-case filters, extended single-case reruns).
 _Avoid_: inference integration test (implementation name)
 
 **Ground truth explanation**:

@@ -303,17 +303,18 @@ Use repeated optimization:
 2. Extract the non-zero action counts.
 3. Add a no-good cut excluding that exact action vector.
 4. Re-solve for the next best solution.
-5. Stop when `max_solutions`, solver status, or time budget is reached.
+5. Stop when `max_solutions`, solver status, row halt/cancel (#71 SPA), or **batch** time budget is reached.
 
 A no-good cut can be encoded with indicator variables that detect whether each action count differs from its previous value, then require at least one difference. Keep this inside `solver.py` so the rest of the analytic only sees top-K results.
 
-**Phase 1H (#71):** the policy ladder and per-tier top-K loop can emit each newly discovered exact explanation on the wire before the row is complete, so the UI can show an **inference solution count indicator** (and open a partial modal) while later alternatives are still enumerating. Until that ships, the batch JSON path returns only after top-K or time budget.
+**Phase 1H (#71):** the policy ladder and per-tier top-K loop emit each newly discovered exact explanation on the NDJSON wire before the row is complete, so the UI can show an **inference solution count indicator** (and open a partial modal) while later alternatives are still enumerating. Cross-row **inference row scheduler** interleaves tier jobs. SPA streams are open-ended (halt / scope cancel); batch JSON still returns only after top-K or per-case time budget.
 
 The solver should return:
 
 - `exact` when at least one feasible solution is found,
 - `no_exact_solution` when the model is infeasible under enabled constraints,
-- `time_limited` when the solver reaches the time budget before proving optimality,
+- `time_limited` when the **batch** time budget is reached before proving optimality (not used as the primary SPA stop mechanism after #71),
+- `stopped` when the row is halted or the stream is cancelled (#71 SPA),
 - `invalid_problem` when generated action bounds or observations are inconsistent before solving.
 
 ---
@@ -341,8 +342,10 @@ When inference is enabled, add one extra column to the existing scoreboard table
 | Icon | Meaning | Hover text | Click behavior |
 |------|---------|------------|----------------|
 | **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K** (`N > 0`). Search may continue until `isComplete`. | summarize top solution; note when search is still running | open modal with ranked held solutions (grows while streaming until plateau at K) |
-| Hourglass | No exact explanation held yet for this player row (`N = 0`) | show that inference is still running | no modal until the first held exact arrives |
-| Red cross | no solution, timeout, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
+| Hourglass | No exact explanation held yet for this player row (`N = 0`) | show that inference is still running | no modal until the first held exact arrives; per-row **halt** visible while in flight |
+| Halt control | user stops this row's search | inference halted; partial held solutions kept when **N > 0** | cancels stream and tier jobs for this row only |
+| Stopped | row halted (`status: stopped`) with **N = 0** | search stopped before any exact explanation was held | optional diagnostic modal |
+| Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 
 The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event is admitted to the held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
 
@@ -372,11 +375,38 @@ Keep the Core solver as an internal component. The Core `scores` analytic should
 }
 ```
 
-The BFF fetches inference **per scoreboard row** (`GET .../scores/inference?playerId=...`). The initial batch JSON response returns only after top-K enumeration or the per-row time budget.
+The BFF fetches inference **per scoreboard row**. Two wire paths:
 
-**Planned (Phase 1H, #71):** NDJSON stream per row (`solution`, optional `progress`, terminal `complete` / `error`), following the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries one newly admitted exact explanation plus **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and maintains **inference merged top-K** ordering. The hourglass clears when the first `solution` is admitted (`N = 1`); the count badge and modal grow while search continues. Keep the batch JSON path for the inference corpus harness until the stream is proven.
+| Path | Consumer | Completion |
+|------|----------|------------|
+| **Batch JSON** | Inference corpus harness, CI | Returns after top-K enumeration or per-case `time_limit_seconds` (default 20s) |
+| **NDJSON stream** | SPA (#71) | Open-ended until ladder finishes, user halt, or stream cancel |
 
-**#77 batch path (before #71):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
+**Batch (current):** `GET .../scores/inference?playerId=...` returns one JSON payload when the row solve completes or hits the time budget.
+
+**Stream (Phase 1H, #71):** same route (or sibling stream route) returns NDJSON per row -- **one connection per scoreboard row**, parallel row requests unchanged. Events: `solution`, optional `progress`, terminal `complete` / `error`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries one newly admitted exact explanation plus **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and maintains **inference merged top-K** ordering. The hourglass clears when the first `solution` is admitted (`N = 1`); the count badge and modal grow while search continues.
+
+**SPA time budget:** none. A row runs until the ladder completes, the user halts that row, or the stream is cancelled (game / turn / **perspective** change, disable build inference, client disconnect). Terminal halt: `complete` with `status: stopped`, `isComplete: true`, held top-K preserved.
+
+**#77 batch path (before #71 stream UI):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
+
+### 7.5 Inference row scheduler (#71)
+
+Process-wide backend facility (glossary: `CONTEXT.md` **Inference row scheduler**). Fair-schedules **inference search tier** work across concurrent per-row NDJSON streams.
+
+1. When a row stream opens, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state).
+2. Enqueue tier-1 on a shared **FIFO** queue.
+3. Drain with a worker pool (default **4** workers, configurable). Distinct from corpus `--workers` (batch case parallelism).
+4. When a tier job completes, enqueue that row's tier-(n+1) job (seeds, held solutions, signatures). Per-row tier chains are strictly sequential.
+5. Emit `solution` events from merge-admit hooks inside the tier job.
+
+One schedulable job = one full **inference search tier** step (catalog build, exact/band passes, within-tier top-K, merge, seed output).
+
+**Accelerated-start rows:** same per-row stream and scheduler as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
+
+**Cancellation:** each row run has a cancel token. Per-row halt, scope change, disable build inference, and client disconnect drop queued and in-flight tier jobs for that run.
+
+**Inference solve interrupt boundary (v1):** cooperative cancel at sub-step boundaries inside a tier job (top-K iterations, seed attempts, exact vs band passes) plus `StopSearch()` when halt fires mid-`Solve()`. OR-Tools CP-SAT cannot resume internal search state across `Solve()` calls. **Known gap:** a long first-feasible `Solve()` on a huge catalog may block halt until that call returns. **Follow-on:** retry `UNKNOWN` sub-steps until feasible or halt (see `CONTEXT.md` **Inference solve interrupt boundary**).
 
 ---
 
@@ -554,7 +584,7 @@ Tunable constants in YAML; illustrative starting point from design review:
 
 Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
 
-1. Walk policy steps until per-row time budget exhausted or a step adds **no new distinct exact solution signatures** to the merged top-K.
+1. Walk policy steps until a step adds **no new distinct exact solution signatures** to the merged top-K, the row is halted/cancelled (#71 SPA), or the **batch** per-case time budget is exhausted (corpus / batch JSON path only).
 2. Build catalog: policy constraints intersect turn catalog intersect player actives; apply **tier aggregate allowlist** and caps.
 3. **Exact solve first** (military, warship, freighter equalities -- section constraints module).
 4. If INFEASIBLE and `alpha > 0`, **band retry** on military score only: `explained_2x >= observed_2x - alpha`; warship and freighter stay exact.
@@ -578,9 +608,10 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 |---------|-----|
 | At least one **exact** solution from any policy step | **Inference solution count indicator** with **N** = held top-K size; merged top-K across steps |
 | Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
+| Row halted or stream cancelled (#71) | `status: stopped`; stopped cue when **N = 0**; count badge when **N > 0** (partials preserved) |
 | Band near-solution | Never shown directly; seeds next step only |
 
-While search is in flight (#71), **N** rises from 1 toward K as new signatures are admitted, then plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Hourglass until **N > 0**; red cross only after terminal `complete` / batch response with zero held exact.
+While search is in flight (#71), **N** rises from 1 toward K as new signatures are admitted, then plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Hourglass until **N > 0**; red cross only after natural terminal `complete` / batch response with zero held exact. Halt is not failure.
 
 Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that status remains for future deferred-effect modeling (#49).
 
@@ -618,11 +649,11 @@ Use these bounds before building the CP-SAT model:
 - **Count-delta bound:** warship and freighter build actions are bounded by the observed count deltas when losses and trades are out of scope.
 - **Capacity bound:** ship fighters and torpedoes should be capped by plausible loadout capacity where known.
 - **Noisy-action cap:** defense posts, starbase fighters, and generic ammo adjustments should have conservative caps and lower probability weights.
-- **Policy step cap:** stop climbing the inference search tier ladder when a step adds no new exact signatures or the per-player time budget is exhausted (section 8.5.4).
-- **Top-K cap:** default to 20 per player; when combo cardinality exceeds **5000**, interim policy forces `max_solutions=1` so enumeration finishes within the time budget (remove once #71 streams first solution without waiting for full top-K).
-- **Time cap:** default **20 seconds** per player (`DEFAULT_INFERENCE_TIME_LIMIT_SECONDS` in `actions.py`). Row-level requests already isolate slow players; #71 will further decouple first-solution latency from top-K enumeration.
+- **Policy step cap:** stop climbing the inference search tier ladder when a step adds no new exact signatures, the row is halted (#71 SPA), or the **batch** per-case time budget is exhausted (section 8.5.4).
+- **Top-K cap:** default to 20 per player; when combo cardinality exceeds **5000**, interim policy forces `max_solutions=1` on the batch path so enumeration finishes within the time budget (revisit after #71 streaming + halt ship; may no longer be needed).
+- **Time cap (batch / corpus only):** default **20 seconds** per case (`DEFAULT_INFERENCE_TIME_LIMIT_SECONDS` in `actions.py`) on the batch JSON path. **SPA NDJSON streams have no row time budget** -- user halt and scope cancel end the row. Corpus orchestration may additionally cap whole probe runs (`--probe-time-limit-seconds`).
 
-Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving (#52) and solution streaming (#71) are the primary mitigations. Column generation remains a later option if tier search is still too slow.
+Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving (#77 YAML ladder), per-row streaming (#71), and the **inference row scheduler** (cross-row tier-1 interleaving) are the primary SPA mitigations. Column generation remains a later option if tier search is still too slow.
 
 ---
 
@@ -857,35 +888,47 @@ The **Issue_77** branch may bundle tier policy, accelerated-start inference, cor
 
 **Review recommendation:** approve **A + B** as one unit (backend tier policy plus accelerated-start solve dispatch). **C** and **D** can ship with the branch or split into follow-on PRs under epic **#39** (corpus harness **#62--#66**, frontend diagnostic polish) without blocking **#77** merge once **A** (and typically **B**) pass.
 
-### Phase 1H: Per-row solution streaming (NDJSON)
+### Phase 1H: Per-row solution streaming, scheduler, and halt (NDJSON)
 
-Goal: expose exact explanations **within each scoreboard row** as they are admitted to **inference merged top-K**, so the UI is not blocked on full top-K enumeration or full policy-ladder completion.
+Goal: expose exact explanations **within each scoreboard row** as they are admitted to **inference merged top-K**, interleave tier work fairly across rows, and let the user halt open-ended searches.
 
 GitHub: **#71**. Depends on **#77** ladder merge semantics (section 8.5.4): cross-tier accumulation, signature dedup, K-best eviction.
 
 Files:
 
+- `packages/api/api/analytics/military_score_inference/inference_scheduler.py` (or equivalent: FIFO tier jobs, worker pool, per-row cancel),
 - `packages/api/api/analytics/military_score_inference/policy_ladder.py` (emit hook on merge admit),
-- `packages/api/api/analytics/military_score_inference/solver.py` (yield/callback per within-tier solution),
+- `packages/api/api/analytics/military_score_inference/solver.py` (callback per within-tier solution; sub-step cancel checks),
 - Core + BFF inference routes (NDJSON stream alongside existing batch JSON),
-- `packages/frontend/src/api/` (Zod schemas + parser for stream events),
-- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, count badge, partial modal),
+- `packages/frontend/src/api/` (Zod schemas + parser for stream events, including `stopped`),
+- `packages/frontend/src/analytics/scores/useScoresInferenceByRow.ts` (consume stream, count badge, halt, partial modal),
 - tests at API, BFF, and frontend layers.
 
 Steps:
 
-1. Define NDJSON event types: `solution`, optional `progress`, terminal `complete` / `error`.
-2. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K (within-tier enumeration and cross-tier ladder progress). Payload includes full explanation rows plus **inference solution rank weight**. Do not re-emit suppressed re-discoveries.
-3. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
-4. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
-5. Update row UI: hourglass until first admitted `solution` (`N = 0`); **inference solution count indicator** with **N** = held top-K size once `N > 0`; subtle in-progress affordance while `!isComplete`; `complete` sets terminal `status` (`exact` when any held row passes final-catalog hard equalities). Abort on game/turn/perspective change.
-6. Retain batch JSON for corpus harness (`infer_military_score_build`) until stream parity is verified; then revisit `max_solutions=1` combo-count fallback.
+1. Define NDJSON event types: `solution`, optional `progress`, terminal `complete` / `error`. `complete.status` includes `exact`, `no_exact_solution`, `stopped`, etc.
+2. Implement **inference row scheduler** (section 7.5): tier-1 enqueued per row at stream open; tier-(n+1) chained per row; shared FIFO; default 4 workers (configurable).
+3. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K. Payload includes full explanation rows plus **inference solution rank weight**. Do not re-emit suppressed re-discoveries.
+4. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
+5. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
+6. **SPA:** no row time budget. Per-row halt control; implicit cancel on game / turn / **perspective** change, disable build inference, disconnect (`AbortSignal`). Halt terminal: `status: stopped`, partial held top-K preserved.
+7. **Batch JSON:** retain for corpus harness with per-case `time_limit_seconds`. Do not remove batch time limits when SPA drops them.
+8. Cooperative cancel at **inference solve interrupt boundaries** (section 7.5). Document follow-on: sub-step retry on `UNKNOWN` if halt responsiveness is insufficient.
+9. Revisit combo-count `max_solutions=1` batch fallback after streaming + halt proven.
+
+**Corpus probe follow-ons** (companion PR or epic follow-on acceptable):
+
+- Per-case time override CLI or manifest field
+- Report/filter mode for `time_limited` outcomes (interrupt-boundary diagnosis)
+- Single-case deep rerun with rich diagnostics when a case times out under a short cap
 
 Done when:
 
 - first admitted solution appears before top-K enumeration and policy-ladder completion on large catalogs,
+- tier-1 jobs for all active rows start without waiting behind another row's deep ladder climb,
 - count badge **N** always matches modal row count (held top-K, not cumulative discoveries above K),
-- partial rows are not misclassified as failure,
+- per-row halt and scope cancel work; partial rows are not misclassified as failure,
+- batch JSON + corpus time limits still work,
 - `make lint` and relevant package tests pass.
 
 ### Phase 2: Integrate with the existing Core scores analytic
@@ -1065,7 +1108,7 @@ Glossary terms: repo root `CONTEXT.md` (**Inference corpus case**, **Inference h
 | **Fixed corpus** | CI (`make test_api`) | `packages/api/tests/fixtures/inference_corpus/manifest.json` plus trimmed RST slices |
 | **Local corpus** | Dev / nightly against downloaded games | `scripts/run_inference_corpus.py --game-id <id>` reading the **file backend** store (default storage root from config, typically `.data`) |
 
-Both modes call the same harness library (`tests.inference_corpus`).
+Both modes call the same harness library (`tests.inference_corpus`). Both use the **batch JSON** inference path only (not the SPA NDJSON stream). Per-case `time_limit_seconds` remains on the batch path after #71; orchestration may cap whole probe runs (`--probe-time-limit-seconds`). See [design-inference-corpus.md](design-inference-corpus.md) section 13.
 
 #### Case discovery (local mode)
 
@@ -1135,12 +1178,14 @@ Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Per-row solution stream
 |------|------------|
 | Too many low-probability exact solutions | optimize by probability first, top-K only, aggregate noisy actions |
 | Ship-build catalog too narrow (INFEASIBLE) | factored combos with tiered widening; jump tiers when `active*` empty |
-| Ship-build catalog too wide (slow solve) | tier caps, per-player time limits, combo-count diagnostics |
+| Ship-build catalog too wide (slow solve) | tier caps, inference row scheduler, streaming + halt (#71), batch/corpus time limits, combo-count diagnostics |
 | Score-equivalent combos hide UI diversity | merge for feasibility only; split labels for top-K when weights differ |
 | Incorrect priority-point model | priority-point equality soft/diagnostic until queue semantics are modeled |
 | False confidence | return multiple explanations and expose ambiguity |
 | Scoreboard regression | keep inference disabled by default and test the existing table contract |
-| Row-level solving blocks the table | per-row requests (shipped); stream solutions within a row (#71) so hourglass clears on first feasible explanation |
+| Row-level solving blocks the table | per-row NDJSON streams (#71); inference row scheduler for cross-row fairness; hourglass clears on first admitted solution |
+| Open-ended SPA search consumes CPU | per-row halt; scope cancel; worker pool cap; batch/corpus stay time-bounded |
+| Halt blocked by long CP-SAT call | sub-step interrupt boundaries; follow-on UNKNOWN retry if needed |
 | Dependency/platform issue | keep solver isolated behind an adapter so a fallback can be added |
 | Hard-to-debug CP-SAT models | emit diagnostics with tier, combo counts, bounds, constraint targets, solver status |
 
@@ -1164,5 +1209,6 @@ The user-facing scoreboard integration should be considered complete when:
 - the Scores tile includes an `Include build inference` checkbox,
 - enabling inference adds an inference column with row-level status,
 - rows with **N > 0** open a modal with ranked held solution details,
+- per-row halt stops in-flight inference and preserves partial held top-K (`status: stopped`),
 - BFF and frontend code never import OR-Tools or encode solver rules directly,
 - `make lint` and the relevant API, BFF, and frontend tests pass.

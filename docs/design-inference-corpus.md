@@ -457,7 +457,27 @@ Print summary counts and optional `--json` array of per-case records (`caseId`, 
 | #77 | Tier policy refactor; refresh fixtures when diagnostics or tier metadata change |
 | #78 | Overlay merge; corpus unchanged until a production caller exists |
 
-**Solver epic ordering:** #62 parallel #50; refresh fixtures after #51; **#77** supersedes #52/#72 (YAML tier policy, slack deferral, band seeding -- see implementation doc section 8.5); re-run corpus after #77 before hardening #65 top-K checks. #66 with #49 when trades modeled. UI per-row NDJSON streaming (#71) does not change corpus Tier 1 -- harness keeps calling batch `infer_military_score_build` until stream parity is proven.
+**Solver epic ordering:** #62 parallel #50; refresh fixtures after #51; **#77** supersedes #52/#72 (YAML tier policy, slack deferral, band seeding -- see implementation doc section 8.5); re-run corpus after #77 before hardening #65 top-K checks. #66 with #49 when trades modeled.
+
+### #71 (SPA streaming) and corpus boundaries
+
+The inference corpus harness is **not** affected by SPA NDJSON streaming or the **inference row scheduler**. It continues to call batch `infer_military_score_build` (batch JSON path).
+
+| Layer | Time budget after #71 |
+|-------|----------------------|
+| SPA per-row streams | None (user halt / scope cancel) |
+| Batch `infer_military_score_build` | Per-case `time_limit_seconds` (default 20s) -- **retained** |
+| `run_inference_corpus.py` orchestration | `--probe-time-limit-seconds` (stop between cases) -- **retained** |
+
+`time_limited` remains a valid expected status for `heavy` cases and for diagnosing slow solves. The SPA dropping row time budgets does not remove batch or probe caps.
+
+**Probe follow-ons (#71 companion or epic follow-on):**
+
+- Per-case time override (`--case-time-limit-seconds` and/or manifest field) for reproducing slow cases
+- Report or filter mode foregrounding `time_limited` outcomes (candidates for **inference solve interrupt boundary** work)
+- Single-case deep rerun with diagnostics (`policy_step_attempts`, `stopped_reason`, combo counts) when a case times out under a short cap
+
+Glossary: `CONTEXT.md` **Inference corpus runner**, **Inference solve interrupt boundary**.
 
 ---
 
@@ -466,3 +486,4 @@ Print summary counts and optional `--json` array of per-case records (`caseId`, 
 - Hybrid CP-SAT coverage probe when mapping says covered but solver returns `no_exact_solution` (section 11.2 parent doc).
 - `--include-adjunct` to run adjunct cases instead of skipping.
 - Combo-aware ground truth after #51 lands.
+- Corpus timeout diagnosis options listed in section 13 (#71 follow-on).
