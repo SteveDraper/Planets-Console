@@ -78,6 +78,11 @@ def put_minimal_turn(storage, game_id: int, perspective: int, turn_number: int) 
     )
 
 
+def mock_planets_load_game_info(planets: MagicMock, info_payload: dict) -> None:
+    """``iter_load_all_turns`` refreshes game info before choosing the bulk-load path."""
+    planets.load_game_info.return_value = info_payload
+
+
 def final_load_all_result(
     load_all: LoadAllTurnsService,
     game_id: int,

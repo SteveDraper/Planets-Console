@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Check, Hourglass, X } from 'lucide-react'
+import { Hourglass, Octagon, Square, X } from 'lucide-react'
 import type { ScoresInferenceRowDetail, ScoresTableWithInferenceData } from '../../api/bff'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import {
+  canHaltInferenceRow,
   canOpenInferenceDetail,
   inferenceAccessibleLabel,
 } from './inferenceStatus'
@@ -13,42 +14,91 @@ import {
 
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
+  onHaltRow?: (playerId: number) => void
 }
 
 function InferenceStatusCell({
   detail,
   onOpenDetail,
+  onHaltRow,
 }: {
   detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
+  onHaltRow?: (playerId: number) => void
 }) {
   const label = inferenceAccessibleLabel(detail)
-  if (detail.displayStatus === 'success') {
+  const playerId = detail.playerId
+  const showHalt = canHaltInferenceRow(detail) && typeof playerId === 'number'
+
+  if (detail.displayStatus === 'success' && detail.solutionCount > 0) {
     const clickable = canOpenInferenceDetail(detail)
     return (
-      <button
-        type="button"
-        title={label}
-        aria-label={label}
-        disabled={!clickable}
-        onClick={clickable ? onOpenDetail : undefined}
-        className="inline-flex items-center justify-center rounded p-1 text-emerald-400 hover:bg-white/10 disabled:cursor-default disabled:opacity-60"
-      >
-        <Check className="h-4 w-4" aria-hidden />
-      </button>
+      <div className="inline-flex items-center gap-1">
+        <button
+          type="button"
+          title={label}
+          aria-label={label}
+          disabled={!clickable}
+          onClick={clickable ? onOpenDetail : undefined}
+          className="inline-flex h-6 min-w-6 items-center justify-center rounded border border-emerald-500/70 px-1.5 text-xs font-medium text-emerald-400 hover:bg-white/10 disabled:cursor-default disabled:opacity-60"
+        >
+          {detail.solutionCount}
+        </button>
+        {showHalt && onHaltRow != null ? (
+          <button
+            type="button"
+            title="Stop build inference for this row"
+            aria-label="Stop build inference for this row"
+            onClick={() => onHaltRow(playerId)}
+            className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
+          >
+            <Square className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        ) : null}
+        {!detail.isComplete ? (
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400/80" aria-hidden />
+        ) : null}
+      </div>
     )
   }
+
   if (detail.displayStatus === 'pending') {
+    return (
+      <div className="inline-flex items-center gap-1">
+        <span
+          title={label}
+          aria-label={label}
+          className="inline-flex items-center justify-center p-1 text-amber-300"
+        >
+          <Hourglass className="h-4 w-4" aria-hidden />
+        </span>
+        {showHalt && onHaltRow != null ? (
+          <button
+            type="button"
+            title="Stop build inference for this row"
+            aria-label="Stop build inference for this row"
+            onClick={() => onHaltRow(playerId)}
+            className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
+          >
+            <Square className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
+  if (detail.displayStatus === 'stopped') {
     return (
       <span
         title={label}
         aria-label={label}
-        className="inline-flex items-center justify-center p-1 text-amber-300"
+        className="inline-flex items-center justify-center p-1 text-slate-400"
       >
-        <Hourglass className="h-4 w-4" aria-hidden />
+        <Octagon className="h-4 w-4" aria-hidden />
       </span>
     )
   }
+
   return (
     <span
       title={label}
@@ -60,7 +110,7 @@ function InferenceStatusCell({
   )
 }
 
-export function ScoresTableView({ data }: ScoresTableViewProps) {
+export function ScoresTableView({ data, onHaltRow }: ScoresTableViewProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
   const inferenceByRow = data.inferenceByRow
   const selectedDetail =
@@ -93,6 +143,7 @@ export function ScoresTableView({ data }: ScoresTableViewProps) {
                         <InferenceStatusCell
                           detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
+                          onHaltRow={onHaltRow}
                         />
                       </td>
                     )

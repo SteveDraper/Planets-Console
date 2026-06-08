@@ -45,11 +45,20 @@ def _format_score_cell(cell: object) -> str:
 def _inference_cell_display_status(inference: dict[str, object]) -> str:
     status = str(inference.get("status", ""))
     solution_count = inference.get("solutionCount", 0)
+    is_complete = inference.get("isComplete", True)
+    has_held_solutions = isinstance(solution_count, int) and solution_count > 0
+
+    if status == "stopped":
+        return "success" if has_held_solutions else "stopped"
     if status == "exact":
         return "success"
-    if status == "time_limited" and isinstance(solution_count, int) and solution_count > 0:
+    if has_held_solutions and not is_complete:
         return "success"
-    if status == "time_limited" and inference.get("isComplete") is False:
+    if status == "time_limited" and has_held_solutions:
+        return "success"
+    if status == "time_limited" and is_complete is False:
+        return "pending"
+    if status == "pending" or (not is_complete and not has_held_solutions):
         return "pending"
     return "failure"
 

@@ -347,7 +347,7 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
     policy_steps = resolve_tier_policies()
     call_step_ids: list[str] = []
 
-    def _solve_side_effect(problem):
+    def _solve_side_effect(problem, **kwargs):
         call_step_ids.append(problem.policy_step_id)
         if problem.policy_step_id == policy_steps[0].id:
             return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
@@ -453,7 +453,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         ),
     )
 
-    def _solve_side_effect(problem):
+    def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
             return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
         if problem.policy_step_id == policy_steps[1].id:
@@ -523,7 +523,7 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
         ),
     )
 
-    def _solve_side_effect(problem):
+    def _solve_side_effect(problem, **kwargs):
         if problem.military_score_alpha > 0:
             return InferenceResult(
                 status=STATUS_TIME_LIMITED,
@@ -578,7 +578,7 @@ def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, 
     policy_steps = resolve_tier_policies()
     early_solution = _ship_build_solution(combo_id="combo_early", objective_value=100)
 
-    def _solve_side_effect(problem):
+    def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
             return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
         if problem.policy_step_id == policy_steps[1].id:
@@ -614,7 +614,7 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
     mid_solution = _ship_build_solution(combo_id="combo_mid", objective_value=50)
     high_solution = _ship_build_solution(combo_id="combo_high", objective_value=100)
 
-    def _solve_side_effect(problem):
+    def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
             return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
         if problem.policy_step_id == policy_steps[1].id:

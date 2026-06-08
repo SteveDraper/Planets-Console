@@ -13,6 +13,7 @@ from api.analytics.military_score_inference.score_arithmetic import (
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
+    STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
 from api.models.game import TurnInfo
@@ -77,6 +78,10 @@ def format_inference_summary(result: InferenceResult) -> str:
         return "No feasible build explanation found"
     if result.status == STATUS_SOLVER_ERROR:
         return "Build inference failed"
+    if result.status == STATUS_STOPPED:
+        if result.solutions:
+            return f"Halted with {len(result.solutions)} held solution(s)"
+        return "Build inference halted"
     if result.status == STATUS_TIME_LIMITED and not result.solutions:
         return "Inference timed out before finding a solution"
     if not result.solutions:

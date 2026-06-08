@@ -236,6 +236,20 @@ class CoreClient:
             )
         )
 
+    def iter_scores_row_inference_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ):
+        yield from self._analytics.iter_scores_row_inference_stream(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
+
 
 _core_client_singleton: CoreClient | None = None
 

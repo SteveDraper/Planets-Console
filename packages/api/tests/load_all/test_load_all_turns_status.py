@@ -11,6 +11,7 @@ from conftest import (
     archive_turn_rst,
     final_load_all_result,
     load_services,
+    mock_planets_load_game_info,
     put_minimal_turn,
 )
 
@@ -87,6 +88,7 @@ def test_load_all_turns_status_expected_perspectives_match_load_for_in_progress(
     assert status.is_game_finished is False
 
     planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
 
     def load_turn_side_effect(**kwargs):
         turn_number = kwargs.get("turn")

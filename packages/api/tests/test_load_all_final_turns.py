@@ -216,6 +216,34 @@ def test_iter_final_turn_load_progress_records_partial_failures() -> None:
     assert get_storage().get("games/628580/3/turns/2") is not None
 
 
+def test_iter_final_turn_load_progress_loads_spectator_when_requested() -> None:
+    turns, credentials = _load_turns()
+    _setup_finished_game(player_count=1)
+    credentials.store_api_key("captain", "api-key-1")
+
+    planets = MagicMock()
+    planets.load_turn.return_value = {"success": True, "rst": _turn_rst(2)}
+
+    result = FinalTurnLoadResult()
+    progress = list(
+        iter_final_turn_load_progress(
+            turns,
+            628580,
+            2,
+            RefreshGameInfoParams(username="captain"),
+            planets,
+            1,
+            result,
+            include_spectator=True,
+        )
+    )
+
+    assert progress[0].message == "Loading final turn for spectator perspective"
+    assert progress[1].message == "Loading final turn for perspective 1"
+    assert result.perspectives_touched == {0, 1}
+    assert get_storage().get("games/628580/0/turns/2") is not None
+
+
 def test_final_turn_progress_uses_one_based_perspective_index() -> None:
     turns, credentials = _load_turns()
     _setup_finished_game(player_count=3, latest_turn=1)

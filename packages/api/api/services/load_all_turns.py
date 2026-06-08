@@ -20,6 +20,8 @@ from api.transport.load_all_turns import (
     LoadAllTurnsStatusResponse,
 )
 
+SPECTATOR_PLAYER_SLOT = 0
+
 
 def expected_perspectives_for_load_all(info: GameInfo, username: str, game_id: int) -> list[int]:
     """1-based perspectives for load-all status and in-progress bulk load.
@@ -88,6 +90,24 @@ class LoadAllTurnsService:
         return True
 
     @staticmethod
+    def _archive_entries_for_spectator(
+        latest_turn: int,
+        grouped: dict[int, list[ArchiveTurnFile]],
+    ) -> list[ArchiveTurnFile]:
+        """Spectator turns from loadall when ``player0-turnT.trn`` entries exist."""
+        if latest_turn < 1:
+            return []
+        required = set(range(1, latest_turn + 1))
+        return sorted(
+            (
+                entry
+                for entry in grouped.get(SPECTATOR_PLAYER_SLOT, [])
+                if entry.turn_number in required
+            ),
+            key=lambda item: item.turn_number,
+        )
+
+    @staticmethod
     def _archive_entries_for_perspective(
         info: GameInfo,
         perspective: int,
@@ -141,6 +161,25 @@ class LoadAllTurnsService:
         perspectives_touched: set[int] = set()
 
         latest_turn = info.game.turn
+        has_spectator_archive = SPECTATOR_PLAYER_SLOT in grouped
+        spectator_entries = self._archive_entries_for_spectator(latest_turn, grouped)
+        if spectator_entries:
+            turn_total = len(spectator_entries)
+            for turn_index, archive_turn in enumerate(spectator_entries, start=1):
+                yield LoadAllProgressUpdate(
+                    phase="import",
+                    perspective=0,
+                    perspective_total=player_count,
+                    turn=turn_index,
+                    turn_total=turn_total,
+                    message=f"Spectator perspective, turn {archive_turn.turn_number}",
+                )
+                if self._turns.store_archive_turn_if_missing(game_id, archive_turn):
+                    turns_written += 1
+                    perspectives_touched.add(SPECTATOR_PLAYER_SLOT)
+                else:
+                    turns_skipped += 1
+
         for perspective_index, perspective in enumerate(range(1, player_count + 1), start=1):
             entries = self._archive_entries_for_perspective(info, perspective, latest_turn, grouped)
             turn_total = max(len(entries), 1)
@@ -168,6 +207,7 @@ class LoadAllTurnsService:
             planets,
             player_count,
             final_turn_result,
+            include_spectator=has_spectator_archive,
         )
         turns_written += final_turn_result.turns_written
         turns_skipped += final_turn_result.turns_skipped
@@ -230,7 +270,9 @@ class LoadAllTurnsService:
                 "Login name is required to load turns from Planets.nu."
             )
         self._credentials.ensure_api_key_for_user(params.username, params.password, planets)
-        info = self._games.get_game_info(game_id)
+        # Use live Planets.nu status so a finished game is not treated as in-progress
+        # when stored info is stale (in-progress bulk load requires player membership).
+        info = self._games.refresh_game_info(game_id, params, planets)
         if GameService.is_game_finished(info):
             yield from self._iter_load_finished_game_from_loadall(game_id, info, params, planets)
         else:

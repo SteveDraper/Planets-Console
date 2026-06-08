@@ -97,7 +97,7 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
-  const inferenceByRow = useScoresInferenceByRow(
+  const { inferenceByRow, haltRow } = useScoresInferenceByRow(
     data,
     analyticScope,
     inferenceEnabled && fetchEnabled
@@ -135,7 +135,7 @@ function TableTile({
   }
   if (!data) return null
   if (isScores && scoresTableWithInference != null) {
-    return <ScoresTableView data={scoresTableWithInference} />
+    return <ScoresTableView data={scoresTableWithInference} onHaltRow={haltRow} />
   }
   return (
     <div className="overflow-auto">

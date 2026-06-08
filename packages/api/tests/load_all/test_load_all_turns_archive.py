@@ -1,5 +1,6 @@
 """Tests for finished-game loadall archive import and archive turn validation."""
 
+import copy
 import json
 from unittest.mock import MagicMock
 
@@ -18,8 +19,101 @@ from conftest import (
     archive_turn_rst,
     final_load_all_result,
     load_services,
+    mock_planets_load_game_info,
     zip_with,
 )
+
+
+def test_load_all_refreshes_stale_in_progress_info_for_finished_path() -> None:
+    """Non-players may bulk-load finished games after live refresh reports status Finished."""
+    storage, credentials, _, _, load_all = load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        stale_payload = json.load(handle)
+        fresh_payload = copy.deepcopy(stale_payload)
+    stale_payload["game"]["status"] = 1
+    stale_payload["game"]["statusname"] = "Running"
+    stale_payload["game"]["turn"] = 1
+    stale_payload["settings"]["turn"] = 1
+    stale_payload["players"] = stale_payload["players"][:2]
+    fresh_payload["game"]["id"] = 673864
+    fresh_payload["game"]["turn"] = 1
+    fresh_payload["settings"]["turn"] = 1
+    fresh_payload["players"] = fresh_payload["players"][:2]
+    stale_payload["game"]["id"] = 673864
+    storage.put("games/673864/info", stale_payload)
+    credentials.store_api_key("outsider", "api-key-1")
+
+    zip_bytes = zip_with(
+        {
+            "player1-turn1.trn": archive_turn_rst(673864, 1),
+            "player2-turn1.trn": archive_turn_rst(673864, 1),
+        }
+    )
+
+    planets = MagicMock()
+    mock_planets_load_game_info(planets, fresh_payload)
+    planets.load_all.return_value = zip_bytes
+
+    result = final_load_all_result(
+        load_all,
+        673864,
+        RefreshGameInfoParams(username="outsider"),
+        planets,
+    )
+
+    planets.load_game_info.assert_called_once_with(673864)
+    assert result.is_game_finished is True
+    assert storage.get("games/673864/1/turns/1") is not None
+    assert storage.get("games/673864/2/turns/1") is not None
+
+
+def test_load_finished_game_imports_spectator_when_archive_includes_player0() -> None:
+    storage, credentials, _, _, load_all = load_services()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        info_payload = json.load(handle)
+    info_payload["game"]["turn"] = 2
+    info_payload["settings"]["turn"] = 2
+    info_payload["players"] = info_payload["players"][:1]
+    storage.put("games/628580/info", info_payload)
+    credentials.store_api_key("captain", "api-key-1")
+
+    zip_bytes = zip_with(
+        {
+            "player0-turn1.trn": archive_turn_rst(628580, 1),
+            "player1-turn1.trn": archive_turn_rst(628580, 1),
+        }
+    )
+
+    with open(ASSETS_DIR / "turn_sample.json") as handle:
+        turn_rst = json.load(handle)
+
+    def load_turn_side_effect(**kwargs):
+        turn_number = kwargs.get("turn")
+        if turn_number is None:
+            turn_number = 2
+        rst = json.loads(json.dumps(turn_rst))
+        rst["settings"]["turn"] = turn_number
+        rst["game"]["id"] = 628580
+        rst["game"]["turn"] = turn_number
+        return {"success": True, "rst": rst}
+
+    planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
+    planets.load_all.return_value = zip_bytes
+    planets.load_turn.side_effect = load_turn_side_effect
+
+    result = final_load_all_result(
+        load_all,
+        628580,
+        RefreshGameInfoParams(username="captain"),
+        planets,
+    )
+
+    assert storage.get("games/628580/0/turns/1") is not None
+    assert storage.get("games/628580/1/turns/1") is not None
+    assert 0 in result.perspectives_touched
+    assert 0 not in (result.final_turn_load_failures or [])
+    assert storage.get("games/628580/0/turns/2") is not None
 
 
 def test_load_finished_game_from_loadall_zip() -> None:
@@ -51,6 +145,7 @@ def test_load_finished_game_from_loadall_zip() -> None:
         return {"success": True, "rst": rst}
 
     planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
     planets.load_all.return_value = zip_bytes
     planets.load_turn.side_effect = load_turn_side_effect
 
@@ -86,6 +181,7 @@ def test_iter_load_all_turns_emits_perspective_first_progress() -> None:
     )
 
     planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
     planets.load_all.return_value = zip_bytes
     planets.load_turn.return_value = {
         "success": True,
@@ -172,6 +268,7 @@ def test_load_finished_game_from_loadall_rejects_invalid_archive_rst() -> None:
     )
 
     planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
     planets.load_all.return_value = zip_bytes
 
     with pytest.raises(ValidationError, match="Loadall archive turn rst"):
@@ -251,6 +348,7 @@ def test_load_finished_game_skips_post_death_archive_turns() -> None:
     )
 
     planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
     planets.load_all.return_value = zip_bytes
 
     result = final_load_all_result(

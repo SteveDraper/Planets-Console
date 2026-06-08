@@ -18,6 +18,10 @@ import {
   type LoadAllStreamEvent,
   type LoadAllTurnsResponse,
 } from './parseLoadAllStreamEvent'
+import {
+  parseInferenceStreamEvent,
+  type InferenceStreamEvent,
+} from './parseInferenceStreamEvent'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
 
@@ -241,15 +245,28 @@ export type ScoresInferenceMilitaryScoreArithmetic = {
   lineItems: ScoresInferenceMilitaryScoreLineItem[]
 }
 
+export type ScoresInferenceSolutionShipBuild = {
+  comboId: string
+  label: string
+  count: number
+  hullId?: number
+  engineId?: number
+  beamId?: number
+  torpId?: number
+  beamCount?: number
+  launcherCount?: number
+}
+
 export type ScoresInferenceSolution = {
   objectiveValue: number
   actions: ScoresInferenceSolutionAction[]
+  shipBuilds?: ScoresInferenceSolutionShipBuild[]
   militaryScoreArithmetic?: ScoresInferenceMilitaryScoreArithmetic
 }
 
 export type ScoresInferenceRowDetail = {
   playerId?: number
-  displayStatus: 'success' | 'pending' | 'failure'
+  displayStatus: 'success' | 'pending' | 'failure' | 'stopped'
   status: string
   summary: string
   solutionCount: number
@@ -639,6 +656,45 @@ export async function fetchScoresRowInference(
   }
   return r.json()
 }
+
+export type { InferenceStreamEvent }
+
+const HELD_INFERENCE_TOP_K = 20
+
+export async function fetchScoresRowInferenceStream(
+  scope: AnalyticShellScope,
+  playerId: number,
+  handlers: {
+    signal?: AbortSignal
+    onEvent: (event: InferenceStreamEvent) => void
+  }
+): Promise<void> {
+  const path = '/bff/analytics/scores/inference/stream'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(
+    `${path}${qs}`,
+    { signal: handlers.signal, cache: 'no-store' },
+    endpointLabel
+  )
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  if (!r.body) {
+    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
+  }
+
+  await readNdjsonStream(r.body, (line) => {
+    const event = parseInferenceStreamEvent(line)
+    if (event) {
+      handlers.onEvent(event)
+    }
+  })
+}
+
+export { HELD_INFERENCE_TOP_K }
 
 export async function fetchAnalyticMap(
   analyticId: string,

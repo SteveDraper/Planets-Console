@@ -67,3 +67,30 @@ class TurnAnalyticService:
             player_id,
             load_scoreboard_turn=load_scoreboard_turn,
         )
+
+    def iter_scores_row_inference_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ):
+        from api.analytics.scores import iter_scores_row_inference_stream
+
+        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+
+        def load_scoreboard_turn(stored_turn_number: int):
+            try:
+                return self._turns.get_turn_info(
+                    game_id,
+                    perspective,
+                    stored_turn_number,
+                )
+            except OSError, ValueError, KeyError, NotFoundError:
+                return None
+
+        return iter_scores_row_inference_stream(
+            turn,
+            player_id,
+            load_scoreboard_turn=load_scoreboard_turn,
+        )

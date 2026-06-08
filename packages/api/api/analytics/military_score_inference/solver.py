@@ -3,10 +3,15 @@
 import os
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from itertools import product
+from typing import TYPE_CHECKING
 
 from ortools.sat.python import cp_model
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 
 from api.analytics.military_score_inference.constraints import InferenceHardConstraints
 from api.analytics.military_score_inference.models import (
@@ -22,6 +27,7 @@ from api.analytics.military_score_inference.models import (
 STATUS_EXACT = "exact"
 STATUS_INVALID_PROBLEM = "invalid_problem"
 STATUS_NO_EXACT_SOLUTION = "no_exact_solution"
+STATUS_STOPPED = "stopped"
 STATUS_TIME_LIMITED = "time_limited"
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
@@ -397,7 +403,22 @@ def solution_signature(solution: InferenceSolution) -> tuple[tuple[str, int], ..
     return tuple(sorted(action_counts) + sorted(combo_counts))
 
 
-def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
+class _StopSearchOnCancel(cp_model.CpSolverSolutionCallback):
+    def __init__(self, cancel_token: InferenceCancelToken) -> None:
+        super().__init__()
+        self._cancel_token = cancel_token
+
+    def on_solution_callback(self) -> None:
+        if self._cancel_token.is_cancelled():
+            self.StopSearch()
+
+
+def solve_inference_problem(
+    problem: InferenceProblem,
+    *,
+    on_solution: Callable[[InferenceSolution], None] | None = None,
+    cancel_token: InferenceCancelToken | None = None,
+) -> InferenceResult:
     """Return up to max_solutions ranked feasible explanations for one player turn."""
     validation_error = _validate_problem(problem)
     if validation_error is not None:
@@ -436,6 +457,10 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
     top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
 
     while len(solutions) < problem.max_solutions:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            stopped_reason = "cancelled"
+            break
+
         elapsed_seconds = time.monotonic() - started_at
         remaining_seconds = problem.time_limit_seconds - elapsed_seconds
         if remaining_seconds <= 0:
@@ -447,7 +472,15 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
         num_search_workers = _configured_num_search_workers(len(problem.ship_build_combos))
         if num_search_workers is not None:
             solver.parameters.num_search_workers = num_search_workers
-        last_solver_status = solver.solve(model)
+        if cancel_token is not None:
+            callback = _StopSearchOnCancel(cancel_token)
+            last_solver_status = solver.solve(model, callback)
+        else:
+            last_solver_status = solver.solve(model)
+
+        if cancel_token is not None and cancel_token.is_cancelled():
+            stopped_reason = "cancelled"
+            break
         if last_solver_status not in _SUCCESS_STATUSES:
             if last_solver_status == cp_model.UNKNOWN and solutions:
                 time_limited = True
@@ -487,6 +520,8 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
             solutions.append(solution)
             top_solution_bucket_counts = bucket_counts
             added_solution = True
+            if on_solution is not None:
+                on_solution(solution)
 
         if stopped_reason == "max_solutions":
             break
@@ -521,10 +556,14 @@ def solve_inference_problem(problem: InferenceProblem) -> InferenceResult:
     if top_solution_bucket_counts:
         diagnostics["bucket_counts_by_action_id"] = top_solution_bucket_counts
 
-    if not solutions:
-        status = STATUS_TIME_LIMITED if time_limited else STATUS_NO_EXACT_SOLUTION
-        return InferenceResult(status=status, solutions=(), diagnostics=diagnostics)
+    if solutions:
+        solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
 
-    solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
-    status = STATUS_TIME_LIMITED if time_limited else STATUS_EXACT
+    if stopped_reason == "cancelled":
+        status = STATUS_STOPPED
+    elif not solutions:
+        status = STATUS_TIME_LIMITED if time_limited else STATUS_NO_EXACT_SOLUTION
+    else:
+        status = STATUS_TIME_LIMITED if time_limited else STATUS_EXACT
+
     return InferenceResult(status=status, solutions=tuple(solutions), diagnostics=diagnostics)

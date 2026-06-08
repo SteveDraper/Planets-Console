@@ -37,6 +37,17 @@ def test_parse_load_all_zip_rejects_empty_archive() -> None:
         parse_load_all_zip(payload)
 
 
+def test_parse_load_all_zip_accepts_spectator_slot_zero() -> None:
+    payload = _zip_with(
+        {
+            "player0-turn1.trn": {"settings": {"turn": 1}, "game": {"id": 1, "turn": 1}},
+            "player1-turn1.trn": {"settings": {"turn": 1}, "game": {"id": 1, "turn": 1}},
+        }
+    )
+    parsed = parse_load_all_zip(payload)
+    assert {(entry.player_slot, entry.turn_number) for entry in parsed} == {(0, 1), (1, 1)}
+
+
 def test_parse_load_all_zip_rejects_invalid_json() -> None:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as archive:
