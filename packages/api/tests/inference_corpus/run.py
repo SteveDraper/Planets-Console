@@ -35,6 +35,7 @@ from tests.inference_corpus.complexity import (
 )
 from tests.inference_corpus.fixtures import (
     assert_required_perspectives_present,
+    load_manifest_ground_truth_turn_snapshots,
     load_turn_fixture,
 )
 from tests.inference_corpus.ground_truth import extract_ground_truth_v1
@@ -47,7 +48,10 @@ from tests.inference_corpus.models import (
     DiscoveredCase,
     ManifestCase,
 )
-from tests.inference_corpus.storage_loader import resolve_player_id_for_case
+from tests.inference_corpus.storage_loader import (
+    load_ground_truth_turn_snapshots,
+    resolve_player_id_for_case,
+)
 from tests.inference_corpus.verify import verify_top_solution_hard_equalities
 
 DEFAULT_MAX_COMPLEXITY: ComplexityLevel = "heavy"
@@ -151,6 +155,12 @@ def run_manifest_case(
             skip_reason=skip_reason,
         )
 
+    gt_prior_turn, gt_score_turn = load_manifest_ground_truth_turn_snapshots(
+        case,
+        player_id,
+        fixtures_root=fixtures_root,
+    )
+
     return run_loaded_case(
         LoadedCorpusCase(
             case_id=case.id,
@@ -162,7 +172,9 @@ def run_manifest_case(
             complexity_reasons=complexity_reasons,
             expected_status=case.expected_status,
             expect_coverage=case.expect_coverage,
-        )
+        ),
+        ground_truth_prior_turn=gt_prior_turn,
+        ground_truth_score_turn=gt_score_turn,
     )
 
 
@@ -233,6 +245,15 @@ def run_discovered_case(
         except OSError, ValueError, KeyError:
             return None
 
+    game_info = game_service.get_game_info(case.game_id)
+    gt_prior_turn, gt_score_turn = load_ground_truth_turn_snapshots(
+        turn_load,
+        game_info,
+        case.game_id,
+        player_id,
+        case.host_turn,
+    )
+
     return run_loaded_case(
         LoadedCorpusCase(
             case_id=case.id,
@@ -246,18 +267,22 @@ def run_discovered_case(
             expect_coverage=expect_coverage,
         ),
         load_scoreboard_turn=load_scoreboard_turn,
+        ground_truth_prior_turn=gt_prior_turn,
+        ground_truth_score_turn=gt_score_turn,
     )
 
 
 def run_loaded_case(
     loaded: LoadedCorpusCase,
     *,
+    ground_truth_prior_turn: TurnInfo,
+    ground_truth_score_turn: TurnInfo,
     load_scoreboard_turn=None,
 ) -> CorpusCaseResult:
     """Ground truth, coverage, and Tier 1 on one observation and catalog build."""
     extraction = extract_ground_truth_v1(
-        prior_turn=loaded.prior_turn,
-        score_turn=loaded.score_turn,
+        prior_turn=ground_truth_prior_turn,
+        score_turn=ground_truth_score_turn,
         player_id=loaded.player_id,
         score=loaded.score,
         complexity=loaded.complexity,

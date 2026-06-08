@@ -250,6 +250,128 @@ class CoreClient:
             player_id,
         )
 
+    def iter_scores_table_inference_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+    ):
+        yield from self._analytics.iter_scores_table_inference_stream(
+            game_id,
+            perspective,
+            turn_number,
+            player_ids,
+        )
+
+    def stop_scores_row_inference(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.stop_scores_row_inference(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+        )
+
+    def get_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.get_inference_hull_catalog_mask(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+        )
+
+    def put_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        enabled_hull_ids: list[int],
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.put_inference_hull_catalog_mask(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+                enabled_hull_ids,
+            )
+        )
+
+    def reset_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.reset_inference_hull_catalog_mask(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+        )
+
+    def get_inference_global_pause_status(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.get_inference_global_pause_status(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
+    def pause_inference_globally(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.pause_inference_globally(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
+    def resume_inference_globally(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.resume_inference_globally(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
 
 _core_client_singleton: CoreClient | None = None
 

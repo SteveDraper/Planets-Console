@@ -29,6 +29,7 @@ from api.transport.connections_options import (
     FlareConnectionMode,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_row
 from api.transport.load_all_turns import (
     LoadAllTurnsRequest,
@@ -147,6 +148,152 @@ def get_scores_row_inference_stream(
             )
         ),
         media_type="application/x-ndjson",
+    )
+
+
+@router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/table-stream")
+def get_scores_table_inference_stream(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_ids: str = Query(
+        ...,
+        alias="playerIds",
+        description="Comma-separated scoreboard player ids",
+    ),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> StreamingResponse:
+    """Stream military score build inference for all scoreboard rows (NDJSON)."""
+    parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
+    return StreamingResponse(
+        stream_inference_row(
+            lambda: analytics.iter_scores_table_inference_stream(
+                game_id,
+                perspective,
+                turn_number,
+                parsed_player_ids,
+            )
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@router.post("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/stop")
+def post_scores_row_inference_stop(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Halt build inference for one scoreboard row without closing the table stream."""
+    return analytics.stop_scores_row_inference(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+    )
+
+
+@router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog")
+def get_inference_hull_catalog_mask(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Return master hull catalog and effective mask for one inference target player."""
+    return analytics.get_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+    )
+
+
+@router.put("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog")
+def put_inference_hull_catalog_mask(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    body: InferenceHullCatalogMaskUpdateRequest,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Persist a user hull catalog mask override for one inference target player."""
+    return analytics.put_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        body.enabled_hull_ids,
+    )
+
+
+@router.delete(
+    "/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog"
+)
+def delete_inference_hull_catalog_mask(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Clear a user hull catalog mask override, restoring game-type defaults."""
+    return analytics.reset_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+    )
+
+
+@router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/global-pause")
+def get_inference_global_pause_status(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Return whether scoreboard inference is globally paused for this turn scope."""
+    return analytics.get_inference_global_pause_status(
+        game_id,
+        perspective,
+        turn_number,
+    )
+
+
+@router.post("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/global-pause")
+def post_inference_global_pause(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Pause all scoreboard inference tier jobs for this turn scope, retaining ladder state."""
+    return analytics.pause_inference_globally(
+        game_id,
+        perspective,
+        turn_number,
+    )
+
+
+@router.delete(
+    "/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/global-pause"
+)
+def delete_inference_global_pause(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Resume globally paused scoreboard inference for this turn scope."""
+    return analytics.resume_inference_globally(
+        game_id,
+        perspective,
+        turn_number,
     )
 
 

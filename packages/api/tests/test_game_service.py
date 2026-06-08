@@ -105,6 +105,16 @@ class TestGetGameInfo:
         assert isinstance(pid, int)
         assert pid == gi.players[0].id
 
+    def test_perspective_for_player_id(self, service):
+        gi = service.get_game_info(628580)
+        player_id = gi.players[0].id
+        assert GameService.perspective_for_player_id(gi, player_id, 628580) == 1
+
+    def test_perspective_for_player_id_unknown_raises(self, service):
+        gi = service.get_game_info(628580)
+        with pytest.raises(ValidationError, match="not in game"):
+            GameService.perspective_for_player_id(gi, 999999, 628580)
+
     def test_player_id_for_pseudo_perspective_zero(self, service):
         gi = service.get_game_info(628580)
         assert GameService.player_id_for_perspective(gi, 0, 628580) == 0

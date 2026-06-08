@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
+from api.analytics.military_score_inference.accelerated_start import scoreboard_host_turn
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -203,7 +204,9 @@ def observation_to_constraints_payload(
     constraints = hard_constraints or InferenceHardConstraints()
     payload: dict[str, object] = {
         "turn": observation.turn,
+        "hostTurn": scoreboard_host_turn(observation.turn),
         "playerId": observation.player_id,
+        "scoreboardDeltaSource": observation.scoreboard_delta_source,
         "militaryDelta2x": observation.military_delta_2x,
         "militaryPartitionSlack2x": observation.military_partition_slack_2x,
         "warshipDelta": observation.warship_delta,

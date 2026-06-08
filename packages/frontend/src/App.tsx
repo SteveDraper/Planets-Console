@@ -27,6 +27,7 @@ import { useShellContext, useShellGameSelection } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
+import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -230,6 +231,16 @@ function ConsoleShell() {
     () => analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
     [analytics, enabledIds]
   )
+  const globalInferencePauseEnabled =
+    viewMode === 'tabular' &&
+    enabledIds.has('scores') &&
+    scoresTableParams.includeBuildInference &&
+    turnDataReady &&
+    analyticScope != null
+  const globalInferencePause = useGlobalInferencePause(
+    analyticScope,
+    globalInferencePauseEnabled
+  )
   const handleMapZoomChange = useCallback((z: number) => {
     setMapZoom(clampMapZoom(z))
   }, [])
@@ -299,6 +310,7 @@ function ConsoleShell() {
             turnBlockedNoLogin={turnBlockedNoLogin}
             connectionsMapParams={connectionsMapParams}
             scoresTableParams={scoresTableParams}
+            globalInferencePause={globalInferencePause}
             futureTurnOffset={futureTurnOffset}
             onMapZoomChange={handleMapZoomChange}
             onSetZoomReady={handleSetZoomReady}

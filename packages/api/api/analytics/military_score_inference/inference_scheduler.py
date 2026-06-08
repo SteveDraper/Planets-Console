@@ -1,4 +1,4 @@
-"""Process-wide FIFO scheduler for inference search tier jobs."""
+"""Process-wide scheduler for inference search tier jobs."""
 
 from __future__ import annotations
 
@@ -6,15 +6,18 @@ import os
 import queue
 import threading
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     _inference_api_payload,
     _serialize_solution_with_arithmetic,
     inference_result_to_api_payload,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceResult,
@@ -30,11 +33,13 @@ from api.analytics.military_score_inference.tier_policy import resolve_tier_poli
 from api.models.game import TurnInfo
 from api.transport.inference_stream import (
     inference_complete_event,
+    inference_global_pause_event,
     inference_progress_event,
     inference_solution_event,
 )
 
 _DEFAULT_WORKER_COUNT = 4
+_DEQUEUE_WAIT_SECONDS = 0.25
 
 
 def _configured_worker_count() -> int:
@@ -51,16 +56,29 @@ class InferenceRowStreamSession:
     player_id: int
     observation: InferenceObservation
     turn: TurnInfo
+    game_id: int
+    perspective: int
+    turn_number: int
+    resolved_mask: ResolvedHullCatalogMask | None = None
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[dict[str, object]] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     ladder_state: PolicyLadderState | None = None
     on_finalize: Callable[[dict[str, object]], None] | None = None
 
+    @property
+    def stream_scope(self) -> InferenceStreamScope:
+        return InferenceStreamScope(
+            game_id=self.game_id,
+            perspective=self.perspective,
+            turn_number=self.turn_number,
+        )
+
 
 @dataclass(frozen=True)
 class _TierJob:
     session: InferenceRowStreamSession
+    is_continuation: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,42 +88,151 @@ class _FullRowJob:
 
 
 _Sentinel = object()
+_Job = _TierJob | _FullRowJob | object
+
+
+def _scope_player_key(
+    scope: InferenceStreamScope,
+    player_id: int,
+) -> tuple[int, int, int, int]:
+    return (scope.game_id, scope.perspective, scope.turn_number, player_id)
 
 
 class InferenceRowScheduler:
-    """FIFO tier-job queue drained by a shared worker pool."""
+    """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
 
     def __init__(self, worker_count: int = _DEFAULT_WORKER_COUNT) -> None:
-        self._queue: queue.Queue[_TierJob | _FullRowJob | object] = queue.Queue()
+        self._tier_one_queue: queue.Queue[_TierJob | _FullRowJob] = queue.Queue()
+        self._continuation_by_run: dict[str, deque[_TierJob]] = {}
+        self._continuation_round_robin: deque[str] = deque()
         self._sessions: dict[str, InferenceRowStreamSession] = {}
+        self._sessions_by_scope_player: dict[
+            tuple[int, int, int, int], InferenceRowStreamSession
+        ] = {}
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._worker_count = worker_count
         self._workers: list[threading.Thread] = []
         self._shutdown = False
+        self._active_scope: InferenceStreamScope | None = None
+        self._globally_paused = False
+        self._held_jobs: list[_TierJob | _FullRowJob] = []
+        self._held_continuations: dict[str, InferenceRowStreamSession] = {}
         for _ in range(worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
             thread.start()
             self._workers.append(thread)
 
+    def begin_scope(self, scope: InferenceStreamScope) -> None:
+        with self._condition:
+            if self._active_scope != scope:
+                self._invalidate_retained_state_locked()
+                self._active_scope = scope
+
+    def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
+        scope_matches = self._active_scope == scope
+        return {
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "turn": scope.turn_number,
+            "paused": self._globally_paused and scope_matches,
+            "activeScope": (
+                {
+                    "gameId": self._active_scope.game_id,
+                    "perspective": self._active_scope.perspective,
+                    "turn": self._active_scope.turn_number,
+                }
+                if self._active_scope is not None
+                else None
+            ),
+            "heldJobCount": len(self._held_jobs) if scope_matches else 0,
+            "heldContinuationCount": len(self._held_continuations) if scope_matches else 0,
+            "activeSessionCount": len(self._sessions) if scope_matches else 0,
+        }
+
+    def global_pause_status(self, scope: InferenceStreamScope) -> dict[str, object]:
+        with self._condition:
+            return self._global_pause_status_locked(scope)
+
+    def pause_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
+        with self._condition:
+            if self._active_scope is not None and self._active_scope != scope:
+                self._invalidate_retained_state_locked()
+            self._active_scope = scope
+            if self._globally_paused:
+                return self._global_pause_status_locked(scope)
+            self._globally_paused = True
+            self._drain_queue_locked()
+            self._broadcast_global_pause_locked(paused=True)
+            self._condition.notify_all()
+            return self._global_pause_status_locked(scope)
+
+    def resume_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
+        with self._condition:
+            if self._active_scope != scope:
+                return self._global_pause_status_locked(scope)
+            if not self._globally_paused:
+                return self._global_pause_status_locked(scope)
+            self._globally_paused = False
+            for job in self._held_jobs:
+                self._requeue_job_locked(job)
+            self._held_jobs.clear()
+            for session in self._held_continuations.values():
+                if not session.cancel_token.is_cancelled():
+                    self._enqueue_continuation_locked(session)
+            self._held_continuations.clear()
+            self._broadcast_global_pause_locked(paused=False)
+            self._condition.notify_all()
+            return self._global_pause_status_locked(scope)
+
+    def preserve_session_on_stream_end(self, session: InferenceRowStreamSession) -> bool:
+        with self._condition:
+            return (
+                self._globally_paused
+                and session.run_id in self._sessions
+                and not session.cancel_token.is_cancelled()
+            )
+
     def register_session(self, session: InferenceRowStreamSession) -> None:
-        with self._lock:
+        with self._condition:
             self._sessions[session.run_id] = session
+            scope_player_key = _scope_player_key(session.stream_scope, session.player_id)
+            self._sessions_by_scope_player[scope_player_key] = session
 
     def unregister_session(self, run_id: str) -> None:
-        with self._lock:
-            self._sessions.pop(run_id, None)
+        with self._condition:
+            session = self._sessions.pop(run_id, None)
+            self._held_continuations.pop(run_id, None)
+            if session is not None:
+                self._sessions_by_scope_player.pop(
+                    _scope_player_key(session.stream_scope, session.player_id),
+                    None,
+                )
+
+    def cancel_player(self, scope: InferenceStreamScope, player_id: int) -> bool:
+        with self._condition:
+            session = self._sessions_by_scope_player.get(_scope_player_key(scope, player_id))
+        if session is None:
+            return False
+        self.cancel_run(session.run_id)
+        return True
 
     def cancel_run(self, run_id: str) -> None:
-        with self._lock:
+        with self._condition:
             session = self._sessions.get(run_id)
         if session is not None:
             session.cancel_token.cancel()
+            with self._condition:
+                self._held_continuations.pop(run_id, None)
 
     def enqueue_tier_ladder(self, session: InferenceRowStreamSession) -> None:
         policy_steps = tuple(resolve_tier_policies(None))
-        session.ladder_state = PolicyLadderState(policy_steps=policy_steps)
+        session.ladder_state = PolicyLadderState(
+            policy_steps=policy_steps,
+            resolved_mask=session.resolved_mask,
+        )
         self.register_session(session)
-        self._queue.put(_TierJob(session=session))
+        self._enqueue_job(_TierJob(session=session))
 
     def enqueue_full_row(
         self,
@@ -113,11 +240,119 @@ class InferenceRowScheduler:
         run_inference: Callable[[InferenceRowStreamSession], dict[str, object]],
     ) -> None:
         self.register_session(session)
-        self._queue.put(_FullRowJob(session=session, run_inference=run_inference))
+        self._enqueue_job(_FullRowJob(session=session, run_inference=run_inference))
+
+    def _enqueue_job(self, job: _TierJob | _FullRowJob) -> None:
+        with self._condition:
+            if self._globally_paused:
+                self._held_jobs.append(job)
+            else:
+                self._tier_one_queue.put(job)
+            self._condition.notify_all()
+
+    def _enqueue_continuation(self, session: InferenceRowStreamSession) -> None:
+        with self._condition:
+            if self._globally_paused:
+                self._held_continuations[session.run_id] = session
+            else:
+                self._enqueue_continuation_locked(session)
+            self._condition.notify_all()
+
+    def _enqueue_continuation_locked(self, session: InferenceRowStreamSession) -> None:
+        job = _TierJob(session=session, is_continuation=True)
+        run_id = session.run_id
+        row_queue = self._continuation_by_run.setdefault(run_id, deque())
+        if not row_queue:
+            self._continuation_round_robin.append(run_id)
+        row_queue.append(job)
+
+    def _requeue_job_locked(self, job: _TierJob | _FullRowJob) -> None:
+        if isinstance(job, _TierJob) and job.is_continuation:
+            self._enqueue_continuation_locked(job.session)
+            return
+        self._tier_one_queue.put(job)
+
+    def _dequeue_next_job_locked(self) -> _TierJob | _FullRowJob | None:
+        try:
+            return self._tier_one_queue.get_nowait()
+        except queue.Empty:
+            pass
+        return self._dequeue_continuation_locked()
+
+    def _dequeue_continuation_locked(self) -> _TierJob | None:
+        while self._continuation_round_robin:
+            run_id = self._continuation_round_robin.popleft()
+            row_queue = self._continuation_by_run.get(run_id)
+            if row_queue is None or not row_queue:
+                self._continuation_by_run.pop(run_id, None)
+                continue
+            job = row_queue.popleft()
+            if row_queue:
+                self._continuation_round_robin.append(run_id)
+            else:
+                self._continuation_by_run.pop(run_id, None)
+            return job
+        return None
+
+    def _drain_queue_locked(self) -> None:
+        while True:
+            try:
+                job = self._tier_one_queue.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(job, (_TierJob, _FullRowJob)):
+                self._held_jobs.append(job)
+        for run_id in list(self._continuation_by_run):
+            row_queue = self._continuation_by_run.pop(run_id, None)
+            if row_queue is None:
+                continue
+            while row_queue:
+                self._held_jobs.append(row_queue.popleft())
+        self._continuation_round_robin.clear()
+
+    def _invalidate_retained_state_locked(self) -> None:
+        self._globally_paused = False
+        for session in list(self._sessions.values()):
+            session.cancel_token.cancel()
+        self._sessions.clear()
+        self._sessions_by_scope_player.clear()
+        self._held_jobs.clear()
+        self._held_continuations.clear()
+        while True:
+            try:
+                job = self._tier_one_queue.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(job, (_TierJob, _FullRowJob)):
+                job.session.cancel_token.cancel()
+        for run_id in list(self._continuation_by_run):
+            row_queue = self._continuation_by_run.pop(run_id, None)
+            if row_queue is None:
+                continue
+            while row_queue:
+                row_queue.popleft().session.cancel_token.cancel()
+        self._continuation_round_robin.clear()
+
+    def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
+        event = inference_global_pause_event(paused=paused)
+        for session in self._sessions.values():
+            session.event_queue.put(event)
+
+    def _take_next_job(self) -> _Job | None:
+        with self._condition:
+            while not self._shutdown:
+                if not self._globally_paused:
+                    job = self._dequeue_next_job_locked()
+                    if job is not None:
+                        return job
+                self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
+            return _Sentinel
 
     def _worker_loop(self) -> None:
         while True:
-            job = self._queue.get()
+            job = self._take_next_job()
+            if job is None:
+                continue
             if job is _Sentinel:
                 return
             if isinstance(job, _TierJob):
@@ -147,6 +382,18 @@ class InferenceRowScheduler:
             inference_progress_event(
                 policy_step_id=state.catalog.policy_step_id,
                 combo_count=len(state.catalog.ship_build_combos),
+                held_count=len(state.merged_solutions),
+            )
+        )
+
+    def _emit_tier_started_progress(self, session: InferenceRowStreamSession) -> None:
+        state = session.ladder_state
+        if state is None or state.next_step_index >= len(state.policy_steps):
+            return
+        step = state.policy_steps[state.next_step_index]
+        session.event_queue.put(
+            inference_progress_event(
+                policy_step_id=step.id,
                 held_count=len(state.merged_solutions),
             )
         )
@@ -182,6 +429,7 @@ class InferenceRowScheduler:
         def on_admitted(solution: InferenceSolution) -> None:
             self._emit_solution(session, solution)
 
+        self._emit_tier_started_progress(session)
         run_policy_ladder_tier_step(
             state,
             session.observation,
@@ -197,7 +445,7 @@ class InferenceRowScheduler:
             return
 
         if not state.ladder_complete:
-            self._queue.put(_TierJob(session=session))
+            self._enqueue_continuation(session)
             return
 
         self._finalize_ladder(session)

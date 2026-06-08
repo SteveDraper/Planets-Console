@@ -122,8 +122,8 @@ def test_first_reliable_turn_observation_uses_reported_host_turn_deltas():
     turn = _load_store_turn(3)
     score = next(s for s in turn.scores if s.ownerid == 1)
     assert is_first_reliable_scoreboard_turn(3, turn.settings)
-    military_delta_2x, warship_delta, freighter_delta, _priority = observation_deltas_from_score(
-        score, turn
+    military_delta_2x, warship_delta, freighter_delta, _priority, _source = (
+        observation_deltas_from_score(score, turn)
     )
     assert military_delta_2x == 2 * score.militarychange
     assert warship_delta == score.shipchange
@@ -159,8 +159,8 @@ def test_accelerated_window_residual_matches_cumulative_minus_reported_delta():
 def test_turn4_uses_scoreboard_delta_fields():
     turn = _load_store_turn(4)
     score = next(s for s in turn.scores if s.ownerid == 1)
-    military_delta_2x, warship_delta, freighter_delta, _priority = observation_deltas_from_score(
-        score, turn
+    military_delta_2x, warship_delta, freighter_delta, _priority, _source = (
+        observation_deltas_from_score(score, turn)
     )
     assert military_delta_2x == 2 * score.militarychange
     assert warship_delta == score.shipchange

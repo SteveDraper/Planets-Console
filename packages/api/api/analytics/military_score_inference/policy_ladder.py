@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.component_eligibility import (
     turn_catalog_context_for_policy_step,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -63,6 +64,7 @@ class PolicyLadderState:
     ladder_complete: bool = False
     cancelled: bool = False
     started_at: float = field(default_factory=time.monotonic)
+    resolved_mask: ResolvedHullCatalogMask | None = None
 
 
 def _remaining_time(started_at: float, time_limit_seconds: float | None) -> float:
@@ -321,6 +323,7 @@ def run_policy_ladder_tier_step(
         turn,
         policy_step=policy_step,
         policy_step_index=step_index,
+        resolved_mask=state.resolved_mask,
     )
     state.catalog = catalog
     current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)
@@ -538,6 +541,7 @@ def finalize_policy_ladder_result(
             turn,
             policy_step=first_step,
             policy_step_index=0,
+            resolved_mask=state.resolved_mask,
         )
         problem = build_inference_problem(observation, catalog, max_solutions=max_solutions)
         tier_result = solve_inference_problem(problem)
@@ -605,6 +609,7 @@ def solve_with_policy_ladder(
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[
     InferenceResult,
     ActionCatalog,
@@ -617,6 +622,7 @@ def solve_with_policy_ladder(
     state = PolicyLadderState(
         policy_steps=tuple(resolve_tier_policies(policy_path)),
         resolved_max_solutions=resolved_max_solutions,
+        resolved_mask=resolved_mask,
     )
     while not state.ladder_complete and state.next_step_index < len(state.policy_steps):
         if cancel_token is not None and cancel_token.is_cancelled():

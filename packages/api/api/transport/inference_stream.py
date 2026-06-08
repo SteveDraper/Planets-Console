@@ -64,6 +64,10 @@ def inference_error_event(detail: str) -> dict[str, object]:
     return {"type": "error", "detail": detail}
 
 
+def inference_global_pause_event(*, paused: bool) -> dict[str, object]:
+    return {"type": "globalPause", "paused": paused}
+
+
 InferenceStreamItem: TypeAlias = dict[str, object]
 
 

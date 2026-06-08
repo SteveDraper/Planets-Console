@@ -13,6 +13,7 @@ from api.transport.connections_options import (
     WARP_SPEED_QUERY,
     FlareConnectionMode,
 )
+from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_row
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -195,6 +196,186 @@ def get_analytic_inference_stream(
             )
         ),
         media_type="application/x-ndjson",
+    )
+
+
+@router.get(
+    "/{analytic_id}/inference/table-stream",
+    responses={
+        200: {
+            "description": "NDJSON stream of tagged inference events.",
+            "content": {"application/x-ndjson": {}},
+        }
+    },
+)
+def get_analytic_inference_table_stream(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_ids: str = Query(..., alias="playerIds"),
+):
+    """Stream build inference for all scoreboard rows on one NDJSON connection."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+
+    parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
+    core = get_core_client()
+    return StreamingResponse(
+        stream_inference_row(
+            lambda: core.iter_scores_table_inference_stream(
+                game_id,
+                perspective,
+                turn,
+                parsed_player_ids,
+            )
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@router.post("/{analytic_id}/inference/stop")
+def post_analytic_inference_stop(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Halt build inference for one scoreboard row."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().stop_scores_row_inference(
+        game_id,
+        perspective,
+        turn,
+        player_id,
+    )
+
+
+@router.get("/{analytic_id}/inference/hull-catalog")
+def get_analytic_inference_hull_catalog(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Master hull catalog and effective mask for one Scores inference row."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().get_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn,
+        player_id,
+    )
+
+
+@router.put("/{analytic_id}/inference/hull-catalog")
+def put_analytic_inference_hull_catalog(
+    analytic_id: str,
+    body: InferenceHullCatalogMaskUpdateRequest,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Persist a user hull catalog mask override for one Scores inference row."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().put_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn,
+        player_id,
+        body.enabled_hull_ids,
+    )
+
+
+@router.delete("/{analytic_id}/inference/hull-catalog")
+def delete_analytic_inference_hull_catalog(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+    player_id: int = Query(..., alias="playerId", ge=0),
+):
+    """Clear a user hull catalog mask override for one Scores inference row."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().reset_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn,
+        player_id,
+    )
+
+
+@router.get("/{analytic_id}/inference/global-pause")
+def get_analytic_inference_global_pause(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+):
+    """Whether scoreboard inference is globally paused for this turn scope."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().get_inference_global_pause_status(
+        game_id,
+        perspective,
+        turn,
+    )
+
+
+@router.post("/{analytic_id}/inference/global-pause")
+def post_analytic_inference_global_pause(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+):
+    """Pause all scoreboard inference jobs for this turn scope."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().pause_inference_globally(
+        game_id,
+        perspective,
+        turn,
+    )
+
+
+@router.delete("/{analytic_id}/inference/global-pause")
+def delete_analytic_inference_global_pause(
+    analytic_id: str,
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+):
+    """Resume globally paused scoreboard inference for this turn scope."""
+    if analytic_id != "scores":
+        from bff.errors import NotFoundError
+
+        raise NotFoundError(f"Unknown analytic: {analytic_id}")
+    return get_core_client().resume_inference_globally(
+        game_id,
+        perspective,
+        turn,
     )
 
 

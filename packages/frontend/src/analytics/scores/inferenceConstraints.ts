@@ -2,7 +2,9 @@ import { isRecord } from './scoresWireParsers'
 
 export type InferenceConstraintsSection = {
   turn?: number
+  hostTurn?: number
   playerId?: number
+  scoreboardDeltaSource?: string
   militaryDelta2x?: number
   warshipDelta?: number
   freighterDelta?: number
@@ -39,8 +41,13 @@ export function readInferenceConstraints(
   }
   return {
     turn: typeof constraints.turn === 'number' ? constraints.turn : undefined,
+    hostTurn: typeof constraints.hostTurn === 'number' ? constraints.hostTurn : undefined,
     playerId:
       typeof constraints.playerId === 'number' ? constraints.playerId : undefined,
+    scoreboardDeltaSource:
+      typeof constraints.scoreboardDeltaSource === 'string'
+        ? constraints.scoreboardDeltaSource
+        : undefined,
     militaryDelta2x:
       typeof constraints.militaryDelta2x === 'number'
         ? constraints.militaryDelta2x

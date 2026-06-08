@@ -266,7 +266,7 @@ export type ScoresInferenceSolution = {
 
 export type ScoresInferenceRowDetail = {
   playerId?: number
-  displayStatus: 'success' | 'pending' | 'failure' | 'stopped'
+  displayStatus: 'success' | 'pending' | 'paused' | 'failure' | 'stopped'
   status: string
   summary: string
   solutionCount: number
@@ -661,6 +661,140 @@ export type { InferenceStreamEvent }
 
 const HELD_INFERENCE_TOP_K = 20
 
+export type InferenceHullCatalogEntry = {
+  hullId: number
+  name: string
+  defaultEnabled: boolean
+  userEnabled: boolean
+  effectiveEnabled: boolean
+}
+
+export type InferenceHullCatalogMaskResponse = {
+  gameId: number
+  playerId: number
+  perspective: number
+  turn: number
+  campaignMode: boolean
+  raceId: number
+  raceName: string
+  masterCatalog: InferenceHullCatalogEntry[]
+  defaultEnabledHullIds: number[]
+  userEnabledHullIds: number[] | null
+  effectiveEnabledHullIds: number[]
+  hasUserOverride: boolean
+}
+
+export async function fetchInferenceHullCatalogMask(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<InferenceHullCatalogMaskResponse> {
+  const path = '/bff/analytics/scores/inference/hull-catalog'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function putInferenceHullCatalogMask(
+  scope: AnalyticShellScope,
+  playerId: number,
+  enabledHullIds: number[]
+): Promise<InferenceHullCatalogMaskResponse> {
+  const path = '/bff/analytics/scores/inference/hull-catalog'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `PUT ${path}`
+  const r = await bffRequest(
+    `${path}${qs}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabledHullIds }),
+    },
+    endpointLabel
+  )
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function resetInferenceHullCatalogMask(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<InferenceHullCatalogMaskResponse> {
+  const path = '/bff/analytics/scores/inference/hull-catalog'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `DELETE ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'DELETE' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export type InferenceGlobalPauseStatus = {
+  gameId: number
+  perspective: number
+  turn: number
+  paused: boolean
+  activeScope: {
+    gameId: number
+    perspective: number
+    turn: number
+  } | null
+  heldJobCount: number
+  heldContinuationCount: number
+  activeSessionCount: number
+}
+
+export async function fetchInferenceGlobalPauseStatus(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/global-pause'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function pauseInferenceGlobally(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/global-pause'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function resumeInferenceGlobally(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/global-pause'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `DELETE ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'DELETE' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
 export async function fetchScoresRowInferenceStream(
   scope: AnalyticShellScope,
   playerId: number,
@@ -692,6 +826,55 @@ export async function fetchScoresRowInferenceStream(
       handlers.onEvent(event)
     }
   })
+}
+
+export async function fetchScoresTableInferenceStream(
+  scope: AnalyticShellScope,
+  playerIds: number[],
+  handlers: {
+    signal?: AbortSignal
+    onEvent: (event: InferenceStreamEvent) => void
+  }
+): Promise<void> {
+  const path = '/bff/analytics/scores/inference/table-stream'
+  const params = analyticScopeParams(scope)
+  params.set('playerIds', playerIds.join(','))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(
+    `${path}${qs}`,
+    { signal: handlers.signal, cache: 'no-store' },
+    endpointLabel
+  )
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  if (!r.body) {
+    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
+  }
+
+  await readNdjsonStream(r.body, (line) => {
+    const event = parseInferenceStreamEvent(line)
+    if (event) {
+      handlers.onEvent(event)
+    }
+  })
+}
+
+export async function stopScoresRowInference(
+  scope: AnalyticShellScope,
+  playerId: number
+): Promise<{ playerId: number; stopped: boolean }> {
+  const path = '/bff/analytics/scores/inference/stop'
+  const params = analyticScopeParams(scope)
+  params.set('playerId', String(playerId))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
 }
 
 export { HELD_INFERENCE_TOP_K }

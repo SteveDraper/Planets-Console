@@ -19,8 +19,8 @@ const tableData: TableDataResponse = {
 }
 
 describe('useScoresInferenceByRow', () => {
-  it('returns pending while per-row inference streams are in flight', () => {
-    vi.spyOn(bff, 'fetchScoresRowInferenceStream').mockImplementation(
+  it('returns pending while the table inference stream is in flight', () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
       () => new Promise(() => {})
     )
 
@@ -37,20 +37,22 @@ describe('useScoresInferenceByRow', () => {
     })
   })
 
-  it('merges settled inference independently per player', async () => {
-    vi.spyOn(bff, 'fetchScoresRowInferenceStream').mockImplementation(
-      async (_scope, playerId, handlers) => {
-        if (playerId === 8) {
-          handlers.onEvent({
-            type: 'complete',
-            status: 'exact',
-            summary: 'Player 8 ok',
-            solutionCount: 1,
-            isComplete: true,
-          })
-          return
-        }
-        throw new Error('502 player 9 failed')
+  it('merges settled inference independently per player from the table stream', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'Player 8 ok',
+          solutionCount: 1,
+          isComplete: true,
+        })
+        handlers.onEvent({
+          type: 'error',
+          playerId: 9,
+          detail: '502 player 9 failed',
+        })
       }
     )
 
@@ -65,13 +67,11 @@ describe('useScoresInferenceByRow', () => {
   })
 
   it('shows count badge when first solution arrives before complete', async () => {
-    vi.spyOn(bff, 'fetchScoresRowInferenceStream').mockImplementation(
-      async (_scope, playerId, handlers) => {
-        if (playerId !== 8) {
-          return
-        }
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
         handlers.onEvent({
           type: 'solution',
+          playerId: 8,
           solution: {
             objectiveValue: 10,
             actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
@@ -84,7 +84,6 @@ describe('useScoresInferenceByRow', () => {
     const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
 
     await waitFor(() => {
-      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('success')
       expect(result.current.inferenceByRow?.[0]?.solutionCount).toBe(1)
       expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(false)
     })

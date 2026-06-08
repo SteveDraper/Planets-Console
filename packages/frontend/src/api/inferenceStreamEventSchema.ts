@@ -14,12 +14,12 @@ const inferenceSolutionShipBuildSchema = z.object({
   comboId: z.string(),
   label: z.string(),
   count: z.number().int(),
-  hullId: z.number().int().optional(),
-  engineId: z.number().int().optional(),
-  beamId: z.number().int().optional(),
-  torpId: z.number().int().optional(),
-  beamCount: z.number().int().optional(),
-  launcherCount: z.number().int().optional(),
+  hullId: z.number().int().nullish(),
+  engineId: z.number().int().nullish(),
+  beamId: z.number().int().nullish(),
+  torpId: z.number().int().nullish(),
+  beamCount: z.number().int().nullish(),
+  launcherCount: z.number().int().nullish(),
 })
 
 export const inferenceStreamSolutionPayloadSchema = z.object({
@@ -29,12 +29,16 @@ export const inferenceStreamSolutionPayloadSchema = z.object({
   militaryScoreArithmetic: z.record(z.string(), z.unknown()).optional(),
 })
 
-export const inferenceStreamSolutionEventSchema = z.object({
+const inferenceStreamPlayerScopeSchema = z.object({
+  playerId: z.number().int().optional(),
+})
+
+export const inferenceStreamSolutionEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('solution'),
   solution: inferenceStreamSolutionPayloadSchema,
 })
 
-export const inferenceStreamProgressEventSchema = z.object({
+export const inferenceStreamProgressEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('progress'),
   policyStepId: z.string().optional(),
   comboCount: z.number().int().optional(),
@@ -43,7 +47,7 @@ export const inferenceStreamProgressEventSchema = z.object({
   elapsedSeconds: z.number().optional(),
 })
 
-export const inferenceStreamCompleteEventSchema = z.object({
+export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('complete'),
   status: z.string(),
   summary: z.string(),
@@ -52,9 +56,14 @@ export const inferenceStreamCompleteEventSchema = z.object({
   diagnostics: z.record(z.string(), z.unknown()).optional(),
 })
 
-export const inferenceStreamErrorEventSchema = z.object({
+export const inferenceStreamErrorEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('error'),
   detail: z.string(),
+})
+
+export const inferenceStreamGlobalPauseEventSchema = z.object({
+  type: z.literal('globalPause'),
+  paused: z.boolean(),
 })
 
 export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
@@ -62,6 +71,7 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
   inferenceStreamProgressEventSchema,
   inferenceStreamCompleteEventSchema,
   inferenceStreamErrorEventSchema,
+  inferenceStreamGlobalPauseEventSchema,
 ])
 
 export type InferenceStreamSolutionPayload = z.infer<typeof inferenceStreamSolutionPayloadSchema>

@@ -12,6 +12,8 @@ from api.errors import ValidationError
 # V1 patterns aligned with service store paths (ADR 0001).
 BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "info"),
+    ("games", "*", "analytics", "*"),
+    ("games", "*", "*", "analytics", "*"),
     ("games", "*", "*", "turns", "*"),
     ("credentials", "accounts", "*"),
 )

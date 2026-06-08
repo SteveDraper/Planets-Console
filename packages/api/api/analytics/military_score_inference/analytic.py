@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
@@ -36,6 +37,7 @@ from api.analytics.military_score_inference.inference_target import (
     load_accelerated_backfill_source_for_host_turn,
     observation_from_accelerated_segment,
     observation_from_deltas,
+    prior_scoreboard_row_score,
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -70,12 +72,22 @@ def _no_prior_turn_reason(turn: TurnInfo) -> str:
     return "first_turn"
 
 
-def build_inference_observation(score: Score, turn: TurnInfo) -> InferenceObservation:
+def build_inference_observation(
+    score: Score,
+    turn: TurnInfo,
+    *,
+    load_scoreboard_turn: ScoreboardTurnLoader | None = None,
+) -> InferenceObservation:
     """Build solver observation for the reported host turn on this scoreboard row."""
+    prior_score = prior_scoreboard_row_score(score, turn, load_scoreboard_turn)
+    military_delta_2x, warship_delta, freighter_delta, priority_point_delta, delta_source = (
+        observation_deltas_from_score(score, turn, prior_score=prior_score)
+    )
     return observation_from_deltas(
         score,
         turn,
-        observation_deltas_from_score(score, turn),
+        (military_delta_2x, warship_delta, freighter_delta, priority_point_delta),
+        scoreboard_delta_source=delta_source,
     )
 
 
@@ -258,11 +270,14 @@ def _run_accelerated_split_inference_path(
     score: Score,
     turn: TurnInfo,
     segments: tuple[AcceleratedInferenceSegment, ...],
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     payload, reported_observation, reported_catalog, _ = _run_accelerated_split_inference(
         score,
         turn,
         segments,
+        resolved_mask=resolved_mask,
     )
     return payload, reported_observation, reported_catalog
 
@@ -270,10 +285,13 @@ def _run_accelerated_split_inference_path(
 def _run_policy_ladder_inference(
     resolved_observation: InferenceObservation,
     turn: TurnInfo,
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
     return solve_with_policy_ladder(
         resolved_observation,
         turn,
+        resolved_mask=resolved_mask,
     )
 
 
@@ -318,16 +336,26 @@ def _run_solver_inference_path(
     *,
     catalog: ActionCatalog | None,
     accelerated_segments: tuple[AcceleratedInferenceSegment, ...] | None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     if path == InferencePath.ACCELERATED_SPLIT:
         assert accelerated_segments is not None
-        return _run_accelerated_split_inference_path(score, turn, accelerated_segments)
+        return _run_accelerated_split_inference_path(
+            score,
+            turn,
+            accelerated_segments,
+            resolved_mask=resolved_mask,
+        )
 
     solve_catalog = catalog
     try:
         if path == InferencePath.POLICY_LADDER:
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
-                _run_policy_ladder_inference(resolved_observation, turn)
+                _run_policy_ladder_inference(
+                    resolved_observation,
+                    turn,
+                    resolved_mask=resolved_mask,
+                )
             )
         else:
             assert path == InferencePath.CORPUS_PREBUILT
@@ -359,6 +387,7 @@ def run_inference_with_artifacts(
     observation: InferenceObservation | None = None,
     catalog: ActionCatalog | None = None,
     load_scoreboard_turn: ScoreboardTurnLoader | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     """Run inference once; return API payload plus observation and catalog for re-checks.
 
@@ -367,7 +396,9 @@ def run_inference_with_artifacts(
     catalog instance as coverage evaluation.
     """
     resolved_observation = (
-        observation if observation is not None else build_inference_observation(score, turn)
+        observation
+        if observation is not None
+        else build_inference_observation(score, turn, load_scoreboard_turn=load_scoreboard_turn)
     )
     path, accelerated_segments = resolve_inference_path(
         score,
@@ -392,6 +423,7 @@ def run_inference_with_artifacts(
         resolved_observation,
         catalog=catalog,
         accelerated_segments=accelerated_segments,
+        resolved_mask=resolved_mask,
     )
 
 
@@ -536,6 +568,8 @@ def _run_accelerated_split_inference(
     score: Score,
     turn: TurnInfo,
     segments: tuple[AcceleratedInferenceSegment, ...],
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[
     dict[str, object],
     InferenceObservation,
@@ -568,6 +602,7 @@ def _run_accelerated_split_inference(
                 turn,
                 max_solutions=per_segment_max_solutions,
                 time_limit_seconds=per_segment_time,
+                resolved_mask=resolved_mask,
             )
         )
         segment_artifacts[segment.host_turn] = (segment_observation, catalog)

@@ -12,6 +12,9 @@ export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): stri
   if (detail.displayStatus === 'pending') {
     return detail.summary || 'Build inference in progress'
   }
+  if (detail.displayStatus === 'paused') {
+    return detail.summary || 'Build inference paused'
+  }
   if (detail.displayStatus === 'stopped') {
     return detail.summary || 'Build inference halted'
   }
@@ -19,9 +22,43 @@ export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): stri
 }
 
 export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolean {
-  return detail.displayStatus === 'success' && detail.solutionCount > 0
+  return (
+    (detail.displayStatus === 'success' || detail.displayStatus === 'paused') &&
+    detail.solutionCount > 0
+  )
 }
 
-export function canHaltInferenceRow(detail: ScoresInferenceRowDetail): boolean {
-  return !detail.isComplete
+export function canStopInferenceRow(detail: ScoresInferenceRowDetail): boolean {
+  if (detail.isComplete) {
+    return false
+  }
+  return detail.displayStatus === 'pending' || detail.displayStatus === 'success'
+}
+
+export function canResumeInferenceRow(
+  detail: ScoresInferenceRowDetail,
+  options: { isGloballyPaused?: boolean } = {}
+): boolean {
+  return detail.displayStatus === 'paused' && !options.isGloballyPaused
+}
+
+export function isIncompleteInferenceRow(detail: ScoresInferenceRowDetail): boolean {
+  if (detail.isComplete) {
+    return false
+  }
+  return (
+    detail.displayStatus === 'pending' ||
+    detail.displayStatus === 'paused' ||
+    detail.displayStatus === 'success'
+  )
+}
+
+export function isActivelySearchingInference(
+  detail: ScoresInferenceRowDetail,
+  isGloballyPaused = false
+): boolean {
+  if (detail.isComplete || isGloballyPaused || detail.displayStatus === 'paused') {
+    return false
+  }
+  return detail.displayStatus === 'pending' || detail.displayStatus === 'success'
 }

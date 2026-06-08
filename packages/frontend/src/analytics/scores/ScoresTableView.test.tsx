@@ -1,7 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ScoresTableWithInferenceData } from '../../api/bff'
 import { ScoresTableView } from './ScoresTableView'
+
+const testScope = {
+  gameId: '628580',
+  turn: 6,
+  perspective: 1,
+}
+
+const idleGlobalInferencePause = {
+  isGloballyPaused: false,
+  isPending: false,
+  error: null,
+  pauseGlobally: vi.fn(),
+  resumeGlobally: vi.fn(),
+}
 
 function tableData(
   overrides: Partial<ScoresTableWithInferenceData> &
@@ -18,6 +32,7 @@ describe('ScoresTableView', () => {
   it('keeps priority points in the data column when build inference column is appended', () => {
     render(
       <ScoresTableView
+        analyticScope={testScope}
         data={tableData({
           columns: [
             'Race (player)',
@@ -62,6 +77,7 @@ describe('ScoresTableView', () => {
   it('renders inference status from inferenceByRow when row has no placeholder cell', () => {
     render(
       <ScoresTableView
+        analyticScope={testScope}
         data={tableData({
           columns: ['Race (player)', 'Military', 'Build inference'],
           rows: [['Federation (alice)', '', '', '', '', '100', '']],
@@ -87,6 +103,7 @@ describe('ScoresTableView', () => {
   it('ignores a legacy trailing empty cell when resolving data column values', () => {
     render(
       <ScoresTableView
+        analyticScope={testScope}
         data={tableData({
           columns: ['Race (player)', 'Military', 'Build inference'],
           rows: [['Federation (alice)', '', '', '', '', '100', '']],
@@ -112,6 +129,7 @@ describe('ScoresTableView', () => {
   it('opens inference detail modal when success icon is clicked', () => {
     render(
       <ScoresTableView
+        analyticScope={testScope}
         data={tableData({
           columns: ['Race (player)', 'Build inference'],
           rows: [['Federation (alice)']],
@@ -134,5 +152,170 @@ describe('ScoresTableView', () => {
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('Federation (alice)')
     expect(dialog).toHaveTextContent('Solution 1')
+  })
+
+  it('shows global pause control beside the build inference column title', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        globalInferencePause={idleGlobalInferencePause}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'pending',
+              status: 'time_limited',
+              summary: 'Still searching',
+              solutionCount: 0,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByLabelText('Pause all build inference for this turn')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Resume all build inference for this turn')).toBeNull()
+  })
+
+  it('animates the solution count badge while search is ongoing', () => {
+    const { container } = render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'success',
+              status: 'exact',
+              summary: 'Searching: 2 solutions so far',
+              solutionCount: 2,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(container.querySelector('.inference-border-dot')).not.toBeNull()
+    expect(container.querySelector('.border-dashed')).not.toBeNull()
+  })
+
+  it('shows dotted zero count for pending rows instead of an hourglass', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'pending',
+              status: 'pending',
+              summary: 'Still searching',
+              solutionCount: 0,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByLabelText('Still searching')).toHaveTextContent('0')
+    expect(screen.queryByLabelText('Still searching')?.className).toContain('border-dashed')
+  })
+
+  it('does not animate incomplete rows while globally paused', () => {
+    const { container } = render(
+      <ScoresTableView
+        analyticScope={testScope}
+        isGloballyPaused
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'paused',
+              status: 'paused',
+              summary: 'Paused with 2 held solution(s)',
+              solutionCount: 2,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(container.querySelector('.inference-border-dot')).toBeNull()
+    expect(screen.getByLabelText('Paused with 2 held solution(s)')).toHaveTextContent('2')
+  })
+
+  it('shows dotted zero for paused rows that have not started yet', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        isGloballyPaused
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'paused',
+              status: 'paused',
+              summary: 'Build inference paused',
+              solutionCount: 0,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    const badge = screen.getByLabelText('Build inference paused')
+    expect(badge).toHaveTextContent('0')
+    expect(badge.className).toContain('border-dashed')
+  })
+
+  it('scrolls the table body in a bounded region with a sticky header row', () => {
+    const { container } = render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Military'],
+          rows: [['Federation (alice)', '1000']],
+          inferenceByRow: [
+            {
+              displayStatus: 'idle',
+              status: 'idle',
+              summary: 'Build inference not started',
+              solutionCount: 0,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    const scrollRegion = container.querySelector('.overflow-auto')
+    expect(scrollRegion).not.toBeNull()
+    expect(scrollRegion?.className).toContain('max-h-')
+
+    const header = screen.getByRole('columnheader', { name: 'Race (player)' })
+    expect(header.className).toContain('sticky')
+    expect(header.className).toContain('top-0')
   })
 })

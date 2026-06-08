@@ -75,7 +75,8 @@ describe('InferenceDetailModal', () => {
 
     expect(screen.getByRole('dialog')).toHaveTextContent('Federation (alice)')
     expect(screen.getByText('Observed constraints')).toBeInTheDocument()
-    expect(screen.getByRole('dialog')).toHaveTextContent('Turn 8')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Scoreboard row turn 9')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Host turn 8 deltas')
     expect(screen.getByRole('dialog')).toHaveTextContent('Player 5')
     expect(screen.getByText(/Priority points are diagnostic only/)).toBeInTheDocument()
     expect(screen.getByText('Explained military change')).toBeInTheDocument()
@@ -246,6 +247,33 @@ describe('InferenceDetailModal', () => {
     expect(screen.getByText('Missouri')).toBeInTheDocument()
     expect(screen.getByText('Scoreboard row constraints')).toBeInTheDocument()
     expect(screen.queryAllByText('Solution 1')).toHaveLength(2)
+  })
+
+  it('shows overall inference status instead of the last solver pass status', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Crystal (koski)"
+        detail={detail({
+          status: 'exact',
+          solutionCount: 2,
+          summary: 'Best: Ruby cruiser; 1 alternative',
+          diagnostics: {
+            solver: {
+              status: 'exact',
+              solver_status: 'INFEASIBLE',
+              wall_time_seconds: 0.12,
+              stopped_reason: 'infeasible',
+            },
+          },
+          solutions: [{ objectiveValue: 85, actions: [] }, { objectiveValue: 80, actions: [] }],
+        })}
+      />
+    )
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Inference exact · 0.12s')
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('INFEASIBLE')
   })
 
   it('calls onClose from the close button', () => {

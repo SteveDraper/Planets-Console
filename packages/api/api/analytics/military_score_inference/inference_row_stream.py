@@ -4,102 +4,57 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 
-from api.analytics.military_score_inference.analytic import (
-    build_inference_observation,
-    run_inference_with_artifacts,
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.inference_scheduler import get_inference_row_scheduler
+from api.analytics.military_score_inference.inference_stream_rows import (
+    cleanup_inference_stream_sessions,
+    immediate_row_inference_events,
+    schedule_inference_row,
 )
-from api.analytics.military_score_inference.inference_api_payload import (
-    STATUS_NO_PRIOR_TURN,
-    _inference_api_payload,
-)
-from api.analytics.military_score_inference.inference_path import (
-    InferencePath,
-    resolve_inference_path,
-)
-from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowStreamSession,
-    get_inference_row_scheduler,
-)
-from api.analytics.military_score_inference.solver import STATUS_STOPPED
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.models.game import TurnInfo
-from api.transport.inference_stream import inference_complete_event
 
 
 def iter_scores_row_inference_events(
     turn: TurnInfo,
     player_id: int,
     *,
+    game_id: int,
+    perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield inference stream wire events for one scoreboard row."""
-    score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    if score is None:
-        yield inference_complete_event(
-            status="player_not_found",
-            summary=f"No score row for player {player_id}",
-            solution_count=0,
-            is_complete=True,
-            diagnostics={"playerId": player_id, "turn": turn.settings.turn},
-        )
-        return
-
-    observation = build_inference_observation(score, turn)
-    path, _segments = resolve_inference_path(
-        score,
+    immediate = immediate_row_inference_events(
         turn,
+        player_id,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-
-    if path == InferencePath.NO_PRIOR_TURN:
-        from api.analytics.military_score_inference.analytic import _no_prior_turn_inference_result
-
-        payload, _, _ = _no_prior_turn_inference_result(turn, observation)
-        yield inference_complete_event(
-            status=str(payload.get("status", STATUS_NO_PRIOR_TURN)),
-            summary=str(payload.get("summary", "")),
-            solution_count=int(payload.get("solutionCount", 0)),
-            is_complete=bool(payload.get("isComplete", True)),
-            diagnostics=(
-                payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else None
-            ),
-        )
+    if immediate is not None:
+        yield from immediate
         return
 
-    session = InferenceRowStreamSession(
-        player_id=player_id,
-        observation=observation,
-        turn=turn,
+    score = next(row for row in turn.scores if row.ownerid == player_id)
+    turn_number = turn.settings.turn
+    stream_scope = InferenceStreamScope(
+        game_id=game_id,
+        perspective=perspective,
+        turn_number=turn_number,
     )
     scheduler = get_inference_row_scheduler()
+    scheduler.begin_scope(stream_scope)
 
-    if path == InferencePath.POLICY_LADDER:
-        scheduler.enqueue_tier_ladder(session)
-    else:
-
-        def run_full_row(row_session: InferenceRowStreamSession) -> dict[str, object]:
-            if row_session.cancel_token.is_cancelled():
-                return _inference_api_payload(
-                    status=STATUS_STOPPED,
-                    summary="Build inference halted",
-                    solutions=(),
-                    diagnostics={"stopped_reason": "cancelled"},
-                )
-            payload, _, _ = run_inference_with_artifacts(
-                score,
-                turn,
-                load_scoreboard_turn=load_scoreboard_turn,
-            )
-            if row_session.cancel_token.is_cancelled():
-                payload = {
-                    **payload,
-                    "status": STATUS_STOPPED,
-                    "summary": "Build inference halted",
-                    "isComplete": True,
-                }
-            return payload
-
-        scheduler.enqueue_full_row(session, run_full_row)
-
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=turn,
+        player_id=player_id,
+        game_id=game_id,
+        perspective=perspective,
+        load_scoreboard_turn=load_scoreboard_turn,
+        resolved_mask=resolved_mask,
+    )
+    session = scheduled.session
     try:
         while True:
             event = session.event_queue.get()
@@ -107,5 +62,4 @@ def iter_scores_row_inference_events(
             if event.get("type") in ("complete", "error"):
                 break
     finally:
-        session.cancel_token.cancel()
-        scheduler.unregister_session(session.run_id)
+        cleanup_inference_stream_sessions(scheduler, (session,))

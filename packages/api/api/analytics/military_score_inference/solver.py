@@ -297,26 +297,30 @@ def _ship_build_from_member(
     )
 
 
+def _ranked_merged_members(members: tuple[ShipBuildCombo, ...]) -> tuple[ShipBuildCombo, ...]:
+    """Order equivalent combos for expansion: highest probability first, then combo id."""
+    return tuple(sorted(members, key=lambda member: (-member.probability_weight, member.combo_id)))
+
+
 def _ship_build_variants_for_merged_count(
     merged_combo_id: str,
     count: int,
     merged_combo_catalog: _MergedComboCatalog,
+    *,
+    max_expansions: int,
 ) -> tuple[InferenceSolutionShipBuild, ...]:
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
     if len(members) == 1:
         return (_ship_build_from_member(members[0], count),)
 
-    distinct_weights = {member.probability_weight for member in members}
-    if len(distinct_weights) <= 1:
-        representative = max(members, key=lambda member: member.combo_id)
-        return (_ship_build_from_member(representative, count),)
+    if count != 1:
+        best_member = _ranked_merged_members(members)[0]
+        return (_ship_build_from_member(best_member, count),)
 
-    by_weight: dict[int, list[ShipBuildCombo]] = defaultdict(list)
-    for member in members:
-        by_weight[member.probability_weight].append(member)
+    ranked_members = _ranked_merged_members(members)
+    expansion_limit = max(1, max_expansions)
     return tuple(
-        _ship_build_from_member(max(group, key=lambda member: member.combo_id), count)
-        for group in by_weight.values()
+        _ship_build_from_member(member, count) for member in ranked_members[:expansion_limit]
     )
 
 
@@ -326,6 +330,8 @@ def _expand_score_equivalent_solutions(
     combo_counts: dict[str, int],
     bucket_counts_by_action_id: dict[str, tuple[int, ...]],
     merged_combo_catalog: _MergedComboCatalog,
+    *,
+    max_expansions: int,
 ) -> list[InferenceSolution]:
     action_by_id = {action.id: action for action in problem.aggregate_actions}
     solution_actions: list[InferenceSolutionAction] = []
@@ -341,7 +347,12 @@ def _expand_score_equivalent_solutions(
             )
         )
     ship_build_variant_lists = [
-        _ship_build_variants_for_merged_count(merged_combo_id, count, merged_combo_catalog)
+        _ship_build_variants_for_merged_count(
+            merged_combo_id,
+            count,
+            merged_combo_catalog,
+            max_expansions=max_expansions,
+        )
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
@@ -364,7 +375,8 @@ def _expand_score_equivalent_solutions(
                 ship_builds=ship_builds,
             )
         )
-    return solutions
+    solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
+    return solutions[: max(1, max_expansions)]
 
 
 def _add_no_good_cut(
@@ -506,6 +518,7 @@ def solve_inference_problem(
             combo_counts,
             bucket_counts,
             merged_combo_catalog,
+            max_expansions=problem.max_solutions - len(solutions),
         )
         expanded_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
         added_solution = False

@@ -1,14 +1,24 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { ReactNode } from 'react'
 import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
 import type { ScoresTableParams } from '../analytics/scores/api'
 import { MainArea } from './MainArea'
+import { fetchAnalyticTable } from '../api/bff'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
 import { buildStellarCartographyMapContext, defaultStellarCartographyMapUiConfig } from '../analytics/stellar-cartography/mapUiConfig'
+
+vi.mock('../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/bff')>()
+  return {
+    ...actual,
+    fetchAnalyticTable: vi.fn(),
+  }
+})
 
 vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/useMapAnalyticQueries')>()
@@ -80,6 +90,14 @@ const defaultScoresTableParams: ScoresTableParams = {
   includeBuildInference: false,
 }
 
+const idleGlobalInferencePause = {
+  isGloballyPaused: false,
+  isPending: false,
+  error: null,
+  pauseGlobally: vi.fn(),
+  resumeGlobally: vi.fn(),
+}
+
 function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
   return {
     viewMode,
@@ -93,6 +111,7 @@ function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
     turnBlockedNoLogin: false,
     connectionsMapParams: defaultConnectionsParams,
     scoresTableParams: defaultScoresTableParams,
+    globalInferencePause: idleGlobalInferencePause,
     futureTurnOffset: 0,
     onMapZoomChange: vi.fn(),
     onSetZoomReady: vi.fn(),
@@ -176,5 +195,38 @@ describe('MainArea map hook mounting', () => {
 
     expect(useStellarCartographyMapContext).toHaveBeenCalledTimes(1)
     expect(useStellarCartographyMapContext).toHaveBeenCalledWith(sampleScope)
+  })
+})
+
+describe('MainArea tabular analytic sections', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'connections',
+      columns: ['From', 'To'],
+      rows: [['A', 'B']],
+    })
+  })
+
+  it('collapses and expands the analytic table body from the title line', async () => {
+    const user = userEvent.setup()
+
+    render(<MainArea {...defaultMainAreaProps('tabular')} />, { wrapper: createWrapper() })
+
+    expect(await screen.findByText('B')).toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: 'Collapse Connections' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAccessibleName('Expand Connections')
+    expect(screen.queryByText('B')).not.toBeInTheDocument()
+
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByText('B')).toBeInTheDocument()
   })
 })

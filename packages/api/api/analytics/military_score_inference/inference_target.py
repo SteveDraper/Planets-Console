@@ -57,12 +57,29 @@ def is_after_ship_limit(turn: TurnInfo, score: Score) -> bool:
     return total_ships >= settings.shiplimit
 
 
+def prior_scoreboard_row_score(
+    score: Score,
+    turn: TurnInfo,
+    load_scoreboard_turn: ScoreboardTurnLoader | None,
+) -> Score | None:
+    if load_scoreboard_turn is None:
+        return None
+    prior_turn_number = turn.settings.turn - 1
+    if prior_turn_number < 1:
+        return None
+    prior_turn = load_scoreboard_turn(prior_turn_number)
+    if prior_turn is None:
+        return None
+    return next((row for row in prior_turn.scores if row.ownerid == score.ownerid), None)
+
+
 def observation_from_deltas(
     score: Score,
     turn: TurnInfo,
     deltas: tuple[int, int, int, int],
     *,
     military_partition_slack_2x: int = SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
+    scoreboard_delta_source: str = "reported_change_fields",
 ) -> InferenceObservation:
     military_delta_2x, warship_delta, freighter_delta, priority_point_delta = deltas
     return InferenceObservation(
@@ -75,6 +92,7 @@ def observation_from_deltas(
         starbases_owned=score.starbases,
         is_after_ship_limit=is_after_ship_limit(turn, score),
         military_partition_slack_2x=military_partition_slack_2x,
+        scoreboard_delta_source=scoreboard_delta_source,
     )
 
 
@@ -92,6 +110,7 @@ def observation_from_accelerated_segment(
             segment.freighter_delta,
             segment.priority_point_delta,
         ),
+        scoreboard_delta_source="accelerated_segment",
     )
 
 
@@ -198,11 +217,16 @@ def resolve_inference_target_for_host_turn(
     expected_host_turn = scoreboard_host_turn(turn.settings.turn)
     if expected_host_turn is None or expected_host_turn != host_turn:
         return None
+    prior_score = prior_scoreboard_row_score(score, turn, load_scoreboard_turn)
+    military_delta_2x, warship_delta, freighter_delta, priority_point_delta, delta_source = (
+        observation_deltas_from_score(score, turn, prior_score=prior_score)
+    )
     return ResolvedInferenceTarget(
         observation=observation_from_deltas(
             score,
             turn,
-            observation_deltas_from_score(score, turn),
+            (military_delta_2x, warship_delta, freighter_delta, priority_point_delta),
+            scoreboard_delta_source=delta_source,
         ),
         turn_info=turn,
         score=score,

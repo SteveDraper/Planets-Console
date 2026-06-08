@@ -6,8 +6,13 @@ from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_row_stream import (
     iter_scores_row_inference_events,
+)
+from api.analytics.military_score_inference.inference_table_stream import (
+    iter_scores_table_inference_events,
+    stop_scores_table_inference_row,
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
@@ -68,6 +73,7 @@ def get_scores_row_inference(
     player_id: int,
     *,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
@@ -88,6 +94,7 @@ def get_scores_row_inference(
             score,
             turn,
             load_scoreboard_turn=load_scoreboard_turn,
+            resolved_mask=resolved_mask,
         )
     return {"playerId": player_id, **inference}
 
@@ -96,11 +103,53 @@ def iter_scores_row_inference_stream(
     turn: TurnInfo,
     player_id: int,
     *,
+    game_id: int,
+    perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for one scoreboard row inference stream."""
     yield from iter_scores_row_inference_events(
         turn,
         player_id,
+        game_id=game_id,
+        perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
+        resolved_mask=resolved_mask,
     )
+
+
+def iter_scores_table_inference_stream(
+    turn: TurnInfo,
+    player_ids: tuple[int, ...],
+    *,
+    game_id: int,
+    perspective: int,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
+) -> Iterator[dict[str, object]]:
+    """Yield NDJSON wire events for all scoreboard rows on one stream."""
+    yield from iter_scores_table_inference_events(
+        turn,
+        player_ids,
+        game_id=game_id,
+        perspective=perspective,
+        load_scoreboard_turn=load_scoreboard_turn,
+        resolve_mask_for_player=resolve_mask_for_player,
+    )
+
+
+def stop_scores_row_inference(
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int,
+) -> dict[str, object]:
+    stopped = stop_scores_table_inference_row(
+        game_id=game_id,
+        perspective=perspective,
+        turn_number=turn_number,
+        player_id=player_id,
+    )
+    return {"playerId": player_id, "stopped": stopped}

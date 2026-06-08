@@ -1,117 +1,180 @@
 import { useState } from 'react'
-import { Hourglass, Octagon, Square, X } from 'lucide-react'
-import type { ScoresInferenceRowDetail, ScoresTableWithInferenceData } from '../../api/bff'
+import { ListFilter, Octagon, Play, X } from 'lucide-react'
+import type {
+  AnalyticShellScope,
+  ScoresInferenceRowDetail,
+  ScoresTableWithInferenceData,
+} from '../../api/bff'
+import { GlobalInferencePauseControl } from './GlobalInferencePauseControl'
+import { HullCatalogMaskDialog } from './HullCatalogMaskDialog'
 import { InferenceDetailModal } from './InferenceDetailModal'
+import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
+import { InferenceStopIcon } from './InferenceStopIcon'
 import {
-  canHaltInferenceRow,
   canOpenInferenceDetail,
+  canResumeInferenceRow,
+  canStopInferenceRow,
   inferenceAccessibleLabel,
+  isActivelySearchingInference,
+  isIncompleteInferenceRow,
 } from './inferenceStatus'
 import {
+  BUILD_INFERENCE_COLUMN,
   isBuildInferenceColumn,
   scoresTableCellForColumn,
 } from './scoresTableColumns'
+import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
-  onHaltRow?: (playerId: number) => void
+  analyticScope: AnalyticShellScope
+  onStopRow?: (playerId: number) => void
+  onResumeRow?: (playerId: number) => void
+  isGloballyPaused?: boolean
+  globalInferencePause?: UseGlobalInferencePauseResult
+}
+
+function StopInferenceButton({ onStopRow }: { onStopRow: () => void }) {
+  return (
+    <button
+      type="button"
+      title="Stop build inference for this row"
+      aria-label="Stop build inference for this row"
+      onClick={onStopRow}
+      className="inline-flex items-center justify-center rounded p-1 text-red-400 hover:bg-red-500/10"
+    >
+      <InferenceStopIcon />
+    </button>
+  )
+}
+
+function ResumeInferenceButton({ onResumeRow }: { onResumeRow: () => void }) {
+  return (
+    <button
+      type="button"
+      title="Resume build inference for this row"
+      aria-label="Resume build inference for this row"
+      onClick={onResumeRow}
+      className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
+    >
+      <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
+    </button>
+  )
 }
 
 function InferenceStatusCell({
   detail,
   onOpenDetail,
-  onHaltRow,
+  onOpenHullCatalog,
+  onStopRow,
+  onResumeRow,
+  isGloballyPaused = false,
 }: {
   detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
-  onHaltRow?: (playerId: number) => void
+  onOpenHullCatalog: () => void
+  onStopRow?: (playerId: number) => void
+  onResumeRow?: (playerId: number) => void
+  isGloballyPaused?: boolean
 }) {
   const label = inferenceAccessibleLabel(detail)
   const playerId = detail.playerId
-  const showHalt = canHaltInferenceRow(detail) && typeof playerId === 'number'
+  const showStop = canStopInferenceRow(detail) && typeof playerId === 'number' && onStopRow != null
+  const showResume =
+    canResumeInferenceRow(detail, { isGloballyPaused }) &&
+    typeof playerId === 'number' &&
+    onResumeRow != null
+  const showHullCatalog = typeof playerId === 'number'
 
-  if (detail.displayStatus === 'success' && detail.solutionCount > 0) {
-    const clickable = canOpenInferenceDetail(detail)
+  const hullCatalogButton =
+    showHullCatalog ? (
+      <button
+        type="button"
+        data-hull-catalog-opener
+        title="Adjust buildable hull catalog"
+        aria-label="Adjust buildable hull catalog"
+        onClick={onOpenHullCatalog}
+        className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
+      >
+        <ListFilter className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    ) : null
+
+  if (isIncompleteInferenceRow(detail)) {
+    const activelySearching = isActivelySearchingInference(detail, isGloballyPaused)
     return (
       <div className="inline-flex items-center gap-1">
-        <button
-          type="button"
-          title={label}
-          aria-label={label}
-          disabled={!clickable}
-          onClick={clickable ? onOpenDetail : undefined}
-          className="inline-flex h-6 min-w-6 items-center justify-center rounded border border-emerald-500/70 px-1.5 text-xs font-medium text-emerald-400 hover:bg-white/10 disabled:cursor-default disabled:opacity-60"
-        >
-          {detail.solutionCount}
-        </button>
-        {showHalt && onHaltRow != null ? (
-          <button
-            type="button"
-            title="Stop build inference for this row"
-            aria-label="Stop build inference for this row"
-            onClick={() => onHaltRow(playerId)}
-            className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
-          >
-            <Square className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        ) : null}
-        {!detail.isComplete ? (
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400/80" aria-hidden />
+        <InferenceSolutionCountBadge
+          count={detail.solutionCount}
+          isSearching={activelySearching}
+          isIncomplete
+          label={label}
+          disabled={!canOpenInferenceDetail(detail)}
+          onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
+        />
+        {hullCatalogButton}
+        {showStop ? <StopInferenceButton onStopRow={() => onStopRow(playerId)} /> : null}
+        {showResume ? (
+          <ResumeInferenceButton onResumeRow={() => onResumeRow(playerId)} />
         ) : null}
       </div>
     )
   }
 
-  if (detail.displayStatus === 'pending') {
+  if (detail.displayStatus === 'success' && detail.solutionCount > 0) {
     return (
       <div className="inline-flex items-center gap-1">
-        <span
-          title={label}
-          aria-label={label}
-          className="inline-flex items-center justify-center p-1 text-amber-300"
-        >
-          <Hourglass className="h-4 w-4" aria-hidden />
-        </span>
-        {showHalt && onHaltRow != null ? (
-          <button
-            type="button"
-            title="Stop build inference for this row"
-            aria-label="Stop build inference for this row"
-            onClick={() => onHaltRow(playerId)}
-            className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
-          >
-            <Square className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        ) : null}
+        <InferenceSolutionCountBadge
+          count={detail.solutionCount}
+          isSearching={false}
+          label={label}
+          disabled={!canOpenInferenceDetail(detail)}
+          onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
+        />
+        {hullCatalogButton}
       </div>
     )
   }
 
   if (detail.displayStatus === 'stopped') {
     return (
-      <span
-        title={label}
-        aria-label={label}
-        className="inline-flex items-center justify-center p-1 text-slate-400"
-      >
-        <Octagon className="h-4 w-4" aria-hidden />
-      </span>
+      <div className="inline-flex items-center gap-1">
+        <span
+          title={label}
+          aria-label={label}
+          className="inline-flex items-center justify-center p-1 text-slate-400"
+        >
+          <Octagon className="h-4 w-4" aria-hidden />
+        </span>
+        {hullCatalogButton}
+      </div>
     )
   }
 
   return (
-    <span
-      title={label}
-      aria-label={label}
-      className="inline-flex items-center justify-center p-1 text-red-400"
-    >
-      <X className="h-4 w-4" aria-hidden />
-    </span>
+    <div className="inline-flex items-center gap-1">
+      <span
+        title={label}
+        aria-label={label}
+        className="inline-flex items-center justify-center p-1 text-red-400"
+      >
+        <X className="h-4 w-4" aria-hidden />
+      </span>
+      {hullCatalogButton}
+    </div>
   )
 }
 
-export function ScoresTableView({ data, onHaltRow }: ScoresTableViewProps) {
+export function ScoresTableView({
+  data,
+  analyticScope,
+  onStopRow,
+  onResumeRow,
+  isGloballyPaused = false,
+  globalInferencePause,
+}: ScoresTableViewProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
+  const [hullCatalogRowIndex, setHullCatalogRowIndex] = useState<number | null>(null)
   const inferenceByRow = data.inferenceByRow
   const selectedDetail =
     selectedRowIndex != null && inferenceByRow != null
@@ -119,16 +182,36 @@ export function ScoresTableView({ data, onHaltRow }: ScoresTableViewProps) {
       : null
   const selectedRacePlayer =
     selectedRowIndex != null ? data.rows[selectedRowIndex]?.[0] ?? '' : ''
+  const hullCatalogDetail =
+    hullCatalogRowIndex != null && inferenceByRow != null
+      ? inferenceByRow[hullCatalogRowIndex]
+      : null
+  const hullCatalogRacePlayer =
+    hullCatalogRowIndex != null ? data.rows[hullCatalogRowIndex]?.[0] ?? '' : ''
+  const hullCatalogPlayerId = hullCatalogDetail?.playerId
+
+  const showGlobalPauseControl =
+    data.includeBuildInference && globalInferencePause != null
 
   return (
     <>
-      <div className="overflow-auto">
-        <table className="min-w-full border-collapse text-sm">
+      <div className="max-h-[calc(100dvh-14rem)] overflow-auto overscroll-contain">
+        <table className="min-w-full border-separate border-spacing-0 text-sm">
           <thead>
-            <tr className="border-b border-[#52575d]">
+            <tr>
               {data.columns.map((column) => (
-                <th key={column} className="px-3 py-2 text-left font-medium text-slate-200">
-                  {column}
+                <th
+                  key={column}
+                  className="sticky top-0 z-10 bg-[#40454a] px-3 py-2 text-left font-medium text-slate-200 shadow-[inset_0_-1px_0_#52575d]"
+                >
+                  {column === BUILD_INFERENCE_COLUMN && showGlobalPauseControl ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span>{column}</span>
+                      <GlobalInferencePauseControl globalInferencePause={globalInferencePause} />
+                    </span>
+                  ) : (
+                    column
+                  )}
                 </th>
               ))}
             </tr>
@@ -143,7 +226,10 @@ export function ScoresTableView({ data, onHaltRow }: ScoresTableViewProps) {
                         <InferenceStatusCell
                           detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
-                          onHaltRow={onHaltRow}
+                          onOpenHullCatalog={() => setHullCatalogRowIndex(rowIndex)}
+                          onStopRow={onStopRow}
+                          onResumeRow={onResumeRow}
+                          isGloballyPaused={isGloballyPaused}
                         />
                       </td>
                     )
@@ -165,6 +251,16 @@ export function ScoresTableView({ data, onHaltRow }: ScoresTableViewProps) {
         racePlayer={selectedRacePlayer}
         detail={selectedDetail}
       />
+      {typeof hullCatalogPlayerId === 'number' ? (
+        <HullCatalogMaskDialog
+          isOpen={hullCatalogRowIndex != null}
+          onClose={() => setHullCatalogRowIndex(null)}
+          scope={analyticScope}
+          playerId={hullCatalogPlayerId}
+          racePlayer={hullCatalogRacePlayer}
+          onSaved={() => onResumeRow?.(hullCatalogPlayerId)}
+        />
+      ) : null}
     </>
   )
 }

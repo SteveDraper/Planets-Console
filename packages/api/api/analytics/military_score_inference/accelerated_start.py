@@ -213,18 +213,48 @@ def effective_prior_score_row(
     return _apply_snapshot(score_at_reliable_turn, snapshot)
 
 
+def _reported_scoreboard_changes_are_zero(score: Score) -> bool:
+    return (
+        score.militarychange == 0
+        and score.shipchange == 0
+        and score.freighterchange == 0
+        and score.prioritypointchange == 0
+    )
+
+
+def scoreboard_row_deltas_from_prior_totals(
+    score: Score,
+    prior_score: Score,
+) -> tuple[int, int, int, int]:
+    """Infer per-row deltas when change columns are missing (e.g. spectator loads)."""
+    return (
+        2 * (score.militaryscore - prior_score.militaryscore),
+        score.capitalships - prior_score.capitalships,
+        score.freighters - prior_score.freighters,
+        score.prioritypoints - prior_score.prioritypoints,
+    )
+
+
 def observation_deltas_from_score(
     score: Score,
     turn: TurnInfo,
-) -> tuple[int, int, int, int]:
+    *,
+    prior_score: Score | None = None,
+) -> tuple[int, int, int, int, str]:
     """Return scoreboard-row deltas for the reported host turn on this row."""
     del turn
-    return (
+    reported = (
         reported_host_military_delta_2x(score),
         score.shipchange,
         score.freighterchange,
         score.prioritypointchange,
     )
+    if not _reported_scoreboard_changes_are_zero(score) or prior_score is None:
+        return (*reported, "reported_change_fields")
+    from_totals = scoreboard_row_deltas_from_prior_totals(score, prior_score)
+    if from_totals == (0, 0, 0, 0):
+        return (*reported, "reported_change_fields")
+    return (*from_totals, "prior_row_total_diff")
 
 
 def accelerated_window_military_change(score: Score, turn: TurnInfo) -> int:

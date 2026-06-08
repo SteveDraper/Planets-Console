@@ -14,6 +14,7 @@ from tests.inference_corpus.ground_truth import (
     describe_inventory_activity,
     extract_ground_truth_v1,
     format_ground_truth_summary,
+    load_ground_truth_turn_snapshots,
 )
 from tests.inference_corpus.models import ComplexityLevel, DiscoveredCase
 
@@ -99,6 +100,14 @@ def _listing_for_case(
     player_name = _player_name(game_info, case.perspective)
     score = score_for_player(score_turn.scores, player_id, case.id)
 
+    gt_prior_turn, gt_score_turn = load_ground_truth_turn_snapshots(
+        turn_load,
+        game_info,
+        case.game_id,
+        player_id,
+        case.host_turn,
+    )
+
     merged = merged_inventory_for_case(
         case,
         turn_load=turn_load,
@@ -115,18 +124,18 @@ def _listing_for_case(
     )
 
     extraction = extract_ground_truth_v1(
-        prior_turn=prior_turn,
-        score_turn=score_turn,
+        prior_turn=gt_prior_turn,
+        score_turn=gt_score_turn,
         player_id=player_id,
         score=score,
         complexity=complexity,
     )
     if extraction.available:
-        summary = format_ground_truth_summary(extraction.ground_truth, score_turn=score_turn)
+        summary = format_ground_truth_summary(extraction.ground_truth, score_turn=gt_score_turn)
     else:
         summary = describe_inventory_activity(
-            prior_turn=prior_turn,
-            score_turn=score_turn,
+            prior_turn=gt_prior_turn,
+            score_turn=gt_score_turn,
             player_id=player_id,
         )
 

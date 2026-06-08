@@ -14,6 +14,7 @@ class InferenceObservation:
     starbases_owned: int
     is_after_ship_limit: bool
     military_partition_slack_2x: int = 0
+    scoreboard_delta_source: str = "reported_change_fields"
 
 
 @dataclass(frozen=True)
