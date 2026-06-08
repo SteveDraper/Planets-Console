@@ -65,6 +65,7 @@ packages/api/api/analytics/military_score_inference/
 |-- scoring.py              # scaled military-score contribution formulas
 |-- score_arithmetic.py     # solution score breakdown for API diagnostics
 |-- solver.py               # OR-Tools CP-SAT adapter
+|-- inference_api_payload.py # inference result and solution API payload serialization
 `-- analytic.py             # run_inference_with_artifacts entry; path dispatch to solver paths
 ```
 
