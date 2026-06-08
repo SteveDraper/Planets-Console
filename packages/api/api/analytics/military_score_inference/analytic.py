@@ -1,5 +1,7 @@
 """Scores analytic integration for military score build inference."""
 
+from dataclasses import dataclass
+
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
     needs_accelerated_backfill,
@@ -579,6 +581,186 @@ def _summary_from_segment_payload(segment_payload: dict[str, object]) -> str:
     return f"Best: {'; '.join(parts)}"
 
 
+def build_accelerated_segment_payload(
+    segment: AcceleratedInferenceSegment,
+    segment_observation: InferenceObservation,
+    result: InferenceResult,
+    catalog: ActionCatalog | None,
+    *,
+    policy_steps_attempted: list[str],
+    step_diagnostics: list[dict[str, object]],
+) -> dict[str, object]:
+    """Shape one accelerated segment solve into the diagnostics segment payload."""
+    return {
+        "segmentId": segment.segment_id,
+        "hostTurn": segment.host_turn,
+        "status": result.status,
+        "solutionCount": len(result.solutions),
+        "militaryDelta2x": segment.military_delta_2x,
+        "warshipDelta": segment.warship_delta,
+        "freighterDelta": segment.freighter_delta,
+        "policyStepsAttempted": policy_steps_attempted,
+        "policyStepAttempts": step_diagnostics,
+        "solutions": (
+            [
+                _serialize_solution_with_arithmetic(
+                    segment_observation,
+                    catalog,
+                    solution,
+                )
+                for solution in result.solutions
+            ]
+            if catalog is not None
+            else []
+        ),
+    }
+
+
+@dataclass(frozen=True)
+class AcceleratedSegmentSolve:
+    """One accelerated segment policy-ladder result collected during streaming."""
+
+    segment: AcceleratedInferenceSegment
+    observation: InferenceObservation
+    result: InferenceResult
+    catalog: ActionCatalog | None
+    problem: InferenceProblem | None
+    policy_steps_attempted: list[str]
+    step_diagnostics: list[dict[str, object]]
+    payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class AcceleratedStreamRowComplete:
+    """Terminal row-complete payload for accelerated stream orchestration."""
+
+    result: InferenceResult
+    catalog: ActionCatalog | None = None
+    problem: InferenceProblem | None = None
+    policy_steps_attempted: list[str] | None = None
+    step_diagnostics: list[dict[str, object]] | None = None
+    summary_override: str | None = None
+    wire_observation: InferenceObservation | None = None
+    wire_turn: TurnInfo | None = None
+    extra_diagnostics: dict[str, object] | None = None
+
+
+def build_accelerated_split_stream_row_complete(
+    score: Score,
+    turn: TurnInfo,
+    *,
+    segment_solves: tuple[AcceleratedSegmentSolve, ...],
+    combined_time_limited: bool,
+) -> AcceleratedStreamRowComplete:
+    """Build terminal stream state for an accelerated split row."""
+    segment_payloads = [segment.payload for segment in segment_solves]
+    reported = next(
+        (
+            segment
+            for segment in segment_solves
+            if segment.segment.segment_id == "reported_host_turn"
+        ),
+        None,
+    )
+    if reported is None or reported.catalog is None or reported.problem is None:
+        missing_payload, missing_observation, _, _ = (
+            _accelerated_split_missing_reported_segment_result(
+                score,
+                turn,
+                segment_payloads=segment_payloads,
+                segment_artifacts={
+                    segment.segment.host_turn: (segment.observation, segment.catalog)
+                    for segment in segment_solves
+                },
+            )
+        )
+        return AcceleratedStreamRowComplete(
+            result=InferenceResult(
+                status=str(missing_payload.get("status", STATUS_INVALID_PROBLEM)),
+                solutions=(),
+                diagnostics=(
+                    missing_payload.get("diagnostics")
+                    if isinstance(missing_payload.get("diagnostics"), dict)
+                    else {"reason": "accelerated_split_missing_reported_segment"}
+                ),
+            ),
+            summary_override=str(missing_payload.get("summary", "Invalid inference problem")),
+            wire_observation=missing_observation,
+            wire_turn=turn,
+        )
+
+    overall_status = _accelerated_split_status(segment_payloads, combined_time_limited)
+    return AcceleratedStreamRowComplete(
+        result=InferenceResult(
+            status=overall_status,
+            solutions=reported.result.solutions,
+            diagnostics={
+                **reported.result.diagnostics,
+                "accelerated_segments": segment_payloads,
+            },
+        ),
+        catalog=reported.catalog,
+        problem=reported.problem,
+        policy_steps_attempted=reported.policy_steps_attempted,
+        step_diagnostics=reported.step_diagnostics,
+        wire_observation=reported.observation,
+        wire_turn=turn,
+        extra_diagnostics={"accelerated_segments": segment_payloads},
+    )
+
+
+def build_accelerated_backfill_stream_row_complete(
+    row_score: Score,
+    row_turn: TurnInfo,
+    *,
+    target_host_turn: int,
+    source_turn_number: int,
+    source_turn: TurnInfo,
+    segment_solves: tuple[AcceleratedSegmentSolve, ...],
+) -> AcceleratedStreamRowComplete:
+    """Build terminal stream state for an accelerated backfill row."""
+    segment_payloads = [segment.payload for segment in segment_solves]
+    target = next(
+        (segment for segment in segment_solves if segment.segment.host_turn == target_host_turn),
+        None,
+    )
+    if target is None or target.catalog is None or target.problem is None:
+        return AcceleratedStreamRowComplete(
+            result=InferenceResult(
+                status=STATUS_NO_PRIOR_TURN,
+                solutions=(),
+                diagnostics={"reason": "accelerated_backfill_unavailable"},
+            ),
+            summary_override="Prior turn score data unavailable",
+            wire_observation=build_inference_observation(row_score, row_turn),
+            wire_turn=row_turn,
+        )
+
+    return AcceleratedStreamRowComplete(
+        result=InferenceResult(
+            status=target.result.status,
+            solutions=target.result.solutions,
+            diagnostics={
+                **target.result.diagnostics,
+                "accelerated_segments": segment_payloads,
+            },
+        ),
+        catalog=target.catalog,
+        problem=target.problem,
+        policy_steps_attempted=target.policy_steps_attempted,
+        step_diagnostics=target.step_diagnostics,
+        wire_observation=target.observation,
+        wire_turn=source_turn,
+        extra_diagnostics={
+            "accelerated_backfill": True,
+            "accelerated_backfill_source_turn": source_turn_number,
+            "accelerated_backfill_host_turn": target_host_turn,
+            "accelerated_backfill_segment_id": target.segment.segment_id,
+            "accelerated_segments": segment_payloads,
+        },
+    )
+
+
 def _run_accelerated_split_inference(
     score: Score,
     turn: TurnInfo,
@@ -628,29 +810,14 @@ def _run_accelerated_split_inference(
             combined_time_limited = True
 
         segment_payloads.append(
-            {
-                "segmentId": segment.segment_id,
-                "hostTurn": segment.host_turn,
-                "status": result.status,
-                "solutionCount": len(result.solutions),
-                "militaryDelta2x": segment.military_delta_2x,
-                "warshipDelta": segment.warship_delta,
-                "freighterDelta": segment.freighter_delta,
-                "policyStepsAttempted": policy_steps_attempted,
-                "policyStepAttempts": step_diagnostics,
-                "solutions": (
-                    [
-                        _serialize_solution_with_arithmetic(
-                            segment_observation,
-                            catalog,
-                            solution,
-                        )
-                        for solution in result.solutions
-                    ]
-                    if catalog is not None
-                    else []
-                ),
-            }
+            build_accelerated_segment_payload(
+                segment,
+                segment_observation,
+                result,
+                catalog,
+                policy_steps_attempted=policy_steps_attempted,
+                step_diagnostics=step_diagnostics,
+            )
         )
 
     if (

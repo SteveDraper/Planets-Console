@@ -10,15 +10,21 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from api.analytics.military_score_inference.analytic import (
+    build_accelerated_backfill_stream_row_complete,
+    build_accelerated_split_stream_row_complete,
+)
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
     HeldSolutionsUpdated,
     InferenceStreamDomainEvent,
-    RowApiPayloadReady,
     RowComplete,
-    RowFailed,
     TierProgress,
+)
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    InferenceStreamOrchestration,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import (
@@ -60,6 +66,7 @@ class InferenceRowStreamSession:
     event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     ladder_state: PolicyLadderState | None = None
+    orchestration: InferenceStreamOrchestration | None = None
     on_finalize: Callable[[dict[str, object]], None] | None = None
 
     @property
@@ -77,14 +84,8 @@ class _TierJob:
     is_continuation: bool = False
 
 
-@dataclass(frozen=True)
-class _FullRowJob:
-    session: InferenceRowStreamSession
-    run_inference: Callable[[InferenceRowStreamSession], dict[str, object]]
-
-
 _Sentinel = object()
-_Job = _TierJob | _FullRowJob | object
+_Job = _TierJob | object
 
 
 def _scope_player_key(
@@ -98,7 +99,7 @@ class InferenceRowScheduler:
     """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
 
     def __init__(self, worker_count: int = _DEFAULT_WORKER_COUNT) -> None:
-        self._tier_one_queue: queue.Queue[_TierJob | _FullRowJob] = queue.Queue()
+        self._tier_one_queue: queue.Queue[_TierJob] = queue.Queue()
         self._continuation_by_run: dict[str, deque[_TierJob]] = {}
         self._continuation_round_robin: deque[str] = deque()
         self._sessions: dict[str, InferenceRowStreamSession] = {}
@@ -112,7 +113,7 @@ class InferenceRowScheduler:
         self._shutdown = False
         self._active_scope: InferenceStreamScope | None = None
         self._globally_paused = False
-        self._held_jobs: list[_TierJob | _FullRowJob] = []
+        self._held_jobs: list[_TierJob] = []
         self._held_continuations: dict[str, InferenceRowStreamSession] = {}
         for _ in range(worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -221,23 +222,22 @@ class InferenceRowScheduler:
             with self._condition:
                 self._held_continuations.pop(run_id, None)
 
-    def enqueue_tier_ladder(self, session: InferenceRowStreamSession) -> None:
-        policy_steps = tuple(resolve_tier_policies(None))
-        session.ladder_state = PolicyLadderState(
-            policy_steps=policy_steps,
-        )
+    def enqueue_tier_ladder(
+        self,
+        session: InferenceRowStreamSession,
+        *,
+        orchestration: InferenceStreamOrchestration | None = None,
+    ) -> None:
+        session.orchestration = orchestration
+        if orchestration is not None:
+            session.ladder_state = orchestration.new_ladder_state()
+        else:
+            policy_steps = tuple(resolve_tier_policies(None))
+            session.ladder_state = PolicyLadderState(policy_steps=policy_steps)
         self.register_session(session)
         self._enqueue_job(_TierJob(session=session))
 
-    def enqueue_full_row(
-        self,
-        session: InferenceRowStreamSession,
-        run_inference: Callable[[InferenceRowStreamSession], dict[str, object]],
-    ) -> None:
-        self.register_session(session)
-        self._enqueue_job(_FullRowJob(session=session, run_inference=run_inference))
-
-    def _enqueue_job(self, job: _TierJob | _FullRowJob) -> None:
+    def _enqueue_job(self, job: _TierJob) -> None:
         with self._condition:
             if self._globally_paused:
                 self._held_jobs.append(job)
@@ -261,13 +261,13 @@ class InferenceRowScheduler:
             self._continuation_round_robin.append(run_id)
         row_queue.append(job)
 
-    def _requeue_job_locked(self, job: _TierJob | _FullRowJob) -> None:
-        if isinstance(job, _TierJob) and job.is_continuation:
+    def _requeue_job_locked(self, job: _TierJob) -> None:
+        if job.is_continuation:
             self._enqueue_continuation_locked(job.session)
             return
         self._tier_one_queue.put(job)
 
-    def _dequeue_next_job_locked(self) -> _TierJob | _FullRowJob | None:
+    def _dequeue_next_job_locked(self) -> _TierJob | None:
         try:
             return self._tier_one_queue.get_nowait()
         except queue.Empty:
@@ -295,8 +295,7 @@ class InferenceRowScheduler:
                 job = self._tier_one_queue.get_nowait()
             except queue.Empty:
                 break
-            if isinstance(job, (_TierJob, _FullRowJob)):
-                self._held_jobs.append(job)
+            self._held_jobs.append(job)
         for run_id in list(self._continuation_by_run):
             row_queue = self._continuation_by_run.pop(run_id, None)
             if row_queue is None:
@@ -318,8 +317,7 @@ class InferenceRowScheduler:
                 job = self._tier_one_queue.get_nowait()
             except queue.Empty:
                 break
-            if isinstance(job, (_TierJob, _FullRowJob)):
-                job.session.cancel_token.cancel()
+            job.session.cancel_token.cancel()
         for run_id in list(self._continuation_by_run):
             row_queue = self._continuation_by_run.pop(run_id, None)
             if row_queue is None:
@@ -352,10 +350,22 @@ class InferenceRowScheduler:
                 return
             if isinstance(job, _TierJob):
                 self._run_tier_job(job.session)
-            elif isinstance(job, _FullRowJob):
-                self._run_full_row_job(job)
 
-    def _emit_held_solutions(self, session: InferenceRowStreamSession) -> None:
+    def _solve_context(
+        self,
+        session: InferenceRowStreamSession,
+    ) -> tuple[InferenceObservation, TurnInfo]:
+        orchestration = session.orchestration
+        if orchestration is not None and orchestration.is_accelerated:
+            return orchestration.current_observation(), orchestration.current_solve_turn()
+        return session.observation, session.turn
+
+    def _emit_held_solutions(
+        self,
+        session: InferenceRowStreamSession,
+        *,
+        observation: InferenceObservation,
+    ) -> None:
         state = session.ladder_state
         if state is None or state.catalog is None or not state.merged_solutions:
             return
@@ -363,6 +373,7 @@ class InferenceRowScheduler:
             HeldSolutionsUpdated(
                 solutions=state.merged_solutions,
                 catalog=state.catalog,
+                observation=observation,
             )
         )
 
@@ -394,6 +405,62 @@ class InferenceRowScheduler:
         session.event_queue.put(event)
         self.unregister_session(session.run_id)
 
+    def _row_complete_from_accelerated(
+        self,
+        session: InferenceRowStreamSession,
+    ) -> RowComplete:
+        orchestration = session.orchestration
+        if orchestration is None:
+            raise RuntimeError("accelerated finalize requires orchestration state")
+        segment_solves = tuple(orchestration.segment_solves)
+        if orchestration.path == InferencePath.ACCELERATED_BACKFILL:
+            assert orchestration.backfill_target_host_turn is not None
+            assert orchestration.backfill_source_turn_number is not None
+            complete = build_accelerated_backfill_stream_row_complete(
+                orchestration.row_score,
+                orchestration.row_turn,
+                target_host_turn=orchestration.backfill_target_host_turn,
+                source_turn_number=orchestration.backfill_source_turn_number,
+                source_turn=orchestration.solve_turn,
+                segment_solves=segment_solves,
+            )
+        else:
+            complete = build_accelerated_split_stream_row_complete(
+                orchestration.row_score,
+                orchestration.row_turn,
+                segment_solves=segment_solves,
+                combined_time_limited=orchestration.combined_time_limited,
+            )
+        return RowComplete(
+            result=complete.result,
+            catalog=complete.catalog,
+            problem=complete.problem,
+            policy_steps_attempted=complete.policy_steps_attempted,
+            step_diagnostics=complete.step_diagnostics,
+            summary_override=complete.summary_override,
+            wire_observation=complete.wire_observation,
+            wire_turn=complete.wire_turn,
+            extra_diagnostics=complete.extra_diagnostics,
+        )
+
+    def _record_completed_segment(self, session: InferenceRowStreamSession) -> None:
+        orchestration = session.orchestration
+        state = session.ladder_state
+        if orchestration is None or state is None:
+            return
+        observation, turn = self._solve_context(session)
+        result, catalog, problem, policy_steps_attempted, step_diagnostics = (
+            finalize_policy_ladder_result(state, observation, turn)
+        )
+        orchestration.record_segment_ladder_complete(
+            observation=observation,
+            result=result,
+            catalog=catalog,
+            problem=problem,
+            policy_steps_attempted=policy_steps_attempted,
+            step_diagnostics=step_diagnostics,
+        )
+
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
         if session.cancel_token.is_cancelled():
             self._finalize_stopped(session)
@@ -402,14 +469,21 @@ class InferenceRowScheduler:
         if state is None:
             return
 
+        observation, turn = self._solve_context(session)
+        orchestration = session.orchestration
+        emit_solutions = (
+            orchestration is None or orchestration.should_emit_streaming_solutions()
+        )
+
         def on_admitted(_solution: InferenceSolution) -> None:
-            self._emit_held_solutions(session)
+            if emit_solutions:
+                self._emit_held_solutions(session, observation=observation)
 
         self._emit_tier_started_progress(session)
         run_policy_ladder_tier_step(
             state,
-            session.observation,
-            session.turn,
+            observation,
+            turn,
             time_limit_seconds=None,
             cancel_token=session.cancel_token,
             on_admitted=on_admitted,
@@ -424,17 +498,27 @@ class InferenceRowScheduler:
             self._enqueue_continuation(session)
             return
 
+        if orchestration is not None and orchestration.is_accelerated:
+            self._record_completed_segment(session)
+            if orchestration.has_more_segments():
+                session.ladder_state = orchestration.new_ladder_state()
+                self._enqueue_continuation(session)
+                return
+            self._emit_row_complete(session, self._row_complete_from_accelerated(session))
+            return
+
         self._finalize_ladder(session)
 
     def _finalize_ladder(self, session: InferenceRowStreamSession) -> None:
         state = session.ladder_state
         if state is None:
             return
+        observation, turn = self._solve_context(session)
         result, catalog, problem, policy_steps_attempted, step_diagnostics = (
             finalize_policy_ladder_result(
                 state,
-                session.observation,
-                session.turn,
+                observation,
+                turn,
             )
         )
         self._emit_row_complete(
@@ -449,13 +533,42 @@ class InferenceRowScheduler:
         )
 
     def _finalize_stopped(self, session: InferenceRowStreamSession) -> None:
+        orchestration = session.orchestration
         state = session.ladder_state
+        if orchestration is not None and orchestration.is_accelerated:
+            if state is not None and state.catalog is not None:
+                self._record_completed_segment(session)
+            if orchestration.segment_solves:
+                complete = self._row_complete_from_accelerated(session)
+                stopped_result = InferenceResult(
+                    status=STATUS_STOPPED,
+                    solutions=complete.result.solutions,
+                    diagnostics={**complete.result.diagnostics, "stopped_reason": "cancelled"},
+                )
+                self._emit_row_complete(
+                    session,
+                    RowComplete(
+                        result=stopped_result,
+                        catalog=complete.catalog,
+                        problem=complete.problem,
+                        policy_steps_attempted=complete.policy_steps_attempted,
+                        step_diagnostics=complete.step_diagnostics,
+                        force_is_complete=True,
+                        summary_override=complete.summary_override,
+                        wire_observation=complete.wire_observation,
+                        wire_turn=complete.wire_turn,
+                        extra_diagnostics=complete.extra_diagnostics,
+                    ),
+                )
+                return
+
         if state is not None and state.merged_solutions:
+            observation, turn = self._solve_context(session)
             result, catalog, problem, policy_steps_attempted, step_diagnostics = (
                 finalize_policy_ladder_result(
                     state,
-                    session.observation,
-                    session.turn,
+                    observation,
+                    turn,
                 )
             )
             stopped_result = InferenceResult(
@@ -488,20 +601,6 @@ class InferenceRowScheduler:
                 force_is_complete=True,
             ),
         )
-
-    def _run_full_row_job(self, job: _FullRowJob) -> None:
-        session = job.session
-        if session.cancel_token.is_cancelled():
-            self._finalize_stopped(session)
-            return
-        try:
-            payload = job.run_inference(session)
-        except Exception:
-            session.event_queue.put(RowFailed(detail="Build inference failed"))
-            self.unregister_session(session.run_id)
-            return
-        session.event_queue.put(RowApiPayloadReady(payload=payload))
-        self.unregister_session(session.run_id)
 
 
 _scheduler: InferenceRowScheduler | None = None

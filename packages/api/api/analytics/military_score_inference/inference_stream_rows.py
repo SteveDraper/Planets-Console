@@ -6,10 +6,7 @@ import queue
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.analytic import (
-    build_inference_observation,
-    run_inference_with_artifacts,
-)
+from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     _inference_api_payload,
@@ -34,8 +31,10 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
     RowFailed,
     TierProgress,
 )
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    create_inference_stream_orchestration,
+)
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.models.game import Score, TurnInfo
 from api.transport.inference_stream import (
     inference_complete_event,
@@ -58,7 +57,7 @@ def domain_event_to_wire_events(
     """Convert one scheduler domain event into zero or more NDJSON wire dicts."""
     if isinstance(event, HeldSolutionsUpdated):
         serialized = serialize_solutions_with_arithmetic(
-            observation,
+            event.observation or observation,
             event.catalog,
             event.solutions,
         )
@@ -74,15 +73,18 @@ def domain_event_to_wire_events(
         ]
 
     if isinstance(event, RowComplete):
+        wire_observation = event.wire_observation or observation
+        wire_turn = event.wire_turn or turn
         if event.catalog is not None and event.problem is not None:
             payload = inference_result_to_api_payload(
                 event.result,
                 event.catalog,
-                observation,
-                turn,
+                wire_observation,
+                wire_turn,
                 event.problem,
                 policy_steps_attempted=event.policy_steps_attempted,
                 step_diagnostics=event.step_diagnostics,
+                extra_diagnostics=event.extra_diagnostics,
             )
         else:
             summary = event.summary_override or format_inference_summary(event.result)
@@ -260,33 +262,14 @@ def schedule_inference_row(
         perspective=perspective,
         turn_number=turn_number,
     )
-    if path == InferencePath.POLICY_LADDER:
-        scheduler.enqueue_tier_ladder(session)
-    else:
-
-        def run_full_row(row_session: InferenceRowStreamSession) -> dict[str, object]:
-            if row_session.cancel_token.is_cancelled():
-                return _inference_api_payload(
-                    status=STATUS_STOPPED,
-                    summary="Build inference halted",
-                    solutions=(),
-                    diagnostics={"stopped_reason": "cancelled"},
-                )
-            payload, _, _ = run_inference_with_artifacts(
-                score,
-                turn,
-                load_scoreboard_turn=load_scoreboard_turn,
-            )
-            if row_session.cancel_token.is_cancelled():
-                payload = {
-                    **payload,
-                    "status": STATUS_STOPPED,
-                    "summary": "Build inference halted",
-                    "isComplete": True,
-                }
-            return payload
-
-        scheduler.enqueue_full_row(session, run_full_row)
+    orchestration = create_inference_stream_orchestration(
+        path,
+        score,
+        turn,
+        segments=_segments,
+        load_scoreboard_turn=load_scoreboard_turn,
+    )
+    scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
     return ScheduledInferenceRow(player_id=player_id, session=session)
 
 
