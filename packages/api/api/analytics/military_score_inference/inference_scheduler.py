@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     _inference_api_payload,
-    _serialize_solution_with_arithmetic,
     inference_result_to_api_payload,
+    serialize_solutions_with_arithmetic,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -360,17 +360,14 @@ class InferenceRowScheduler:
             elif isinstance(job, _FullRowJob):
                 self._run_full_row_job(job)
 
-    def _emit_solution(
-        self,
-        session: InferenceRowStreamSession,
-        solution: InferenceSolution,
-    ) -> None:
-        if session.ladder_state is None or session.ladder_state.catalog is None:
+    def _emit_held_solutions(self, session: InferenceRowStreamSession) -> None:
+        state = session.ladder_state
+        if state is None or state.catalog is None or not state.merged_solutions:
             return
-        serialized = _serialize_solution_with_arithmetic(
+        serialized = serialize_solutions_with_arithmetic(
             session.observation,
-            session.ladder_state.catalog,
-            solution,
+            state.catalog,
+            state.merged_solutions,
         )
         session.event_queue.put(inference_solution_event(serialized))
 
@@ -426,8 +423,8 @@ class InferenceRowScheduler:
         if state is None:
             return
 
-        def on_admitted(solution: InferenceSolution) -> None:
-            self._emit_solution(session, solution)
+        def on_admitted(_solution: InferenceSolution) -> None:
+            self._emit_held_solutions(session)
 
         self._emit_tier_started_progress(session)
         run_policy_ladder_tier_step(
@@ -525,9 +522,9 @@ class InferenceRowScheduler:
             return
         solutions_raw = payload.get("solutions")
         if isinstance(solutions_raw, list):
-            for solution in solutions_raw:
-                if isinstance(solution, dict):
-                    session.event_queue.put(inference_solution_event(solution))
+            serialized = [solution for solution in solutions_raw if isinstance(solution, dict)]
+            if serialized:
+                session.event_queue.put(inference_solution_event(serialized))
         self._emit_complete_from_payload(session, payload)
 
 

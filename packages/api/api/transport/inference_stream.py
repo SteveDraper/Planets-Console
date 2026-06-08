@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 _INFERENCE_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
 
-def inference_solution_event(solution: dict[str, object]) -> dict[str, object]:
-    return {"type": "solution", "solution": solution}
+def inference_solution_event(solutions: list[dict[str, object]]) -> dict[str, object]:
+    """Emit the full held top-K for one row after a new signature is admitted."""
+    return {"type": "solution", "solutions": solutions}
 
 
 def inference_progress_event(

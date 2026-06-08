@@ -1,8 +1,11 @@
 """Turn analytic dispatch via the Core analytics registry."""
 
+from collections.abc import Callable
+
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError
+from api.models.game import TurnInfo
 from api.services.inference_hull_catalog_service import InferenceHullCatalogService
 from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
@@ -28,6 +31,23 @@ class TurnAnalyticService:
 
                 storage = get_storage()
             self._hull_catalog_masks = InferenceHullCatalogService(storage, turns)
+
+    def _load_scoreboard_turn(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> Callable[[int], TurnInfo | None]:
+        def load_scoreboard_turn(stored_turn_number: int) -> TurnInfo | None:
+            try:
+                return self._turns.get_turn_info(
+                    game_id,
+                    perspective,
+                    stored_turn_number,
+                )
+            except OSError, ValueError, KeyError, NotFoundError:
+                return None
+
+        return load_scoreboard_turn
 
     def get_turn_analytics(
         self,
@@ -67,17 +87,6 @@ class TurnAnalyticService:
         from api.analytics.scores import get_scores_row_inference
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-
-        def load_scoreboard_turn(stored_turn_number: int):
-            try:
-                return self._turns.get_turn_info(
-                    game_id,
-                    perspective,
-                    stored_turn_number,
-                )
-            except OSError, ValueError, KeyError, NotFoundError:
-                return None
-
         resolved_mask = self._hull_catalog_masks.resolve_mask_for_player(
             game_id,
             perspective,
@@ -87,7 +96,7 @@ class TurnAnalyticService:
         return get_scores_row_inference(
             turn,
             player_id,
-            load_scoreboard_turn=load_scoreboard_turn,
+            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
             resolved_mask=resolved_mask,
         )
 
@@ -101,17 +110,6 @@ class TurnAnalyticService:
         from api.analytics.scores import iter_scores_row_inference_stream
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-
-        def load_scoreboard_turn(stored_turn_number: int):
-            try:
-                return self._turns.get_turn_info(
-                    game_id,
-                    perspective,
-                    stored_turn_number,
-                )
-            except OSError, ValueError, KeyError, NotFoundError:
-                return None
-
         resolved_mask = self._hull_catalog_masks.resolve_mask_for_player(
             game_id,
             perspective,
@@ -123,7 +121,7 @@ class TurnAnalyticService:
             player_id,
             game_id=game_id,
             perspective=perspective,
-            load_scoreboard_turn=load_scoreboard_turn,
+            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
             resolved_mask=resolved_mask,
         )
 
@@ -138,16 +136,6 @@ class TurnAnalyticService:
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
 
-        def load_scoreboard_turn(stored_turn_number: int):
-            try:
-                return self._turns.get_turn_info(
-                    game_id,
-                    perspective,
-                    stored_turn_number,
-                )
-            except OSError, ValueError, KeyError, NotFoundError:
-                return None
-
         def resolve_mask_for_player(player_id: int):
             return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
                 turn,
@@ -160,7 +148,7 @@ class TurnAnalyticService:
             player_ids,
             game_id=game_id,
             perspective=perspective,
-            load_scoreboard_turn=load_scoreboard_turn,
+            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
             resolve_mask_for_player=resolve_mask_for_player,
         )
 

@@ -11,7 +11,7 @@ from api.transport.inference_stream import (
 
 def test_stream_inference_row_yields_ndjson_lines() -> None:
     items = [
-        inference_solution_event({"objectiveValue": 5, "actions": []}),
+        inference_solution_event([{"objectiveValue": 5, "actions": []}]),
         inference_complete_event(
             status="exact",
             summary="Best: built one ship",

@@ -196,3 +196,16 @@ def _serialize_solution_with_arithmetic(
 
 def _serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[str, object]:
     return _serialize_solution_core(solution)
+
+
+def serialize_solutions_with_arithmetic(
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    solutions: list[InferenceSolution] | tuple[InferenceSolution, ...],
+) -> list[dict[str, object]]:
+    """Rank and serialize held top-K rows for NDJSON solution events."""
+    ranked = sorted(solutions, key=lambda solution: solution.objective_value, reverse=True)
+    return [
+        _serialize_solution_with_arithmetic(observation, catalog, solution)
+        for solution in ranked
+    ]

@@ -659,7 +659,6 @@ export async function fetchScoresRowInference(
 
 export type { InferenceStreamEvent }
 
-const HELD_INFERENCE_TOP_K = 20
 
 export type InferenceHullCatalogEntry = {
   hullId: number
@@ -876,8 +875,6 @@ export async function stopScoresRowInference(
   }
   return r.json()
 }
-
-export { HELD_INFERENCE_TOP_K }
 
 export async function fetchAnalyticMap(
   analyticId: string,

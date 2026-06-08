@@ -12,7 +12,6 @@ import {
 } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
-import { admitInferenceSolution } from './inferenceHeldTopK'
 
 function pendingDetail(
   playerId: number,
@@ -195,7 +194,7 @@ export function useScoresInferenceByRow(
       }
 
       if (event.type === 'solution') {
-        state.heldSolutions = admitInferenceSolution(state.heldSolutions, event.solution)
+        state.heldSolutions = event.solutions
         publishPlayerState(playerId)
         return
       }

@@ -307,7 +307,7 @@ Use repeated optimization:
 
 A no-good cut can be encoded with indicator variables that detect whether each action count differs from its previous value, then require at least one difference. Keep this inside `solver.py` so the rest of the analytic only sees top-K results.
 
-**Phase 1H (#71):** the policy ladder and per-tier top-K loop emit each newly discovered exact explanation on the NDJSON wire before the row is complete, so the UI can show an **inference solution count indicator** (and open a partial modal) while later alternatives are still enumerating. Cross-row **inference row scheduler** interleaves tier jobs. SPA streams are open-ended (halt / scope cancel); batch JSON still returns only after top-K or per-case time budget.
+**Phase 1H (#71):** the policy ladder and per-tier top-K loop emit the **full held top-K** on the NDJSON wire whenever a new **inference explanation signature** is admitted, before the row is complete, so the UI can show an **inference solution count indicator** (and open a partial modal) while later alternatives are still enumerating. Cross-row **inference row scheduler** interleaves tier jobs. SPA uses one multiplexed **inference table stream** plus optional **inference global pause**; per-row halt and scope cancel remain. Batch JSON still returns only after top-K or per-case time budget.
 
 The solver should return:
 
@@ -347,7 +347,7 @@ When inference is enabled, add one extra column to the existing scoreboard table
 | Stopped | row halted (`status: stopped`) with **N = 0** | search stopped before any exact explanation was held | optional diagnostic modal |
 | Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 
-The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event is admitted to the held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
+The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event arrives with a non-empty held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
 
 ### 7.3 Modal details
 
@@ -375,34 +375,43 @@ Keep the Core solver as an internal component. The Core `scores` analytic should
 }
 ```
 
-The BFF fetches inference **per scoreboard row**. Two wire paths:
+Inference is fetched **per scoreboard row** at the solver layer. Three wire paths:
 
 | Path | Consumer | Completion |
 |------|----------|------------|
 | **Batch JSON** | Inference corpus harness, CI | Returns after top-K enumeration or per-case `time_limit_seconds` (default 20s) |
-| **NDJSON stream** | SPA (#71) | Open-ended until ladder finishes, user halt, or stream cancel |
+| **NDJSON table stream** | SPA (#71) primary | One connection per shell scope; multiplexed row events |
+| **NDJSON per-row stream** | SPA row resume | Open-ended until ladder finishes, user halt, or stream cancel |
 
 **Batch (current):** `GET .../scores/inference?playerId=...` returns one JSON payload when the row solve completes or hits the time budget.
 
-**Stream (Phase 1H, #71):** same route (or sibling stream route) returns NDJSON per row -- **one connection per scoreboard row**, parallel row requests unchanged. Events: `solution`, optional `progress`, terminal `complete` / `error`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries one newly admitted exact explanation plus **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and maintains **inference merged top-K** ordering. The hourglass clears when the first `solution` is admitted (`N = 1`); the count badge and modal grow while search continues.
+**Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). The hourglass clears when the first `solution` arrives with `solutions.length >= 1`; the count badge and modal track `solutions.length` while search continues.
 
-**SPA time budget:** none. A row runs until the ladder completes, the user halts that row, or the stream is cancelled (game / turn / **perspective** change, disable build inference, client disconnect). Terminal halt: `complete` with `status: stopped`, `isComplete: true`, held top-K preserved.
+**Per-row stream (resume path):** `GET .../scores/inference/stream?playerId=...` -- same event shapes without `playerId`. Used when the user resumes one row after **inference global pause** or per-row halt without reopening the full table stream.
+
+**Global pause:** `POST/DELETE .../scores/inference/global-pause` freezes or resumes all scheduler work for the current scope. Open table streams receive `globalPause` events; held top-K remains visible with paused chrome.
+
+**SPA time budget:** none. A row runs until the ladder completes, the user halts that row, global pause freezes it, or the stream is cancelled (game / turn / **perspective** change, disable build inference, client disconnect). Terminal halt: `complete` with `status: stopped`, `isComplete: true`, held top-K preserved.
 
 **#77 batch path (before #71 stream UI):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
 
 ### 7.5 Inference row scheduler (#71)
 
-Process-wide backend facility (glossary: `CONTEXT.md` **Inference row scheduler**). Fair-schedules **inference search tier** work across concurrent per-row NDJSON streams.
+Process-wide backend facility (glossary: `CONTEXT.md` **Inference row scheduler**). Fair-schedules **inference search tier** work across concurrent inference streams (table-multiplexed or per-row).
 
-1. When a row stream opens, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state).
+1. When a row is scheduled (table stream open or per-row resume), construct a tier-1 **inference tier job** (deltas, player id, ladder entry state).
 2. Enqueue tier-1 on a shared **FIFO** queue.
 3. Drain with a worker pool (default **4** workers, configurable). Distinct from corpus `--workers` (batch case parallelism).
 4. When a tier job completes, enqueue that row's tier-(n+1) job (seeds, held solutions, signatures). Per-row tier chains are strictly sequential.
-5. Emit `solution` events from merge-admit hooks inside the tier job.
+5. Emit `solution` events (full held top-K) from merge-admit hooks inside the tier job.
 
 One schedulable job = one full **inference search tier** step (catalog build, exact/band passes, within-tier top-K, merge, seed output).
 
-**Accelerated-start rows:** same per-row stream and scheduler as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
+**Table stream multiplexing:** per-row event queues are round-robin drained into one NDJSON generator; `playerId` tags identify the row on the wire.
+
+**Global pause:** pause drains the worker queue into a held buffer and broadcasts `globalPause`; resume requeues held tier jobs and continuations. Sessions may be preserved when a table stream disconnects while globally paused.
+
+**Accelerated-start rows:** same scheduler path as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
 
 **Cancellation:** each row run has a cancel token. Per-row halt, scope change, disable build inference, and client disconnect drop queued and in-flight tier jobs for that run.
 
@@ -653,7 +662,7 @@ Use these bounds before building the CP-SAT model:
 - **Top-K cap:** default to 20 per player; when combo cardinality exceeds **5000**, interim policy forces `max_solutions=1` on the batch path so enumeration finishes within the time budget (revisit after #71 streaming + halt ship; may no longer be needed).
 - **Time cap (batch / corpus only):** default **20 seconds** per case (`DEFAULT_INFERENCE_TIME_LIMIT_SECONDS` in `actions.py`) on the batch JSON path. **SPA NDJSON streams have no row time budget** -- user halt and scope cancel end the row. Corpus orchestration may additionally cap whole probe runs (`--probe-time-limit-seconds`).
 
-Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving (#77 YAML ladder), per-row streaming (#71), and the **inference row scheduler** (cross-row tier-1 interleaving) are the primary SPA mitigations. Column generation remains a later option if tier search is still too slow.
+Expect **hundreds to low thousands** of variables per player at mid tiers; worst-case full catalogs may approach **~10k** combo variables before partial-count expansion. Staged solving (#77 YAML ladder), inference table streaming (#71), and the **inference row scheduler** (cross-row tier-1 interleaving) are the primary SPA mitigations. Column generation remains a later option if tier search is still too slow.
 
 ---
 
@@ -906,9 +915,9 @@ Files:
 
 Steps:
 
-1. Define NDJSON event types: `solution`, optional `progress`, terminal `complete` / `error`. `complete.status` includes `exact`, `no_exact_solution`, `stopped`, etc.
-2. Implement **inference row scheduler** (section 7.5): tier-1 enqueued per row at stream open; tier-(n+1) chained per row; shared FIFO; default 4 workers (configurable).
-3. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K. Payload includes full explanation rows plus **inference solution rank weight**. Do not re-emit suppressed re-discoveries.
+1. Define NDJSON event types: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. `complete.status` includes `exact`, `no_exact_solution`, `stopped`, etc. Table-stream row events include `playerId`.
+2. Implement **inference row scheduler** (section 7.5): tier-1 enqueued per row at schedule time; tier-(n+1) chained per row; shared FIFO; default 4 workers (configurable). Add **inference global pause** (held jobs, broadcast).
+3. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K. Payload is the **full held top-K** for that row (ranked explanation rows plus **inference solution rank weight**). Do not emit on suppressed re-discoveries. Consumer replaces local held state; no client-side merge.
 4. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
 5. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
 6. **SPA:** no row time budget. Per-row halt control; implicit cancel on game / turn / **perspective** change, disable build inference, disconnect (`AbortSignal`). Halt terminal: `status: stopped`, partial held top-K preserved.

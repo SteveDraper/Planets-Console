@@ -465,7 +465,7 @@ The inference corpus harness is **not** affected by SPA NDJSON streaming or the 
 
 | Layer | Time budget after #71 |
 |-------|----------------------|
-| SPA per-row streams | None (user halt / scope cancel) |
+| SPA inference streams (table + per-row resume) | None (user halt / global pause / scope cancel) |
 | Batch `infer_military_score_build` | Per-case `time_limit_seconds` (default 20s) -- **retained** |
 | `run_inference_corpus.py` orchestration | `--probe-time-limit-seconds` (stop between cases) -- **retained** |
 

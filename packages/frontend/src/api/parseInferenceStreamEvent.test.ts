@@ -2,40 +2,47 @@ import { describe, expect, it } from 'vitest'
 import { parseInferenceStreamEvent } from './parseInferenceStreamEvent'
 
 describe('parseInferenceStreamEvent', () => {
-  it('parses solution events', () => {
+  it('parses solution events with full held top-K', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
         type: 'solution',
-        solution: {
-          objectiveValue: 12,
-          actions: [{ actionId: 'a1', label: 'Fighter', count: 2 }],
-        },
+        solutions: [
+          {
+            objectiveValue: 12,
+            actions: [{ actionId: 'a1', label: 'Fighter', count: 2 }],
+          },
+        ],
       })
     )
     expect(event?.type).toBe('solution')
+    if (event?.type === 'solution') {
+      expect(event.solutions).toHaveLength(1)
+    }
   })
 
   it('parses ship builds with null optional component ids', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
         type: 'solution',
-        solution: {
-          objectiveValue: 80,
-          actions: [],
-          shipBuilds: [
-            {
-              comboId: 'combo_60_4_none_none_0_0',
-              label: 'Build Ruby Class Light Cruiser: 2x SuperStarDrive 4',
-              count: 1,
-              hullId: 60,
-              engineId: 4,
-              beamId: null,
-              torpId: null,
-              beamCount: 0,
-              launcherCount: 0,
-            },
-          ],
-        },
+        solutions: [
+          {
+            objectiveValue: 80,
+            actions: [],
+            shipBuilds: [
+              {
+                comboId: 'combo_60_4_none_none_0_0',
+                label: 'Build Ruby Class Light Cruiser: 2x SuperStarDrive 4',
+                count: 1,
+                hullId: 60,
+                engineId: 4,
+                beamId: null,
+                torpId: null,
+                beamCount: 0,
+                launcherCount: 0,
+              },
+            ],
+          },
+        ],
       })
     )
     expect(event?.type).toBe('solution')

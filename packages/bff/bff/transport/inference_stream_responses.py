@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 class InferenceStreamSolutionEvent(BaseModel):
     type: Literal["solution"]
-    solution: dict[str, Any]
+    solutions: list[dict[str, Any]]
 
 
 class InferenceStreamProgressEvent(BaseModel):

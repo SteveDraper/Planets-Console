@@ -72,10 +72,12 @@ describe('useScoresInferenceByRow', () => {
         handlers.onEvent({
           type: 'solution',
           playerId: 8,
-          solution: {
-            objectiveValue: 10,
-            actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
-          },
+          solutions: [
+            {
+              objectiveValue: 10,
+              actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+            },
+          ],
         })
         await new Promise(() => {})
       }
