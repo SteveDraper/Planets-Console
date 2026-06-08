@@ -1,10 +1,7 @@
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
 import { isScoresInferenceRowDetail } from '../../api/bff'
 import type { ScoresAnalyticDiagnostics } from '../../stores/analyticDiagnostics'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-}
+import { isRecord } from './scoresWireParsers'
 
 function readTurn(diagnostics: Record<string, unknown>): number | null {
   if (typeof diagnostics.turn === 'number') {

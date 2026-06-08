@@ -1,3 +1,5 @@
+import { isRecord } from './scoresWireParsers'
+
 export type InferenceConstraintsSection = {
   turn?: number
   playerId?: number
@@ -26,10 +28,6 @@ export type MilitaryScoreArithmetic = {
   explainedMilitaryDelta2x: number
   matchesObserved: boolean
   lineItems: MilitaryScoreLineItem[]
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
 export function readInferenceConstraints(

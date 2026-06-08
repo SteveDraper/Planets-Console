@@ -15,16 +15,13 @@ import {
   readMilitaryScoreArithmetic,
   type MilitaryScoreArithmetic,
 } from './inferenceConstraints'
+import { isRecord } from './scoresWireParsers'
 
 type InferenceDetailModalProps = {
   isOpen: boolean
   onClose: () => void
   racePlayer: string
   detail: ScoresInferenceRowDetail | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function readSolverSummary(diagnostics: Record<string, unknown>): {
