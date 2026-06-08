@@ -26,7 +26,6 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
     GlobalPauseChanged,
     HeldSolutionsUpdated,
     InferenceStreamDomainEvent,
-    RowApiPayloadReady,
     RowComplete,
     RowFailed,
     TierProgress,
@@ -111,30 +110,6 @@ def domain_event_to_wire_events(
                 ),
             )
         ]
-
-    if isinstance(event, RowApiPayloadReady):
-        payload = event.payload
-        wire_events: list[dict[str, object]] = []
-        if event.emit_solution_event:
-            solutions_raw = payload.get("solutions")
-            if isinstance(solutions_raw, list):
-                serialized = [solution for solution in solutions_raw if isinstance(solution, dict)]
-                if serialized:
-                    wire_events.append(inference_solution_event(serialized))
-        wire_events.append(
-            inference_complete_event(
-                status=str(payload.get("status", "")),
-                summary=str(payload.get("summary", "")),
-                solution_count=int(payload.get("solutionCount", 0)),
-                is_complete=bool(payload.get("isComplete", True)),
-                diagnostics=(
-                    payload.get("diagnostics")
-                    if isinstance(payload.get("diagnostics"), dict)
-                    else None
-                ),
-            )
-        )
-        return wire_events
 
     if isinstance(event, RowFailed):
         return [inference_error_event(event.detail)]

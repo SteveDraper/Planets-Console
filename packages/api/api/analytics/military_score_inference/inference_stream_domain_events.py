@@ -43,14 +43,6 @@ class RowComplete:
 
 
 @dataclass(frozen=True)
-class RowApiPayloadReady:
-    """API-shaped row result from analytic; converted to NDJSON at the stream boundary."""
-
-    payload: dict[str, object]
-    emit_solution_event: bool = True
-
-
-@dataclass(frozen=True)
 class RowFailed:
     detail: str
 
@@ -64,7 +56,6 @@ InferenceStreamDomainEvent = (
     HeldSolutionsUpdated
     | TierProgress
     | RowComplete
-    | RowApiPayloadReady
     | RowFailed
     | GlobalPauseChanged
 )
