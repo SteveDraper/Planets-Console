@@ -28,7 +28,7 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun, TierJob
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.errors import ValidationError
+from api.errors import ConflictError, ValidationError
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
@@ -71,12 +71,14 @@ class InferenceRowScheduler:
 
     def begin_scope(self, scope: InferenceStreamScope) -> None:
         with self._condition:
+            if self._active_scope == scope and self._active_stream_refcount > 0:
+                raise ConflictError(
+                    "An inference table stream is already active for this scope."
+                )
             if self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
-                self._active_stream_refcount = 1
-            else:
-                self._active_stream_refcount += 1
+            self._active_stream_refcount = 1
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
         scope_matches = self._active_scope == scope

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     _TierJob,
-    get_inference_row_scheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
@@ -17,12 +19,13 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
     tag_inference_stream_event,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.errors import ConflictError
+from api.transport.inference_stream import stream_inference_ndjson
 
 
 def _session_for_player(sample_turn, *, player_id: int) -> InferenceRowStreamSession:
@@ -60,26 +63,56 @@ def test_table_stream_emits_global_pause_snapshot_on_connect(sample_turn):
     assert events[0] == {"type": "globalPause", "paused": False}
 
 
-def test_table_stream_emits_global_pause_snapshot_when_scope_is_paused(sample_turn):
+def test_table_stream_rejects_duplicate_concurrent_connection(sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = get_inference_row_scheduler()
-    scope = InferenceStreamScope(
+    active_stream = iter_scores_table_inference_events(
+        sample_turn,
+        (),
         game_id=628580,
         perspective=1,
-        turn_number=sample_turn.settings.turn,
     )
-    scheduler.begin_scope(scope)
-    scheduler.pause_globally(scope)
+    assert next(active_stream) == {"type": "globalPause", "paused": False}
 
-    events = list(
-        iter_scores_table_inference_events(
+    with pytest.raises(ConflictError, match="already active for this scope"):
+        list(
+            iter_scores_table_inference_events(
+                sample_turn,
+                (),
+                game_id=628580,
+                perspective=1,
+            )
+        )
+
+    active_stream.close()
+
+
+def test_table_stream_duplicate_connection_surfaces_error_event(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    active_stream = iter_scores_table_inference_events(
+        sample_turn,
+        (),
+        game_id=628580,
+        perspective=1,
+    )
+    next(active_stream)
+
+    def duplicate_loader():
+        yield from iter_scores_table_inference_events(
             sample_turn,
             (),
             game_id=628580,
             perspective=1,
         )
-    )
-    assert events[0] == {"type": "globalPause", "paused": True}
+
+    lines = list(stream_inference_ndjson(duplicate_loader))
+    active_stream.close()
+
+    assert len(lines) == 1
+    error = json.loads(lines[0])
+    assert error == {
+        "type": "error",
+        "detail": "An inference table stream is already active for this scope.",
+    }
 
 
 def test_tag_inference_stream_event_adds_player_id_except_global_pause():

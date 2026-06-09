@@ -17,7 +17,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceSolution, InferenceSolutionAction
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.errors import ValidationError
+from api.errors import ConflictError, ValidationError
 
 
 def _session_for_turn(
@@ -121,7 +121,7 @@ def test_new_scope_invalidates_retained_pause_state(sample_turn):
     assert status["activeScope"]["turn"] == scope_b.turn_number
 
 
-def test_end_inference_stream_keeps_global_pause_while_other_stream_connected(sample_turn):
+def test_begin_scope_rejects_duplicate_concurrent_stream(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     scope = InferenceStreamScope(
@@ -129,39 +129,36 @@ def test_end_inference_stream_keeps_global_pause_while_other_stream_connected(sa
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    session_a = _session_for_turn(sample_turn)
-    score_b = sample_turn.scores[1]
-    session_b = InferenceRowStreamSession(
-        player_id=score_b.ownerid,
-        observation=build_inference_observation(score_b, sample_turn),
-        turn=sample_turn,
+    session = _session_for_turn(sample_turn)
+    scheduler.begin_scope(scope)
+    scheduler.enqueue_tier_ladder(session)
+
+    with pytest.raises(ConflictError, match="already active for this scope"):
+        scheduler.begin_scope(scope)
+
+    status = scheduler.global_pause_status(scope)
+    assert status["activeSessionCount"] == 1
+    assert not session.cancel_token.is_cancelled()
+
+
+def test_begin_scope_succeeds_after_end_inference_stream(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
+    session = _session_for_turn(sample_turn)
     scheduler.begin_scope(scope)
+    scheduler.enqueue_tier_ladder(session)
+    scheduler.end_inference_stream(scope, (session,))
+
     scheduler.begin_scope(scope)
-    scheduler.enqueue_tier_ladder(session_a)
-    scheduler.enqueue_tier_ladder(session_b)
-    scheduler.pause_globally(scope)
-
-    assert scheduler.global_pause_status(scope)["paused"] is True
-    assert scheduler.global_pause_status(scope)["activeSessionCount"] == 2
-
-    scheduler.end_inference_stream(scope, (session_a,))
 
     status = scheduler.global_pause_status(scope)
-    assert status["paused"] is True
-    assert status["activeSessionCount"] == 1
-    assert session_a.cancel_token.is_cancelled()
-    assert not session_b.cancel_token.is_cancelled()
-
-    scheduler.end_inference_stream(scope, (session_b,))
-
-    status = scheduler.global_pause_status(scope)
-    assert status["paused"] is False
     assert status["activeSessionCount"] == 0
-    assert session_b.cancel_token.is_cancelled()
+    assert status["paused"] is False
 
 
 def test_end_inference_stream_cancels_runs_and_clears_global_pause(sample_turn):
