@@ -18,8 +18,8 @@ from api.analytics.military_score_inference.actions import (
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
-    _inference_api_payload,
     _serialize_solution_with_arithmetic,
+    inference_api_payload,
     inference_result_to_api_payload,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
@@ -194,7 +194,7 @@ def accelerated_split_missing_reported_segment_result(
     reason = "accelerated_split_missing_reported_segment"
     fallback_observation = build_inference_observation(score, turn)
     return (
-        _inference_api_payload(
+        inference_api_payload(
             status=STATUS_INVALID_PROBLEM,
             summary=f"Invalid inference problem: {reason}",
             solutions=(),

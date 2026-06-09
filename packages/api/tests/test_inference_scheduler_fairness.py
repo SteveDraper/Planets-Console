@@ -8,11 +8,13 @@ import time
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    InferenceRowStreamSession,
     _TierJob,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
@@ -69,13 +71,13 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
         gate.wait(timeout=1.0)
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler.run_policy_ladder_tier_step",
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
         fake_tier_step,
     )
     monkeypatch.setattr(
         scheduler,
-        "_finalize_ladder",
-        lambda session: scheduler.unregister_session(session.run_id),
+        "_emit_row_complete",
+        lambda session, _event: scheduler.unregister_session(session.run_id),
     )
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     assert len(player_ids) >= 2
@@ -135,13 +137,13 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
         gate.wait(timeout=1.0)
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler.run_policy_ladder_tier_step",
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
         fake_tier_step,
     )
     monkeypatch.setattr(
         scheduler,
-        "_finalize_ladder",
-        lambda session: scheduler.unregister_session(session.run_id),
+        "_emit_row_complete",
+        lambda session, _event: scheduler.unregister_session(session.run_id),
     )
 
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]

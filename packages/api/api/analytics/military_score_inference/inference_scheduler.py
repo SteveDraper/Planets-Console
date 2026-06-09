@@ -5,34 +5,29 @@ from __future__ import annotations
 import os
 import queue
 import threading
-import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.inference_row_runner import (
+    InferenceTierJobCallbacks,
+    run_inference_tier_job,
+)
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
     HeldSolutionsUpdated,
-    InferenceStreamDomainEvent,
     RowComplete,
     TierProgress,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
-    build_policy_ladder_stopped_row_complete,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.models import (
-    InferenceObservation,
-    InferenceSolution,
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.policy_ladder import (
-    PolicyLadderState,
-    finalize_policy_ladder_result,
-    run_policy_ladder_tier_step,
-)
+from api.analytics.military_score_inference.models import InferenceObservation
+from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.models.game import TurnInfo
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
@@ -43,31 +38,6 @@ def _configured_worker_count() -> int:
     if raw is not None:
         return max(1, int(raw))
     return _DEFAULT_WORKER_COUNT
-
-
-@dataclass
-class InferenceRowStreamSession:
-    """Per-row NDJSON stream state shared between the request thread and workers."""
-
-    player_id: int
-    observation: InferenceObservation
-    turn: TurnInfo
-    game_id: int
-    perspective: int
-    turn_number: int
-    cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
-    event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
-    run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    ladder_state: PolicyLadderState | None = None
-    orchestration: InferenceStreamOrchestration | None = None
-
-    @property
-    def stream_scope(self) -> InferenceStreamScope:
-        return InferenceStreamScope(
-            game_id=self.game_id,
-            perspective=self.perspective,
-            turn_number=self.turn_number,
-        )
 
 
 @dataclass(frozen=True)
@@ -358,15 +328,6 @@ class InferenceRowScheduler:
             if isinstance(job, _TierJob):
                 self._run_tier_job(job.session)
 
-    def _solve_context(
-        self,
-        session: InferenceRowStreamSession,
-    ) -> tuple[InferenceObservation, TurnInfo]:
-        orchestration = session.orchestration
-        if orchestration is not None and orchestration.is_accelerated:
-            return orchestration.current_observation(), orchestration.current_solve_turn()
-        return session.observation, session.turn
-
     def _emit_held_solutions(
         self,
         session: InferenceRowStreamSession,
@@ -413,85 +374,22 @@ class InferenceRowScheduler:
         self.unregister_session(session.run_id)
 
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
-        if session.cancel_token.is_cancelled():
-            self._finalize_stopped(session)
-            return
-        state = session.ladder_state
-        if state is None:
-            return
-
-        observation, turn = self._solve_context(session)
-        orchestration = session.orchestration
-        emit_solutions = orchestration is None or orchestration.should_emit_streaming_solutions()
-
-        def on_admitted(_solution: InferenceSolution) -> None:
-            if emit_solutions:
-                self._emit_held_solutions(session, observation=observation)
-
-        self._emit_tier_started_progress(session)
-        run_policy_ladder_tier_step(
-            state,
-            observation,
-            turn,
-            time_limit_seconds=None,
-            cancel_token=session.cancel_token,
-            on_admitted=on_admitted,
-        )
-        self._emit_progress(session)
-
-        if session.cancel_token.is_cancelled() or state.cancelled:
-            self._finalize_stopped(session)
-            return
-
-        if not state.ladder_complete:
-            self._enqueue_continuation(session)
-            return
-
-        if orchestration is not None and orchestration.is_accelerated:
-            advance = orchestration.finish_ladder_segment(state, observation, turn)
-            if advance.continue_next_segment:
-                session.ladder_state = orchestration.new_ladder_state()
-                self._enqueue_continuation(session)
-                return
-            if advance.row_complete is not None:
-                self._emit_row_complete(session, advance.row_complete)
-            return
-
-        self._finalize_ladder(session)
-
-    def _finalize_ladder(self, session: InferenceRowStreamSession) -> None:
-        state = session.ladder_state
-        if state is None:
-            return
-        observation, turn = self._solve_context(session)
-        result, catalog, problem, policy_steps_attempted, step_diagnostics = (
-            finalize_policy_ladder_result(
-                state,
-                observation,
-                turn,
-            )
-        )
-        self._emit_row_complete(
-            session,
-            RowComplete(
-                result=result,
-                catalog=catalog,
-                problem=problem,
-                policy_steps_attempted=policy_steps_attempted,
-                step_diagnostics=step_diagnostics,
+        callbacks = InferenceTierJobCallbacks(
+            emit_tier_started_progress=lambda: self._emit_tier_started_progress(session),
+            emit_progress=lambda: self._emit_progress(session),
+            emit_held_solutions=lambda observation: self._emit_held_solutions(
+                session,
+                observation=observation,
             ),
         )
-
-    def _build_stopped_row_complete(self, session: InferenceRowStreamSession) -> RowComplete:
-        orchestration = session.orchestration
-        state = session.ladder_state
-        observation, turn = self._solve_context(session)
-        if orchestration is not None and orchestration.is_accelerated:
-            return orchestration.build_stopped_row_complete(state, observation, turn)
-        return build_policy_ladder_stopped_row_complete(state, observation, turn)
-
-    def _finalize_stopped(self, session: InferenceRowStreamSession) -> None:
-        self._emit_row_complete(session, self._build_stopped_row_complete(session))
+        outcome = run_inference_tier_job(session, callbacks)
+        if outcome.next_ladder_state is not None:
+            session.ladder_state = outcome.next_ladder_state
+        if outcome.enqueue_continuation:
+            self._enqueue_continuation(session)
+            return
+        if outcome.row_complete is not None:
+            self._emit_row_complete(session, outcome.row_complete)
 
 
 _scheduler: InferenceRowScheduler | None = None

@@ -5,7 +5,6 @@ from __future__ import annotations
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    InferenceRowStreamSession,
     _TierJob,
     reset_inference_row_scheduler_for_tests,
 )
@@ -15,6 +14,9 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     drain_available_multiplex_events,
     iter_multiplexed_inference_events,
     tag_inference_stream_event,
+)
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT

@@ -21,8 +21,8 @@ from api.analytics.military_score_inference.inference_accelerated import (
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_SOLVER_ERROR,
-    _inference_api_payload,
     format_inference_summary,
+    inference_api_payload,
     inference_result_to_api_payload,
     no_prior_turn_inference_api_payload,
 )
@@ -254,7 +254,7 @@ def _solver_error_inference_result(
     exc: Exception,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     return (
-        _inference_api_payload(
+        inference_api_payload(
             status=STATUS_SOLVER_ERROR,
             summary="Build inference failed",
             solutions=(),
@@ -305,7 +305,7 @@ def _run_solver_inference_path(
             )
         if solve_catalog is None or problem is None:
             return (
-                _inference_api_payload(
+                inference_api_payload(
                     status=result.status,
                     summary=format_inference_summary(result),
                     solutions=result.solutions,

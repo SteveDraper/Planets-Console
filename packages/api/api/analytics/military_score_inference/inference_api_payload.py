@@ -56,7 +56,7 @@ def inference_result_to_api_payload(
             **(extra_diagnostics or {}),
         },
     )
-    return _inference_api_payload(
+    return inference_api_payload(
         status=result.status,
         summary=format_inference_summary(result),
         solutions=result.solutions,
@@ -80,7 +80,7 @@ def no_prior_turn_inference_api_payload(
 ) -> dict[str, object]:
     from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 
-    return _inference_api_payload(
+    return inference_api_payload(
         status=STATUS_NO_PRIOR_TURN,
         summary="Prior turn score data unavailable",
         solutions=(),
@@ -139,7 +139,7 @@ def _format_solution_brief(solution: InferenceSolution) -> str:
     return "; ".join(parts) if parts else "no actions"
 
 
-def _inference_api_payload(
+def inference_api_payload(
     *,
     status: str,
     summary: str,
