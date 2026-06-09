@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from api.analytics.military_score_inference import policy_ladder_tier_step
 from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
+)
+from api.analytics.military_score_inference.constraints import (
+    solution_satisfies_exact_hard_equalities,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
@@ -102,9 +104,7 @@ def finalize_policy_ladder_result(
         status = STATUS_STOPPED
     elif merged_solutions:
         if any(
-            policy_ladder_tier_step.solution_satisfies_exact_hard_equalities(
-                solution, observation, catalog
-            )
+            solution_satisfies_exact_hard_equalities(solution, observation, catalog)
             for solution in merged_solutions
         ):
             status = STATUS_EXACT

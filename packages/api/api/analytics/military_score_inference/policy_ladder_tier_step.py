@@ -14,6 +14,9 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.component_eligibility import (
     turn_catalog_context_for_policy_step,
 )
+from api.analytics.military_score_inference.constraints import (
+    solution_satisfies_exact_hard_equalities,
+)
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -37,37 +40,6 @@ def remaining_time(started_at: float, time_limit_seconds: float | None) -> float
     if time_limit_seconds is None:
         return float("inf")
     return time_limit_seconds - (time.monotonic() - started_at)
-
-
-def solution_satisfies_exact_hard_equalities(
-    solution: InferenceSolution,
-    observation: InferenceObservation,
-    catalog: ActionCatalog,
-) -> bool:
-    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
-    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
-    military_sum = 0
-    warship_sum = 0
-    freighter_sum = 0
-    for action in solution.actions:
-        catalog_action = actions_by_id.get(action.action_id)
-        if catalog_action is None:
-            return False
-        military_sum += catalog_action.score_delta_2x * action.count
-        warship_sum += catalog_action.warship_delta * action.count
-        freighter_sum += catalog_action.freighter_delta * action.count
-    for ship_build in solution.ship_builds:
-        combo = combos_by_id.get(ship_build.combo_id)
-        if combo is None:
-            return False
-        military_sum += combo.score_delta_2x * ship_build.count
-        warship_sum += combo.warship_delta * ship_build.count
-        freighter_sum += combo.freighter_delta * ship_build.count
-    return (
-        abs(military_sum - observation.military_delta_2x) <= observation.military_partition_slack_2x
-        and warship_sum == observation.warship_delta
-        and freighter_sum == observation.freighter_delta
-    )
 
 
 def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
