@@ -92,6 +92,7 @@ export function useScoresInferenceByRow(
     if (!enabled || scope == null || playerIds.length === 0) {
       setDetailsByPlayerId(new Map())
       rowStreamStateRef.current = new Map()
+      onGlobalPauseChange?.(false)
       return
     }
 
@@ -134,8 +135,9 @@ export function useScoresInferenceByRow(
     return () => {
       controller.abort()
       tableAbortControllerRef.current = null
+      onGlobalPauseChange?.(false)
     }
-  }, [enabled, scope, playerIdsKey, handleTableStreamEvent])
+  }, [enabled, scope, playerIdsKey, handleTableStreamEvent, onGlobalPauseChange])
 
   if (!enabled || tableData?.inferenceByRow == null) {
     return { inferenceByRow: undefined }

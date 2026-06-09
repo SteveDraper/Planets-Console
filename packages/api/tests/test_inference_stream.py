@@ -5,11 +5,11 @@ import json
 from api.transport.inference_stream import (
     inference_complete_event,
     inference_solution_event,
-    stream_inference_row,
+    stream_inference_ndjson,
 )
 
 
-def test_stream_inference_row_yields_ndjson_lines() -> None:
+def test_stream_inference_ndjson_yields_ndjson_lines() -> None:
     items = [
         inference_solution_event([{"objectiveValue": 5, "actions": []}]),
         inference_complete_event(
@@ -20,7 +20,7 @@ def test_stream_inference_row_yields_ndjson_lines() -> None:
         ),
     ]
 
-    lines = list(stream_inference_row(lambda: iter(items)))
+    lines = list(stream_inference_ndjson(lambda: iter(items)))
 
     assert len(lines) == 2
     first = json.loads(lines[0])
@@ -31,11 +31,11 @@ def test_stream_inference_row_yields_ndjson_lines() -> None:
     assert last["solutionCount"] == 1
 
 
-def test_stream_inference_row_yields_error_line_on_failure() -> None:
+def test_stream_inference_ndjson_yields_error_line_on_failure() -> None:
     def failing_loader():
         raise RuntimeError("simulated defect")
 
-    lines = list(stream_inference_row(failing_loader))
+    lines = list(stream_inference_ndjson(failing_loader))
 
     assert len(lines) == 1
     error = json.loads(lines[0])

@@ -1,14 +1,21 @@
 """Tests for global pause/resume on the inference row scheduler."""
 
+from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    HeldSolutionsUpdated,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.models import InferenceSolution, InferenceSolutionAction
+from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
 
 def _session_for_turn(
@@ -97,3 +104,34 @@ def test_end_inference_stream_cancels_runs_and_clears_global_pause(sample_turn):
     assert status["activeSessionCount"] == 0
     assert status["heldJobCount"] == 0
     assert session.cancel_token.is_cancelled()
+
+
+def test_emit_held_solutions_snapshots_merged_list(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    session = _session_for_turn(sample_turn)
+    session.ladder_state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
+    session.ladder_state.catalog = ActionCatalog((), (), {})
+    session.ladder_state.merged_solutions = [
+        InferenceSolution(
+            objective_value=10,
+            actions=(InferenceSolutionAction(action_id="a1", label="Action A", count=1),),
+        )
+    ]
+
+    scheduler._emit_held_solutions(session, observation=session.observation)
+
+    event = session.event_queue.get(timeout=1.0)
+    assert isinstance(event, HeldSolutionsUpdated)
+    assert len(event.solutions) == 1
+    assert event.solutions[0].objective_value == 10
+
+    session.ladder_state.merged_solutions.append(
+        InferenceSolution(
+            objective_value=5,
+            actions=(InferenceSolutionAction(action_id="a2", label="Action B", count=1),),
+        )
+    )
+
+    assert len(event.solutions) == 1
+    assert event.solutions[0].objective_value == 10

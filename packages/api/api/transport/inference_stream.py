@@ -1,4 +1,4 @@
-"""NDJSON wire events for per-row military score build inference streaming."""
+"""NDJSON wire events and line encoding for military score build inference streams."""
 
 from __future__ import annotations
 
@@ -83,10 +83,10 @@ def _inference_stream_error_detail(exc: BaseException) -> str:
     return _INFERENCE_STREAM_UNEXPECTED_ERROR_DETAIL
 
 
-def stream_inference_row(
+def stream_inference_ndjson(
     stream_iterator: Callable[[], Iterator[InferenceStreamItem]],
 ) -> Iterator[str]:
-    """Run one row inference stream and yield NDJSON lines."""
+    """Run an inference event iterator and yield NDJSON lines."""
     try:
         yield from iter_inference_ndjson_lines(stream_iterator())
     except Exception as exc:

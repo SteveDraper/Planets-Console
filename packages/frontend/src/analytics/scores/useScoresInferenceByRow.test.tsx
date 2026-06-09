@@ -160,4 +160,37 @@ describe('useScoresInferenceByRow', () => {
       expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('paused')
     })
   })
+
+  it('resets global pause when the table stream ends', () => {
+    const onGlobalPauseChange = vi.fn()
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      () => new Promise(() => {})
+    )
+
+    const { unmount } = renderHook(() =>
+      useScoresInferenceByRow(tableData, scope, true, { onGlobalPauseChange })
+    )
+
+    unmount()
+
+    expect(onGlobalPauseChange).toHaveBeenCalledWith(false)
+  })
+
+  it('resets global pause when inference is disabled', () => {
+    const onGlobalPauseChange = vi.fn()
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      () => new Promise(() => {})
+    )
+
+    const { rerender } = renderHook(
+      ({ enabled }) =>
+        useScoresInferenceByRow(tableData, scope, enabled, { onGlobalPauseChange }),
+      { initialProps: { enabled: true } }
+    )
+
+    onGlobalPauseChange.mockClear()
+    rerender({ enabled: false })
+
+    expect(onGlobalPauseChange).toHaveBeenCalledWith(false)
+  })
 })

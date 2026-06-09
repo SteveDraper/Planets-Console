@@ -339,7 +339,7 @@ class InferenceRowScheduler:
             return
         session.event_queue.put(
             HeldSolutionsUpdated(
-                solutions=state.merged_solutions,
+                solutions=tuple(state.merged_solutions),
                 catalog=state.catalog,
                 observation=observation,
             )

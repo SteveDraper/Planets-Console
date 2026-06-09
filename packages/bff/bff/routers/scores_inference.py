@@ -5,7 +5,7 @@ Included from the analytics router at prefix ``/scores`` so paths match
 """
 
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics, timed_section
-from api.transport.inference_stream import stream_inference_row
+from api.transport.inference_stream import stream_inference_ndjson
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -98,7 +98,7 @@ def get_scores_inference_table_stream(
     parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
     core = get_core_client()
     return StreamingResponse(
-        stream_inference_row(
+        stream_inference_ndjson(
             lambda: core.iter_scores_table_inference_stream(
                 game_id,
                 perspective,

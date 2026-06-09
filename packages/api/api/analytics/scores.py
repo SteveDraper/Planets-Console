@@ -6,7 +6,7 @@ from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
 )
-from api.analytics.military_score_inference.inference_table_stream import (
+from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
 from api.analytics.options import TurnAnalyticsOptions

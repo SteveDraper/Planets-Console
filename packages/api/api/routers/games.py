@@ -29,7 +29,7 @@ from api.transport.connections_options import (
     FlareConnectionMode,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
-from api.transport.inference_stream import stream_inference_row
+from api.transport.inference_stream import stream_inference_ndjson
 from api.transport.load_all_turns import (
     LoadAllTurnsRequest,
     LoadAllTurnsStatusResponse,
@@ -143,7 +143,7 @@ def get_scores_table_inference_stream(
     """Stream military score build inference for all scoreboard rows (NDJSON)."""
     parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
     return StreamingResponse(
-        stream_inference_row(
+        stream_inference_ndjson(
             lambda: analytics.iter_scores_table_inference_stream(
                 game_id,
                 perspective,
