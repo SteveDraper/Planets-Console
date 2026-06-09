@@ -53,9 +53,5 @@ class GlobalPauseChanged:
 
 
 InferenceStreamDomainEvent = (
-    HeldSolutionsUpdated
-    | TierProgress
-    | RowComplete
-    | RowFailed
-    | GlobalPauseChanged
+    HeldSolutionsUpdated | TierProgress | RowComplete | RowFailed | GlobalPauseChanged
 )

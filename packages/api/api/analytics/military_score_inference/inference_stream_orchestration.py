@@ -9,7 +9,7 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.analytic import (
+from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentSolve,
     build_accelerated_segment_payload,
 )

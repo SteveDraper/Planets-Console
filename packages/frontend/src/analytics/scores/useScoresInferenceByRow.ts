@@ -1,151 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  AnalyticShellScope,
-  ScoresInferenceRowDetail,
-  ScoresInferenceSolution,
-  TableDataResponse,
-} from '../../api/bff'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
 import {
   fetchScoresRowInferenceStream,
   fetchScoresTableInferenceStream,
   stopScoresRowInference,
 } from '../../api/bff'
-import type {
-  InferenceStreamEvent,
-  InferenceStreamSolutionPayload,
-} from '../../api/inferenceStreamEventSchema'
+import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
-
-function omitNull<T>(value: T | null | undefined): T | undefined {
-  return value ?? undefined
-}
-
-function streamSolutionsToRowSolutions(
-  solutions: InferenceStreamSolutionPayload[]
-): ScoresInferenceSolution[] {
-  return solutions.map((solution) => ({
-    objectiveValue: solution.objectiveValue,
-    actions: solution.actions,
-    shipBuilds: solution.shipBuilds?.map((shipBuild) => ({
-      comboId: shipBuild.comboId,
-      label: shipBuild.label,
-      count: shipBuild.count,
-      hullId: omitNull(shipBuild.hullId),
-      engineId: omitNull(shipBuild.engineId),
-      beamId: omitNull(shipBuild.beamId),
-      torpId: omitNull(shipBuild.torpId),
-      beamCount: omitNull(shipBuild.beamCount),
-      launcherCount: omitNull(shipBuild.launcherCount),
-    })),
-    militaryScoreArithmetic: solution.militaryScoreArithmetic as
-      | ScoresInferenceSolution['militaryScoreArithmetic']
-      | undefined,
-  }))
-}
-
-function pendingDetail(
-  playerId: number,
-  solutions: ScoresInferenceSolution[] = []
-): ScoresInferenceRowDetail {
-  return {
-    playerId,
-    displayStatus: solutions.length > 0 ? 'success' : 'pending',
-    status: 'pending',
-    summary: 'Build inference in progress',
-    solutionCount: solutions.length,
-    isComplete: false,
-    solutions,
-    diagnostics: {},
-  }
-}
-
-function failureDetail(playerId: number, summary: string): ScoresInferenceRowDetail {
-  return {
-    playerId,
-    displayStatus: 'failure',
-    status: 'fetch_error',
-    summary,
-    solutionCount: 0,
-    isComplete: true,
-    solutions: [],
-    diagnostics: {},
-  }
-}
-
-function displayStatusForRow(
-  status: string,
-  solutionCount: number,
-  isComplete: boolean
-): ScoresInferenceRowDetail['displayStatus'] {
-  if (status === 'paused') {
-    return 'paused'
-  }
-  if (status === 'stopped') {
-    return solutionCount > 0 ? 'success' : 'stopped'
-  }
-  if (solutionCount > 0 && !isComplete) {
-    return 'success'
-  }
-  if (status === 'exact' || (solutionCount > 0 && isComplete)) {
-    return 'success'
-  }
-  if (!isComplete) {
-    return 'pending'
-  }
-  return 'failure'
-}
-
-function rowDetailFromStreamState(
-  playerId: number,
-  solutions: ScoresInferenceSolution[],
-  status: string,
-  summary: string,
-  isComplete: boolean,
-  diagnostics: Record<string, unknown>
-): ScoresInferenceRowDetail {
-  const solutionCount = solutions.length
-  return {
-    playerId,
-    displayStatus: displayStatusForRow(status, solutionCount, isComplete),
-    status,
-    summary,
-    solutionCount,
-    isComplete,
-    solutions,
-    diagnostics,
-  }
-}
+import {
+  failureDetail,
+  initialRowStreamState,
+  pendingDetail,
+  reduceRowStreamState,
+  rowDetailFromStreamState,
+  stablePlayerIdsKey,
+  type RowStreamState,
+} from './inferenceRowStreamState'
 
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
   stopRow: (playerId: number) => void
   resumeRow: (playerId: number) => void
-}
-
-function pausedSummaryFromSolutions(solutions: ScoresInferenceSolution[]): string {
-  return solutions.length > 0
-    ? `Paused with ${solutions.length} held solution(s)`
-    : 'Build inference paused'
-}
-
-type RowStreamState = {
-  heldSolutions: ScoresInferenceSolution[]
-  status: string
-  summary: string
-  isComplete: boolean
-  diagnostics: Record<string, unknown>
-}
-
-function initialRowStreamState(
-  carryOverSolutions: ScoresInferenceSolution[] = []
-): RowStreamState {
-  return {
-    heldSolutions: [...carryOverSolutions],
-    status: 'pending',
-    summary: 'Build inference in progress',
-    isComplete: false,
-    diagnostics: {},
-  }
 }
 
 export function useScoresInferenceByRow(
@@ -158,6 +33,7 @@ export function useScoresInferenceByRow(
   const playerIds = stubs
     .map((stub) => stub.playerId)
     .filter((id): id is number => typeof id === 'number')
+  const playerIdsKey = useMemo(() => stablePlayerIdsKey(playerIds), [playerIds])
 
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<
     Map<number, ScoresInferenceRowDetail>
@@ -177,72 +53,17 @@ export function useScoresInferenceByRow(
     }
     setDetailsByPlayerId((previous) => {
       const next = new Map(previous)
-      next.set(
-        playerId,
-        rowDetailFromStreamState(
-          playerId,
-          state.heldSolutions,
-          state.status,
-          state.summary,
-          state.isComplete,
-          state.diagnostics
-        )
-      )
+      next.set(playerId, rowDetailFromStreamState(playerId, state))
       return next
     })
   }, [])
 
   const applyStreamEvent = useCallback(
     (playerId: number, event: InferenceStreamEvent) => {
-      let state = rowStreamStateRef.current.get(playerId)
-      if (state == null) {
-        state = initialRowStreamState()
-        rowStreamStateRef.current.set(playerId, state)
-      }
-
-      if (event.type === 'globalPause') {
-        if (event.paused && !state.isComplete) {
-          state.status = 'paused'
-          state.summary = pausedSummaryFromSolutions(state.heldSolutions)
-        } else if (!event.paused && state.status === 'paused') {
-          state.status = 'pending'
-          state.summary = 'Build inference in progress'
-        }
-        publishPlayerState(playerId)
-        return
-      }
-
-      if (event.type === 'progress') {
-        if (!state.isComplete) {
-          state.summary = event.policyStepId
-            ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
-            : 'Build inference in progress'
-        }
-        publishPlayerState(playerId)
-        return
-      }
-
-      if (event.type === 'solution') {
-        state.heldSolutions = streamSolutionsToRowSolutions(event.solutions)
-        publishPlayerState(playerId)
-        return
-      }
-
-      if (event.type === 'complete') {
-        state.status = event.status
-        state.summary = event.summary
-        state.isComplete = event.isComplete
-        state.diagnostics = event.diagnostics ?? {}
-        publishPlayerState(playerId)
-        return
-      }
-
-      if (event.type === 'error') {
-        state.status = 'fetch_error'
-        state.summary = event.detail
-        state.isComplete = true
-        publishPlayerState(playerId)
-      }
+      const current = rowStreamStateRef.current.get(playerId) ?? initialRowStreamState()
+      const next = reduceRowStreamState(current, event)
+      rowStreamStateRef.current.set(playerId, next)
+      publishPlayerState(playerId)
     },
     [publishPlayerState]
   )
@@ -275,7 +96,7 @@ export function useScoresInferenceByRow(
   )
 
   const startStreamForPlayer = useCallback(
-    (playerId: number, carryOverSolutions: ScoresInferenceSolution[] = []) => {
+    (playerId: number, carryOverSolutions: ScoresInferenceRowDetail['solutions'] = []) => {
       if (scope == null) {
         return
       }
@@ -285,7 +106,10 @@ export function useScoresInferenceByRow(
       resumeAbortControllersRef.current.set(playerId, controller)
       independentResumePlayersRef.current.add(playerId)
 
-      rowStreamStateRef.current.set(playerId, initialRowStreamState(carryOverSolutions))
+      rowStreamStateRef.current.set(
+        playerId,
+        initialRowStreamState(carryOverSolutions ?? [])
+      )
       publishPlayerState(playerId)
 
       void fetchScoresRowInferenceStream(scope, playerId, {
@@ -302,8 +126,10 @@ export function useScoresInferenceByRow(
           if (controller.signal.aborted) {
             const state = rowStreamStateRef.current.get(playerId)
             if (state != null && !state.isComplete) {
-              state.status = 'paused'
-              state.summary = pausedSummaryFromSolutions(state.heldSolutions)
+              rowStreamStateRef.current.set(
+                playerId,
+                reduceRowStreamState(state, { type: 'globalPause', paused: true })
+              )
               publishPlayerState(playerId)
             }
             return
@@ -392,10 +218,7 @@ export function useScoresInferenceByRow(
           if (next.get(playerId)?.isComplete) {
             continue
           }
-          next.set(
-            playerId,
-            failureDetail(playerId, errorDetailFromUnknown(error))
-          )
+          next.set(playerId, failureDetail(playerId, errorDetailFromUnknown(error)))
         }
         return next
       })
@@ -410,7 +233,7 @@ export function useScoresInferenceByRow(
       resumeAbortControllersRef.current = new Map()
       independentResumePlayersRef.current = new Set()
     }
-  }, [enabled, scope, playerIds.join(','), handleTableStreamEvent])
+  }, [enabled, scope, playerIdsKey, handleTableStreamEvent])
 
   if (!enabled || tableData?.inferenceByRow == null) {
     return { inferenceByRow: undefined, stopRow, resumeRow }

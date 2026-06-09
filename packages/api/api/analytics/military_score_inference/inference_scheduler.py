@@ -10,7 +10,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from api.analytics.military_score_inference.analytic import (
+from api.analytics.military_score_inference.inference_accelerated import (
     build_accelerated_backfill_stream_row_complete,
     build_accelerated_split_stream_row_complete,
 )
@@ -530,75 +530,61 @@ class InferenceRowScheduler:
             ),
         )
 
-    def _finalize_stopped(self, session: InferenceRowStreamSession) -> None:
+    def _as_stopped_complete(self, base: RowComplete) -> RowComplete:
+        return RowComplete(
+            result=InferenceResult(
+                status=STATUS_STOPPED,
+                solutions=base.result.solutions,
+                diagnostics={**base.result.diagnostics, "stopped_reason": "cancelled"},
+            ),
+            catalog=base.catalog,
+            problem=base.problem,
+            policy_steps_attempted=base.policy_steps_attempted,
+            step_diagnostics=base.step_diagnostics,
+            force_is_complete=True,
+            summary_override=base.summary_override,
+            wire_observation=base.wire_observation,
+            wire_turn=base.wire_turn,
+            extra_diagnostics=base.extra_diagnostics,
+        )
+
+    def _build_stopped_row_complete(self, session: InferenceRowStreamSession) -> RowComplete:
         orchestration = session.orchestration
         state = session.ladder_state
+
         if orchestration is not None and orchestration.is_accelerated:
             if state is not None and state.catalog is not None:
                 self._record_completed_segment(session)
             if orchestration.segment_solves:
-                complete = self._row_complete_from_accelerated(session)
-                stopped_result = InferenceResult(
-                    status=STATUS_STOPPED,
-                    solutions=complete.result.solutions,
-                    diagnostics={**complete.result.diagnostics, "stopped_reason": "cancelled"},
-                )
-                self._emit_row_complete(
-                    session,
-                    RowComplete(
-                        result=stopped_result,
-                        catalog=complete.catalog,
-                        problem=complete.problem,
-                        policy_steps_attempted=complete.policy_steps_attempted,
-                        step_diagnostics=complete.step_diagnostics,
-                        force_is_complete=True,
-                        summary_override=complete.summary_override,
-                        wire_observation=complete.wire_observation,
-                        wire_turn=complete.wire_turn,
-                        extra_diagnostics=complete.extra_diagnostics,
-                    ),
-                )
-                return
+                return self._as_stopped_complete(self._row_complete_from_accelerated(session))
 
         if state is not None and state.merged_solutions:
             observation, turn = self._solve_context(session)
             result, catalog, problem, policy_steps_attempted, step_diagnostics = (
-                finalize_policy_ladder_result(
-                    state,
-                    observation,
-                    turn,
-                )
+                finalize_policy_ladder_result(state, observation, turn)
             )
-            stopped_result = InferenceResult(
-                status=STATUS_STOPPED,
-                solutions=result.solutions,
-                diagnostics={**result.diagnostics, "stopped_reason": "cancelled"},
-            )
-            self._emit_row_complete(
-                session,
+            return self._as_stopped_complete(
                 RowComplete(
-                    result=stopped_result,
+                    result=result,
                     catalog=catalog,
                     problem=problem,
                     policy_steps_attempted=policy_steps_attempted,
                     step_diagnostics=step_diagnostics,
-                    force_is_complete=True,
-                ),
+                )
             )
-            return
 
-        self._emit_row_complete(
-            session,
-            RowComplete(
-                result=InferenceResult(
-                    status=STATUS_STOPPED,
-                    solutions=(),
-                    diagnostics={"stopped_reason": "cancelled"},
-                ),
-                summary_override="Build inference halted",
-                force_is_complete=True,
+        return RowComplete(
+            result=InferenceResult(
+                status=STATUS_STOPPED,
+                solutions=(),
+                diagnostics={"stopped_reason": "cancelled"},
             ),
+            summary_override="Build inference halted",
+            force_is_complete=True,
         )
+
+    def _finalize_stopped(self, session: InferenceRowStreamSession) -> None:
+        self._emit_row_complete(session, self._build_stopped_row_complete(session))
 
 
 _scheduler: InferenceRowScheduler | None = None

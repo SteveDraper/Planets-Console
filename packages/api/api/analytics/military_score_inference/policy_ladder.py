@@ -288,6 +288,69 @@ def _policy_step_diagnostics(
     }
 
 
+def _make_incremental_admitter(
+    state: PolicyLadderState,
+    on_admitted: Callable[[InferenceSolution], None] | None,
+) -> Callable[[InferenceSolution], None]:
+    """Merge each solver solution into held top-K as soon as it is found."""
+
+    def admit(solution: InferenceSolution) -> None:
+        _merge_exact_solutions(
+            state.merged_solutions,
+            state.seen_signatures,
+            (solution,),
+            resolved_max_solutions=state.resolved_max_solutions,
+            on_admitted=on_admitted,
+        )
+
+    return admit
+
+
+@dataclass
+class _TierStepRun:
+    """Cancel and time-budget guards shared across one tier step."""
+
+    state: PolicyLadderState
+    time_limit_seconds: float | None
+    cancel_token: InferenceCancelToken | None
+
+    def should_stop(self) -> bool:
+        if self.cancel_token is not None and self.cancel_token.is_cancelled():
+            self.state.cancelled = True
+            self.state.ladder_complete = True
+            return True
+        if _remaining_time(self.state.started_at, self.time_limit_seconds) <= 0:
+            self.state.time_limited = True
+            self.state.ladder_complete = True
+            return True
+        return False
+
+    def remaining_seconds(self) -> float:
+        return _remaining_time(self.state.started_at, self.time_limit_seconds)
+
+
+def _abort_tier_step_on_seed_result(
+    state: PolicyLadderState,
+    seed_result: InferenceResult,
+    seed_problem: InferenceProblem,
+) -> bool:
+    """Apply terminal seed status to state. Returns True when the tier step should end."""
+    if seed_result.status == STATUS_INVALID_PROBLEM:
+        state.last_status = seed_result.status
+        state.last_diagnostics = dict(seed_result.diagnostics)
+        state.problem = seed_problem
+        state.ladder_complete = True
+        return True
+    if seed_result.status == STATUS_STOPPED:
+        state.cancelled = True
+        state.last_status = seed_result.status
+        state.last_diagnostics = dict(seed_result.diagnostics)
+        state.problem = seed_problem
+        state.ladder_complete = True
+        return True
+    return False
+
+
 def run_policy_ladder_tier_step(
     state: PolicyLadderState,
     observation: InferenceObservation,
@@ -302,15 +365,8 @@ def run_policy_ladder_tier_step(
         state.ladder_complete = True
         return
 
-    if cancel_token is not None and cancel_token.is_cancelled():
-        state.cancelled = True
-        state.ladder_complete = True
-        return
-
-    remaining = _remaining_time(state.started_at, time_limit_seconds)
-    if remaining <= 0:
-        state.time_limited = True
-        state.ladder_complete = True
+    run = _TierStepRun(state, time_limit_seconds, cancel_token)
+    if run.should_stop():
         return
 
     step_index = state.next_step_index
@@ -338,6 +394,7 @@ def run_policy_ladder_tier_step(
     )
     state.prior_aggregate_action_ids = current_aggregate_action_ids
 
+    admit_solution = _make_incremental_admitter(state, on_admitted)
     catalog_solve_max = _catalog_solve_max_solutions(
         len(state.merged_solutions),
         state.resolved_max_solutions,
@@ -348,49 +405,33 @@ def run_policy_ladder_tier_step(
     state.band_seeds = []
 
     for seed in seeds_for_step[: policy_step.max_seeds]:
-        if cancel_token is not None and cancel_token.is_cancelled():
-            state.cancelled = True
-            state.ladder_complete = True
-            return
-        seed_remaining = _remaining_time(state.started_at, time_limit_seconds)
-        if seed_remaining <= 0:
-            state.time_limited = True
-            state.ladder_complete = True
+        if run.should_stop():
             return
         seed_result, seed_problem = _solve_seed_progression(
             observation,
             catalog,
             seed,
             max_solutions=catalog_solve_max,
-            time_limit_seconds=seed_remaining,
+            time_limit_seconds=run.remaining_seconds(),
             cancel_token=cancel_token,
+            on_solution=admit_solution,
         )
         if seed_result is None or seed_problem is None:
             continue
-        if seed_result.status == STATUS_INVALID_PROBLEM:
-            state.last_status = seed_result.status
-            state.last_diagnostics = dict(seed_result.diagnostics)
-            state.problem = seed_problem
-            state.ladder_complete = True
-            return
-        if seed_result.status == STATUS_STOPPED:
-            state.cancelled = True
-            state.last_status = seed_result.status
-            state.last_diagnostics = dict(seed_result.diagnostics)
-            state.problem = seed_problem
-            state.ladder_complete = True
+        if _abort_tier_step_on_seed_result(state, seed_result, seed_problem):
             return
         catalog_solve_max = _catalog_solve_max_solutions(
             len(state.merged_solutions),
             state.resolved_max_solutions,
         )
-        _merge_exact_solutions(
-            state.merged_solutions,
-            state.seen_signatures,
-            seed_result.solutions,
-            resolved_max_solutions=state.resolved_max_solutions,
-            on_admitted=on_admitted,
-        )
+        if seed_result.solutions:
+            _merge_exact_solutions(
+                state.merged_solutions,
+                state.seen_signatures,
+                seed_result.solutions,
+                resolved_max_solutions=state.resolved_max_solutions,
+                on_admitted=on_admitted,
+            )
         state.problem = seed_problem
         if seed_result.status == STATUS_TIME_LIMITED:
             state.time_limited = True
@@ -399,16 +440,9 @@ def run_policy_ladder_tier_step(
         state.ladder_complete = True
         return
 
-    if cancel_token is not None and cancel_token.is_cancelled():
-        state.cancelled = True
-        state.ladder_complete = True
+    if run.should_stop():
         return
 
-    remaining = _remaining_time(state.started_at, time_limit_seconds)
-    if remaining <= 0:
-        state.time_limited = True
-        state.ladder_complete = True
-        return
     catalog_solve_max = _catalog_solve_max_solutions(
         len(state.merged_solutions),
         state.resolved_max_solutions,
@@ -418,8 +452,9 @@ def run_policy_ladder_tier_step(
         observation,
         catalog,
         max_solutions=catalog_solve_max,
-        time_limit_seconds=remaining,
+        time_limit_seconds=run.remaining_seconds(),
         cancel_token=cancel_token,
+        on_solution=admit_solution,
     )
     state.last_status = exact_result.status
     state.last_diagnostics = dict(exact_result.diagnostics)
@@ -440,18 +475,17 @@ def run_policy_ladder_tier_step(
             resolved_max_solutions=state.resolved_max_solutions,
             on_admitted=on_admitted,
         )
-        if exact_result.status == STATUS_TIME_LIMITED:
-            state.time_limited = True
+    if exact_result.status == STATUS_TIME_LIMITED:
+        state.time_limited = True
 
     band_residual_2x: int | None = None
     if not exact_result.solutions and policy_step.alpha > 0:
-        remaining = _remaining_time(state.started_at, time_limit_seconds)
-        if remaining > 0 and not (cancel_token is not None and cancel_token.is_cancelled()):
+        if not run.should_stop() and run.remaining_seconds() > 0:
             band_result, band_problem = _solve_catalog(
                 observation,
                 catalog,
                 max_solutions=policy_step.max_seeds,
-                time_limit_seconds=remaining,
+                time_limit_seconds=run.remaining_seconds(),
                 military_score_alpha=policy_step.alpha,
                 cancel_token=cancel_token,
             )
