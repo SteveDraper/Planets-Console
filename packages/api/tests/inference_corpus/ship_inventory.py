@@ -2,7 +2,13 @@
 
 from collections import Counter
 
-from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
+from api.analytics.military_score_inference.ship_build_combos import (
+    GENERIC_FREIGHTER_COMBO_ID,
+    ship_build_combo_id,
+)
+from api.analytics.military_score_inference.ship_build_scoring import (
+    ship_build_has_zero_military_score,
+)
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.ship import Ship
@@ -70,15 +76,23 @@ def ship_to_build_combo_id(ship: Ship, turn: TurnInfo) -> str | None:
     hull = hulls_by_id(turn).get(ship.hullid)
     if hull is None:
         return None
-    beam_id = ship.beamid if ship.beams > 0 else None
-    torp_id = ship.torpedoid if ship.torps > 0 else None
+    beam_count = ship.beams
+    launcher_count = ship.torps
+    if ship_build_has_zero_military_score(
+        hull,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
+    ):
+        return GENERIC_FREIGHTER_COMBO_ID
+    beam_id = ship.beamid if beam_count > 0 else None
+    torp_id = ship.torpedoid if launcher_count > 0 else None
     return ship_build_combo_id(
         hull_id=ship.hullid,
         engine_id=ship.engineid,
         beam_id=beam_id,
         torp_id=torp_id,
-        beam_count=ship.beams,
-        launcher_count=ship.torps,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
     )
 
 

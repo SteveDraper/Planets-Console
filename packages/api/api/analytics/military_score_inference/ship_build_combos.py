@@ -4,11 +4,18 @@ from dataclasses import dataclass
 
 from api.analytics.military_score_inference.models import InferenceObservation, ShipBuildCombo
 from api.analytics.military_score_inference.ship_build_scoring import (
-    is_military_hull,
+    ship_build_counts_as_warship,
     ship_build_military_score_delta_2x,
 )
 from api.analytics.military_score_inference.tier_policy import SlotCountMode
 from api.models.components import Beam, Engine, Hull, Torpedo
+
+GENERIC_FREIGHTER_COMBO_ID = "combo_freighter"
+GENERIC_ZERO_MILITARY_SCORE_LABEL = "Freighter"
+
+
+def is_generic_zero_military_score_combo_id(combo_id: str) -> bool:
+    return combo_id == GENERIC_FREIGHTER_COMBO_ID
 
 
 @dataclass(frozen=True)
@@ -85,6 +92,27 @@ def ship_build_upper_bound(
     return min(count_delta, observation.starbases_owned)
 
 
+def _generic_freighter_combo(
+    *,
+    upper_bound: int,
+    probability_weight: int,
+) -> ShipBuildCombo:
+    return ShipBuildCombo(
+        combo_id=GENERIC_FREIGHTER_COMBO_ID,
+        hull_id=0,
+        engine_id=0,
+        beam_id=None,
+        torp_id=None,
+        beam_count=0,
+        launcher_count=0,
+        labels=(GENERIC_ZERO_MILITARY_SCORE_LABEL,),
+        score_delta_2x=0,
+        freighter_delta=1,
+        upper_bound=upper_bound,
+        probability_weight=probability_weight,
+    )
+
+
 def generate_ship_build_combos(
     observation: InferenceObservation,
     *,
@@ -102,20 +130,11 @@ def generate_ship_build_combos(
 ) -> tuple[ShipBuildCombo, ...]:
     combo_config = config or ShipBuildComboConfig()
     combos: list[ShipBuildCombo] = []
+    freighter_upper_bound = 0
 
     for hull_id in sorted(buildable_hull_ids):
         hull = hulls_by_id.get(hull_id)
         if hull is None:
-            continue
-
-        is_warship = is_military_hull(hull)
-        is_freighter = not is_warship
-        build_upper_bound = ship_build_upper_bound(
-            observation,
-            is_warship=is_warship,
-            is_freighter=is_freighter,
-        )
-        if build_upper_bound <= 0:
             continue
 
         beam_count_options = beam_count_options_for_slot_mode(hull, beam_slot_counts)
@@ -154,6 +173,20 @@ def generate_ship_build_combos(
 
                     for beam in beam_choices:
                         for torpedo in torp_choices:
+                            counts_as_warship = ship_build_counts_as_warship(
+                                hull,
+                                beam_count=beam_count,
+                                launcher_count=launcher_count,
+                            )
+                            counts_as_freighter = not counts_as_warship
+                            build_upper_bound = ship_build_upper_bound(
+                                observation,
+                                is_warship=counts_as_warship,
+                                is_freighter=counts_as_freighter,
+                            )
+                            if build_upper_bound <= 0:
+                                continue
+
                             score_delta_2x = ship_build_military_score_delta_2x(
                                 hull,
                                 engine,
@@ -162,7 +195,10 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            if score_delta_2x == 0 and not is_warship and not is_freighter:
+                            if score_delta_2x == 0:
+                                freighter_upper_bound = max(
+                                    freighter_upper_bound, build_upper_bound
+                                )
                                 continue
 
                             armed = beam_count > 0 or launcher_count > 0
@@ -198,12 +234,20 @@ def generate_ship_build_combos(
                                         ),
                                     ),
                                     score_delta_2x=score_delta_2x,
-                                    warship_delta=1 if is_warship else 0,
-                                    freighter_delta=1 if is_freighter else 0,
+                                    warship_delta=1 if counts_as_warship else 0,
+                                    freighter_delta=1 if counts_as_freighter else 0,
                                     upper_bound=build_upper_bound,
                                     probability_weight=probability_weight,
                                 )
                             )
+
+    if freighter_upper_bound > 0:
+        combos.append(
+            _generic_freighter_combo(
+                upper_bound=freighter_upper_bound,
+                probability_weight=combo_config.default_probability_weight,
+            )
+        )
 
     pruned = prune_combos_for_observation(
         observation,

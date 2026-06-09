@@ -17,6 +17,22 @@ def is_military_hull(hull: Hull) -> bool:
     return hull.beams > 0 or hull.launchers > 0 or hull.fighterbays > 0
 
 
+def ship_build_counts_as_warship(
+    hull: Hull,
+    *,
+    beam_count: int,
+    launcher_count: int,
+) -> bool:
+    """Whether a build counts toward ``shipchange`` rather than ``freighterchange``.
+
+    Hulls with fighter bays always count as warships. Other military hulls count as
+    freighters on the scoreboard when built without beams or launchers fitted.
+    """
+    if hull.fighterbays > 0:
+        return True
+    return beam_count > 0 or launcher_count > 0
+
+
 def default_build_components(
     *,
     engines_by_id: dict[int, Engine],
@@ -66,6 +82,18 @@ def ship_build_score_delta_2x(
     )
 
 
+def ship_build_has_zero_military_score(
+    hull: Hull,
+    *,
+    beam_count: int,
+    launcher_count: int,
+) -> bool:
+    """True when military score is zero regardless of which engine is fitted."""
+    if not is_military_hull(hull):
+        return True
+    return beam_count == 0 and launcher_count == 0 and hull.fighterbays == 0
+
+
 def ship_build_military_score_delta_2x(
     hull: Hull,
     engine: Engine,
@@ -75,8 +103,17 @@ def ship_build_military_score_delta_2x(
     beam_count: int,
     launcher_count: int,
 ) -> int:
-    """Military-score contribution for a ship build; pure freighters contribute zero."""
-    if not is_military_hull(hull):
+    """Military-score contribution for a ship build.
+
+    Freighters and unarmed military hulls without fighter bays contribute zero.
+    Carriers and other fighter-bay hulls score hull construction even when empty.
+    Loaded fighters are modeled by separate aggregate actions, not ship combos.
+    """
+    if ship_build_has_zero_military_score(
+        hull,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
+    ):
         return 0
     return ship_build_score_delta_2x(
         hull,
