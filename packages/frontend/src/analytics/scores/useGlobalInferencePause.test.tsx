@@ -62,8 +62,10 @@ describe('useGlobalInferencePause', () => {
     expect(result.current.isGloballyPaused).toBe(false)
   })
 
-  it('updates pause state from pauseGlobally REST action', async () => {
-    vi.spyOn(bff, 'pauseInferenceGlobally').mockResolvedValue(pauseStatus(true))
+  it('calls pauseGlobally REST without updating chrome state', async () => {
+    const pauseGlobally = vi
+      .spyOn(bff, 'pauseInferenceGlobally')
+      .mockResolvedValue(pauseStatus(true))
 
     const { result } = renderHook(() => useGlobalInferencePause(scope, true))
 
@@ -72,13 +74,16 @@ describe('useGlobalInferencePause', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.isGloballyPaused).toBe(true)
+      expect(pauseGlobally).toHaveBeenCalledWith(scope)
+      expect(result.current.isGloballyPaused).toBe(false)
       expect(result.current.isPending).toBe(false)
     })
   })
 
-  it('updates pause state from resumeGlobally REST action', async () => {
-    vi.spyOn(bff, 'resumeInferenceGlobally').mockResolvedValue(pauseStatus(false))
+  it('calls resumeGlobally REST without updating chrome state', async () => {
+    const resumeGlobally = vi
+      .spyOn(bff, 'resumeInferenceGlobally')
+      .mockResolvedValue(pauseStatus(false))
 
     const { result } = renderHook(() => useGlobalInferencePause(scope, true))
 
@@ -91,6 +96,23 @@ describe('useGlobalInferencePause', () => {
     })
 
     await waitFor(() => {
+      expect(resumeGlobally).toHaveBeenCalledWith(scope)
+      expect(result.current.isGloballyPaused).toBe(true)
+      expect(result.current.isPending).toBe(false)
+    })
+  })
+
+  it('surfaces REST errors from pauseGlobally without changing pause state', async () => {
+    vi.spyOn(bff, 'pauseInferenceGlobally').mockRejectedValue(new Error('no active stream'))
+
+    const { result } = renderHook(() => useGlobalInferencePause(scope, true))
+
+    await act(async () => {
+      await result.current.pauseGlobally()
+    })
+
+    await waitFor(() => {
+      expect(result.current.error).toBe('no active stream')
       expect(result.current.isGloballyPaused).toBe(false)
       expect(result.current.isPending).toBe(false)
     })

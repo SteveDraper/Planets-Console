@@ -34,8 +34,7 @@ export function useGlobalInferencePause(
     setIsPending(true)
     setError(null)
     try {
-      const status = await pauseInferenceGlobally(scope)
-      setIsGloballyPaused(status.paused)
+      await pauseInferenceGlobally(scope)
     } catch (pauseError) {
       setError(errorDetailFromUnknown(pauseError))
     } finally {
@@ -50,8 +49,7 @@ export function useGlobalInferencePause(
     setIsPending(true)
     setError(null)
     try {
-      const status = await resumeInferenceGlobally(scope)
-      setIsGloballyPaused(status.paused)
+      await resumeInferenceGlobally(scope)
     } catch (resumeError) {
       setError(errorDetailFromUnknown(resumeError))
     } finally {
