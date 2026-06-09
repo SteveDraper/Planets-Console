@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 from api.analytics.military_score_inference.accelerated_start import (
+    ACCEL_WINDOW_SEGMENT_ID,
     HOMEBASE_STARTING_FREIGHTERS,
+    REPORTED_HOST_TURN_SEGMENT_ID,
     SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
     accelerated_inference_segments,
     accelerated_window_military_change,
@@ -149,9 +151,9 @@ def test_accelerated_window_residual_matches_cumulative_minus_reported_delta():
     )
     segments = accelerated_inference_segments(score, turn)
     assert segments is not None
-    assert segments[-1].segment_id == "reported_host_turn"
+    assert segments[-1].segment_id == REPORTED_HOST_TURN_SEGMENT_ID
     assert segments[-1].military_delta_2x == reported_2x
-    assert segments[0].segment_id == "accel_window"
+    assert segments[0].segment_id == ACCEL_WINDOW_SEGMENT_ID
     assert segments[0].military_delta_2x == cumulative_2x - reported_2x
     assert segments[0].military_delta_2x == 110
     assert segments[0].freighter_delta == 1
@@ -240,7 +242,7 @@ def test_p2_turn3_accel_segment_includes_freighter_only_window():
     score = next(s for s in turn.scores if s.ownerid == 2)
     segments = accelerated_inference_segments(score, turn)
     assert segments is not None
-    assert segments[0].segment_id == "accel_window"
+    assert segments[0].segment_id == ACCEL_WINDOW_SEGMENT_ID
     assert segments[0].military_delta_2x == 0
     assert segments[0].freighter_delta == 1
     assert segments[-1].freighter_delta == 1

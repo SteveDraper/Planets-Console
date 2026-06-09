@@ -44,6 +44,9 @@ STANDARD_STARBASE_MAX_FIGHTERS = 60
 # delta is rounded or when an accelerated-start segment partition subtracts 1x values.
 SCOREBOARD_MILITARY_PARTITION_SLACK_2X = 1
 
+ACCEL_WINDOW_SEGMENT_ID = "accel_window"
+REPORTED_HOST_TURN_SEGMENT_ID = "reported_host_turn"
+
 
 @dataclass(frozen=True)
 class ScoreboardSnapshot:
@@ -66,6 +69,11 @@ class AcceleratedInferenceSegment:
     warship_delta: int
     freighter_delta: int
     priority_point_delta: int
+
+    @property
+    def is_streaming_target(self) -> bool:
+        """Whether live solution events apply to this segment (badge N = reported host turn)."""
+        return self.segment_id == REPORTED_HOST_TURN_SEGMENT_ID
 
 
 @dataclass(frozen=True)
@@ -279,7 +287,7 @@ def accelerated_inference_segments(
     segments: list[AcceleratedInferenceSegment] = []
 
     accel_segment = AcceleratedInferenceSegment(
-        segment_id="accel_window",
+        segment_id=ACCEL_WINDOW_SEGMENT_ID,
         host_turn=accel_host_turn,
         military_delta_2x=accelerated_window_military_delta_2x(score, turn),
         warship_delta=builds.warships_built_before_reported_host_turn,
@@ -291,7 +299,7 @@ def accelerated_inference_segments(
 
     segments.append(
         AcceleratedInferenceSegment(
-            segment_id="reported_host_turn",
+            segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
             host_turn=reported_host_turn,
             military_delta_2x=reported_host_military_delta_2x(score),
             warship_delta=score.shipchange,

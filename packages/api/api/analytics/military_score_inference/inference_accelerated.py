@@ -221,7 +221,7 @@ def run_accelerated_split_inference(
             max_solutions=20,
             time_limit_seconds=per_segment_time,
         )
-        if segment.segment_id == "reported_host_turn":
+        if segment.is_streaming_target:
             reported_observation = ladder_result.observation
             reported_catalog = ladder_result.catalog
             reported_problem = ladder_result.problem
@@ -301,7 +301,7 @@ def build_accelerated_split_stream_row_complete(
         (
             segment
             for segment in segment_solves
-            if segment.segment.segment_id == "reported_host_turn"
+            if segment.segment.is_streaming_target
         ),
         None,
     )

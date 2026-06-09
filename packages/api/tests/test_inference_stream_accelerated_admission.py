@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from api.analytics.military_score_inference.accelerated_start import AcceleratedInferenceSegment
+from api.analytics.military_score_inference.accelerated_start import (
+    ACCEL_WINDOW_SEGMENT_ID,
+    REPORTED_HOST_TURN_SEGMENT_ID,
+    AcceleratedInferenceSegment,
+)
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_path import InferencePath
@@ -30,7 +34,7 @@ from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 def _accel_window_segment() -> AcceleratedInferenceSegment:
     return AcceleratedInferenceSegment(
-        segment_id="accel_window",
+        segment_id=ACCEL_WINDOW_SEGMENT_ID,
         host_turn=1,
         military_delta_2x=110,
         warship_delta=0,
@@ -41,7 +45,7 @@ def _accel_window_segment() -> AcceleratedInferenceSegment:
 
 def _reported_host_turn_segment() -> AcceleratedInferenceSegment:
     return AcceleratedInferenceSegment(
-        segment_id="reported_host_turn",
+        segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
         host_turn=2,
         military_delta_2x=20,
         warship_delta=1,
@@ -73,7 +77,7 @@ def test_new_ladder_state_uses_full_k_per_segment(sample_turn) -> None:
 def test_should_emit_streaming_solutions_false_for_accel_window_segment(sample_turn) -> None:
     orchestration = _accelerated_split_orchestration(sample_turn)
 
-    assert orchestration.current_segment().segment_id == "accel_window"
+    assert orchestration.current_segment().segment_id == ACCEL_WINDOW_SEGMENT_ID
     assert orchestration.should_emit_streaming_solutions() is False
 
 
@@ -81,7 +85,7 @@ def test_should_emit_streaming_solutions_true_for_reported_host_turn_segment(sam
     orchestration = _accelerated_split_orchestration(sample_turn)
     orchestration.current_segment_index = 1
 
-    assert orchestration.current_segment().segment_id == "reported_host_turn"
+    assert orchestration.current_segment().segment_id == REPORTED_HOST_TURN_SEGMENT_ID
     assert orchestration.should_emit_streaming_solutions() is True
 
 
@@ -89,7 +93,7 @@ def test_should_emit_streaming_solutions_false_for_backfill_non_target_segment(s
     score = sample_turn.scores[0]
     segments = (
         AcceleratedInferenceSegment(
-            segment_id="accel_window",
+            segment_id=ACCEL_WINDOW_SEGMENT_ID,
             host_turn=2,
             military_delta_2x=50,
             warship_delta=0,
@@ -97,7 +101,7 @@ def test_should_emit_streaming_solutions_false_for_backfill_non_target_segment(s
             priority_point_delta=0,
         ),
         AcceleratedInferenceSegment(
-            segment_id="reported_host_turn",
+            segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
             host_turn=1,
             military_delta_2x=110,
             warship_delta=0,
@@ -310,7 +314,7 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
 
     event = session.event_queue.get(timeout=1.0)
     assert isinstance(event, HeldSolutionsUpdated)
-    assert event.segment_id == "reported_host_turn"
+    assert event.segment_id == REPORTED_HOST_TURN_SEGMENT_ID
 
     wire_events = domain_event_to_wire_events(
         event,
@@ -318,5 +322,5 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
         turn=sample_turn,
     )
     wire = wire_events[0]
-    assert wire["segmentId"] == "reported_host_turn"
+    assert wire["segmentId"] == REPORTED_HOST_TURN_SEGMENT_ID
     assert "isTargetSegment" not in wire
