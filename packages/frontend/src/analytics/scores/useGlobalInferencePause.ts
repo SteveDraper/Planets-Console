@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
-import {
-  fetchInferenceGlobalPauseStatus,
-  pauseInferenceGlobally,
-  resumeInferenceGlobally,
-} from '../../api/bff'
+import { pauseInferenceGlobally, resumeInferenceGlobally } from '../../api/bff'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 
 export type UseGlobalInferencePauseResult = {
@@ -28,25 +24,6 @@ export function useGlobalInferencePause(
     if (!enabled || scope == null) {
       setIsGloballyPaused(false)
       setError(null)
-      return
-    }
-
-    let cancelled = false
-    void fetchInferenceGlobalPauseStatus(scope)
-      .then((status) => {
-        if (!cancelled) {
-          setIsGloballyPaused(status.paused)
-          setError(null)
-        }
-      })
-      .catch((fetchError) => {
-        if (!cancelled) {
-          setError(errorDetailFromUnknown(fetchError))
-        }
-      })
-
-    return () => {
-      cancelled = true
     }
   }, [enabled, scope?.gameId, scope?.turn, scope?.perspective])
 

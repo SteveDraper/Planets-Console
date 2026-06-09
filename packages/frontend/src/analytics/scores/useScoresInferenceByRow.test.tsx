@@ -161,6 +161,26 @@ describe('useScoresInferenceByRow', () => {
     })
   })
 
+  it('notifies onGlobalPauseChange from globalPause stream events', async () => {
+    const onGlobalPauseChange = vi.fn()
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({ type: 'globalPause', paused: true })
+        handlers.onEvent({ type: 'globalPause', paused: false })
+        await new Promise(() => {})
+      }
+    )
+
+    renderHook(() =>
+      useScoresInferenceByRow(tableData, scope, true, { onGlobalPauseChange })
+    )
+
+    await waitFor(() => {
+      expect(onGlobalPauseChange).toHaveBeenCalledWith(true)
+      expect(onGlobalPauseChange).toHaveBeenLastCalledWith(false)
+    })
+  })
+
   it('resets global pause when the table stream ends', () => {
     const onGlobalPauseChange = vi.fn()
     vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
