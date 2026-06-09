@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { AnalyticShellScope } from '../../api/bff'
+import type { AnalyticShellScope, InferenceGlobalPauseStatus } from '../../api/bff'
 import * as bff from '../../api/bff'
 import { useGlobalInferencePause } from './useGlobalInferencePause'
 
@@ -8,6 +8,19 @@ const scope: AnalyticShellScope = {
   gameId: '628580',
   turn: 111,
   perspective: 1,
+}
+
+function pauseStatus(paused: boolean): InferenceGlobalPauseStatus {
+  return {
+    gameId: 628580,
+    perspective: 1,
+    turn: 111,
+    paused,
+    activeScope: { gameId: 628580, perspective: 1, turn: 111 },
+    heldJobCount: 0,
+    heldContinuationCount: 0,
+    activeSessionCount: paused ? 2 : 1,
+  }
 }
 
 describe('useGlobalInferencePause', () => {
@@ -50,7 +63,7 @@ describe('useGlobalInferencePause', () => {
   })
 
   it('updates pause state from pauseGlobally REST action', async () => {
-    vi.spyOn(bff, 'pauseInferenceGlobally').mockResolvedValue({ paused: true })
+    vi.spyOn(bff, 'pauseInferenceGlobally').mockResolvedValue(pauseStatus(true))
 
     const { result } = renderHook(() => useGlobalInferencePause(scope, true))
 
@@ -65,7 +78,7 @@ describe('useGlobalInferencePause', () => {
   })
 
   it('updates pause state from resumeGlobally REST action', async () => {
-    vi.spyOn(bff, 'resumeInferenceGlobally').mockResolvedValue({ paused: false })
+    vi.spyOn(bff, 'resumeInferenceGlobally').mockResolvedValue(pauseStatus(false))
 
     const { result } = renderHook(() => useGlobalInferencePause(scope, true))
 
