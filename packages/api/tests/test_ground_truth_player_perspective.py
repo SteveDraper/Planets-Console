@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.services.store_service import StoreService
 
 from tests.inference_corpus.case_helpers import score_for_player
@@ -64,8 +65,9 @@ def test_ground_truth_turn_snapshots_use_player_perspective_not_spectator():
     )
 
     assert wrong.available is True
-    assert wrong.ground_truth == (("combo_2065_0_none_none_0_0", 1),)
+    assert wrong.ground_truth == ((GENERIC_FREIGHTER_COMBO_ID, 1),)
     assert right.available is True
+    assert right.ground_truth != wrong.ground_truth
     summary = format_ground_truth_summary(right.ground_truth, score_turn=owner_score)
     assert "Imperial Topaz Class Gunboats" in summary
     assert "Quantam Drive 7" in summary

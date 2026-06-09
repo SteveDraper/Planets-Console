@@ -3,7 +3,11 @@
 from collections import Counter
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_label
+from api.analytics.military_score_inference.ship_build_combos import (
+    GENERIC_FREIGHTER_COMBO_ID,
+    GENERIC_ZERO_MILITARY_SCORE_LABEL,
+    ship_build_combo_label,
+)
 from api.models.game import GameInfo, TurnInfo
 from api.models.player import Score
 from api.services.turn_load_service import TurnLoadService
@@ -330,6 +334,8 @@ def _parse_combo_id(
 
 
 def _combo_ground_truth_label(combo_id: str, turn: TurnInfo) -> str:
+    if combo_id == GENERIC_FREIGHTER_COMBO_ID:
+        return GENERIC_ZERO_MILITARY_SCORE_LABEL
     parsed = _parse_combo_id(combo_id)
     if parsed is None:
         return combo_id

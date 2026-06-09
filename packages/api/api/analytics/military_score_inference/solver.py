@@ -23,6 +23,9 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.ship_build_combos import (
+    is_generic_zero_military_score_combo_id,
+)
 
 STATUS_EXACT = "exact"
 STATUS_INVALID_PROBLEM = "invalid_problem"
@@ -117,11 +120,15 @@ def _merge_score_equivalent_combos(
 ) -> _MergedComboCatalog:
     """Merge score-equivalent combos for CP-SAT feasibility; members kept for extraction."""
     groups: dict[tuple[int, int, int], list[ShipBuildCombo]] = defaultdict(list)
-    for combo in combos:
-        groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(combo)
-
     merged: list[ShipBuildCombo] = []
     members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]] = {}
+    for combo in combos:
+        if is_generic_zero_military_score_combo_id(combo.combo_id):
+            merged.append(combo)
+            members_by_merged_id[combo.combo_id] = (combo,)
+            continue
+        groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(combo)
+
     for members in groups.values():
         sorted_members = tuple(sorted(members, key=lambda combo: combo.combo_id))
         if len(sorted_members) == 1:
@@ -310,6 +317,8 @@ def _ship_build_variants_for_merged_count(
     max_expansions: int,
 ) -> tuple[InferenceSolutionShipBuild, ...]:
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
+    if is_generic_zero_military_score_combo_id(merged_combo_id):
+        return (_ship_build_from_member(members[0], count),)
     if len(members) == 1:
         return (_ship_build_from_member(members[0], count),)
 

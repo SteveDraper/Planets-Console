@@ -20,10 +20,17 @@ from api.analytics.military_score_inference.component_eligibility import (
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
+    GENERIC_FREIGHTER_COMBO_ID,
+    GENERIC_ZERO_MILITARY_SCORE_LABEL,
     generate_ship_build_combos,
+    is_generic_zero_military_score_combo_id,
     ship_build_combo_id,
 )
-from api.analytics.military_score_inference.ship_build_scoring import ship_build_score_delta_2x
+from api.analytics.military_score_inference.ship_build_scoring import (
+    ship_build_counts_as_warship,
+    ship_build_military_score_delta_2x,
+    ship_build_score_delta_2x,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_TIME_LIMITED,
@@ -97,14 +104,83 @@ def test_freighter_combo_has_zero_military_score(synthetic_catalog_context):
         **synthetic_catalog_context,
     )
     freighter_combos = [combo for combo in combos if combo.freighter_delta == 1]
-    assert freighter_combos
-    assert all(combo.score_delta_2x == 0 for combo in freighter_combos)
+    assert len(freighter_combos) == 1
+    assert freighter_combos[0].combo_id == GENERIC_FREIGHTER_COMBO_ID
+    assert freighter_combos[0].score_delta_2x == 0
+    assert freighter_combos[0].labels == (GENERIC_ZERO_MILITARY_SCORE_LABEL,)
 
     warship_combos = generate_ship_build_combos(
         _observation(warship_delta=1),
         **synthetic_catalog_context,
     )
-    assert all(combo.score_delta_2x > 0 for combo in warship_combos if combo.warship_delta == 1)
+    armed_warship_combos = [
+        combo
+        for combo in warship_combos
+        if combo.warship_delta == 1 and combo.combo_id != GENERIC_FREIGHTER_COMBO_ID
+    ]
+    assert armed_warship_combos
+    assert all(combo.score_delta_2x > 0 for combo in armed_warship_combos)
+    assert not any(combo.combo_id == GENERIC_FREIGHTER_COMBO_ID for combo in warship_combos)
+
+
+def test_unarmed_military_hull_has_zero_military_score(synthetic_catalog_context):
+    hull = synthetic_catalog_context["hulls_by_id"][24]
+    engine = synthetic_catalog_context["engines_by_id"][1]
+    assert (
+        ship_build_military_score_delta_2x(
+            hull,
+            engine,
+            None,
+            None,
+            beam_count=0,
+            launcher_count=0,
+        )
+        == 0
+    )
+    assert (
+        ship_build_score_delta_2x(
+            hull,
+            engine,
+            None,
+            None,
+            beam_count=0,
+            launcher_count=0,
+        )
+        > 0
+    )
+
+
+def test_carrier_with_fighter_bays_scores_military_when_unarmed(synthetic_catalog_context):
+    hull = synthetic_catalog_context["hulls_by_id"][71]
+    engine = synthetic_catalog_context["engines_by_id"][1]
+    assert ship_build_counts_as_warship(hull, beam_count=0, launcher_count=0)
+    assert (
+        ship_build_military_score_delta_2x(
+            hull,
+            engine,
+            None,
+            None,
+            beam_count=0,
+            launcher_count=0,
+        )
+        > 0
+    )
+
+
+def test_unarmed_escort_counts_as_freighter_on_scoreboard(synthetic_catalog_context):
+    hull = synthetic_catalog_context["hulls_by_id"][24]
+    assert not ship_build_counts_as_warship(hull, beam_count=0, launcher_count=0)
+
+    context = {
+        **synthetic_catalog_context,
+        "buildable_hull_ids": frozenset({hull.id}),
+    }
+    combos = generate_ship_build_combos(
+        _observation(military_delta_2x=0, warship_delta=0, freighter_delta=1),
+        **context,
+    )
+    assert len(combos) == 1
+    assert combos[0].combo_id == GENERIC_FREIGHTER_COMBO_ID
 
 
 def test_beams_and_launchers_may_be_omitted_independently(synthetic_catalog_context):
@@ -126,15 +202,10 @@ def test_beams_and_launchers_may_be_omitted_independently(synthetic_catalog_cont
     assert (torp_hull.beams, 0) in beam_launcher_pairs
     assert (0, torp_hull.launchers) in beam_launcher_pairs
     assert (torp_hull.beams, torp_hull.launchers) in beam_launcher_pairs
-    assert (0, 0) in beam_launcher_pairs
+    assert (0, 0) not in beam_launcher_pairs
 
 
 def test_multi_engine_hull_scales_engine_cost(synthetic_catalog_context):
-    combos = generate_ship_build_combos(
-        _observation(warship_delta=1, freighter_delta=1),
-        **synthetic_catalog_context,
-    )
-    carrier_combo = next(combo for combo in combos if combo.hull_id == 71 and combo.beam_count == 0)
     hull = synthetic_catalog_context["hulls_by_id"][71]
     engine = synthetic_catalog_context["engines_by_id"][1]
     engine_minerals = engine.tritanium + engine.duranium + engine.molybdenum
@@ -143,8 +214,31 @@ def test_multi_engine_hull_scales_engine_cost(synthetic_catalog_context):
         hull.cost + engine.cost * hull.engines,
         hull_minerals + engine_minerals * hull.engines,
     )
-    assert carrier_combo.score_delta_2x == expected
+    assert (
+        ship_build_score_delta_2x(
+            hull,
+            engine,
+            None,
+            None,
+            beam_count=0,
+            launcher_count=0,
+        )
+        == expected
+    )
     assert hull.engines == 2
+
+    combos = generate_ship_build_combos(
+        _observation(warship_delta=1, freighter_delta=1),
+        **synthetic_catalog_context,
+    )
+    carrier_combo = next(
+        combo
+        for combo in combos
+        if combo.hull_id == 71 and combo.beam_count == 0 and combo.launcher_count == 0
+    )
+    assert carrier_combo.score_delta_2x == expected
+    assert carrier_combo.warship_delta == 1
+    assert any(combo.combo_id == GENERIC_FREIGHTER_COMBO_ID for combo in combos)
 
 
 def test_empty_active_lists_jump_to_turn_catalog_for_components():
@@ -186,7 +280,7 @@ def test_early_tier_limits_beam_counts_to_zero_or_max(synthetic_catalog_context)
         **context,
     )
     beam_counts = {combo.beam_count for combo in combos if combo.hull_id == hull.id}
-    assert beam_counts <= {0, hull.beams}
+    assert beam_counts <= {hull.beams}
 
 
 def test_max_tier_includes_partial_beam_and_launcher_counts(synthetic_catalog_context):
@@ -209,8 +303,8 @@ def test_max_tier_includes_partial_beam_and_launcher_counts(synthetic_catalog_co
     hull_combos = [combo for combo in combos if combo.hull_id == hull.id]
     beam_counts = {combo.beam_count for combo in hull_combos if combo.launcher_count == 0}
     launcher_counts = {combo.launcher_count for combo in hull_combos if combo.beam_count == 0}
-    assert beam_counts == {0, 1, 2, 3, 4}
-    assert launcher_counts == {0, 1, 2, 3}
+    assert beam_counts == {1, 2, 3, 4}
+    assert launcher_counts == {1, 2, 3}
 
 
 def test_solver_joint_constraints_with_combo_and_aggregate():
@@ -259,6 +353,43 @@ def test_solver_joint_constraints_with_combo_and_aggregate():
     assert result.status == STATUS_EXACT
     assert result.solutions[0].ship_builds[0].combo_id == combo.combo_id
     assert result.solutions[0].actions[0].count == 40
+
+
+def test_solver_generic_freighter_produces_single_solution_without_expansion(
+    synthetic_catalog_context,
+):
+    from api.analytics.military_score_inference.models import (
+        InferenceProblem,
+        InferenceSolutionShipBuild,
+    )
+
+    combos = generate_ship_build_combos(
+        _observation(military_delta_2x=0, warship_delta=0, freighter_delta=1),
+        **synthetic_catalog_context,
+    )
+    problem = InferenceProblem(
+        observation=_observation(military_delta_2x=0, warship_delta=0, freighter_delta=1),
+        aggregate_actions=(),
+        ship_build_combos=combos,
+        max_solutions=20,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_EXACT
+    assert len(result.solutions) == 1
+    assert result.solutions[0].ship_builds == (
+        InferenceSolutionShipBuild(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            label=GENERIC_ZERO_MILITARY_SCORE_LABEL,
+            count=1,
+            hull_id=0,
+            engine_id=0,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+        ),
+    )
 
 
 def test_score_equivalent_merge_preserves_distinct_probability_ranked_solutions():
@@ -485,8 +616,11 @@ def test_early_policy_step_catalog_uses_early_game_band_filters(sample_turn):
     if not combos:
         pytest.skip("sample turn has no buildable hull combos for observation")
     assert early_step.filters.engines.all
-    assert {combo.hull_id for combo in combos} <= context.buildable_hull_ids
-    assert {combo.engine_id for combo in combos} <= context.eligible_engine_ids
+    specific_combos = [
+        combo for combo in combos if not is_generic_zero_military_score_combo_id(combo.combo_id)
+    ]
+    assert {combo.hull_id for combo in specific_combos} <= context.buildable_hull_ids
+    assert {combo.engine_id for combo in specific_combos} <= context.eligible_engine_ids
     combo_beam_ids = {combo.beam_id for combo in combos if combo.beam_id is not None}
     combo_torp_ids = {combo.torp_id for combo in combos if combo.torp_id is not None}
     assert combo_beam_ids <= context.eligible_beam_ids

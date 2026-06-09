@@ -19,6 +19,10 @@ from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     ship_construction_score_delta_2x,
 )
+from api.analytics.military_score_inference.ship_build_scoring import (
+    ship_build_military_score_delta_2x,
+    ship_build_score_delta_2x,
+)
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.concepts.races import evil_empire_free_starbase_fighters_per_host_turn
 from api.serialization.game import game_info_from_json
@@ -167,33 +171,25 @@ def test_ship_build_combos_exclude_build_time_ammo(synthetic_catalog_context):
 
     assert not any("fighters" in combo_id for combo_id in combo_ids)
 
-    carrier_empty = next(
+    carrier_unarmed = next(
         combo
         for combo in catalog.ship_build_combos
         if combo.hull_id == 71 and combo.beam_count == 0 and combo.launcher_count == 0
     )
     hull = synthetic_catalog_context["hulls_by_id"][71]
     engine = synthetic_catalog_context["engines_by_id"][1]
-    expected_score = ship_construction_score_delta_2x(
-        hull.cost + engine.cost * hull.engines,
-        hull.tritanium
-        + hull.duranium
-        + hull.molybdenum
-        + (engine.tritanium + engine.duranium + engine.molybdenum) * hull.engines,
+    assert carrier_unarmed.score_delta_2x == ship_build_military_score_delta_2x(
+        hull,
+        engine,
+        None,
+        None,
+        beam_count=0,
+        launcher_count=0,
     )
-    assert carrier_empty.score_delta_2x == expected_score
+    assert carrier_unarmed.warship_delta == 1
 
 
 def test_ship_build_score_scales_engine_cost_by_hull_engine_slots(synthetic_catalog_context):
-    catalog = build_action_catalog(
-        _observation(warship_delta=1, freighter_delta=1),
-        **synthetic_catalog_context,
-    )
-    carrier_build = next(
-        combo
-        for combo in catalog.ship_build_combos
-        if combo.hull_id == 71 and combo.beam_count == 0 and combo.launcher_count == 0
-    )
     hull = synthetic_catalog_context["hulls_by_id"][71]
     engine = synthetic_catalog_context["engines_by_id"][1]
     engine_minerals = engine.tritanium + engine.duranium + engine.molybdenum
@@ -202,7 +198,17 @@ def test_ship_build_score_scales_engine_cost_by_hull_engine_slots(synthetic_cata
         hull.cost + engine.cost * hull.engines,
         hull_minerals + engine_minerals * hull.engines,
     )
-    assert carrier_build.score_delta_2x == expected
+    assert (
+        ship_build_score_delta_2x(
+            hull,
+            engine,
+            None,
+            None,
+            beam_count=0,
+            launcher_count=0,
+        )
+        == expected
+    )
     assert hull.engines == 2
 
 

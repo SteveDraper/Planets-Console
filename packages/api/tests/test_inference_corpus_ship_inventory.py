@@ -2,6 +2,7 @@
 
 import json
 
+from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.serialization.turn import turn_info_from_json
 
 from tests.inference_corpus.ground_truth import describe_inventory_activity
@@ -54,6 +55,14 @@ def test_torp_delta_uses_ammo_not_launcher_count():
     assert deltas == {}
     full_deltas = torpedo_load_delta_by_type(prior_turn, score_turn, player_id=1)
     assert full_deltas.get(6) == 40
+
+
+def test_zero_military_score_ship_maps_to_generic_freighter_combo_id():
+    prior_turn, score_turn = _turn_pair()
+    new_ship = new_owned_ships(prior_turn, score_turn, player_id=1)[0]
+    new_ship.beams = 0
+    new_ship.torps = 0
+    assert ship_to_build_combo_id(new_ship, score_turn) == GENERIC_FREIGHTER_COMBO_ID
 
 
 def test_missouri_maps_to_factored_combo_id():
