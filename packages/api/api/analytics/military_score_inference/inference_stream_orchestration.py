@@ -146,17 +146,11 @@ class InferenceStreamOrchestration:
     def current_solve_turn(self) -> TurnInfo:
         return self.solve_turn
 
-    def per_segment_max_solutions(self) -> int:
-        return max(1, 20 // len(self.segments))
-
     def should_emit_streaming_solutions(self) -> bool:
         return self.current_segment() is not None
 
     def new_ladder_state(self) -> PolicyLadderState:
-        return PolicyLadderState(
-            policy_steps=tuple(resolve_tier_policies(None)),
-            resolved_max_solutions=self.per_segment_max_solutions(),
-        )
+        return PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)))
 
     def record_segment_ladder_complete(
         self,

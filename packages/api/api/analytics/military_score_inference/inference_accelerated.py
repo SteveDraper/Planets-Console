@@ -229,7 +229,6 @@ def run_accelerated_split_inference(
     """Solve accel-window and reported-host-turn targets independently."""
     segment_count = len(segments)
     per_segment_time = time_limit_seconds / segment_count
-    per_segment_max_solutions = max(1, 20 // segment_count)
 
     segment_payloads: list[dict[str, object]] = []
     segment_artifacts: dict[int, AcceleratedSegmentArtifacts] = {}
@@ -246,7 +245,7 @@ def run_accelerated_split_inference(
             score,
             turn,
             segment,
-            max_solutions=per_segment_max_solutions,
+            max_solutions=20,
             time_limit_seconds=per_segment_time,
         )
         if segment.segment_id == "reported_host_turn":

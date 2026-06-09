@@ -59,6 +59,12 @@ def _accelerated_split_orchestration(
     )
 
 
+def test_new_ladder_state_uses_full_k_per_segment(sample_turn) -> None:
+    orchestration = _accelerated_split_orchestration(sample_turn)
+
+    assert orchestration.new_ladder_state().resolved_max_solutions == 20
+
+
 def test_should_emit_streaming_solutions_for_accel_window_segment(sample_turn) -> None:
     orchestration = _accelerated_split_orchestration(sample_turn)
 
