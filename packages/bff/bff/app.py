@@ -15,6 +15,12 @@ from bff.transport.game_responses import (
     LoadAllStreamErrorEvent,
     LoadAllStreamProgressEvent,
 )
+from bff.transport.inference_stream_responses import (
+    InferenceStreamCompleteEvent,
+    InferenceStreamErrorEvent,
+    InferenceStreamProgressEvent,
+    InferenceStreamSolutionEvent,
+)
 
 app = FastAPI(
     title="Planets Console BFF",
@@ -47,6 +53,10 @@ def build_openapi_schema() -> dict:
         LoadAllStreamProgressEvent,
         LoadAllStreamCompleteEvent,
         LoadAllStreamErrorEvent,
+        InferenceStreamSolutionEvent,
+        InferenceStreamProgressEvent,
+        InferenceStreamCompleteEvent,
+        InferenceStreamErrorEvent,
     ):
         _merge_model_json_schema(openapi_schema, model)
     app.openapi_schema = openapi_schema

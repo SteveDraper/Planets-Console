@@ -4,6 +4,74 @@
  */
 
 export interface paths {
+    "/analytics/scores/inference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scores Inference
+         * @description Per-row military score build inference for the Scores analytic.
+         */
+        get: operations["get_scores_inference_analytics_scores_inference_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/scores/inference/table-stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scores Inference Table Stream
+         * @description Stream build inference for all scoreboard rows on one NDJSON connection.
+         */
+        get: operations["get_scores_inference_table_stream_analytics_scores_inference_table_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/scores/inference/global-pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scores Inference Global Pause
+         * @description Whether scoreboard inference is globally paused for this turn scope.
+         */
+        get: operations["get_scores_inference_global_pause_analytics_scores_inference_global_pause_get"];
+        put?: never;
+        /**
+         * Post Scores Inference Global Pause
+         * @description Pause all scoreboard inference jobs for this turn scope.
+         */
+        post: operations["post_scores_inference_global_pause_analytics_scores_inference_global_pause_post"];
+        /**
+         * Delete Scores Inference Global Pause
+         * @description Resume globally paused scoreboard inference for this turn scope.
+         */
+        delete: operations["delete_scores_inference_global_pause_analytics_scores_inference_global_pause_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics": {
         parameters: {
             query?: never;
@@ -36,26 +104,6 @@ export interface paths {
          * @description Tabular data scoped to the selected game, turn, and perspective.
          */
         get: operations["get_analytic_table_analytics__analytic_id__table_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/analytics/{analytic_id}/inference": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Analytic Inference
-         * @description Per-row military score build inference for the Scores analytic.
-         */
-        get: operations["get_analytic_inference_analytics__analytic_id__inference_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -128,6 +176,175 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_scores_inference_analytics_scores_inference_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+                playerId: number;
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scores_inference_table_stream_analytics_scores_inference_table_stream_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+                playerIds: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description NDJSON stream of tagged inference events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/x-ndjson": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scores_inference_global_pause_analytics_scores_inference_global_pause_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_scores_inference_global_pause_analytics_scores_inference_global_pause_post: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_scores_inference_global_pause_analytics_scores_inference_global_pause_delete: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_analytics_analytics_get: {
         parameters: {
             query?: {
@@ -166,43 +383,6 @@ export interface operations {
                 turn: number;
                 perspective: number;
                 includeBuildInference?: boolean;
-                includeDiagnostics?: boolean;
-            };
-            header?: never;
-            path: {
-                analytic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_analytic_inference_analytics__analytic_id__inference_get: {
-        parameters: {
-            query: {
-                gameId: number;
-                turn: number;
-                perspective: number;
-                playerId: number;
                 includeDiagnostics?: boolean;
             };
             header?: never;

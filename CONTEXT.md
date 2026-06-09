@@ -281,7 +281,7 @@ Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=
 _Avoid_: full hwdistribution support (v1 claim)
 
 **Military score build inference**:
-Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row**; default per-row solver budget is **20s** with top-K **20** (combo catalogs above **5000** combos temporarily force `max_solutions=1` until streaming ships). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
+Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row** with top-K **20**. No fixed row time budget once **#71** ships -- SPA runs continue until the ladder finishes, **inference global pause** freezes them, or the stream is cancelled (scope change, disable build inference, disconnect). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
 _Avoid_: build solver, score guesser
 
 **Inference search tier**:
@@ -333,12 +333,36 @@ Static YAML ladder under `assets/analytics/military_score_build_inference/` (rep
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
 
 **Inference solution streaming**:
-Planned NDJSON wire protocol (**#71**, Phase 1H) that emits each new exact explanation for one scoreboard row as soon as any **inference search tier** finds it -- within-tier enumeration and cross-tier ladder progress -- so the hourglass clears before top-K is full. Each `solution` event carries **inference solution rank weight**; the consumer dedupes on **inference explanation signature** and applies final ordering. Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness until stream parity is proven.
-_Avoid_: websocket inference, whole-table stream
+NDJSON wire protocol (**#71**, Phase 1H). The SPA opens **one multiplexed table stream** (`GET .../inference/table-stream`) for all scoreboard rows on the current shell scope; events carry an optional `playerId` tag (except `globalPause`). Emits whenever a **new** **inference explanation signature** is admitted to **inference merged top-K** -- within-tier enumeration and cross-tier ladder progress -- so the dashed-zero badge transitions to a solid count before top-K is full. Admission is incremental-only: the solver `on_solution` callback merges into held top-K; there is no post-solve re-merge. Each `solution` event carries the **full held top-K** for that row (ranked by **inference solution rank weight**); the consumer replaces local held state from the event (no client-side merge). Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness. **Stream disconnect** (refresh, network loss, disable build inference, tab close) cancels all in-flight work and clears **inference global pause** on the server; reopening the table stream on the same scope **recalculates from scratch**.
+_Avoid_: websocket inference
+
+**Inference table stream**:
+Single NDJSON connection for all scoreboard rows on one game / turn / **perspective** scope. The backend multiplexes per-row scheduler event queues onto one wire; the frontend demuxes on `playerId`. Chosen over parallel per-row HTTP connections so **inference global pause** can freeze all rows on one scope without juggling N client abort controllers. The build-inference column header hosts the global pause control.
+_Avoid_: turn-level inference job queue in the SPA
+
+**Inference global pause**:
+User-initiated **soft** freeze of build inference for the current shell scope (game, turn, **perspective**) **while the inference table stream is connected**. **Pause** drains the scheduler worker queue into a held buffer, stops dequeuing new tier jobs, and broadcasts `globalPause` on the open stream; **in-flight tier jobs already running continue until the current tier step completes** and may still emit `solution` events. Rows already held in top-K stay visible with `paused` chrome. **Resume** (column header or `DELETE .../global-pause`) requeues held tier jobs and continuations on the same connection. Open streams drive the pause-control chrome via `globalPause` events (single source of truth with REST pause/resume). **Stream disconnect** clears server-side global pause and cancels all row runs; reconnect recalculates from scratch. Implicit scope change also cancels everything.
+_Avoid_: confusing global pause with implicit stream cancellation
+
+**Inference row scheduler**:
+Process-wide backend facility (**#71** companion) that fair-schedules **inference search tier** work for rows on the active inference table stream. One schedulable **inference tier job** = one full **inference search tier** step for one scoreboard row (catalog build, exact/band passes, within-tier top-K, merge admit, seed output). Each row's ladder is sequential (tier *n+1* needs tier *n* job outputs). Cross-row fairness: enqueue tier-1 when a row is scheduled, append tier *n+1* after tier *n* completes, shared FIFO queue drained by a worker pool (default **4** workers, configurable). Distinct from **inference corpus runner** `--workers` (batch case parallelism). `solution` events emit from inside the tier job via merge-admit hooks. Integrates **inference global pause** (held jobs while the table stream stays open). Table stream teardown cancels all row runs and clears global pause.
+_Avoid_: frontend job queue, per-solve queue jobs
+
+**Inference solve interrupt boundary**:
+Where stream cancellation (scope change, disable build inference, client disconnect) and **inference global pause** can take effect without losing tier progress. v1 (**#71**): cooperative checks at sub-step boundaries inside a tier job -- top-K no-good iterations, seed attempts, exact vs band passes -- plus `StopSearch()` in a CP-SAT callback when cancel fires mid-`Solve()`. OR-Tools CP-SAT cannot resume internal search state across `Solve()` calls; only complete solutions can warm-start the next pass via hints. **Known gap:** a single long first-feasible `Solve()` on a huge catalog may block cancel until that call returns. **Follow-on (if needed):** retry `UNKNOWN` sub-steps until feasible or cancelled (logical continuation; CP-SAT restarts internally each retry).
+_Avoid_: routine short-solve slice loops (wastes search), assuming CP-SAT pause/resume
 
 **Inference solution count indicator**:
-Per scoreboard row chrome replacing the binary green tick: a green outlined badge showing **N** = the number of rows currently held in **inference merged top-K** (not cumulative discoveries above K). **N > 0** as soon as the first exact explanation is held; rises toward K then plateaus while eviction swaps membership. Hourglass while **N = 0** and search is in flight; red cross when the row completes with no exact explanation. Click opens the ranked modal.
+Per scoreboard row chrome replacing the binary green tick: a green outlined badge showing **N** = the number of rows currently held in **inference merged top-K** (not cumulative discoveries above K). While search is in flight and **N = 0**, show a **dashed-border badge with 0** (same count-badge chrome, not a separate hourglass icon); in-progress search adds an animation affordance on the badge. When **N > 0**, use a solid border; **N** rises toward K then plateaus while eviction swaps membership. Red cross when the row completes with no exact explanation. Global pause/resume is controlled from the column header only. Click on the badge (or row chrome when **N > 0**) opens the ranked modal.
 _Avoid_: green tick, checkmark column
+
+**Accelerated-start inference row** (SPA):
+A scoreboard row whose host turn falls in an accelerated-start window may run multiple internal segments (accel window + reported host turn). v1 **#71** uses the same table-stream scheduler path as other rows; segments stay inside the row's inference path with no per-segment SPA time split (natural completion or implicit stream cancellation ends the row).
+_Avoid_: per-segment stream, segment-level halt (v1)
+
+**Inference stream cancellation**:
+End of in-flight build inference when the shell scope changes (game, turn, **perspective**), build inference is disabled, or the **inference table stream** disconnects (`AbortSignal`, refresh, network loss). There is no per-row halt control in the SPA; use **inference global pause** to freeze all rows while the stream stays open, or change scope / disconnect to cancel. On disconnect the scheduler cancels every row run, clears server-side **inference global pause**, and drops held tier jobs; reopening the table stream on the same scope **recalculates from scratch**. A terminal wire `complete` with `status: stopped` may still carry the last held top-K for that row on the way out; that is not server state preserved across reconnect. Distinct from failure (`no_exact_solution`, solver error), from natural completion (`exact` when final-catalog equalities pass), and from **inference global pause** (all rows frozen on an open stream, resumable via the column header).
+_Avoid_: per-row halt (removed from SPA), time_limited (as the primary SPA stop mechanism)
 
 **Inference host turn**:
 The host turn whose activity is being explained. Scoreboard deltas are read from the **later** stored **TurnInfo** document (turn *N+1*); the **earlier** document (turn *N*) supplies inventory ground truth for complexity grading and Tier 2 checks.
@@ -357,7 +381,7 @@ Inventory truth for a corpus case assembled from one or more stored **TurnInfo**
 _Avoid_: omniscient turn (informal)
 
 **Inference corpus runner**:
-Test-harness code (not shipped in the Core REST API package) that performs discovery, complexity grading, **catalog coverage**, case execution, and reporting. Two modes: **fixed corpus** (committed fixtures and manifest for CI) and **local corpus** (script `game_id` against a completed game in the **file backend** store). Invokes production inference APIs only; no corpus logic in `api/` business modules.
+Test-harness code (not shipped in the Core REST API package) that performs discovery, complexity grading, **catalog coverage**, case execution, and reporting. Two modes: **fixed corpus** (committed fixtures and manifest for CI) and **local corpus** (script `game_id` against a completed game in the **file backend** store). Invokes production inference via the **batch JSON** path (not the SPA NDJSON stream). **Orchestration-level** wall-clock caps (e.g. `--probe-time-limit-seconds`) stop the run between cases; per-case solver time limits remain on the batch path so CI and probes stay bounded after the SPA drops row time budgets. Probe options should surface `time_limited` outcomes and support deeper diagnosis of slow sub-steps (per-case time override, timeout-case filters, extended single-case reruns).
 _Avoid_: inference integration test (implementation name)
 
 **Ground truth explanation**:

@@ -4,8 +4,9 @@ from collections import Counter
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_label
-from api.models.game import TurnInfo
+from api.models.game import GameInfo, TurnInfo
 from api.models.player import Score
+from api.services.turn_load_service import TurnLoadService
 
 from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel
 from tests.inference_corpus.ship_inventory import (
@@ -38,6 +39,46 @@ class GroundTruthExtraction:
     unavailable_reason: str | None = None
 
 
+def load_ground_truth_turn_snapshots(
+    turn_load: TurnLoadService,
+    game_info: GameInfo,
+    game_id: int,
+    player_id: int,
+    host_turn: int,
+) -> tuple[TurnInfo, TurnInfo]:
+    """Load prior/score turns from the perspective slot that owns ``player_id``."""
+    from tests.inference_corpus.storage_loader import load_ground_truth_turn_snapshots as _load
+
+    return _load(turn_load, game_info, game_id, player_id, host_turn)
+
+
+def extract_ground_truth_for_player(
+    *,
+    turn_load: TurnLoadService,
+    game_info: GameInfo,
+    game_id: int,
+    player_id: int,
+    host_turn: int,
+    score: Score,
+    complexity: ComplexityLevel,
+) -> GroundTruthExtraction:
+    """Extract ground truth using turn snapshots from the player's own perspective."""
+    prior_turn, score_turn = load_ground_truth_turn_snapshots(
+        turn_load,
+        game_info,
+        game_id,
+        player_id,
+        host_turn,
+    )
+    return extract_ground_truth_v1(
+        prior_turn=prior_turn,
+        score_turn=score_turn,
+        player_id=player_id,
+        score=score,
+        complexity=complexity,
+    )
+
+
 def extract_ground_truth_v1(
     *,
     prior_turn: TurnInfo,
@@ -47,6 +88,10 @@ def extract_ground_truth_v1(
     complexity: ComplexityLevel,
 ) -> GroundTruthExtraction:
     """Build a normalized action multiset from inventory deltas when v1 rules apply.
+
+    ``prior_turn`` and ``score_turn`` must come from the perspective slot that
+    owns ``player_id``. Other perspectives omit fitted component detail on ships
+    owned by that player.
 
     Ground truth is inventory-only. Scoreboard rows (including ``militarychange``) are
     not used for extraction or validation -- during accelerated start those fields are

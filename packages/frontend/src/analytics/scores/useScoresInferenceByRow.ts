@@ -1,80 +1,155 @@
-import { useQueries } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
-import { fetchScoresRowInference } from '../../api/bff'
-import { scoresRowInferenceQueryKey } from './api'
+import { fetchScoresTableInferenceStream } from '../../api/bff'
+import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
+import {
+  failureDetail,
+  initialRowStreamState,
+  pendingDetail,
+  reduceRowStreamState,
+  rowDetailFromStreamState,
+  stablePlayerIdsKey,
+  type RowStreamState,
+} from './inferenceRowStreamState'
 
-function pendingDetail(playerId: number): ScoresInferenceRowDetail {
-  return {
-    playerId,
-    displayStatus: 'pending',
-    status: 'pending',
-    summary: 'Build inference in progress',
-    solutionCount: 0,
-    isComplete: false,
-    solutions: [],
-    diagnostics: {},
-  }
+export type UseScoresInferenceByRowOptions = {
+  onGlobalPauseChange?: (paused: boolean) => void
 }
 
-function failureDetail(playerId: number, summary: string): ScoresInferenceRowDetail {
-  return {
-    playerId,
-    displayStatus: 'failure',
-    status: 'fetch_error',
-    summary,
-    solutionCount: 0,
-    isComplete: true,
-    solutions: [],
-    diagnostics: {},
-  }
+export type UseScoresInferenceByRowResult = {
+  inferenceByRow: ScoresInferenceRowDetail[] | undefined
 }
 
 export function useScoresInferenceByRow(
   tableData: TableDataResponse | undefined,
   scope: AnalyticShellScope | null,
-  enabled: boolean
-): ScoresInferenceRowDetail[] | undefined {
+  enabled: boolean,
+  options: UseScoresInferenceByRowOptions = {}
+): UseScoresInferenceByRowResult {
+  const { onGlobalPauseChange } = options
   const stubs =
     enabled && tableData?.inferenceByRow != null ? tableData.inferenceByRow : []
   const playerIds = stubs
     .map((stub) => stub.playerId)
     .filter((id): id is number => typeof id === 'number')
+  const playerIdsKey = useMemo(() => stablePlayerIdsKey(playerIds), [playerIds])
 
-  const queries = useQueries({
-    queries: playerIds.map((playerId) => ({
-      queryKey: scoresRowInferenceQueryKey(scope!, playerId),
-      queryFn: () => fetchScoresRowInference(scope!, playerId),
-      enabled: enabled && scope != null,
-    })),
-  })
+  const [detailsByPlayerId, setDetailsByPlayerId] = useState<
+    Map<number, ScoresInferenceRowDetail>
+  >(new Map())
+  const tableAbortControllerRef = useRef<AbortController | null>(null)
+  const rowStreamStateRef = useRef<Map<number, RowStreamState>>(new Map())
 
-  const queryByPlayerId = new Map(
-    playerIds.map((playerId, index) => [playerId, queries[index]])
+  const publishPlayerState = useCallback((playerId: number) => {
+    const state = rowStreamStateRef.current.get(playerId)
+    if (state == null) {
+      return
+    }
+    setDetailsByPlayerId((previous) => {
+      const next = new Map(previous)
+      next.set(playerId, rowDetailFromStreamState(playerId, state))
+      return next
+    })
+  }, [])
+
+  const applyStreamEvent = useCallback(
+    (playerId: number, event: InferenceStreamEvent) => {
+      const current = rowStreamStateRef.current.get(playerId) ?? initialRowStreamState()
+      const next = reduceRowStreamState(current, event)
+      rowStreamStateRef.current.set(playerId, next)
+      publishPlayerState(playerId)
+    },
+    [publishPlayerState]
   )
 
+  const applyGlobalPauseEvent = useCallback(
+    (event: Extract<InferenceStreamEvent, { type: 'globalPause' }>) => {
+      onGlobalPauseChange?.(event.paused)
+      for (const playerId of rowStreamStateRef.current.keys()) {
+        applyStreamEvent(playerId, event)
+      }
+    },
+    [applyStreamEvent, onGlobalPauseChange]
+  )
+
+  const handleTableStreamEvent = useCallback(
+    (event: InferenceStreamEvent) => {
+      if (event.type === 'globalPause') {
+        applyGlobalPauseEvent(event)
+        return
+      }
+      const playerId = 'playerId' in event ? event.playerId : undefined
+      if (typeof playerId !== 'number') {
+        return
+      }
+      applyStreamEvent(playerId, event)
+    },
+    [applyGlobalPauseEvent, applyStreamEvent]
+  )
+
+  useEffect(() => {
+    if (!enabled || scope == null || playerIds.length === 0) {
+      setDetailsByPlayerId(new Map())
+      rowStreamStateRef.current = new Map()
+      onGlobalPauseChange?.(false)
+      return
+    }
+
+    tableAbortControllerRef.current?.abort()
+
+    const initialStates = new Map<number, RowStreamState>()
+    for (const playerId of playerIds) {
+      initialStates.set(playerId, initialRowStreamState())
+    }
+    rowStreamStateRef.current = initialStates
+
+    const initialDetails = new Map<number, ScoresInferenceRowDetail>()
+    for (const playerId of playerIds) {
+      initialDetails.set(playerId, pendingDetail(playerId))
+    }
+    setDetailsByPlayerId(initialDetails)
+
+    const controller = new AbortController()
+    tableAbortControllerRef.current = controller
+
+    void fetchScoresTableInferenceStream(scope, playerIds, {
+      signal: controller.signal,
+      onEvent: handleTableStreamEvent,
+    }).catch((error) => {
+      if (controller.signal.aborted) {
+        return
+      }
+      setDetailsByPlayerId((previous) => {
+        const next = new Map(previous)
+        for (const playerId of playerIds) {
+          if (next.get(playerId)?.isComplete) {
+            continue
+          }
+          next.set(playerId, failureDetail(playerId, errorDetailFromUnknown(error)))
+        }
+        return next
+      })
+    })
+
+    return () => {
+      controller.abort()
+      tableAbortControllerRef.current = null
+      onGlobalPauseChange?.(false)
+    }
+  }, [enabled, scope, playerIdsKey, handleTableStreamEvent, onGlobalPauseChange])
+
   if (!enabled || tableData?.inferenceByRow == null) {
-    return undefined
+    return { inferenceByRow: undefined }
   }
 
-  return stubs.map((stub, rowIndex) => {
+  const inferenceByRow = stubs.map((stub, rowIndex) => {
     const playerId = stub.playerId
     if (typeof playerId !== 'number') {
       return failureDetail(-(rowIndex + 1), 'Missing player id for build inference')
     }
-    const query = queryByPlayerId.get(playerId)
-    if (query == null) {
-      return pendingDetail(playerId)
-    }
-    if (query.isPending) {
-      return pendingDetail(playerId)
-    }
-    if (query.isError) {
-      return failureDetail(playerId, errorDetailFromUnknown(query.error))
-    }
-    if (query.data != null) {
-      return query.data
-    }
-    return pendingDetail(playerId)
+    return detailsByPlayerId.get(playerId) ?? pendingDetail(playerId)
   })
+
+  return { inferenceByRow }
 }

@@ -1,8 +1,11 @@
 """Turn analytic dispatch via the Core analytics registry."""
 
+from collections.abc import Callable
+
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError
+from api.models.game import TurnInfo
 from api.services.turn_load_service import TurnLoadService
 from api.transport.connections_options import FlareConnectionMode
 
@@ -12,6 +15,23 @@ class TurnAnalyticService:
 
     def __init__(self, turns: TurnLoadService) -> None:
         self._turns = turns
+
+    def _load_scoreboard_turn(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> Callable[[int], TurnInfo | None]:
+        def load_scoreboard_turn(stored_turn_number: int) -> TurnInfo | None:
+            try:
+                return self._turns.get_turn_info(
+                    game_id,
+                    perspective,
+                    stored_turn_number,
+                )
+            except OSError, ValueError, KeyError, NotFoundError:
+                return None
+
+        return load_scoreboard_turn
 
     def get_turn_analytics(
         self,
@@ -51,19 +71,85 @@ class TurnAnalyticService:
         from api.analytics.scores import get_scores_row_inference
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-
-        def load_scoreboard_turn(stored_turn_number: int):
-            try:
-                return self._turns.get_turn_info(
-                    game_id,
-                    perspective,
-                    stored_turn_number,
-                )
-            except OSError, ValueError, KeyError, NotFoundError:
-                return None
-
         return get_scores_row_inference(
             turn,
             player_id,
-            load_scoreboard_turn=load_scoreboard_turn,
+            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
         )
+
+    def iter_scores_table_inference_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+    ):
+        from api.analytics.scores import iter_scores_table_inference_stream
+
+        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        return iter_scores_table_inference_stream(
+            turn,
+            player_ids,
+            game_id=game_id,
+            perspective=perspective,
+            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
+        )
+
+    def _inference_scheduler_scope(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ):
+        from api.analytics.military_score_inference.inference_scheduler import (
+            get_inference_row_scheduler,
+        )
+        from api.analytics.military_score_inference.inference_stream_scope import (
+            InferenceStreamScope,
+        )
+
+        scope = InferenceStreamScope(
+            game_id=game_id,
+            perspective=perspective,
+            turn_number=turn_number,
+        )
+        return scope, get_inference_row_scheduler()
+
+    def get_inference_global_pause_status(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
+        )
+        return scheduler.global_pause_status(scope)
+
+    def pause_inference_globally(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
+        )
+        return scheduler.pause_globally(scope)
+
+    def resume_inference_globally(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
+        )
+        return scheduler.resume_globally(scope)

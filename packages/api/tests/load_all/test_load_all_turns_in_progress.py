@@ -6,7 +6,13 @@ from unittest.mock import MagicMock
 import pytest
 from api.errors import NotFoundError
 from api.transport.game_info_update import RefreshGameInfoParams
-from conftest import ASSETS_DIR, archive_turn_rst, final_load_all_result, load_services
+from conftest import (
+    ASSETS_DIR,
+    archive_turn_rst,
+    final_load_all_result,
+    load_services,
+    mock_planets_load_game_info,
+)
 
 
 def test_load_in_progress_game_stops_at_elimination_turn() -> None:
@@ -24,6 +30,7 @@ def test_load_in_progress_game_stops_at_elimination_turn() -> None:
     credentials.store_api_key("captain", "api-key-1")
 
     planets = MagicMock()
+    mock_planets_load_game_info(planets, info_payload)
 
     def load_turn_side_effect(**kwargs):
         turn_number = kwargs.get("turn")

@@ -44,6 +44,9 @@ STANDARD_STARBASE_MAX_FIGHTERS = 60
 # delta is rounded or when an accelerated-start segment partition subtracts 1x values.
 SCOREBOARD_MILITARY_PARTITION_SLACK_2X = 1
 
+ACCEL_WINDOW_SEGMENT_ID = "accel_window"
+REPORTED_HOST_TURN_SEGMENT_ID = "reported_host_turn"
+
 
 @dataclass(frozen=True)
 class ScoreboardSnapshot:
@@ -66,6 +69,11 @@ class AcceleratedInferenceSegment:
     warship_delta: int
     freighter_delta: int
     priority_point_delta: int
+
+    @property
+    def is_streaming_target(self) -> bool:
+        """Whether live solution events apply to this segment (badge N = reported host turn)."""
+        return self.segment_id == REPORTED_HOST_TURN_SEGMENT_ID
 
 
 @dataclass(frozen=True)
@@ -213,18 +221,48 @@ def effective_prior_score_row(
     return _apply_snapshot(score_at_reliable_turn, snapshot)
 
 
+def _reported_scoreboard_changes_are_zero(score: Score) -> bool:
+    return (
+        score.militarychange == 0
+        and score.shipchange == 0
+        and score.freighterchange == 0
+        and score.prioritypointchange == 0
+    )
+
+
+def scoreboard_row_deltas_from_prior_totals(
+    score: Score,
+    prior_score: Score,
+) -> tuple[int, int, int, int]:
+    """Infer per-row deltas when change columns are missing (e.g. spectator loads)."""
+    return (
+        2 * (score.militaryscore - prior_score.militaryscore),
+        score.capitalships - prior_score.capitalships,
+        score.freighters - prior_score.freighters,
+        score.prioritypoints - prior_score.prioritypoints,
+    )
+
+
 def observation_deltas_from_score(
     score: Score,
     turn: TurnInfo,
-) -> tuple[int, int, int, int]:
+    *,
+    prior_score: Score | None = None,
+) -> tuple[int, int, int, int, str]:
     """Return scoreboard-row deltas for the reported host turn on this row."""
     del turn
-    return (
+    reported = (
         reported_host_military_delta_2x(score),
         score.shipchange,
         score.freighterchange,
         score.prioritypointchange,
     )
+    if not _reported_scoreboard_changes_are_zero(score) or prior_score is None:
+        return (*reported, "reported_change_fields")
+    from_totals = scoreboard_row_deltas_from_prior_totals(score, prior_score)
+    if from_totals == (0, 0, 0, 0):
+        return (*reported, "reported_change_fields")
+    return (*from_totals, "prior_row_total_diff")
 
 
 def accelerated_window_military_change(score: Score, turn: TurnInfo) -> int:
@@ -249,7 +287,7 @@ def accelerated_inference_segments(
     segments: list[AcceleratedInferenceSegment] = []
 
     accel_segment = AcceleratedInferenceSegment(
-        segment_id="accel_window",
+        segment_id=ACCEL_WINDOW_SEGMENT_ID,
         host_turn=accel_host_turn,
         military_delta_2x=accelerated_window_military_delta_2x(score, turn),
         warship_delta=builds.warships_built_before_reported_host_turn,
@@ -261,7 +299,7 @@ def accelerated_inference_segments(
 
     segments.append(
         AcceleratedInferenceSegment(
-            segment_id="reported_host_turn",
+            segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
             host_turn=reported_host_turn,
             military_delta_2x=reported_host_military_delta_2x(score),
             warship_delta=score.shipchange,

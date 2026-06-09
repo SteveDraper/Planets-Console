@@ -236,6 +236,62 @@ class CoreClient:
             )
         )
 
+    def iter_scores_table_inference_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+    ):
+        yield from self._analytics.iter_scores_table_inference_stream(
+            game_id,
+            perspective,
+            turn_number,
+            player_ids,
+        )
+
+    def get_inference_global_pause_status(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.get_inference_global_pause_status(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
+    def pause_inference_globally(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.pause_inference_globally(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
+    def resume_inference_globally(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.resume_inference_globally(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
 
 _core_client_singleton: CoreClient | None = None
 

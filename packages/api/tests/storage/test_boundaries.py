@@ -36,6 +36,18 @@ def test_resolve_breakpoint_credentials():
     assert suffix == "api_key"
 
 
+def test_resolve_breakpoint_game_global_analytic_persistence():
+    bp, suffix = resolve_breakpoint("games/628580/analytics/scores/settings/5")
+    assert bp == "games/628580/analytics/scores"
+    assert suffix == "settings/5"
+
+
+def test_resolve_breakpoint_perspective_analytic_persistence():
+    bp, suffix = resolve_breakpoint("games/628580/1/analytics/homeworld-locator/evidence")
+    assert bp == "games/628580/1/analytics/homeworld-locator"
+    assert suffix == "evidence"
+
+
 def test_resolve_breakpoint_unregistered_raises():
     with pytest.raises(ValidationError, match="Unregistered"):
         resolve_breakpoint("unknown/path")

@@ -2,12 +2,10 @@
 
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
-    needs_accelerated_backfill,
     observation_deltas_from_score,
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.actions import (
-    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
     build_inference_problem,
 )
@@ -18,12 +16,15 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
+from api.analytics.military_score_inference.inference_accelerated import (
+    run_accelerated_split_inference,
+)
 from api.analytics.military_score_inference.inference_api_payload import (
-    STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
-    _inference_api_payload,
-    _serialize_solution_with_arithmetic,
+    format_inference_summary,
+    inference_api_payload,
     inference_result_to_api_payload,
+    no_prior_turn_inference_api_payload,
 )
 from api.analytics.military_score_inference.inference_path import (
     InferencePath,
@@ -34,8 +35,8 @@ from api.analytics.military_score_inference.inference_target import (
     ScoreboardTurnLoader,
     is_after_ship_limit,
     load_accelerated_backfill_source_for_host_turn,
-    observation_from_accelerated_segment,
     observation_from_deltas,
+    prior_scoreboard_row_score,
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -44,7 +45,6 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_TIME_LIMITED,
@@ -59,23 +59,23 @@ __all__ = [
     "run_inference_with_artifacts",
 ]
 
-AcceleratedSegmentArtifacts = tuple[InferenceObservation, ActionCatalog]
 
-
-def _no_prior_turn_reason(turn: TurnInfo) -> str:
-    if turn.settings.turn <= 1:
-        return "first_turn"
-    if needs_accelerated_backfill(turn.settings.turn, turn.settings):
-        return "accelerated_backfill_unavailable"
-    return "first_turn"
-
-
-def build_inference_observation(score: Score, turn: TurnInfo) -> InferenceObservation:
+def build_inference_observation(
+    score: Score,
+    turn: TurnInfo,
+    *,
+    load_scoreboard_turn: ScoreboardTurnLoader | None = None,
+) -> InferenceObservation:
     """Build solver observation for the reported host turn on this scoreboard row."""
+    prior_score = prior_scoreboard_row_score(score, turn, load_scoreboard_turn)
+    military_delta_2x, warship_delta, freighter_delta, priority_point_delta, delta_source = (
+        observation_deltas_from_score(score, turn, prior_score=prior_score)
+    )
     return observation_from_deltas(
         score,
         turn,
-        observation_deltas_from_score(score, turn),
+        (military_delta_2x, warship_delta, freighter_delta, priority_point_delta),
+        scoreboard_delta_source=delta_source,
     )
 
 
@@ -186,54 +186,9 @@ def _no_prior_turn_inference_result(
     resolved_observation: InferenceObservation,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     return (
-        _inference_api_payload(
-            status=STATUS_NO_PRIOR_TURN,
-            summary="Prior turn score data unavailable",
-            solutions=(),
-            diagnostics=build_inference_solver_diagnostics(
-                turn=turn.settings.turn,
-                observation=resolved_observation,
-                turn_info=turn,
-                extra={"reason": _no_prior_turn_reason(turn)},
-            ),
-        ),
+        no_prior_turn_inference_api_payload(turn, resolved_observation),
         resolved_observation,
         None,
-    )
-
-
-def _accelerated_split_missing_reported_segment_result(
-    score: Score,
-    turn: TurnInfo,
-    *,
-    segment_payloads: list[dict[str, object]],
-    segment_artifacts: dict[int, AcceleratedSegmentArtifacts],
-) -> tuple[
-    dict[str, object],
-    InferenceObservation,
-    ActionCatalog | None,
-    dict[int, AcceleratedSegmentArtifacts],
-]:
-    reason = "accelerated_split_missing_reported_segment"
-    fallback_observation = build_inference_observation(score, turn)
-    return (
-        _inference_api_payload(
-            status=STATUS_INVALID_PROBLEM,
-            summary=f"Invalid inference problem: {reason}",
-            solutions=(),
-            diagnostics=build_inference_solver_diagnostics(
-                turn=turn.settings.turn,
-                observation=fallback_observation,
-                turn_info=turn,
-                extra={
-                    "reason": reason,
-                    "accelerated_segments": segment_payloads,
-                },
-            ),
-        ),
-        fallback_observation,
-        None,
-        segment_artifacts,
     )
 
 
@@ -259,7 +214,7 @@ def _run_accelerated_split_inference_path(
     turn: TurnInfo,
     segments: tuple[AcceleratedInferenceSegment, ...],
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
-    payload, reported_observation, reported_catalog, _ = _run_accelerated_split_inference(
+    payload, reported_observation, reported_catalog, _ = run_accelerated_split_inference(
         score,
         turn,
         segments,
@@ -270,7 +225,13 @@ def _run_accelerated_split_inference_path(
 def _run_policy_ladder_inference(
     resolved_observation: InferenceObservation,
     turn: TurnInfo,
-) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
+) -> tuple[
+    InferenceResult,
+    ActionCatalog | None,
+    InferenceProblem | None,
+    list[str],
+    list[dict[str, object]],
+]:
     return solve_with_policy_ladder(
         resolved_observation,
         turn,
@@ -293,7 +254,7 @@ def _solver_error_inference_result(
     exc: Exception,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     return (
-        _inference_api_payload(
+        inference_api_payload(
             status=STATUS_SOLVER_ERROR,
             summary="Build inference failed",
             solutions=(),
@@ -321,19 +282,46 @@ def _run_solver_inference_path(
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     if path == InferencePath.ACCELERATED_SPLIT:
         assert accelerated_segments is not None
-        return _run_accelerated_split_inference_path(score, turn, accelerated_segments)
+        return _run_accelerated_split_inference_path(
+            score,
+            turn,
+            accelerated_segments,
+        )
 
     solve_catalog = catalog
     try:
         if path == InferencePath.POLICY_LADDER:
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
-                _run_policy_ladder_inference(resolved_observation, turn)
+                _run_policy_ladder_inference(
+                    resolved_observation,
+                    turn,
+                )
             )
         else:
             assert path == InferencePath.CORPUS_PREBUILT
             assert solve_catalog is not None
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
                 _run_corpus_prebuilt_inference(resolved_observation, solve_catalog)
+            )
+        if solve_catalog is None or problem is None:
+            return (
+                inference_api_payload(
+                    status=result.status,
+                    summary=format_inference_summary(result),
+                    solutions=result.solutions,
+                    diagnostics=build_inference_solver_diagnostics(
+                        turn=turn.settings.turn,
+                        observation=resolved_observation,
+                        turn_info=turn,
+                        solver={"status": result.status, **result.diagnostics},
+                        extra={
+                            "policy_steps_attempted": policy_steps_attempted,
+                            "policy_step_attempts": step_diagnostics,
+                        },
+                    ),
+                ),
+                resolved_observation,
+                None,
             )
         return (
             inference_result_to_api_payload(
@@ -367,7 +355,9 @@ def run_inference_with_artifacts(
     catalog instance as coverage evaluation.
     """
     resolved_observation = (
-        observation if observation is not None else build_inference_observation(score, turn)
+        observation
+        if observation is not None
+        else build_inference_observation(score, turn, load_scoreboard_turn=load_scoreboard_turn)
     )
     path, accelerated_segments = resolve_inference_path(
         score,
@@ -418,7 +408,7 @@ def _try_accelerated_backfill_inference(
     if backfill_source is None:
         return None
 
-    payload, _, _, segment_artifacts = _run_accelerated_split_inference(
+    payload, _, _, segment_artifacts = run_accelerated_split_inference(
         backfill_source.source_score,
         backfill_source.source_turn,
         backfill_source.segments,
@@ -530,128 +520,6 @@ def _summary_from_segment_payload(segment_payload: dict[str, object]) -> str:
     if not parts:
         return "No feasible build explanation found"
     return f"Best: {'; '.join(parts)}"
-
-
-def _run_accelerated_split_inference(
-    score: Score,
-    turn: TurnInfo,
-    segments: tuple[AcceleratedInferenceSegment, ...],
-) -> tuple[
-    dict[str, object],
-    InferenceObservation,
-    ActionCatalog | None,
-    dict[int, AcceleratedSegmentArtifacts],
-]:
-    """Solve accel-window and reported-host-turn targets independently."""
-    segment_count = len(segments)
-    per_segment_time = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS / segment_count
-    per_segment_max_solutions = max(1, 20 // segment_count)
-
-    segment_payloads: list[dict[str, object]] = []
-    segment_artifacts: dict[int, AcceleratedSegmentArtifacts] = {}
-    reported_observation: InferenceObservation | None = None
-    reported_catalog: ActionCatalog | None = None
-    reported_problem: InferenceProblem | None = None
-    reported_result: InferenceResult | None = None
-    reported_policy_steps: list[str] = []
-    reported_step_diagnostics: list[dict[str, object]] = []
-    combined_time_limited = False
-
-    for segment in segments:
-        segment_observation = observation_from_accelerated_segment(score, turn, segment)
-        if segment.segment_id == "reported_host_turn":
-            reported_observation = segment_observation
-
-        result, catalog, problem, policy_steps_attempted, step_diagnostics = (
-            solve_with_policy_ladder(
-                segment_observation,
-                turn,
-                max_solutions=per_segment_max_solutions,
-                time_limit_seconds=per_segment_time,
-            )
-        )
-        segment_artifacts[segment.host_turn] = (segment_observation, catalog)
-        if segment.segment_id == "reported_host_turn":
-            reported_catalog = catalog
-            reported_problem = problem
-            reported_result = result
-            reported_policy_steps = policy_steps_attempted
-            reported_step_diagnostics = step_diagnostics
-        if result.status == STATUS_TIME_LIMITED:
-            combined_time_limited = True
-
-        segment_payloads.append(
-            {
-                "segmentId": segment.segment_id,
-                "hostTurn": segment.host_turn,
-                "status": result.status,
-                "solutionCount": len(result.solutions),
-                "militaryDelta2x": segment.military_delta_2x,
-                "warshipDelta": segment.warship_delta,
-                "freighterDelta": segment.freighter_delta,
-                "policyStepsAttempted": policy_steps_attempted,
-                "policyStepAttempts": step_diagnostics,
-                "solutions": [
-                    _serialize_solution_with_arithmetic(segment_observation, catalog, solution)
-                    for solution in result.solutions
-                ],
-            }
-        )
-
-    if (
-        reported_observation is None
-        or reported_catalog is None
-        or reported_problem is None
-        or reported_result is None
-    ):
-        return _accelerated_split_missing_reported_segment_result(
-            score,
-            turn,
-            segment_payloads=segment_payloads,
-            segment_artifacts=segment_artifacts,
-        )
-
-    overall_status = _accelerated_split_status(segment_payloads, combined_time_limited)
-    primary_result = InferenceResult(
-        status=overall_status,
-        solutions=reported_result.solutions,
-        diagnostics={
-            **reported_result.diagnostics,
-            "accelerated_segments": segment_payloads,
-        },
-    )
-
-    return (
-        inference_result_to_api_payload(
-            primary_result,
-            reported_catalog,
-            reported_observation,
-            turn,
-            reported_problem,
-            policy_steps_attempted=reported_policy_steps,
-            step_diagnostics=reported_step_diagnostics,
-            extra_diagnostics={"accelerated_segments": segment_payloads},
-        ),
-        reported_observation,
-        reported_catalog,
-        segment_artifacts,
-    )
-
-
-def _accelerated_split_status(
-    segment_payloads: list[dict[str, object]],
-    combined_time_limited: bool,
-) -> str:
-    statuses = [
-        payload["status"] for payload in segment_payloads if isinstance(payload["status"], str)
-    ]
-    if any(status == STATUS_NO_EXACT_SOLUTION for status in statuses):
-        return STATUS_NO_EXACT_SOLUTION
-    if any(status == STATUS_INVALID_PROBLEM for status in statuses):
-        return STATUS_INVALID_PROBLEM
-    if combined_time_limited or any(status == STATUS_TIME_LIMITED for status in statuses):
-        return STATUS_TIME_LIMITED
-    return STATUS_EXACT
 
 
 def infer_military_score_build(score: Score, turn: TurnInfo) -> dict[str, object]:

@@ -64,6 +64,14 @@ class GameService:
         return players[perspective - 1].id
 
     @staticmethod
+    def perspective_for_player_id(info: GameInfo, player_id: int, game_id: int) -> int:
+        """1-based perspective slot for a player id; raises if not in the game."""
+        for index, player in enumerate(info.players):
+            if player.id == player_id:
+                return index + 1
+        raise ValidationError(f"Player id {player_id} is not in game {game_id}.")
+
+    @staticmethod
     def _validate_refreshed_game_info_has_current_turn(info: GameInfo) -> None:
         if info.game.turn != info.settings.turn:
             raise ValidationError(

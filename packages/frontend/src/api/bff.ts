@@ -18,6 +18,10 @@ import {
   type LoadAllStreamEvent,
   type LoadAllTurnsResponse,
 } from './parseLoadAllStreamEvent'
+import {
+  parseInferenceStreamEvent,
+  type InferenceStreamEvent,
+} from './parseInferenceStreamEvent'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
 
@@ -241,15 +245,28 @@ export type ScoresInferenceMilitaryScoreArithmetic = {
   lineItems: ScoresInferenceMilitaryScoreLineItem[]
 }
 
+export type ScoresInferenceSolutionShipBuild = {
+  comboId: string
+  label: string
+  count: number
+  hullId?: number
+  engineId?: number
+  beamId?: number
+  torpId?: number
+  beamCount?: number
+  launcherCount?: number
+}
+
 export type ScoresInferenceSolution = {
   objectiveValue: number
   actions: ScoresInferenceSolutionAction[]
+  shipBuilds?: ScoresInferenceSolutionShipBuild[]
   militaryScoreArithmetic?: ScoresInferenceMilitaryScoreArithmetic
 }
 
 export type ScoresInferenceRowDetail = {
   playerId?: number
-  displayStatus: 'success' | 'pending' | 'failure'
+  displayStatus: 'success' | 'pending' | 'paused' | 'failure' | 'stopped'
   status: string
   summary: string
   solutionCount: number
@@ -638,6 +655,96 @@ export async function fetchScoresRowInference(
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
   return r.json()
+}
+
+export type { InferenceStreamEvent }
+
+
+export type InferenceGlobalPauseStatus = {
+  gameId: number
+  perspective: number
+  turn: number
+  paused: boolean
+  activeScope: {
+    gameId: number
+    perspective: number
+    turn: number
+  } | null
+  heldJobCount: number
+  heldContinuationCount: number
+  activeSessionCount: number
+}
+
+export async function fetchInferenceGlobalPauseStatus(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/global-pause'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function pauseInferenceGlobally(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/global-pause'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function resumeInferenceGlobally(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/global-pause'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `DELETE ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'DELETE' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
+export async function fetchScoresTableInferenceStream(
+  scope: AnalyticShellScope,
+  playerIds: number[],
+  handlers: {
+    signal?: AbortSignal
+    onEvent: (event: InferenceStreamEvent) => void
+  }
+): Promise<void> {
+  const path = '/bff/analytics/scores/inference/table-stream'
+  const params = analyticScopeParams(scope)
+  params.set('playerIds', playerIds.join(','))
+  const qs = `?${params.toString()}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(
+    `${path}${qs}`,
+    { signal: handlers.signal, cache: 'no-store' },
+    endpointLabel
+  )
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  if (!r.body) {
+    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
+  }
+
+  await readNdjsonStream(r.body, (line) => {
+    const event = parseInferenceStreamEvent(line)
+    if (event) {
+      handlers.onEvent(event)
+    }
+  })
 }
 
 export async function fetchAnalyticMap(

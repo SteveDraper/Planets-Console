@@ -24,27 +24,39 @@ type InferenceDetailModalProps = {
   detail: ScoresInferenceRowDetail | null
 }
 
-function readSolverSummary(diagnostics: Record<string, unknown>): {
-  status?: string
+function formatInferenceStatusLabel(status: string): string {
+  return status.replaceAll('_', ' ')
+}
+
+function readInferenceRunSummary(
+  detail: ScoresInferenceRowDetail,
+  diagnostics: Record<string, unknown>
+): {
+  statusLabel?: string
   wallTimeSeconds?: number
 } {
   const solver = diagnostics.solver
-  if (!isRecord(solver)) {
-    return {}
-  }
-  const solverStatus =
-    typeof solver.solver_status === 'string'
-      ? solver.solver_status
-      : typeof solver.solverStatus === 'string'
-        ? solver.solverStatus
-        : undefined
+  const solverRecord = isRecord(solver) ? solver : null
+
+  const overallStatus =
+    typeof detail.status === 'string' && detail.status.length > 0
+      ? detail.status
+      : typeof solverRecord?.status === 'string'
+        ? solverRecord.status
+        : typeof solverRecord?.solver_status === 'string'
+          ? solverRecord.solver_status
+          : typeof solverRecord?.solverStatus === 'string'
+            ? solverRecord.solverStatus
+            : undefined
+
   return {
-    status: solverStatus,
+    statusLabel:
+      overallStatus != null ? formatInferenceStatusLabel(overallStatus) : undefined,
     wallTimeSeconds:
-      typeof solver.wall_time_seconds === 'number'
-        ? solver.wall_time_seconds
-        : typeof solver.wallTimeSeconds === 'number'
-          ? solver.wallTimeSeconds
+      typeof solverRecord?.wall_time_seconds === 'number'
+        ? solverRecord.wall_time_seconds
+        : typeof solverRecord?.wallTimeSeconds === 'number'
+          ? solverRecord.wallTimeSeconds
           : undefined,
   }
 }
@@ -210,9 +222,15 @@ export function InferenceDetailModal({
   const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
   const constraints = readInferenceConstraints(diagnostics)
   const acceleratedSegments = readAcceleratedInferenceSegments(diagnostics)
-  const solver = readSolverSummary(diagnostics)
-  const priorTurn =
-    constraints?.turn != null && constraints.turn > 1 ? constraints.turn - 1 : null
+  const inferenceRun = readInferenceRunSummary(detail, diagnostics)
+  const scoreboardTurn = constraints?.turn
+  const hostTurn =
+    constraints?.hostTurn ??
+    (scoreboardTurn != null && scoreboardTurn > 1 ? scoreboardTurn - 1 : null)
+  const deltaSourceNote =
+    constraints?.scoreboardDeltaSource === 'prior_row_total_diff'
+      ? 'Change columns were missing on this scoreboard row (typical for spectator loads). Deltas were inferred from totals versus the prior scoreboard row.'
+      : null
 
   return (
     <div
@@ -242,10 +260,11 @@ export function InferenceDetailModal({
               Build inference
             </h2>
             <p className="mt-1 text-xs text-slate-400">{racePlayer}</p>
-            {constraints?.turn != null ? (
+            {scoreboardTurn != null ? (
               <p className="mt-1 text-xs text-slate-400">
-                {priorTurn != null ? `Turn ${priorTurn} → ${constraints.turn}` : `Turn ${constraints.turn}`}
-                {constraints.playerId != null ? ` · Player ${constraints.playerId}` : ''}
+                Scoreboard row turn {scoreboardTurn}
+                {hostTurn != null ? ` · Host turn ${hostTurn} deltas` : ''}
+                {constraints?.playerId != null ? ` · Player ${constraints?.playerId}` : ''}
               </p>
             ) : null}
           </div>
@@ -310,6 +329,12 @@ export function InferenceDetailModal({
           </section>
         ) : null}
 
+        {deltaSourceNote != null ? (
+          <p className="rounded border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+            {deltaSourceNote}
+          </p>
+        ) : null}
+
         {constraints?.priorityPointConstraintNote != null ? (
           <p className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             {constraints.priorityPointConstraintNote}
@@ -318,11 +343,13 @@ export function InferenceDetailModal({
 
         <p className="text-xs text-slate-300">{detail.summary}</p>
 
-        {solver.status != null || solver.wallTimeSeconds != null ? (
+        {inferenceRun.statusLabel != null || inferenceRun.wallTimeSeconds != null ? (
           <p className="text-xs text-slate-500">
-            {solver.status != null ? `Solver ${solver.status}` : 'Solver'}
-            {solver.wallTimeSeconds != null
-              ? ` · ${solver.wallTimeSeconds.toFixed(2)}s`
+            {inferenceRun.statusLabel != null
+              ? `Inference ${inferenceRun.statusLabel}`
+              : 'Inference'}
+            {inferenceRun.wallTimeSeconds != null
+              ? ` · ${inferenceRun.wallTimeSeconds.toFixed(2)}s`
               : ''}
           </p>
         ) : null}

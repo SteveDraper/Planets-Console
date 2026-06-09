@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 from api.analytics.military_score_inference.accelerated_start import (
+    ACCEL_WINDOW_SEGMENT_ID,
     HOMEBASE_STARTING_FREIGHTERS,
+    REPORTED_HOST_TURN_SEGMENT_ID,
     SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
     accelerated_inference_segments,
     accelerated_window_military_change,
@@ -22,11 +24,13 @@ from api.analytics.military_score_inference.accelerated_start import (
     synthetic_scoreboard_before_reported_deltas,
 )
 from api.analytics.military_score_inference.analytic import (
-    STATUS_NO_PRIOR_TURN,
     build_inference_observation,
     infer_military_score_build,
     prior_turn_score_data_available,
     run_inference_with_artifacts,
+)
+from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_NO_PRIOR_TURN,
 )
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
@@ -122,8 +126,8 @@ def test_first_reliable_turn_observation_uses_reported_host_turn_deltas():
     turn = _load_store_turn(3)
     score = next(s for s in turn.scores if s.ownerid == 1)
     assert is_first_reliable_scoreboard_turn(3, turn.settings)
-    military_delta_2x, warship_delta, freighter_delta, _priority = observation_deltas_from_score(
-        score, turn
+    military_delta_2x, warship_delta, freighter_delta, _priority, _source = (
+        observation_deltas_from_score(score, turn)
     )
     assert military_delta_2x == 2 * score.militarychange
     assert warship_delta == score.shipchange
@@ -147,9 +151,9 @@ def test_accelerated_window_residual_matches_cumulative_minus_reported_delta():
     )
     segments = accelerated_inference_segments(score, turn)
     assert segments is not None
-    assert segments[-1].segment_id == "reported_host_turn"
+    assert segments[-1].segment_id == REPORTED_HOST_TURN_SEGMENT_ID
     assert segments[-1].military_delta_2x == reported_2x
-    assert segments[0].segment_id == "accel_window"
+    assert segments[0].segment_id == ACCEL_WINDOW_SEGMENT_ID
     assert segments[0].military_delta_2x == cumulative_2x - reported_2x
     assert segments[0].military_delta_2x == 110
     assert segments[0].freighter_delta == 1
@@ -159,8 +163,8 @@ def test_accelerated_window_residual_matches_cumulative_minus_reported_delta():
 def test_turn4_uses_scoreboard_delta_fields():
     turn = _load_store_turn(4)
     score = next(s for s in turn.scores if s.ownerid == 1)
-    military_delta_2x, warship_delta, freighter_delta, _priority = observation_deltas_from_score(
-        score, turn
+    military_delta_2x, warship_delta, freighter_delta, _priority, _source = (
+        observation_deltas_from_score(score, turn)
     )
     assert military_delta_2x == 2 * score.militarychange
     assert warship_delta == score.shipchange
@@ -238,7 +242,7 @@ def test_p2_turn3_accel_segment_includes_freighter_only_window():
     score = next(s for s in turn.scores if s.ownerid == 2)
     segments = accelerated_inference_segments(score, turn)
     assert segments is not None
-    assert segments[0].segment_id == "accel_window"
+    assert segments[0].segment_id == ACCEL_WINDOW_SEGMENT_ID
     assert segments[0].military_delta_2x == 0
     assert segments[0].freighter_delta == 1
     assert segments[-1].freighter_delta == 1

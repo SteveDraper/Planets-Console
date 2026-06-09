@@ -376,7 +376,7 @@ The inference engine should return a per-player list of explanations that can en
 
 - observed deltas,
 - constraints used,
-- status: exact, no-exact-solution, or skipped (`exact-with-deferred-risk` reserved for deferred-effect modeling in #49),
+- status: exact, no-exact-solution, stopped (implicit scope cancel on SPA stream, #71), or skipped (`exact-with-deferred-risk` reserved for deferred-effect modeling in #49); `time_limited` remains on the batch / corpus path,
 - ranked explanations (exact only in user-facing top-K; band-feasible near-solutions from tier search are internal seeds -- section 8.5.5 of implementation doc),
 - explanation probability or score,
 - action breakdown,
@@ -384,9 +384,9 @@ The inference engine should return a per-player list of explanations that can en
 - warnings about ignored deferred effects,
 - a compact summary suitable for a scoreboard cell.
 
-The user-facing feature should be an optional capability of the existing Scores analytic rather than a separate analytic. When enabled, the scoreboard adds an inference column with row-level status: an **inference solution count indicator** (green outlined badge with **N** = held top-K size) when **N > 0**, hourglass while **N = 0** and search is in flight, and red cross when the row completes with no exact explanation or on solver failure. Hover text should summarize the result. Clicking the badge opens a modal with the detailed ranked held explanations, including action vectors and score arithmetic.
+The user-facing feature should be an optional capability of the existing Scores analytic rather than a separate analytic. When enabled, the scoreboard adds an inference column with row-level status: an **inference solution count indicator** -- a green outlined badge with **N** = held top-K size. While search is in flight and **N = 0**, the badge shows a dashed-border **0** with an in-progress animation (same count-badge chrome, not a separate hourglass icon); when **N > 0**, the border is solid and the count rises toward K. Paused chrome when **inference global pause** is active; red cross when the row completes naturally with no exact explanation or on solver failure. The column header hosts the global pause control. Hover text should summarize the result. Clicking the badge opens a modal with the detailed ranked held explanations, including action vectors and score arithmetic.
 
-**Streaming (#71):** each row's policy ladder should stream newly admitted exact explanations over NDJSON as they are found (hourglass clears when **N** becomes 1; the badge and modal grow while search continues). Until that ships, the UI waits for the full per-row JSON response. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) Phase 1H and section 8.5.4.
+**Streaming (#71):** the SPA opens one multiplexed **inference table stream** for all scoreboard rows on the current scope; each `solution` event carries the full held top-K for one row (dashed-zero badge transitions to solid count when **N** becomes 1; the badge and modal grow while search continues). **Inference global pause** freezes all rows without losing partial held top-K **while the stream stays open**; resume via the column header. **Stream disconnect** cancels all work and clears server-side pause; reconnect recalculates from scratch. A process-wide **inference row scheduler** interleaves tier jobs across rows so quick-to-solve players are not blocked behind another row's deep ladder climb. SPA searches are open-ended (no row time budget). Implicit **inference stream cancellation** ends rows on scope change or disconnect. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) sections 7.4--7.5, Phase 1H, and section 8.5.4.
 
 ---
 
@@ -399,7 +399,7 @@ Validation should start before any UI work:
 - Test unsatisfiable cases, especially score deltas that require deferred minefield or loss effects.
 - Test ambiguous cases where multiple hulls or ammo mixes fit the same score.
 - Compare inferred explanations against real turn histories where the player's own builds are known.
-- Track solver runtime per player and cap top-K enumeration for UI responsiveness.
+- Track solver runtime per player; corpus and batch JSON retain per-case time limits after the SPA drops row budgets (#71).
 
 The first implementation should prefer correct "unknown or ambiguous" output over overconfident guesses.
 
@@ -425,12 +425,21 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
 | Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
 | Fleet priors | Deferred; **inference tier policy overlay** (#78), not hard exclusion |
+| SPA streaming (#71) | One multiplexed **inference table stream** per shell scope |
+| Cross-row scheduling (#71) | **Inference row scheduler**: FIFO tier jobs, default 4 workers (configurable) |
+| Global pause (#71) | Freeze/resume all rows on current scope while stream connected; cleared on disconnect |
+| SPA time budget (#71) | None; global pause while connected; stream disconnect recalculates |
+| Stream cancel terminal (#71) | `stopped` on implicit cancel; last held top-K on wire when applicable; no server state across reconnect |
+| Batch / corpus time limits | Retained on batch JSON path; probe orchestration cap (`--probe-time-limit-seconds`) |
+| Solve interrupt (v1) | Sub-step boundaries + `StopSearch()`; UNKNOWN sub-step retry follow-on if needed |
+| Accelerated-start rows (#71) | Same stream and scheduler as normal rows; segments internal to row path |
 
 ### Still open
 
 - Engine/hull tech-legality rules beyond active component lists.
 - How much of the probability model should be user-configurable.
 - Whether BFF returns full solutions inline or lazily per row at scale.
-- Column generation if tier-4 combo search exceeds time budget on large games.
+- Column generation if full-catalog combo search remains too slow after streaming + scheduler + global pause (#71).
+- Corpus probe options for timeout-case deep diagnosis (per-case time override, `time_limited` filters).
 
 These decisions affect implementation, not the overall approach. The core design remains: exact integer feasibility first, probabilistic ranking second.

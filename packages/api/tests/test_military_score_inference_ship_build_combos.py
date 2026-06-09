@@ -320,6 +320,55 @@ def test_score_equivalent_merge_preserves_distinct_probability_ranked_solutions(
     assert combo_ids == {"combo_high", "combo_low"}
 
 
+def test_score_equivalent_expansion_prefers_top_k_by_probability():
+    """Same score: expand to top K members by probability, not one per weight bucket."""
+    from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
+
+    def _combo(combo_id: str, *, probability_weight: int) -> ShipBuildCombo:
+        return ShipBuildCombo(
+            combo_id=combo_id,
+            hull_id=1,
+            engine_id=1,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+            labels=(combo_id,),
+            score_delta_2x=400,
+            warship_delta=1,
+            upper_bound=1,
+            probability_weight=probability_weight,
+        )
+
+    combo_a = _combo("combo_a", probability_weight=85)
+    combo_b = _combo("combo_b", probability_weight=85)
+    combo_c = _combo("combo_c", probability_weight=85)
+    combo_low = _combo("combo_low", probability_weight=80)
+    observation = InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=400,
+        warship_delta=1,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=1,
+        is_after_ship_limit=False,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(),
+        ship_build_combos=(combo_a, combo_b, combo_c, combo_low),
+        max_solutions=3,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_EXACT
+    assert len(result.solutions) == 3
+    combo_ids = [solution.ship_builds[0].combo_id for solution in result.solutions]
+    assert combo_ids == ["combo_a", "combo_b", "combo_c"]
+    assert all(solution.objective_value == 85 for solution in result.solutions)
+
+
 def test_solver_no_good_cuts_include_combo_variables():
     from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
 
@@ -458,6 +507,8 @@ def test_missouri_host_turn_2_regression_reports_policy_ladder_diagnostics():
     assert catalog is not None
     assert payload["diagnostics"]["ship_build_combo_count"] > 0
     missouri_combo_id = "combo_13_9_3_6_8_6"
-    top_ship_builds = payload["solutions"][0]["shipBuilds"]
-    assert any(build["comboId"] == missouri_combo_id for build in top_ship_builds)
+    all_ship_builds = [
+        build for solution in payload["solutions"] for build in solution["shipBuilds"]
+    ]
+    assert any(build["comboId"] == missouri_combo_id for build in all_ship_builds)
     assert "accelerated_segments" in payload["diagnostics"]

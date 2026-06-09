@@ -217,6 +217,7 @@ def test_post_load_all_turns_stream_finished_game(mock_pc_class):
     with zipfile.ZipFile(buf, "w") as archive:
         archive.writestr("player1-turn1.trn", json.dumps(archive_rst))
     mock_instance = mock_pc_class.from_config.return_value
+    mock_instance.load_game_info.return_value = info_payload
     mock_instance.load_all.return_value = buf.getvalue()
     mock_instance.load_turn.return_value = {"success": True, "rst": archive_rst}
 

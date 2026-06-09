@@ -23,7 +23,11 @@ class ArchiveTurnFile:
 
 
 def parse_load_all_zip(zip_bytes: bytes) -> list[ArchiveTurnFile]:
-    """Extract ``playerN-turnT.trn`` JSON objects from a loadall ZIP."""
+    """Extract ``playerN-turnT.trn`` JSON objects from a loadall ZIP.
+
+    Slot ``0`` is the spectator / neutral view (``playerid=0``); larger games
+    include those files alongside ``player1``..``playerN`` entries.
+    """
     if not zip_bytes:
         raise UpstreamPlanetsError("Planets.nu loadall returned an empty response.")
 
@@ -41,7 +45,7 @@ def parse_load_all_zip(zip_bytes: bytes) -> list[ArchiveTurnFile]:
             continue
         player_slot = int(match.group(1))
         turn_number = int(match.group(2))
-        if player_slot < 1:
+        if player_slot < 0:
             raise ValidationError(f"Invalid player slot in loadall archive entry: {name!r}")
         if turn_number < 0:
             raise ValidationError(f"Invalid turn number in loadall archive entry: {name!r}")

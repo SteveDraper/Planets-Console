@@ -1,5 +1,6 @@
 """API payload serialization for military score build inference results."""
 
+from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -13,6 +14,7 @@ from api.analytics.military_score_inference.score_arithmetic import (
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
+    STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
 from api.models.game import TurnInfo
@@ -54,13 +56,40 @@ def inference_result_to_api_payload(
             **(extra_diagnostics or {}),
         },
     )
-    return _inference_api_payload(
+    return inference_api_payload(
         status=result.status,
         summary=format_inference_summary(result),
         solutions=result.solutions,
         diagnostics=diagnostics,
         observation=observation,
         catalog=catalog,
+    )
+
+
+def no_prior_turn_reason(turn: TurnInfo) -> str:
+    if turn.settings.turn <= 1:
+        return "first_turn"
+    if needs_accelerated_backfill(turn.settings.turn, turn.settings):
+        return "accelerated_backfill_unavailable"
+    return "first_turn"
+
+
+def no_prior_turn_inference_api_payload(
+    turn: TurnInfo,
+    observation: InferenceObservation,
+) -> dict[str, object]:
+    from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
+
+    return inference_api_payload(
+        status=STATUS_NO_PRIOR_TURN,
+        summary="Prior turn score data unavailable",
+        solutions=(),
+        diagnostics=build_inference_solver_diagnostics(
+            turn=turn.settings.turn,
+            observation=observation,
+            turn_info=turn,
+            extra={"reason": no_prior_turn_reason(turn)},
+        ),
     )
 
 
@@ -77,6 +106,10 @@ def format_inference_summary(result: InferenceResult) -> str:
         return "No feasible build explanation found"
     if result.status == STATUS_SOLVER_ERROR:
         return "Build inference failed"
+    if result.status == STATUS_STOPPED:
+        if result.solutions:
+            return f"Halted with {len(result.solutions)} held solution(s)"
+        return "Build inference halted"
     if result.status == STATUS_TIME_LIMITED and not result.solutions:
         return "Inference timed out before finding a solution"
     if not result.solutions:
@@ -106,7 +139,7 @@ def _format_solution_brief(solution: InferenceSolution) -> str:
     return "; ".join(parts) if parts else "no actions"
 
 
-def _inference_api_payload(
+def inference_api_payload(
     *,
     status: str,
     summary: str,
@@ -191,3 +224,15 @@ def _serialize_solution_with_arithmetic(
 
 def _serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[str, object]:
     return _serialize_solution_core(solution)
+
+
+def serialize_solutions_with_arithmetic(
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    solutions: list[InferenceSolution] | tuple[InferenceSolution, ...],
+) -> list[dict[str, object]]:
+    """Rank and serialize held top-K rows for NDJSON solution events."""
+    ranked = sorted(solutions, key=lambda solution: solution.objective_value, reverse=True)
+    return [
+        _serialize_solution_with_arithmetic(observation, catalog, solution) for solution in ranked
+    ]

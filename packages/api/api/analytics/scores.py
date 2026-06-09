@@ -1,10 +1,13 @@
 """Core scoreboard analytic."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
+)
+from api.analytics.military_score_inference.inference_stream_rows import (
+    iter_scores_table_inference_events,
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
@@ -87,3 +90,21 @@ def get_scores_row_inference(
             load_scoreboard_turn=load_scoreboard_turn,
         )
     return {"playerId": player_id, **inference}
+
+
+def iter_scores_table_inference_stream(
+    turn: TurnInfo,
+    player_ids: tuple[int, ...],
+    *,
+    game_id: int,
+    perspective: int,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+) -> Iterator[dict[str, object]]:
+    """Yield NDJSON wire events for all scoreboard rows on one stream."""
+    yield from iter_scores_table_inference_events(
+        turn,
+        player_ids,
+        game_id=game_id,
+        perspective=perspective,
+        load_scoreboard_turn=load_scoreboard_turn,
+    )

@@ -1,5 +1,7 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
+import { cn } from '../lib/utils'
 import { fetchAnalyticTable } from '../api/bff'
 import type {
   AnalyticItem,
@@ -14,6 +16,7 @@ import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
+import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
 import { isStellarCartographyMapEnabled } from '../analytics/mapShellCartography'
 import {
@@ -29,6 +32,35 @@ import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
 
 type ViewMode = 'tabular' | 'map'
+
+function AnalyticTableSection({ title, children }: { title: string; children: ReactNode }) {
+  const [expanded, setExpanded] = useState(true)
+
+  return (
+    <section className="rounded-lg border border-[#52575d] bg-[#40454a] shadow-sm">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+        onClick={() => setExpanded((value) => !value)}
+        className={cn(
+          'flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-medium text-slate-200 transition-colors hover:bg-black/10 focus-visible:outline focus-visible:ring-1 focus-visible:ring-slate-500',
+          expanded && 'border-b border-[#52575d]'
+        )}
+      >
+        <ChevronDown
+          className={cn(
+            'h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150',
+            !expanded && '-rotate-90'
+          )}
+          aria-hidden
+        />
+        <span>{title}</span>
+      </button>
+      {expanded ? children : null}
+    </section>
+  )
+}
 
 function buildScoresTableWithInference(
   data: TableDataResponse,
@@ -61,6 +93,7 @@ type MainAreaProps = {
   connectionsMapParams: ConnectionsMapParams
   /** Parameters for the Scores table analytic (refetch when these change). */
   scoresTableParams: ScoresTableParams
+  globalInferencePause: UseGlobalInferencePauseResult
   /** Turns beyond latest stored game turn for ion storm prediction. */
   futureTurnOffset: number
   onMapZoomChange: (zoom: number) => void
@@ -72,11 +105,13 @@ function TableTile({
   analyticScope,
   fetchEnabled,
   scoresTableParams,
+  globalInferencePause,
 }: {
   analyticId: string
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
   scoresTableParams: ScoresTableParams
+  globalInferencePause: UseGlobalInferencePauseResult
 }) {
   const isScores = analyticId === 'scores'
   const inferenceEnabled = isScores && scoresTableParams.includeBuildInference
@@ -97,10 +132,11 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
-  const inferenceByRow = useScoresInferenceByRow(
+  const { inferenceByRow } = useScoresInferenceByRow(
     data,
     analyticScope,
-    inferenceEnabled && fetchEnabled
+    inferenceEnabled && fetchEnabled,
+    { onGlobalPauseChange: globalInferencePause.syncPausedFromStream }
   )
   const scoresTableWithInference =
     data != null && inferenceByRow != null
@@ -135,7 +171,14 @@ function TableTile({
   }
   if (!data) return null
   if (isScores && scoresTableWithInference != null) {
-    return <ScoresTableView data={scoresTableWithInference} />
+    return (
+      <ScoresTableView
+        data={scoresTableWithInference}
+        analyticScope={analyticScope}
+        isGloballyPaused={globalInferencePause.isGloballyPaused}
+        globalInferencePause={globalInferencePause}
+      />
+    )
   }
   return (
     <div className="overflow-auto">
@@ -275,6 +318,7 @@ export function MainArea({
   turnBlockedNoLogin,
   connectionsMapParams,
   scoresTableParams,
+  globalInferencePause,
   futureTurnOffset,
   onMapZoomChange,
   onSetZoomReady,
@@ -316,22 +360,20 @@ export function MainArea({
     }
 
     return (
-      <main className="flex flex-1 flex-col gap-4 overflow-auto bg-black p-4">
+      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
         {enabledAnalyticIds.map((id) => (
-          <section
+          <AnalyticTableSection
             key={id}
-            className="rounded-lg border border-[#52575d] bg-[#40454a] shadow-sm"
+            title={analytics.find((a) => a.id === id)?.name ?? id}
           >
-            <h3 className="border-b border-[#52575d] px-4 py-2 text-sm font-medium text-slate-200">
-              {analytics.find((a) => a.id === id)?.name ?? id}
-            </h3>
             <TableTile
               analyticId={id}
               analyticScope={analyticScope}
               fetchEnabled={analyticFetchEnabled}
               scoresTableParams={scoresTableParams}
+              globalInferencePause={globalInferencePause}
             />
-          </section>
+          </AnalyticTableSection>
         ))}
       </main>
     )

@@ -23,6 +23,63 @@ class FinalTurnLoadResult:
     failures: list[int] = field(default_factory=list)
 
 
+def _yield_final_turn_for_perspective(
+    turns: TurnLoadService,
+    game_id: int,
+    latest_turn: int,
+    params: RefreshGameInfoParams,
+    planets: PlanetsNuClient,
+    *,
+    perspective: int,
+    perspective_index: int,
+    perspective_total: int,
+    result: FinalTurnLoadResult,
+) -> Iterator[LoadAllProgressUpdate]:
+    if latest_turn < 1:
+        return
+    if turns.is_turn_stored(game_id, perspective, latest_turn):
+        result.turns_skipped += 1
+        yield LoadAllProgressUpdate(
+            phase="final_turn",
+            perspective=perspective_index,
+            perspective_total=perspective_total,
+            turn=1,
+            turn_total=1,
+            message=(
+                "Final turn already stored (spectator perspective)"
+                if perspective == 0
+                else f"Final turn already stored (perspective {perspective})"
+            ),
+        )
+        return
+    yield LoadAllProgressUpdate(
+        phase="final_turn",
+        perspective=perspective_index,
+        perspective_total=perspective_total,
+        turn=1,
+        turn_total=1,
+        message=(
+            "Loading final turn for spectator perspective"
+            if perspective == 0
+            else f"Loading final turn for perspective {perspective}"
+        ),
+    )
+    try:
+        turns.ensure_turn_loaded(game_id, perspective, latest_turn, params, planets)
+    except (UpstreamPlanetsError, ValidationError) as exc:
+        result.failures.append(perspective)
+        logger.warning(
+            "Loadall final turn %s for game %s perspective %s failed: %s",
+            latest_turn,
+            game_id,
+            perspective,
+            exc,
+        )
+        return
+    result.turns_written += 1
+    result.perspectives_touched.add(perspective)
+
+
 def iter_final_turn_load_progress(
     turns: TurnLoadService,
     game_id: int,
@@ -31,41 +88,31 @@ def iter_final_turn_load_progress(
     planets: PlanetsNuClient,
     player_count: int,
     result: FinalTurnLoadResult,
+    *,
+    include_spectator: bool = False,
 ) -> Iterator[LoadAllProgressUpdate]:
     """Yield final-turn phase progress and update ``result`` in place."""
-    for perspective_index, perspective in enumerate(range(1, player_count + 1), start=1):
-        if latest_turn < 1:
-            continue
-        if turns.is_turn_stored(game_id, perspective, latest_turn):
-            result.turns_skipped += 1
-            yield LoadAllProgressUpdate(
-                phase="final_turn",
-                perspective=perspective_index,
-                perspective_total=player_count,
-                turn=1,
-                turn_total=1,
-                message=f"Final turn already stored (perspective {perspective})",
-            )
-            continue
-        yield LoadAllProgressUpdate(
-            phase="final_turn",
-            perspective=perspective_index,
+    if include_spectator:
+        yield from _yield_final_turn_for_perspective(
+            turns,
+            game_id,
+            latest_turn,
+            params,
+            planets,
+            perspective=0,
+            perspective_index=0,
             perspective_total=player_count,
-            turn=1,
-            turn_total=1,
-            message=f"Loading final turn for perspective {perspective}",
+            result=result,
         )
-        try:
-            turns.ensure_turn_loaded(game_id, perspective, latest_turn, params, planets)
-        except (UpstreamPlanetsError, ValidationError) as exc:
-            result.failures.append(perspective)
-            logger.warning(
-                "Loadall final turn %s for game %s perspective %s failed: %s",
-                latest_turn,
-                game_id,
-                perspective,
-                exc,
-            )
-            continue
-        result.turns_written += 1
-        result.perspectives_touched.add(perspective)
+    for perspective_index, perspective in enumerate(range(1, player_count + 1), start=1):
+        yield from _yield_final_turn_for_perspective(
+            turns,
+            game_id,
+            latest_turn,
+            params,
+            planets,
+            perspective=perspective,
+            perspective_index=perspective_index,
+            perspective_total=player_count,
+            result=result,
+        )
