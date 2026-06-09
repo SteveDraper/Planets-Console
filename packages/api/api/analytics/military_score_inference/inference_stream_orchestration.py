@@ -10,8 +10,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.inference_accelerated import (
-    AcceleratedSegmentSolve,
-    AcceleratedStreamRowComplete,
+    AcceleratedSegmentResult,
     build_accelerated_backfill_stream_row_complete,
     build_accelerated_segment_payload,
     build_accelerated_split_stream_row_complete,
@@ -30,10 +29,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.row_complete_factory import (
-    row_complete_from_accelerated_payload,
-    row_complete_stopped,
-)
+from api.analytics.military_score_inference.row_complete_factory import row_complete_stopped
 from api.analytics.military_score_inference.solver import STATUS_TIME_LIMITED
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
@@ -59,7 +55,7 @@ class InferenceStreamOrchestration:
     solve_turn: TurnInfo
     segments: tuple[AcceleratedInferenceSegment, ...]
     current_segment_index: int = 0
-    segment_solves: list[AcceleratedSegmentSolve] = field(default_factory=list)
+    segment_solves: list[AcceleratedSegmentResult] = field(default_factory=list)
     combined_time_limited: bool = False
     backfill_target_host_turn: int | None = None
     backfill_source_turn_number: int | None = None
@@ -70,7 +66,7 @@ class InferenceStreamOrchestration:
 
     @property
     def segment_payloads(self) -> list[dict[str, object]]:
-        return [segment.payload for segment in self.segment_solves]
+        return [segment.payload for segment in self.segment_solves if segment.payload is not None]
 
     def current_segment(self) -> AcceleratedInferenceSegment | None:
         if not self.is_accelerated or self.current_segment_index >= len(self.segments):
@@ -115,7 +111,7 @@ class InferenceStreamOrchestration:
             step_diagnostics=step_diagnostics,
         )
         self.segment_solves.append(
-            AcceleratedSegmentSolve(
+            AcceleratedSegmentResult(
                 segment=segment,
                 observation=observation,
                 result=result,
@@ -133,7 +129,7 @@ class InferenceStreamOrchestration:
     def has_more_segments(self) -> bool:
         return self.is_accelerated and self.current_segment_index < len(self.segments)
 
-    def _accelerated_stream_row_complete(self) -> AcceleratedStreamRowComplete:
+    def _accelerated_stream_row_complete(self) -> RowComplete:
         segment_solves = tuple(self.segment_solves)
         if self.path == InferencePath.ACCELERATED_BACKFILL:
             assert self.backfill_target_host_turn is not None
@@ -180,11 +176,7 @@ class InferenceStreamOrchestration:
         self.record_ladder_segment_complete(ladder_state, observation, turn)
         if self.has_more_segments():
             return LadderSegmentAdvance(continue_next_segment=True)
-        return LadderSegmentAdvance(
-            row_complete=row_complete_from_accelerated_payload(
-                self._accelerated_stream_row_complete()
-            )
-        )
+        return LadderSegmentAdvance(row_complete=self._accelerated_stream_row_complete())
 
     def build_stopped_row_complete(
         self,
@@ -195,9 +187,7 @@ class InferenceStreamOrchestration:
         if ladder_state is not None and ladder_state.catalog is not None:
             self.record_ladder_segment_complete(ladder_state, observation, turn)
         if self.segment_solves:
-            return row_complete_stopped(
-                base=row_complete_from_accelerated_payload(self._accelerated_stream_row_complete())
-            )
+            return row_complete_stopped(base=self._accelerated_stream_row_complete())
         return row_complete_stopped(
             ladder_state=ladder_state,
             observation=observation,

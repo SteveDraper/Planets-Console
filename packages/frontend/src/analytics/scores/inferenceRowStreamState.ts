@@ -43,11 +43,9 @@ export type RowStreamState = {
   diagnostics: Record<string, unknown>
 }
 
-export function initialRowStreamState(
-  carryOverSolutions: ScoresInferenceSolution[] = []
-): RowStreamState {
+export function initialRowStreamState(): RowStreamState {
   return {
-    heldSolutions: [...carryOverSolutions],
+    heldSolutions: [],
     status: 'pending',
     summary: 'Build inference in progress',
     isComplete: false,
@@ -105,7 +103,10 @@ export function pendingDetail(
   playerId: number,
   solutions: ScoresInferenceSolution[] = []
 ): ScoresInferenceRowDetail {
-  return rowDetailFromStreamState(playerId, initialRowStreamState(solutions))
+  return rowDetailFromStreamState(playerId, {
+    ...initialRowStreamState(),
+    heldSolutions: [...solutions],
+  })
 }
 
 export function failureDetail(playerId: number, summary: string): ScoresInferenceRowDetail {

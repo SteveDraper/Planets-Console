@@ -9,7 +9,6 @@ from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     run_inference_tier_job,
-    should_emit_streaming_solutions,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
@@ -76,7 +75,6 @@ def test_should_emit_streaming_solutions_false_for_accel_window_segment(sample_t
 
     assert orchestration.current_segment().segment_id == "accel_window"
     assert orchestration.should_emit_streaming_solutions() is False
-    assert should_emit_streaming_solutions(orchestration) is False
 
 
 def test_should_emit_streaming_solutions_true_for_reported_host_turn_segment(sample_turn) -> None:
@@ -85,7 +83,6 @@ def test_should_emit_streaming_solutions_true_for_reported_host_turn_segment(sam
 
     assert orchestration.current_segment().segment_id == "reported_host_turn"
     assert orchestration.should_emit_streaming_solutions() is True
-    assert should_emit_streaming_solutions(orchestration) is True
 
 
 def test_should_emit_streaming_solutions_false_for_backfill_non_target_segment(sample_turn) -> None:

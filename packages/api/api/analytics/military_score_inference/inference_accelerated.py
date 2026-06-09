@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
     inference_result_to_api_payload,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_target import (
     observation_from_accelerated_segment,
 )
@@ -46,7 +47,7 @@ AcceleratedSegmentArtifacts = tuple[InferenceObservation, ActionCatalog | None]
 
 
 @dataclass(frozen=True)
-class AcceleratedSegmentLadderResult:
+class AcceleratedSegmentResult:
     """Policy-ladder outcome for one accelerated inference segment."""
 
     segment: AcceleratedInferenceSegment
@@ -56,35 +57,7 @@ class AcceleratedSegmentLadderResult:
     problem: InferenceProblem | None
     policy_steps_attempted: list[str]
     step_diagnostics: list[dict[str, object]]
-
-
-@dataclass(frozen=True)
-class AcceleratedSegmentSolve:
-    """One accelerated segment policy-ladder result collected during streaming."""
-
-    segment: AcceleratedInferenceSegment
-    observation: InferenceObservation
-    result: InferenceResult
-    catalog: ActionCatalog | None
-    problem: InferenceProblem | None
-    policy_steps_attempted: list[str]
-    step_diagnostics: list[dict[str, object]]
-    payload: dict[str, object]
-
-
-@dataclass(frozen=True)
-class AcceleratedStreamRowComplete:
-    """Terminal row-complete payload for accelerated stream orchestration."""
-
-    result: InferenceResult
-    catalog: ActionCatalog | None = None
-    problem: InferenceProblem | None = None
-    policy_steps_attempted: list[str] | None = None
-    step_diagnostics: list[dict[str, object]] | None = None
-    summary_override: str | None = None
-    wire_observation: InferenceObservation | None = None
-    wire_turn: TurnInfo | None = None
-    extra_diagnostics: dict[str, object] | None = None
+    payload: dict[str, object] | None = None
 
 
 def run_accelerated_segment_policy_ladder(
@@ -96,7 +69,7 @@ def run_accelerated_segment_policy_ladder(
     time_limit_seconds: float | None,
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
-) -> AcceleratedSegmentLadderResult:
+) -> AcceleratedSegmentResult:
     """Run the policy ladder for one accelerated segment."""
     observation = observation_from_accelerated_segment(score, turn, segment)
     resolved_time_limit = (
@@ -112,7 +85,7 @@ def run_accelerated_segment_policy_ladder(
         cancel_token=cancel_token,
         on_admitted=on_admitted,
     )
-    return AcceleratedSegmentLadderResult(
+    return AcceleratedSegmentResult(
         segment=segment,
         observation=observation,
         result=result,
@@ -317,11 +290,13 @@ def build_accelerated_split_stream_row_complete(
     score: Score,
     turn: TurnInfo,
     *,
-    segment_solves: tuple[AcceleratedSegmentSolve, ...],
+    segment_solves: tuple[AcceleratedSegmentResult, ...],
     combined_time_limited: bool,
-) -> AcceleratedStreamRowComplete:
+) -> RowComplete:
     """Build terminal stream state for an accelerated split row."""
-    segment_payloads = [segment.payload for segment in segment_solves]
+    segment_payloads = [
+        segment.payload for segment in segment_solves if segment.payload is not None
+    ]
     reported = next(
         (
             segment
@@ -341,7 +316,7 @@ def build_accelerated_split_stream_row_complete(
             },
         )
         missing_payload, missing_observation, _, _ = missing
-        return AcceleratedStreamRowComplete(
+        return RowComplete(
             result=InferenceResult(
                 status=str(missing_payload.get("status", STATUS_INVALID_PROBLEM)),
                 solutions=(),
@@ -357,7 +332,7 @@ def build_accelerated_split_stream_row_complete(
         )
 
     overall_status = accelerated_split_status(segment_payloads, combined_time_limited)
-    return AcceleratedStreamRowComplete(
+    return RowComplete(
         result=InferenceResult(
             status=overall_status,
             solutions=reported.result.solutions,
@@ -383,10 +358,12 @@ def build_accelerated_backfill_stream_row_complete(
     target_host_turn: int,
     source_turn_number: int,
     source_turn: TurnInfo,
-    segment_solves: tuple[AcceleratedSegmentSolve, ...],
-) -> AcceleratedStreamRowComplete:
+    segment_solves: tuple[AcceleratedSegmentResult, ...],
+) -> RowComplete:
     """Build terminal stream state for an accelerated backfill row."""
-    segment_payloads = [segment.payload for segment in segment_solves]
+    segment_payloads = [
+        segment.payload for segment in segment_solves if segment.payload is not None
+    ]
     target = next(
         (segment for segment in segment_solves if segment.segment.host_turn == target_host_turn),
         None,
@@ -394,7 +371,7 @@ def build_accelerated_backfill_stream_row_complete(
     if target is None or target.catalog is None or target.problem is None:
         from api.analytics.military_score_inference.analytic import build_inference_observation
 
-        return AcceleratedStreamRowComplete(
+        return RowComplete(
             result=InferenceResult(
                 status=STATUS_NO_PRIOR_TURN,
                 solutions=(),
@@ -405,7 +382,7 @@ def build_accelerated_backfill_stream_row_complete(
             wire_turn=row_turn,
         )
 
-    return AcceleratedStreamRowComplete(
+    return RowComplete(
         result=InferenceResult(
             status=target.result.status,
             solutions=target.result.solutions,

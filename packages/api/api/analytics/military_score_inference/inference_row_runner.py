@@ -6,9 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
-from api.analytics.military_score_inference.inference_stream_orchestration import (
-    InferenceStreamOrchestration,
-)
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -44,14 +41,6 @@ def solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
     if orchestration is not None:
         return orchestration.current_observation(), orchestration.current_solve_turn()
     return run.session.observation, run.session.turn
-
-
-def should_emit_streaming_solutions(
-    orchestration: InferenceStreamOrchestration | None,
-) -> bool:
-    if orchestration is None:
-        return True
-    return orchestration.should_emit_streaming_solutions()
 
 
 def build_stopped_row_complete(run: RowRun) -> RowComplete:
@@ -112,7 +101,7 @@ def run_inference_tier_job(
     orchestration = run.orchestration
 
     def on_admitted(_solution: InferenceSolution) -> None:
-        if should_emit_streaming_solutions(orchestration):
+        if orchestration is None or orchestration.should_emit_streaming_solutions():
             callbacks.emit_held_solutions(observation)
 
     callbacks.emit_tier_started_progress()

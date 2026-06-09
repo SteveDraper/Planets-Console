@@ -58,7 +58,7 @@ class InferenceRowScheduler:
         self._workers: list[threading.Thread] = []
         self._shutdown = False
         self._active_scope: InferenceStreamScope | None = None
-        self._active_stream_refcount = 0
+        self._has_active_table_stream = False
         self._globally_paused = False
         for _ in range(worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -67,12 +67,12 @@ class InferenceRowScheduler:
 
     def begin_scope(self, scope: InferenceStreamScope) -> None:
         with self._condition:
-            if self._active_scope == scope and self._active_stream_refcount > 0:
+            if self._active_scope == scope and self._has_active_table_stream:
                 raise ConflictError("An inference table stream is already active for this scope.")
             if self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
-            self._active_stream_refcount = 1
+            self._has_active_table_stream = True
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
         scope_matches = self._active_scope == scope
@@ -106,7 +106,7 @@ class InferenceRowScheduler:
             return self._global_pause_status_locked(scope)
 
     def _require_active_stream_for_scope_locked(self, scope: InferenceStreamScope) -> None:
-        if self._active_stream_refcount == 0 or self._active_scope != scope:
+        if not self._has_active_table_stream or self._active_scope != scope:
             raise ValidationError(
                 "Global pause requires an active inference table stream for this scope."
             )
@@ -155,9 +155,8 @@ class InferenceRowScheduler:
                 self._purge_queued_jobs_for_run_locked(run_id)
                 self._runs.pop(run_id, None)
             if self._active_scope == scope:
-                self._active_stream_refcount = max(0, self._active_stream_refcount - 1)
-                if self._active_stream_refcount == 0:
-                    self._clear_global_pause_for_active_scope_locked(scope)
+                self._has_active_table_stream = False
+                self._clear_global_pause_for_active_scope_locked(scope)
             self._condition.notify_all()
 
     def _clear_global_pause_for_active_scope_locked(
@@ -235,7 +234,7 @@ class InferenceRowScheduler:
             self._get_or_create_run(job.session).hold_job(job)
 
     def _invalidate_retained_state_locked(self) -> None:
-        self._active_stream_refcount = 0
+        self._has_active_table_stream = False
         self._globally_paused = False
         for run in list(self._runs.values()):
             run.session.cancel_token.cancel()

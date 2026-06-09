@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.inference_accelerated import (
-    AcceleratedStreamRowComplete,
-)
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -31,22 +28,6 @@ def row_complete_from_ladder_finalize(
         problem=problem,
         policy_steps_attempted=policy_steps_attempted,
         step_diagnostics=step_diagnostics,
-    )
-
-
-def row_complete_from_accelerated_payload(
-    complete: AcceleratedStreamRowComplete,
-) -> RowComplete:
-    return RowComplete(
-        result=complete.result,
-        catalog=complete.catalog,
-        problem=complete.problem,
-        policy_steps_attempted=complete.policy_steps_attempted,
-        step_diagnostics=complete.step_diagnostics,
-        summary_override=complete.summary_override,
-        wire_observation=complete.wire_observation,
-        wire_turn=complete.wire_turn,
-        extra_diagnostics=complete.extra_diagnostics,
     )
 
 
