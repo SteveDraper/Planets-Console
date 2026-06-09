@@ -77,5 +77,6 @@ def iter_scores_table_inference_events(
     finally:
         cleanup_inference_stream_sessions(
             scheduler,
+            stream_scope,
             tuple(row.session for row in sessions),
         )

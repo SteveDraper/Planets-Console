@@ -386,7 +386,7 @@ The inference engine should return a per-player list of explanations that can en
 
 The user-facing feature should be an optional capability of the existing Scores analytic rather than a separate analytic. When enabled, the scoreboard adds an inference column with row-level status: an **inference solution count indicator** (green outlined badge with **N** = held top-K size) when **N > 0**, hourglass while **N = 0** and search is in flight, paused chrome when **inference global pause** is active, and red cross when the row completes naturally with no exact explanation or on solver failure. The column header hosts the global pause control. Hover text should summarize the result. Clicking the badge opens a modal with the detailed ranked held explanations, including action vectors and score arithmetic.
 
-**Streaming (#71):** the SPA opens one multiplexed **inference table stream** for all scoreboard rows on the current scope; each `solution` event carries the full held top-K for one row (hourglass clears when **N** becomes 1; the badge and modal grow while search continues). **Inference global pause** freezes all rows without losing partial held top-K; per-row resume (via the per-row stream) is available after global pause. A process-wide **inference row scheduler** interleaves tier jobs across rows so quick-to-solve players are not blocked behind another row's deep ladder climb. SPA searches are open-ended (no row time budget). Implicit **inference stream cancellation** ends rows on scope change or disconnect. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) sections 7.4--7.5, Phase 1H, and section 8.5.4.
+**Streaming (#71):** the SPA opens one multiplexed **inference table stream** for all scoreboard rows on the current scope; each `solution` event carries the full held top-K for one row (hourglass clears when **N** becomes 1; the badge and modal grow while search continues). **Inference global pause** freezes all rows without losing partial held top-K **while the stream stays open**; resume via the column header. **Stream disconnect** cancels all work and clears server-side pause; reconnect recalculates from scratch. A process-wide **inference row scheduler** interleaves tier jobs across rows so quick-to-solve players are not blocked behind another row's deep ladder climb. SPA searches are open-ended (no row time budget). Implicit **inference stream cancellation** ends rows on scope change or disconnect. See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) sections 7.4--7.5, Phase 1H, and section 8.5.4.
 
 ---
 
@@ -425,11 +425,11 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
 | Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
 | Fleet priors | Deferred; **inference tier policy overlay** (#78), not hard exclusion |
-| SPA streaming (#71) | One multiplexed **inference table stream** per shell scope; per-row stream for resume |
+| SPA streaming (#71) | One multiplexed **inference table stream** per shell scope |
 | Cross-row scheduling (#71) | **Inference row scheduler**: FIFO tier jobs, default 4 workers (configurable) |
-| Global pause (#71) | Freeze/resume all rows on current scope; `globalPause` wire events |
-| SPA time budget (#71) | None; global pause + implicit stream cancel on scope change |
-| Stream cancel terminal (#71) | `stopped` on implicit cancel; preserve partial held top-K when applicable; distinct from failure |
+| Global pause (#71) | Freeze/resume all rows on current scope while stream connected; cleared on disconnect |
+| SPA time budget (#71) | None; global pause while connected; stream disconnect recalculates |
+| Stream cancel terminal (#71) | `stopped` on implicit cancel; last held top-K on wire when applicable; no server state across reconnect |
 | Batch / corpus time limits | Retained on batch JSON path; probe orchestration cap (`--probe-time-limit-seconds`) |
 | Solve interrupt (v1) | Sub-step boundaries + `StopSearch()`; UNKNOWN sub-step retry follow-on if needed |
 | Accelerated-start rows (#71) | Same stream and scheduler as normal rows; segments internal to row path |

@@ -343,7 +343,7 @@ When inference is enabled, add one extra column to the existing scoreboard table
 |------|---------|------------|----------------|
 | **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K** (`N > 0`). Search may continue until `isComplete`. | summarize top solution; note when search is still running | open modal with ranked held solutions (grows while streaming until plateau at K) |
 | Hourglass | No exact explanation held yet for this player row (`N = 0`) | show that inference is still running | no modal until the first held exact arrives |
-| Paused | row frozen by **inference global pause** | paused summary; held count when **N > 0** | modal when **N > 0**; per-row **resume** when globally paused |
+| Paused | row frozen by **inference global pause** | paused summary; held count when **N > 0** | modal when **N > 0**; resume all via column header |
 | Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 | Global pause (column header) | freeze or resume all rows on this scope | pause/resume all build inference | `POST/DELETE .../inference/global-pause` |
 
@@ -381,25 +381,24 @@ Inference is fetched **per scoreboard row** at the solver layer. Three wire path
 |------|----------|------------|
 | **Batch JSON** | Inference corpus harness, CI | Returns after top-K enumeration or per-case `time_limit_seconds` (default 20s) |
 | **NDJSON table stream** | SPA (#71) primary | One connection per shell scope; multiplexed row events |
-| **NDJSON per-row stream** | SPA row resume | Open-ended until ladder finishes or stream cancel |
 
 **Batch (current):** `GET .../scores/inference?playerId=...` returns one JSON payload when the row solve completes or hits the time budget.
 
 **Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). The hourglass clears when the first `solution` arrives with `solutions.length >= 1`; the count badge and modal track `solutions.length` while search continues.
 
-**Per-row stream (resume path):** `GET .../scores/inference/stream?playerId=...` -- same event shapes without `playerId`. Used when the user resumes one row after **inference global pause** without reopening the full table stream.
+**Stream disconnect:** when the table stream ends (client `AbortSignal`, refresh, network loss, disable build inference, or natural completion after all rows finish), the server cancels all row runs for that connection and clears **inference global pause**. Reopening the table stream on the same scope **recalculates from scratch** (no server-side ladder or pause state preserved across disconnect).
 
-**Global pause:** `POST/DELETE .../scores/inference/global-pause` freezes or resumes all scheduler work for the current scope. Open table streams receive `globalPause` events; held top-K remains visible with paused chrome. The frontend syncs pause-control state from stream `globalPause` events.
+**Global pause:** `POST/DELETE .../scores/inference/global-pause` freezes or resumes all scheduler work for the current scope **while the table stream is connected**. Open streams receive `globalPause` events; held top-K remains visible with paused chrome. The frontend syncs pause-control state from stream `globalPause` events.
 
-**SPA time budget:** none. A row runs until the ladder completes, **inference global pause** freezes it, or the stream is cancelled (game / turn / **perspective** change, disable build inference, client disconnect). Implicit cancel may emit `complete` with `status: stopped`, `isComplete: true`, and held top-K preserved when applicable.
+**SPA time budget:** none. A row runs until the ladder completes, **inference global pause** freezes it (on an open stream), or the stream is cancelled (game / turn / **perspective** change, disable build inference, client disconnect). Implicit cancel may emit `complete` with `status: stopped`, `isComplete: true`, and the last held top-K on the wire when applicable; reconnect still recalculates.
 
 **#77 batch path (before #71 stream UI):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
 
 ### 7.5 Inference row scheduler (#71)
 
-Process-wide backend facility (glossary: `CONTEXT.md` **Inference row scheduler**). Fair-schedules **inference search tier** work across concurrent inference streams (table-multiplexed or per-row).
+Process-wide backend facility (glossary: `CONTEXT.md` **Inference row scheduler**). Fair-schedules **inference search tier** work for rows on the active inference table stream.
 
-1. When a row is scheduled (table stream open or per-row resume), construct a tier-1 **inference tier job** (deltas, player id, ladder entry state).
+1. When the table stream schedules a row, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state).
 2. Enqueue tier-1 on a shared **FIFO** queue.
 3. Drain with a worker pool (default **4** workers, configurable). Distinct from corpus `--workers` (batch case parallelism).
 4. When a tier job completes, enqueue that row's tier-(n+1) job (seeds, held solutions, signatures). Per-row tier chains are strictly sequential.
@@ -409,7 +408,7 @@ One schedulable job = one full **inference search tier** step (catalog build, ex
 
 **Table stream multiplexing:** per-row event queues are round-robin drained into one NDJSON generator; `playerId` tags identify the row on the wire.
 
-**Global pause:** pause drains the worker queue into a held buffer and broadcasts `globalPause`; resume requeues held tier jobs and continuations. Sessions may be preserved when a table stream disconnects while globally paused.
+**Global pause:** pause drains the worker queue into a held buffer and broadcasts `globalPause`; resume requeues held tier jobs and continuations. Applies only while the table stream stays connected. **Stream disconnect** cancels all row runs and clears server-side global pause; reconnect recalculates from scratch.
 
 **Accelerated-start rows:** same scheduler path as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
 
@@ -619,7 +618,7 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 |---------|-----|
 | At least one **exact** solution from any policy step | **Inference solution count indicator** with **N** = held top-K size; merged top-K across steps |
 | Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
-| Stream cancelled (#71 implicit cancel) | `status: stopped` when applicable; count badge when **N > 0** (partials preserved) |
+| Stream cancelled (#71 implicit cancel) | `status: stopped` when applicable; count badge when **N > 0** on the terminal wire event (not preserved server-side across reconnect) |
 | Band near-solution | Never shown directly; seeds next step only |
 
 While search is in flight (#71), **N** rises from 1 toward K as new signatures are admitted, then plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Hourglass until **N > 0**; red cross only after natural terminal `complete` / batch response with zero held exact. Halt is not failure.
@@ -922,7 +921,7 @@ Steps:
 3. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K. Payload is the **full held top-K** for that row (ranked explanation rows plus **inference solution rank weight**). Do not emit on suppressed re-discoveries. Consumer replaces local held state; no client-side merge.
 4. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
 5. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
-6. **SPA:** no row time budget. **Inference global pause** in column header; per-row resume via per-row stream after pause; implicit cancel on game / turn / **perspective** change, disable build inference, disconnect (`AbortSignal`). No per-row halt API.
+6. **SPA:** no row time budget. **Inference global pause** in column header (while table stream connected); implicit cancel on game / turn / **perspective** change, disable build inference, disconnect (`AbortSignal`). Disconnect clears server-side global pause and recalculates on reconnect. No per-row halt API.
 7. **Batch JSON:** retain for corpus harness with per-case `time_limit_seconds`. Do not remove batch time limits when SPA drops them.
 8. Cooperative cancel at **inference solve interrupt boundaries** (section 7.5); `cancel_run` purges queued tier jobs. Document follow-on: sub-step retry on `UNKNOWN` if cancel responsiveness is insufficient.
 9. Revisit combo-count `max_solutions=1` batch fallback after streaming + global pause proven.
@@ -1220,6 +1219,6 @@ The user-facing scoreboard integration should be considered complete when:
 - the Scores tile includes an `Include build inference` checkbox,
 - enabling inference adds an inference column with row-level status,
 - rows with **N > 0** open a modal with ranked held solution details,
-- global pause freezes in-flight inference without losing partial held top-K; implicit cancel may emit `status: stopped` with partials preserved,
+- global pause freezes in-flight inference without losing partial held top-K while the table stream stays open; stream disconnect clears pause and recalculates; implicit cancel may emit `status: stopped` with the last held top-K on the wire,
 - BFF and frontend code never import OR-Tools or encode solver rules directly,
 - `make lint` and the relevant API, BFF, and frontend tests pass.

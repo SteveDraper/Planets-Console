@@ -72,7 +72,7 @@ def test_new_scope_invalidates_retained_pause_state(sample_turn):
     assert status["activeScope"]["turn"] == scope_b.turn_number
 
 
-def test_preserve_session_on_stream_end_when_globally_paused(sample_turn):
+def test_end_inference_stream_cancels_runs_and_clears_global_pause(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     scope = InferenceStreamScope(
@@ -82,10 +82,16 @@ def test_preserve_session_on_stream_end_when_globally_paused(sample_turn):
     )
     session = _session_for_turn(sample_turn)
     scheduler.begin_scope(scope)
-    scheduler.register_session(session)
+    scheduler.enqueue_tier_ladder(session)
     scheduler.pause_globally(scope)
 
-    assert scheduler.preserve_session_on_stream_end(session) is True
+    assert scheduler.global_pause_status(scope)["paused"] is True
+    assert scheduler.global_pause_status(scope)["activeSessionCount"] == 1
 
-    scheduler.resume_globally(scope)
-    assert scheduler.preserve_session_on_stream_end(session) is False
+    scheduler.end_inference_stream(scope, (session,))
+
+    status = scheduler.global_pause_status(scope)
+    assert status["paused"] is False
+    assert status["activeSessionCount"] == 0
+    assert status["heldJobCount"] == 0
+    assert session.cancel_token.is_cancelled()

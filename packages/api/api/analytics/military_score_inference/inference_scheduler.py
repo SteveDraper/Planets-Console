@@ -7,7 +7,6 @@ import queue
 import threading
 import uuid
 from collections import deque
-from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
@@ -61,7 +60,6 @@ class InferenceRowStreamSession:
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     ladder_state: PolicyLadderState | None = None
     orchestration: InferenceStreamOrchestration | None = None
-    on_finalize: Callable[[dict[str, object]], None] | None = None
 
     @property
     def stream_scope(self) -> InferenceStreamScope:
@@ -82,13 +80,6 @@ _Sentinel = object()
 _Job = _TierJob | object
 
 
-def _scope_player_key(
-    scope: InferenceStreamScope,
-    player_id: int,
-) -> tuple[int, int, int, int]:
-    return (scope.game_id, scope.perspective, scope.turn_number, player_id)
-
-
 class InferenceRowScheduler:
     """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
 
@@ -97,9 +88,6 @@ class InferenceRowScheduler:
         self._continuation_by_run: dict[str, deque[_TierJob]] = {}
         self._continuation_round_robin: deque[str] = deque()
         self._sessions: dict[str, InferenceRowStreamSession] = {}
-        self._sessions_by_scope_player: dict[
-            tuple[int, int, int, int], InferenceRowStreamSession
-        ] = {}
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._worker_count = worker_count
@@ -176,29 +164,40 @@ class InferenceRowScheduler:
             self._condition.notify_all()
             return self._global_pause_status_locked(scope)
 
-    def preserve_session_on_stream_end(self, session: InferenceRowStreamSession) -> bool:
-        with self._condition:
-            return (
-                self._globally_paused
-                and session.run_id in self._sessions
-                and not session.cancel_token.is_cancelled()
-            )
-
     def register_session(self, session: InferenceRowStreamSession) -> None:
         with self._condition:
             self._sessions[session.run_id] = session
-            scope_player_key = _scope_player_key(session.stream_scope, session.player_id)
-            self._sessions_by_scope_player[scope_player_key] = session
 
     def unregister_session(self, run_id: str) -> None:
         with self._condition:
-            session = self._sessions.pop(run_id, None)
+            self._sessions.pop(run_id, None)
             self._held_continuations.pop(run_id, None)
-            if session is not None:
-                self._sessions_by_scope_player.pop(
-                    _scope_player_key(session.stream_scope, session.player_id),
-                    None,
-                )
+
+    def end_inference_stream(
+        self,
+        scope: InferenceStreamScope,
+        sessions: tuple[InferenceRowStreamSession, ...],
+    ) -> None:
+        """Cancel all row runs for a table stream and clear global pause on disconnect."""
+        with self._condition:
+            for session in sessions:
+                run_id = session.run_id
+                session.cancel_token.cancel()
+                self._purge_queued_jobs_for_run_locked(run_id)
+                self._held_continuations.pop(run_id, None)
+                self._sessions.pop(run_id, None)
+            self._clear_global_pause_for_active_scope_locked(scope)
+            self._condition.notify_all()
+
+    def _clear_global_pause_for_active_scope_locked(
+        self,
+        scope: InferenceStreamScope,
+    ) -> None:
+        if self._active_scope != scope:
+            return
+        self._globally_paused = False
+        self._held_jobs.clear()
+        self._held_continuations.clear()
 
     def cancel_run(self, run_id: str) -> None:
         with self._condition:
@@ -318,7 +317,6 @@ class InferenceRowScheduler:
         for session in list(self._sessions.values()):
             session.cancel_token.cancel()
         self._sessions.clear()
-        self._sessions_by_scope_player.clear()
         self._held_jobs.clear()
         self._held_continuations.clear()
         while True:

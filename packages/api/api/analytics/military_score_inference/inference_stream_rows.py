@@ -34,6 +34,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     create_inference_stream_orchestration,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.models.game import Score, TurnInfo
 from api.transport.inference_stream import (
@@ -52,7 +53,6 @@ def domain_event_to_wire_events(
     *,
     observation: InferenceObservation,
     turn: TurnInfo,
-    on_finalize: Callable[[dict[str, object]], None] | None = None,
 ) -> list[dict[str, object]]:
     """Convert one scheduler domain event into zero or more NDJSON wire dicts."""
     if isinstance(event, HeldSolutionsUpdated):
@@ -96,8 +96,6 @@ def domain_event_to_wire_events(
             )
         if event.force_is_complete is not None:
             payload["isComplete"] = event.force_is_complete
-        if on_finalize is not None:
-            on_finalize(payload)
         return [
             inference_complete_event(
                 status=str(payload.get("status", "")),
@@ -129,19 +127,6 @@ def row_domain_event_to_wire_events(
         event,
         observation=row.session.observation,
         turn=row.session.turn,
-        on_finalize=row.session.on_finalize,
-    )
-
-
-def session_domain_event_to_wire_events(
-    session: InferenceRowStreamSession,
-    event: InferenceStreamDomainEvent,
-) -> list[dict[str, object]]:
-    return domain_event_to_wire_events(
-        event,
-        observation=session.observation,
-        turn=session.turn,
-        on_finalize=session.on_finalize,
     )
 
 
@@ -301,9 +286,9 @@ def iter_multiplexed_inference_events(
 
 def cleanup_inference_stream_sessions(
     scheduler: InferenceRowScheduler,
+    scope: InferenceStreamScope,
     sessions: tuple[InferenceRowStreamSession, ...],
 ) -> None:
-    for session in sessions:
-        if not scheduler.preserve_session_on_stream_end(session):
-            scheduler.cancel_run(session.run_id)
-            scheduler.unregister_session(session.run_id)
+    """Tear down row runs when the table stream ends; always recalculate on reconnect."""
+    if sessions:
+        scheduler.end_inference_stream(scope, sessions)
