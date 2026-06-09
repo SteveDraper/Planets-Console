@@ -66,11 +66,11 @@ def test_run_policy_ladder_tier_step_calls_on_admitted_for_each_within_tier_solu
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder._solve_seed_progression",
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_seed_progression",
         lambda *args, **kwargs: (None, None),
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder._solve_catalog",
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
         fake_solve_catalog,
     )
 

@@ -390,7 +390,7 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
     result, catalog, problem, attempted, step_diagnostics = solve_with_policy_ladder(
@@ -512,15 +512,15 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder._solution_fully_explained_by_ship_builds_only",
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solution_fully_explained_by_ship_builds_only",
         lambda solution, observation, catalog: False,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder._solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     result, catalog, _, attempted, _ = solve_with_policy_ladder(
@@ -578,11 +578,11 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder._solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     result, _, _, _, _ = solve_with_policy_ladder(
@@ -644,7 +644,7 @@ def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, 
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
     result, _, _, attempted, _ = solve_with_policy_ladder(
@@ -698,7 +698,7 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         )
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder.solve_inference_problem",
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
     result, _, _, _, _ = solve_with_policy_ladder(

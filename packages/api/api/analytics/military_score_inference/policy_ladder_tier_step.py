@@ -1,0 +1,494 @@
+"""Single-tier execution for the YAML inference search policy ladder."""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from api.analytics.military_score_inference.actions import (
+    ActionCatalog,
+    build_action_catalog_from_turn,
+    build_inference_problem,
+)
+from api.analytics.military_score_inference.component_eligibility import (
+    turn_catalog_context_for_policy_step,
+)
+from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.models import (
+    InferenceObservation,
+    InferenceProblem,
+    InferenceResult,
+    InferenceSolution,
+)
+from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
+from api.analytics.military_score_inference.solver import (
+    STATUS_INVALID_PROBLEM,
+    STATUS_STOPPED,
+    STATUS_TIME_LIMITED,
+    solution_signature,
+    solve_inference_problem,
+)
+from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
+from api.models.game import TurnInfo
+
+
+def remaining_time(started_at: float, time_limit_seconds: float | None) -> float:
+    if time_limit_seconds is None:
+        return float("inf")
+    return time_limit_seconds - (time.monotonic() - started_at)
+
+
+def solution_satisfies_exact_hard_equalities(
+    solution: InferenceSolution,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+) -> bool:
+    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
+    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
+    military_sum = 0
+    warship_sum = 0
+    freighter_sum = 0
+    for action in solution.actions:
+        catalog_action = actions_by_id.get(action.action_id)
+        if catalog_action is None:
+            return False
+        military_sum += catalog_action.score_delta_2x * action.count
+        warship_sum += catalog_action.warship_delta * action.count
+        freighter_sum += catalog_action.freighter_delta * action.count
+    for ship_build in solution.ship_builds:
+        combo = combos_by_id.get(ship_build.combo_id)
+        if combo is None:
+            return False
+        military_sum += combo.score_delta_2x * ship_build.count
+        warship_sum += combo.warship_delta * ship_build.count
+        freighter_sum += combo.freighter_delta * ship_build.count
+    return (
+        abs(military_sum - observation.military_delta_2x) <= observation.military_partition_slack_2x
+        and warship_sum == observation.warship_delta
+        and freighter_sum == observation.freighter_delta
+    )
+
+
+def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
+    return {ship_build.combo_id: ship_build.count for ship_build in solution.ship_builds}
+
+
+def _solution_fully_explained_by_ship_builds_only(
+    solution: InferenceSolution,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+) -> bool:
+    if solution.actions:
+        return False
+    return solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+
+
+def _explained_military_score_2x(
+    solution: InferenceSolution,
+    catalog: ActionCatalog,
+) -> int:
+    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
+    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
+    explained = 0
+    for action in solution.actions:
+        catalog_action = actions_by_id[action.action_id]
+        explained += catalog_action.score_delta_2x * action.count
+    for ship_build in solution.ship_builds:
+        combo = combos_by_id[ship_build.combo_id]
+        explained += combo.score_delta_2x * ship_build.count
+    return explained
+
+
+def _catalog_solve_max_solutions(merged_count: int, resolved_max_solutions: int) -> int:
+    remaining_slots = max(0, resolved_max_solutions - merged_count)
+    if remaining_slots > 0:
+        return remaining_slots
+    return resolved_max_solutions
+
+
+def _merge_exact_solutions(
+    merged_solutions: list[InferenceSolution],
+    seen_signatures: set[tuple[tuple[str, int], ...]],
+    candidates: tuple[InferenceSolution, ...],
+    *,
+    resolved_max_solutions: int,
+    on_admitted: Callable[[InferenceSolution], None] | None = None,
+) -> int:
+    new_solutions = 0
+    for solution in candidates:
+        signature = solution_signature(solution)
+        if signature in seen_signatures:
+            continue
+        if len(merged_solutions) < resolved_max_solutions:
+            seen_signatures.add(signature)
+            merged_solutions.append(solution)
+            new_solutions += 1
+            if on_admitted is not None:
+                on_admitted(solution)
+            continue
+        worst_index = min(
+            range(len(merged_solutions)),
+            key=lambda index: merged_solutions[index].objective_value,
+        )
+        worst_solution = merged_solutions[worst_index]
+        if solution.objective_value <= worst_solution.objective_value:
+            continue
+        seen_signatures.remove(solution_signature(worst_solution))
+        seen_signatures.add(signature)
+        merged_solutions[worst_index] = solution
+        new_solutions += 1
+        if on_admitted is not None:
+            on_admitted(solution)
+    return new_solutions
+
+
+def _solve_catalog(
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    *,
+    max_solutions: int,
+    time_limit_seconds: float,
+    military_score_alpha: int = 0,
+    fixed_combo_counts: dict[str, int] | None = None,
+    combo_count_neighborhood: int = 0,
+    cancel_token: InferenceCancelToken | None = None,
+    on_solution: Callable[[InferenceSolution], None] | None = None,
+) -> tuple[InferenceResult, InferenceProblem]:
+    problem = build_inference_problem(
+        observation,
+        catalog,
+        max_solutions=max_solutions,
+        time_limit_seconds=time_limit_seconds,
+        military_score_alpha=military_score_alpha,
+        fixed_combo_counts=fixed_combo_counts,
+        combo_count_neighborhood=combo_count_neighborhood,
+    )
+    return (
+        solve_inference_problem(
+            problem,
+            cancel_token=cancel_token,
+            on_solution=on_solution,
+        ),
+        problem,
+    )
+
+
+def _solve_seed_progression(
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    seed: InferenceSolution,
+    *,
+    max_solutions: int,
+    time_limit_seconds: float,
+    cancel_token: InferenceCancelToken | None = None,
+    on_solution: Callable[[InferenceSolution], None] | None = None,
+) -> tuple[InferenceResult | None, InferenceProblem | None]:
+    fixed_counts = _combo_counts_from_solution(seed)
+    if not fixed_counts:
+        return None, None
+
+    remaining_slots = max_solutions
+    for neighborhood in (0, 1):
+        if remaining_slots <= 0 or time_limit_seconds <= 0:
+            break
+        if cancel_token is not None and cancel_token.is_cancelled():
+            break
+        result, problem = _solve_catalog(
+            observation,
+            catalog,
+            max_solutions=remaining_slots,
+            time_limit_seconds=time_limit_seconds,
+            fixed_combo_counts=fixed_counts,
+            combo_count_neighborhood=neighborhood,
+            cancel_token=cancel_token,
+            on_solution=on_solution,
+        )
+        if result.status == STATUS_STOPPED:
+            return result, problem
+        if result.solutions:
+            return result, problem
+
+    if cancel_token is not None and cancel_token.is_cancelled():
+        return None, None
+
+    result, problem = _solve_catalog(
+        observation,
+        catalog,
+        max_solutions=remaining_slots,
+        time_limit_seconds=time_limit_seconds,
+        cancel_token=cancel_token,
+        on_solution=on_solution,
+    )
+    if result.solutions or result.status == STATUS_STOPPED:
+        return result, problem
+    return None, None
+
+
+def _policy_step_diagnostics(
+    *,
+    policy_step: InferenceTierPolicyStep,
+    policy_step_index: int,
+    catalog: ActionCatalog,
+    turn: TurnInfo,
+    observation: InferenceObservation,
+    seed_count: int,
+    band_residual_2x: int | None,
+) -> dict[str, object]:
+    catalog_context = turn_catalog_context_for_policy_step(
+        turn,
+        observation.player_id,
+        policy_step,
+    )
+    return {
+        "policyStepId": policy_step.id,
+        "policyStepIndex": policy_step_index,
+        "policyStepsAttempted": policy_step_index + 1,
+        "constraintSnapshot": policy_step.constraint_snapshot(),
+        "resolvedEligibleEngineIds": sorted(catalog_context.eligible_engine_ids),
+        "resolvedEligibleBeamIds": sorted(catalog_context.eligible_beam_ids),
+        "resolvedEligibleTorpIds": sorted(catalog_context.eligible_torp_ids),
+        "resolvedBuildableHullIds": sorted(catalog_context.buildable_hull_ids),
+        "alpha": policy_step.alpha,
+        "comboCount": len(catalog.ship_build_combos),
+        "seedCount": seed_count,
+        "bandResidual2x": band_residual_2x,
+    }
+
+
+def _make_incremental_admitter(
+    state: PolicyLadderState,
+    on_admitted: Callable[[InferenceSolution], None] | None,
+) -> Callable[[InferenceSolution], None]:
+    """Merge each solver solution into held top-K as soon as it is found."""
+
+    def admit(solution: InferenceSolution) -> None:
+        _merge_exact_solutions(
+            state.merged_solutions,
+            state.seen_signatures,
+            (solution,),
+            resolved_max_solutions=state.resolved_max_solutions,
+            on_admitted=on_admitted,
+        )
+
+    return admit
+
+
+@dataclass
+class _TierStepRun:
+    """Cancel and time-budget guards shared across one tier step."""
+
+    state: PolicyLadderState
+    time_limit_seconds: float | None
+    cancel_token: InferenceCancelToken | None
+
+    def should_stop(self) -> bool:
+        if self.cancel_token is not None and self.cancel_token.is_cancelled():
+            self.state.cancelled = True
+            self.state.ladder_complete = True
+            return True
+        if remaining_time(self.state.started_at, self.time_limit_seconds) <= 0:
+            self.state.time_limited = True
+            self.state.ladder_complete = True
+            return True
+        return False
+
+    def remaining_seconds(self) -> float:
+        return remaining_time(self.state.started_at, self.time_limit_seconds)
+
+
+def _abort_tier_step_on_seed_result(
+    state: PolicyLadderState,
+    seed_result: InferenceResult,
+    seed_problem: InferenceProblem,
+) -> bool:
+    """Apply terminal seed status to state. Returns True when the tier step should end."""
+    if seed_result.status == STATUS_INVALID_PROBLEM:
+        state.last_status = seed_result.status
+        state.last_diagnostics = dict(seed_result.diagnostics)
+        state.problem = seed_problem
+        state.ladder_complete = True
+        return True
+    if seed_result.status == STATUS_STOPPED:
+        state.cancelled = True
+        state.last_status = seed_result.status
+        state.last_diagnostics = dict(seed_result.diagnostics)
+        state.problem = seed_problem
+        state.ladder_complete = True
+        return True
+    return False
+
+
+def run_policy_ladder_tier_step(
+    state: PolicyLadderState,
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    *,
+    time_limit_seconds: float | None,
+    cancel_token: InferenceCancelToken | None = None,
+    on_admitted: Callable[[InferenceSolution], None] | None = None,
+) -> None:
+    """Run one inference search tier step; mutates ``state`` in place."""
+    if state.ladder_complete or state.next_step_index >= len(state.policy_steps):
+        state.ladder_complete = True
+        return
+
+    run = _TierStepRun(state, time_limit_seconds, cancel_token)
+    if run.should_stop():
+        return
+
+    step_index = state.next_step_index
+    policy_step = state.policy_steps[step_index]
+    state.policy_steps_attempted.append(policy_step.id)
+    catalog = build_action_catalog_from_turn(
+        observation,
+        turn,
+        policy_step=policy_step,
+        policy_step_index=step_index,
+    )
+    state.catalog = catalog
+    current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)
+    added_combo_ids = (
+        current_combo_ids
+        if state.prior_combo_ids is None
+        else current_combo_ids - state.prior_combo_ids
+    )
+    state.prior_combo_ids = current_combo_ids
+    current_aggregate_action_ids = frozenset(action.id for action in catalog.aggregate_actions)
+    added_aggregate_action_ids = (
+        current_aggregate_action_ids
+        if state.prior_aggregate_action_ids is None
+        else current_aggregate_action_ids - state.prior_aggregate_action_ids
+    )
+    state.prior_aggregate_action_ids = current_aggregate_action_ids
+
+    admit_solution = _make_incremental_admitter(state, on_admitted)
+    catalog_solve_max = _catalog_solve_max_solutions(
+        len(state.merged_solutions),
+        state.resolved_max_solutions,
+    )
+
+    new_exact_before_step = len(state.merged_solutions)
+    seeds_for_step = list(state.band_seeds)
+    state.band_seeds = []
+
+    for seed in seeds_for_step[: policy_step.max_seeds]:
+        if run.should_stop():
+            return
+        seed_result, seed_problem = _solve_seed_progression(
+            observation,
+            catalog,
+            seed,
+            max_solutions=catalog_solve_max,
+            time_limit_seconds=run.remaining_seconds(),
+            cancel_token=cancel_token,
+            on_solution=admit_solution,
+        )
+        if seed_result is None or seed_problem is None:
+            continue
+        if _abort_tier_step_on_seed_result(state, seed_result, seed_problem):
+            return
+        state.problem = seed_problem
+        if seed_result.status == STATUS_TIME_LIMITED:
+            state.time_limited = True
+
+    if state.last_status == STATUS_INVALID_PROBLEM:
+        state.ladder_complete = True
+        return
+
+    if run.should_stop():
+        return
+
+    catalog_solve_max = _catalog_solve_max_solutions(
+        len(state.merged_solutions),
+        state.resolved_max_solutions,
+    )
+
+    exact_result, problem = _solve_catalog(
+        observation,
+        catalog,
+        max_solutions=catalog_solve_max,
+        time_limit_seconds=run.remaining_seconds(),
+        cancel_token=cancel_token,
+        on_solution=admit_solution,
+    )
+    state.last_status = exact_result.status
+    state.last_diagnostics = dict(exact_result.diagnostics)
+    state.problem = problem
+    if exact_result.status == STATUS_INVALID_PROBLEM:
+        state.ladder_complete = True
+        return
+    if exact_result.status == STATUS_STOPPED:
+        state.cancelled = True
+        state.ladder_complete = True
+        return
+
+    if exact_result.status == STATUS_TIME_LIMITED:
+        state.time_limited = True
+
+    band_residual_2x: int | None = None
+    if not exact_result.solutions and policy_step.alpha > 0:
+        if not run.should_stop() and run.remaining_seconds() > 0:
+            band_result, band_problem = _solve_catalog(
+                observation,
+                catalog,
+                max_solutions=policy_step.max_seeds,
+                time_limit_seconds=run.remaining_seconds(),
+                military_score_alpha=policy_step.alpha,
+                cancel_token=cancel_token,
+            )
+            state.problem = band_problem
+            state.last_diagnostics = dict(band_result.diagnostics)
+            if band_result.status == STATUS_STOPPED:
+                state.cancelled = True
+                state.ladder_complete = True
+                return
+            if band_result.solutions:
+                state.band_seeds = list(band_result.solutions[: policy_step.max_seeds])
+                best_solution = band_result.solutions[0]
+                explained = _explained_military_score_2x(best_solution, catalog)
+                band_residual_2x = observation.military_delta_2x - explained
+                if (
+                    state.best_band_residual_2x is None
+                    or band_residual_2x < state.best_band_residual_2x
+                ):
+                    state.best_band_residual_2x = band_residual_2x
+            elif band_result.status == STATUS_INVALID_PROBLEM:
+                state.last_status = band_result.status
+                state.ladder_complete = True
+                return
+
+    state.step_diagnostics.append(
+        _policy_step_diagnostics(
+            policy_step=policy_step,
+            policy_step_index=step_index,
+            catalog=catalog,
+            turn=turn,
+            observation=observation,
+            seed_count=len(seeds_for_step),
+            band_residual_2x=band_residual_2x,
+        )
+    )
+
+    state.next_step_index = step_index + 1
+
+    if state.merged_solutions and _solution_fully_explained_by_ship_builds_only(
+        state.merged_solutions[0],
+        observation,
+        catalog,
+    ):
+        state.ladder_complete = True
+        return
+
+    if (
+        len(state.merged_solutions) == new_exact_before_step
+        and len(state.merged_solutions) > 0
+        and not added_combo_ids
+        and not added_aggregate_action_ids
+    ):
+        state.ladder_early_stop_reason = "no_new_exact_signatures"
+        state.ladder_complete = True
+        return
+
+    if state.next_step_index >= len(state.policy_steps):
+        state.ladder_complete = True
