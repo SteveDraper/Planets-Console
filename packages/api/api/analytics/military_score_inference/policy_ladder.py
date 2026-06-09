@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
+from api.analytics.military_score_inference import policy_ladder_tier_step
 from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
@@ -18,6 +17,11 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
+    remaining_time,
+    run_policy_ladder_tier_step,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
@@ -25,44 +29,8 @@ from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
-from api.analytics.military_score_inference.tier_policy import (
-    InferenceTierPolicyStep,
-    resolve_tier_policies,
-)
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
-
-
-@dataclass
-class PolicyLadderState:
-    """Mutable cross-tier state for one policy-ladder row run."""
-
-    policy_steps: tuple[InferenceTierPolicyStep, ...]
-    policy_steps_attempted: list[str] = field(default_factory=list)
-    step_diagnostics: list[dict[str, object]] = field(default_factory=list)
-    merged_solutions: list[InferenceSolution] = field(default_factory=list)
-    seen_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
-    catalog: ActionCatalog | None = None
-    problem: InferenceProblem | None = None
-    last_status: str = STATUS_NO_EXACT_SOLUTION
-    last_diagnostics: dict[str, object] = field(default_factory=dict)
-    resolved_max_solutions: int = 20
-    time_limited: bool = False
-    band_seeds: list[InferenceSolution] = field(default_factory=list)
-    best_band_residual_2x: int | None = None
-    prior_combo_ids: frozenset[str] | None = None
-    prior_aggregate_action_ids: frozenset[str] | None = None
-    ladder_early_stop_reason: str | None = None
-    next_step_index: int = 0
-    ladder_complete: bool = False
-    cancelled: bool = False
-    started_at: float = field(default_factory=time.monotonic)
-
-
-from api.analytics.military_score_inference.policy_ladder_tier_step import (  # noqa: E402
-    remaining_time,
-    run_policy_ladder_tier_step,
-    solution_satisfies_exact_hard_equalities,
-)
 
 
 def _missing_tier_state_result(
@@ -134,7 +102,9 @@ def finalize_policy_ladder_result(
         status = STATUS_STOPPED
     elif merged_solutions:
         if any(
-            solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+            policy_ladder_tier_step.solution_satisfies_exact_hard_equalities(
+                solution, observation, catalog
+            )
             for solution in merged_solutions
         ):
             status = STATUS_EXACT

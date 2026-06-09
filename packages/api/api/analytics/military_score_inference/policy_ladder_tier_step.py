@@ -21,7 +21,7 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
-from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_STOPPED,

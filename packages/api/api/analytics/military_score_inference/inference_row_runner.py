@@ -14,9 +14,9 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
-from api.analytics.military_score_inference.policy_ladder import (
-    PolicyLadderState,
-    finalize_policy_ladder_result,
+from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
 )
 from api.models.game import TurnInfo

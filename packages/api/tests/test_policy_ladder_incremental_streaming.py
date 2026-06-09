@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.models import InferenceSolution
-from api.analytics.military_score_inference.policy_ladder import (
-    PolicyLadderState,
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
