@@ -347,20 +347,17 @@ class InferenceRowScheduler:
         if state is None or state.catalog is None or not state.merged_solutions:
             return
         segment_id: str | None = None
-        is_target_segment = True
         orchestration = run.orchestration
         if orchestration is not None:
             segment = orchestration.current_segment()
             if segment is not None:
                 segment_id = segment.segment_id
-                is_target_segment = segment.segment_id == "reported_host_turn"
         session.event_queue.put(
             HeldSolutionsUpdated(
                 solutions=tuple(state.merged_solutions),
                 catalog=state.catalog,
                 observation=observation,
                 segment_id=segment_id,
-                is_target_segment=is_target_segment,
             )
         )
 

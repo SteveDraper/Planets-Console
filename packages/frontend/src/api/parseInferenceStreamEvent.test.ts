@@ -6,9 +6,8 @@ describe('parseInferenceStreamEvent', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
         type: 'solution',
-        segmentId: 'accel_window',
+        segmentId: 'reported_host_turn',
         scoreboardDeltaSource: 'accelerated_segment',
-        isTargetSegment: false,
         solutions: [
           {
             objectiveValue: 12,
@@ -19,9 +18,8 @@ describe('parseInferenceStreamEvent', () => {
     )
     expect(event).toMatchObject({
       type: 'solution',
-      segmentId: 'accel_window',
+      segmentId: 'reported_host_turn',
       scoreboardDeltaSource: 'accelerated_segment',
-      isTargetSegment: false,
     })
   })
 

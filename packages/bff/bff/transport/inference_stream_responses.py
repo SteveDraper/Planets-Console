@@ -12,7 +12,6 @@ class InferenceStreamSolutionEvent(BaseModel):
     solutions: list[dict[str, Any]]
     segmentId: str | None = None
     scoreboardDeltaSource: str | None = None
-    isTargetSegment: bool | None = None
 
 
 class InferenceStreamProgressEvent(BaseModel):

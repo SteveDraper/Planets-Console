@@ -20,7 +20,6 @@ class HeldSolutionsUpdated:
     catalog: ActionCatalog
     observation: InferenceObservation | None = None
     segment_id: str | None = None
-    is_target_segment: bool = True
 
 
 @dataclass(frozen=True)

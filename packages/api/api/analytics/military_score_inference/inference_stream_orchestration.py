@@ -89,7 +89,8 @@ class InferenceStreamOrchestration:
         return self.solve_turn
 
     def should_emit_streaming_solutions(self) -> bool:
-        return self.current_segment() is not None
+        segment = self.current_segment()
+        return segment is not None and segment.segment_id == "reported_host_turn"
 
     def new_ladder_state(self) -> PolicyLadderState:
         return PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)))

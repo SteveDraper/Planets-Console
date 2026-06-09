@@ -37,7 +37,6 @@ export function streamSolutionsToRowSolutions(
 
 export type RowStreamState = {
   heldSolutions: ScoresInferenceSolution[]
-  hasInterimSegmentProgress: boolean
   status: string
   summary: string
   isComplete: boolean
@@ -49,7 +48,6 @@ export function initialRowStreamState(
 ): RowStreamState {
   return {
     heldSolutions: [...carryOverSolutions],
-    hasInterimSegmentProgress: false,
     status: 'pending',
     summary: 'Build inference in progress',
     isComplete: false,
@@ -86,20 +84,6 @@ export function displayStatusForRow(
   return 'failure'
 }
 
-function streamDiagnostics(state: RowStreamState): Record<string, unknown> {
-  if (!state.hasInterimSegmentProgress) {
-    return state.diagnostics
-  }
-  return {
-    ...state.diagnostics,
-    streamInterimSegmentProgress: true,
-  }
-}
-
-function isTargetSegmentSolutionEvent(event: Extract<InferenceStreamEvent, { type: 'solution' }>): boolean {
-  return event.isTargetSegment !== false
-}
-
 export function rowDetailFromStreamState(
   playerId: number,
   state: RowStreamState
@@ -113,7 +97,7 @@ export function rowDetailFromStreamState(
     solutionCount,
     isComplete: state.isComplete,
     solutions: state.heldSolutions,
-    diagnostics: streamDiagnostics(state),
+    diagnostics: state.diagnostics,
   }
 }
 
@@ -172,19 +156,9 @@ export function reduceRowStreamState(
   }
 
   if (event.type === 'solution') {
-    if (!isTargetSegmentSolutionEvent(event)) {
-      return {
-        ...state,
-        hasInterimSegmentProgress: true,
-        summary: event.segmentId
-          ? `Searching (${event.segmentId.replace(/_/g, ' ')})`
-          : 'Build inference in progress',
-      }
-    }
     return {
       ...state,
       heldSolutions: streamSolutionsToRowSolutions(event.solutions),
-      hasInterimSegmentProgress: false,
     }
   }
 

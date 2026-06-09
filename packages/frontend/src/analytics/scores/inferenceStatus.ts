@@ -46,11 +46,5 @@ export function isActivelySearchingInference(
   if (detail.isComplete || isGloballyPaused || detail.displayStatus === 'paused') {
     return false
   }
-  if (
-    detail.solutionCount === 0 &&
-    detail.diagnostics?.streamInterimSegmentProgress === true
-  ) {
-    return false
-  }
   return detail.displayStatus === 'pending' || detail.displayStatus === 'success'
 }
