@@ -145,10 +145,6 @@ class InferenceRowScheduler:
             self._condition.notify_all()
             return self._global_pause_status_locked(scope)
 
-    def register_session(self, session: InferenceRowStreamSession) -> None:
-        with self._condition:
-            self._get_or_create_run(session)
-
     def unregister_session(self, run_id: str) -> None:
         with self._condition:
             run = self._runs.pop(run_id, None)

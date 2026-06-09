@@ -190,7 +190,7 @@ def test_emit_held_solutions_snapshots_merged_list(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     session = _session_for_turn(sample_turn)
-    scheduler.register_session(session)
+    scheduler.enqueue_tier_ladder(session)
     run = scheduler._runs[session.run_id]
     run.ladder_state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     run.ladder_state.catalog = ActionCatalog((), (), {})

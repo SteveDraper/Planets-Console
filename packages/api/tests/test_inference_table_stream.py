@@ -8,7 +8,6 @@ import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    _TierJob,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
@@ -179,11 +178,9 @@ def test_cancel_run_purges_queued_tier_jobs_for_run(sample_turn):
     scheduler = InferenceRowScheduler(worker_count=0)
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid)
     other_session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
-    scheduler.register_session(session)
-    scheduler.register_session(other_session)
-    scheduler._enqueue_job(_TierJob(session=session))
+    scheduler.enqueue_tier_ladder(session)
+    scheduler.enqueue_tier_ladder(other_session)
     scheduler._enqueue_continuation(session)
-    scheduler._enqueue_job(_TierJob(session=other_session))
 
     scheduler.cancel_run(session.run_id)
 

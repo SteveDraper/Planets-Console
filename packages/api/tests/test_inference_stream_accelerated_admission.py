@@ -296,10 +296,8 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    scheduler.register_session(session)
+    scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
     run = scheduler._runs[session.run_id]
-    run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
     run.ladder_state.catalog = ActionCatalog((), (), {})
     run.ladder_state.merged_solutions = [
         InferenceSolution(

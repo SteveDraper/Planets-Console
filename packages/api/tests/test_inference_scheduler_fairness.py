@@ -8,7 +8,6 @@ import time
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    _TierJob,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -115,7 +114,6 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
 
     execution_order: list[tuple[int, int]] = []
     gate = threading.Event()
-    gate.set()
     short_ladder = resolve_tier_policies(None)[:3]
 
     def fake_tier_step(
@@ -149,16 +147,16 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     session_a = _session_for_player(sample_turn, player_id=player_ids[0])
     session_b = _session_for_player(sample_turn, player_id=player_ids[1])
-    scheduler.register_session(session_a)
-    scheduler.register_session(session_b)
+    scheduler.pause_globally(scope)
+    scheduler.enqueue_tier_ladder(session_a)
+    scheduler.enqueue_tier_ladder(session_b)
     scheduler._runs[session_a.run_id].ladder_state = PolicyLadderState(
         policy_steps=short_ladder,
     )
     scheduler._runs[session_b.run_id].ladder_state = PolicyLadderState(
         policy_steps=short_ladder,
     )
-    scheduler._enqueue_job(_TierJob(session=session_a))
-    scheduler._enqueue_job(_TierJob(session=session_b))
+    scheduler.resume_globally(scope)
     gate.set()
 
     deadline = time.monotonic() + 3.0
