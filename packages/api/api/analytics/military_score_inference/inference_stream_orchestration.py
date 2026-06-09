@@ -28,10 +28,8 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
 )
-from api.analytics.military_score_inference.policy_ladder import (
-    PolicyLadderState,
-    finalize_policy_ladder_result,
-)
+from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_complete_factory import (
     row_complete_from_accelerated_payload,
     row_complete_stopped,

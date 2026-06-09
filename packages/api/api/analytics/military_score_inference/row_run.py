@@ -11,7 +11,7 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun, TierJob
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.errors import ValidationError
