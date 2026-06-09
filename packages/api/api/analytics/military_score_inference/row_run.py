@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -21,15 +20,13 @@ class TierJob:
 
 
 class RowRun:
-    """One scoreboard row's ladder state, orchestration, queues, and held work while paused."""
+    """One scoreboard row's ladder state, orchestration, and held work while paused."""
 
     def __init__(self, session: InferenceRowStreamSession) -> None:
         self.session = session
         self.ladder_state: PolicyLadderState | None = None
         self.orchestration: InferenceStreamOrchestration | None = None
-        self.continuation_jobs: deque[TierJob] = deque()
         self.held_jobs: list[TierJob] = []
-        self.held_continuation_pending = False
 
     @property
     def run_id(self) -> str:
@@ -41,32 +38,13 @@ class RowRun:
 
     @property
     def held_continuation_count(self) -> int:
-        return 1 if self.held_continuation_pending else 0
-
-    def enqueue_continuation(self) -> TierJob:
-        job = TierJob(session=self.session, is_continuation=True)
-        self.continuation_jobs.append(job)
-        return job
-
-    def requeue_continuation(self, job: TierJob) -> bool:
-        """Return True when this row newly joined the continuation round-robin."""
-        was_empty = not self.continuation_jobs
-        self.continuation_jobs.append(job)
-        return was_empty
+        return sum(1 for job in self.held_jobs if job.is_continuation)
 
     def hold_job(self, job: TierJob) -> None:
         self.held_jobs.append(job)
 
-    def hold_continuation_signal(self) -> None:
-        self.held_continuation_pending = True
-
-    def drain_continuations_to_held(self) -> None:
-        while self.continuation_jobs:
-            self.held_jobs.append(self.continuation_jobs.popleft())
-
     def clear_held(self) -> None:
         self.held_jobs.clear()
-        self.held_continuation_pending = False
 
     def pop_held_jobs(self) -> list[TierJob]:
         jobs = self.held_jobs
@@ -74,6 +52,4 @@ class RowRun:
         return jobs
 
     def purge_queued_work(self) -> None:
-        self.continuation_jobs.clear()
         self.held_jobs.clear()
-        self.held_continuation_pending = False

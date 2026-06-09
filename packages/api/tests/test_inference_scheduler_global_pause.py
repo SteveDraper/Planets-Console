@@ -75,6 +75,32 @@ def test_pause_with_mismatched_scope_raises_validation_error(sample_turn):
         scheduler.resume_globally(scope_b)
 
 
+def test_pause_holds_continuation_tier_job_enqueued_while_paused(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    scheduler.begin_scope(scope)
+    session = _session_for_turn(sample_turn)
+    scheduler.pause_globally(scope)
+
+    scheduler._enqueue_continuation(session)
+
+    status = scheduler.global_pause_status(scope)
+    assert status["heldContinuationCount"] == 1
+    run = scheduler._runs[session.run_id]
+    assert len(run.held_jobs) == 1
+    assert run.held_jobs[0].is_continuation is True
+
+    resumed = scheduler.resume_globally(scope)
+    assert resumed["heldContinuationCount"] == 0
+    assert len(scheduler._work_queue) == 1
+    assert scheduler._work_queue[0].is_continuation is True
+
+
 def test_pause_holds_enqueued_jobs_and_resume_requeues(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
