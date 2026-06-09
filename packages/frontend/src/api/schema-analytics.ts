@@ -24,26 +24,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/analytics/scores/inference/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Scores Inference Stream
-         * @description Stream per-row military score build inference for the Scores analytic (NDJSON).
-         */
-        get: operations["get_scores_inference_stream_analytics_scores_inference_stream_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/analytics/scores/inference/table-stream": {
         parameters: {
             query?: never;
@@ -174,87 +154,6 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** InferenceStreamCompleteEvent */
-        InferenceStreamCompleteEvent: {
-            /**
-             * Type
-             * @constant
-             */
-            type: "complete";
-            /** Status */
-            status: string;
-            /** Summary */
-            summary: string;
-            /** Solutioncount */
-            solutionCount: number;
-            /**
-             * Iscomplete
-             * @default true
-             */
-            isComplete: boolean;
-            /**
-             * Diagnostics
-             * @default null
-             */
-            diagnostics: {
-                [key: string]: unknown;
-            } | null;
-        };
-        /** InferenceStreamErrorEvent */
-        InferenceStreamErrorEvent: {
-            /**
-             * Type
-             * @constant
-             */
-            type: "error";
-            /** Detail */
-            detail: string;
-        };
-        /** InferenceStreamProgressEvent */
-        InferenceStreamProgressEvent: {
-            /**
-             * Type
-             * @constant
-             */
-            type: "progress";
-            /**
-             * Policystepid
-             * @default null
-             */
-            policyStepId: string | null;
-            /**
-             * Combocount
-             * @default null
-             */
-            comboCount: number | null;
-            /**
-             * Heldcount
-             * @default null
-             */
-            heldCount: number | null;
-            /**
-             * Solverstatus
-             * @default null
-             */
-            solverStatus: string | null;
-            /**
-             * Elapsedseconds
-             * @default null
-             */
-            elapsedSeconds: number | null;
-        };
-        /** InferenceStreamSolutionEvent */
-        InferenceStreamSolutionEvent: {
-            /**
-             * Type
-             * @constant
-             */
-            type: "solution";
-            /** Solutions */
-            solutions: {
-                [key: string]: unknown;
-            }[];
-        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -299,41 +198,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_scores_inference_stream_analytics_scores_inference_stream_get: {
-        parameters: {
-            query: {
-                gameId: number;
-                turn: number;
-                perspective: number;
-                playerId: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description NDJSON stream of solution, progress, complete, and error events. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "application/x-ndjson": components["schemas"]["InferenceStreamSolutionEvent"] | components["schemas"]["InferenceStreamProgressEvent"] | components["schemas"]["InferenceStreamCompleteEvent"] | components["schemas"]["InferenceStreamErrorEvent"];
                 };
             };
             /** @description Validation Error */

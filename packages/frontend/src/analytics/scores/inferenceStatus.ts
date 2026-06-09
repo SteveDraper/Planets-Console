@@ -28,13 +28,6 @@ export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolea
   )
 }
 
-export function canResumeInferenceRow(
-  detail: ScoresInferenceRowDetail,
-  options: { isGloballyPaused?: boolean } = {}
-): boolean {
-  return detail.displayStatus === 'paused' && !options.isGloballyPaused
-}
-
 export function isIncompleteInferenceRow(detail: ScoresInferenceRowDetail): boolean {
   if (detail.isComplete) {
     return false

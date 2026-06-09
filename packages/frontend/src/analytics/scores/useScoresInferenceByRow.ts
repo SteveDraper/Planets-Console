@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
-import {
-  fetchScoresRowInferenceStream,
-  fetchScoresTableInferenceStream,
-} from '../../api/bff'
+import { fetchScoresTableInferenceStream } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import {
@@ -22,7 +19,6 @@ export type UseScoresInferenceByRowOptions = {
 
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
-  resumeRow: (playerId: number) => void
 }
 
 export function useScoresInferenceByRow(
@@ -42,12 +38,7 @@ export function useScoresInferenceByRow(
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<
     Map<number, ScoresInferenceRowDetail>
   >(new Map())
-  const detailsByPlayerIdRef = useRef(detailsByPlayerId)
-  detailsByPlayerIdRef.current = detailsByPlayerId
-
   const tableAbortControllerRef = useRef<AbortController | null>(null)
-  const resumeAbortControllersRef = useRef<Map<number, AbortController>>(new Map())
-  const independentResumePlayersRef = useRef<Set<number>>(new Set())
   const rowStreamStateRef = useRef<Map<number, RowStreamState>>(new Map())
 
   const publishPlayerState = useCallback((playerId: number) => {
@@ -92,69 +83,9 @@ export function useScoresInferenceByRow(
       if (typeof playerId !== 'number') {
         return
       }
-      if (independentResumePlayersRef.current.has(playerId)) {
-        return
-      }
       applyStreamEvent(playerId, event)
     },
     [applyGlobalPauseEvent, applyStreamEvent]
-  )
-
-  const startStreamForPlayer = useCallback(
-    (playerId: number, carryOverSolutions: ScoresInferenceRowDetail['solutions'] = []) => {
-      if (scope == null) {
-        return
-      }
-
-      resumeAbortControllersRef.current.get(playerId)?.abort()
-      const controller = new AbortController()
-      resumeAbortControllersRef.current.set(playerId, controller)
-      independentResumePlayersRef.current.add(playerId)
-
-      rowStreamStateRef.current.set(
-        playerId,
-        initialRowStreamState(carryOverSolutions ?? [])
-      )
-      publishPlayerState(playerId)
-
-      void fetchScoresRowInferenceStream(scope, playerId, {
-        signal: controller.signal,
-        onEvent: (event) => {
-          if (event.type === 'globalPause') {
-            applyGlobalPauseEvent(event)
-            return
-          }
-          applyStreamEvent(playerId, event)
-        },
-      })
-        .catch((error) => {
-          if (controller.signal.aborted) {
-            return
-          }
-          setDetailsByPlayerId((previous) => {
-            const next = new Map(previous)
-            next.set(playerId, failureDetail(playerId, errorDetailFromUnknown(error)))
-            return next
-          })
-        })
-        .finally(() => {
-          resumeAbortControllersRef.current.delete(playerId)
-          independentResumePlayersRef.current.delete(playerId)
-        })
-    },
-    [scope, applyGlobalPauseEvent, applyStreamEvent, publishPlayerState]
-  )
-
-  const resumeRow = useCallback(
-    (playerId: number) => {
-      const detail = detailsByPlayerIdRef.current.get(playerId)
-      const carryOver =
-        detail?.displayStatus === 'paused' || detail?.displayStatus === 'stopped'
-          ? detail.solutions
-          : []
-      startStreamForPlayer(playerId, carryOver)
-    },
-    [startStreamForPlayer]
   )
 
   useEffect(() => {
@@ -165,11 +96,6 @@ export function useScoresInferenceByRow(
     }
 
     tableAbortControllerRef.current?.abort()
-    for (const controller of resumeAbortControllersRef.current.values()) {
-      controller.abort()
-    }
-    resumeAbortControllersRef.current = new Map()
-    independentResumePlayersRef.current = new Set()
 
     const initialStates = new Map<number, RowStreamState>()
     for (const playerId of playerIds) {
@@ -208,16 +134,11 @@ export function useScoresInferenceByRow(
     return () => {
       controller.abort()
       tableAbortControllerRef.current = null
-      for (const resumeController of resumeAbortControllersRef.current.values()) {
-        resumeController.abort()
-      }
-      resumeAbortControllersRef.current = new Map()
-      independentResumePlayersRef.current = new Set()
     }
   }, [enabled, scope, playerIdsKey, handleTableStreamEvent])
 
   if (!enabled || tableData?.inferenceByRow == null) {
-    return { inferenceByRow: undefined, resumeRow }
+    return { inferenceByRow: undefined }
   }
 
   const inferenceByRow = stubs.map((stub, rowIndex) => {
@@ -228,5 +149,5 @@ export function useScoresInferenceByRow(
     return detailsByPlayerId.get(playerId) ?? pendingDetail(playerId)
   })
 
-  return { inferenceByRow, resumeRow }
+  return { inferenceByRow }
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { ScoresInferenceRowDetail } from '../../api/bff'
 import {
   canOpenInferenceDetail,
-  canResumeInferenceRow,
   inferenceAccessibleLabel,
   isActivelySearchingInference,
   isIncompleteInferenceRow,
@@ -54,22 +53,6 @@ describe('canOpenInferenceDetail', () => {
     expect(canOpenInferenceDetail(detail({ displayStatus: 'pending' }))).toBe(false)
     expect(
       canOpenInferenceDetail(detail({ displayStatus: 'success', solutionCount: 0 }))
-    ).toBe(false)
-  })
-})
-
-describe('inference transport controls', () => {
-  it('shows resume only when paused and not globally paused', () => {
-    expect(canResumeInferenceRow(detail({ displayStatus: 'paused', isComplete: false }))).toBe(
-      true
-    )
-    expect(canResumeInferenceRow(detail({ displayStatus: 'pending', isComplete: false }))).toBe(
-      false
-    )
-    expect(
-      canResumeInferenceRow(detail({ displayStatus: 'paused', isComplete: false }), {
-        isGloballyPaused: true,
-      })
     ).toBe(false)
   })
 })

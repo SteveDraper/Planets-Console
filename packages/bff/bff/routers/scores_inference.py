@@ -80,47 +80,6 @@ def get_scores_inference(
 
 
 @router.get(
-    "/inference/stream",
-    responses={
-        200: {
-            "description": "NDJSON stream of solution, progress, complete, and error events.",
-            "content": {
-                "application/x-ndjson": {
-                    "schema": {
-                        "oneOf": [
-                            {"$ref": "#/components/schemas/InferenceStreamSolutionEvent"},
-                            {"$ref": "#/components/schemas/InferenceStreamProgressEvent"},
-                            {"$ref": "#/components/schemas/InferenceStreamCompleteEvent"},
-                            {"$ref": "#/components/schemas/InferenceStreamErrorEvent"},
-                        ]
-                    }
-                }
-            },
-        }
-    },
-)
-def get_scores_inference_stream(
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Stream per-row military score build inference for the Scores analytic (NDJSON)."""
-    core = get_core_client()
-    return StreamingResponse(
-        stream_inference_row(
-            lambda: core.iter_scores_row_inference_stream(
-                game_id,
-                perspective,
-                turn,
-                player_id,
-            )
-        ),
-        media_type="application/x-ndjson",
-    )
-
-
-@router.get(
     "/inference/table-stream",
     responses={
         200: {

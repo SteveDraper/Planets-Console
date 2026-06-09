@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Octagon, Play, X } from 'lucide-react'
+import { Octagon, X } from 'lucide-react'
 import type {
   AnalyticShellScope,
   ScoresInferenceRowDetail,
@@ -10,7 +10,6 @@ import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
 import {
   canOpenInferenceDetail,
-  canResumeInferenceRow,
   inferenceAccessibleLabel,
   isActivelySearchingInference,
   isIncompleteInferenceRow,
@@ -25,42 +24,20 @@ import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
   analyticScope: AnalyticShellScope
-  onResumeRow?: (playerId: number) => void
   isGloballyPaused?: boolean
   globalInferencePause?: UseGlobalInferencePauseResult
-}
-
-function ResumeInferenceButton({ onResumeRow }: { onResumeRow: () => void }) {
-  return (
-    <button
-      type="button"
-      title="Resume build inference for this row"
-      aria-label="Resume build inference for this row"
-      onClick={onResumeRow}
-      className="inline-flex items-center justify-center rounded p-1 text-slate-300 hover:bg-white/10"
-    >
-      <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
-    </button>
-  )
 }
 
 function InferenceStatusCell({
   detail,
   onOpenDetail,
-  onResumeRow,
   isGloballyPaused = false,
 }: {
   detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
-  onResumeRow?: (playerId: number) => void
   isGloballyPaused?: boolean
 }) {
   const label = inferenceAccessibleLabel(detail)
-  const playerId = detail.playerId
-  const showResume =
-    canResumeInferenceRow(detail, { isGloballyPaused }) &&
-    typeof playerId === 'number' &&
-    onResumeRow != null
 
   if (isIncompleteInferenceRow(detail)) {
     const activelySearching = isActivelySearchingInference(detail, isGloballyPaused)
@@ -74,9 +51,6 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
-        {showResume ? (
-          <ResumeInferenceButton onResumeRow={() => onResumeRow(playerId)} />
-        ) : null}
       </div>
     )
   }
@@ -125,7 +99,6 @@ function InferenceStatusCell({
 export function ScoresTableView({
   data,
   analyticScope: _analyticScope,
-  onResumeRow,
   isGloballyPaused = false,
   globalInferencePause,
 }: ScoresTableViewProps) {
@@ -174,7 +147,6 @@ export function ScoresTableView({
                         <InferenceStatusCell
                           detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
-                          onResumeRow={onResumeRow}
                           isGloballyPaused={isGloballyPaused}
                         />
                       </td>

@@ -714,39 +714,6 @@ export async function resumeInferenceGlobally(
   return r.json()
 }
 
-export async function fetchScoresRowInferenceStream(
-  scope: AnalyticShellScope,
-  playerId: number,
-  handlers: {
-    signal?: AbortSignal
-    onEvent: (event: InferenceStreamEvent) => void
-  }
-): Promise<void> {
-  const path = '/bff/analytics/scores/inference/stream'
-  const params = analyticScopeParams(scope)
-  params.set('playerId', String(playerId))
-  const qs = `?${params.toString()}`
-  const endpointLabel = `GET ${path}`
-  const r = await bffRequest(
-    `${path}${qs}`,
-    { signal: handlers.signal, cache: 'no-store' },
-    endpointLabel
-  )
-  if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
-  }
-  if (!r.body) {
-    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
-  }
-
-  await readNdjsonStream(r.body, (line) => {
-    const event = parseInferenceStreamEvent(line)
-    if (event) {
-      handlers.onEvent(event)
-    }
-  })
-}
-
 export async function fetchScoresTableInferenceStream(
   scope: AnalyticShellScope,
   playerIds: number[],

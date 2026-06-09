@@ -6,9 +6,6 @@ from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
 )
-from api.analytics.military_score_inference.inference_row_stream import (
-    iter_scores_row_inference_events,
-)
 from api.analytics.military_score_inference.inference_table_stream import (
     iter_scores_table_inference_events,
 )
@@ -93,24 +90,6 @@ def get_scores_row_inference(
             load_scoreboard_turn=load_scoreboard_turn,
         )
     return {"playerId": player_id, **inference}
-
-
-def iter_scores_row_inference_stream(
-    turn: TurnInfo,
-    player_id: int,
-    *,
-    game_id: int,
-    perspective: int,
-    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
-) -> Iterator[dict[str, object]]:
-    """Yield NDJSON wire events for one scoreboard row inference stream."""
-    yield from iter_scores_row_inference_events(
-        turn,
-        player_id,
-        game_id=game_id,
-        perspective=perspective,
-        load_scoreboard_turn=load_scoreboard_turn,
-    )
 
 
 def iter_scores_table_inference_stream(
