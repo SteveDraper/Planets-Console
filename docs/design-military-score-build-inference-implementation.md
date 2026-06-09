@@ -341,13 +341,12 @@ When inference is enabled, add one extra column to the existing scoreboard table
 
 | Icon | Meaning | Hover text | Click behavior |
 |------|---------|------------|----------------|
-| **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K** (`N > 0`). Search may continue until `isComplete`. | summarize top solution; note when search is still running | open modal with ranked held solutions (grows while streaming until plateau at K) |
-| Hourglass | No exact explanation held yet for this player row (`N = 0`) | show that inference is still running | no modal until the first held exact arrives |
+| **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K**. While search is in flight and **N = 0**, show a **dashed-border badge with 0** (same count-badge chrome, not a separate hourglass icon). When **N > 0**, use a solid border; **N** rises toward K while search continues until `isComplete`. In-progress search adds an animation affordance on the badge. | summarize top solution when **N > 0**; show that inference is still running when **N = 0** | open modal with ranked held solutions when **N > 0** (grows while streaming until plateau at K); no modal until the first held exact arrives |
 | Paused | row frozen by **inference global pause** | paused summary; held count when **N > 0** | modal when **N > 0**; resume all via column header |
 | Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
 | Global pause (column header) | freeze or resume all rows on this scope | pause/resume all build inference | `POST/DELETE .../inference/global-pause` |
 
-The row-level hourglass means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the hourglass clears when the first `solution` event arrives with a non-empty held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
+The row-level dashed-zero badge means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the badge transitions from dashed **0** to a solid count when the first `solution` event arrives with a non-empty held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
 
 ### 7.3 Modal details
 
@@ -384,7 +383,7 @@ Inference is fetched **per scoreboard row** at the solver layer. Three wire path
 
 **Batch (current):** `GET .../scores/inference?playerId=...` returns one JSON payload when the row solve completes or hits the time budget.
 
-**Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). The hourglass clears when the first `solution` arrives with `solutions.length >= 1`; the count badge and modal track `solutions.length` while search continues.
+**Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). The dashed-zero badge transitions to a solid count when the first `solution` arrives with `solutions.length >= 1`; the badge and modal track `solutions.length` while search continues.
 
 **Stream disconnect:** when the table stream ends (client `AbortSignal`, refresh, network loss, disable build inference, or natural completion after all rows finish), the server cancels all row runs for that connection and clears **inference global pause**. Reopening the table stream on the same scope **recalculates from scratch** (no server-side ladder or pause state preserved across disconnect).
 
@@ -621,7 +620,7 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 | Stream cancelled (#71 implicit cancel) | `status: stopped` when applicable; count badge when **N > 0** on the terminal wire event (not preserved server-side across reconnect) |
 | Band near-solution | Never shown directly; seeds next step only |
 
-While search is in flight (#71), **N** rises from 1 toward K as new signatures are admitted, then plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Hourglass until **N > 0**; red cross only after natural terminal `complete` / batch response with zero held exact. Halt is not failure.
+While search is in flight (#71), show a dashed-border **0** badge until the first exact is held, then **N** rises from 1 toward K as new signatures are admitted and plateaus at K when the buffer is full (eviction swaps membership without changing **N**). Red cross only after natural terminal `complete` / batch response with zero held exact. Halt is not failure.
 
 Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that status remains for future deferred-effect modeling (#49).
 
@@ -1021,7 +1020,7 @@ Steps:
 1. Add a checkbox labeled `Include build inference` to the Scores analytic controls.
 2. Include the checkbox state in the scores query key.
 3. Render the inference column only when enabled.
-4. Render inference solution count indicator, hourglass, or red cross based on row status.
+4. Render inference solution count indicator (dashed **0** or solid **N**) or red cross based on row status.
 5. Add hover text with the row summary.
 6. Keep the normal scoreboard table fast and unchanged when the checkbox is off.
 
@@ -1052,14 +1051,14 @@ Steps:
 1. Open the modal when the user clicks a row with **N > 0**.
 2. Show solutions in descending objective/probability order.
 3. Show observed deltas, action breakdown, score arithmetic, and warnings.
-4. Do not open a solution modal for hourglass rows.
+4. Do not open a solution modal for rows with **N = 0**.
 5. For red cross rows, either show hover-only diagnostics or a separate diagnostic modal if details are already available.
 
 Tests:
 
 - clicking a count badge opens the modal,
 - solutions are displayed in order,
-- hourglass rows are non-clickable or explain that solving is pending,
+- rows with **N = 0** are non-clickable or explain that solving is pending,
 - modal closes cleanly and does not reset the Scores checkbox.
 
 Done when:
@@ -1193,7 +1192,7 @@ Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Per-row solution stream
 | Incorrect priority-point model | priority-point equality soft/diagnostic until queue semantics are modeled |
 | False confidence | return multiple explanations and expose ambiguity |
 | Scoreboard regression | keep inference disabled by default and test the existing table contract |
-| Row-level solving blocks the table | per-row NDJSON streams (#71); inference row scheduler for cross-row fairness; hourglass clears on first admitted solution |
+| Row-level solving blocks the table | per-row NDJSON streams (#71); inference row scheduler for cross-row fairness; dashed-zero badge transitions to solid count on first admitted solution |
 | Open-ended SPA search consumes CPU | global pause; scope cancel; worker pool cap; batch/corpus stay time-bounded |
 | Cancel blocked by long CP-SAT call | sub-step interrupt boundaries; follow-on UNKNOWN retry if needed |
 | Dependency/platform issue | keep solver isolated behind an adapter so a fallback can be added |
