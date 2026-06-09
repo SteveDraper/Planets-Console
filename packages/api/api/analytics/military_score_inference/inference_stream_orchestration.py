@@ -18,6 +18,10 @@ from api.analytics.military_score_inference.inference_accelerated import (
 )
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.row_complete_factory import (
+    row_complete_from_accelerated_payload,
+    row_complete_stopped,
+)
 from api.analytics.military_score_inference.inference_target import (
     ScoreboardTurnLoader,
     load_accelerated_backfill_source_for_host_turn,
@@ -32,7 +36,7 @@ from api.analytics.military_score_inference.policy_ladder import (
     PolicyLadderState,
     finalize_policy_ladder_result,
 )
-from api.analytics.military_score_inference.solver import STATUS_STOPPED, STATUS_TIME_LIMITED
+from api.analytics.military_score_inference.solver import STATUS_TIME_LIMITED
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -44,68 +48,6 @@ class LadderSegmentAdvance:
 
     continue_next_segment: bool = False
     row_complete: RowComplete | None = None
-
-
-def as_stopped_row_complete(base: RowComplete) -> RowComplete:
-    return RowComplete(
-        result=InferenceResult(
-            status=STATUS_STOPPED,
-            solutions=base.result.solutions,
-            diagnostics={**base.result.diagnostics, "stopped_reason": "cancelled"},
-        ),
-        catalog=base.catalog,
-        problem=base.problem,
-        policy_steps_attempted=base.policy_steps_attempted,
-        step_diagnostics=base.step_diagnostics,
-        force_is_complete=True,
-        summary_override=base.summary_override,
-        wire_observation=base.wire_observation,
-        wire_turn=base.wire_turn,
-        extra_diagnostics=base.extra_diagnostics,
-    )
-
-
-def build_policy_ladder_stopped_row_complete(
-    state: PolicyLadderState | None,
-    observation: InferenceObservation,
-    turn: TurnInfo,
-) -> RowComplete:
-    if state is not None and state.merged_solutions:
-        result, catalog, problem, policy_steps_attempted, step_diagnostics = (
-            finalize_policy_ladder_result(state, observation, turn)
-        )
-        return as_stopped_row_complete(
-            RowComplete(
-                result=result,
-                catalog=catalog,
-                problem=problem,
-                policy_steps_attempted=policy_steps_attempted,
-                step_diagnostics=step_diagnostics,
-            )
-        )
-    return RowComplete(
-        result=InferenceResult(
-            status=STATUS_STOPPED,
-            solutions=(),
-            diagnostics={"stopped_reason": "cancelled"},
-        ),
-        summary_override="Build inference halted",
-        force_is_complete=True,
-    )
-
-
-def row_complete_from_stream_payload(complete: AcceleratedStreamRowComplete) -> RowComplete:
-    return RowComplete(
-        result=complete.result,
-        catalog=complete.catalog,
-        problem=complete.problem,
-        policy_steps_attempted=complete.policy_steps_attempted,
-        step_diagnostics=complete.step_diagnostics,
-        summary_override=complete.summary_override,
-        wire_observation=complete.wire_observation,
-        wire_turn=complete.wire_turn,
-        extra_diagnostics=complete.extra_diagnostics,
-    )
 
 
 @dataclass
@@ -240,7 +182,9 @@ class InferenceStreamOrchestration:
         if self.has_more_segments():
             return LadderSegmentAdvance(continue_next_segment=True)
         return LadderSegmentAdvance(
-            row_complete=row_complete_from_stream_payload(self._accelerated_stream_row_complete())
+            row_complete=row_complete_from_accelerated_payload(
+                self._accelerated_stream_row_complete()
+            )
         )
 
     def build_stopped_row_complete(
@@ -252,10 +196,16 @@ class InferenceStreamOrchestration:
         if ladder_state is not None and ladder_state.catalog is not None:
             self.record_ladder_segment_complete(ladder_state, observation, turn)
         if self.segment_solves:
-            return as_stopped_row_complete(
-                row_complete_from_stream_payload(self._accelerated_stream_row_complete())
+            return row_complete_stopped(
+                base=row_complete_from_accelerated_payload(
+                    self._accelerated_stream_row_complete()
+                )
             )
-        return build_policy_ladder_stopped_row_complete(ladder_state, observation, turn)
+        return row_complete_stopped(
+            ladder_state=ladder_state,
+            observation=observation,
+            turn=turn,
+        )
 
 
 def create_inference_stream_orchestration(

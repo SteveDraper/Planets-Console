@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
-    build_policy_ladder_stopped_row_complete,
+)
+from api.analytics.military_score_inference.row_complete_factory import (
+    row_complete_from_ladder_finalize,
+    row_complete_stopped,
 )
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -59,29 +62,7 @@ def build_stopped_row_complete(session: InferenceRowStreamSession) -> RowComplet
     observation, turn = solve_context(session)
     if orchestration is not None:
         return orchestration.build_stopped_row_complete(state, observation, turn)
-    return build_policy_ladder_stopped_row_complete(state, observation, turn)
-
-
-def _finalize_policy_ladder_row_complete(
-    session: InferenceRowStreamSession,
-    state: PolicyLadderState,
-    observation: InferenceObservation,
-    turn: TurnInfo,
-) -> RowComplete:
-    result, catalog, problem, policy_steps_attempted, step_diagnostics = (
-        finalize_policy_ladder_result(
-            state,
-            observation,
-            turn,
-        )
-    )
-    return RowComplete(
-        result=result,
-        catalog=catalog,
-        problem=problem,
-        policy_steps_attempted=policy_steps_attempted,
-        step_diagnostics=step_diagnostics,
-    )
+    return row_complete_stopped(ladder_state=state, observation=observation, turn=turn)
 
 
 def _outcome_after_ladder_complete(
@@ -102,8 +83,17 @@ def _outcome_after_ladder_complete(
             return TierJobOutcome(row_complete=advance.row_complete)
         return TierJobOutcome()
 
+    result, catalog, problem, policy_steps_attempted, step_diagnostics = (
+        finalize_policy_ladder_result(state, observation, turn)
+    )
     return TierJobOutcome(
-        row_complete=_finalize_policy_ladder_row_complete(session, state, observation, turn),
+        row_complete=row_complete_from_ladder_finalize(
+            result,
+            catalog,
+            problem,
+            policy_steps_attempted,
+            step_diagnostics,
+        ),
     )
 
 
