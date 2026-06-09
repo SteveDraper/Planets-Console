@@ -150,17 +150,7 @@ class InferenceStreamOrchestration:
         return max(1, 20 // len(self.segments))
 
     def should_emit_streaming_solutions(self) -> bool:
-        segment = self.current_segment()
-        if segment is None:
-            return False
-        if self.path == InferencePath.ACCELERATED_SPLIT:
-            return segment.segment_id == "reported_host_turn"
-        if self.path == InferencePath.ACCELERATED_BACKFILL:
-            return (
-                self.backfill_target_host_turn is not None
-                and segment.host_turn == self.backfill_target_host_turn
-            )
-        return False
+        return self.current_segment() is not None
 
     def new_ladder_state(self) -> PolicyLadderState:
         return PolicyLadderState(
