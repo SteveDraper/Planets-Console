@@ -50,7 +50,10 @@ export function HullCatalogMaskDialog({
 
   const handleClose = useCallback(() => {
     onClose()
-    restoreFocusToElementOrFallback(openerRef.current, '[data-hull-catalog-opener]')
+    restoreFocusToElementOrFallback(
+      openerRef.current,
+      () => document.querySelector<HTMLElement>('[data-hull-catalog-opener]'),
+    )
   }, [onClose])
 
   useModalKeydownFocusTrap(isOpen, dialogRef, handleClose)

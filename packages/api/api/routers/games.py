@@ -156,7 +156,6 @@ def get_scores_table_inference_stream(
     )
 
 
-
 @router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog")
 def get_inference_hull_catalog_mask(
     game_id: int,

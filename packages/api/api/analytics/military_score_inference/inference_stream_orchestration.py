@@ -9,13 +9,13 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentResult,
     build_accelerated_backfill_stream_row_complete,
     build_accelerated_segment_payload,
     build_accelerated_split_stream_row_complete,
 )
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_target import (

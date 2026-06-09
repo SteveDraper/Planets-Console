@@ -250,7 +250,6 @@ class CoreClient:
             player_ids,
         )
 
-
     def get_inference_hull_catalog_mask(
         self,
         game_id: int,

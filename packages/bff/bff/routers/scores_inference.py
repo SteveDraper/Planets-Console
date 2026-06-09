@@ -111,7 +111,6 @@ def get_scores_inference_table_stream(
     )
 
 
-
 @router.get("/inference/hull-catalog")
 def get_scores_inference_hull_catalog(
     game_id: int = Query(..., alias="gameId"),
