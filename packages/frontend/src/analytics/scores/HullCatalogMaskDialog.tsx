@@ -113,6 +113,8 @@ export function HullCatalogMaskDialog({
       const response = await resetInferenceHullCatalogMask(scope, playerId)
       setPayload(response)
       setDraftEnabled(new Set(enabledHullIdsFromCatalog(response.masterCatalog)))
+      onSaved()
+      handleClose()
     } catch (resetError) {
       setError(errorDetailFromUnknown(resetError))
     } finally {

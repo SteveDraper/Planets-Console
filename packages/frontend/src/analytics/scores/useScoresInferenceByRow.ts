@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
-import { fetchScoresTableInferenceStream } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import {
@@ -12,6 +11,7 @@ import {
   stablePlayerIdsKey,
   type RowStreamState,
 } from './inferenceRowStreamState'
+import { connectTableInferenceStream } from './tableInferenceStreamConnect'
 
 export type UseScoresInferenceByRowOptions = {
   onGlobalPauseChange?: (paused: boolean) => void
@@ -84,6 +84,12 @@ export function useScoresInferenceByRow(
         applyGlobalPauseEvent(event)
         return
       }
+      if (event.type === 'error' && event.playerId == null) {
+        for (const playerId of rowStreamStateRef.current.keys()) {
+          applyStreamEvent(playerId, { ...event, playerId })
+        }
+        return
+      }
       const playerId = 'playerId' in event ? event.playerId : undefined
       if (typeof playerId !== 'number') {
         return
@@ -118,10 +124,32 @@ export function useScoresInferenceByRow(
     const controller = new AbortController()
     tableAbortControllerRef.current = controller
 
-    void fetchScoresTableInferenceStream(scope, playerIds, {
+    void connectTableInferenceStream(scope, playerIds, {
       signal: controller.signal,
       onEvent: handleTableStreamEvent,
-    }).catch((error) => {
+    })
+      .then((result) => {
+        if (controller.signal.aborted || result !== 'conflict_exhausted') {
+          return
+        }
+        setDetailsByPlayerId((previous) => {
+          const next = new Map(previous)
+          for (const playerId of playerIds) {
+            if (next.get(playerId)?.isComplete) {
+              continue
+            }
+            next.set(
+              playerId,
+              failureDetail(
+                playerId,
+                'Build inference could not reconnect after updating the hull catalog.'
+              )
+            )
+          }
+          return next
+        })
+      })
+      .catch((error) => {
       if (controller.signal.aborted) {
         return
       }
