@@ -108,6 +108,7 @@ class InferenceRowScheduler:
             return self._global_pause_status_locked(scope)
 
     def pause_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
+        """Soft pause: drain queued tier jobs; in-flight tier work is not cancelled."""
         with self._condition:
             if self._active_scope is not None and self._active_scope != scope:
                 self._invalidate_retained_state_locked()
@@ -317,6 +318,8 @@ class InferenceRowScheduler:
             session.event_queue.put(event)
 
     def _take_next_job(self) -> _Job | None:
+        # Soft pause: globally paused workers stop dequeuing; tier jobs already
+        # running in _run_tier_job continue until the current tier step finishes.
         with self._condition:
             while not self._shutdown:
                 if not self._globally_paused:
@@ -382,6 +385,8 @@ class InferenceRowScheduler:
         self.unregister_session(session.run_id)
 
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
+        # Not interrupted by global pause; merge-admit hooks may still emit solution
+        # events until this tier step returns.
         callbacks = InferenceTierJobCallbacks(
             emit_tier_started_progress=lambda: self._emit_tier_started_progress(session),
             emit_progress=lambda: self._emit_progress(session),

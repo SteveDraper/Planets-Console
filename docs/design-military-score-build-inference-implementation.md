@@ -408,7 +408,7 @@ One schedulable job = one full **inference search tier** step (catalog build, ex
 
 **Table stream multiplexing:** per-row event queues are round-robin drained into one NDJSON generator; `playerId` tags identify the row on the wire.
 
-**Global pause:** pause drains the worker queue into a held buffer and broadcasts `globalPause`; resume requeues held tier jobs and continuations. Applies only while the table stream stays connected. **Stream disconnect** cancels all row runs and clears server-side global pause; reconnect recalculates from scratch.
+**Global pause (soft):** pause drains the worker queue into a held buffer, stops starting new tier jobs, and broadcasts `globalPause`; in-flight tier jobs are not cancelled and may finish the current tier step and emit `solution` events until that step completes. Resume requeues held tier jobs and continuations. Applies only while the table stream stays connected. **Stream disconnect** cancels all row runs and clears server-side global pause; reconnect recalculates from scratch.
 
 **Accelerated-start rows:** same scheduler path as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
 
