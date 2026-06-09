@@ -10,12 +10,8 @@ from api.analytics.military_score_inference.inference_cancel import InferenceCan
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     InferenceStreamDomainEvent,
 )
-from api.analytics.military_score_inference.inference_stream_orchestration import (
-    InferenceStreamOrchestration,
-)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
 from api.models.game import TurnInfo
 
 
@@ -32,8 +28,6 @@ class InferenceRowStreamSession:
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    ladder_state: PolicyLadderState | None = None
-    orchestration: InferenceStreamOrchestration | None = None
 
     @property
     def stream_scope(self) -> InferenceStreamScope:

@@ -9,19 +9,17 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
 )
-from api.analytics.military_score_inference.row_complete_factory import (
-    row_complete_from_ladder_finalize,
-    row_complete_stopped,
-)
-from api.analytics.military_score_inference.inference_stream_session import (
-    InferenceRowStreamSession,
-)
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
 )
+from api.analytics.military_score_inference.row_complete_factory import (
+    row_complete_from_ladder_finalize,
+    row_complete_stopped,
+)
+from api.analytics.military_score_inference.row_run import RowRun
 from api.models.game import TurnInfo
 
 
@@ -41,11 +39,11 @@ class InferenceTierJobCallbacks:
     emit_held_solutions: Callable[[InferenceObservation], None]
 
 
-def solve_context(session: InferenceRowStreamSession) -> tuple[InferenceObservation, TurnInfo]:
-    orchestration = session.orchestration
+def solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
+    orchestration = run.orchestration
     if orchestration is not None:
         return orchestration.current_observation(), orchestration.current_solve_turn()
-    return session.observation, session.turn
+    return run.session.observation, run.session.turn
 
 
 def should_emit_streaming_solutions(
@@ -56,22 +54,22 @@ def should_emit_streaming_solutions(
     return orchestration.should_emit_streaming_solutions()
 
 
-def build_stopped_row_complete(session: InferenceRowStreamSession) -> RowComplete:
-    orchestration = session.orchestration
-    state = session.ladder_state
-    observation, turn = solve_context(session)
+def build_stopped_row_complete(run: RowRun) -> RowComplete:
+    orchestration = run.orchestration
+    state = run.ladder_state
+    observation, turn = solve_context(run)
     if orchestration is not None:
         return orchestration.build_stopped_row_complete(state, observation, turn)
     return row_complete_stopped(ladder_state=state, observation=observation, turn=turn)
 
 
 def _outcome_after_ladder_complete(
-    session: InferenceRowStreamSession,
+    run: RowRun,
     state: PolicyLadderState,
     observation: InferenceObservation,
     turn: TurnInfo,
 ) -> TierJobOutcome:
-    orchestration = session.orchestration
+    orchestration = run.orchestration
     if orchestration is not None:
         advance = orchestration.finish_ladder_segment(state, observation, turn)
         if advance.continue_next_segment:
@@ -98,19 +96,20 @@ def _outcome_after_ladder_complete(
 
 
 def run_inference_tier_job(
-    session: InferenceRowStreamSession,
+    run: RowRun,
     callbacks: InferenceTierJobCallbacks,
 ) -> TierJobOutcome:
     """Run one policy-ladder tier step and return the scheduler's next action."""
+    session = run.session
     if session.cancel_token.is_cancelled():
-        return TierJobOutcome(row_complete=build_stopped_row_complete(session))
+        return TierJobOutcome(row_complete=build_stopped_row_complete(run))
 
-    state = session.ladder_state
+    state = run.ladder_state
     if state is None:
         return TierJobOutcome()
 
-    observation, turn = solve_context(session)
-    orchestration = session.orchestration
+    observation, turn = solve_context(run)
+    orchestration = run.orchestration
 
     def on_admitted(_solution: InferenceSolution) -> None:
         if should_emit_streaming_solutions(orchestration):
@@ -128,9 +127,9 @@ def run_inference_tier_job(
     callbacks.emit_progress()
 
     if session.cancel_token.is_cancelled() or state.cancelled:
-        return TierJobOutcome(row_complete=build_stopped_row_complete(session))
+        return TierJobOutcome(row_complete=build_stopped_row_complete(run))
 
     if not state.ladder_complete:
         return TierJobOutcome(enqueue_continuation=True)
 
-    return _outcome_after_ladder_complete(session, state, observation, turn)
+    return _outcome_after_ladder_complete(run, state, observation, turn)

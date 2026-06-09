@@ -5,9 +5,13 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    InferenceStreamOrchestration,
+)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
 
 
 @dataclass(frozen=True)
@@ -17,10 +21,12 @@ class TierJob:
 
 
 class RowRun:
-    """One scoreboard row's session, continuation queue, and held work while paused."""
+    """One scoreboard row's ladder state, orchestration, queues, and held work while paused."""
 
     def __init__(self, session: InferenceRowStreamSession) -> None:
         self.session = session
+        self.ladder_state: PolicyLadderState | None = None
+        self.orchestration: InferenceStreamOrchestration | None = None
         self.continuation_jobs: deque[TierJob] = deque()
         self.held_jobs: list[TierJob] = []
         self.held_continuation_pending = False

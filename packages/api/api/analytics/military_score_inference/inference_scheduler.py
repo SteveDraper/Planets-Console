@@ -223,13 +223,13 @@ class InferenceRowScheduler:
         *,
         orchestration: InferenceStreamOrchestration | None = None,
     ) -> None:
-        session.orchestration = orchestration
+        run = self._get_or_create_run(session)
+        run.orchestration = orchestration
         if orchestration is not None:
-            session.ladder_state = orchestration.new_ladder_state()
+            run.ladder_state = orchestration.new_ladder_state()
         else:
             policy_steps = tuple(resolve_tier_policies(None))
-            session.ladder_state = PolicyLadderState(policy_steps=policy_steps)
-        self.register_session(session)
+            run.ladder_state = PolicyLadderState(policy_steps=policy_steps)
         self._enqueue_job(TierJob(session=session))
 
     def _enqueue_job(self, job: TierJob) -> None:
@@ -338,12 +338,15 @@ class InferenceRowScheduler:
         *,
         observation: InferenceObservation,
     ) -> None:
-        state = session.ladder_state
+        run = self._runs.get(session.run_id)
+        if run is None:
+            return
+        state = run.ladder_state
         if state is None or state.catalog is None or not state.merged_solutions:
             return
         segment_id: str | None = None
         is_target_segment = True
-        orchestration = session.orchestration
+        orchestration = run.orchestration
         if orchestration is not None:
             segment = orchestration.current_segment()
             if segment is not None:
@@ -360,7 +363,10 @@ class InferenceRowScheduler:
         )
 
     def _emit_progress(self, session: InferenceRowStreamSession) -> None:
-        state = session.ladder_state
+        run = self._runs.get(session.run_id)
+        if run is None:
+            return
+        state = run.ladder_state
         if state is None or state.catalog is None:
             return
         session.event_queue.put(
@@ -372,7 +378,10 @@ class InferenceRowScheduler:
         )
 
     def _emit_tier_started_progress(self, session: InferenceRowStreamSession) -> None:
-        state = session.ladder_state
+        run = self._runs.get(session.run_id)
+        if run is None:
+            return
+        state = run.ladder_state
         if state is None or state.next_step_index >= len(state.policy_steps):
             return
         step = state.policy_steps[state.next_step_index]
@@ -388,6 +397,9 @@ class InferenceRowScheduler:
         self.unregister_session(session.run_id)
 
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
+        run = self._runs.get(session.run_id)
+        if run is None:
+            return
         # Not interrupted by global pause; merge-admit hooks may still emit solution
         # events until this tier step returns.
         callbacks = InferenceTierJobCallbacks(
@@ -398,9 +410,9 @@ class InferenceRowScheduler:
                 observation=observation,
             ),
         )
-        outcome = run_inference_tier_job(session, callbacks)
+        outcome = run_inference_tier_job(run, callbacks)
         if outcome.next_ladder_state is not None:
-            session.ladder_state = outcome.next_ladder_state
+            run.ladder_state = outcome.next_ladder_state
         if outcome.enqueue_continuation:
             self._enqueue_continuation(session)
             return

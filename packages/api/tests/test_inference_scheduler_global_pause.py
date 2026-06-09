@@ -193,9 +193,11 @@ def test_emit_held_solutions_snapshots_merged_list(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     session = _session_for_turn(sample_turn)
-    session.ladder_state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
-    session.ladder_state.catalog = ActionCatalog((), (), {})
-    session.ladder_state.merged_solutions = [
+    scheduler.register_session(session)
+    run = scheduler._runs[session.run_id]
+    run.ladder_state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
+    run.ladder_state.catalog = ActionCatalog((), (), {})
+    run.ladder_state.merged_solutions = [
         InferenceSolution(
             objective_value=10,
             actions=(InferenceSolutionAction(action_id="a1", label="Action A", count=1),),
@@ -209,7 +211,7 @@ def test_emit_held_solutions_snapshots_merged_list(sample_turn):
     assert len(event.solutions) == 1
     assert event.solutions[0].objective_value == 10
 
-    session.ladder_state.merged_solutions.append(
+    run.ladder_state.merged_solutions.append(
         InferenceSolution(
             objective_value=5,
             actions=(InferenceSolutionAction(action_id="a2", label="Action B", count=1),),

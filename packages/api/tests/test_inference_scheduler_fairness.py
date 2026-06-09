@@ -149,15 +149,14 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     session_a = _session_for_player(sample_turn, player_id=player_ids[0])
     session_b = _session_for_player(sample_turn, player_id=player_ids[1])
-    session_a.ladder_state = PolicyLadderState(
-        policy_steps=short_ladder,
-    )
-    session_b.ladder_state = PolicyLadderState(
-        policy_steps=short_ladder,
-    )
-
     scheduler.register_session(session_a)
     scheduler.register_session(session_b)
+    scheduler._runs[session_a.run_id].ladder_state = PolicyLadderState(
+        policy_steps=short_ladder,
+    )
+    scheduler._runs[session_b.run_id].ladder_state = PolicyLadderState(
+        policy_steps=short_ladder,
+    )
     scheduler._enqueue_job(_TierJob(session=session_a))
     scheduler._enqueue_job(_TierJob(session=session_b))
     gate.set()

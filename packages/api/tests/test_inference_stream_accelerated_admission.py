@@ -11,21 +11,22 @@ from api.analytics.military_score_inference.inference_row_runner import (
     run_inference_tier_job,
     should_emit_streaming_solutions,
 )
-from api.analytics.military_score_inference.inference_stream_orchestration import (
-    InferenceStreamOrchestration,
-)
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
+)
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    InferenceStreamOrchestration,
 )
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.transport.inference_stream_wire import domain_event_to_wire_events
 from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionAction,
 )
+from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 
 def _accel_window_segment() -> AcceleratedInferenceSegment:
@@ -126,9 +127,10 @@ def test_run_inference_tier_job_emits_on_admission_for_accel_window_segment(
         game_id=628580,
         perspective=1,
         turn_number=sample_turn.settings.turn,
-        orchestration=orchestration,
-        ladder_state=orchestration.new_ladder_state(),
     )
+    run = RowRun(session)
+    run.orchestration = orchestration
+    run.ladder_state = orchestration.new_ladder_state()
     observation = orchestration.current_observation()
 
     solution = InferenceSolution(
@@ -182,7 +184,7 @@ def test_run_inference_tier_job_emits_on_admission_for_accel_window_segment(
         emit_held_solutions=emitted_observations.append,
     )
 
-    run_inference_tier_job(session, callbacks)
+    run_inference_tier_job(run, callbacks)
 
     assert len(emitted_observations) == 1
     emitted = emitted_observations[0]
@@ -196,8 +198,6 @@ def test_emit_held_solutions_tags_accel_window_as_non_target(sample_turn) -> Non
         InferenceRowScheduler,
         reset_inference_row_scheduler_for_tests,
     )
-    from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
-    from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
@@ -210,11 +210,13 @@ def test_emit_held_solutions_tags_accel_window_as_non_target(sample_turn) -> Non
         game_id=628580,
         perspective=1,
         turn_number=sample_turn.settings.turn,
-        orchestration=orchestration,
-        ladder_state=orchestration.new_ladder_state(),
     )
-    session.ladder_state.catalog = ActionCatalog((), (), {})
-    session.ladder_state.merged_solutions = [
+    scheduler.register_session(session)
+    run = scheduler._runs[session.run_id]
+    run.orchestration = orchestration
+    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state.catalog = ActionCatalog((), (), {})
+    run.ladder_state.merged_solutions = [
         InferenceSolution(
             objective_value=20,
             actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
@@ -261,11 +263,13 @@ def test_emit_held_solutions_tags_reported_host_turn_as_target(sample_turn) -> N
         game_id=628580,
         perspective=1,
         turn_number=sample_turn.settings.turn,
-        orchestration=orchestration,
-        ladder_state=orchestration.new_ladder_state(),
     )
-    session.ladder_state.catalog = ActionCatalog((), (), {})
-    session.ladder_state.merged_solutions = [
+    scheduler.register_session(session)
+    run = scheduler._runs[session.run_id]
+    run.orchestration = orchestration
+    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state.catalog = ActionCatalog((), (), {})
+    run.ladder_state.merged_solutions = [
         InferenceSolution(
             objective_value=20,
             actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
