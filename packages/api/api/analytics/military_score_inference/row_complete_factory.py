@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.inference_accelerated import AcceleratedStreamRowComplete
+from api.analytics.military_score_inference.inference_accelerated import (
+    AcceleratedStreamRowComplete,
+)
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.models import (
     InferenceObservation,

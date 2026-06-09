@@ -18,10 +18,6 @@ from api.analytics.military_score_inference.inference_accelerated import (
 )
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
-from api.analytics.military_score_inference.row_complete_factory import (
-    row_complete_from_accelerated_payload,
-    row_complete_stopped,
-)
 from api.analytics.military_score_inference.inference_target import (
     ScoreboardTurnLoader,
     load_accelerated_backfill_source_for_host_turn,
@@ -35,6 +31,10 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.policy_ladder import (
     PolicyLadderState,
     finalize_policy_ladder_result,
+)
+from api.analytics.military_score_inference.row_complete_factory import (
+    row_complete_from_accelerated_payload,
+    row_complete_stopped,
 )
 from api.analytics.military_score_inference.solver import STATUS_TIME_LIMITED
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
@@ -197,9 +197,7 @@ class InferenceStreamOrchestration:
             self.record_ladder_segment_complete(ladder_state, observation, turn)
         if self.segment_solves:
             return row_complete_stopped(
-                base=row_complete_from_accelerated_payload(
-                    self._accelerated_stream_row_complete()
-                )
+                base=row_complete_from_accelerated_payload(self._accelerated_stream_row_complete())
             )
         return row_complete_stopped(
             ladder_state=ladder_state,

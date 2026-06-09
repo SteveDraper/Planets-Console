@@ -86,13 +86,9 @@ def domain_event_to_wire_events(
                 serialized,
                 segment_id=segment_id,
                 scoreboard_delta_source=(
-                    wire_observation.scoreboard_delta_source
-                    if segment_id is not None
-                    else None
+                    wire_observation.scoreboard_delta_source if segment_id is not None else None
                 ),
-                is_target_segment=(
-                    event.is_target_segment if segment_id is not None else None
-                ),
+                is_target_segment=(event.is_target_segment if segment_id is not None else None),
             )
         ]
 
