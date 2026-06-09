@@ -72,9 +72,7 @@ class InferenceRowScheduler:
     def begin_scope(self, scope: InferenceStreamScope) -> None:
         with self._condition:
             if self._active_scope == scope and self._active_stream_refcount > 0:
-                raise ConflictError(
-                    "An inference table stream is already active for this scope."
-                )
+                raise ConflictError("An inference table stream is already active for this scope.")
             if self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
