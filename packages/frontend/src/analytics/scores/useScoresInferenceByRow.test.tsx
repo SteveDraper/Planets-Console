@@ -292,7 +292,7 @@ describe('useScoresInferenceByRow', () => {
       expect(streamCallCount).toBe(2)
     })
 
-    releaseSecondStream?.()
+    releaseSecondStream!()
 
     await waitFor(() => {
       expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after mask save')
