@@ -80,6 +80,8 @@ def _outcome_after_ladder_complete(
             problem,
             policy_steps_attempted,
             step_diagnostics,
+            observation=observation,
+            turn=turn,
         ),
     )
 

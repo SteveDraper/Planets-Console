@@ -7,11 +7,9 @@ from dataclasses import dataclass
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
-    InferenceProblem,
     InferenceResult,
     InferenceSolution,
 )
-from api.models.game import TurnInfo
 
 
 @dataclass(frozen=True)
@@ -30,17 +28,19 @@ class TierProgress:
 
 
 @dataclass(frozen=True)
+class RowCompleteWirePayload:
+    status: str
+    summary: str
+    solution_count: int
+    is_complete: bool
+    solutions: list[dict[str, object]]
+    diagnostics: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
 class RowComplete:
     result: InferenceResult
-    catalog: ActionCatalog | None = None
-    problem: InferenceProblem | None = None
-    policy_steps_attempted: list[str] | None = None
-    step_diagnostics: list[dict[str, object]] | None = None
-    force_is_complete: bool | None = None
-    summary_override: str | None = None
-    wire_observation: InferenceObservation | None = None
-    wire_turn: TurnInfo | None = None
-    extra_diagnostics: dict[str, object] | None = None
+    wire_payload: RowCompleteWirePayload
 
 
 @dataclass(frozen=True)

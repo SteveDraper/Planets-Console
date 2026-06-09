@@ -34,6 +34,10 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.row_complete_factory import (
+    build_row_complete_wire_payload,
+    row_complete_wire_payload_from_api_payload,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
@@ -298,11 +302,7 @@ def build_accelerated_split_stream_row_complete(
         segment.payload for segment in segment_solves if segment.payload is not None
     ]
     reported = next(
-        (
-            segment
-            for segment in segment_solves
-            if segment.segment.is_streaming_target
-        ),
+        (segment for segment in segment_solves if segment.segment.is_streaming_target),
         None,
     )
     if reported is None or reported.catalog is None or reported.problem is None:
@@ -315,7 +315,7 @@ def build_accelerated_split_stream_row_complete(
                 for segment in segment_solves
             },
         )
-        missing_payload, missing_observation, _, _ = missing
+        missing_payload, _, _, _ = missing
         return RowComplete(
             result=InferenceResult(
                 status=str(missing_payload.get("status", STATUS_INVALID_PROBLEM)),
@@ -326,28 +326,30 @@ def build_accelerated_split_stream_row_complete(
                     else {"reason": "accelerated_split_missing_reported_segment"}
                 ),
             ),
-            summary_override=str(missing_payload.get("summary", "Invalid inference problem")),
-            wire_observation=missing_observation,
-            wire_turn=turn,
+            wire_payload=row_complete_wire_payload_from_api_payload(missing_payload),
         )
 
     overall_status = accelerated_split_status(segment_payloads, combined_time_limited)
+    result = InferenceResult(
+        status=overall_status,
+        solutions=reported.result.solutions,
+        diagnostics={
+            **reported.result.diagnostics,
+            "accelerated_segments": segment_payloads,
+        },
+    )
     return RowComplete(
-        result=InferenceResult(
-            status=overall_status,
-            solutions=reported.result.solutions,
-            diagnostics={
-                **reported.result.diagnostics,
-                "accelerated_segments": segment_payloads,
-            },
+        result=result,
+        wire_payload=build_row_complete_wire_payload(
+            result,
+            observation=reported.observation,
+            turn=turn,
+            catalog=reported.catalog,
+            problem=reported.problem,
+            policy_steps_attempted=reported.policy_steps_attempted,
+            step_diagnostics=reported.step_diagnostics,
+            extra_diagnostics={"accelerated_segments": segment_payloads},
         ),
-        catalog=reported.catalog,
-        problem=reported.problem,
-        policy_steps_attempted=reported.policy_steps_attempted,
-        step_diagnostics=reported.step_diagnostics,
-        wire_observation=reported.observation,
-        wire_turn=turn,
-        extra_diagnostics={"accelerated_segments": segment_payloads},
     )
 
 
@@ -369,39 +371,43 @@ def build_accelerated_backfill_stream_row_complete(
         None,
     )
     if target is None or target.catalog is None or target.problem is None:
-        from api.analytics.military_score_inference.analytic import build_inference_observation
-
+        result = InferenceResult(
+            status=STATUS_NO_PRIOR_TURN,
+            solutions=(),
+            diagnostics={"reason": "accelerated_backfill_unavailable"},
+        )
         return RowComplete(
-            result=InferenceResult(
-                status=STATUS_NO_PRIOR_TURN,
-                solutions=(),
-                diagnostics={"reason": "accelerated_backfill_unavailable"},
+            result=result,
+            wire_payload=build_row_complete_wire_payload(
+                result,
+                summary_override="Prior turn score data unavailable",
             ),
-            summary_override="Prior turn score data unavailable",
-            wire_observation=build_inference_observation(row_score, row_turn),
-            wire_turn=row_turn,
         )
 
+    result = InferenceResult(
+        status=target.result.status,
+        solutions=target.result.solutions,
+        diagnostics={
+            **target.result.diagnostics,
+            "accelerated_segments": segment_payloads,
+        },
+    )
     return RowComplete(
-        result=InferenceResult(
-            status=target.result.status,
-            solutions=target.result.solutions,
-            diagnostics={
-                **target.result.diagnostics,
+        result=result,
+        wire_payload=build_row_complete_wire_payload(
+            result,
+            observation=target.observation,
+            turn=source_turn,
+            catalog=target.catalog,
+            problem=target.problem,
+            policy_steps_attempted=target.policy_steps_attempted,
+            step_diagnostics=target.step_diagnostics,
+            extra_diagnostics={
+                "accelerated_backfill": True,
+                "accelerated_backfill_source_turn": source_turn_number,
+                "accelerated_backfill_host_turn": target_host_turn,
+                "accelerated_backfill_segment_id": target.segment.segment_id,
                 "accelerated_segments": segment_payloads,
             },
         ),
-        catalog=target.catalog,
-        problem=target.problem,
-        policy_steps_attempted=target.policy_steps_attempted,
-        step_diagnostics=target.step_diagnostics,
-        wire_observation=target.observation,
-        wire_turn=source_turn,
-        extra_diagnostics={
-            "accelerated_backfill": True,
-            "accelerated_backfill_source_turn": source_turn_number,
-            "accelerated_backfill_host_turn": target_host_turn,
-            "accelerated_backfill_segment_id": target.segment.segment_id,
-            "accelerated_segments": segment_payloads,
-        },
     )

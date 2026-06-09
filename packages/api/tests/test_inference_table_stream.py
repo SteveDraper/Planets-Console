@@ -10,7 +10,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_rows import (
     ScheduledInferenceRow,
     drain_available_multiplex_events,
@@ -22,6 +21,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.models import InferenceResult
+from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.errors import ConflictError
 from api.transport.inference_stream import stream_inference_ndjson
@@ -132,9 +132,9 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
     for player_id in player_ids:
         session = _session_for_player(sample_turn, player_id=player_id)
         session.event_queue.put(
-            RowComplete(
-                result=InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-                summary_override=f"Player {player_id} ok",
+            row_complete_with_summary(
+                InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                summary=f"Player {player_id} ok",
             )
         )
         rows.append(ScheduledInferenceRow(player_id=player_id, session=session))
@@ -157,9 +157,9 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
     for player_id in player_ids:
         session = _session_for_player(sample_turn, player_id=player_id)
         session.event_queue.put(
-            RowComplete(
-                result=InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-                summary_override=f"Player {player_id} ok",
+            row_complete_with_summary(
+                InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                summary=f"Player {player_id} ok",
             )
         )
         rows.append(ScheduledInferenceRow(player_id=player_id, session=session))

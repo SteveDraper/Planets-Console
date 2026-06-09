@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.inference_api_payload import (
-    format_inference_summary,
-    inference_api_payload,
-    inference_result_to_api_payload,
     serialize_solutions_with_arithmetic,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -33,38 +30,14 @@ def row_complete_to_complete_wire_event(
     observation: InferenceObservation,
     turn: TurnInfo,
 ) -> dict[str, object]:
-    wire_observation = event.wire_observation or observation
-    wire_turn = event.wire_turn or turn
-    if event.catalog is not None and event.problem is not None:
-        payload = inference_result_to_api_payload(
-            event.result,
-            event.catalog,
-            wire_observation,
-            wire_turn,
-            event.problem,
-            policy_steps_attempted=event.policy_steps_attempted,
-            step_diagnostics=event.step_diagnostics,
-            extra_diagnostics=event.extra_diagnostics,
-        )
-    else:
-        summary = event.summary_override or format_inference_summary(event.result)
-        payload = inference_api_payload(
-            status=event.result.status,
-            summary=summary,
-            solutions=event.result.solutions,
-            diagnostics=event.result.diagnostics,
-        )
-    if event.force_is_complete is not None:
-        payload["isComplete"] = event.force_is_complete
-    diagnostics = payload.get("diagnostics")
-    wire_solutions = payload.get("solutions")
+    payload = event.wire_payload
     return inference_complete_event(
-        status=str(payload.get("status", "")),
-        summary=str(payload.get("summary", "")),
-        solution_count=int(payload.get("solutionCount", 0)),
-        is_complete=bool(payload.get("isComplete", True)),
-        diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
-        solutions=wire_solutions if isinstance(wire_solutions, list) else [],
+        status=payload.status,
+        summary=payload.summary,
+        solution_count=payload.solution_count,
+        is_complete=payload.is_complete,
+        diagnostics=payload.diagnostics,
+        solutions=payload.solutions,
     )
 
 

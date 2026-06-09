@@ -2,12 +2,12 @@
 
 import json
 
-from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
 )
+from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.transport.inference_stream import (
     inference_complete_event,
@@ -51,9 +51,9 @@ def test_row_complete_to_complete_wire_event_includes_solutions(sample_turn) -> 
         actions=(InferenceSolutionAction(action_id="action_a", label="Build fighter", count=2),),
     )
     wire = row_complete_to_complete_wire_event(
-        RowComplete(
-            result=InferenceResult(status=STATUS_EXACT, solutions=(solution,), diagnostics={}),
-            summary_override="Best: built fighters",
+        row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(solution,), diagnostics={}),
+            summary="Best: built fighters",
         ),
         observation=observation,
         turn=sample_turn,
