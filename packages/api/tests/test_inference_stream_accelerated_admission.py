@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.accelerated_start import AcceleratedInferenceSegment
+from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
@@ -13,9 +14,13 @@ from api.analytics.military_score_inference.inference_row_runner import (
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
 )
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    HeldSolutionsUpdated,
+)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.transport.inference_stream_wire import domain_event_to_wire_events
 from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionAction,
@@ -184,3 +189,104 @@ def test_run_inference_tier_job_emits_on_admission_for_accel_window_segment(
     assert emitted.player_id == observation.player_id
     assert emitted.military_delta_2x == observation.military_delta_2x
     assert emitted.scoreboard_delta_source == "accelerated_segment"
+
+
+def test_emit_held_solutions_tags_accel_window_as_non_target(sample_turn) -> None:
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
+    from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    orchestration = _accelerated_split_orchestration(sample_turn)
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+        orchestration=orchestration,
+        ladder_state=orchestration.new_ladder_state(),
+    )
+    session.ladder_state.catalog = ActionCatalog((), (), {})
+    session.ladder_state.merged_solutions = [
+        InferenceSolution(
+            objective_value=20,
+            actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
+        )
+    ]
+
+    scheduler._emit_held_solutions(
+        session,
+        observation=orchestration.current_observation(),
+    )
+
+    event = session.event_queue.get(timeout=1.0)
+    assert isinstance(event, HeldSolutionsUpdated)
+    assert event.segment_id == "accel_window"
+    assert event.is_target_segment is False
+
+    wire_events = domain_event_to_wire_events(
+        event,
+        observation=session.observation,
+        turn=sample_turn,
+    )
+    assert len(wire_events) == 1
+    wire = wire_events[0]
+    assert wire["segmentId"] == "accel_window"
+    assert wire["scoreboardDeltaSource"] == "accelerated_segment"
+    assert wire["isTargetSegment"] is False
+
+
+def test_emit_held_solutions_tags_reported_host_turn_as_target(sample_turn) -> None:
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration.current_segment_index = 1
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+        orchestration=orchestration,
+        ladder_state=orchestration.new_ladder_state(),
+    )
+    session.ladder_state.catalog = ActionCatalog((), (), {})
+    session.ladder_state.merged_solutions = [
+        InferenceSolution(
+            objective_value=20,
+            actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
+        )
+    ]
+
+    scheduler._emit_held_solutions(
+        session,
+        observation=orchestration.current_observation(),
+    )
+
+    event = session.event_queue.get(timeout=1.0)
+    assert isinstance(event, HeldSolutionsUpdated)
+    assert event.segment_id == "reported_host_turn"
+    assert event.is_target_segment is True
+
+    wire_events = domain_event_to_wire_events(
+        event,
+        observation=session.observation,
+        turn=sample_turn,
+    )
+    wire = wire_events[0]
+    assert wire["segmentId"] == "reported_host_turn"
+    assert wire["isTargetSegment"] is True

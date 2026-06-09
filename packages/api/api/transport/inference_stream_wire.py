@@ -74,12 +74,27 @@ def domain_event_to_wire_events(
 ) -> list[dict[str, object]]:
     """Convert one scheduler domain event into zero or more NDJSON wire dicts."""
     if isinstance(event, HeldSolutionsUpdated):
+        wire_observation = event.observation or observation
         serialized = serialize_solutions_with_arithmetic(
-            event.observation or observation,
+            wire_observation,
             event.catalog,
             event.solutions,
         )
-        return [inference_solution_event(serialized)]
+        segment_id = event.segment_id
+        return [
+            inference_solution_event(
+                serialized,
+                segment_id=segment_id,
+                scoreboard_delta_source=(
+                    wire_observation.scoreboard_delta_source
+                    if segment_id is not None
+                    else None
+                ),
+                is_target_segment=(
+                    event.is_target_segment if segment_id is not None else None
+                ),
+            )
+        ]
 
     if isinstance(event, TierProgress):
         return [

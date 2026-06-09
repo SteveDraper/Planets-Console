@@ -14,9 +14,22 @@ logger = logging.getLogger(__name__)
 _INFERENCE_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
 
-def inference_solution_event(solutions: list[dict[str, object]]) -> dict[str, object]:
+def inference_solution_event(
+    solutions: list[dict[str, object]],
+    *,
+    segment_id: str | None = None,
+    scoreboard_delta_source: str | None = None,
+    is_target_segment: bool | None = None,
+) -> dict[str, object]:
     """Emit the full held top-K for one row after a new signature is admitted."""
-    return {"type": "solution", "solutions": solutions}
+    payload: dict[str, object] = {"type": "solution", "solutions": solutions}
+    if segment_id is not None:
+        payload["segmentId"] = segment_id
+    if scoreboard_delta_source is not None:
+        payload["scoreboardDeltaSource"] = scoreboard_delta_source
+    if is_target_segment is not None:
+        payload["isTargetSegment"] = is_target_segment
+    return payload
 
 
 def inference_progress_event(

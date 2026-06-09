@@ -36,6 +36,9 @@ const inferenceStreamPlayerScopeSchema = z.object({
 export const inferenceStreamSolutionEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('solution'),
   solutions: z.array(inferenceStreamSolutionPayloadSchema),
+  segmentId: z.string().optional(),
+  scoreboardDeltaSource: z.string().optional(),
+  isTargetSegment: z.boolean().optional(),
 })
 
 export const inferenceStreamProgressEventSchema = inferenceStreamPlayerScopeSchema.extend({

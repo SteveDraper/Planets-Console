@@ -19,6 +19,8 @@ class HeldSolutionsUpdated:
     solutions: tuple[InferenceSolution, ...] | list[InferenceSolution]
     catalog: ActionCatalog
     observation: InferenceObservation | None = None
+    segment_id: str | None = None
+    is_target_segment: bool = True
 
 
 @dataclass(frozen=True)

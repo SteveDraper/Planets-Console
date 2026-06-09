@@ -2,6 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { parseInferenceStreamEvent } from './parseInferenceStreamEvent'
 
 describe('parseInferenceStreamEvent', () => {
+  it('parses solution events with accelerated segment metadata', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'solution',
+        segmentId: 'accel_window',
+        scoreboardDeltaSource: 'accelerated_segment',
+        isTargetSegment: false,
+        solutions: [
+          {
+            objectiveValue: 12,
+            actions: [{ actionId: 'a1', label: 'Fighter', count: 2 }],
+          },
+        ],
+      })
+    )
+    expect(event).toMatchObject({
+      type: 'solution',
+      segmentId: 'accel_window',
+      scoreboardDeltaSource: 'accelerated_segment',
+      isTargetSegment: false,
+    })
+  })
+
   it('parses solution events with full held top-K', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
