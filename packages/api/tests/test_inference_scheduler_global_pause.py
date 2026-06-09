@@ -81,6 +81,49 @@ def test_new_scope_invalidates_retained_pause_state(sample_turn):
     assert status["activeScope"]["turn"] == scope_b.turn_number
 
 
+def test_end_inference_stream_keeps_global_pause_while_other_stream_connected(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    session_a = _session_for_turn(sample_turn)
+    score_b = sample_turn.scores[1]
+    session_b = InferenceRowStreamSession(
+        player_id=score_b.ownerid,
+        observation=build_inference_observation(score_b, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    scheduler.begin_scope(scope)
+    scheduler.begin_scope(scope)
+    scheduler.enqueue_tier_ladder(session_a)
+    scheduler.enqueue_tier_ladder(session_b)
+    scheduler.pause_globally(scope)
+
+    assert scheduler.global_pause_status(scope)["paused"] is True
+    assert scheduler.global_pause_status(scope)["activeSessionCount"] == 2
+
+    scheduler.end_inference_stream(scope, (session_a,))
+
+    status = scheduler.global_pause_status(scope)
+    assert status["paused"] is True
+    assert status["activeSessionCount"] == 1
+    assert session_a.cancel_token.is_cancelled()
+    assert not session_b.cancel_token.is_cancelled()
+
+    scheduler.end_inference_stream(scope, (session_b,))
+
+    status = scheduler.global_pause_status(scope)
+    assert status["paused"] is False
+    assert status["activeSessionCount"] == 0
+    assert session_b.cancel_token.is_cancelled()
+
+
 def test_end_inference_stream_cancels_runs_and_clears_global_pause(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)

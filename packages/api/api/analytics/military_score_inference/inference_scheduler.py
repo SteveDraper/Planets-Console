@@ -64,6 +64,7 @@ class InferenceRowScheduler:
         self._workers: list[threading.Thread] = []
         self._shutdown = False
         self._active_scope: InferenceStreamScope | None = None
+        self._active_stream_refcount = 0
         self._globally_paused = False
         self._held_jobs: list[_TierJob] = []
         self._held_continuations: dict[str, InferenceRowStreamSession] = {}
@@ -77,6 +78,9 @@ class InferenceRowScheduler:
             if self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
+                self._active_stream_refcount = 1
+            else:
+                self._active_stream_refcount += 1
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
         scope_matches = self._active_scope == scope
@@ -156,7 +160,10 @@ class InferenceRowScheduler:
                 self._purge_queued_jobs_for_run_locked(run_id)
                 self._held_continuations.pop(run_id, None)
                 self._sessions.pop(run_id, None)
-            self._clear_global_pause_for_active_scope_locked(scope)
+            if self._active_scope == scope:
+                self._active_stream_refcount = max(0, self._active_stream_refcount - 1)
+                if self._active_stream_refcount == 0:
+                    self._clear_global_pause_for_active_scope_locked(scope)
             self._condition.notify_all()
 
     def _clear_global_pause_for_active_scope_locked(
@@ -283,6 +290,7 @@ class InferenceRowScheduler:
         self._continuation_round_robin.clear()
 
     def _invalidate_retained_state_locked(self) -> None:
+        self._active_stream_refcount = 0
         self._globally_paused = False
         for session in list(self._sessions.values()):
             session.cancel_token.cancel()
