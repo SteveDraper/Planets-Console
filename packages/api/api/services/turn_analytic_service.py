@@ -95,12 +95,12 @@ class TurnAnalyticService:
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
         )
 
-    def get_inference_global_pause_status(
+    def _inference_scheduler_scope(
         self,
         game_id: int,
         perspective: int,
         turn_number: int,
-    ) -> dict[str, object]:
+    ):
         from api.analytics.military_score_inference.inference_scheduler import (
             get_inference_row_scheduler,
         )
@@ -113,7 +113,20 @@ class TurnAnalyticService:
             perspective=perspective,
             turn_number=turn_number,
         )
-        return get_inference_row_scheduler().global_pause_status(scope)
+        return scope, get_inference_row_scheduler()
+
+    def get_inference_global_pause_status(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
+        )
+        return scheduler.global_pause_status(scope)
 
     def pause_inference_globally(
         self,
@@ -121,19 +134,12 @@ class TurnAnalyticService:
         perspective: int,
         turn_number: int,
     ) -> dict[str, object]:
-        from api.analytics.military_score_inference.inference_scheduler import (
-            get_inference_row_scheduler,
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
         )
-        from api.analytics.military_score_inference.inference_stream_scope import (
-            InferenceStreamScope,
-        )
-
-        scope = InferenceStreamScope(
-            game_id=game_id,
-            perspective=perspective,
-            turn_number=turn_number,
-        )
-        return get_inference_row_scheduler().pause_globally(scope)
+        return scheduler.pause_globally(scope)
 
     def resume_inference_globally(
         self,
@@ -141,16 +147,9 @@ class TurnAnalyticService:
         perspective: int,
         turn_number: int,
     ) -> dict[str, object]:
-        from api.analytics.military_score_inference.inference_scheduler import (
-            get_inference_row_scheduler,
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
         )
-        from api.analytics.military_score_inference.inference_stream_scope import (
-            InferenceStreamScope,
-        )
-
-        scope = InferenceStreamScope(
-            game_id=game_id,
-            perspective=perspective,
-            turn_number=turn_number,
-        )
-        return get_inference_row_scheduler().resume_globally(scope)
+        return scheduler.resume_globally(scope)
