@@ -22,11 +22,13 @@ from api.analytics.military_score_inference.accelerated_start import (
     synthetic_scoreboard_before_reported_deltas,
 )
 from api.analytics.military_score_inference.analytic import (
-    STATUS_NO_PRIOR_TURN,
     build_inference_observation,
     infer_military_score_build,
     prior_turn_score_data_available,
     run_inference_with_artifacts,
+)
+from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_NO_PRIOR_TURN,
 )
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json

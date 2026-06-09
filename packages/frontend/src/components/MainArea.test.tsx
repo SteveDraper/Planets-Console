@@ -96,6 +96,7 @@ const idleGlobalInferencePause = {
   error: null,
   pauseGlobally: vi.fn(),
   resumeGlobally: vi.fn(),
+  syncPausedFromStream: vi.fn(),
 }
 
 function defaultMainAreaProps(viewMode: 'tabular' | 'map') {

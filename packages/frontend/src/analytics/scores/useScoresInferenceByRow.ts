@@ -3,7 +3,6 @@ import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } 
 import {
   fetchScoresRowInferenceStream,
   fetchScoresTableInferenceStream,
-  stopScoresRowInference,
 } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
@@ -17,17 +16,22 @@ import {
   type RowStreamState,
 } from './inferenceRowStreamState'
 
+export type UseScoresInferenceByRowOptions = {
+  onGlobalPauseChange?: (paused: boolean) => void
+}
+
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
-  stopRow: (playerId: number) => void
   resumeRow: (playerId: number) => void
 }
 
 export function useScoresInferenceByRow(
   tableData: TableDataResponse | undefined,
   scope: AnalyticShellScope | null,
-  enabled: boolean
+  enabled: boolean,
+  options: UseScoresInferenceByRowOptions = {}
 ): UseScoresInferenceByRowResult {
+  const { onGlobalPauseChange } = options
   const stubs =
     enabled && tableData?.inferenceByRow != null ? tableData.inferenceByRow : []
   const playerIds = stubs
@@ -70,11 +74,12 @@ export function useScoresInferenceByRow(
 
   const applyGlobalPauseEvent = useCallback(
     (event: Extract<InferenceStreamEvent, { type: 'globalPause' }>) => {
+      onGlobalPauseChange?.(event.paused)
       for (const playerId of rowStreamStateRef.current.keys()) {
         applyStreamEvent(playerId, event)
       }
     },
-    [applyStreamEvent]
+    [applyStreamEvent, onGlobalPauseChange]
   )
 
   const handleTableStreamEvent = useCallback(
@@ -124,14 +129,6 @@ export function useScoresInferenceByRow(
       })
         .catch((error) => {
           if (controller.signal.aborted) {
-            const state = rowStreamStateRef.current.get(playerId)
-            if (state != null && !state.isComplete) {
-              rowStreamStateRef.current.set(
-                playerId,
-                reduceRowStreamState(state, { type: 'globalPause', paused: true })
-              )
-              publishPlayerState(playerId)
-            }
             return
           }
           setDetailsByPlayerId((previous) => {
@@ -146,22 +143,6 @@ export function useScoresInferenceByRow(
         })
     },
     [scope, applyGlobalPauseEvent, applyStreamEvent, publishPlayerState]
-  )
-
-  const stopRow = useCallback(
-    (playerId: number) => {
-      if (independentResumePlayersRef.current.has(playerId)) {
-        resumeAbortControllersRef.current.get(playerId)?.abort()
-        return
-      }
-      if (scope == null) {
-        return
-      }
-      void stopScoresRowInference(scope, playerId).catch(() => {
-        // Row stop is best-effort; stream complete event is authoritative.
-      })
-    },
-    [scope]
   )
 
   const resumeRow = useCallback(
@@ -236,7 +217,7 @@ export function useScoresInferenceByRow(
   }, [enabled, scope, playerIdsKey, handleTableStreamEvent])
 
   if (!enabled || tableData?.inferenceByRow == null) {
-    return { inferenceByRow: undefined, stopRow, resumeRow }
+    return { inferenceByRow: undefined, resumeRow }
   }
 
   const inferenceByRow = stubs.map((stub, rowIndex) => {
@@ -247,5 +228,5 @@ export function useScoresInferenceByRow(
     return detailsByPlayerId.get(playerId) ?? pendingDetail(playerId)
   })
 
-  return { inferenceByRow, stopRow, resumeRow }
+  return { inferenceByRow, resumeRow }
 }

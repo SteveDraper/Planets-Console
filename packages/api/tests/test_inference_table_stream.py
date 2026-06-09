@@ -16,7 +16,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     iter_multiplexed_inference_events,
     tag_inference_stream_event,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 
@@ -102,17 +101,21 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
     assert complete_player_ids == set(player_ids)
 
 
-def test_cancel_player_stops_active_row(sample_turn):
+def test_cancel_run_purges_queued_tier_jobs_for_run(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    scope = InferenceStreamScope(
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
-    )
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid)
+    other_session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
     scheduler.register_session(session)
+    scheduler.register_session(other_session)
     scheduler._enqueue_job(_TierJob(session=session))
+    scheduler._enqueue_continuation(session)
+    scheduler._enqueue_job(_TierJob(session=other_session))
 
-    assert scheduler.cancel_player(scope, session.player_id) is True
+    scheduler.cancel_run(session.run_id)
+
     assert session.cancel_token.is_cancelled() is True
+    assert scheduler._tier_one_queue.qsize() == 1
+    remaining_job = scheduler._tier_one_queue.get_nowait()
+    assert remaining_job.session.run_id == other_session.run_id
+    assert session.run_id not in scheduler._continuation_by_run

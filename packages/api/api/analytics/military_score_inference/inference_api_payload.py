@@ -1,5 +1,6 @@
 """API payload serialization for military score build inference results."""
 
+from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -62,6 +63,33 @@ def inference_result_to_api_payload(
         diagnostics=diagnostics,
         observation=observation,
         catalog=catalog,
+    )
+
+
+def no_prior_turn_reason(turn: TurnInfo) -> str:
+    if turn.settings.turn <= 1:
+        return "first_turn"
+    if needs_accelerated_backfill(turn.settings.turn, turn.settings):
+        return "accelerated_backfill_unavailable"
+    return "first_turn"
+
+
+def no_prior_turn_inference_api_payload(
+    turn: TurnInfo,
+    observation: InferenceObservation,
+) -> dict[str, object]:
+    from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
+
+    return _inference_api_payload(
+        status=STATUS_NO_PRIOR_TURN,
+        summary="Prior turn score data unavailable",
+        solutions=(),
+        diagnostics=build_inference_solver_diagnostics(
+            turn=turn.settings.turn,
+            observation=observation,
+            turn_info=turn,
+            extra={"reason": no_prior_turn_reason(turn)},
+        ),
     )
 
 

@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
     _inference_api_payload,
     format_inference_summary,
     inference_result_to_api_payload,
+    no_prior_turn_inference_api_payload,
     serialize_solutions_with_arithmetic,
 )
 from api.analytics.military_score_inference.inference_path import (
@@ -192,9 +193,7 @@ def immediate_row_inference_events(
     if path != InferencePath.NO_PRIOR_TURN:
         return None
 
-    from api.analytics.military_score_inference.analytic import _no_prior_turn_inference_result
-
-    payload, _, _ = _no_prior_turn_inference_result(turn, observation)
+    payload = no_prior_turn_inference_api_payload(turn, observation)
     return (
         inference_complete_event(
             status=str(payload.get("status", STATUS_NO_PRIOR_TURN)),
@@ -306,5 +305,5 @@ def cleanup_inference_stream_sessions(
 ) -> None:
     for session in sessions:
         if not scheduler.preserve_session_on_stream_end(session):
-            session.cancel_token.cancel()
+            scheduler.cancel_run(session.run_id)
             scheduler.unregister_session(session.run_id)

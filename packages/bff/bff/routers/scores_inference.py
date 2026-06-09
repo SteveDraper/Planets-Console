@@ -151,22 +151,6 @@ def get_scores_inference_table_stream(
     )
 
 
-@router.post("/inference/stop")
-def post_scores_inference_stop(
-    game_id: int = Query(..., alias="gameId"),
-    turn: int = Query(..., ge=1),
-    perspective: int = Query(..., ge=0),
-    player_id: int = Query(..., alias="playerId", ge=0),
-):
-    """Halt build inference for one scoreboard row."""
-    return get_core_client().stop_scores_row_inference(
-        game_id,
-        perspective,
-        turn,
-        player_id,
-    )
-
-
 @router.get("/inference/global-pause")
 def get_scores_inference_global_pause(
     game_id: int = Query(..., alias="gameId"),

@@ -79,18 +79,3 @@ def iter_scores_table_inference_events(
             scheduler,
             tuple(row.session for row in sessions),
         )
-
-
-def stop_scores_table_inference_row(
-    *,
-    game_id: int,
-    perspective: int,
-    turn_number: int,
-    player_id: int,
-) -> bool:
-    scope = InferenceStreamScope(
-        game_id=game_id,
-        perspective=perspective,
-        turn_number=turn_number,
-    )
-    return get_inference_row_scheduler().cancel_player(scope, player_id)

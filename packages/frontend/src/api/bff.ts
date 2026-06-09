@@ -780,22 +780,6 @@ export async function fetchScoresTableInferenceStream(
   })
 }
 
-export async function stopScoresRowInference(
-  scope: AnalyticShellScope,
-  playerId: number
-): Promise<{ playerId: number; stopped: boolean }> {
-  const path = '/bff/analytics/scores/inference/stop'
-  const params = analyticScopeParams(scope)
-  params.set('playerId', String(playerId))
-  const qs = `?${params.toString()}`
-  const endpointLabel = `POST ${path}`
-  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
-  if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
-  }
-  return r.json()
-}
-
 export async function fetchAnalyticMap(
   analyticId: string,
   scope: AnalyticShellScope,

@@ -2,7 +2,6 @@
 
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
-    needs_accelerated_backfill,
     observation_deltas_from_score,
     scoreboard_host_turn,
 )
@@ -21,11 +20,11 @@ from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_split_inference,
 )
 from api.analytics.military_score_inference.inference_api_payload import (
-    STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
     _inference_api_payload,
     format_inference_summary,
     inference_result_to_api_payload,
+    no_prior_turn_inference_api_payload,
 )
 from api.analytics.military_score_inference.inference_path import (
     InferencePath,
@@ -59,14 +58,6 @@ __all__ = [
     "prior_turn_score_data_available",
     "run_inference_with_artifacts",
 ]
-
-
-def _no_prior_turn_reason(turn: TurnInfo) -> str:
-    if turn.settings.turn <= 1:
-        return "first_turn"
-    if needs_accelerated_backfill(turn.settings.turn, turn.settings):
-        return "accelerated_backfill_unavailable"
-    return "first_turn"
 
 
 def build_inference_observation(
@@ -195,17 +186,7 @@ def _no_prior_turn_inference_result(
     resolved_observation: InferenceObservation,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     return (
-        _inference_api_payload(
-            status=STATUS_NO_PRIOR_TURN,
-            summary="Prior turn score data unavailable",
-            solutions=(),
-            diagnostics=build_inference_solver_diagnostics(
-                turn=turn.settings.turn,
-                observation=resolved_observation,
-                turn_info=turn,
-                extra={"reason": _no_prior_turn_reason(turn)},
-            ),
-        ),
+        no_prior_turn_inference_api_payload(turn, resolved_observation),
         resolved_observation,
         None,
     )

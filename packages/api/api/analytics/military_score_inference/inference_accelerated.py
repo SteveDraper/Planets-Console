@@ -1,4 +1,10 @@
-"""Accelerated-start segment execution and stream terminal row builders."""
+"""Accelerated-start segment execution and stream terminal row builders.
+
+Batch JSON (``run_accelerated_split_inference``) runs a full policy ladder per segment
+with a per-case time budget. SPA streaming runs one tier job at a time via the inference
+row scheduler and ``InferenceStreamOrchestration``; segments chain without a row time cap.
+Both paths share segment payload builders and terminal status aggregation here.
+"""
 
 from __future__ import annotations
 

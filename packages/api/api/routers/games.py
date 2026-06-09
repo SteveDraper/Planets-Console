@@ -177,23 +177,6 @@ def get_scores_table_inference_stream(
     )
 
 
-@router.post("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/stop")
-def post_scores_row_inference_stop(
-    game_id: int,
-    perspective: int,
-    turn_number: int,
-    player_id: int = Query(..., alias="playerId", ge=0),
-    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
-) -> dict[str, object]:
-    """Halt build inference for one scoreboard row without closing the table stream."""
-    return analytics.stop_scores_row_inference(
-        game_id,
-        perspective,
-        turn_number,
-        player_id,
-    )
-
-
 @router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/global-pause")
 def get_inference_global_pause_status(
     game_id: int,

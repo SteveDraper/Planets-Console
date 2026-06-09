@@ -113,22 +113,6 @@ class TurnAnalyticService:
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
         )
 
-    def stop_scores_row_inference(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        player_id: int,
-    ) -> dict[str, object]:
-        from api.analytics.scores import stop_scores_row_inference
-
-        return stop_scores_row_inference(
-            game_id=game_id,
-            perspective=perspective,
-            turn_number=turn_number,
-            player_id=player_id,
-        )
-
     def get_inference_global_pause_status(
         self,
         game_id: int,

@@ -3,7 +3,6 @@ import type { ScoresInferenceRowDetail } from '../../api/bff'
 import {
   canOpenInferenceDetail,
   canResumeInferenceRow,
-  canStopInferenceRow,
   inferenceAccessibleLabel,
   isActivelySearchingInference,
   isIncompleteInferenceRow,
@@ -60,18 +59,7 @@ describe('canOpenInferenceDetail', () => {
 })
 
 describe('inference transport controls', () => {
-  it('shows stop while running and play only when paused', () => {
-    expect(canStopInferenceRow(detail({ displayStatus: 'pending', isComplete: false }))).toBe(
-      true
-    )
-    expect(
-      canStopInferenceRow(
-        detail({ displayStatus: 'success', solutionCount: 1, isComplete: false })
-      )
-    ).toBe(true)
-    expect(canStopInferenceRow(detail({ displayStatus: 'paused', isComplete: false }))).toBe(
-      false
-    )
+  it('shows resume only when paused and not globally paused', () => {
     expect(canResumeInferenceRow(detail({ displayStatus: 'paused', isComplete: false }))).toBe(
       true
     )

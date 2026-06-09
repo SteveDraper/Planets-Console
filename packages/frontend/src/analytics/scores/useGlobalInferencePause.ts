@@ -13,6 +13,7 @@ export type UseGlobalInferencePauseResult = {
   error: string | null
   pauseGlobally: () => Promise<void>
   resumeGlobally: () => Promise<void>
+  syncPausedFromStream: (paused: boolean) => void
 }
 
 export function useGlobalInferencePause(
@@ -81,11 +82,16 @@ export function useGlobalInferencePause(
     }
   }, [scope])
 
+  const syncPausedFromStream = useCallback((paused: boolean) => {
+    setIsGloballyPaused(paused)
+  }, [])
+
   return {
     isGloballyPaused,
     isPending,
     error,
     pauseGlobally,
     resumeGlobally,
+    syncPausedFromStream,
   }
 }

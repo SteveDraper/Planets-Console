@@ -132,10 +132,11 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
-  const { inferenceByRow, stopRow, resumeRow } = useScoresInferenceByRow(
+  const { inferenceByRow, resumeRow } = useScoresInferenceByRow(
     data,
     analyticScope,
-    inferenceEnabled && fetchEnabled
+    inferenceEnabled && fetchEnabled,
+    { onGlobalPauseChange: globalInferencePause.syncPausedFromStream }
   )
   const scoresTableWithInference =
     data != null && inferenceByRow != null
@@ -174,7 +175,6 @@ function TableTile({
       <ScoresTableView
         data={scoresTableWithInference}
         analyticScope={analyticScope}
-        onStopRow={stopRow}
         onResumeRow={resumeRow}
         isGloballyPaused={globalInferencePause.isGloballyPaused}
         globalInferencePause={globalInferencePause}

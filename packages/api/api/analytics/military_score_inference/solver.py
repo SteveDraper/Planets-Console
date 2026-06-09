@@ -462,9 +462,12 @@ def solve_inference_problem(
 
     if not _problem_has_catalog_entries(problem):
         if _observation_is_solver_idle(problem):
+            idle_solution = InferenceSolution(objective_value=0, actions=())
+            if on_solution is not None:
+                on_solution(idle_solution)
             return InferenceResult(
                 status=STATUS_EXACT,
-                solutions=(InferenceSolution(objective_value=0, actions=()),),
+                solutions=(idle_solution,),
                 diagnostics={"solver_status": "NO_ACTIONS", "solution_count": 1},
             )
         return InferenceResult(

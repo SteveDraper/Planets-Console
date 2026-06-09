@@ -32,6 +32,14 @@ from tests.fixtures.military_score_inference import _observation
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _emit_mock_solver_solutions(result: InferenceResult, **kwargs) -> InferenceResult:
+    on_solution = kwargs.get("on_solution")
+    if on_solution is not None:
+        for solution in result.solutions:
+            on_solution(solution)
+    return result
+
+
 def test_default_policy_path_exists():
     path = default_tier_policy_path()
     assert path.is_file()
@@ -350,23 +358,35 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
     def _solve_side_effect(problem, **kwargs):
         call_step_ids.append(problem.policy_step_id)
         if problem.policy_step_id == policy_steps[0].id:
-            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
         if problem.policy_step_id == policy_steps[1].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution_a,),
-                diagnostics={"policy_step_id": policy_steps[1].id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(solution_a,),
+                    diagnostics={"policy_step_id": policy_steps[1].id},
+                ),
+                **kwargs,
             )
         if problem.policy_step_id == policy_steps[2].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution_a, solution_b),
-                diagnostics={"policy_step_id": policy_steps[2].id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(solution_a, solution_b),
+                    diagnostics={"policy_step_id": policy_steps[2].id},
+                ),
+                **kwargs,
             )
-        return InferenceResult(
-            status=STATUS_EXACT,
-            solutions=(solution_a,),
-            diagnostics={"policy_step_id": problem.policy_step_id},
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution_a,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
         )
 
     monkeypatch.setattr(
@@ -455,25 +475,40 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
-            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
         if problem.policy_step_id == policy_steps[1].id:
-            return InferenceResult(status=STATUS_EXACT, solutions=(solution_a,), diagnostics={})
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_EXACT, solutions=(solution_a,), diagnostics={}),
+                **kwargs,
+            )
         if problem.policy_step_id == policy_steps[2].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution_a, solution_b),
-                diagnostics={"policy_step_id": problem.policy_step_id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(solution_a, solution_b),
+                    diagnostics={"policy_step_id": problem.policy_step_id},
+                ),
+                **kwargs,
             )
         if problem.policy_step_id == policy_steps[3].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution_c,),
-                diagnostics={"policy_step_id": problem.policy_step_id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(solution_c,),
+                    diagnostics={"policy_step_id": problem.policy_step_id},
+                ),
+                **kwargs,
             )
-        return InferenceResult(
-            status=STATUS_EXACT,
-            solutions=(solution_a,),
-            diagnostics={"policy_step_id": problem.policy_step_id},
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution_a,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
         )
 
     monkeypatch.setattr(
@@ -525,15 +560,21 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
 
     def _solve_side_effect(problem, **kwargs):
         if problem.military_score_alpha > 0:
-            return InferenceResult(
-                status=STATUS_TIME_LIMITED,
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_TIME_LIMITED,
+                    solutions=(exact_solution,),
+                    diagnostics={"policy_step_id": problem.policy_step_id},
+                ),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
                 solutions=(exact_solution,),
                 diagnostics={"policy_step_id": problem.policy_step_id},
-            )
-        return InferenceResult(
-            status=STATUS_EXACT,
-            solutions=(exact_solution,),
-            diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
         )
 
     monkeypatch.setattr(
@@ -580,17 +621,26 @@ def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, 
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
-            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
-        if problem.policy_step_id == policy_steps[1].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(early_solution,),
-                diagnostics={"policy_step_id": policy_steps[1].id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
             )
-        return InferenceResult(
-            status=STATUS_NO_EXACT_SOLUTION,
-            solutions=(),
-            diagnostics={"policy_step_id": problem.policy_step_id},
+        if problem.policy_step_id == policy_steps[1].id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(early_solution,),
+                    diagnostics={"policy_step_id": policy_steps[1].id},
+                ),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_NO_EXACT_SOLUTION,
+                solutions=(),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
         )
 
     monkeypatch.setattr(
@@ -616,23 +666,35 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
-            return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
         if problem.policy_step_id == policy_steps[1].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(mid_solution, low_solution),
-                diagnostics={"policy_step_id": policy_steps[1].id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(mid_solution, low_solution),
+                    diagnostics={"policy_step_id": policy_steps[1].id},
+                ),
+                **kwargs,
             )
         if problem.policy_step_id == policy_steps[2].id:
-            return InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(high_solution,),
-                diagnostics={"policy_step_id": policy_steps[2].id},
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(high_solution,),
+                    diagnostics={"policy_step_id": policy_steps[2].id},
+                ),
+                **kwargs,
             )
-        return InferenceResult(
-            status=STATUS_NO_EXACT_SOLUTION,
-            solutions=(),
-            diagnostics={"policy_step_id": problem.policy_step_id},
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_NO_EXACT_SOLUTION,
+                solutions=(),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
         )
 
     monkeypatch.setattr(

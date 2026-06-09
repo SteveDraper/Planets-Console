@@ -28,13 +28,6 @@ export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolea
   )
 }
 
-export function canStopInferenceRow(detail: ScoresInferenceRowDetail): boolean {
-  if (detail.isComplete) {
-    return false
-  }
-  return detail.displayStatus === 'pending' || detail.displayStatus === 'success'
-}
-
 export function canResumeInferenceRow(
   detail: ScoresInferenceRowDetail,
   options: { isGloballyPaused?: boolean } = {}

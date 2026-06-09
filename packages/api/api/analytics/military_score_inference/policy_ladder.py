@@ -420,18 +420,6 @@ def run_policy_ladder_tier_step(
             continue
         if _abort_tier_step_on_seed_result(state, seed_result, seed_problem):
             return
-        catalog_solve_max = _catalog_solve_max_solutions(
-            len(state.merged_solutions),
-            state.resolved_max_solutions,
-        )
-        if seed_result.solutions:
-            _merge_exact_solutions(
-                state.merged_solutions,
-                state.seen_signatures,
-                seed_result.solutions,
-                resolved_max_solutions=state.resolved_max_solutions,
-                on_admitted=on_admitted,
-            )
         state.problem = seed_problem
         if seed_result.status == STATUS_TIME_LIMITED:
             state.time_limited = True
@@ -467,14 +455,6 @@ def run_policy_ladder_tier_step(
         state.ladder_complete = True
         return
 
-    if exact_result.solutions:
-        _merge_exact_solutions(
-            state.merged_solutions,
-            state.seen_signatures,
-            exact_result.solutions,
-            resolved_max_solutions=state.resolved_max_solutions,
-            on_admitted=on_admitted,
-        )
     if exact_result.status == STATUS_TIME_LIMITED:
         state.time_limited = True
 

@@ -8,11 +8,9 @@ import type {
 import { GlobalInferencePauseControl } from './GlobalInferencePauseControl'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
-import { InferenceStopIcon } from './InferenceStopIcon'
 import {
   canOpenInferenceDetail,
   canResumeInferenceRow,
-  canStopInferenceRow,
   inferenceAccessibleLabel,
   isActivelySearchingInference,
   isIncompleteInferenceRow,
@@ -27,24 +25,9 @@ import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
   analyticScope: AnalyticShellScope
-  onStopRow?: (playerId: number) => void
   onResumeRow?: (playerId: number) => void
   isGloballyPaused?: boolean
   globalInferencePause?: UseGlobalInferencePauseResult
-}
-
-function StopInferenceButton({ onStopRow }: { onStopRow: () => void }) {
-  return (
-    <button
-      type="button"
-      title="Stop build inference for this row"
-      aria-label="Stop build inference for this row"
-      onClick={onStopRow}
-      className="inline-flex items-center justify-center rounded p-1 text-red-400 hover:bg-red-500/10"
-    >
-      <InferenceStopIcon />
-    </button>
-  )
 }
 
 function ResumeInferenceButton({ onResumeRow }: { onResumeRow: () => void }) {
@@ -64,19 +47,16 @@ function ResumeInferenceButton({ onResumeRow }: { onResumeRow: () => void }) {
 function InferenceStatusCell({
   detail,
   onOpenDetail,
-  onStopRow,
   onResumeRow,
   isGloballyPaused = false,
 }: {
   detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
-  onStopRow?: (playerId: number) => void
   onResumeRow?: (playerId: number) => void
   isGloballyPaused?: boolean
 }) {
   const label = inferenceAccessibleLabel(detail)
   const playerId = detail.playerId
-  const showStop = canStopInferenceRow(detail) && typeof playerId === 'number' && onStopRow != null
   const showResume =
     canResumeInferenceRow(detail, { isGloballyPaused }) &&
     typeof playerId === 'number' &&
@@ -94,7 +74,6 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
-        {showStop ? <StopInferenceButton onStopRow={() => onStopRow(playerId)} /> : null}
         {showResume ? (
           <ResumeInferenceButton onResumeRow={() => onResumeRow(playerId)} />
         ) : null}
@@ -146,7 +125,6 @@ function InferenceStatusCell({
 export function ScoresTableView({
   data,
   analyticScope: _analyticScope,
-  onStopRow,
   onResumeRow,
   isGloballyPaused = false,
   globalInferencePause,
@@ -196,7 +174,6 @@ export function ScoresTableView({
                         <InferenceStatusCell
                           detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
-                          onStopRow={onStopRow}
                           onResumeRow={onResumeRow}
                           isGloballyPaused={isGloballyPaused}
                         />

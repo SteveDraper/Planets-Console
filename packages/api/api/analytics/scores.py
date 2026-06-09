@@ -11,7 +11,6 @@ from api.analytics.military_score_inference.inference_row_stream import (
 )
 from api.analytics.military_score_inference.inference_table_stream import (
     iter_scores_table_inference_events,
-    stop_scores_table_inference_row,
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
@@ -130,19 +129,3 @@ def iter_scores_table_inference_stream(
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-
-
-def stop_scores_row_inference(
-    *,
-    game_id: int,
-    perspective: int,
-    turn_number: int,
-    player_id: int,
-) -> dict[str, object]:
-    stopped = stop_scores_table_inference_row(
-        game_id=game_id,
-        perspective=perspective,
-        turn_number=turn_number,
-        player_id=player_id,
-    )
-    return {"playerId": player_id, "stopped": stopped}

@@ -7,7 +7,6 @@ import pytest
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import (
-    STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
     build_inference_observation,
     infer_military_score_build,
@@ -15,6 +14,9 @@ from api.analytics.military_score_inference.analytic import (
     is_after_ship_limit,
     observation_to_constraints_payload,
     prior_turn_score_data_available,
+)
+from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_NO_PRIOR_TURN,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
