@@ -28,6 +28,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.errors import ValidationError
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
@@ -107,12 +108,16 @@ class InferenceRowScheduler:
         with self._condition:
             return self._global_pause_status_locked(scope)
 
+    def _require_active_stream_for_scope_locked(self, scope: InferenceStreamScope) -> None:
+        if self._active_stream_refcount == 0 or self._active_scope != scope:
+            raise ValidationError(
+                "Global pause requires an active inference table stream for this scope."
+            )
+
     def pause_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
         """Soft pause: drain queued tier jobs; in-flight tier work is not cancelled."""
         with self._condition:
-            if self._active_scope is not None and self._active_scope != scope:
-                self._invalidate_retained_state_locked()
-            self._active_scope = scope
+            self._require_active_stream_for_scope_locked(scope)
             if self._globally_paused:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = True
@@ -123,8 +128,7 @@ class InferenceRowScheduler:
 
     def resume_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
         with self._condition:
-            if self._active_scope != scope:
-                return self._global_pause_status_locked(scope)
+            self._require_active_stream_for_scope_locked(scope)
             if not self._globally_paused:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = False

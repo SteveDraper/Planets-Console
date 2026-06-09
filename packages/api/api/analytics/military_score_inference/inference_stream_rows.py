@@ -30,7 +30,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.models.game import Score, TurnInfo
-from api.transport.inference_stream import inference_complete_event
+from api.transport.inference_stream import inference_complete_event, inference_global_pause_event
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 _MULTiplexWaitSeconds = 0.05
@@ -228,6 +228,8 @@ def iter_scores_table_inference_events(
     )
     scheduler = get_inference_row_scheduler()
     scheduler.begin_scope(stream_scope)
+    pause_status = scheduler.global_pause_status(stream_scope)
+    yield inference_global_pause_event(paused=bool(pause_status.get("paused")))
 
     scheduled_rows: list[ScheduledInferenceRow] = []
     finished_run_ids: set[str] = set()

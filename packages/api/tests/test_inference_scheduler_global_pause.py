@@ -1,5 +1,6 @@
 """Tests for global pause/resume on the inference row scheduler."""
 
+import pytest
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -16,6 +17,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceSolution, InferenceSolutionAction
 from api.analytics.military_score_inference.policy_ladder import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.errors import ValidationError
 
 
 def _session_for_turn(
@@ -33,6 +35,44 @@ def _session_for_turn(
         perspective=perspective,
         turn_number=sample_turn.settings.turn,
     )
+
+
+def test_pause_without_active_stream_raises_validation_error(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+
+    with pytest.raises(ValidationError, match="active inference table stream"):
+        scheduler.pause_globally(scope)
+
+    with pytest.raises(ValidationError, match="active inference table stream"):
+        scheduler.resume_globally(scope)
+
+
+def test_pause_with_mismatched_scope_raises_validation_error(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope_a = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    scope_b = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn + 1,
+    )
+    scheduler.begin_scope(scope_a)
+
+    with pytest.raises(ValidationError, match="active inference table stream"):
+        scheduler.pause_globally(scope_b)
+
+    with pytest.raises(ValidationError, match="active inference table stream"):
+        scheduler.resume_globally(scope_b)
 
 
 def test_pause_holds_enqueued_jobs_and_resume_requeues(sample_turn):

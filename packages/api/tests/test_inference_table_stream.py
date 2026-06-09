@@ -6,6 +6,7 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     _TierJob,
+    get_inference_row_scheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
@@ -13,8 +14,10 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     ScheduledInferenceRow,
     drain_available_multiplex_events,
     iter_multiplexed_inference_events,
+    iter_scores_table_inference_events,
     tag_inference_stream_event,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -42,6 +45,41 @@ def _wire_complete_event(*, summary: str) -> dict[str, object]:
         "solutionCount": 1,
         "isComplete": True,
     }
+
+
+def test_table_stream_emits_global_pause_snapshot_on_connect(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    events = list(
+        iter_scores_table_inference_events(
+            sample_turn,
+            (),
+            game_id=628580,
+            perspective=1,
+        )
+    )
+    assert events[0] == {"type": "globalPause", "paused": False}
+
+
+def test_table_stream_emits_global_pause_snapshot_when_scope_is_paused(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = get_inference_row_scheduler()
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    scheduler.begin_scope(scope)
+    scheduler.pause_globally(scope)
+
+    events = list(
+        iter_scores_table_inference_events(
+            sample_turn,
+            (),
+            game_id=628580,
+            perspective=1,
+        )
+    )
+    assert events[0] == {"type": "globalPause", "paused": True}
 
 
 def test_tag_inference_stream_event_adds_player_id_except_global_pause():
