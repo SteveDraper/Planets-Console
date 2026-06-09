@@ -51,7 +51,9 @@ class InferenceRowScheduler:
     """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
 
     def __init__(self, worker_count: int = _DEFAULT_WORKER_COUNT) -> None:
-        self._tier_one_queue: queue.Queue[TierJob] = queue.Queue()
+        # Non-continuation tier jobs (including requeued held jobs). Workers drain
+        # this queue before the continuation round-robin.
+        self._pending_tier_jobs: queue.Queue[TierJob] = queue.Queue()
         self._continuation_round_robin: deque[str] = deque()
         self._runs: dict[str, RowRun] = {}
         self._lock = threading.Lock()
@@ -198,13 +200,13 @@ class InferenceRowScheduler:
         surviving_tier_one: list[TierJob] = []
         while True:
             try:
-                job = self._tier_one_queue.get_nowait()
+                job = self._pending_tier_jobs.get_nowait()
             except queue.Empty:
                 break
             if job.session.run_id != run_id:
                 surviving_tier_one.append(job)
         for job in surviving_tier_one:
-            self._tier_one_queue.put(job)
+            self._pending_tier_jobs.put(job)
 
         run = self._runs.get(run_id)
         if run is not None:
@@ -237,7 +239,7 @@ class InferenceRowScheduler:
             if self._globally_paused:
                 self._get_or_create_run(job.session).hold_job(job)
             else:
-                self._tier_one_queue.put(job)
+                self._pending_tier_jobs.put(job)
             self._condition.notify_all()
 
     def _enqueue_continuation(self, session: InferenceRowStreamSession) -> None:
@@ -259,11 +261,11 @@ class InferenceRowScheduler:
             if run.requeue_continuation(job):
                 self._continuation_round_robin.append(run.run_id)
             return
-        self._tier_one_queue.put(job)
+        self._pending_tier_jobs.put(job)
 
     def _dequeue_next_job_locked(self) -> TierJob | None:
         try:
-            return self._tier_one_queue.get_nowait()
+            return self._pending_tier_jobs.get_nowait()
         except queue.Empty:
             pass
         return self._dequeue_continuation_locked()
@@ -283,7 +285,7 @@ class InferenceRowScheduler:
     def _drain_queue_locked(self) -> None:
         while True:
             try:
-                job = self._tier_one_queue.get_nowait()
+                job = self._pending_tier_jobs.get_nowait()
             except queue.Empty:
                 break
             self._get_or_create_run(job.session).hold_job(job)
@@ -299,7 +301,7 @@ class InferenceRowScheduler:
         self._runs.clear()
         while True:
             try:
-                job = self._tier_one_queue.get_nowait()
+                job = self._pending_tier_jobs.get_nowait()
             except queue.Empty:
                 break
             job.session.cancel_token.cancel()
