@@ -79,6 +79,7 @@ def immediate_row_inference_events(
                 solution_count=0,
                 is_complete=True,
                 diagnostics={"playerId": player_id, "turn": turn.settings.turn},
+                solutions=[],
             ),
         )
 
@@ -96,6 +97,7 @@ def immediate_row_inference_events(
         return None
 
     payload = no_prior_turn_inference_api_payload(turn, observation)
+    wire_solutions = payload.get("solutions")
     return (
         inference_complete_event(
             status=str(payload.get("status", STATUS_NO_PRIOR_TURN)),
@@ -105,6 +107,7 @@ def immediate_row_inference_events(
             diagnostics=(
                 payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else None
             ),
+            solutions=wire_solutions if isinstance(wire_solutions, list) else [],
         ),
     )
 

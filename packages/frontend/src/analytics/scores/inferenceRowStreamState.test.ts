@@ -63,4 +63,56 @@ describe('reduceRowStreamState', () => {
     expect(paused.status).toBe('paused')
     expect(paused.heldSolutions).toHaveLength(1)
   })
+
+  it('replaces held solutions from complete events when solutions are present', () => {
+    const withSolution = reduceRowStreamState(initialRowStreamState(), {
+      type: 'solution',
+      solutions: [
+        {
+          objectiveValue: 10,
+          actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+        },
+      ],
+    })
+    const complete = reduceRowStreamState(withSolution, {
+      type: 'complete',
+      status: 'exact',
+      summary: 'Best: built warship',
+      solutionCount: 1,
+      isComplete: true,
+      solutions: [
+        {
+          objectiveValue: 20,
+          actions: [{ actionId: 'a2', label: 'Build warship', count: 1 }],
+        },
+      ],
+    })
+
+    expect(complete.isComplete).toBe(true)
+    expect(complete.heldSolutions).toHaveLength(1)
+    expect(complete.heldSolutions[0]?.actions[0]?.actionId).toBe('a2')
+    expect(rowDetailFromStreamState(8, complete).solutionCount).toBe(1)
+  })
+
+  it('preserves held solutions on complete events without solutions payload', () => {
+    const withSolution = reduceRowStreamState(initialRowStreamState(), {
+      type: 'solution',
+      solutions: [
+        {
+          objectiveValue: 10,
+          actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+        },
+      ],
+    })
+    const complete = reduceRowStreamState(withSolution, {
+      type: 'complete',
+      status: 'exact',
+      summary: 'Done',
+      solutionCount: 1,
+      isComplete: true,
+    })
+
+    expect(complete.heldSolutions).toHaveLength(1)
+    expect(complete.heldSolutions[0]?.actions[0]?.actionId).toBe('a1')
+  })
 })

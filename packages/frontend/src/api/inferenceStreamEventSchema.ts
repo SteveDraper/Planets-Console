@@ -55,6 +55,7 @@ export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSche
   summary: z.string(),
   solutionCount: z.number().int().min(0),
   isComplete: z.boolean(),
+  solutions: z.array(inferenceStreamSolutionPayloadSchema).optional(),
   diagnostics: z.record(z.string(), z.unknown()).optional(),
 })
 

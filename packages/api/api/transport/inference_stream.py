@@ -58,6 +58,7 @@ def inference_complete_event(
     solution_count: int,
     is_complete: bool = True,
     diagnostics: dict[str, object] | None = None,
+    solutions: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -66,6 +67,8 @@ def inference_complete_event(
         "solutionCount": solution_count,
         "isComplete": is_complete,
     }
+    if solutions is not None:
+        payload["solutions"] = solutions
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
     return payload

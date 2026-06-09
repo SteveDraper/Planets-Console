@@ -169,6 +169,9 @@ export function reduceRowStreamState(
       summary: event.summary,
       isComplete: event.isComplete,
       diagnostics: event.diagnostics ?? {},
+      ...(event.solutions != null
+        ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
+        : {}),
     }
   }
 

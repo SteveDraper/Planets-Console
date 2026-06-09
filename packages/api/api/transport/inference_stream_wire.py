@@ -57,12 +57,14 @@ def row_complete_to_complete_wire_event(
     if event.force_is_complete is not None:
         payload["isComplete"] = event.force_is_complete
     diagnostics = payload.get("diagnostics")
+    wire_solutions = payload.get("solutions")
     return inference_complete_event(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
         solution_count=int(payload.get("solutionCount", 0)),
         is_complete=bool(payload.get("isComplete", True)),
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        solutions=wire_solutions if isinstance(wire_solutions, list) else [],
     )
 
 

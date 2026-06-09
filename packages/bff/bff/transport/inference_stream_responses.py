@@ -29,6 +29,7 @@ class InferenceStreamCompleteEvent(BaseModel):
     summary: str
     solutionCount: int
     isComplete: bool = True
+    solutions: list[dict[str, Any]] | None = None
     diagnostics: dict[str, Any] | None = None
 
 

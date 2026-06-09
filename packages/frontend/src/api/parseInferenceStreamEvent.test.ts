@@ -86,6 +86,33 @@ describe('parseInferenceStreamEvent', () => {
     })
   })
 
+  it('parses complete events with final held solutions', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'complete',
+        status: 'exact',
+        summary: 'Best: built warship',
+        solutionCount: 1,
+        isComplete: true,
+        solutions: [
+          {
+            objectiveValue: 20,
+            actions: [{ actionId: 'a2', label: 'Warship', count: 1 }],
+          },
+        ],
+      })
+    )
+    expect(event).toMatchObject({
+      type: 'complete',
+      status: 'exact',
+      isComplete: true,
+    })
+    if (event?.type === 'complete') {
+      expect(event.solutions).toHaveLength(1)
+      expect(event.solutions?.[0]?.actions[0]?.actionId).toBe('a2')
+    }
+  })
+
   it('parses global pause events', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
