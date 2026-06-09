@@ -6,6 +6,7 @@ from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
@@ -68,6 +69,7 @@ def get_scores_row_inference(
     player_id: int,
     *,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
@@ -88,6 +90,7 @@ def get_scores_row_inference(
             score,
             turn,
             load_scoreboard_turn=load_scoreboard_turn,
+            resolved_mask=resolved_mask,
         )
     return {"playerId": player_id, **inference}
 
@@ -99,6 +102,7 @@ def iter_scores_table_inference_stream(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for all scoreboard rows on one stream."""
     yield from iter_scores_table_inference_events(
@@ -107,4 +111,5 @@ def iter_scores_table_inference_stream(
         game_id=game_id,
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
+        resolve_mask_for_player=resolve_mask_for_player,
     )

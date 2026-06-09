@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import uuid
 from collections import deque
 
 from api.analytics.military_score_inference.inference_row_runner import (
@@ -27,7 +28,7 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun, TierJob
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.errors import ConflictError, ValidationError
+from api.errors import ValidationError
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
@@ -59,20 +60,28 @@ class InferenceRowScheduler:
         self._shutdown = False
         self._active_scope: InferenceStreamScope | None = None
         self._has_active_table_stream = False
+        self._active_table_stream_token: str | None = None
         self._globally_paused = False
         for _ in range(worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
             thread.start()
             self._workers.append(thread)
 
-    def begin_scope(self, scope: InferenceStreamScope) -> None:
+    def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._condition:
             if self._active_scope == scope and self._has_active_table_stream:
-                raise ConflictError("An inference table stream is already active for this scope.")
-            if self._active_scope != scope:
+                self._preempt_table_stream_for_scope_locked()
+            elif self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
+            stream_token = str(uuid.uuid4())
             self._has_active_table_stream = True
+            self._active_table_stream_token = stream_token
+            return stream_token
+
+    def owns_table_stream(self, stream_token: str) -> bool:
+        with self._condition:
+            return self._active_table_stream_token == stream_token
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
         scope_matches = self._active_scope == scope
@@ -146,16 +155,20 @@ class InferenceRowScheduler:
         self,
         scope: InferenceStreamScope,
         sessions: tuple[InferenceRowStreamSession, ...],
+        *,
+        stream_token: str,
     ) -> None:
         """Cancel all row runs for a table stream and clear global pause on disconnect."""
         with self._condition:
+            owns_scope = self._active_table_stream_token == stream_token
             for session in sessions:
                 run_id = session.run_id
                 session.cancel_token.cancel()
                 self._purge_queued_jobs_for_run_locked(run_id)
                 self._runs.pop(run_id, None)
-            if self._active_scope == scope:
+            if owns_scope and self._active_scope == scope:
                 self._has_active_table_stream = False
+                self._active_table_stream_token = None
                 self._clear_global_pause_for_active_scope_locked(scope)
             self._condition.notify_all()
 
@@ -195,14 +208,23 @@ class InferenceRowScheduler:
         session: InferenceRowStreamSession,
         *,
         orchestration: InferenceStreamOrchestration | None = None,
+        stream_token: str | None = None,
     ) -> None:
+        with self._condition:
+            if stream_token is not None and self._active_table_stream_token != stream_token:
+                return
         run = self._get_or_create_run(session)
         run.orchestration = orchestration
         if orchestration is not None:
-            run.ladder_state = orchestration.new_ladder_state()
+            run.ladder_state = orchestration.new_ladder_state(
+                resolved_mask=session.resolved_mask,
+            )
         else:
             policy_steps = tuple(resolve_tier_policies(None))
-            run.ladder_state = PolicyLadderState(policy_steps=policy_steps)
+            run.ladder_state = PolicyLadderState(
+                policy_steps=policy_steps,
+                resolved_mask=session.resolved_mask,
+            )
         self._enqueue_job(TierJob(session=session))
 
     def _enqueue_job(self, job: TierJob) -> None:
@@ -233,8 +255,19 @@ class InferenceRowScheduler:
             job = self._work_queue.popleft()
             self._get_or_create_run(job.session).hold_job(job)
 
+    def _preempt_table_stream_for_scope_locked(self) -> None:
+        """Cancel in-flight table-stream work so a reconnect can replace the active stream."""
+        self._globally_paused = False
+        for run in list(self._runs.values()):
+            run.session.cancel_token.cancel()
+        self._runs.clear()
+        while self._work_queue:
+            job = self._work_queue.popleft()
+            job.session.cancel_token.cancel()
+
     def _invalidate_retained_state_locked(self) -> None:
         self._has_active_table_stream = False
+        self._active_table_stream_token = None
         self._globally_paused = False
         for run in list(self._runs.values()):
             run.session.cancel_token.cancel()

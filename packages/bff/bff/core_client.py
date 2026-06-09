@@ -250,6 +250,56 @@ class CoreClient:
             player_ids,
         )
 
+    def get_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.get_inference_hull_catalog_mask(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+        )
+
+    def put_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        enabled_hull_ids: list[int],
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.put_inference_hull_catalog_mask(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+                enabled_hull_ids,
+            )
+        )
+
+    def reset_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.reset_inference_hull_catalog_mask(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+        )
+
     def get_inference_global_pause_status(
         self,
         game_id: int,

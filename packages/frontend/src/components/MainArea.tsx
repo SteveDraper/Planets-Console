@@ -132,7 +132,7 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
-  const { inferenceByRow } = useScoresInferenceByRow(
+  const { inferenceByRow, refreshInference } = useScoresInferenceByRow(
     data,
     analyticScope,
     inferenceEnabled && fetchEnabled,
@@ -175,6 +175,7 @@ function TableTile({
       <ScoresTableView
         data={scoresTableWithInference}
         analyticScope={analyticScope}
+        onHullCatalogSaved={refreshInference}
         isGloballyPaused={globalInferencePause.isGloballyPaused}
         globalInferencePause={globalInferencePause}
       />

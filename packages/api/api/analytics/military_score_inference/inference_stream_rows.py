@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     no_prior_turn_inference_api_payload,
@@ -121,7 +122,9 @@ def schedule_inference_row(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
-) -> ScheduledInferenceRow:
+    resolved_mask: ResolvedHullCatalogMask | None = None,
+    stream_token: str | None = None,
+) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
         score,
         turn,
@@ -140,6 +143,7 @@ def schedule_inference_row(
         game_id=game_id,
         perspective=perspective,
         turn_number=turn_number,
+        resolved_mask=resolved_mask,
     )
     orchestration = create_inference_stream_orchestration(
         path,
@@ -148,7 +152,13 @@ def schedule_inference_row(
         segments=_segments,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-    scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
+    scheduler.enqueue_tier_ladder(
+        session,
+        orchestration=orchestration,
+        stream_token=stream_token,
+    )
+    if stream_token is not None and not scheduler.owns_table_stream(stream_token):
+        return None
     return ScheduledInferenceRow(player_id=player_id, session=session)
 
 
@@ -180,6 +190,7 @@ def iter_multiplexed_inference_events(
     *,
     tag_player_id: bool,
     finished_run_ids: set[str] | None = None,
+    is_stream_active: Callable[[], bool] | None = None,
 ) -> Iterator[dict[str, object]]:
     """Round-robin blocking reads across row event queues until all rows finish."""
     finished = finished_run_ids if finished_run_ids is not None else set()
@@ -187,6 +198,8 @@ def iter_multiplexed_inference_events(
     active_rows = list(sessions)
     cursor = 0
     while pending_run_ids and active_rows:
+        if is_stream_active is not None and not is_stream_active():
+            return
         row = active_rows[cursor % len(active_rows)]
         cursor += 1
         if row.session.run_id not in pending_run_ids:
@@ -208,10 +221,12 @@ def cleanup_inference_stream_sessions(
     scheduler: InferenceRowScheduler,
     scope: InferenceStreamScope,
     sessions: tuple[InferenceRowStreamSession, ...],
+    *,
+    stream_token: str,
 ) -> None:
     """Tear down row runs when the table stream ends; always recalculate on reconnect."""
     if sessions:
-        scheduler.end_inference_stream(scope, sessions)
+        scheduler.end_inference_stream(scope, sessions, stream_token=stream_token)
 
 
 def iter_scores_table_inference_events(
@@ -221,6 +236,7 @@ def iter_scores_table_inference_events(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged inference events for all scoreboard rows on one NDJSON stream."""
     turn_number = turn.settings.turn
@@ -230,13 +246,16 @@ def iter_scores_table_inference_events(
         turn_number=turn_number,
     )
     scheduler = get_inference_row_scheduler()
-    scheduler.begin_scope(stream_scope)
+    stream_token = scheduler.begin_scope(stream_scope)
     pause_status = scheduler.global_pause_status(stream_scope)
     yield inference_global_pause_event(paused=bool(pause_status.get("paused")))
 
     scheduled_rows: list[ScheduledInferenceRow] = []
     finished_run_ids: set[str] = set()
     for player_id in player_ids:
+        if not scheduler.owns_table_stream(stream_token):
+            return
+
         immediate = immediate_row_inference_events(
             turn,
             player_id,
@@ -248,17 +267,23 @@ def iter_scores_table_inference_events(
             continue
 
         score = next(row for row in turn.scores if row.ownerid == player_id)
-        scheduled_rows.append(
-            schedule_inference_row(
-                scheduler,
-                score=score,
-                turn=turn,
-                player_id=player_id,
-                game_id=game_id,
-                perspective=perspective,
-                load_scoreboard_turn=load_scoreboard_turn,
-            )
+        resolved_mask = (
+            resolve_mask_for_player(player_id) if resolve_mask_for_player is not None else None
         )
+        scheduled_row = schedule_inference_row(
+            scheduler,
+            score=score,
+            turn=turn,
+            player_id=player_id,
+            game_id=game_id,
+            perspective=perspective,
+            load_scoreboard_turn=load_scoreboard_turn,
+            resolved_mask=resolved_mask,
+            stream_token=stream_token,
+        )
+        if scheduled_row is None:
+            return
+        scheduled_rows.append(scheduled_row)
         yield from drain_available_multiplex_events(
             tuple(scheduled_rows),
             tag_player_id=True,
@@ -271,10 +296,12 @@ def iter_scores_table_inference_events(
             sessions,
             tag_player_id=True,
             finished_run_ids=finished_run_ids,
+            is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
         )
     finally:
         cleanup_inference_stream_sessions(
             scheduler,
             stream_scope,
             tuple(row.session for row in sessions),
+            stream_token=stream_token,
         )

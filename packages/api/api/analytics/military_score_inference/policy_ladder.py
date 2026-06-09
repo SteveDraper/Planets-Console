@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.constraints import (
     solution_satisfies_exact_hard_equalities,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -151,6 +152,7 @@ def solve_with_policy_ladder(
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[
     InferenceResult,
     ActionCatalog | None,
@@ -163,6 +165,7 @@ def solve_with_policy_ladder(
     state = PolicyLadderState(
         policy_steps=tuple(resolve_tier_policies(policy_path)),
         resolved_max_solutions=resolved_max_solutions,
+        resolved_mask=resolved_mask,
     )
     while not state.ladder_complete and state.next_step_index < len(state.policy_steps):
         if cancel_token is not None and cancel_token.is_cancelled():

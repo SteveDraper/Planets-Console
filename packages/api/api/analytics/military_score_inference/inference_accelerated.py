@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     _serialize_solution_with_arithmetic,
@@ -73,6 +74,7 @@ def run_accelerated_segment_policy_ladder(
     time_limit_seconds: float | None,
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> AcceleratedSegmentResult:
     """Run the policy ladder for one accelerated segment."""
     observation = observation_from_accelerated_segment(score, turn, segment)
@@ -88,6 +90,7 @@ def run_accelerated_segment_policy_ladder(
         time_limit_seconds=resolved_time_limit,
         cancel_token=cancel_token,
         on_admitted=on_admitted,
+        resolved_mask=resolved_mask,
     )
     return AcceleratedSegmentResult(
         segment=segment,
@@ -197,6 +200,7 @@ def run_accelerated_split_inference(
     segments: tuple[AcceleratedInferenceSegment, ...],
     *,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> tuple[
     dict[str, object],
     InferenceObservation,
@@ -224,6 +228,7 @@ def run_accelerated_split_inference(
             segment,
             max_solutions=20,
             time_limit_seconds=per_segment_time,
+            resolved_mask=resolved_mask,
         )
         if segment.is_streaming_target:
             reported_observation = ladder_result.observation

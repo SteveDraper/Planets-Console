@@ -29,6 +29,7 @@ from api.transport.connections_options import (
     FlareConnectionMode,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_ndjson
 from api.transport.load_all_turns import (
     LoadAllTurnsRequest,
@@ -152,6 +153,61 @@ def get_scores_table_inference_stream(
             )
         ),
         media_type="application/x-ndjson",
+    )
+
+
+@router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog")
+def get_inference_hull_catalog_mask(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Return master hull catalog and effective mask for one inference target player."""
+    return analytics.get_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+    )
+
+
+@router.put("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog")
+def put_inference_hull_catalog_mask(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    body: InferenceHullCatalogMaskUpdateRequest,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Persist a user hull catalog mask override for one inference target player."""
+    return analytics.put_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        body.enabled_hull_ids,
+    )
+
+
+@router.delete(
+    "/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/hull-catalog"
+)
+def delete_inference_hull_catalog_mask(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int = Query(..., alias="playerId", ge=0),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Clear a user hull catalog mask override, restoring game-type defaults."""
+    return analytics.reset_inference_hull_catalog_mask(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
     )
 
 

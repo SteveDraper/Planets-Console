@@ -6,15 +6,31 @@ from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError
 from api.models.game import TurnInfo
+from api.services.inference_hull_catalog_service import InferenceHullCatalogService
 from api.services.turn_load_service import TurnLoadService
+from api.storage.base import StorageBackend
 from api.transport.connections_options import FlareConnectionMode
 
 
 class TurnAnalyticService:
     """Compute registered turn analytics for a game, perspective, and turn."""
 
-    def __init__(self, turns: TurnLoadService) -> None:
+    def __init__(
+        self,
+        turns: TurnLoadService,
+        hull_catalog_masks: InferenceHullCatalogService | None = None,
+        *,
+        storage: StorageBackend | None = None,
+    ) -> None:
         self._turns = turns
+        if hull_catalog_masks is not None:
+            self._hull_catalog_masks = hull_catalog_masks
+        else:
+            if storage is None:
+                from api.storage import get_storage
+
+                storage = get_storage()
+            self._hull_catalog_masks = InferenceHullCatalogService(storage, turns)
 
     def _load_scoreboard_turn(
         self,
@@ -71,10 +87,17 @@ class TurnAnalyticService:
         from api.analytics.scores import get_scores_row_inference
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        resolved_mask = self._hull_catalog_masks.resolve_mask_for_player(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
         return get_scores_row_inference(
             turn,
             player_id,
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
+            resolved_mask=resolved_mask,
         )
 
     def iter_scores_table_inference_stream(
@@ -87,12 +110,21 @@ class TurnAnalyticService:
         from api.analytics.scores import iter_scores_table_inference_stream
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+
+        def resolve_mask_for_player(player_id: int):
+            return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
+                turn,
+                game_id,
+                player_id,
+            )
+
         return iter_scores_table_inference_stream(
             turn,
             player_ids,
             game_id=game_id,
             perspective=perspective,
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
+            resolve_mask_for_player=resolve_mask_for_player,
         )
 
     def _inference_scheduler_scope(
@@ -153,3 +185,47 @@ class TurnAnalyticService:
             turn_number,
         )
         return scheduler.resume_globally(scope)
+
+    def get_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._hull_catalog_masks.hull_catalog_mask_payload(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
+
+    def put_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        enabled_hull_ids: list[int],
+    ) -> dict[str, object]:
+        return self._hull_catalog_masks.put_user_mask(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            enabled_hull_ids,
+        )
+
+    def reset_inference_hull_catalog_mask(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> dict[str, object]:
+        return self._hull_catalog_masks.reset_user_mask(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )

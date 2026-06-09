@@ -44,6 +44,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/scores/inference/hull-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scores Inference Hull Catalog
+         * @description Master hull catalog and effective mask for one Scores inference row.
+         */
+        get: operations["get_scores_inference_hull_catalog_analytics_scores_inference_hull_catalog_get"];
+        /**
+         * Put Scores Inference Hull Catalog
+         * @description Persist a user hull catalog mask override for one Scores inference row.
+         */
+        put: operations["put_scores_inference_hull_catalog_analytics_scores_inference_hull_catalog_put"];
+        post?: never;
+        /**
+         * Delete Scores Inference Hull Catalog
+         * @description Clear a user hull catalog mask override for one Scores inference row.
+         */
+        delete: operations["delete_scores_inference_hull_catalog_analytics_scores_inference_hull_catalog_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/scores/inference/global-pause": {
         parameters: {
             query?: never;
@@ -154,6 +182,11 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** InferenceHullCatalogMaskUpdateRequest */
+        InferenceHullCatalogMaskUpdateRequest: {
+            /** Enabledhullids */
+            enabledHullIds: number[];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -233,6 +266,112 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                     "application/x-ndjson": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scores_inference_hull_catalog_analytics_scores_inference_hull_catalog_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+                playerId: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_scores_inference_hull_catalog_analytics_scores_inference_hull_catalog_put: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+                playerId: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InferenceHullCatalogMaskUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_scores_inference_hull_catalog_analytics_scores_inference_hull_catalog_delete: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+                playerId: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

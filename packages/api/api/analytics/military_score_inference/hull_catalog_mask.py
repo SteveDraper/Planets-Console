@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from api.analytics.military_score_inference.inference_turn_lookup import (
     parse_component_id_csv,
     player_by_id,
@@ -25,6 +27,18 @@ REPLACEMENT_SETTING_FIELDS: tuple[str, ...] = (
     "cybernautlightreplacescybernaut",
     "ironslavescoutreplacesironslave",
 )
+
+
+@dataclass(frozen=True)
+class ResolvedHullCatalogMask:
+    """Effective hull eligibility for one inference target player."""
+
+    race_id: int
+    race_name: str
+    master_hull_ids: frozenset[int]
+    default_enabled_hull_ids: frozenset[int]
+    effective_enabled_hull_ids: frozenset[int]
+    has_user_override: bool
 
 
 def catalog_hull_ids(turn: TurnInfo) -> frozenset[int]:
@@ -139,3 +153,30 @@ def default_enabled_hull_ids_for_player(turn: TurnInfo, player_id: int) -> froze
         settings=turn.settings,
     )
     return enabled & master
+
+
+def resolve_hull_catalog_mask(
+    turn: TurnInfo,
+    player_id: int,
+    *,
+    user_enabled_hull_ids: frozenset[int] | None,
+) -> ResolvedHullCatalogMask:
+    player = player_by_id(turn, player_id)
+    race = race_by_id_or_none(turn, player.raceid)
+    race_name = race.name if race is not None else "Unknown"
+    master = master_hull_ids_for_race(turn, player.raceid)
+    default_enabled = default_enabled_hull_ids_for_player(turn, player_id)
+    if user_enabled_hull_ids is None:
+        effective = default_enabled
+        has_override = False
+    else:
+        effective = user_enabled_hull_ids & master
+        has_override = True
+    return ResolvedHullCatalogMask(
+        race_id=player.raceid,
+        race_name=race_name,
+        master_hull_ids=master,
+        default_enabled_hull_ids=default_enabled,
+        effective_enabled_hull_ids=effective,
+        has_user_override=has_override,
+    )
