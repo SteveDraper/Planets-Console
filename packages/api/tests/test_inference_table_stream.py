@@ -158,4 +158,5 @@ def test_cancel_run_purges_queued_tier_jobs_for_run(sample_turn):
     assert scheduler._tier_one_queue.qsize() == 1
     remaining_job = scheduler._tier_one_queue.get_nowait()
     assert remaining_job.session.run_id == other_session.run_id
-    assert session.run_id not in scheduler._continuation_by_run
+    cancelled_run = scheduler._runs.get(session.run_id)
+    assert cancelled_run is None or not cancelled_run.continuation_jobs
