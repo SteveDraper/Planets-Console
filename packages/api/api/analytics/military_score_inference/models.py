@@ -1,6 +1,21 @@
 """Data contracts for military score build inference."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.ranking_heuristics import (
+        InferenceRankingHeuristics,
+        TierOverflowBand,
+    )
+
+
+def _default_ranking_heuristics() -> InferenceRankingHeuristics:
+    from api.analytics.military_score_inference.ranking_heuristics import InferenceRankingHeuristics
+
+    return InferenceRankingHeuristics()
 
 
 @dataclass(frozen=True)
@@ -56,6 +71,8 @@ class ShipBuildCombo:
     lower_bound: int = 0
     upper_bound: int = 0
     probability_weight: int = 0
+    hull_beam_slots: int = 0
+    hull_launcher_slots: int = 0
 
 
 @dataclass(frozen=True)
@@ -72,6 +89,11 @@ class InferenceProblem:
     time_limit_seconds: float = 20.0
     enforce_priority_point_constraint: bool = False
     military_score_alpha: int = 0
+    ranking_heuristics: InferenceRankingHeuristics = field(
+        default_factory=_default_ranking_heuristics
+    )
+    admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
+    tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

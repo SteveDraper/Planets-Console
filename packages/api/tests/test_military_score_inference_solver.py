@@ -101,7 +101,7 @@ def test_solve_exact_positive_action_solution():
             count=1,
         ),
     )
-    assert result.solutions[0].objective_value == 100
+    assert result.solutions[0].objective_value == 0
 
 
 def test_solve_solution_with_negative_action_contribution():
@@ -269,7 +269,7 @@ def test_top_k_returns_higher_weight_solutions_first():
     )
 
     assert result.status == STATUS_EXACT
-    assert [solution.objective_value for solution in result.solutions] == [100, 60, 50]
+    assert [solution.objective_value for solution in result.solutions] == [0, -50, -70]
     assert result.solutions[0].actions[0].action_id == "build_preferred"
 
 
@@ -408,12 +408,10 @@ def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100(
     )
 
     assert result_ten.solutions[0].actions[0].count == 10
-    assert result_ten.solutions[0].objective_value == 10 * 100
     assert result_hundred.solutions[0].actions[0].count == 100
-    assert result_hundred.solutions[0].objective_value == 10 * 100 + 40 * 20 + 50 * 5
-    assert result_ten.solutions[0].objective_value / 10 != (
-        result_hundred.solutions[0].objective_value / 100
-    )
+    assert result_ten.solutions[0].objective_value > result_hundred.solutions[0].objective_value
+    assert result_ten.solutions[0].objective_value == 0
+    assert result_hundred.solutions[0].objective_value == -95
 
 
 def test_bucketed_action_satisfies_exact_score_constraint():
@@ -440,9 +438,5 @@ def test_bucket_variables_respect_configured_count_ranges():
         )
     )
 
-    bucket_counts = result.diagnostics["bucket_counts_by_action_id"]["planet_defense_posts"]
-    assert bucket_counts == (10, 40, 50)
-    assert bucket_counts[0] <= 10
-    assert bucket_counts[1] <= 40
-    assert bucket_counts[2] <= 50
-    assert sum(bucket_counts) == 100
+    active_bins = result.diagnostics["bucket_counts_by_action_id"]["planet_defense_posts"]
+    assert active_bins == (0, 0, 1)

@@ -13,6 +13,12 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.ranking_heuristics import (
+    InferenceRankingHeuristics,
+    diversity_caps_applied_payload,
+    fighter_channel_action_ids,
+    torpedo_load_action_ids,
+)
 
 PRIORITY_POINT_DIAGNOSTIC_NOTE = (
     "Priority-point equality is not a hard solver constraint until production-queue "
@@ -33,6 +39,67 @@ def _fighter_transfer_actions_both_present(
         FIGHTERS_STARBASE_TO_SHIP_ID in aggregate_action_ids
         and FIGHTERS_SHIP_TO_STARBASE_ID in aggregate_action_ids
     )
+
+
+def _add_active_indicator(
+    model: cp_model.CpModel,
+    count_var: cp_model.IntVar,
+    *,
+    name: str,
+) -> cp_model.IntVar:
+    active = model.new_bool_var(name)
+    model.add(count_var >= 1).only_enforce_if(active)
+    model.add(count_var == 0).only_enforce_if(active.negated())
+    return active
+
+
+def _add_superclass_diversity_cap(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    member_action_ids: tuple[str, ...],
+    *,
+    cap: int,
+    superclass: str,
+) -> None:
+    if len(member_action_ids) <= cap:
+        return
+    active_indicators = [
+        _add_active_indicator(
+            model,
+            action_count_vars[action_id],
+            name=f"diversity_{superclass}_{action_id}_active",
+        )
+        for action_id in member_action_ids
+    ]
+    model.add(sum(active_indicators) <= cap)
+
+
+def add_action_family_diversity_caps(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    aggregate_action_ids: frozenset[str],
+    heuristics: InferenceRankingHeuristics,
+) -> list[dict[str, object]]:
+    """Apply torpedo-load and fighter-channel diversity caps; return diagnostics payload."""
+    torpedo_ids = torpedo_load_action_ids(aggregate_action_ids)
+    if torpedo_ids:
+        _add_superclass_diversity_cap(
+            model,
+            action_count_vars,
+            torpedo_ids,
+            cap=heuristics.torpedo_load_diversity_cap,
+            superclass="torpedo_loads",
+        )
+    fighter_ids = fighter_channel_action_ids(aggregate_action_ids)
+    if fighter_ids:
+        _add_superclass_diversity_cap(
+            model,
+            action_count_vars,
+            fighter_ids,
+            cap=heuristics.fighter_channel_diversity_cap,
+            superclass="fighter_channel",
+        )
+    return diversity_caps_applied_payload(heuristics, aggregate_action_ids)
 
 
 def _add_fighter_transfer_direction_exclusivity(
@@ -168,7 +235,7 @@ class InferenceHardConstraints:
         problem: InferenceProblem,
         action_count_vars: dict[str, cp_model.IntVar],
         combo_count_vars: dict[str, cp_model.IntVar],
-    ) -> None:
+    ) -> list[dict[str, object]]:
         observation = problem.observation
         for constraint in self.enforced_equalities():
             constraint.add_to_model(
@@ -194,6 +261,12 @@ class InferenceHardConstraints:
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):
             _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
+        return add_action_family_diversity_caps(
+            model,
+            action_count_vars,
+            aggregate_action_ids,
+            problem.ranking_heuristics,
+        )
 
 
 def solution_satisfies_exact_hard_equalities(
@@ -233,6 +306,7 @@ def observation_to_constraints_payload(
     *,
     hard_constraints: InferenceHardConstraints | None = None,
     aggregate_action_ids: frozenset[str] | None = None,
+    diversity_caps_applied: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Serialize hard solver constraints for diagnostics."""
     constraints = hard_constraints or InferenceHardConstraints()
@@ -257,4 +331,6 @@ def observation_to_constraints_payload(
     }
     if not constraints.enforce_priority_point_constraint:
         payload["priorityPointConstraintNote"] = PRIORITY_POINT_DIAGNOSTIC_NOTE
+    if diversity_caps_applied is not None:
+        payload["diversityCapsApplied"] = diversity_caps_applied
     return payload

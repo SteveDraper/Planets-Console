@@ -1,6 +1,6 @@
 """Bounded aggregate action catalog for military score build inference."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from api.analytics.military_score_inference.accelerated_start import (
     HOMEBASE_STARBASE_FIGHTERS,
@@ -18,6 +18,12 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.ranking_heuristics import (
+    InferenceRankingHeuristics,
+    TierOverflowBand,
+    admission_cap_for_action,
+    build_tier_aware_probability_buckets,
+)
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     loaded_ship_fighter_score_delta_2x,
@@ -32,6 +38,7 @@ from api.analytics.military_score_inference.ship_build_combos import (
 )
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
+    compute_aggregate_admission_caps,
     resolve_tier_policies,
     resolved_aggregate_cap,
 )
@@ -63,8 +70,8 @@ SHIP_FIGHTER_BUCKETS = (
     ProbabilityBucket("extreme load", 101, 500, 5),
 )
 SHIP_TORPEDO_BUCKETS = (
-    ProbabilityBucket("modest load", 0, 20, 70),
-    ProbabilityBucket("heavy load", 21, 100, 20),
+    ProbabilityBucket("modest load", 0, 40, 70),
+    ProbabilityBucket("heavy load", 41, 100, 70),
     ProbabilityBucket("extreme load", 101, 200, 5),
 )
 
@@ -101,6 +108,11 @@ class ActionCatalog:
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]]
     policy_step_id: str = ""
     policy_step_index: int = 0
+    ranking_heuristics: InferenceRankingHeuristics = field(
+        default_factory=InferenceRankingHeuristics
+    )
+    admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
+    tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
 
     @property
     def catalog_size(self) -> int:
@@ -147,6 +159,9 @@ def build_inference_problem(
         max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
         military_score_alpha=military_score_alpha,
+        ranking_heuristics=catalog.ranking_heuristics,
+        admission_caps_by_action_id=catalog.admission_caps_by_action_id,
+        tier_overflow_by_action_id=catalog.tier_overflow_by_action_id,
     )
 
 
@@ -182,6 +197,7 @@ def build_action_catalog_from_turn(
         turn=turn,
         policy_step=resolved_policy_step,
         policy_step_index=policy_step_index,
+        policy_steps=resolve_tier_policies(),
     )
 
 
@@ -200,6 +216,7 @@ def build_action_catalog(
     turn: TurnInfo | None = None,
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
+    policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
@@ -229,6 +246,27 @@ def build_action_catalog(
         elif action.id.startswith("ship_torps_loaded_"):
             probability_buckets[action.id] = SHIP_TORPEDO_BUCKETS
 
+    policy_ladder = policy_steps or resolve_tier_policies()
+    ranking_heuristics = InferenceRankingHeuristics()
+    admission_caps_raw = compute_aggregate_admission_caps(policy_ladder, policy_step_index)
+    admission_caps_by_action_id: dict[str, int] = {}
+    tier_overflow_by_action_id: dict[str, TierOverflowBand] = {}
+    for action in kept_actions:
+        if action.id not in probability_buckets:
+            continue
+        admission_cap = admission_cap_for_action(action.id, admission_caps_raw)
+        buckets, overflow_band = build_tier_aware_probability_buckets(
+            probability_buckets[action.id],
+            admission_cap=admission_cap,
+            current_cap=action.upper_bound,
+            overflow_marginal_weight=ranking_heuristics.tier_overflow_marginal_weight,
+        )
+        probability_buckets[action.id] = buckets
+        if admission_cap is not None:
+            admission_caps_by_action_id[action.id] = admission_cap
+        if overflow_band is not None:
+            tier_overflow_by_action_id[action.id] = overflow_band
+
     ship_build_combos = generate_ship_build_combos(
         observation,
         hulls_by_id=hulls_by_id,
@@ -250,6 +288,9 @@ def build_action_catalog(
         probability_buckets_by_action_id=probability_buckets,
         policy_step_id=resolved_policy_step.id,
         policy_step_index=policy_step_index,
+        ranking_heuristics=ranking_heuristics,
+        admission_caps_by_action_id=admission_caps_by_action_id,
+        tier_overflow_by_action_id=tier_overflow_by_action_id,
     )
 
 

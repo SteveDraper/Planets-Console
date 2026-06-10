@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_N
 from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
     TierPolicyOverlay,
+    compute_aggregate_admission_caps,
     default_tier_policy_path,
     parse_tier_policy_steps,
     resolve_tier_policies,
@@ -276,7 +277,7 @@ def test_slack_admitted_on_later_steps_with_caps(sample_turn):
     ]
     assert planet_action.upper_bound <= 16
     assert torp_actions
-    assert all(action.upper_bound <= 10 for action in torp_actions)
+    assert all(action.upper_bound <= 40 for action in torp_actions)
 
 
 def test_tech_level_filtering_derives_component_sets(synthetic_catalog_context):
@@ -712,3 +713,35 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         "combo_high",
         "combo_mid",
     }
+
+
+def test_full_catalog_step_applies_tier_overflow_to_planet_defense(sample_turn):
+    steps = resolve_tier_policies()
+    full_catalog_index = next(
+        index for index, step in enumerate(steps) if step.id == "full_catalog_exact"
+    )
+    full_step = steps[full_catalog_index]
+    observation = _observation(military_delta_2x=500)
+    catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=full_step,
+        policy_step_index=full_catalog_index,
+    )
+
+    assert catalog.admission_caps_by_action_id["planet_defense_posts_added_total"] == 16
+    assert "planet_defense_posts_added_total" in catalog.tier_overflow_by_action_id
+    overflow = catalog.tier_overflow_by_action_id["planet_defense_posts_added_total"]
+    assert overflow.marginal_weight == 5
+
+
+def test_compute_aggregate_admission_caps_records_first_step_appearance():
+    steps = resolve_tier_policies()
+    torp_step_index = next(
+        index for index, step in enumerate(steps) if step.id == "admit_ship_torpedoes"
+    )
+    caps = compute_aggregate_admission_caps(steps, torp_step_index)
+
+    assert caps["planet_defense_posts_added_total"] == 16
+    assert caps["ship_torps_per_type"] == 40
+    assert caps["starbase_defense_posts_added_total"] == 5

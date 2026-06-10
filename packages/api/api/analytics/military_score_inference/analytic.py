@@ -152,6 +152,11 @@ def build_inference_solver_diagnostics(
     extra: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Structured solver diagnostics for the diagnostics panel."""
+    from api.analytics.military_score_inference.ranking_heuristics import (
+        diversity_caps_applied_payload,
+        ranking_heuristics_diagnostics_payload,
+    )
+
     payload: dict[str, object] = {"turn": turn}
     if observation is not None:
         hard_constraints = (
@@ -159,14 +164,24 @@ def build_inference_solver_diagnostics(
             if problem is not None
             else InferenceHardConstraints()
         )
+        aggregate_action_ids = (
+            frozenset(action.id for action in problem.aggregate_actions)
+            if problem is not None
+            else None
+        )
+        diversity_caps_applied = (
+            diversity_caps_applied_payload(
+                problem.ranking_heuristics,
+                aggregate_action_ids,
+            )
+            if problem is not None and aggregate_action_ids is not None
+            else None
+        )
         payload["constraints"] = observation_to_constraints_payload(
             observation,
             hard_constraints=hard_constraints,
-            aggregate_action_ids=(
-                frozenset(action.id for action in problem.aggregate_actions)
-                if problem is not None
-                else None
-            ),
+            aggregate_action_ids=aggregate_action_ids,
+            diversity_caps_applied=diversity_caps_applied,
         )
     if catalog is not None:
         payload["actionCatalog"] = catalog_to_actions_payload(
@@ -175,6 +190,16 @@ def build_inference_solver_diagnostics(
             observation=observation,
         )
         payload.update(catalog.diagnostics())
+    if problem is not None:
+        payload["rankingHeuristics"] = ranking_heuristics_diagnostics_payload(
+            problem.ranking_heuristics,
+            admission_caps_by_action_id=problem.admission_caps_by_action_id,
+        )
+    elif catalog is not None:
+        payload["rankingHeuristics"] = ranking_heuristics_diagnostics_payload(
+            catalog.ranking_heuristics,
+            admission_caps_by_action_id=catalog.admission_caps_by_action_id,
+        )
     if solver is not None:
         payload["solver"] = solver
     if extra:

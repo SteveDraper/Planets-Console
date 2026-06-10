@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
+    LOADED_TORPEDO_AMMO_MINERALS,
     PLANET_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_FIGHTER_SCORE_DELTA_2X,
@@ -41,6 +42,7 @@ from api.analytics.military_score_inference.solver import (
 
 __all__ = [
     "LOADED_SHIP_FIGHTER_SCORE_DELTA_2X",
+    "LOADED_TORPEDO_AMMO_MINERALS",
     "PLANET_DEFENSE_POST_SCORE_DELTA_2X",
     "STARBASE_DEFENSE_POST_SCORE_DELTA_2X",
     "STARBASE_FIGHTER_SCORE_DELTA_2X",
