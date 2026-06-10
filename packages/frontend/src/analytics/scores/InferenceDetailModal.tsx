@@ -4,158 +4,80 @@ import { useModalKeydownFocusTrap } from '../../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../../lib/restoreFocus'
 import { cn } from '../../lib/utils'
 import {
-  acceleratedSegmentTitle,
-  readAcceleratedInferenceSegments,
-  type AcceleratedInferenceSegment,
-} from './acceleratedInferenceSegments'
-import {
   formatSignedDelta,
   militaryChangeFromDelta2x,
   readInferenceConstraints,
   readMilitaryScoreArithmetic,
   type MilitaryScoreArithmetic,
 } from './inferenceConstraints'
+import { InferenceSolutionLineIcon } from './inferenceSolutionLineIcon'
+import { readInferenceRunSummary } from './inferenceRunSummary'
 import { isRecord } from './scoresWireParsers'
+import { sortSolutionLineItemsForDisplay } from './solutionLineItemDisplayOrder'
 
 type InferenceDetailModalProps = {
   isOpen: boolean
   onClose: () => void
   racePlayer: string
   detail: ScoresInferenceRowDetail | null
+  isGloballyPaused?: boolean
 }
 
-function formatInferenceStatusLabel(status: string): string {
-  return status.replaceAll('_', ' ')
-}
+function SolutionActionTable({
+  solution,
+  arithmetic,
+}: {
+  solution: ScoresInferenceSolution
+  arithmetic: MilitaryScoreArithmetic
+}) {
+  const displayLineItems = sortSolutionLineItemsForDisplay(arithmetic.lineItems)
 
-function readInferenceRunSummary(
-  detail: ScoresInferenceRowDetail,
-  diagnostics: Record<string, unknown>
-): {
-  statusLabel?: string
-  wallTimeSeconds?: number
-} {
-  const solver = diagnostics.solver
-  const solverRecord = isRecord(solver) ? solver : null
-
-  const overallStatus =
-    typeof detail.status === 'string' && detail.status.length > 0
-      ? detail.status
-      : typeof solverRecord?.status === 'string'
-        ? solverRecord.status
-        : typeof solverRecord?.solver_status === 'string'
-          ? solverRecord.solver_status
-          : typeof solverRecord?.solverStatus === 'string'
-            ? solverRecord.solverStatus
-            : undefined
-
-  return {
-    statusLabel:
-      overallStatus != null ? formatInferenceStatusLabel(overallStatus) : undefined,
-    wallTimeSeconds:
-      typeof solverRecord?.wall_time_seconds === 'number'
-        ? solverRecord.wall_time_seconds
-        : typeof solverRecord?.wallTimeSeconds === 'number'
-          ? solverRecord.wallTimeSeconds
-          : undefined,
-  }
-}
-
-function MilitaryScoreArithmeticTable({ arithmetic }: { arithmetic: MilitaryScoreArithmetic }) {
   return (
     <div className="mt-2 overflow-x-auto">
       <table className="w-full border-collapse text-xs text-slate-300">
         <thead>
           <tr className="border-b border-[#52575d]/60 text-left text-slate-400">
+            <th className="w-10 py-1 pr-2">
+              <span className="sr-only">Icon</span>
+            </th>
             <th className="py-1 pr-2 font-medium">Action</th>
-            <th className="py-1 pr-2 font-medium">Count</th>
-            <th className="py-1 pr-2 font-medium">Per unit</th>
-            <th className="py-1 font-medium">Military subtotal</th>
+            <th className="py-1 font-medium">Military</th>
           </tr>
         </thead>
         <tbody>
-          {arithmetic.lineItems.map((line) => (
+          {displayLineItems.map((line) => (
             <tr key={line.actionId} className="border-b border-[#52575d]/40">
-              <td className="py-1 pr-2">{line.label}</td>
-              <td className="py-1 pr-2 tabular-nums">{line.count}</td>
-              <td className="py-1 pr-2 tabular-nums">
-                {formatSignedDelta(line.militaryChangePerUnit)}
+              <td className="py-1 pr-2 align-middle">
+                <InferenceSolutionLineIcon line={line} shipBuilds={solution.shipBuilds} />
               </td>
+              <td className="py-1 pr-2">{line.label}</td>
               <td className="py-1 tabular-nums">
                 {formatSignedDelta(line.militaryChangeSubtotal)}
               </td>
             </tr>
           ))}
         </tbody>
-        <tfoot>
-          <tr className="text-slate-200">
-            <td colSpan={3} className="py-1 pr-2 text-right font-medium">
-              Explained military change
-            </td>
-            <td className="py-1 tabular-nums font-medium">
-              {formatSignedDelta(arithmetic.explainedMilitaryChange)}
-            </td>
-          </tr>
-          <tr className="text-slate-400">
-            <td colSpan={3} className="py-1 pr-2 text-right">
-              Observed military change
-            </td>
-            <td className="py-1 tabular-nums">
-              {formatSignedDelta(arithmetic.observedMilitaryChange)}
-            </td>
-          </tr>
-        </tfoot>
       </table>
-      {!arithmetic.matchesObserved ? (
-        <p className="mt-2 text-xs text-amber-300/90">
-          Explained military change does not match the observed scoreboard delta.
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function SegmentConstraints({ segment }: { segment: AcceleratedInferenceSegment }) {
-  return (
-    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-300">
-      <dt className="text-slate-400">Military change</dt>
-      <dd className="tabular-nums">
-        {formatSignedDelta(militaryChangeFromDelta2x(segment.militaryDelta2x))}
-        <span className="ml-1 text-slate-500">
-          (2× scale {formatSignedDelta(segment.militaryDelta2x)})
-        </span>
-      </dd>
-      <dt className="text-slate-400">Warship change</dt>
-      <dd className="tabular-nums">{formatSignedDelta(segment.warshipDelta)}</dd>
-      <dt className="text-slate-400">Freighter change</dt>
-      <dd className="tabular-nums">{formatSignedDelta(segment.freighterDelta)}</dd>
-    </dl>
-  )
-}
-
-function AcceleratedSegmentSection({
-  segment,
-  scoreboardTurn,
-}: {
-  segment: AcceleratedInferenceSegment
-  scoreboardTurn: number | undefined
-}) {
-  return (
-    <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
-      <h3 className="text-xs font-medium text-slate-200">
-        {acceleratedSegmentTitle(segment, scoreboardTurn)}
-      </h3>
-      <SegmentConstraints segment={segment} />
-      {segment.solutions.length > 0 ? (
-        <div className="mt-3 flex flex-col gap-3">
-          {segment.solutions.map((solution, index) => (
-            <SolutionSection key={`${segment.segmentId}-solution-${index}`} solution={solution} index={index} />
-          ))}
+      <div className="mt-2 space-y-1 border-t border-[#52575d]/40 pt-2 text-xs">
+        <div className="flex justify-between gap-4 text-slate-200">
+          <span>Explained military change</span>
+          <span className="tabular-nums font-medium">
+            {formatSignedDelta(arithmetic.explainedMilitaryChange)}
+          </span>
         </div>
-      ) : (
-        <p className="mt-2 text-xs text-slate-500">No feasible build explanation found.</p>
-      )}
-    </section>
+        <div className="flex justify-between gap-4 text-slate-400">
+          <span>Observed military change</span>
+          <span className="tabular-nums">
+            {formatSignedDelta(arithmetic.observedMilitaryChange)}
+          </span>
+        </div>
+        {!arithmetic.matchesObserved ? (
+          <p className="text-amber-300/90">
+            Explained military change does not match the observed scoreboard delta.
+          </p>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
@@ -168,12 +90,15 @@ function SolutionSection({
 }) {
   const arithmetic = readMilitaryScoreArithmetic(solution.militaryScoreArithmetic)
   return (
-    <section
-      className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3"
-    >
-      <h3 className="text-xs font-medium text-slate-200">Solution {index + 1}</h3>
+    <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
+      <h3
+        className="text-xs font-medium text-slate-200"
+        title="Composite rank score from action priors and parsimony penalties -- not a percentage."
+      >
+        Solution {index + 1} · Plausibility {solution.objectiveValue}
+      </h3>
       {arithmetic != null && arithmetic.lineItems.length > 0 ? (
-        <MilitaryScoreArithmeticTable arithmetic={arithmetic} />
+        <SolutionActionTable solution={solution} arithmetic={arithmetic} />
       ) : (
         <ul className="mt-2 flex flex-col gap-1 text-xs text-slate-300">
           {solution.actions.map((action) => (
@@ -188,11 +113,25 @@ function SolutionSection({
   )
 }
 
+function inferenceSearchBanner(
+  detail: ScoresInferenceRowDetail,
+  isGloballyPaused: boolean
+): string | null {
+  if (detail.isComplete) {
+    return null
+  }
+  if (detail.displayStatus === 'paused' || isGloballyPaused) {
+    return 'Search paused -- held explanations are current.'
+  }
+  return 'Search continuing -- more explanations may appear.'
+}
+
 export function InferenceDetailModal({
   isOpen,
   onClose,
   racePlayer,
   detail,
+  isGloballyPaused = false,
 }: InferenceDetailModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -221,16 +160,12 @@ export function InferenceDetailModal({
 
   const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
   const constraints = readInferenceConstraints(diagnostics)
-  const acceleratedSegments = readAcceleratedInferenceSegments(diagnostics)
   const inferenceRun = readInferenceRunSummary(detail, diagnostics)
   const scoreboardTurn = constraints?.turn
   const hostTurn =
     constraints?.hostTurn ??
     (scoreboardTurn != null && scoreboardTurn > 1 ? scoreboardTurn - 1 : null)
-  const deltaSourceNote =
-    constraints?.scoreboardDeltaSource === 'prior_row_total_diff'
-      ? 'Change columns were missing on this scoreboard row (typical for spectator loads). Deltas were inferred from totals versus the prior scoreboard row.'
-      : null
+  const searchBanner = inferenceSearchBanner(detail, isGloballyPaused)
 
   return (
     <div
@@ -279,11 +214,7 @@ export function InferenceDetailModal({
 
         {constraints != null ? (
           <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
-            <h3 className="text-xs font-medium text-slate-200">
-              {acceleratedSegments != null
-                ? 'Scoreboard row constraints'
-                : 'Observed constraints'}
-            </h3>
+            <h3 className="text-xs font-medium text-slate-200">Observed constraints</h3>
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-300">
               {constraints.militaryDelta2x != null ? (
                 <>
@@ -292,9 +223,6 @@ export function InferenceDetailModal({
                     {formatSignedDelta(
                       militaryChangeFromDelta2x(constraints.militaryDelta2x)
                     )}
-                    <span className="ml-1 text-slate-500">
-                      (2× scale {formatSignedDelta(constraints.militaryDelta2x)})
-                    </span>
                   </dd>
                 </>
               ) : null}
@@ -319,29 +247,8 @@ export function InferenceDetailModal({
                 </>
               ) : null}
             </dl>
-            {constraints.appliedEqualities != null && constraints.appliedEqualities.length > 0 ? (
-              <ul className="mt-2 list-inside list-disc text-xs text-slate-500">
-                {constraints.appliedEqualities.map((equality) => (
-                  <li key={equality}>{equality}</li>
-                ))}
-              </ul>
-            ) : null}
           </section>
         ) : null}
-
-        {deltaSourceNote != null ? (
-          <p className="rounded border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
-            {deltaSourceNote}
-          </p>
-        ) : null}
-
-        {constraints?.priorityPointConstraintNote != null ? (
-          <p className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            {constraints.priorityPointConstraintNote}
-          </p>
-        ) : null}
-
-        <p className="text-xs text-slate-300">{detail.summary}</p>
 
         {inferenceRun.statusLabel != null || inferenceRun.wallTimeSeconds != null ? (
           <p className="text-xs text-slate-500">
@@ -354,31 +261,14 @@ export function InferenceDetailModal({
           </p>
         ) : null}
 
-        {acceleratedSegments != null ? (
-          <div className="flex flex-col gap-3">
-            <p className="text-xs text-slate-400">
-              Accelerated-start game: build inference split by host turn.
-            </p>
-            {acceleratedSegments.map((segment) => (
-              <AcceleratedSegmentSection
-                key={segment.segmentId}
-                segment={segment}
-                scoreboardTurn={constraints?.turn}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {detail.solutions.map((solution, index) => (
-              <SolutionSection key={`solution-${index}`} solution={solution} index={index} />
-            ))}
-          </div>
-        )}
+        <div className="flex flex-col gap-3">
+          {detail.solutions.map((solution, index) => (
+            <SolutionSection key={`solution-${index}`} solution={solution} index={index} />
+          ))}
+        </div>
 
-        {!detail.isComplete ? (
-          <p className="text-xs text-amber-300/90">
-            Inference stopped before all alternatives were explored.
-          </p>
+        {searchBanner != null ? (
+          <p className="text-xs text-slate-400">{searchBanner}</p>
         ) : null}
       </div>
     </div>

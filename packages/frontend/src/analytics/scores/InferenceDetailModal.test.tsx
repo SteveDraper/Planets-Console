@@ -16,6 +16,35 @@ function detail(overrides: Partial<ScoresInferenceRowDetail> = {}): ScoresInfere
   }
 }
 
+const defenseSolution = {
+  objectiveValue: 999,
+  actions: [
+    {
+      actionId: 'planet_defense_posts_added_total',
+      label: 'Planet defense post',
+      count: 2,
+    },
+  ],
+  militaryScoreArithmetic: {
+    observedMilitaryChange: 22,
+    observedMilitaryDelta2x: 44,
+    explainedMilitaryChange: 22,
+    explainedMilitaryDelta2x: 44,
+    matchesObserved: true,
+    lineItems: [
+      {
+        actionId: 'planet_defense_posts_added_total',
+        label: 'Planet defense post',
+        count: 2,
+        scoreDelta2xPerUnit: 22,
+        militaryChangePerUnit: 11,
+        scoreDelta2xSubtotal: 44,
+        militaryChangeSubtotal: 22,
+      },
+    ],
+  },
+}
+
 describe('InferenceDetailModal', () => {
   it('shows observed constraints and military score arithmetic', () => {
     render(
@@ -39,36 +68,7 @@ describe('InferenceDetailModal', () => {
             },
             solver: { solver_status: 'OPTIMAL', wall_time_seconds: 0.42 },
           },
-          solutions: [
-            {
-              objectiveValue: 999,
-              actions: [
-                {
-                  actionId: 'planet_defense',
-                  label: 'Planet defense post',
-                  count: 2,
-                },
-              ],
-              militaryScoreArithmetic: {
-                observedMilitaryChange: 22,
-                observedMilitaryDelta2x: 44,
-                explainedMilitaryChange: 22,
-                explainedMilitaryDelta2x: 44,
-                matchesObserved: true,
-                lineItems: [
-                  {
-                    actionId: 'planet_defense',
-                    label: 'Planet defense post',
-                    count: 2,
-                    scoreDelta2xPerUnit: 22,
-                    militaryChangePerUnit: 11,
-                    scoreDelta2xSubtotal: 44,
-                    militaryChangeSubtotal: 22,
-                  },
-                ],
-              },
-            },
-          ],
+          solutions: [defenseSolution],
         })}
       />
     )
@@ -78,11 +78,16 @@ describe('InferenceDetailModal', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Scoreboard row turn 9')
     expect(screen.getByRole('dialog')).toHaveTextContent('Host turn 8 deltas')
     expect(screen.getByRole('dialog')).toHaveTextContent('Player 5')
-    expect(screen.getByText(/Priority points are diagnostic only/)).toBeInTheDocument()
-    expect(screen.getByText('Explained military change')).toBeInTheDocument()
+    // PP note and spectator delta-source note belong in Scores diagnostics panel, not modal (#48 UX).
+    expect(screen.queryByText(/Priority points are diagnostic only/)).toBeNull()
+    expect(screen.queryByText(/Change columns were missing/)).toBeNull()
+    expect(screen.getByText('Solution 1 · Plausibility 999')).toBeInTheDocument()
     expect(screen.getByText('Planet defense post')).toBeInTheDocument()
-    expect(screen.queryByText(/score 999/)).toBeNull()
-    expect(screen.queryByText(/score 999/i)).toBeNull()
+    expect(screen.getByText('Explained military change')).toBeInTheDocument()
+    expect(screen.getByText('Observed military change')).toBeInTheDocument()
+    expect(screen.queryByText('Best: two defense posts')).toBeNull()
+    expect(screen.queryByText(/2× scale/)).toBeNull()
+    expect(screen.queryByText(/appliedEqualities|scoreDelta2x \* count/)).toBeNull()
   })
 
   it('shows negative military change using integer halving of 2× scale', () => {
@@ -106,6 +111,7 @@ describe('InferenceDetailModal', () => {
 
     expect(screen.getByRole('dialog')).toHaveTextContent('-53869')
     expect(screen.getByRole('dialog')).not.toHaveTextContent('-53869.5')
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('2× scale')
   })
 
   it('does not render when closed', () => {
@@ -120,7 +126,7 @@ describe('InferenceDetailModal', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('shows accelerated-start segments instead of duplicate top-level solutions', () => {
+  it('renders top-level solutions only when accelerated segments are present in diagnostics', () => {
     render(
       <InferenceDetailModal
         isOpen
@@ -149,59 +155,16 @@ describe('InferenceDetailModal', () => {
                 solutions: [
                   {
                     objectiveValue: 999,
-                    actions: [
-                      {
-                        actionId: 'planet_defense',
-                        label: 'Planet defense post',
-                        count: 10,
-                      },
-                    ],
+                    actions: [],
                     militaryScoreArithmetic: {
                       observedMilitaryChange: 110,
-                      observedMilitaryDelta2x: 220,
-                      explainedMilitaryChange: 110,
-                      explainedMilitaryDelta2x: 220,
-                      matchesObserved: true,
                       lineItems: [
                         {
-                          actionId: 'planet_defense',
+                          actionId: 'planet_defense_posts_added_total',
                           label: 'Planet defense post',
                           count: 10,
                           scoreDelta2xPerUnit: 22,
                           militaryChangePerUnit: 11,
-                          scoreDelta2xSubtotal: 220,
-                          militaryChangeSubtotal: 110,
-                        },
-                      ],
-                    },
-                  },
-                ],
-              },
-              {
-                segmentId: 'reported_host_turn',
-                hostTurn: 2,
-                status: 'exact',
-                solutionCount: 1,
-                militaryDelta2x: 220,
-                warshipDelta: 1,
-                freighterDelta: 0,
-                solutions: [
-                  {
-                    objectiveValue: 100,
-                    actions: [],
-                    militaryScoreArithmetic: {
-                      observedMilitaryChange: 110,
-                      observedMilitaryDelta2x: 220,
-                      explainedMilitaryChange: 110,
-                      explainedMilitaryDelta2x: 220,
-                      matchesObserved: true,
-                      lineItems: [
-                        {
-                          comboId: 'combo_13_9_3_6_8_6',
-                          label: 'Missouri',
-                          count: 1,
-                          scoreDelta2xPerUnit: 220,
-                          militaryChangePerUnit: 110,
                           scoreDelta2xSubtotal: 220,
                           militaryChangeSubtotal: 110,
                         },
@@ -216,6 +179,14 @@ describe('InferenceDetailModal', () => {
             {
               objectiveValue: 100,
               actions: [],
+              shipBuilds: [
+                {
+                  comboId: 'combo_13_9_3_6_8_6',
+                  label: 'Missouri',
+                  count: 1,
+                  hullId: 13,
+                },
+              ],
               militaryScoreArithmetic: {
                 observedMilitaryChange: 110,
                 observedMilitaryDelta2x: 220,
@@ -240,13 +211,95 @@ describe('InferenceDetailModal', () => {
       />
     )
 
-    expect(screen.getByText('Accelerated-start game: build inference split by host turn.')).toBeInTheDocument()
-    expect(screen.getByText('Host turn 1 (accelerated window)')).toBeInTheDocument()
-    expect(screen.getByText('Host turn 2 (on scoreboard row turn 3)')).toBeInTheDocument()
-    expect(screen.getByText('Planet defense post')).toBeInTheDocument()
+    expect(screen.queryByText(/Accelerated-start game/)).toBeNull()
+    expect(screen.queryByText('Host turn 1 (accelerated window)')).toBeNull()
+    expect(screen.getByText('Solution 1 · Plausibility 100')).toBeInTheDocument()
     expect(screen.getByText('Missouri')).toBeInTheDocument()
-    expect(screen.getByText('Scoreboard row constraints')).toBeInTheDocument()
-    expect(screen.queryAllByText('Solution 1')).toHaveLength(2)
+    const hullImage = screen.getByRole('dialog').querySelector(
+      'img[src="https://mobile.planets.nu/img/hulls3d/13_p.png"]'
+    )
+    expect(hullImage).not.toBeNull()
+  })
+
+  it('shows reconciliation warning when explained military does not match observed', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          solutions: [
+            {
+              ...defenseSolution,
+              militaryScoreArithmetic: {
+                ...defenseSolution.militaryScoreArithmetic,
+                explainedMilitaryChange: 20,
+                matchesObserved: false,
+              },
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(
+      screen.getByText(/Explained military change does not match the observed scoreboard delta/)
+    ).toBeInTheDocument()
+  })
+
+  it('shows continuing banner while search is in flight', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          isComplete: false,
+          solutions: [defenseSolution],
+        })}
+      />
+    )
+
+    expect(
+      screen.getByText('Search continuing -- more explanations may appear.')
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/stopped before all alternatives were explored/)
+    ).toBeNull()
+  })
+
+  it('shows paused banner when row or global pause is active', () => {
+    const { rerender } = render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          displayStatus: 'paused',
+          isComplete: false,
+          solutions: [defenseSolution],
+        })}
+      />
+    )
+    expect(
+      screen.getByText('Search paused -- held explanations are current.')
+    ).toBeInTheDocument()
+
+    rerender(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        isGloballyPaused
+        detail={detail({
+          isComplete: false,
+          solutions: [defenseSolution],
+        })}
+      />
+    )
+    expect(
+      screen.getByText('Search paused -- held explanations are current.')
+    ).toBeInTheDocument()
   })
 
   it('shows overall inference status instead of the last solver pass status', () => {
@@ -274,6 +327,8 @@ describe('InferenceDetailModal', () => {
 
     expect(screen.getByRole('dialog')).toHaveTextContent('Inference exact · 0.12s')
     expect(screen.getByRole('dialog')).not.toHaveTextContent('INFEASIBLE')
+    expect(screen.getByText('Solution 1 · Plausibility 85')).toBeInTheDocument()
+    expect(screen.getByText('Solution 2 · Plausibility 80')).toBeInTheDocument()
   })
 
   it('calls onClose from the close button', () => {

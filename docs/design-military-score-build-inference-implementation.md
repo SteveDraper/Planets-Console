@@ -353,22 +353,23 @@ When inference is enabled, add one extra column to the existing scoreboard table
 |------|---------|------------|----------------|
 | **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K**. While search is in flight and **N = 0**, show a **dashed-border badge with 0** (same count-badge chrome, not a separate hourglass icon). When **N > 0**, use a solid border; **N** rises toward K while search continues until `isComplete`. In-progress search adds an animation affordance on the badge. | summarize top solution when **N > 0**; show that inference is still running when **N = 0** | open modal with ranked held solutions when **N > 0** (grows while streaming until plateau at K); no modal until the first held exact arrives |
 | Paused | row frozen by **inference global pause** | paused summary; held count when **N > 0** | modal when **N > 0**; resume all via column header |
-| Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | optionally open diagnostic modal if details exist |
+| Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | no modal in #48; tooltip only (failure diagnostic modal is a later option) |
 | Global pause (column header) | freeze or resume all rows on this scope | pause/resume all build inference | `POST/DELETE .../inference/global-pause` |
 
 The row-level dashed-zero badge means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the badge transitions from dashed **0** to a solid count when the first `solution` event arrives with a non-empty held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
 
-### 7.3 Modal details
+### 7.3 Solution detail modal
 
-The modal for a row with **N > 0** should show:
+**Authoritative UX spec:** [design-military-score-inference-solution-modal.md](design-military-score-inference-solution-modal.md) (issue **#48**).
 
-- player and turn transition,
-- observed deltas used as constraints,
-- solver status and runtime,
-- ranked solutions in descending objective/probability order,
-- action breakdown for each solution,
-- score arithmetic for the selected solution,
-- warnings when priority points were diagnostic-only or when deferred effects may explain missing solutions.
+Summary:
+
+- Opens when **N > 0** and row status is `success` or `paused`; live-updates while search runs.
+- Player-facing header: turn/host-turn context, observed constraint deltas (scoreboard units). No `appliedEqualities`, no 2× parentheticals, no `summary` body, no PP diagnostic note, and no spectator delta-source note in the modal (those appear in the Scores diagnostics panel only).
+- All held top-K solutions, each with **Plausibility** header (`objectiveValue`) and an icon | action | military subtotal table plus explained-vs-observed footer.
+- **Accelerated-start segments** are internal: modal uses top-level row `solutions` and `constraints` only (Core already promotes the row-relevant segment).
+- Hull row icons via frontend `hullImageUrl()`; aggregate rows use Lucide fallbacks until #89.
+- Relative probability pruning and tail collapse: follow-on **#88**.
 
 ### 7.4 API shape
 
@@ -901,7 +902,7 @@ The **Issue_77** branch may bundle tier policy, accelerated-start inference, cor
 | **A** (merge gate) | Tier policy core per section 8.5; satisfies **#77** acceptance criteria | `tier_policy.yaml`, `tier_policy.py`, `policy_ladder.py`, `component_eligibility.py`; refactors to `actions.py`, `constraints.py` (band retry), `ship_build_combos.py`, `solver.py`, `analytic.py`; `test_military_score_inference_tier_policy.py` and related inference tests |
 | **B** (companion) | Accelerated-start inference dispatch | `accelerated_start.py`, `inference_target.py`, `inference_path.py`; scoreboard wiring in `scores.py`, `turn_analytic_service.py`; `test_accelerated_start_scoreboard.py` |
 | **C** (companion, optional split) | Corpus probe harness; inventory-only ground truth | `Makefile` targets (`inference_corpus`, `inference_corpus_discover`, `inference_corpus_probe`), `scripts/run_inference_corpus.py`, `packages/api/tests/inference_corpus/` (`worker.py`, `ground_truth.py`, `run.py`, `verify.py`, discovery/coverage/report), `test_inference_corpus_*.py`; spec touch-ups in `docs/design-inference-corpus.md` |
-| **D** (companion, optional split) | Frontend accelerated segments and wire parsing | `acceleratedInferenceSegments.ts`, `scoresWireParsers.ts`, `diagnosticsFromTable.ts`, `inferenceConstraints.ts`, `InferenceDetailModal.tsx`; matching `*.test.ts(x)` |
+| **D** (companion, optional split) | Frontend solution modal and wire parsing | `scoresWireParsers.ts`, `diagnosticsFromTable.ts`, `inferenceConstraints.ts`, `InferenceDetailModal.tsx`, `hullImageUrl.ts`; matching `*.test.ts(x)`. Accelerated segments stay in diagnostics only (see [solution modal spec](design-military-score-inference-solution-modal.md)). |
 
 **Merge gate:** slice **A** closes **#77**. Slices **B--D** are companion changes on the same branch that depend on or exercise the ladder but are not required to meet **#77** acceptance criteria.
 
@@ -1046,35 +1047,38 @@ Done when:
 - frontend tests pass,
 - the scoreboard remains usable while inference is disabled.
 
-### Phase 5: Add solution-detail modal
+### Phase 5: Solution detail modal (#48)
 
 Goal: let users inspect ranked solutions for rows with feasible explanations.
 
+**UX spec:** [design-military-score-inference-solution-modal.md](design-military-score-inference-solution-modal.md).
+
 Files:
 
-- `packages/frontend/src/analytics/scores/` modal component,
-- any shared dialog component if one already exists,
-- frontend tests for modal behavior.
+- `packages/frontend/src/analytics/scores/InferenceDetailModal.tsx` and helpers,
+- `packages/frontend/src/concepts/hullImageUrl.ts` (frontend-only Planets.nu CDN URLs),
+- frontend tests for modal and hull URL helpers.
 
 Steps:
 
-1. Open the modal when the user clicks a row with **N > 0**.
-2. Show solutions in descending objective/probability order.
-3. Show observed deltas, action breakdown, score arithmetic, and warnings.
-4. Do not open a solution modal for rows with **N = 0**.
-5. For red cross rows, either show hover-only diagnostics or a separate diagnostic modal if details are already available.
+1. Open the modal when the user clicks the count badge with **N > 0** (`success` or `paused` only).
+2. Live-update held solutions while search continues; state-specific banners (continuing / paused).
+3. Player-facing constraints header; per-solution icon table and plausibility header; reconciliation footer.
+4. Remove accelerated-segment multi-section UI; use top-level row payload only.
+5. Do not open the modal for **N = 0** or red-cross rows (tooltip only).
 
 Tests:
 
 - clicking a count badge opens the modal,
-- solutions are displayed in order,
-- rows with **N = 0** are non-clickable or explain that solving is pending,
-- modal closes cleanly and does not reset the Scores checkbox.
+- solutions in rank order with plausibility and icon table,
+- rows with **N = 0** are non-clickable,
+- modal closes cleanly and does not reset the Scores checkbox,
+- `hullImageUrl` golden tests.
 
 Done when:
 
-- modal behavior is covered by frontend tests,
-- detailed solution rendering does not require BFF or frontend to understand OR-Tools internals.
+- #48 acceptance criteria pass,
+- detailed rendering does not require BFF or frontend to understand OR-Tools internals.
 
 ### Phase 6: richer constraints and deferred effects
 
@@ -1187,7 +1191,7 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 | After #53 | Optional manifest rows tied to combo diagnostics shapes |
 | With #49 (deferred effects) | Expand ground truth + coverage for trades/losses; adjunct fixtures |
 
-Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Per-row solution streaming: **#71** (Phase 1H). Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
+Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Solution detail modal UX: **#48** ([spec](design-military-score-inference-solution-modal.md)). Modal follow-ons: **#88** (relative plausibility pruning), **#89** (aggregate-action icons). Per-row solution streaming: **#71** (Phase 1H). Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
 
 ---
 
@@ -1227,7 +1231,7 @@ The user-facing scoreboard integration should be considered complete when:
 - the existing Scores table contract is unchanged when inference is disabled,
 - the Scores tile includes an `Include build inference` checkbox,
 - enabling inference adds an inference column with row-level status,
-- rows with **N > 0** open a modal with ranked held solution details,
+- rows with **N > 0** open the solution detail modal per [design-military-score-inference-solution-modal.md](design-military-score-inference-solution-modal.md) (#48),
 - global pause freezes in-flight inference without losing partial held top-K while the table stream stays open; stream disconnect clears pause and recalculates; implicit cancel may emit `status: stopped` with the last held top-K on the wire,
 - BFF and frontend code never import OR-Tools or encode solver rules directly,
 - `make lint` and the relevant API, BFF, and frontend tests pass.
