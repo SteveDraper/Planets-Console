@@ -1,6 +1,7 @@
 """Scaled military-score contribution helpers for build inference."""
 
 LOADED_SHIP_FIGHTER_SCORE_DELTA_2X = 250
+LOADED_TORPEDO_AMMO_MINERALS = 3
 STARBASE_FIGHTER_SCORE_DELTA_2X = 125
 STARBASE_DEFENSE_POST_SCORE_DELTA_2X = 15
 PLANET_DEFENSE_POST_SCORE_DELTA_2X = 11
@@ -24,9 +25,16 @@ def loaded_ship_fighter_score_delta_2x(count: int = 1) -> int:
     return LOADED_SHIP_FIGHTER_SCORE_DELTA_2X * count
 
 
-def loaded_ship_torpedo_score_delta_2x(torpedo_megacredits: int, count: int = 1) -> int:
-    """Scaled score delta for torpedoes loaded onto ships."""
-    return 2 * torpedo_megacredits * count
+def loaded_ship_torpedo_score_delta_2x(
+    torpedo_megacredits: int,
+    count: int = 1,
+) -> int:
+    """Scaled score delta for torpedoes loaded onto ships.
+
+    Ammo always costs 1 KT each of tritanium, duranium, and molybdenum regardless of
+    torpedo type (launcher mineral columns on the catalog row are not used here).
+    """
+    return 2 * construction_value(torpedo_megacredits, LOADED_TORPEDO_AMMO_MINERALS) * count
 
 
 def starbase_fighter_score_delta_2x(count: int = 1) -> int:

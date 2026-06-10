@@ -6,12 +6,19 @@ from ortools.sat.python import cp_model
 
 from api.analytics.military_score_inference.accelerated_start import scoreboard_host_turn
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.inference_objective import add_count_active_indicator
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
     InferenceSolution,
     ShipBuildCombo,
+)
+from api.analytics.military_score_inference.ranking_heuristics import (
+    InferenceRankingHeuristics,
+    diversity_caps_applied_payload,
+    fighter_channel_action_ids,
+    torpedo_load_action_ids,
 )
 
 PRIORITY_POINT_DIAGNOSTIC_NOTE = (
@@ -35,6 +42,55 @@ def _fighter_transfer_actions_both_present(
     )
 
 
+def _add_superclass_diversity_cap(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    member_action_ids: tuple[str, ...],
+    *,
+    cap: int,
+    superclass: str,
+) -> None:
+    if len(member_action_ids) <= cap:
+        return
+    active_indicators = [
+        add_count_active_indicator(
+            model,
+            action_count_vars[action_id],
+            name=f"diversity_{superclass}_{action_id}_active",
+        )
+        for action_id in member_action_ids
+    ]
+    model.add(sum(active_indicators) <= cap)
+
+
+def add_action_family_diversity_caps(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    aggregate_action_ids: frozenset[str],
+    heuristics: InferenceRankingHeuristics,
+) -> list[dict[str, object]]:
+    """Apply torpedo-load and fighter-channel diversity caps; return diagnostics payload."""
+    torpedo_ids = torpedo_load_action_ids(aggregate_action_ids)
+    if torpedo_ids:
+        _add_superclass_diversity_cap(
+            model,
+            action_count_vars,
+            torpedo_ids,
+            cap=heuristics.torpedo_load_diversity_cap,
+            superclass="torpedo_loads",
+        )
+    fighter_ids = fighter_channel_action_ids(aggregate_action_ids)
+    if fighter_ids:
+        _add_superclass_diversity_cap(
+            model,
+            action_count_vars,
+            fighter_ids,
+            cap=heuristics.fighter_channel_diversity_cap,
+            superclass="fighter_channel",
+        )
+    return diversity_caps_applied_payload(heuristics, aggregate_action_ids)
+
+
 def _add_fighter_transfer_direction_exclusivity(
     model: cp_model.CpModel,
     action_count_vars: dict[str, cp_model.IntVar],
@@ -43,13 +99,16 @@ def _add_fighter_transfer_direction_exclusivity(
     starbase_to_ship = action_count_vars[FIGHTERS_STARBASE_TO_SHIP_ID]
     ship_to_starbase = action_count_vars[FIGHTERS_SHIP_TO_STARBASE_ID]
 
-    uses_starbase_to_ship = model.new_bool_var("fighter_transfer_starbase_to_ship_active")
-    uses_ship_to_starbase = model.new_bool_var("fighter_transfer_ship_to_starbase_active")
-
-    model.add(starbase_to_ship >= 1).only_enforce_if(uses_starbase_to_ship)
-    model.add(starbase_to_ship == 0).only_enforce_if(uses_starbase_to_ship.negated())
-    model.add(ship_to_starbase >= 1).only_enforce_if(uses_ship_to_starbase)
-    model.add(ship_to_starbase == 0).only_enforce_if(uses_ship_to_starbase.negated())
+    uses_starbase_to_ship = add_count_active_indicator(
+        model,
+        starbase_to_ship,
+        name="fighter_transfer_starbase_to_ship_active",
+    )
+    uses_ship_to_starbase = add_count_active_indicator(
+        model,
+        ship_to_starbase,
+        name="fighter_transfer_ship_to_starbase_active",
+    )
     model.add(uses_starbase_to_ship + uses_ship_to_starbase <= 1)
 
 
@@ -168,7 +227,7 @@ class InferenceHardConstraints:
         problem: InferenceProblem,
         action_count_vars: dict[str, cp_model.IntVar],
         combo_count_vars: dict[str, cp_model.IntVar],
-    ) -> None:
+    ) -> list[dict[str, object]]:
         observation = problem.observation
         for constraint in self.enforced_equalities():
             constraint.add_to_model(
@@ -194,6 +253,12 @@ class InferenceHardConstraints:
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):
             _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
+        return add_action_family_diversity_caps(
+            model,
+            action_count_vars,
+            aggregate_action_ids,
+            problem.ranking_heuristics,
+        )
 
 
 def solution_satisfies_exact_hard_equalities(
@@ -233,6 +298,7 @@ def observation_to_constraints_payload(
     *,
     hard_constraints: InferenceHardConstraints | None = None,
     aggregate_action_ids: frozenset[str] | None = None,
+    diversity_caps_applied: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Serialize hard solver constraints for diagnostics."""
     constraints = hard_constraints or InferenceHardConstraints()
@@ -257,4 +323,6 @@ def observation_to_constraints_payload(
     }
     if not constraints.enforce_priority_point_constraint:
         payload["priorityPointConstraintNote"] = PRIORITY_POINT_DIAGNOSTIC_NOTE
+    if diversity_caps_applied is not None:
+        payload["diversityCapsApplied"] = diversity_caps_applied
     return payload

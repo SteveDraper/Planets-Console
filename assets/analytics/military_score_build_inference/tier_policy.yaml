@@ -123,7 +123,7 @@ steps:
     aggregateAllowlist:
       planet_defense_posts_added_total: 16
       starbase_defense_posts_added_total: 5
-      ship_torps_per_type: 10
+      ship_torps_per_type: 40
       starbase_fighters_added_total: 50
       ship_fighters_added_total: 20
       fighter_transfers_per_direction: 50

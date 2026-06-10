@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
+    LOADED_TORPEDO_AMMO_MINERALS,
     PLANET_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_FIGHTER_SCORE_DELTA_2X,
@@ -25,6 +26,7 @@ from api.analytics.military_score_inference.scoring import (
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
 )
+from api.models.components import Torpedo
 
 
 def test_construction_value_uses_megacredits_and_minerals():
@@ -42,8 +44,29 @@ def test_loaded_ship_fighter_score_delta_2x():
 
 
 def test_loaded_ship_torpedo_score_delta_2x():
-    assert loaded_ship_torpedo_score_delta_2x(1) == 2
-    assert loaded_ship_torpedo_score_delta_2x(5, count=4) == 40
+    assert LOADED_TORPEDO_AMMO_MINERALS == 3
+    assert loaded_ship_torpedo_score_delta_2x(1) == 32
+    assert loaded_ship_torpedo_score_delta_2x(5, count=4) == 160
+    assert loaded_ship_torpedo_score_delta_2x(13) == 56
+
+
+def test_loaded_ship_torpedo_score_ignores_launcher_mineral_columns():
+    mark4_launcher_minerals = Torpedo(
+        id=6,
+        fullid=6,
+        name="Mark 4 Photon",
+        torpedocost=13,
+        launchercost=20,
+        tritanium=1,
+        duranium=4,
+        molybdenum=1,
+        mass=2,
+        techlevel=5,
+        crewkill=13,
+        damage=30,
+        combatrange=300,
+    )
+    assert loaded_ship_torpedo_score_delta_2x(mark4_launcher_minerals.torpedocost) == 56
 
 
 def test_starbase_fighter_score_delta_2x():

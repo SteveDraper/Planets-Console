@@ -151,7 +151,18 @@ def build_inference_solver_diagnostics(
     solver: dict[str, object] | None = None,
     extra: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Structured solver diagnostics for the diagnostics panel."""
+    """Structured solver diagnostics for the diagnostics panel.
+
+    Solver-owned keys (ranking heuristics, diversity caps, bin indicators, etc.)
+    must come from ``solver`` -- typically ``InferenceResult.diagnostics`` plus
+    status. This function adds analytic-level context (constraints display,
+    catalog snapshot, turn metadata) without recomputing solver diagnostics.
+    """
+    solver_data = solver or {}
+    diversity_caps_applied = solver_data.get("diversityCapsApplied")
+    if not isinstance(diversity_caps_applied, list):
+        diversity_caps_applied = None
+
     payload: dict[str, object] = {"turn": turn}
     if observation is not None:
         hard_constraints = (
@@ -159,14 +170,16 @@ def build_inference_solver_diagnostics(
             if problem is not None
             else InferenceHardConstraints()
         )
+        aggregate_action_ids = (
+            frozenset(action.id for action in problem.aggregate_actions)
+            if problem is not None
+            else None
+        )
         payload["constraints"] = observation_to_constraints_payload(
             observation,
             hard_constraints=hard_constraints,
-            aggregate_action_ids=(
-                frozenset(action.id for action in problem.aggregate_actions)
-                if problem is not None
-                else None
-            ),
+            aggregate_action_ids=aggregate_action_ids,
+            diversity_caps_applied=diversity_caps_applied,
         )
     if catalog is not None:
         payload["actionCatalog"] = catalog_to_actions_payload(
@@ -175,8 +188,15 @@ def build_inference_solver_diagnostics(
             observation=observation,
         )
         payload.update(catalog.diagnostics())
+    ranking_heuristics = solver_data.get("rankingHeuristics")
+    if isinstance(ranking_heuristics, dict):
+        payload["rankingHeuristics"] = ranking_heuristics
     if solver is not None:
-        payload["solver"] = solver
+        payload["solver"] = {
+            key: value
+            for key, value in solver_data.items()
+            if key not in ("rankingHeuristics", "diversityCapsApplied")
+        }
     if extra:
         payload.update(extra)
     return payload

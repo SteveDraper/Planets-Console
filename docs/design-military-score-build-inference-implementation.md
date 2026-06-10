@@ -255,35 +255,45 @@ Priority points should be configurable at first. If queue behavior is not yet co
 Add an integer objective:
 
 ```text
-maximize action_weights + bucketed_count_weights + interaction_weights
+maximize ranking_penalties + ranking_heuristic_terms
 ```
 
-Weights should be scaled integer log-probabilities or penalties. For example, a common race-appropriate hull receives a better weight than an unusual one, and generic defense-post explanations receive a penalty so they do not crowd out more informative ship-build explanations.
+Ranking penalties are scaled integer values derived from catalog marginal weights (inverted so higher is better). For example, a common race-appropriate hull receives a better penalty than an unusual one, and generic defense-post explanations receive a worse penalty so they do not crowd out more informative ship-build explanations.
 
 ### 5.1 Count-dependent probability terms
 
-Some actions need probability as a function of count, not as a constant per unit. Use bucket variables for these cases.
+Some actions need probability as a function of count, not as a constant per unit. Define **magnitude bins** (`ProbabilityBucket`): each bin has a count range and a marginal weight. The catalog assigns an ordered tuple of bins per bucketed action.
 
 Example for planetary defense posts:
 
-| Bucket | Count range | Marginal meaning |
-|--------|-------------|------------------|
+| Bin | Count range | Marginal meaning |
+|-----|-------------|------------------|
 | modest build-up | 0-10 | plausible local development |
 | heavy build-up | 11-50 | less likely but common in border areas |
 | extreme build-up | 51-100 | possible but strongly penalized |
 
-The model can represent this with separate integer variables per bucket:
+The action still has a single integer count variable (`defense_posts_total`). CP-SAT does **not** decompose that count into per-bin integer variables. Instead, for each bin the solver adds one **ranking bin indicator** boolean that is active when the count falls in that bin's range:
 
 ```text
-defense_posts_total == defense_posts_bucket_1 + defense_posts_bucket_2 + defense_posts_bucket_3
-0 <= defense_posts_bucket_1 <= 10
-0 <= defense_posts_bucket_2 <= 40
-0 <= defense_posts_bucket_3 <= 50
+has_positive_count <=> defense_posts_total >= 1
+for each bin i with range [lower_i, upper_i]:
+  ranking_bin_i active => lower_i <= defense_posts_total <= upper_i
+sum(ranking_bin_i) == has_positive_count
 ```
 
-Then the objective uses different marginal weights for each bucket. This keeps the CP-SAT objective linear while avoiding the wrong assumption that 100 defense posts are as unlikely as 100 fully independent one-post actions.
+When the count is zero, no bin indicator is active. When the count is positive, exactly one bin indicator is active -- the bin whose range contains the count.
 
-This bucket pattern also applies to:
+The objective applies **one rescaled penalty per active bin**, not a per-unit sum across bins. Each active indicator contributes `-ranking_penalty_from_marginal_weight(bin.marginal_weight, max_marginal_weight)` where `max_marginal_weight` is the largest marginal weight among that action's bins. This keeps the CP-SAT objective linear while avoiding the wrong assumption that 100 defense posts are as unlikely as 100 fully independent one-post actions.
+
+Non-bucketed aggregate actions use the same pattern with a single active indicator and one rescaled penalty when count is positive. Ship-build combo counts use per-unit combo penalties (plus partial-weapon-slot penalties when configured).
+
+**Ranking heuristics** layer on top of bin and action penalties (see `ranking_heuristics.py`):
+
+- **Parsimony:** penalize each active fine-grained slack action type (boolean per eligible action).
+- **Tier overflow:** when tier policy raises an action's upper bound above its admission cap, a flat boolean fires when count exceeds the admission cap and adds one overflow marginal penalty (not per unit above the cap).
+- **Action-family diversity caps:** hard constraints limiting how many distinct torpedo-load or fighter-channel member actions may be active simultaneously.
+
+This bin-indicator pattern applies to:
 
 - starbase defense posts,
 - starbase fighter increases,
@@ -786,15 +796,15 @@ Files:
 Steps:
 
 1. Add `ProbabilityBucket` support to `InferenceProblem`.
-2. For each bucketed action, add bucket variables whose sum equals the action count.
-3. Apply bucket marginal weights in the objective.
-4. Prefer bucketed penalties for defense posts, starbase fighters, loaded fighters, and loaded torpedoes.
+2. For each bucketed action, add ranking bin indicators (one active bin per positive count).
+3. Apply one rescaled bin penalty per active indicator in the objective.
+4. Prefer bin-indicator penalties for defense posts, starbase fighters, loaded fighters, and loaded torpedoes.
 
 Tests:
 
 - 10 defense posts has a different marginal penalty from 100 defense posts,
 - a bucketed action still satisfies the exact score constraint,
-- bucket variables cannot exceed their configured count ranges.
+- exactly one bin indicator is active for each positive bucketed count.
 
 Done when:
 

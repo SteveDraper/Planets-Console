@@ -223,6 +223,8 @@ def generate_ship_build_combos(
                                     torp_id=torpedo.id if torpedo is not None else None,
                                     beam_count=beam_count,
                                     launcher_count=launcher_count,
+                                    hull_beam_slots=hull.beams,
+                                    hull_launcher_slots=hull.launchers,
                                     labels=(
                                         ship_build_combo_label(
                                             hull,

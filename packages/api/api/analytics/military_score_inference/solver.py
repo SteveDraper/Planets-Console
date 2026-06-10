@@ -14,14 +14,26 @@ if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 
 from api.analytics.military_score_inference.constraints import InferenceHardConstraints
+from api.analytics.military_score_inference.inference_objective import (
+    build_inference_objective_terms,
+    max_aggregate_probability_weight,
+    max_combo_probability_weight,
+)
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
     InferenceSolutionShipBuild,
-    ProbabilityBucket,
     ShipBuildCombo,
+)
+from api.analytics.military_score_inference.ranking_heuristics import (
+    compute_bin_penalty_objective_contribution,
+    compute_overflow_objective_contribution,
+    compute_parsimony_objective_contribution,
+    compute_partial_weapon_slot_penalty_contribution,
+    ranking_heuristics_diagnostics_payload,
+    ranking_penalty_from_marginal_weight,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
@@ -56,8 +68,22 @@ class _BuiltModel:
     model: cp_model.CpModel
     action_count_vars: dict[str, cp_model.IntVar]
     combo_count_vars: dict[str, cp_model.IntVar]
-    bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]]
     merged_combo_catalog: _MergedComboCatalog
+    diversity_caps_applied: tuple[dict[str, object], ...]
+
+
+def _solver_build_diagnostics(
+    problem: InferenceProblem,
+    built_model: _BuiltModel,
+) -> dict[str, object]:
+    """Diagnostics fixed at CP-SAT model build time; merged into InferenceResult.diagnostics."""
+    return {
+        "rankingHeuristics": ranking_heuristics_diagnostics_payload(
+            problem.ranking_heuristics,
+            admission_caps_by_action_id=problem.admission_caps_by_action_id,
+        ),
+        "diversityCapsApplied": list(built_model.diversity_caps_applied),
+    }
 
 
 def _validate_problem(problem: InferenceProblem) -> str | None:
@@ -91,28 +117,25 @@ def _validate_problem(problem: InferenceProblem) -> str | None:
             candidate for candidate in problem.aggregate_actions if candidate.id == action_id
         )
         previous_upper_count = -1
-        total_bucket_capacity = 0
         for bucket in buckets:
             if bucket.lower_count > bucket.upper_count:
                 return f"bucket {bucket.label} for action {action_id} has invalid count range"
             if bucket.lower_count <= previous_upper_count:
                 return f"bucket {bucket.label} for action {action_id} overlaps prior bucket"
             previous_upper_count = bucket.upper_count
-            total_bucket_capacity += _bucket_capacity(bucket)
 
-        if total_bucket_capacity < action.upper_bound:
+        max_covered_count = buckets[-1].upper_count
+        overflow_band = problem.tier_overflow_by_action_id.get(action_id)
+        if overflow_band is not None:
+            max_covered_count = max(max_covered_count, overflow_band.current_cap)
+
+        if max_covered_count < action.upper_bound:
             return (
                 f"probability buckets for action {action_id} "
-                f"cover only {total_bucket_capacity} counts but upper_bound is {action.upper_bound}"
+                f"cover only {max_covered_count} counts but upper_bound is {action.upper_bound}"
             )
 
     return None
-
-
-def _bucket_capacity(bucket: ProbabilityBucket) -> int:
-    if bucket.lower_count == 0:
-        return bucket.upper_count
-    return bucket.upper_count - bucket.lower_count + 1
 
 
 def _merge_score_equivalent_combos(
@@ -193,31 +216,16 @@ def _build_model(
         combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
         for combo in merged_combo_catalog.combos
     }
-    bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]] = {}
-    objective_terms: list[cp_model.LinearExpr] = []
-
-    for action in problem.aggregate_actions:
-        buckets = problem.probability_buckets_by_action_id.get(action.id)
-        if buckets:
-            bucket_vars: list[cp_model.IntVar] = []
-            for index, bucket in enumerate(buckets):
-                bucket_var = model.new_int_var(
-                    0,
-                    _bucket_capacity(bucket),
-                    f"{action.id}_bucket_{index}",
-                )
-                bucket_vars.append(bucket_var)
-                objective_terms.append(bucket_var * bucket.marginal_weight)
-            bucket_vars_by_action_id[action.id] = tuple(bucket_vars)
-            model.add(action_count_vars[action.id] == sum(bucket_vars))
-        else:
-            objective_terms.append(action_count_vars[action.id] * action.probability_weight)
-
-    for combo in merged_combo_catalog.combos:
-        objective_terms.append(combo_count_vars[combo.combo_id] * combo.probability_weight)
+    objective_terms = build_inference_objective_terms(
+        model,
+        problem,
+        action_count_vars,
+        combo_count_vars,
+        ship_build_combos=merged_combo_catalog.combos,
+    )
 
     merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
-    InferenceHardConstraints.from_problem(merged_problem).add_to_model(
+    diversity_caps_applied = InferenceHardConstraints.from_problem(merged_problem).add_to_model(
         model,
         merged_problem,
         action_count_vars,
@@ -228,8 +236,8 @@ def _build_model(
         model=model,
         action_count_vars=action_count_vars,
         combo_count_vars=combo_count_vars,
-        bucket_vars_by_action_id=bucket_vars_by_action_id,
         merged_combo_catalog=merged_combo_catalog,
+        diversity_caps_applied=tuple(diversity_caps_applied),
     )
 
 
@@ -255,13 +263,17 @@ def _read_combo_counts(
     }
 
 
-def _read_bucket_counts(
-    bucket_vars_by_action_id: dict[str, tuple[cp_model.IntVar, ...]],
-    solver: cp_model.CpSolver,
+def _ranking_bin_indicators_by_action_id(
+    problem: InferenceProblem,
+    action_counts: dict[str, int],
 ) -> dict[str, tuple[int, ...]]:
+    from api.analytics.military_score_inference.ranking_heuristics import (
+        active_ranking_bin_indicators,
+    )
+
     return {
-        action_id: tuple(solver.value(bucket_var) for bucket_var in bucket_vars)
-        for action_id, bucket_vars in bucket_vars_by_action_id.items()
+        action_id: active_ranking_bin_indicators(action_counts.get(action_id, 0), buckets)
+        for action_id, buckets in problem.probability_buckets_by_action_id.items()
     }
 
 
@@ -269,21 +281,44 @@ def _objective_value(
     problem: InferenceProblem,
     action_counts: dict[str, int],
     ship_builds: tuple[InferenceSolutionShipBuild, ...],
-    bucket_counts_by_action_id: dict[str, tuple[int, ...]],
-    *,
-    combo_probability_weight_by_id: dict[str, int],
 ) -> int:
-    objective_value = 0
+    max_aggregate_weight = max_aggregate_probability_weight(problem)
+    max_combo_weight = max_combo_probability_weight(problem)
+    objective_value = compute_bin_penalty_objective_contribution(
+        action_counts,
+        problem.probability_buckets_by_action_id,
+    )
     for action in problem.aggregate_actions:
-        buckets = problem.probability_buckets_by_action_id.get(action.id)
-        if buckets:
-            bucket_counts = bucket_counts_by_action_id[action.id]
-            for bucket, count in zip(buckets, bucket_counts, strict=True):
-                objective_value += bucket.marginal_weight * count
-        else:
-            objective_value += action.probability_weight * action_counts[action.id]
+        if action.id in problem.probability_buckets_by_action_id:
+            continue
+        if action_counts.get(action.id, 0) <= 0:
+            continue
+        penalty = ranking_penalty_from_marginal_weight(
+            action.probability_weight,
+            max_marginal_weight=max_aggregate_weight,
+        )
+        objective_value -= penalty
+    objective_value += compute_overflow_objective_contribution(
+        action_counts,
+        problem.tier_overflow_by_action_id,
+    )
+    objective_value += compute_parsimony_objective_contribution(
+        action_counts,
+        problem.ranking_heuristics,
+    )
+    combo_by_id = {combo.combo_id: combo for combo in problem.ship_build_combos}
     for ship_build in ship_builds:
-        objective_value += combo_probability_weight_by_id[ship_build.combo_id] * ship_build.count
+        combo = combo_by_id[ship_build.combo_id]
+        combo_penalty = ranking_penalty_from_marginal_weight(
+            combo.probability_weight,
+            max_marginal_weight=max_combo_weight,
+        )
+        objective_value -= combo_penalty * ship_build.count
+    objective_value += compute_partial_weapon_slot_penalty_contribution(
+        ship_builds,
+        combo_by_id,
+        problem.ranking_heuristics,
+    )
     return objective_value
 
 
@@ -357,7 +392,6 @@ def _expand_score_equivalent_solutions(
     problem: InferenceProblem,
     action_counts: dict[str, int],
     combo_counts: dict[str, int],
-    bucket_counts_by_action_id: dict[str, tuple[int, ...]],
     merged_combo_catalog: _MergedComboCatalog,
     *,
     max_expansions: int,
@@ -385,21 +419,12 @@ def _expand_score_equivalent_solutions(
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
-    combo_probability_weight_by_id = {
-        combo.combo_id: combo.probability_weight for combo in problem.ship_build_combos
-    }
     solutions: list[InferenceSolution] = []
     for ship_build_variant in product(*ship_build_variant_lists):
         ship_builds = tuple(ship_build_variant)
         solutions.append(
             InferenceSolution(
-                objective_value=_objective_value(
-                    problem,
-                    action_counts,
-                    ship_builds,
-                    bucket_counts_by_action_id,
-                    combo_probability_weight_by_id=combo_probability_weight_by_id,
-                ),
+                objective_value=_objective_value(problem, action_counts, ship_builds),
                 actions=tuple(solution_actions),
                 ship_builds=ship_builds,
             )
@@ -487,10 +512,10 @@ def solve_inference_problem(
 
     merged_combo_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)
     built_model = _build_model(problem, merged_combo_catalog)
+    build_diagnostics = _solver_build_diagnostics(problem, built_model)
     model = built_model.model
     action_count_vars = built_model.action_count_vars
     combo_count_vars = built_model.combo_count_vars
-    bucket_vars_by_action_id = built_model.bucket_vars_by_action_id
     solver = cp_model.CpSolver()
     solutions: list[InferenceSolution] = []
     seen_signatures: set[tuple[tuple[str, int], ...]] = set()
@@ -543,7 +568,7 @@ def solve_inference_problem(
 
         action_counts = _read_action_counts(problem, action_count_vars, solver)
         combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)
-        bucket_counts = _read_bucket_counts(bucket_vars_by_action_id, solver)
+        ranking_bin_indicators = _ranking_bin_indicators_by_action_id(problem, action_counts)
         expansion_budget = _score_equivalent_expansion_budget(
             problem,
             action_counts,
@@ -553,7 +578,6 @@ def solve_inference_problem(
             problem,
             action_counts,
             combo_counts,
-            bucket_counts,
             merged_combo_catalog,
             max_expansions=expansion_budget,
         )
@@ -568,7 +592,7 @@ def solve_inference_problem(
                 continue
             seen_signatures.add(signature)
             solutions.append(solution)
-            top_solution_bucket_counts = bucket_counts
+            top_solution_bucket_counts = ranking_bin_indicators
             added_solution = True
             if on_solution is not None:
                 on_solution(solution)
@@ -593,6 +617,7 @@ def solve_inference_problem(
             break
 
     diagnostics: dict[str, object] = {
+        **build_diagnostics,
         "solver_status": solver.status_name(last_solver_status),
         "solution_count": len(solutions),
         "stopped_reason": stopped_reason,
@@ -604,7 +629,7 @@ def solve_inference_problem(
     if time_limited:
         diagnostics["time_limited"] = True
     if top_solution_bucket_counts:
-        diagnostics["bucket_counts_by_action_id"] = top_solution_bucket_counts
+        diagnostics["rankingBinIndicatorsByActionId"] = top_solution_bucket_counts
 
     if solutions:
         solutions.sort(key=lambda solution: solution.objective_value, reverse=True)

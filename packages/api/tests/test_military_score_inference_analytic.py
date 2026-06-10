@@ -332,6 +332,28 @@ def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
     assert isinstance(diagnostics["actionCatalog"]["actions"], list)
     assert "meta" in diagnostics["actionCatalog"]
     assert "shipBuildCombos" in diagnostics["actionCatalog"]
+    assert "rankingHeuristics" in diagnostics
+    assert "diversityCapsApplied" in diagnostics["constraints"]
+    assert "rankingHeuristics" not in diagnostics["solver"]
+    assert "diversityCapsApplied" not in diagnostics["solver"]
+
+
+def test_build_inference_solver_diagnostics_passes_through_solver_owned_keys():
+    from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
+
+    solver_owned = {
+        "status": "exact",
+        "rankingHeuristics": {"parsimonyPerActiveSlackType": -5},
+        "diversityCapsApplied": [{"superclass": "torpedo_loads", "cap": 2}],
+        "solver_status": "OPTIMAL",
+    }
+    payload = build_inference_solver_diagnostics(
+        turn=5,
+        solver=solver_owned,
+    )
+
+    assert payload["rankingHeuristics"] == {"parsimonyPerActiveSlackType": -5}
+    assert payload["solver"] == {"status": "exact", "solver_status": "OPTIMAL"}
 
 
 def test_inference_diagnostics_include_policy_ladder_fields(sample_turn):

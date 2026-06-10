@@ -321,8 +321,24 @@ Up to K distinct exact explanations held across the full **inference search tier
 _Avoid_: per-tier top-K, solution buffer
 
 **Inference solution rank weight**:
-The solver likelihood objective attached to one explanation. Orders the merged top-K and each streamed `solution` event; the consumer may maintain final ranked order incrementally from this weight without waiting for the full ladder to finish.
+The solver maximize objective attached to one explanation, expressed in inverted penalty space (higher is better). Legacy positive marginal weights map to penalties via `(max_marginal - weight)` so more plausible bins and actions score higher. **Bucketed aggregate actions** contribute one rescaled bin penalty for the single active magnitude bin when count is positive -- not a sum of all bucket marginals and not per unit in the bin. Non-bucketed aggregate actions and **ship build combos** contribute inverted probability weights (combos per combo count). **Inference ranking heuristics** layer on top: parsimony per active slack type, flat tier-overflow when count exceeds **inference aggregate admission cap**, and partial weapon-slot fill penalties. Combos are not subject to **inference ranking parsimony**. Orders the merged top-K and each streamed `solution` event; the consumer may maintain final ranked order incrementally from this weight without waiting for the full ladder to finish.
 _Avoid_: probability score, objective value (implementation field name)
+
+**Inference ranking parsimony**:
+Per-active-type penalty in the CP-SAT objective for **fine-grained slack action** aggregate variables (`count > 0`). Penalizes explanation breadth (many distinct slack types in one multiset), not ship-build combo types. Sufficient on its own for defense-post slack (planet and starbase defense posts may both be non-zero in plausible explanations). Distinct from count-dependent **probability buckets**, **inference tier-overflow bands**, and **inference action-family diversity caps**.
+_Avoid_: complexity score, moving-parts penalty
+
+**Inference action-family diversity cap**:
+Hard CP-SAT constraint: at most N distinct catalog members from a **superclass** may be non-zero in one explanation (indicator `count > 0`, then `sum(indicators) <= cap`). Used where parsimony alone does not stop degeneracy -- e.g. many distinct torpedo-load types padding score. Not applied to defense-post slack (planet + starbase posts together are plausible; parsimony only there). v1 superclasses: **torpedo loads** (`ship_torps_loaded_{id}`, cap 2); **fighter channel** (`starbase_fighters_added_total`, `ship_fighters_added_total`, `fighters_starbase_to_ship`, `fighters_ship_to_starbase`, cap 2). **`evil_empire_free_starbase_fighters`** is excluded from diversity caps and parsimony (race-specific high-prior action).
+_Avoid_: superclass limit (without "inference"), defense cap
+
+**Inference tier-overflow band**:
+When tier policy raises an action's upper bound above its **inference aggregate admission cap**, one flat boolean overflow indicator fires when count exceeds the admission cap and adds one fixed marginal penalty (`tier_overflow_marginal_weight`, not per unit above the cap). Penalizes explanations that need slack volume only unlocked on later **inference search tier** steps (e.g. planet defense posts 17+ when admission cap was 16). Probability bins are not clamped to the admission cap; overflow is modeled separately in the solver objective. One count variable per action; not duplicate catalog entries.
+_Avoid_: overflow penalty (generic), duplicate tier action
+
+**Inference aggregate admission cap**:
+For one aggregate action id, the `aggregateAllowlist` cap at the **inference search tier** where that action first entered the ladder. Later tiers may raise the cap (superset rule); counts at or below the admission cap are more plausible than counts that require a later tier's raised cap. Ranking encodes this via a flat boolean overflow indicator in the solver objective, not duplicate catalog entries.
+_Avoid_: first-tier cap, allowlist origin
 
 **Inference tier policy overlay** (follow-on):
 Solver-side merge of injected parameters into the static **inference tier policy asset** at solve time (e.g. extra launcher torpedo tech levels, earlier beam tech bands). Defines how overlays combine with the base YAML -- not which upstream features produce overlay values (fleet histogram, prior builds, user settings, etc.). Separate ticket from the static-policy refactor.

@@ -376,6 +376,19 @@ def is_fine_grained_slack_action(action_id: str) -> bool:
     return action_id.startswith("ship_torps_loaded_")
 
 
+def compute_aggregate_admission_caps(
+    steps: tuple[InferenceTierPolicyStep, ...],
+    up_to_index: int,
+) -> dict[str, int]:
+    """First aggregateAllowlist appearance per key across policy steps 0..up_to_index."""
+    caps: dict[str, int] = {}
+    for step in steps[: up_to_index + 1]:
+        for key, cap in step.aggregate_allowlist.items():
+            if key not in caps:
+                caps[key] = cap
+    return caps
+
+
 def resolved_aggregate_cap(action_id: str, allowlist: dict[str, int]) -> int | None:
     if action_id in allowlist:
         return allowlist[action_id]

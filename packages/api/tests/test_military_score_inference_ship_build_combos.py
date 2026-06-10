@@ -446,7 +446,7 @@ def test_score_equivalent_merge_preserves_distinct_probability_ranked_solutions(
     assert len(result.solutions) == 2
     objective_values = [solution.objective_value for solution in result.solutions]
     assert objective_values == sorted(objective_values, reverse=True)
-    assert objective_values == [100, 50]
+    assert objective_values == [0, -50]
     combo_ids = {solution.ship_builds[0].combo_id for solution in result.solutions}
     assert combo_ids == {"combo_high", "combo_low"}
 
@@ -497,7 +497,7 @@ def test_score_equivalent_expansion_prefers_top_k_by_probability():
     assert len(result.solutions) == 3
     combo_ids = [solution.ship_builds[0].combo_id for solution in result.solutions]
     assert combo_ids == ["combo_a", "combo_b", "combo_c"]
-    assert all(solution.objective_value == 85 for solution in result.solutions)
+    assert all(solution.objective_value == 0 for solution in result.solutions)
 
 
 def test_solver_no_good_cuts_include_combo_variables():
