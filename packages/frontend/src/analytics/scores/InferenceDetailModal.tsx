@@ -11,6 +11,7 @@ import {
   type MilitaryScoreArithmetic,
 } from './inferenceConstraints'
 import { InferenceSolutionLineIcon } from './inferenceSolutionLineIcon'
+import { readInferenceRunSummary } from './inferenceRunSummary'
 import { isRecord } from './scoresWireParsers'
 import { sortSolutionLineItemsForDisplay } from './solutionLineItemDisplayOrder'
 
@@ -20,43 +21,6 @@ type InferenceDetailModalProps = {
   racePlayer: string
   detail: ScoresInferenceRowDetail | null
   isGloballyPaused?: boolean
-}
-
-function formatInferenceStatusLabel(status: string): string {
-  return status.replaceAll('_', ' ')
-}
-
-function readInferenceRunSummary(
-  detail: ScoresInferenceRowDetail,
-  diagnostics: Record<string, unknown>
-): {
-  statusLabel?: string
-  wallTimeSeconds?: number
-} {
-  const solver = diagnostics.solver
-  const solverRecord = isRecord(solver) ? solver : null
-
-  const overallStatus =
-    typeof detail.status === 'string' && detail.status.length > 0
-      ? detail.status
-      : typeof solverRecord?.status === 'string'
-        ? solverRecord.status
-        : typeof solverRecord?.solver_status === 'string'
-          ? solverRecord.solver_status
-          : typeof solverRecord?.solverStatus === 'string'
-            ? solverRecord.solverStatus
-            : undefined
-
-  return {
-    statusLabel:
-      overallStatus != null ? formatInferenceStatusLabel(overallStatus) : undefined,
-    wallTimeSeconds:
-      typeof solverRecord?.wall_time_seconds === 'number'
-        ? solverRecord.wall_time_seconds
-        : typeof solverRecord?.wallTimeSeconds === 'number'
-          ? solverRecord.wallTimeSeconds
-          : undefined,
-  }
 }
 
 function SolutionActionTable({
