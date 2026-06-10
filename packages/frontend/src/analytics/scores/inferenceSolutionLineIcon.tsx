@@ -1,14 +1,9 @@
-import {
-  HelpCircle,
-  Rocket,
-  Shield,
-  Swords,
-} from 'lucide-react'
 import type { ScoresInferenceSolutionShipBuild } from '../../api/bff'
 import {
   GENERIC_FREIGHTER_HULL_ID,
   hullImageUrl,
 } from '../../concepts/hullImageUrl'
+import { inferenceActionAggregateIcon } from './inferenceActionFamily'
 import type { MilitaryScoreLineItem } from './inferenceConstraints'
 
 const GENERIC_FREIGHTER_COMBO_ID = 'combo_freighter'
@@ -54,22 +49,6 @@ function resolveHullIdForLine(
   return null
 }
 
-function aggregateActionIcon(actionId: string) {
-  if (actionId.startsWith('ship_torps_loaded_')) {
-    return Rocket
-  }
-  if (
-    actionId.includes('fighter') ||
-    actionId.startsWith('fighters_')
-  ) {
-    return Swords
-  }
-  if (actionId.includes('defense')) {
-    return Shield
-  }
-  return HelpCircle
-}
-
 type InferenceSolutionLineIconProps = {
   line: MilitaryScoreLineItem
   shipBuilds: ScoresInferenceSolutionShipBuild[] | undefined
@@ -93,6 +72,6 @@ export function InferenceSolutionLineIcon({
     )
   }
 
-  const Icon = aggregateActionIcon(line.actionId)
+  const Icon = inferenceActionAggregateIcon(line.actionId)
   return <Icon className="h-5 w-5 text-slate-400" aria-hidden />
 }
