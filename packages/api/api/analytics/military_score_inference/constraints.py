@@ -6,6 +6,7 @@ from ortools.sat.python import cp_model
 
 from api.analytics.military_score_inference.accelerated_start import scoreboard_host_turn
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.inference_objective import add_count_active_indicator
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -41,18 +42,6 @@ def _fighter_transfer_actions_both_present(
     )
 
 
-def _add_active_indicator(
-    model: cp_model.CpModel,
-    count_var: cp_model.IntVar,
-    *,
-    name: str,
-) -> cp_model.IntVar:
-    active = model.new_bool_var(name)
-    model.add(count_var >= 1).only_enforce_if(active)
-    model.add(count_var == 0).only_enforce_if(active.negated())
-    return active
-
-
 def _add_superclass_diversity_cap(
     model: cp_model.CpModel,
     action_count_vars: dict[str, cp_model.IntVar],
@@ -64,7 +53,7 @@ def _add_superclass_diversity_cap(
     if len(member_action_ids) <= cap:
         return
     active_indicators = [
-        _add_active_indicator(
+        add_count_active_indicator(
             model,
             action_count_vars[action_id],
             name=f"diversity_{superclass}_{action_id}_active",
@@ -110,13 +99,16 @@ def _add_fighter_transfer_direction_exclusivity(
     starbase_to_ship = action_count_vars[FIGHTERS_STARBASE_TO_SHIP_ID]
     ship_to_starbase = action_count_vars[FIGHTERS_SHIP_TO_STARBASE_ID]
 
-    uses_starbase_to_ship = model.new_bool_var("fighter_transfer_starbase_to_ship_active")
-    uses_ship_to_starbase = model.new_bool_var("fighter_transfer_ship_to_starbase_active")
-
-    model.add(starbase_to_ship >= 1).only_enforce_if(uses_starbase_to_ship)
-    model.add(starbase_to_ship == 0).only_enforce_if(uses_starbase_to_ship.negated())
-    model.add(ship_to_starbase >= 1).only_enforce_if(uses_ship_to_starbase)
-    model.add(ship_to_starbase == 0).only_enforce_if(uses_ship_to_starbase.negated())
+    uses_starbase_to_ship = add_count_active_indicator(
+        model,
+        starbase_to_ship,
+        name="fighter_transfer_starbase_to_ship_active",
+    )
+    uses_ship_to_starbase = add_count_active_indicator(
+        model,
+        ship_to_starbase,
+        name="fighter_transfer_ship_to_starbase_active",
+    )
     model.add(uses_starbase_to_ship + uses_ship_to_starbase <= 1)
 
 

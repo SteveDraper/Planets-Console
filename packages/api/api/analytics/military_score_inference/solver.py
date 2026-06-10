@@ -14,13 +14,17 @@ if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 
 from api.analytics.military_score_inference.constraints import InferenceHardConstraints
+from api.analytics.military_score_inference.inference_objective import (
+    build_inference_objective_terms,
+    max_aggregate_probability_weight,
+    max_combo_probability_weight,
+)
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
     InferenceSolutionShipBuild,
-    ProbabilityBucket,
     ShipBuildCombo,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
@@ -28,8 +32,6 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     compute_overflow_objective_contribution,
     compute_parsimony_objective_contribution,
     compute_partial_weapon_slot_penalty_contribution,
-    is_parsimony_eligible_slack_action,
-    partial_weapon_slot_penalty_for_fit,
     ranking_penalty_from_marginal_weight,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
@@ -120,47 +122,6 @@ def _validate_problem(problem: InferenceProblem) -> str | None:
     return None
 
 
-def _max_aggregate_probability_weight(problem: InferenceProblem) -> int:
-    if not problem.aggregate_actions:
-        return 0
-    return max(action.probability_weight for action in problem.aggregate_actions)
-
-
-def _max_combo_probability_weight(problem: InferenceProblem) -> int:
-    if not problem.ship_build_combos:
-        return 0
-    return max(combo.probability_weight for combo in problem.ship_build_combos)
-
-
-def _add_ranking_bin_indicators(
-    model: cp_model.CpModel,
-    count_var: cp_model.IntVar,
-    buckets: tuple[ProbabilityBucket, ...],
-    *,
-    action_id: str,
-    objective_terms: list[cp_model.LinearExpr],
-) -> None:
-    max_weight = max(bucket.marginal_weight for bucket in buckets)
-    bin_indicators: list[cp_model.IntVar] = []
-    has_positive_count = model.new_bool_var(f"{action_id}_has_positive_count")
-    model.add(count_var >= 1).only_enforce_if(has_positive_count)
-    model.add(count_var == 0).only_enforce_if(has_positive_count.negated())
-
-    for index, bucket in enumerate(buckets):
-        active = model.new_bool_var(f"{action_id}_ranking_bin_{index}")
-        bin_indicators.append(active)
-        lower_bound = 1 if bucket.lower_count == 0 else bucket.lower_count
-        model.add(count_var >= lower_bound).only_enforce_if(active)
-        model.add(count_var <= bucket.upper_count).only_enforce_if(active)
-        penalty = ranking_penalty_from_marginal_weight(
-            bucket.marginal_weight,
-            max_marginal_weight=max_weight,
-        )
-        objective_terms.append(active * (-penalty))
-
-    model.add(sum(bin_indicators) == has_positive_count)
-
-
 def _merge_score_equivalent_combos(
     combos: tuple[ShipBuildCombo, ...],
 ) -> _MergedComboCatalog:
@@ -239,64 +200,13 @@ def _build_model(
         combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
         for combo in merged_combo_catalog.combos
     }
-    objective_terms: list[cp_model.LinearExpr] = []
-    max_aggregate_weight = _max_aggregate_probability_weight(problem)
-    max_combo_weight = _max_combo_probability_weight(problem)
-
-    for action in problem.aggregate_actions:
-        count_var = action_count_vars[action.id]
-        buckets = problem.probability_buckets_by_action_id.get(action.id)
-        if buckets:
-            _add_ranking_bin_indicators(
-                model,
-                count_var,
-                buckets,
-                action_id=action.id,
-                objective_terms=objective_terms,
-            )
-            overflow_band = problem.tier_overflow_by_action_id.get(action.id)
-            if overflow_band is not None:
-                overflow_active = model.new_bool_var(f"{action.id}_tier_overflow_active")
-                model.add(count_var > overflow_band.admission_cap).only_enforce_if(overflow_active)
-                model.add(count_var <= overflow_band.admission_cap).only_enforce_if(
-                    overflow_active.negated()
-                )
-                objective_terms.append(overflow_active * (-overflow_band.marginal_weight))
-        else:
-            active_action = model.new_bool_var(f"{action.id}_active")
-            model.add(count_var >= 1).only_enforce_if(active_action)
-            model.add(count_var == 0).only_enforce_if(active_action.negated())
-            penalty = ranking_penalty_from_marginal_weight(
-                action.probability_weight,
-                max_marginal_weight=max_aggregate_weight,
-            )
-            objective_terms.append(active_action * (-penalty))
-
-    for combo in merged_combo_catalog.combos:
-        combo_penalty = ranking_penalty_from_marginal_weight(
-            combo.probability_weight,
-            max_marginal_weight=max_combo_weight,
-        )
-        partial_slot_penalty = partial_weapon_slot_penalty_for_fit(
-            beam_count=combo.beam_count,
-            launcher_count=combo.launcher_count,
-            hull_beam_slots=combo.hull_beam_slots,
-            hull_launcher_slots=combo.hull_launcher_slots,
-            heuristics=problem.ranking_heuristics,
-        )
-        objective_terms.append(
-            combo_count_vars[combo.combo_id] * (-combo_penalty + partial_slot_penalty)
-        )
-
-    for action in problem.aggregate_actions:
-        if not is_parsimony_eligible_slack_action(action.id):
-            continue
-        active_slack_type = model.new_bool_var(f"parsimony_active_{action.id}")
-        model.add(action_count_vars[action.id] >= 1).only_enforce_if(active_slack_type)
-        model.add(action_count_vars[action.id] == 0).only_enforce_if(active_slack_type.negated())
-        objective_terms.append(
-            active_slack_type * problem.ranking_heuristics.parsimony_per_active_slack_type
-        )
+    objective_terms = build_inference_objective_terms(
+        model,
+        problem,
+        action_count_vars,
+        combo_count_vars,
+        ship_build_combos=merged_combo_catalog.combos,
+    )
 
     merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
     InferenceHardConstraints.from_problem(merged_problem).add_to_model(
@@ -355,8 +265,8 @@ def _objective_value(
     action_counts: dict[str, int],
     ship_builds: tuple[InferenceSolutionShipBuild, ...],
 ) -> int:
-    max_aggregate_weight = _max_aggregate_probability_weight(problem)
-    max_combo_weight = _max_combo_probability_weight(problem)
+    max_aggregate_weight = max_aggregate_probability_weight(problem)
+    max_combo_weight = max_combo_probability_weight(problem)
     objective_value = compute_bin_penalty_objective_contribution(
         action_counts,
         problem.probability_buckets_by_action_id,
