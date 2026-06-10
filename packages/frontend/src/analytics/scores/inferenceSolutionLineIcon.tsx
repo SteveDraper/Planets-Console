@@ -83,16 +83,9 @@ export function InferenceSolutionLineIcon({
   const hullId = resolveHullIdForLine(line, shipBuild)
 
   if (hullId != null) {
-    const beams =
-      shipBuild != null &&
-      shipBuild.beamCount != null &&
-      shipBuild.beamCount > 0 &&
-      (hullId === 65 || hullId === 71)
-        ? shipBuild.beamCount
-        : undefined
     return (
       <img
-        src={hullImageUrl(hullId, { beams })}
+        src={hullImageUrl(hullId)}
         alt=""
         className="h-8 w-8 object-contain"
         loading="lazy"
