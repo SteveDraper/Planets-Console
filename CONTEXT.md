@@ -329,7 +329,7 @@ The integer shown in the **inference solution detail modal** solution header (`S
 _Avoid_: likelihood percent, log probability (in modal copy without qualification)
 
 **Inference solution detail modal**:
-Player-facing dialog opened from the **inference solution count indicator** when **N > 0** on a `success` or `paused` row. Shows observed constraint deltas, ranked solutions (icon | action | military subtotal tables, plausibility headers, reconciliation footers), and live updates while search continues. Does not surface `accelerated_segments`, `appliedEqualities`, or developer diagnostics. Spec: [design-military-score-inference-solution-modal.md](docs/design-military-score-inference-solution-modal.md). Tracker: #48.
+Player-facing dialog opened from the **inference solution count indicator** when **N > 0** on a `success` or `paused` row. Shows observed constraint deltas, ranked solutions (icon | action | military subtotal tables, plausibility headers, reconciliation footers), and live updates while search continues. Does not surface `accelerated_segments`, `appliedEqualities`, priority-point constraint notes, spectator delta-source notes, or other developer diagnostics (those belong in the Scores diagnostics panel). Spec: [design-military-score-inference-solution-modal.md](docs/design-military-score-inference-solution-modal.md). Tracker: #48.
 _Avoid_: inference detail dialog (generic), diagnostic modal
 
 **Inference ranking parsimony**:

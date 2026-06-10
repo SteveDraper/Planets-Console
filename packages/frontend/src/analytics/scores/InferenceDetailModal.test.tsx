@@ -78,6 +78,7 @@ describe('InferenceDetailModal', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Scoreboard row turn 9')
     expect(screen.getByRole('dialog')).toHaveTextContent('Host turn 8 deltas')
     expect(screen.getByRole('dialog')).toHaveTextContent('Player 5')
+    // PP note and spectator delta-source note belong in Scores diagnostics panel, not modal (#48 UX).
     expect(screen.queryByText(/Priority points are diagnostic only/)).toBeNull()
     expect(screen.queryByText(/Change columns were missing/)).toBeNull()
     expect(screen.getByText('Solution 1 · Plausibility 999')).toBeInTheDocument()

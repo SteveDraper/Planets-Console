@@ -10,7 +10,7 @@ Player-facing UX for inspecting ranked build-inference explanations from the Sco
 
 When build inference is enabled and a scoreboard row holds at least one exact explanation, the player opens a modal to compare ranked alternatives: what actions might explain the row's scoreboard deltas, how each alternative sums to the observed military change, and how plausible each alternative is relative to the others.
 
-The modal is **not** a developer diagnostics surface. Equality strings, raw 2× scale, and full `accelerated_segments` arrays belong in the Scores diagnostics panel.
+The modal is **not** a developer diagnostics surface. Equality strings, raw 2× scale, full `accelerated_segments` arrays, priority-point constraint notes, and spectator delta-source notes belong in the Scores diagnostics panel.
 
 ---
 
@@ -54,11 +54,11 @@ Player-facing only:
 - Race and player name (from scoreboard row)
 - Scoreboard row turn, host-turn deltas line, player id when known
 - **Observed constraints** section: military, warship, freighter, and priority-point deltas in **scoreboard units** (integer military change from `militaryDelta2x // 2` -- no 2× parenthetical)
-- **Priority point constraint note** (amber callout) when `priorityPointConstraintNote` is present (#50 diagnostic-only mode)
-- **Spectator delta-source note** (sky callout) when `scoreboardDeltaSource` is `prior_row_total_diff`
 
 **Omit from the modal:**
 
+- **Priority point constraint note** (`priorityPointConstraintNote`) -- Scores diagnostics panel only (#50 diagnostic-only mode)
+- **Spectator delta-source note** when `scoreboardDeltaSource` is `prior_row_total_diff` -- Scores diagnostics panel only
 - `detail.summary` body text (remains on badge tooltip)
 - `appliedEqualities` bullets
 - Developer-oriented solver internals beyond status label and wall time
@@ -163,7 +163,7 @@ Fixed-width icon column (~32--40px). Decorative hull images use `alt=""`; descri
 Frontend tests (`InferenceDetailModal.test.tsx` and helpers):
 
 - Modal open/close and focus trap (existing)
-- Observed constraints and PP note
+- Observed constraints in modal; PP note and spectator delta-source note **not** in modal (Scores diagnostics panel only)
 - Per-solution table: labels, military subtotals, footer reconciliation
 - Plausibility header from `objectiveValue`
 - No accelerated-segment multi-section UI

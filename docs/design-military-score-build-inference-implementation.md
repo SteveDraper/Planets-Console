@@ -365,7 +365,7 @@ The row-level dashed-zero badge means the frontend should track inference status
 Summary:
 
 - Opens when **N > 0** and row status is `success` or `paused`; live-updates while search runs.
-- Player-facing header: turn/host-turn context, observed constraint deltas (scoreboard units), PP diagnostic note, spectator delta-source note. No `appliedEqualities`, no 2× parentheticals, no `summary` body in the modal.
+- Player-facing header: turn/host-turn context, observed constraint deltas (scoreboard units). No `appliedEqualities`, no 2× parentheticals, no `summary` body, no PP diagnostic note, and no spectator delta-source note in the modal (those appear in the Scores diagnostics panel only).
 - All held top-K solutions, each with **Plausibility** header (`objectiveValue`) and an icon | action | military subtotal table plus explained-vs-observed footer.
 - **Accelerated-start segments** are internal: modal uses top-level row `solutions` and `constraints` only (Core already promotes the row-relevant segment).
 - Hull row icons via frontend `hullImageUrl()`; aggregate rows use Lucide fallbacks until #89.
