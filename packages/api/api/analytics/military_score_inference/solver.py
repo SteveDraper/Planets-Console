@@ -610,7 +610,7 @@ def solve_inference_problem(
     if time_limited:
         diagnostics["time_limited"] = True
     if top_solution_bucket_counts:
-        diagnostics["bucket_counts_by_action_id"] = top_solution_bucket_counts
+        diagnostics["rankingBinIndicatorsByActionId"] = top_solution_bucket_counts
 
     if solutions:
         solutions.sort(key=lambda solution: solution.objective_value, reverse=True)

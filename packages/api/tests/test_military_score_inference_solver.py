@@ -438,5 +438,5 @@ def test_bucket_variables_respect_configured_count_ranges():
         )
     )
 
-    active_bins = result.diagnostics["bucket_counts_by_action_id"]["planet_defense_posts"]
+    active_bins = result.diagnostics["rankingBinIndicatorsByActionId"]["planet_defense_posts"]
     assert active_bins == (0, 0, 1)
