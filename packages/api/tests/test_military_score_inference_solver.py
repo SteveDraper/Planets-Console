@@ -440,3 +440,29 @@ def test_bucket_variables_respect_configured_count_ranges():
 
     active_bins = result.diagnostics["rankingBinIndicatorsByActionId"]["planet_defense_posts"]
     assert active_bins == (0, 0, 1)
+
+
+def test_solver_diagnostics_include_build_time_ranking_metadata():
+    torp_actions = tuple(
+        CandidateAction(
+            id=f"ship_torps_loaded_{torp_id}",
+            label=f"Torpedoes {torp_id}",
+            score_delta_2x=100,
+            upper_bound=2,
+            probability_weight=10,
+        )
+        for torp_id in (1, 2)
+    )
+    result = solve_inference_problem(
+        _problem(
+            _observation(military_delta_2x=100),
+            *torp_actions,
+        )
+    )
+
+    assert "rankingHeuristics" in result.diagnostics
+    assert result.diagnostics["rankingHeuristics"]["parsimonyPerActiveSlackType"] == -5
+    assert "diversityCapsApplied" in result.diagnostics
+    diversity_caps = result.diagnostics["diversityCapsApplied"]
+    assert isinstance(diversity_caps, list)
+    assert any(entry["superclass"] == "torpedo_loads" for entry in diversity_caps)

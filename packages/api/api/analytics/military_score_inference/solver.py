@@ -32,6 +32,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     compute_overflow_objective_contribution,
     compute_parsimony_objective_contribution,
     compute_partial_weapon_slot_penalty_contribution,
+    ranking_heuristics_diagnostics_payload,
     ranking_penalty_from_marginal_weight,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
@@ -68,6 +69,21 @@ class _BuiltModel:
     action_count_vars: dict[str, cp_model.IntVar]
     combo_count_vars: dict[str, cp_model.IntVar]
     merged_combo_catalog: _MergedComboCatalog
+    diversity_caps_applied: tuple[dict[str, object], ...]
+
+
+def _solver_build_diagnostics(
+    problem: InferenceProblem,
+    built_model: _BuiltModel,
+) -> dict[str, object]:
+    """Diagnostics fixed at CP-SAT model build time; merged into InferenceResult.diagnostics."""
+    return {
+        "rankingHeuristics": ranking_heuristics_diagnostics_payload(
+            problem.ranking_heuristics,
+            admission_caps_by_action_id=problem.admission_caps_by_action_id,
+        ),
+        "diversityCapsApplied": list(built_model.diversity_caps_applied),
+    }
 
 
 def _validate_problem(problem: InferenceProblem) -> str | None:
@@ -209,7 +225,7 @@ def _build_model(
     )
 
     merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
-    InferenceHardConstraints.from_problem(merged_problem).add_to_model(
+    diversity_caps_applied = InferenceHardConstraints.from_problem(merged_problem).add_to_model(
         model,
         merged_problem,
         action_count_vars,
@@ -221,6 +237,7 @@ def _build_model(
         action_count_vars=action_count_vars,
         combo_count_vars=combo_count_vars,
         merged_combo_catalog=merged_combo_catalog,
+        diversity_caps_applied=tuple(diversity_caps_applied),
     )
 
 
@@ -495,6 +512,7 @@ def solve_inference_problem(
 
     merged_combo_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)
     built_model = _build_model(problem, merged_combo_catalog)
+    build_diagnostics = _solver_build_diagnostics(problem, built_model)
     model = built_model.model
     action_count_vars = built_model.action_count_vars
     combo_count_vars = built_model.combo_count_vars
@@ -599,6 +617,7 @@ def solve_inference_problem(
             break
 
     diagnostics: dict[str, object] = {
+        **build_diagnostics,
         "solver_status": solver.status_name(last_solver_status),
         "solution_count": len(solutions),
         "stopped_reason": stopped_reason,
