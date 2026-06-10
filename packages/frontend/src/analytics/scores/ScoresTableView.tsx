@@ -202,6 +202,7 @@ export function ScoresTableView({
         onClose={() => setSelectedRowIndex(null)}
         racePlayer={selectedRacePlayer}
         detail={selectedDetail}
+        isGloballyPaused={isGloballyPaused}
       />
       {typeof hullCatalogPlayerId === 'number' ? (
         <HullCatalogMaskDialog
