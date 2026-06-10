@@ -26,14 +26,7 @@ function resolveShipBuildForLine(
   if (shipBuilds == null || shipBuilds.length === 0) {
     return null
   }
-  const byCombo = shipBuilds.find((build) => build.comboId === line.actionId)
-  if (byCombo != null) {
-    return byCombo
-  }
-  if (shipBuilds.length === 1 && line.actionId.startsWith('combo_')) {
-    return shipBuilds[0] ?? null
-  }
-  return null
+  return shipBuilds.find((build) => build.comboId === line.actionId) ?? null
 }
 
 function resolveHullIdForLine(
