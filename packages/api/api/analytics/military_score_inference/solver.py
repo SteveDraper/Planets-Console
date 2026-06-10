@@ -27,6 +27,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     compute_bin_penalty_objective_contribution,
     compute_overflow_objective_contribution,
     compute_parsimony_objective_contribution,
+    compute_partial_weapon_slot_penalty_contribution,
     is_parsimony_eligible_slack_action,
     partial_weapon_slot_penalty_for_fit,
     ranking_penalty_from_marginal_weight,
@@ -385,15 +386,12 @@ def _objective_value(
             combo.probability_weight,
             max_marginal_weight=max_combo_weight,
         )
-        partial_slot_penalty = partial_weapon_slot_penalty_for_fit(
-            beam_count=combo.beam_count,
-            launcher_count=combo.launcher_count,
-            hull_beam_slots=combo.hull_beam_slots,
-            hull_launcher_slots=combo.hull_launcher_slots,
-            heuristics=problem.ranking_heuristics,
-        )
         objective_value -= combo_penalty * ship_build.count
-        objective_value += partial_slot_penalty * ship_build.count
+    objective_value += compute_partial_weapon_slot_penalty_contribution(
+        ship_builds,
+        combo_by_id,
+        problem.ranking_heuristics,
+    )
     return objective_value
 
 
