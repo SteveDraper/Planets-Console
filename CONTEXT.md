@@ -333,11 +333,11 @@ Hard CP-SAT constraint: at most N distinct catalog members from a **superclass**
 _Avoid_: superclass limit (without "inference"), defense cap
 
 **Inference tier-overflow band**:
-Count range above **inference aggregate admission cap** but within the current tier's allowlist cap, modeled as a separate low-weight objective bucket at catalog build time. Penalizes explanations that need slack volume only unlocked on later **inference search tier** steps (e.g. planet defense posts 17-100 when admission cap was 16). One count variable per action; not duplicate catalog entries.
+When tier policy raises an action's upper bound above its **inference aggregate admission cap**, one flat boolean overflow indicator fires when count exceeds the admission cap and adds one fixed marginal penalty (`tier_overflow_marginal_weight`, not per unit above the cap). Penalizes explanations that need slack volume only unlocked on later **inference search tier** steps (e.g. planet defense posts 17+ when admission cap was 16). Probability bins are not clamped to the admission cap; overflow is modeled separately in the solver objective. One count variable per action; not duplicate catalog entries.
 _Avoid_: overflow penalty (generic), duplicate tier action
 
 **Inference aggregate admission cap**:
-For one aggregate action id, the `aggregateAllowlist` cap at the **inference search tier** where that action first entered the ladder. Later tiers may raise the cap (superset rule); counts at or below the admission cap are more plausible than counts that require a later tier's raised cap. Ranking may encode this via tier-aware overflow bands in bucket construction, not duplicate catalog entries.
+For one aggregate action id, the `aggregateAllowlist` cap at the **inference search tier** where that action first entered the ladder. Later tiers may raise the cap (superset rule); counts at or below the admission cap are more plausible than counts that require a later tier's raised cap. Ranking encodes this via a flat boolean overflow indicator in the solver objective, not duplicate catalog entries.
 _Avoid_: first-tier cap, allowlist origin
 
 **Inference tier policy overlay** (follow-on):

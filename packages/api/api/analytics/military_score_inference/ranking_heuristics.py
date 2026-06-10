@@ -45,10 +45,6 @@ class TierOverflowBand:
     current_cap: int
     marginal_weight: int
 
-    @property
-    def overflow_capacity(self) -> int:
-        return self.current_cap - self.admission_cap
-
 
 def admission_cap_for_action(action_id: str, admission_caps: dict[str, int]) -> int | None:
     """Return the admission cap for one catalog action id from raw allowlist history."""
@@ -118,28 +114,6 @@ def compute_bin_penalty_objective_contribution(
         )
         contribution -= penalty
     return contribution
-
-
-def clamp_probability_buckets(
-    buckets: tuple[ProbabilityBucket, ...],
-    admission_cap: int,
-) -> tuple[ProbabilityBucket, ...]:
-    clamped: list[ProbabilityBucket] = []
-    for bucket in buckets:
-        if bucket.lower_count > admission_cap:
-            continue
-        upper_count = min(bucket.upper_count, admission_cap)
-        if bucket.lower_count > upper_count:
-            continue
-        clamped.append(
-            ProbabilityBucket(
-                bucket.label,
-                bucket.lower_count,
-                upper_count,
-                bucket.marginal_weight,
-            )
-        )
-    return tuple(clamped)
 
 
 def build_tier_aware_probability_buckets(
