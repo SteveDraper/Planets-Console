@@ -70,6 +70,7 @@ def _problem(
     probability_buckets_by_action_id: dict[str, tuple[ProbabilityBucket, ...]] | None = None,
     tier_overflow_by_action_id: dict[str, TierOverflowBand] | None = None,
     admission_caps_by_action_id: dict[str, int] | None = None,
+    ranking_heuristics: InferenceRankingHeuristics | None = None,
     max_solutions: int = 20,
 ) -> InferenceProblem:
     return InferenceProblem(
@@ -79,6 +80,7 @@ def _problem(
         probability_buckets_by_action_id=probability_buckets_by_action_id or {},
         tier_overflow_by_action_id=tier_overflow_by_action_id or {},
         admission_caps_by_action_id=admission_caps_by_action_id or {},
+        ranking_heuristics=ranking_heuristics or InferenceRankingHeuristics(),
         max_solutions=max_solutions,
         time_limit_seconds=1.0,
     )
@@ -201,6 +203,7 @@ def test_parsimony_allows_planet_and_starbase_defense():
 
 
 def test_tier_overflow_penalizes_count_above_admission_cap():
+    heuristics = InferenceRankingHeuristics(parsimony_per_active_slack_type=-5)
     admission_cap = 16
     current_cap = 100
     planet = CandidateAction(
@@ -221,7 +224,7 @@ def test_tier_overflow_penalizes_count_above_admission_cap():
         PLANET_DEFENSE_POST_BUCKETS,
         admission_cap=admission_cap,
         current_cap=current_cap,
-        overflow_marginal_weight=5,
+        overflow_marginal_weight=heuristics.tier_overflow_marginal_weight,
     )
     assert overflow_band is not None
     military_delta_2x = 50 * PLANET_DEFENSE_POST_SCORE_DELTA_2X
@@ -235,6 +238,7 @@ def test_tier_overflow_penalizes_count_above_admission_cap():
             },
             tier_overflow_by_action_id={planet.id: overflow_band},
             admission_caps_by_action_id={planet.id: admission_cap},
+            ranking_heuristics=heuristics,
             max_solutions=5,
         )
     )
@@ -250,6 +254,7 @@ def test_tier_overflow_penalizes_count_above_admission_cap():
         alt_slack,
         probability_buckets_by_action_id={planet.id: buckets},
         tier_overflow_by_action_id={planet.id: overflow_band},
+        ranking_heuristics=heuristics,
     )
     overflow_only_counts = {action.id: 0 for action in overflow_problem.aggregate_actions}
     overflow_only_counts[planet.id] = 50
@@ -330,7 +335,7 @@ def test_objective_value_includes_parsimony():
         action_counts,
         problem.ranking_heuristics,
     )
-    assert parsimony == -10
+    assert parsimony == -100
 
 
 def test_top_k_still_descending_objective_order():
@@ -384,9 +389,9 @@ def test_ranking_heuristics_diagnostics_payload_shape():
         admission_caps_by_action_id={"planet_defense_posts_added_total": 16},
     )
 
-    assert payload["parsimonyPerActiveSlackType"] == -5
-    assert payload["partialWeaponSlotPenaltyPerLine"] == -8
-    assert payload["tierOverflowMarginalWeight"] == 5
+    assert payload["parsimonyPerActiveSlackType"] == -50
+    assert payload["partialWeaponSlotPenaltyPerLine"] == -25
+    assert payload["tierOverflowMarginalWeight"] == 50
     assert payload["admissionCaps"] == {"planet_defense_posts_added_total": 16}
     assert len(payload["diversityCaps"]) == 2
 
@@ -401,7 +406,7 @@ def test_partial_weapon_slot_penalty_applies_per_underfilled_line():
             hull_launcher_slots=3,
             heuristics=heuristics,
         )
-        == -8
+        == -25
     )
     assert (
         partial_weapon_slot_penalty_for_fit(
@@ -411,7 +416,7 @@ def test_partial_weapon_slot_penalty_applies_per_underfilled_line():
             hull_launcher_slots=3,
             heuristics=heuristics,
         )
-        == -16
+        == -50
     )
     assert (
         partial_weapon_slot_penalty_for_fit(
@@ -498,7 +503,7 @@ def test_partial_weapon_slot_fill_ranks_below_full_slots():
         launcher_count=1,
     )
     assert _objective_value(problem, {}, (full_build,)) == 0
-    assert _objective_value(problem, {}, (partial_build,)) == -16
+    assert _objective_value(problem, {}, (partial_build,)) == -50
 
 
 def test_ranking_bin_penalty_is_per_bin_not_per_unit():

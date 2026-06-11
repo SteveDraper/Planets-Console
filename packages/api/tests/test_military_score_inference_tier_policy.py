@@ -732,7 +732,7 @@ def test_full_catalog_step_applies_tier_overflow_to_planet_defense(sample_turn):
     assert catalog.admission_caps_by_action_id["planet_defense_posts_added_total"] == 16
     assert "planet_defense_posts_added_total" in catalog.tier_overflow_by_action_id
     overflow = catalog.tier_overflow_by_action_id["planet_defense_posts_added_total"]
-    assert overflow.marginal_weight == 5
+    assert overflow.marginal_weight == 50
 
 
 def test_compute_aggregate_admission_caps_records_first_step_appearance():

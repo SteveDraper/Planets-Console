@@ -18,6 +18,20 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.prior_weights import (
+    PRIOR_WEIGHT_SCALE,
+    PriorWeightsCatalog,
+    PriorWeightsDiagnostics,
+    laplace_log_weight,
+    resolve_prior_weights_catalog,
+)
+from api.analytics.military_score_inference.probability_bucket_defaults import (
+    PLANET_DEFENSE_POST_BUCKETS,
+    SHIP_FIGHTER_BUCKETS,
+    SHIP_TORPEDO_BUCKETS,
+    STARBASE_DEFENSE_POST_BUCKETS,
+    STARBASE_FIGHTER_BUCKETS,
+)
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     TierOverflowBand,
@@ -49,32 +63,6 @@ from api.concepts.races import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 
-PLANET_DEFENSE_POST_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 10, 100),
-    ProbabilityBucket("heavy build-up", 11, 50, 20),
-    ProbabilityBucket("extreme build-up", 51, 100, 5),
-)
-STARBASE_DEFENSE_POST_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 10, 100),
-    ProbabilityBucket("heavy build-up", 11, 50, 20),
-    ProbabilityBucket("extreme build-up", 51, 100, 5),
-)
-STARBASE_FIGHTER_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 20, 80),
-    ProbabilityBucket("heavy build-up", 21, 100, 15),
-    ProbabilityBucket("extreme build-up", 101, 200, 3),
-)
-SHIP_FIGHTER_BUCKETS = (
-    ProbabilityBucket("modest load", 0, 20, 70),
-    ProbabilityBucket("heavy load", 21, 100, 20),
-    ProbabilityBucket("extreme load", 101, 500, 5),
-)
-SHIP_TORPEDO_BUCKETS = (
-    ProbabilityBucket("modest load", 0, 40, 70),
-    ProbabilityBucket("heavy load", 41, 100, 70),
-    ProbabilityBucket("extreme load", 101, 200, 5),
-)
-
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
 
 BUCKETED_ACTION_IDS = frozenset(
@@ -98,7 +86,7 @@ class ActionCatalogConfig:
     ship_build_combo_config: ShipBuildComboConfig | None = None
     noisy_action_probability_weight: int = 10
     fighter_transfer_probability_weight: int = 15
-    evil_empire_free_starbase_fighter_probability_weight: int = 75
+    evil_empire_free_starbase_fighter_pseudo_count: float = 500
 
 
 @dataclass(frozen=True)
@@ -113,13 +101,14 @@ class ActionCatalog:
     )
     admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
+    prior_weights: PriorWeightsDiagnostics | None = None
 
     @property
     def catalog_size(self) -> int:
         return len(self.aggregate_actions) + len(self.ship_build_combos)
 
     def diagnostics(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "catalog_size": self.catalog_size,
             "aggregate_action_count": len(self.aggregate_actions),
             "ship_build_combo_count": len(self.ship_build_combos),
@@ -129,6 +118,9 @@ class ActionCatalog:
                 1 for action in self.aggregate_actions if action.id in BUCKETED_ACTION_IDS
             ),
         }
+        if self.prior_weights is not None:
+            payload["priorWeights"] = self.prior_weights.to_payload()
+        return payload
 
 
 def build_inference_problem(
@@ -220,6 +212,21 @@ def build_action_catalog(
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
+    prior_catalog: PriorWeightsCatalog | None = None
+    prior_diagnostics: PriorWeightsDiagnostics | None = None
+    if turn is not None:
+        player = player_by_id(turn, observation.player_id)
+        prior_catalog = resolve_prior_weights_catalog(
+            observation,
+            turn.settings,
+            race_id=player.raceid,
+            buildable_hull_ids=buildable_hull_ids,
+            eligible_engine_ids=eligible_engine_ids,
+            eligible_beam_ids=eligible_beam_ids,
+            eligible_torp_ids=eligible_torp_ids,
+        )
+        prior_diagnostics = prior_catalog.diagnostics
+
     actions: list[CandidateAction] = []
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
 
@@ -240,11 +247,28 @@ def build_action_catalog(
     for action in actions:
         if action.upper_bound <= 0:
             continue
-        kept_actions.append(action)
+        updated_action = action
+        if prior_catalog is not None:
+            prior_weight = prior_catalog.aggregate_probability_weight(action.id)
+            if prior_weight is not None:
+                updated_action = replace(action, probability_weight=prior_weight)
+        kept_actions.append(updated_action)
         if action.id in BUCKETED_ACTION_IDS:
-            probability_buckets[action.id] = _probability_buckets_for_action(action.id)
+            base_buckets = _probability_buckets_for_action(action.id)
+            if prior_catalog is not None:
+                base_buckets = prior_catalog.probability_buckets_for_action(
+                    action.id,
+                    base_buckets,
+                )
+            probability_buckets[action.id] = base_buckets
         elif action.id.startswith("ship_torps_loaded_"):
-            probability_buckets[action.id] = SHIP_TORPEDO_BUCKETS
+            base_buckets = SHIP_TORPEDO_BUCKETS
+            if prior_catalog is not None:
+                base_buckets = prior_catalog.probability_buckets_for_action(
+                    action.id,
+                    base_buckets,
+                )
+            probability_buckets[action.id] = base_buckets
 
     policy_ladder = policy_steps or resolve_tier_policies()
     ranking_heuristics = InferenceRankingHeuristics()
@@ -278,6 +302,7 @@ def build_action_catalog(
         eligible_beam_ids=eligible_beam_ids,
         eligible_torp_ids=eligible_torp_ids,
         config=catalog_config.ship_build_combo_config,
+        prior_weights=prior_catalog,
         beam_slot_counts=resolved_policy_step.beam_slot_counts,
         launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
     )
@@ -291,6 +316,7 @@ def build_action_catalog(
         ranking_heuristics=ranking_heuristics,
         admission_caps_by_action_id=admission_caps_by_action_id,
         tier_overflow_by_action_id=tier_overflow_by_action_id,
+        prior_weights=prior_diagnostics,
     )
 
 
@@ -367,7 +393,12 @@ def _evil_empire_free_starbase_fighter_actions(
             label="Evil Empire free starbase fighters (likely)",
             score_delta_2x=starbase_fighter_score_delta_2x(),
             upper_bound=count_upper,
-            probability_weight=config.evil_empire_free_starbase_fighter_probability_weight,
+            probability_weight=laplace_log_weight(
+                config.evil_empire_free_starbase_fighter_pseudo_count,
+                total=config.evil_empire_free_starbase_fighter_pseudo_count,
+                cell_count=1,
+                scale=PRIOR_WEIGHT_SCALE,
+            ),
         )
     ]
 

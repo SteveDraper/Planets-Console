@@ -461,7 +461,7 @@ def test_solver_diagnostics_include_build_time_ranking_metadata():
     )
 
     assert "rankingHeuristics" in result.diagnostics
-    assert result.diagnostics["rankingHeuristics"]["parsimonyPerActiveSlackType"] == -5
+    assert result.diagnostics["rankingHeuristics"]["parsimonyPerActiveSlackType"] == -50
     assert "diversityCapsApplied" in result.diagnostics
     diversity_caps = result.diagnostics["diversityCapsApplied"]
     assert isinstance(diversity_caps, list)

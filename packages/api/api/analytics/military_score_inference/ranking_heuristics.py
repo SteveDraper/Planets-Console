@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.prior_weights import PRIOR_WEIGHT_SCALE
 from api.analytics.military_score_inference.tier_policy import (
     FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
     SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
@@ -30,11 +31,29 @@ FIGHTER_CHANNEL_MEMBER_IDS = frozenset(
 )
 
 
+def _default_parsimony_per_active_slack_type() -> int:
+    return -(PRIOR_WEIGHT_SCALE // 2)
+
+
+def _default_partial_weapon_slot_penalty_per_line() -> int:
+    return -(PRIOR_WEIGHT_SCALE // 4)
+
+
+def _default_tier_overflow_marginal_weight() -> int:
+    return PRIOR_WEIGHT_SCALE // 2
+
+
 @dataclass(frozen=True)
 class InferenceRankingHeuristics:
-    parsimony_per_active_slack_type: int = -5
-    partial_weapon_slot_penalty_per_line: int = -8
-    tier_overflow_marginal_weight: int = 5
+    parsimony_per_active_slack_type: int = field(
+        default_factory=_default_parsimony_per_active_slack_type
+    )
+    partial_weapon_slot_penalty_per_line: int = field(
+        default_factory=_default_partial_weapon_slot_penalty_per_line
+    )
+    tier_overflow_marginal_weight: int = field(
+        default_factory=_default_tier_overflow_marginal_weight
+    )
     torpedo_load_diversity_cap: int = 2
     fighter_channel_diversity_cap: int = 2
 
