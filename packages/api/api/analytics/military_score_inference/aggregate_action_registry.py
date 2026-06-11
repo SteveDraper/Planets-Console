@@ -76,6 +76,13 @@ class AggregateActionSpec:
     catalog_label: str = ""
     score_delta_2x: Callable[[], int] | None = None
     catalog_config_cap: CatalogConfigCap | None = None
+    action_id_prefix: str | None = None
+    catalog_label_format: str | None = None
+    score_delta_2x_from_cost: Callable[[int], int] | None = None
+
+    @property
+    def is_template(self) -> bool:
+        return self.action_id_prefix is not None
 
     def catalog_probability_weight(
         self,
@@ -95,40 +102,10 @@ class AggregateActionSpec:
 
 
 @dataclass(frozen=True)
-class AggregateActionTemplateSpec:
-    action_id_prefix: str
-    prior_shape: PriorShape
-    bin_bounds: tuple[ProbabilityBinBounds, ...] | None
-    catalog_config_cap: CatalogConfigCap
-    catalog_label_format: str
-    score_delta_2x_from_cost: Callable[[int], int]
-    allowlist_key: str | None = None
-    is_fine_grained_slack: bool = False
-
-    def aggregate_spec(self) -> AggregateActionSpec:
-        return AggregateActionSpec(
-            prior_shape=self.prior_shape,
-            bin_bounds=self.bin_bounds,
-            allowlist_key=self.allowlist_key,
-            is_fine_grained_slack=self.is_fine_grained_slack,
-        )
-
-    def action_id_for_entity_id(self, entity_id: int) -> str:
-        return f"{self.action_id_prefix}{entity_id}"
-
-
-@dataclass(frozen=True)
-class FixedAggregateRegistryEntry:
-    action_id: str
+class AggregateRegistryEntry:
     spec: AggregateActionSpec
+    fixed_action_id: str | None = None
 
-
-@dataclass(frozen=True)
-class TemplateAggregateRegistryEntry:
-    template: AggregateActionTemplateSpec
-
-
-AggregateRegistryEntry = FixedAggregateRegistryEntry | TemplateAggregateRegistryEntry
 
 AssetRequirement = Literal["required", "optional_uniform_histogram"]
 
@@ -138,7 +115,6 @@ class AggregateActionSlot:
     action_id: str
     spec: AggregateActionSpec
     asset_requirement: AssetRequirement
-    template: AggregateActionTemplateSpec | None = None
     entity_id: int | None = None
 
 
@@ -148,28 +124,29 @@ def iter_aggregate_action_slots(
 ) -> Iterator[AggregateActionSlot]:
     """Yield one catalog/prior slot per aggregate action from the canonical registry."""
     for entry in AGGREGATE_REGISTRY:
-        if isinstance(entry, FixedAggregateRegistryEntry):
+        if entry.fixed_action_id is not None:
             yield AggregateActionSlot(
-                action_id=entry.action_id,
+                action_id=entry.fixed_action_id,
                 spec=entry.spec,
                 asset_requirement="required",
             )
             continue
-        template = entry.template
+        prefix = entry.spec.action_id_prefix
+        if prefix is None:
+            raise ValueError("registry entry has neither fixed_action_id nor action_id_prefix")
         for torp_id in sorted(eligible_torp_ids):
             yield AggregateActionSlot(
-                action_id=template.action_id_for_entity_id(torp_id),
-                spec=template.aggregate_spec(),
+                action_id=f"{prefix}{torp_id}",
+                spec=entry.spec,
                 asset_requirement="optional_uniform_histogram",
-                template=template,
                 entity_id=torp_id,
             )
 
 
 # Catalog build order: config-cap histogram actions, torpedo template, fighter transfers.
 AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
-    FixedAggregateRegistryEntry(
-        action_id="planet_defense_posts_added_total",
+    AggregateRegistryEntry(
+        fixed_action_id="planet_defense_posts_added_total",
         spec=AggregateActionSpec(
             prior_shape="histogram",
             bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
@@ -179,8 +156,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_planet_defense_posts,
         ),
     ),
-    FixedAggregateRegistryEntry(
-        action_id="starbase_defense_posts_added_total",
+    AggregateRegistryEntry(
+        fixed_action_id="starbase_defense_posts_added_total",
         spec=AggregateActionSpec(
             prior_shape="histogram",
             bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
@@ -190,8 +167,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_starbase_defense_posts,
         ),
     ),
-    FixedAggregateRegistryEntry(
-        action_id="starbase_fighters_added_total",
+    AggregateRegistryEntry(
+        fixed_action_id="starbase_fighters_added_total",
         spec=AggregateActionSpec(
             prior_shape="histogram",
             bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
@@ -202,8 +179,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_starbase_fighters,
         ),
     ),
-    FixedAggregateRegistryEntry(
-        action_id="ship_fighters_added_total",
+    AggregateRegistryEntry(
+        fixed_action_id="ship_fighters_added_total",
         spec=AggregateActionSpec(
             prior_shape="histogram",
             bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
@@ -214,20 +191,20 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_ship_fighters,
         ),
     ),
-    TemplateAggregateRegistryEntry(
-        template=AggregateActionTemplateSpec(
-            action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
+    AggregateRegistryEntry(
+        spec=AggregateActionSpec(
             prior_shape="histogram",
             bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
             allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
             is_fine_grained_slack=True,
+            action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
             catalog_config_cap=lambda config: config.max_ship_torpedoes_per_type,
             catalog_label_format="Ship torpedoes loaded ({name})",
             score_delta_2x_from_cost=loaded_ship_torpedo_score_delta_2x,
         ),
     ),
-    FixedAggregateRegistryEntry(
-        action_id="fighters_starbase_to_ship",
+    AggregateRegistryEntry(
+        fixed_action_id="fighters_starbase_to_ship",
         spec=AggregateActionSpec(
             prior_shape="counts",
             bin_bounds=None,
@@ -238,8 +215,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
         ),
     ),
-    FixedAggregateRegistryEntry(
-        action_id="fighters_ship_to_starbase",
+    AggregateRegistryEntry(
+        fixed_action_id="fighters_ship_to_starbase",
         spec=AggregateActionSpec(
             prior_shape="counts",
             bin_bounds=None,
@@ -252,34 +229,51 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     ),
 )
 
-AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
-    entry.action_id: entry.spec
-    for entry in AGGREGATE_REGISTRY
-    if isinstance(entry, FixedAggregateRegistryEntry)
-}
 
-
-def lookup_aggregate_action_template(action_id: str) -> AggregateActionTemplateSpec | None:
+def _build_aggregate_action_spec_caches() -> tuple[
+    dict[str, AggregateActionSpec],
+    str | None,
+    AggregateActionSpec | None,
+]:
+    fixed_specs: dict[str, AggregateActionSpec] = {}
+    template_prefix: str | None = None
+    template_spec: AggregateActionSpec | None = None
     for entry in AGGREGATE_REGISTRY:
-        if isinstance(entry, TemplateAggregateRegistryEntry):
-            template = entry.template
-            if action_id.startswith(template.action_id_prefix):
-                return template
-    return None
+        if entry.fixed_action_id is not None:
+            fixed_specs[entry.fixed_action_id] = entry.spec
+            continue
+        prefix = entry.spec.action_id_prefix
+        if prefix is None:
+            raise ValueError("registry entry has neither fixed_action_id nor action_id_prefix")
+        if template_prefix is not None:
+            raise ValueError("multiple template aggregate registry entries are not supported")
+        template_prefix = prefix
+        template_spec = entry.spec
+    return fixed_specs, template_prefix, template_spec
+
+
+AGGREGATE_ACTION_SPECS, _AGGREGATE_TEMPLATE_PREFIX, _AGGREGATE_TEMPLATE_SPEC = (
+    _build_aggregate_action_spec_caches()
+)
 
 
 def lookup_aggregate_action_spec(action_id: str) -> AggregateActionSpec | None:
     spec = AGGREGATE_ACTION_SPECS.get(action_id)
     if spec is not None:
         return spec
-    template = lookup_aggregate_action_template(action_id)
-    if template is not None:
-        return template.aggregate_spec()
+    if (
+        _AGGREGATE_TEMPLATE_PREFIX is not None
+        and _AGGREGATE_TEMPLATE_SPEC is not None
+        and action_id.startswith(_AGGREGATE_TEMPLATE_PREFIX)
+    ):
+        return _AGGREGATE_TEMPLATE_SPEC
     return None
 
 
 def is_ship_torps_loaded_action(action_id: str) -> bool:
-    return action_id.startswith(SHIP_TORPS_LOADED_ACTION_PREFIX)
+    return _AGGREGATE_TEMPLATE_PREFIX is not None and action_id.startswith(
+        _AGGREGATE_TEMPLATE_PREFIX
+    )
 
 
 def is_histogram_aggregate_action(action_id: str) -> bool:

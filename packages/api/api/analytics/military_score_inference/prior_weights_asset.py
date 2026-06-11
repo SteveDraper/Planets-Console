@@ -10,9 +10,9 @@ from typing import Any, Literal, TypeAlias, overload
 import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    iter_aggregate_action_slots,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
+    iter_aggregate_action_slots,
 )
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
@@ -154,7 +154,7 @@ class HistogramAggregate:
 
 @dataclass(frozen=True)
 class CountsAggregate:
-    counts: dict[str, float]
+    pseudo_count: float
 
 
 AggregatePrior = HistogramAggregate | CountsAggregate
@@ -278,12 +278,12 @@ def _parse_band_aggregate_tables(
                 raise ValueError(f"aggregates.{band}.{action_id}.counts must be a mapping")
             if len(counts_raw) != 1:
                 raise ValueError(f"aggregates.{band}.{action_id}.counts must have exactly one key")
-            actions[action_id] = CountsAggregate(
-                counts=_parse_str_keyed_counts(
-                    counts_raw,
-                    field_name=f"aggregates.{band}.{action_id}.counts",
-                )
-            )
+            ((count_key, count_value),) = counts_raw.items()
+            if not isinstance(count_key, str):
+                raise ValueError(f"aggregates.{band}.{action_id}.counts keys must be strings")
+            if not isinstance(count_value, (int, float)):
+                raise ValueError(f"aggregates.{band}.{action_id}.counts values must be numbers")
+            actions[action_id] = CountsAggregate(pseudo_count=float(count_value))
         else:
             raise ValueError(f"aggregates.{band}.{action_id} must include histogram or counts")
     return actions
