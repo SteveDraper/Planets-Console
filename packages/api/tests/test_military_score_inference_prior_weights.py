@@ -18,7 +18,10 @@ from api.analytics.military_score_inference.inference_game_category import (
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceProblem
 from api.analytics.military_score_inference.prior_weights import (
     PRIOR_WEIGHT_SCALE,
+    SMALL_DEEP_SPACE_FREIGHTER_HULL_ID,
     WILDCARD_COUNT_KEY,
+    PriorWeightsCatalog,
+    PriorWeightsDiagnostics,
     counts_to_log_weights,
     default_prior_weights_dir,
     expand_wildcard_counts,
@@ -28,6 +31,7 @@ from api.analytics.military_score_inference.prior_weights import (
     resolve_prior_weights_catalog,
     ship_limit_band_key,
 )
+from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.components import Beam, Engine, Hull, Torpedo
@@ -405,6 +409,69 @@ def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):
     )
     assert likely != unlikely
     assert likely > unlikely
+
+
+def _minimal_prior_catalog(
+    *,
+    hull_log_weights: dict[int, int] | None = None,
+    combo_log_overrides: dict[str, int] | None = None,
+    hull_log_overrides: dict[int, int] | None = None,
+) -> PriorWeightsCatalog:
+    return PriorWeightsCatalog(
+        diagnostics=PriorWeightsDiagnostics(
+            category_id="standard",
+            asset_path="test",
+            asset_version=1,
+            game_category_rules_version=1,
+            fell_back_to_standard=False,
+            ship_limit_band="before_ship_limit",
+            race_id_used=None,
+        ),
+        hull_log_weights=hull_log_weights or {},
+        component_tables={},
+        aggregate_action_weights={},
+        aggregate_bucket_marginal_weights={},
+        combo_log_overrides=combo_log_overrides or {},
+        hull_log_overrides=hull_log_overrides or {},
+    )
+
+
+def test_freighter_probability_weight_uses_sdsf_hull_marginal():
+    catalog = _minimal_prior_catalog(
+        hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
+    )
+    assert catalog.freighter_probability_weight(
+        combo_id=GENERIC_FREIGHTER_COMBO_ID,
+        default_weight=80,
+    ) == 42
+
+
+def test_freighter_probability_weight_prefers_combo_then_hull_override():
+    catalog = _minimal_prior_catalog(
+        hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
+        hull_log_overrides={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 55},
+        combo_log_overrides={GENERIC_FREIGHTER_COMBO_ID: 99},
+    )
+    assert catalog.freighter_probability_weight(
+        combo_id=GENERIC_FREIGHTER_COMBO_ID,
+        default_weight=80,
+    ) == 99
+    without_combo = _minimal_prior_catalog(
+        hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
+        hull_log_overrides={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 55},
+    )
+    assert without_combo.freighter_probability_weight(
+        combo_id=GENERIC_FREIGHTER_COMBO_ID,
+        default_weight=80,
+    ) == 55
+
+
+def test_freighter_probability_weight_falls_back_to_default():
+    catalog = _minimal_prior_catalog()
+    assert catalog.freighter_probability_weight(
+        combo_id=GENERIC_FREIGHTER_COMBO_ID,
+        default_weight=80,
+    ) == 80
 
 
 def test_catalog_build_includes_prior_weights_diagnostics(sample_turn):

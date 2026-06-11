@@ -44,6 +44,8 @@ from api.analytics.military_score_inference.probability_bucket_defaults import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
 
+SMALL_DEEP_SPACE_FREIGHTER_HULL_ID = 15
+
 BUCKETED_AGGREGATE_ACTION_IDS = frozenset(
     {
         "planet_defense_posts_added_total",
@@ -63,6 +65,7 @@ BASE_BUCKETS_BY_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
 __all__ = [
     "BUCKETED_AGGREGATE_ACTION_IDS",
     "PRIOR_WEIGHT_SCALE",
+    "SMALL_DEEP_SPACE_FREIGHTER_HULL_ID",
     "WILDCARD_COUNT_KEY",
     "PriorWeightsCatalog",
     "PriorWeightsDiagnostics",
@@ -120,6 +123,21 @@ class PriorWeightsCatalog:
     combo_log_overrides: dict[str, int]
     hull_log_overrides: dict[int, int]
 
+    def _hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
+        hull_override = self.hull_log_overrides.get(hull_id)
+        if hull_override is not None:
+            return hull_override
+        return self.hull_log_weights.get(hull_id, default_weight)
+
+    def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
+        override = self.combo_log_overrides.get(combo_id)
+        if override is not None:
+            return override
+        return self._hull_marginal_log_weight(
+            SMALL_DEEP_SPACE_FREIGHTER_HULL_ID,
+            default_weight=default_weight,
+        )
+
     def combo_probability_weight(
         self,
         *,
@@ -135,10 +153,7 @@ class PriorWeightsCatalog:
         if override is not None:
             return override
 
-        hull_override = self.hull_log_overrides.get(hull.id)
-        hull_weight = (
-            hull_override if hull_override is not None else self.hull_log_weights.get(hull.id, 0)
-        )
+        hull_weight = self._hull_marginal_log_weight(hull.id)
 
         hull_category = resolve_inference_hull_category(
             hull,
