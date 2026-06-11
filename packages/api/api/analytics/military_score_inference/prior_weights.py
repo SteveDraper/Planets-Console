@@ -85,27 +85,38 @@ class PriorWeightsDiagnostics:
 @dataclass(frozen=True)
 class PriorWeightsCatalog:
     diagnostics: PriorWeightsDiagnostics
-    hull_log_weights: dict[int, int]
-    component_tables: dict[
+    _hull_log_weights: dict[int, int]
+    _component_tables: dict[
         InferenceHullCategory,
         dict[str, dict[Any, int]],
     ]
-    aggregate_action_weights: dict[str, int]
-    aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
-    combo_log_overrides: dict[str, int]
-    hull_log_overrides: dict[int, int]
+    _aggregate_action_weights: dict[str, int]
+    _aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
+    _combo_log_overrides: dict[str, int]
+    _hull_log_overrides: dict[int, int]
 
-    def _hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
-        hull_override = self.hull_log_overrides.get(hull_id)
+    def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
+        hull_override = self._hull_log_overrides.get(hull_id)
         if hull_override is not None:
             return hull_override
-        return self.hull_log_weights.get(hull_id, default_weight)
+        return self._hull_log_weights.get(hull_id, default_weight)
+
+    def component_log_weight(
+        self,
+        hull_category: InferenceHullCategory,
+        table_name: str,
+        key: Any,
+        *,
+        default_weight: int = 0,
+    ) -> int:
+        category_tables = self._component_tables[hull_category]
+        return category_tables.get(table_name, {}).get(key, default_weight)
 
     def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
-        override = self.combo_log_overrides.get(combo_id)
+        override = self._combo_log_overrides.get(combo_id)
         if override is not None:
             return override
-        return self._hull_marginal_log_weight(
+        return self.hull_marginal_log_weight(
             GENERIC_FREIGHTER_PRIOR_HULL_ID,
             default_weight=default_weight,
         )
@@ -121,18 +132,18 @@ class PriorWeightsCatalog:
         beam_count: int,
         launcher_count: int,
     ) -> int:
-        override = self.combo_log_overrides.get(combo_id)
+        override = self._combo_log_overrides.get(combo_id)
         if override is not None:
             return override
 
-        hull_weight = self._hull_marginal_log_weight(hull.id)
+        hull_weight = self.hull_marginal_log_weight(hull.id)
 
         hull_category = resolve_inference_hull_category(
             hull,
             beam_count=beam_count,
             launcher_count=launcher_count,
         )
-        category_tables = self.component_tables[hull_category]
+        category_tables = self._component_tables[hull_category]
         fill = slot_fill_pattern(hull, beam_count=beam_count, launcher_count=launcher_count)
 
         component_weight = 0
@@ -146,14 +157,14 @@ class PriorWeightsCatalog:
         return hull_weight + component_weight
 
     def aggregate_probability_weight(self, action_id: str) -> int | None:
-        return self.aggregate_action_weights.get(action_id)
+        return self._aggregate_action_weights.get(action_id)
 
     def probability_buckets_for_action(
         self,
         action_id: str,
         base_buckets: tuple[ProbabilityBucket, ...],
     ) -> tuple[ProbabilityBucket, ...]:
-        marginal_weights = self.aggregate_bucket_marginal_weights.get(action_id)
+        marginal_weights = self._aggregate_bucket_marginal_weights.get(action_id)
         if marginal_weights is None:
             return base_buckets
         if len(marginal_weights) != len(base_buckets):
@@ -377,7 +388,7 @@ def resolve_prior_weights_catalog(
         race_id_used=race_id,
     )
 
-    return PriorWeightsCatalog(
+    return _prior_weights_catalog_from_tables(
         diagnostics=diagnostics,
         hull_log_weights=hull_log_weights,
         component_tables=component_tables,
@@ -385,4 +396,25 @@ def resolve_prior_weights_catalog(
         aggregate_bucket_marginal_weights=aggregate_bucket_weights,
         combo_log_overrides=combo_log_overrides,
         hull_log_overrides=hull_log_overrides_int,
+    )
+
+
+def _prior_weights_catalog_from_tables(
+    *,
+    diagnostics: PriorWeightsDiagnostics,
+    hull_log_weights: dict[int, int],
+    component_tables: dict[InferenceHullCategory, dict[str, dict[Any, int]]],
+    aggregate_action_weights: dict[str, int],
+    aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]],
+    combo_log_overrides: dict[str, int],
+    hull_log_overrides: dict[int, int],
+) -> PriorWeightsCatalog:
+    return PriorWeightsCatalog(
+        diagnostics=diagnostics,
+        _hull_log_weights=hull_log_weights,
+        _component_tables=component_tables,
+        _aggregate_action_weights=aggregate_action_weights,
+        _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights,
+        _combo_log_overrides=combo_log_overrides,
+        _hull_log_overrides=hull_log_overrides,
     )

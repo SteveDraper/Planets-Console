@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.prior_weights import (
     GENERIC_FREIGHTER_PRIOR_HULL_ID,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
+    _prior_weights_catalog_from_tables,
     resolve_prior_weights_catalog,
     ship_limit_band_key,
 )
@@ -119,7 +120,7 @@ def _minimal_prior_catalog(
     combo_log_overrides: dict[str, int] | None = None,
     hull_log_overrides: dict[int, int] | None = None,
 ) -> PriorWeightsCatalog:
-    return PriorWeightsCatalog(
+    return _prior_weights_catalog_from_tables(
         diagnostics=PriorWeightsDiagnostics(
             category_id="standard",
             asset_path="test",
@@ -187,8 +188,8 @@ def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
         eligible_beam_ids=frozenset({1, 3}),
         eligible_torp_ids=frozenset({1, 8}),
     )
-    assert 99 in catalog.hull_log_weights
-    assert catalog.hull_log_weights[24] > catalog.hull_log_weights[99]
+    assert catalog.hull_marginal_log_weight(99, default_weight=-1) != -1
+    assert catalog.hull_marginal_log_weight(24) > catalog.hull_marginal_log_weight(99)
 
 
 def test_expand_wildcard_counts_fills_universe():
@@ -291,13 +292,14 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
         launcher_count=2,
     )
 
-    beams_table = catalog.component_tables["torpedo_ship"]["beams"]
     expected_uniform_weight = counts_to_log_weights(
         {2: 1.0, 3: 1.0}, scale=INFERENCE_PROBABILITY_WEIGHT_SCALE
     )[2]
+    beam_two_weight = catalog.component_log_weight("torpedo_ship", "beams", 2)
+    beam_three_weight = catalog.component_log_weight("torpedo_ship", "beams", 3)
 
     assert with_beam_two == with_beam_three
-    assert beams_table[2] == beams_table[3] == expected_uniform_weight
+    assert beam_two_weight == beam_three_weight == expected_uniform_weight
     assert expected_uniform_weight < 0
 
 
