@@ -116,13 +116,26 @@ def _parse_str_keyed_counts(
 
 
 @dataclass(frozen=True)
+class HistogramAggregate:
+    histogram: dict[int, float]
+
+
+@dataclass(frozen=True)
+class CountsAggregate:
+    counts: dict[str, float]
+
+
+AggregatePrior = HistogramAggregate | CountsAggregate
+
+
+@dataclass(frozen=True)
 class PriorWeightsAsset:
     version: int
     category: str
     game_category_rules_version: int
     hulls: dict[ShipLimitBand, dict[str, dict[int, float]]]
     components: dict[ShipLimitBand, dict[InferenceHullCategory, dict[str, dict[Any, float]]]]
-    aggregates: dict[ShipLimitBand, dict[str, dict[str, dict[int, float]]]]
+    aggregates: dict[ShipLimitBand, dict[str, AggregatePrior]]
     combo_overrides: dict[str, float] = field(default_factory=dict)
     hull_overrides: dict[int, float] = field(default_factory=dict)
 
@@ -204,8 +217,8 @@ def _parse_component_tables(
 def _parse_band_aggregate_tables(
     band_raw: object,
     band: ShipLimitBand,
-) -> dict[str, dict[str, dict[int, float]]]:
-    actions: dict[str, dict[str, dict[int, float]]] = {}
+) -> dict[str, AggregatePrior]:
+    actions: dict[str, AggregatePrior] = {}
     for action_id, action_raw in band_raw.items():
         if not isinstance(action_id, str):
             raise ValueError(f"aggregates.{band} keys must be strings")
@@ -216,13 +229,13 @@ def _parse_band_aggregate_tables(
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
                 )
-            actions[action_id] = {
-                "histogram": _parse_int_keyed_counts(
+            actions[action_id] = HistogramAggregate(
+                histogram=_parse_int_keyed_counts(
                     action_raw["histogram"],
                     field_name=f"aggregates.{band}.{action_id}.histogram",
                     allow_wildcard=False,
                 )
-            }
+            )
         elif "counts" in action_raw:
             if not is_counts_aggregate_action(action_id):
                 raise ValueError(
@@ -233,12 +246,12 @@ def _parse_band_aggregate_tables(
                 raise ValueError(f"aggregates.{band}.{action_id}.counts must be a mapping")
             if len(counts_raw) != 1:
                 raise ValueError(f"aggregates.{band}.{action_id}.counts must have exactly one key")
-            actions[action_id] = {
-                "counts": _parse_str_keyed_counts(
+            actions[action_id] = CountsAggregate(
+                counts=_parse_str_keyed_counts(
                     counts_raw,
                     field_name=f"aggregates.{band}.{action_id}.counts",
                 )
-            }
+            )
         else:
             raise ValueError(f"aggregates.{band}.{action_id} must include histogram or counts")
     return actions
@@ -246,7 +259,7 @@ def _parse_band_aggregate_tables(
 
 def _parse_aggregate_tables(
     raw: object,
-) -> dict[ShipLimitBand, dict[str, dict[str, dict[int, float]]]]:
+) -> dict[ShipLimitBand, dict[str, AggregatePrior]]:
     return _parse_ship_limit_bands(
         raw,
         section_name="aggregates",

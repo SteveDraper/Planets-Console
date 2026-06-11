@@ -25,6 +25,8 @@ from api.analytics.military_score_inference.inference_probability_scale import (
 from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBucket
 from api.analytics.military_score_inference.prior_weights_asset import (
     COMPONENT_TABLE_NAMES,
+    CountsAggregate,
+    HistogramAggregate,
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
@@ -300,8 +302,8 @@ def _resolve_aggregate_weights(
     bucket_weights: dict[str, tuple[int, ...]] = {}
     band_tables = asset.aggregates.get(band, {})
 
-    for action_id, tables in band_tables.items():
-        if "histogram" in tables:
+    for action_id, aggregate in band_tables.items():
+        if isinstance(aggregate, HistogramAggregate):
             if not is_histogram_aggregate_action(action_id):
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
@@ -311,17 +313,17 @@ def _resolve_aggregate_weights(
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} has no solver bucket definition"
                 )
-            bucket_counts = _histogram_bucket_counts(tables["histogram"], base_buckets)
+            bucket_counts = _histogram_bucket_counts(aggregate.histogram, base_buckets)
             log_weights = counts_to_log_weights(bucket_counts, scale=scale)
             bucket_weights[action_id] = tuple(
                 log_weights[index] for index in range(len(base_buckets))
             )
-        elif "counts" in tables:
+        elif isinstance(aggregate, CountsAggregate):
             if not is_counts_aggregate_action(action_id):
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
                 )
-            log_weights = counts_to_log_weights(tables["counts"], scale=scale)
+            log_weights = counts_to_log_weights(aggregate.counts, scale=scale)
             if log_weights:
                 action_weights[action_id] = next(iter(log_weights.values()))
     return action_weights, bucket_weights
