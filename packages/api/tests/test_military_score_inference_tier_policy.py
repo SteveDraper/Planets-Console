@@ -311,7 +311,11 @@ def test_tech_level_filtering_derives_component_sets(synthetic_catalog_context):
         components_by_id=synthetic_catalog_context["beams_by_id"],
     )
     context = {
-        **synthetic_catalog_context,
+        key: value
+        for key, value in synthetic_catalog_context.items()
+        if key != "prior_weights"
+    }
+    context |= {
         "engines_by_id": engines_by_id,
         "eligible_beam_ids": eligible_beam_ids,
     }

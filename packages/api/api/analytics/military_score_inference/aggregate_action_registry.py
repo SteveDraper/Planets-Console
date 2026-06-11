@@ -10,6 +10,7 @@ from api.analytics.military_score_inference.models import ProbabilityBinBounds
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     loaded_ship_fighter_score_delta_2x,
+    loaded_ship_torpedo_score_delta_2x,
     planet_defense_post_score_delta_2x,
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
@@ -44,7 +45,13 @@ SHIP_TORPEDO_BIN_BOUNDS = (
 )
 
 PriorShape = Literal["histogram", "counts"]
-CatalogBuildPhase = Literal["pre_torpedo", "post_torpedo"]
+CatalogBuildPhase = Literal["pre_torpedo", "torpedo", "post_torpedo"]
+
+CATALOG_BUILD_PHASE_ORDER: tuple[CatalogBuildPhase, ...] = (
+    "pre_torpedo",
+    "torpedo",
+    "post_torpedo",
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,30 @@ class AggregateActionSpec:
     score_delta_2x: Callable[[], int] | None = None
     config_cap_field: str | None = None
     catalog_build_phase: CatalogBuildPhase | None = None
+
+
+@dataclass(frozen=True)
+class AggregateActionTemplateSpec:
+    action_id_prefix: str
+    prior_shape: PriorShape
+    bin_bounds: tuple[ProbabilityBinBounds, ...] | None
+    catalog_build_phase: CatalogBuildPhase
+    config_cap_field: str
+    catalog_label_format: str
+    score_delta_2x_from_cost: Callable[[int], int]
+    allowlist_key: str | None = None
+    is_fine_grained_slack: bool = False
+
+    def aggregate_spec(self) -> AggregateActionSpec:
+        return AggregateActionSpec(
+            prior_shape=self.prior_shape,
+            bin_bounds=self.bin_bounds,
+            allowlist_key=self.allowlist_key,
+            is_fine_grained_slack=self.is_fine_grained_slack,
+        )
+
+    def action_id_for_entity_id(self, entity_id: int) -> str:
+        return f"{self.action_id_prefix}{entity_id}"
 
 
 AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
@@ -121,20 +152,35 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
     ),
 }
 
-SHIP_TORPS_LOADED_SPEC = AggregateActionSpec(
-    prior_shape="histogram",
-    bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
-    allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
-    is_fine_grained_slack=True,
+AGGREGATE_ACTION_TEMPLATES: tuple[AggregateActionTemplateSpec, ...] = (
+    AggregateActionTemplateSpec(
+        action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
+        prior_shape="histogram",
+        bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
+        allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
+        is_fine_grained_slack=True,
+        catalog_build_phase="torpedo",
+        config_cap_field="max_ship_torpedoes_per_type",
+        catalog_label_format="Ship torpedoes loaded ({name})",
+        score_delta_2x_from_cost=loaded_ship_torpedo_score_delta_2x,
+    ),
 )
+
+
+def lookup_aggregate_action_template(action_id: str) -> AggregateActionTemplateSpec | None:
+    for template in AGGREGATE_ACTION_TEMPLATES:
+        if action_id.startswith(template.action_id_prefix):
+            return template
+    return None
 
 
 def lookup_aggregate_action_spec(action_id: str) -> AggregateActionSpec | None:
     spec = AGGREGATE_ACTION_SPECS.get(action_id)
     if spec is not None:
         return spec
-    if action_id.startswith(SHIP_TORPS_LOADED_ACTION_PREFIX):
-        return SHIP_TORPS_LOADED_SPEC
+    template = lookup_aggregate_action_template(action_id)
+    if template is not None:
+        return template.aggregate_spec()
     return None
 
 
