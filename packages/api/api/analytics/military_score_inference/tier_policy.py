@@ -11,9 +11,6 @@ import yaml
 from api.analytics.military_score_inference.aggregate_action_registry import (
     aggregate_allowlist_key,
 )
-from api.analytics.military_score_inference.aggregate_action_registry import (
-    is_fine_grained_slack_action as registry_is_fine_grained_slack_action,
-)
 from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
@@ -358,10 +355,6 @@ def resolve_tier_policies(
     if overlay is not None:
         return steps
     return steps
-
-
-def is_fine_grained_slack_action(action_id: str) -> bool:
-    return registry_is_fine_grained_slack_action(action_id)
 
 
 def compute_aggregate_admission_caps(
