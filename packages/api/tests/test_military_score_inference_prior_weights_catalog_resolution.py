@@ -1,8 +1,8 @@
 """Integration tests for prior-weights catalog resolution and combo weighting."""
 
-import pytest
 from dataclasses import replace
 
+import pytest
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPEDO_BIN_BOUNDS,
 )
