@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
+    turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
@@ -262,6 +263,66 @@ def test_build_action_catalog_from_turn_sample(sample_turn):
         buildable_in_catalog = buildable_hulls & catalog_hull_ids
         if buildable_in_catalog:
             assert catalog.ship_build_combos
+
+
+def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
+    """Turn-based catalog applies priors; bare build_action_catalog with turn=None does not."""
+    observation = _observation(starbases_owned=10)
+    full_step = resolve_tier_policies()[-1]
+    context = turn_catalog_context_for_policy_step(
+        sample_turn,
+        observation.player_id,
+        full_step,
+    )
+    catalog_with_priors = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=full_step,
+    )
+    catalog_without_priors = build_action_catalog(
+        observation,
+        hulls_by_id=context.hulls_by_id,
+        engines_by_id=context.engines_by_id,
+        beams_by_id=context.beams_by_id,
+        torpedos_by_id=context.torpedos_by_id,
+        buildable_hull_ids=context.buildable_hull_ids,
+        eligible_engine_ids=context.eligible_engine_ids,
+        eligible_beam_ids=context.eligible_beam_ids,
+        eligible_torp_ids=context.eligible_torp_ids,
+        policy_step=full_step,
+        turn=None,
+    )
+
+    assert catalog_with_priors.prior_weights is not None
+    assert catalog_without_priors.prior_weights is None
+
+    default_config = ActionCatalogConfig()
+    with_prior_by_id = {
+        action.id: action.probability_weight for action in catalog_with_priors.aggregate_actions
+    }
+    without_prior_by_id = {
+        action.id: action.probability_weight
+        for action in catalog_without_priors.aggregate_actions
+    }
+    assert (
+        with_prior_by_id["fighters_starbase_to_ship"]
+        != default_config.fighter_transfer_probability_weight
+    )
+    assert (
+        with_prior_by_id["fighters_starbase_to_ship"]
+        != without_prior_by_id["fighters_starbase_to_ship"]
+    )
+
+    planet_defense_id = "planet_defense_posts_added_total"
+    prior_bucket_weights = tuple(
+        bucket.marginal_weight
+        for bucket in catalog_with_priors.probability_buckets_by_action_id[planet_defense_id]
+    )
+    default_bucket_weights = tuple(
+        bucket.marginal_weight
+        for bucket in catalog_without_priors.probability_buckets_by_action_id[planet_defense_id]
+    )
+    assert prior_bucket_weights != default_bucket_weights
 
 
 @pytest.mark.skipif(not GAME_INFO_PATH.is_file(), reason="local store only")
