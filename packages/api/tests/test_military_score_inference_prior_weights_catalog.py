@@ -18,7 +18,6 @@ from api.analytics.military_score_inference.inference_probability_scale import (
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceProblem
 from api.analytics.military_score_inference.prior_weights import (
-    SMALL_DEEP_SPACE_FREIGHTER_HULL_ID,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
     resolve_prior_weights_catalog,
@@ -31,6 +30,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 )
 from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
+    GENERIC_FREIGHTER_PRIOR_HULL_ID,
     ship_build_combo_id,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
@@ -366,9 +366,9 @@ def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):
     assert likely > unlikely
 
 
-def test_freighter_probability_weight_uses_sdsf_hull_marginal():
+def test_freighter_probability_weight_uses_pseudo_hull_marginal():
     catalog = _minimal_prior_catalog(
-        hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
+        hull_log_weights={GENERIC_FREIGHTER_PRIOR_HULL_ID: 42},
     )
     assert (
         catalog.freighter_probability_weight(
@@ -381,8 +381,8 @@ def test_freighter_probability_weight_uses_sdsf_hull_marginal():
 
 def test_freighter_probability_weight_prefers_combo_then_hull_override():
     catalog = _minimal_prior_catalog(
-        hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
-        hull_log_overrides={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 55},
+        hull_log_weights={GENERIC_FREIGHTER_PRIOR_HULL_ID: 42},
+        hull_log_overrides={GENERIC_FREIGHTER_PRIOR_HULL_ID: 55},
         combo_log_overrides={GENERIC_FREIGHTER_COMBO_ID: 99},
     )
     assert (
@@ -393,8 +393,8 @@ def test_freighter_probability_weight_prefers_combo_then_hull_override():
         == 99
     )
     without_combo = _minimal_prior_catalog(
-        hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
-        hull_log_overrides={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 55},
+        hull_log_weights={GENERIC_FREIGHTER_PRIOR_HULL_ID: 42},
+        hull_log_overrides={GENERIC_FREIGHTER_PRIOR_HULL_ID: 55},
     )
     assert (
         without_combo.freighter_probability_weight(
