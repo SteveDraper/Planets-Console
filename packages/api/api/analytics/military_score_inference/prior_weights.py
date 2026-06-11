@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    base_buckets_for_action,
+    SHIP_TORPS_LOADED_ACTION_PREFIX,
+    base_bin_bounds_for_action,
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -22,7 +23,12 @@ from api.analytics.military_score_inference.inference_game_category import (
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
-from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBucket
+from api.analytics.military_score_inference.models import (
+    InferenceObservation,
+    ProbabilityBinBounds,
+    ProbabilityBucket,
+    probability_buckets_from_bin_bounds,
+)
 from api.analytics.military_score_inference.prior_weights_asset import (
     COMPONENT_TABLE_NAMES,
     CountsAggregate,
@@ -30,6 +36,7 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
+    validate_complete_aggregate_priors,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
     WILDCARD_COUNT_KEY,
@@ -199,31 +206,26 @@ class PriorWeightsCatalog:
     def probability_buckets_for_action(
         self,
         action_id: str,
-        base_buckets: tuple[ProbabilityBucket, ...],
+        bin_bounds: tuple[ProbabilityBinBounds, ...],
     ) -> tuple[ProbabilityBucket, ...]:
         marginal_weights = self._aggregate_bucket_marginal_weights.get(action_id)
         if marginal_weights is None:
-            return base_buckets
-        if len(marginal_weights) != len(base_buckets):
-            raise ValueError(f"prior bucket count for {action_id} does not match solver buckets")
-        return tuple(
-            ProbabilityBucket(
-                label=bucket.label,
-                lower_count=bucket.lower_count,
-                upper_count=bucket.upper_count,
-                marginal_weight=weight,
+            raise ValueError(
+                f"incomplete prior: missing histogram marginal weights for aggregate action "
+                f"{action_id!r}"
             )
-            for bucket, weight in zip(base_buckets, marginal_weights, strict=True)
-        )
+        if len(marginal_weights) != len(bin_bounds):
+            raise ValueError(f"prior bucket count for {action_id} does not match solver bins")
+        return probability_buckets_from_bin_bounds(bin_bounds, marginal_weights)
 
 
 def _histogram_bucket_counts(
     histogram: dict[int, float],
-    buckets: tuple[ProbabilityBucket, ...],
+    bin_bounds: tuple[ProbabilityBinBounds, ...],
 ) -> dict[int, float]:
-    bucket_counts = dict.fromkeys(range(len(buckets)), 0.0)
+    bucket_counts = dict.fromkeys(range(len(bin_bounds)), 0.0)
     for magnitude, count in histogram.items():
-        bucket_counts[magnitude_bin_index(magnitude, buckets)] += count
+        bucket_counts[magnitude_bin_index(magnitude, bin_bounds)] += count
     return bucket_counts
 
 
@@ -347,13 +349,13 @@ def _resolve_aggregate_weights(
 
     for action_id, aggregate in band_tables.items():
         if isinstance(aggregate, HistogramAggregate):
-            base_buckets = base_buckets_for_action(action_id)
-            if base_buckets is None:
-                raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bucket definition")
-            bucket_counts = _histogram_bucket_counts(aggregate.histogram, base_buckets)
+            bin_bounds = base_bin_bounds_for_action(action_id)
+            if bin_bounds is None:
+                raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bin definition")
+            bucket_counts = _histogram_bucket_counts(aggregate.histogram, bin_bounds)
             log_weights = counts_to_log_weights(bucket_counts, scale=scale)
             bucket_weights[action_id] = tuple(
-                log_weights[index] for index in range(len(base_buckets))
+                log_weights[index] for index in range(len(bin_bounds))
             )
         elif isinstance(aggregate, CountsAggregate):
             ((count_key, count_value),) = aggregate.counts.items()
@@ -362,6 +364,19 @@ def _resolve_aggregate_weights(
                 scale=scale,
             )[count_key]
     return action_weights, bucket_weights
+
+
+def _validate_eligible_torpedo_histograms(
+    bucket_weights: dict[str, tuple[int, ...]],
+    eligible_torp_ids: frozenset[int],
+) -> None:
+    for torp_id in eligible_torp_ids:
+        action_id = f"{SHIP_TORPS_LOADED_ACTION_PREFIX}{torp_id}"
+        if action_id not in bucket_weights:
+            raise ValueError(
+                f"incomplete prior: missing histogram marginal weights for aggregate action "
+                f"{action_id!r}"
+            )
 
 
 def resolve_prior_weights_catalog(
@@ -382,6 +397,7 @@ def resolve_prior_weights_catalog(
         base_dir=base_dir,
     )
     band = ship_limit_band_key(observation)
+    validate_complete_aggregate_priors(asset, band=band)
 
     hull_log_weights = _resolve_hull_log_weights(
         asset,
@@ -403,6 +419,8 @@ def resolve_prior_weights_catalog(
         band=band,
         scale=scale,
     )
+    if eligible_torp_ids:
+        _validate_eligible_torpedo_histograms(aggregate_bucket_weights, eligible_torp_ids)
 
     combo_log_overrides = counts_to_log_weights(asset.combo_overrides, scale=scale)
     hull_log_overrides_int = counts_to_log_weights(asset.hull_overrides, scale=scale)

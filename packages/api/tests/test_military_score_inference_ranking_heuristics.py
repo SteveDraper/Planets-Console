@@ -2,9 +2,7 @@
 
 from api.analytics.military_score_inference.accelerated_start import accelerated_inference_segments
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    PLANET_DEFENSE_POST_BUCKETS,
-    SHIP_TORPEDO_BUCKETS,
-    STARBASE_DEFENSE_POST_BUCKETS,
+    SHIP_TORPEDO_BIN_BOUNDS,
 )
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_segment_policy_ladder,
@@ -42,6 +40,17 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.military_score_inference.tier_policy import (
     compute_aggregate_admission_caps,
     resolve_tier_policies,
+)
+
+from tests.fixtures.military_score_inference_prior_weights import (
+    probability_buckets_for_test_action,
+)
+
+_PLANET_DEFENSE_POST_TEST_BUCKETS = probability_buckets_for_test_action(
+    "planet_defense_posts_added_total"
+)
+_STARBASE_DEFENSE_POST_TEST_BUCKETS = probability_buckets_for_test_action(
+    "starbase_defense_posts_added_total"
 )
 
 
@@ -190,8 +199,8 @@ def test_parsimony_allows_planet_and_starbase_defense():
             planet,
             starbase,
             probability_buckets_by_action_id={
-                planet.id: PLANET_DEFENSE_POST_BUCKETS,
-                starbase.id: STARBASE_DEFENSE_POST_BUCKETS,
+                planet.id: _PLANET_DEFENSE_POST_TEST_BUCKETS,
+                starbase.id: _STARBASE_DEFENSE_POST_TEST_BUCKETS,
             },
             max_solutions=5,
         )
@@ -221,8 +230,9 @@ def test_tier_overflow_penalizes_count_above_admission_cap():
         upper_bound=admission_cap + 18,
         probability_weight=10,
     )
+    planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
     buckets, overflow_band = build_tier_aware_probability_buckets(
-        PLANET_DEFENSE_POST_BUCKETS,
+        planet_defense_buckets,
         admission_cap=admission_cap,
         current_cap=current_cap,
         overflow_marginal_weight=heuristics.tier_overflow_marginal_weight,
@@ -361,8 +371,8 @@ def test_top_k_still_descending_objective_order():
             preferred,
             alternate,
             probability_buckets_by_action_id={
-                preferred.id: PLANET_DEFENSE_POST_BUCKETS,
-                alternate.id: STARBASE_DEFENSE_POST_BUCKETS,
+                preferred.id: _PLANET_DEFENSE_POST_TEST_BUCKETS,
+                alternate.id: _STARBASE_DEFENSE_POST_TEST_BUCKETS,
             },
             max_solutions=3,
         )
@@ -508,17 +518,18 @@ def test_partial_weapon_slot_fill_ranks_below_full_slots():
 
 
 def test_ranking_bin_penalty_is_per_bin_not_per_unit():
-    assert active_ranking_bin_indicators(1, PLANET_DEFENSE_POST_BUCKETS) == (1, 0, 0)
-    assert active_ranking_bin_indicators(10, PLANET_DEFENSE_POST_BUCKETS) == (1, 0, 0)
-    assert active_ranking_bin_indicators(100, PLANET_DEFENSE_POST_BUCKETS) == (0, 0, 1)
+    planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
+    assert active_ranking_bin_indicators(1, planet_defense_buckets) == (1, 0, 0)
+    assert active_ranking_bin_indicators(10, planet_defense_buckets) == (1, 0, 0)
+    assert active_ranking_bin_indicators(100, planet_defense_buckets) == (0, 0, 1)
 
     ten_posts = compute_bin_penalty_objective_contribution(
         {"planet_defense_posts_added_total": 10},
-        {"planet_defense_posts_added_total": PLANET_DEFENSE_POST_BUCKETS},
+        {"planet_defense_posts_added_total": planet_defense_buckets},
     )
     hundred_posts = compute_bin_penalty_objective_contribution(
         {"planet_defense_posts_added_total": 100},
-        {"planet_defense_posts_added_total": PLANET_DEFENSE_POST_BUCKETS},
+        {"planet_defense_posts_added_total": planet_defense_buckets},
     )
     assert ten_posts == 0
     assert hundred_posts == -95
@@ -569,13 +580,14 @@ def test_ship_torpedo_modest_bin_covers_typical_load_counts():
         ranking_penalty_from_marginal_weight,
     )
 
-    assert SHIP_TORPEDO_BUCKETS[0].upper_count == 40
-    assert active_ranking_bin_index(30, SHIP_TORPEDO_BUCKETS) == 0
-    assert active_ranking_bin_index(41, SHIP_TORPEDO_BUCKETS) == 1
-    max_weight = max_marginal_weight(SHIP_TORPEDO_BUCKETS)
+    ship_torpedo_buckets = probability_buckets_for_test_action("ship_torps_loaded_1")
+    assert SHIP_TORPEDO_BIN_BOUNDS[0].upper_count == 40
+    assert active_ranking_bin_index(30, ship_torpedo_buckets) == 0
+    assert active_ranking_bin_index(41, ship_torpedo_buckets) == 1
+    max_weight = max_marginal_weight(ship_torpedo_buckets)
     assert (
         ranking_penalty_from_marginal_weight(
-            SHIP_TORPEDO_BUCKETS[1].marginal_weight,
+            ship_torpedo_buckets[1].marginal_weight,
             max_marginal_weight=max_weight,
         )
         == 0

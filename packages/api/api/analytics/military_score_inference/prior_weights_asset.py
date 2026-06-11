@@ -10,6 +10,7 @@ from typing import Any, Literal
 import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    AGGREGATE_ACTION_SPECS,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
 )
@@ -267,6 +268,22 @@ def _parse_aggregate_tables(
     )
 
 
+def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:
+    band_tables = asset.aggregates.get(band, {})
+    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+        if action_id not in band_tables:
+            raise ValueError(
+                f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
+            )
+        aggregate = band_tables[action_id]
+        if spec.prior_shape == "histogram" and not isinstance(aggregate, HistogramAggregate):
+            raise ValueError(
+                f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
+            )
+        if spec.prior_shape == "counts" and not isinstance(aggregate, CountsAggregate):
+            raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
+
+
 def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
     version = document.get("version")
     if not isinstance(version, int) or version < 1:
@@ -307,7 +324,7 @@ def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
                 allow_wildcard=False,
             )
 
-    return PriorWeightsAsset(
+    asset = PriorWeightsAsset(
         version=version,
         category=category,
         game_category_rules_version=rules_version,
@@ -317,6 +334,9 @@ def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
         combo_overrides=combo_overrides,
         hull_overrides=hull_overrides,
     )
+    for band in SHIP_LIMIT_BANDS:
+        validate_complete_aggregate_priors(asset, band=band)
+    return asset
 
 
 def load_prior_weights_asset(path: Path) -> PriorWeightsAsset:

@@ -47,11 +47,37 @@ class CandidateAction:
 
 
 @dataclass(frozen=True)
+class ProbabilityBinBounds:
+    """Solver magnitude-bin geometry (labels and count ranges only)."""
+
+    label: str
+    lower_count: int
+    upper_count: int
+
+
+@dataclass(frozen=True)
 class ProbabilityBucket:
     label: str
     lower_count: int
     upper_count: int
     marginal_weight: int
+
+
+def probability_buckets_from_bin_bounds(
+    bounds: tuple[ProbabilityBinBounds, ...],
+    marginal_weights: tuple[int, ...],
+) -> tuple[ProbabilityBucket, ...]:
+    if len(bounds) != len(marginal_weights):
+        raise ValueError("bin bounds and marginal weight count must match")
+    return tuple(
+        ProbabilityBucket(
+            label=bound.label,
+            lower_count=bound.lower_count,
+            upper_count=bound.upper_count,
+            marginal_weight=weight,
+        )
+        for bound, weight in zip(bounds, marginal_weights, strict=True)
+    )
 
 
 @dataclass(frozen=True)

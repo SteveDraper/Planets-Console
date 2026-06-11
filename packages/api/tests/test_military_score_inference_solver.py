@@ -1,8 +1,5 @@
 """Tests for the military score inference CP-SAT solver."""
 
-from api.analytics.military_score_inference.aggregate_action_registry import (
-    PLANET_DEFENSE_POST_BUCKETS,
-)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -21,6 +18,14 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_TIME_LIMITED,
     solve_inference_problem,
+)
+
+from tests.fixtures.military_score_inference_prior_weights import (
+    probability_buckets_for_test_action,
+)
+
+_PLANET_DEFENSE_POST_TEST_BUCKETS = probability_buckets_for_test_action(
+    "planet_defense_posts_added_total"
 )
 
 
@@ -386,7 +391,8 @@ def test_top_k_surfaces_time_limited_status(monkeypatch):
 
 def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100():
     action = _planet_defense_posts_action()
-    buckets = {"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS}
+    planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
+    buckets = {"planet_defense_posts": planet_defense_buckets}
 
     result_ten = solve_inference_problem(
         _problem(
@@ -416,7 +422,9 @@ def test_bucketed_action_satisfies_exact_score_constraint():
         _problem(
             _observation(military_delta_2x=55 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
             action,
-            probability_buckets_by_action_id={"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS},
+            probability_buckets_by_action_id={
+                "planet_defense_posts": _PLANET_DEFENSE_POST_TEST_BUCKETS,
+            },
         )
     )
 
@@ -430,7 +438,9 @@ def test_bucket_variables_respect_configured_count_ranges():
         _problem(
             _observation(military_delta_2x=100 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
             action,
-            probability_buckets_by_action_id={"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS},
+            probability_buckets_by_action_id={
+                "planet_defense_posts": _PLANET_DEFENSE_POST_TEST_BUCKETS,
+            },
         )
     )
 

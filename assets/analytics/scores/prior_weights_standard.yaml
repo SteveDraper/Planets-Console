@@ -133,6 +133,32 @@ aggregates:
         10: 80  # Mark 1 Photon load magnitudes
         50: 45
         120: 8
+    ship_torps_loaded_2:
+      histogram:
+        10: 75
+        50: 42
+        120: 7
+    ship_torps_loaded_3:
+      histogram:
+        10: 70
+        50: 40
+        120: 6
+    ship_torps_loaded_4:
+      histogram: {10: 68, 50: 38, 120: 6}
+    ship_torps_loaded_5:
+      histogram: {10: 66, 50: 36, 120: 5}
+    ship_torps_loaded_6:
+      histogram: {10: 64, 50: 34, 120: 5}
+    ship_torps_loaded_7:
+      histogram: {10: 62, 50: 32, 120: 4}
+    ship_torps_loaded_8:
+      histogram: {10: 60, 50: 30, 120: 4}
+    ship_torps_loaded_9:
+      histogram: {10: 58, 50: 28, 120: 3}
+    ship_torps_loaded_10:
+      histogram: {10: 56, 50: 26, 120: 3}
+    ship_torps_loaded_11:
+      histogram: {10: 54, 50: 24, 120: 2}
   after_ship_limit:
     planet_defense_posts_added_total:
       histogram:
@@ -164,6 +190,37 @@ aggregates:
     fighters_ship_to_starbase:
       counts:
         default: 30
+    ship_torps_loaded_1:
+      histogram:
+        10: 70
+        50: 40
+        120: 6
+    ship_torps_loaded_2:
+      histogram:
+        10: 65
+        50: 38
+        120: 5
+    ship_torps_loaded_3:
+      histogram:
+        10: 60
+        50: 35
+        120: 4
+    ship_torps_loaded_4:
+      histogram: {10: 58, 50: 33, 120: 4}
+    ship_torps_loaded_5:
+      histogram: {10: 56, 50: 31, 120: 3}
+    ship_torps_loaded_6:
+      histogram: {10: 54, 50: 29, 120: 3}
+    ship_torps_loaded_7:
+      histogram: {10: 52, 50: 27, 120: 2}
+    ship_torps_loaded_8:
+      histogram: {10: 50, 50: 25, 120: 2}
+    ship_torps_loaded_9:
+      histogram: {10: 48, 50: 23, 120: 2}
+    ship_torps_loaded_10:
+      histogram: {10: 46, 50: 21, 120: 1}
+    ship_torps_loaded_11:
+      histogram: {10: 44, 50: 19, 120: 1}
 
 overrides:
   combos: {}  # combo_id -> pseudo-count (optional sparse corrections; no wildcard)

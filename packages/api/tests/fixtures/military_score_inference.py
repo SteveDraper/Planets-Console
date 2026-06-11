@@ -179,3 +179,13 @@ def synthetic_catalog_context():
         "eligible_beam_ids": frozenset({beam.id}),
         "eligible_torp_ids": frozenset({torpedo.id}),
     }
+
+
+@pytest.fixture
+def synthetic_catalog_build_context(synthetic_catalog_context):
+    from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog
+
+    return {
+        **synthetic_catalog_context,
+        "prior_catalog": minimal_prior_catalog(),
+    }

@@ -315,9 +315,12 @@ def test_tech_level_filtering_derives_component_sets(synthetic_catalog_context):
         "engines_by_id": engines_by_id,
         "eligible_beam_ids": eligible_beam_ids,
     }
+    from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog
+
     early_catalog = build_action_catalog(
         _observation(warship_delta=1),
         policy_step=early_step,
+        prior_catalog=minimal_prior_catalog(),
         **context,
     )
     assert high_tech_engine.id not in {combo.engine_id for combo in early_catalog.ship_build_combos}

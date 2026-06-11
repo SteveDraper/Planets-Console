@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from api.analytics.military_score_inference.aggregate_action_registry import AGGREGATE_ACTION_SPECS
 from api.analytics.military_score_inference.inference_game_category import (
     BLITZ_INFERENCE_GAME_CATEGORY,
     INFERENCE_GAME_CATEGORY_RULES_VERSION,
@@ -16,7 +17,18 @@ from api.analytics.military_score_inference.prior_weights_asset import (
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
 
 
+def _complete_aggregates_band() -> dict[str, object]:
+    band: dict[str, object] = {}
+    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+        if spec.prior_shape == "histogram":
+            band[action_id] = {"histogram": {5: 1}}
+        else:
+            band[action_id] = {"counts": {"default": 1}}
+    return band
+
+
 def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
+    complete_band = _complete_aggregates_band()
     document: dict[str, object] = {
         "version": 2,
         "category": "standard",
@@ -30,8 +42,8 @@ def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
             "after_ship_limit": {},
         },
         "aggregates": {
-            "before_ship_limit": {},
-            "after_ship_limit": {},
+            "before_ship_limit": dict(complete_band),
+            "after_ship_limit": dict(complete_band),
         },
     }
     document.update(overrides)
@@ -72,14 +84,14 @@ def test_game_category_rules_version_must_match_inference_rules():
 
 
 def test_histogram_rejects_wildcard_key():
+    before_ship_limit = _complete_aggregates_band()
+    before_ship_limit["planet_defense_posts_added_total"] = {"histogram": {"*": 10, 5: 1}}
     with pytest.raises(ValueError, match="must be integers"):
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
-                    "before_ship_limit": {
-                        "planet_defense_posts_added_total": {"histogram": {"*": 10, 5: 1}}
-                    },
-                    "after_ship_limit": {},
+                    "before_ship_limit": before_ship_limit,
+                    "after_ship_limit": _complete_aggregates_band(),
                 }
             )
         )
@@ -90,8 +102,11 @@ def test_aggregates_reject_unknown_histogram_action_id():
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
-                    "before_ship_limit": {"planet_defense_posts_typo": {"histogram": {5: 1}}},
-                    "after_ship_limit": {},
+                    "before_ship_limit": {
+                        **_complete_aggregates_band(),
+                        "planet_defense_posts_typo": {"histogram": {5: 1}},
+                    },
+                    "after_ship_limit": _complete_aggregates_band(),
                 }
             )
         )
@@ -103,35 +118,52 @@ def test_aggregates_reject_unknown_counts_action_id():
             _minimal_prior_weights_document(
                 aggregates={
                     "before_ship_limit": {
-                        "evil_empire_free_starbase_fighters": {"counts": {"default": 10}}
+                        **_complete_aggregates_band(),
+                        "evil_empire_free_starbase_fighters": {"counts": {"default": 10}},
                     },
-                    "after_ship_limit": {},
+                    "after_ship_limit": _complete_aggregates_band(),
                 }
             )
         )
 
 
 def test_aggregates_reject_counts_with_multiple_keys():
+    before_ship_limit = _complete_aggregates_band()
+    before_ship_limit["fighters_starbase_to_ship"] = {"counts": {"default": 65, "alternate": 10}}
     with pytest.raises(ValueError, match="must have exactly one key"):
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
-                    "before_ship_limit": {
-                        "fighters_starbase_to_ship": {"counts": {"default": 65, "alternate": 10}}
-                    },
-                    "after_ship_limit": {},
+                    "before_ship_limit": before_ship_limit,
+                    "after_ship_limit": _complete_aggregates_band(),
                 }
             )
         )
 
 
 def test_aggregates_reject_empty_counts():
+    before_ship_limit = _complete_aggregates_band()
+    before_ship_limit["fighters_ship_to_starbase"] = {"counts": {}}
     with pytest.raises(ValueError, match="must have exactly one key"):
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
-                    "before_ship_limit": {"fighters_ship_to_starbase": {"counts": {}}},
-                    "after_ship_limit": {},
+                    "before_ship_limit": before_ship_limit,
+                    "after_ship_limit": _complete_aggregates_band(),
+                }
+            )
+        )
+
+
+def test_parse_rejects_incomplete_aggregate_priors():
+    incomplete_band = _complete_aggregates_band()
+    del incomplete_band["planet_defense_posts_added_total"]
+    with pytest.raises(ValueError, match="incomplete prior"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": incomplete_band,
+                    "after_ship_limit": _complete_aggregates_band(),
                 }
             )
         )
@@ -153,8 +185,8 @@ def test_component_tables_reject_unknown_hull_category():
                     "after_ship_limit": {},
                 },
                 "aggregates": {
-                    "before_ship_limit": {},
-                    "after_ship_limit": {},
+                    "before_ship_limit": _complete_aggregates_band(),
+                    "after_ship_limit": _complete_aggregates_band(),
                 },
             }
         )
@@ -176,8 +208,8 @@ def test_slotfill_rejects_wildcard_key():
                     "after_ship_limit": {},
                 },
                 "aggregates": {
-                    "before_ship_limit": {},
-                    "after_ship_limit": {},
+                    "before_ship_limit": _complete_aggregates_band(),
+                    "after_ship_limit": _complete_aggregates_band(),
                 },
             }
         )
