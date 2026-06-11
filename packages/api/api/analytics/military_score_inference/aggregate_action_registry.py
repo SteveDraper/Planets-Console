@@ -48,6 +48,7 @@ SHIP_TORPEDO_BIN_BOUNDS = (
 )
 
 PriorShape = Literal["histogram", "counts"]
+MissingAggregatePolicy = Literal["required", "implicit_uniform"]
 
 
 class CatalogConfig(Protocol):
@@ -66,6 +67,7 @@ CatalogConfigCap = Callable[[CatalogConfig], int]
 class AggregatePriorFields:
     prior_shape: PriorShape
     bin_bounds: tuple[ProbabilityBinBounds, ...] | None
+    missing_aggregate_policy: MissingAggregatePolicy = "required"
     allowlist_key: str | None = None
     is_fighter_channel_member: bool = False
     is_fine_grained_slack: bool = False
@@ -130,9 +132,7 @@ def iter_aggregate_action_slots(
         if isinstance(entry, FixedAggregateRegistryEntry):
             spec = entry.spec
             if spec.score_delta_2x is None:
-                raise ValueError(
-                    f"fixed aggregate slot missing score delta: {entry.action_id!r}"
-                )
+                raise ValueError(f"fixed aggregate slot missing score delta: {entry.action_id!r}")
             yield FixedAggregateSlot(
                 action_id=entry.action_id,
                 spec=spec,
@@ -203,6 +203,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
         spec=TemplateAggregateSpec(
             prior_shape="histogram",
             bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
+            missing_aggregate_policy="implicit_uniform",
             allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
             is_fine_grained_slack=True,
             action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,

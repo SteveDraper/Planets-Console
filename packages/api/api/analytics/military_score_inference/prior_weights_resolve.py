@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    FixedAggregateSlot,
-    TemplateAggregateSlot,
+    AggregateActionSlot,
     base_bin_bounds_for_action,
     iter_aggregate_action_slots,
     magnitude_bin_index,
@@ -24,6 +24,7 @@ from api.analytics.military_score_inference.inference_probability_scale import (
 from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBinBounds
 from api.analytics.military_score_inference.prior_weights_asset import (
     COMPONENT_TABLE_NAMES,
+    AggregatePrior,
     ComponentCountTables,
     CountsAggregate,
     HistogramAggregate,
@@ -31,7 +32,6 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
-    required_aggregate_prior,
 )
 from api.analytics.military_score_inference.prior_weights_catalog import (
     CategoryComponentLogTables,
@@ -215,6 +215,59 @@ def _resolve_counts_aggregate_weight(
     return counts_to_log_weights({"default": aggregate.pseudo_count}, scale=scale)["default"]
 
 
+@dataclass(frozen=True)
+class HistogramBucketWeights:
+    weights: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CountsPriorWeight:
+    weight: int
+
+
+ResolvedPrior = HistogramBucketWeights | CountsPriorWeight
+
+
+def _resolve_slot_aggregate_prior(
+    slot: AggregateActionSlot,
+    band_tables: dict[str, AggregatePrior],
+    *,
+    band: ShipLimitBand,
+    scale: int,
+) -> ResolvedPrior:
+    action_id = slot.action_id
+    spec = slot.spec
+    aggregate = band_tables.get(action_id)
+
+    if aggregate is None:
+        if spec.missing_aggregate_policy == "required":
+            raise ValueError(
+                f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
+            )
+        bin_bounds = spec.bin_bounds
+        if bin_bounds is None:
+            raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
+        return HistogramBucketWeights(
+            _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
+        )
+
+    if spec.prior_shape == "histogram":
+        if not isinstance(aggregate, HistogramAggregate):
+            raise ValueError(f"aggregates.{band}.{action_id!r} must be a histogram aggregate")
+        return HistogramBucketWeights(
+            _resolve_histogram_aggregate_weights(
+                aggregate,
+                action_id,
+                band=band,
+                scale=scale,
+            )
+        )
+
+    if not isinstance(aggregate, CountsAggregate):
+        raise ValueError(f"aggregates.{band}.{action_id!r} must be a counts aggregate")
+    return CountsPriorWeight(_resolve_counts_aggregate_weight(aggregate, scale=scale))
+
+
 def _resolve_aggregate_priors(
     asset: PriorWeightsAsset,
     *,
@@ -227,48 +280,16 @@ def _resolve_aggregate_priors(
     band_tables = asset.aggregates.get(band, {})
 
     for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
-        action_id = slot.action_id
-        aggregate = band_tables.get(action_id)
-        if isinstance(slot, FixedAggregateSlot):
-            resolved_aggregate = required_aggregate_prior(
-                band_tables,
-                band=band,
-                action_id=action_id,
-                spec=slot.spec,
-            )
-            if slot.spec.prior_shape == "histogram":
-                bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
-                    resolved_aggregate,
-                    action_id,
-                    band=band,
-                    scale=scale,
-                )
-            else:
-                action_weights[action_id] = _resolve_counts_aggregate_weight(
-                    resolved_aggregate,
-                    scale=scale,
-                )
-            continue
-
-        if not isinstance(slot, TemplateAggregateSlot):
-            raise ValueError(f"unknown aggregate slot type for action {action_id!r}")
-        bin_bounds = slot.spec.bin_bounds
-        if bin_bounds is None:
-            raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
-        if aggregate is None:
-            bucket_weights[action_id] = _implicit_uniform_histogram_bucket_weights(
-                bin_bounds,
-                scale=scale,
-            )
-        elif isinstance(aggregate, HistogramAggregate):
-            bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
-                aggregate,
-                action_id,
-                band=band,
-                scale=scale,
-            )
+        resolved = _resolve_slot_aggregate_prior(
+            slot,
+            band_tables,
+            band=band,
+            scale=scale,
+        )
+        if isinstance(resolved, HistogramBucketWeights):
+            bucket_weights[slot.action_id] = resolved.weights
         else:
-            raise ValueError(f"aggregates.{band}.{action_id!r} must be a histogram aggregate")
+            action_weights[slot.action_id] = resolved.weight
 
     return action_weights, bucket_weights
 
