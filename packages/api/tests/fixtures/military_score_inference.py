@@ -190,9 +190,7 @@ def synthetic_catalog_build_context(synthetic_catalog_context):
 
     prior_catalog = minimal_prior_catalog()
     context_without_prior_weights = {
-        key: value
-        for key, value in synthetic_catalog_context.items()
-        if key != "prior_weights"
+        key: value for key, value in synthetic_catalog_context.items() if key != "prior_weights"
     }
     return {
         **context_without_prior_weights,
