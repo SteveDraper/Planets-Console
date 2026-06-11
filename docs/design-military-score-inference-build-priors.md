@@ -43,7 +43,7 @@ Glossary: `CONTEXT.md` -- **Inference build prior**, **Inference solution rank w
 One YAML file per **inference game category** under:
 
 ```text
-assets/analytics/military_score_build_inference/
+assets/analytics/scores/
   prior_weights_standard.yaml    # v1 hand-seed
   prior_weights_blitz.yaml       # when mined
   prior_weights_epic.yaml        # when mined
@@ -254,7 +254,7 @@ Distinct from the **inference regression corpus** ([design-inference-corpus.md](
 Explicit allowlist of **finished** game ids grouped by category (all perspectives must be available):
 
 ```yaml
-# assets/analytics/military_score_build_inference/mining_corpus.yaml (spec)
+# assets/analytics/scores/mining_corpus.yaml (spec)
 version: 1
 categories:
   standard: [628580, ...]

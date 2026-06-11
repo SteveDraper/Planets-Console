@@ -136,6 +136,66 @@ _Avoid_: single registration list (handlers and shapers are still per-layer dict
 The BFF registration object for one **turn analytic** -- optional table/map handlers and diagnostic hooks, with catalog metadata from `TURN_ANALYTIC_CATALOG` via `from_catalog_entry`. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.
 _Avoid_: METADATA dict, handler registry (when meaning the consolidated descriptor)
 
+**Analytic export**:
+A queryable surface one **turn analytic** exposes as a single **analytic export value schema** tree, queried with JSONPath **analytic export paths** and scope parameters (game, turn, **perspective**, optional **Player**). Scope binds on the query with ambient defaults; path-prefix rules override where defaults are wrong or forbidden. Distinct from the **turn analytic wire contract** and from direct **game concept** imports -- consumers use the **analytic query context** even when the provider delegates to `api/concepts/`.
+_Avoid_: analytic API, internal getter, wire payload reuse, flat scalar export per field
+
+**Analytic export catalog**:
+The self-describing **analytic export value schema** tree and path-prefix scope rules registered by one **turn analytic**. One schema tree per analytic; scope is not baked into separate root shapes. Every turn analytic implements the pattern; an empty catalog is valid. Aggregated at the Core layer for discovery (future analytic MCP: describe tree, query JSONPath + scope).
+_Avoid_: multiple scope-specific root schemas per analytic, OpenAPI per path (v1)
+
+**Concept-shim analytic**:
+A **turn analytic** whose primary job is to expose **game concept** results as **analytic exports** with a stable catalog id, while its SPA table/map surface may be thin or absent. **Connections** is the reference shape: reachability math lives in **Connections engine** (`concepts/`); the analytic adds export entry points and UI-facing options. Allows arbitrary Core information to enter the uniform export graph without duplicating concept code inside unrelated analytics.
+_Avoid_: fake analytic, concept wrapper module (when meaning the registered turn analytic)
+
+**Analytic query context**:
+The in-process Core facility passed into **turn analytic** computation through which one analytic requests **analytic exports** from another. Owns scope validation (game, turn, **perspective**, optional **Player**), per-request memoization, and cycle detection. v1: export queries run only through this context during Core compute -- not nested HTTP. A future analytic MCP reuses the same export handler implementations with an HTTP/JSON adapter.
+_Avoid_: export microservice, cross-analytic REST (v1)
+
+**Analytic export scope**:
+Scope parameters on an export query (game, turn, **perspective**, `player_id`, connection **options**, etc.). Unspecified dimensions default to the ambient compute scope (shell turn, **perspective**, and related context). **Path-prefix scope rules** in the **analytic export catalog** declare where defaults are wrong or forbidden (e.g. `$.evidence.*` uses ambient **perspective** only; `$.solution.*` requires explicit `player_id`). The **analytic query context** validates scope, enforces **perspective**-visible stored turns for cross-turn reads, and merges **analytic persistence** when needed. Missing stored turns or unknown players yield root **unavailable** -- not silent fallback.
+_Avoid_: scope baked into separate root schemas, omniscient cross-perspective reads
+
+**Analytic export cycle detection**:
+While resolving exports in-process, the **analytic query context** maintains a resolution stack keyed by `(analytic_id, normalized scope parameters, normalized path set)`. Re-entering the same key is a hard error (true cycle). Cross-turn chains differ in scope (e.g. turn *N* vs *N−1*) and are not cycles. Different paths at the same scope (`$.ships` vs `$.aggregates`) are not a cycle. Per-request memoization applies for identical keys.
+_Avoid_: analytic-id-only cycle check, treating path variants as re-entrant cycles
+
+**Analytic export availability**:
+Whether a Core **analytic export** query can be satisfied for the requested scope. Independent of SPA sidebar enablement (**client preference** in localStorage) -- enablement controls which table/map wire payloads the SPA fetches, not whether Core may resolve exports during compute or future MCP calls. An export may still return unavailable when data is missing (turn not stored, persistence not populated, invalid scope, **analytic export cycle detection** trip, etc.).
+_Avoid_: enabled analytic check, client toggle gate
+
+**Analytic export value schema**:
+The single self-describing JSON-shaped type tree one **turn analytic** publishes in the **analytic export catalog**. Structure is independent of scope -- scope selects which slice of the tree is populated. Top-level branches may differ in role (e.g. `solution`, `hullCatalogMask`, `slots`, `evidence`) with **path-prefix scope rules** per branch. Catalog documents array **ordering semantics** (e.g. `solution.ships` sorted by **inference solution rank weight** so `$.solution.ships[0]` is top ship). Wire values are JSON-serializable for future MCP adapters.
+_Avoid_: flat scalar-only catalog, separate schema per scope, SPA table row as the schema
+
+**Analytic export path**:
+A JSONPath selector into the analytic's **value schema** tree -- e.g. `$`, `$.solution.ships`, `$.solution.ships[0]`, `$.solution.ships[*].hull_id`. One **analytic query context** request binds scope once, materializes the tree (memoized), then resolves one or more paths (**batched export query**). Zero matches yield **analytic export path none**, not root **unavailable**.
+_Avoid_: custom path dialect, treating empty index as query failure
+
+**Analytic export result**:
+Discriminated outcome of one path query through the **analytic query context**. Top level: **`ok`** when the export tree can be established for scope; **`unavailable`** when it cannot (e.g. `turn_not_stored`, `invalid_scope`, `persistence_empty`). Under **`ok`**, each path gets a **path result**: **`value`**, **`none`** (zero matches -- e.g. `$.solution.ships[0]` when `ships` is `[]`), or **`invalid_path`**. Batched paths do not fail the whole query when one path is **`none`**. **`cycle_detected`** is a hard error (exception).
+_Avoid_: top-level failure for path none, conflating none with turn_not_stored
+
+**Analytic export path none**:
+A **path result** status: root available, JSONPath valid, zero nodes matched. Distinct from a matched JSON **`null`** and from root **unavailable**. No ships in a solution is **`none`**, not an error.
+_Avoid_: path miss as query failure
+
+**Batched export query**:
+One **analytic query context** request resolving multiple JSONPath selectors under one scope binding -- e.g. `["$.solution.ships[0]", "$.solution.aggregates"]` without re-materializing the tree.
+_Avoid_: N sequential queries when one tree pass suffices
+
+**Analytic export materializer**:
+The per-**turn analytic** function (`materialize_export_tree`) registered in Core that builds the JSON tree for a validated **analytic export scope** on first path touch (memoized on the **analytic query context**). Declared alongside **`EXPORT_VALUE_SCHEMA`** (JSON Schema dict), **path-prefix scope rules**, and ordering semantics in `analytics/<id>/exports.py`. Table/map handlers and **concept-shim analytic** providers should call the same materializer (or shared helpers it uses) so wire output and export queries stay one source of truth. When materialization can be incomplete (e.g. **military score build inference** still running or not yet started for that scope), the tree includes a documented **`meta`** branch with explicit status so consumers can warn users -- not only best-so-far data with no signal.
+_Avoid_: duplicate domain logic in handler vs exports, silent partial data without status
+
+**Analytic export meta**:
+A documented branch of the export value tree (e.g. `$.meta`) carrying **materialization lifecycle** status independent of path **`none`** / **`value`**. Generic **`searchStatus`** values: **`not_started`**, **`in_progress`**, **`paused`**, **`stopped`**, **`complete`**. Consumers warn users when status is not **`complete`** (e.g. fleet analytic: prior-turn inference not ready). **`complete`** with path **`none`** is authoritative empty data, not bad data. Solver-specific outcomes (e.g. inference `no_exact_solution`, band residual) live under domain branches (e.g. `$.solution.diagnostics`), not in **`searchStatus`**. Optional **`solutionsHeld`** counts held rows under **`complete`** / in-progress partial trees.
+_Avoid_: inference-only statuses in generic meta, inferring quality from empty paths alone
+
+**Analytic export registry**:
+Core aggregation of every turn analytic's export catalog (`analytics/exports/registry.py`). Import-time validation: each `TURN_ANALYTIC_CATALOG` id has a registry entry (empty catalog allowed). Dispatches materialize + JSONPath resolution for **analytic query context** queries.
+_Avoid_: per-consumer ad hoc import of analytic modules
+
 **Base map**:
 The always-on map layer (`type: base`, id `base-map`) that renders planet nodes from **TurnInfo**. Fetched automatically in **map mode** and omitted from the analytics sidebar; other map analytics overlay it.
 _Avoid_: background layer, planet layer (without "base map")
@@ -353,7 +413,7 @@ Solver-side merge of injected parameters into the static **inference tier policy
 _Avoid_: fleet prior, runtime tier config, injection source
 
 **Inference tier policy asset**:
-Static YAML ladder under `assets/analytics/military_score_build_inference/` (repo root). Defines ordered **inference tier policy** steps: per-axis tech-level allowlists, aggregate allowlists and caps, `alpha`, beam/launcher slot-count widening at named steps, and flags such as use-player-active-lists. Loaded at solve time via a resolver that accepts an optional **inference tier policy overlay** (no-op when absent). Not mixed with storage seed fixtures.
+Static YAML ladder under `assets/analytics/scores/` (repo root). Defines ordered **inference tier policy** steps: per-axis tech-level allowlists, aggregate allowlists and caps, `alpha`, beam/launcher slot-count widening at named steps, and flags such as use-player-active-lists. Loaded at solve time via a resolver that accepts an optional **inference tier policy overlay** (no-op when absent). Not mixed with storage seed fixtures.
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
 
 **Inference build prior**:
@@ -369,7 +429,7 @@ Explicit allowlist of finished game ids used to mine **inference build prior ass
 _Avoid_: all stored games, in-progress games
 
 **Inference build prior asset**:
-Static YAML under `assets/analytics/military_score_build_inference/` holding un-normalized count tables for hull marginals, **inference conditional component prior** cells, and **inference aggregate prior** histograms. One file per **inference game category** (e.g. category id in filename). At catalog-build time the console resolves category from the loaded game, loads the matching file, normalizes each table with Laplace smoothing (`alpha = 1`), converts to integer log-probability weights, and composes additively in log space for ship combos. v1 hand-seeds pseudo-counts; structure accepts mined replacements without solver changes.
+Static YAML under `assets/analytics/scores/` holding un-normalized count tables for hull marginals, **inference conditional component prior** cells, and **inference aggregate prior** histograms. One file per **inference game category** (e.g. category id in filename). At catalog-build time the console resolves category from the loaded game, loads the matching file, normalizes each table with Laplace smoothing (`alpha = 1`), converts to integer log-probability weights, and composes additively in log space for ship combos. v1 hand-seeds pseudo-counts; structure accepts mined replacements without solver changes.
 _Avoid_: normalized probabilities in the asset, hardcoded weights in Python, single monolithic asset for all game types
 
 **Inference hull category**:

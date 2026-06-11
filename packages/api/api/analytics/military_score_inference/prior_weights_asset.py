@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 import yaml
 
-from api.analytics.assets import analytics_assets_dir
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
@@ -18,6 +17,7 @@ from api.analytics.military_score_inference.inference_game_category import (
     STANDARD_INFERENCE_GAME_CATEGORY,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
+from api.analytics.scores_assets import Scores
 
 ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
 
@@ -29,7 +29,7 @@ STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yam
 
 
 def default_prior_weights_dir() -> Path:
-    return analytics_assets_dir("military_score_build_inference")
+    return Scores.assets_dir()
 
 
 def _parse_ship_limit_bands[T](

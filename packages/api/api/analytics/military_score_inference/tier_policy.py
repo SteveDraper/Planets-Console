@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import yaml
 
-from api.analytics.assets import analytics_assets_dir
+from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
 FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
@@ -129,7 +129,7 @@ class InferenceTierPolicyStep:
 
 
 def default_tier_policy_path() -> Path:
-    return analytics_assets_dir("military_score_build_inference") / "tier_policy.yaml"
+    return Scores.assets_dir() / "tier_policy.yaml"
 
 
 def load_tier_policy_document(path: Path) -> dict[str, Any]:

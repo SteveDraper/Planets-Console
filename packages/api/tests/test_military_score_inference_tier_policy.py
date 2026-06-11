@@ -44,7 +44,7 @@ def _emit_mock_solver_solutions(result: InferenceResult, **kwargs) -> InferenceR
 def test_default_policy_path_exists():
     path = default_tier_policy_path()
     assert path.is_file()
-    assert path == REPO_ROOT / "assets/analytics/military_score_build_inference/tier_policy.yaml"
+    assert path == REPO_ROOT / "assets/analytics/scores/tier_policy.yaml"
 
 
 def test_policy_loader_validates_final_alpha_zero():

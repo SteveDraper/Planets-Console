@@ -11,9 +11,8 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
-
-ANALYTIC_ID = "scores"
 
 
 def _score_row(

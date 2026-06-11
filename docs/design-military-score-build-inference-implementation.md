@@ -552,7 +552,7 @@ Phase 1G shipped `_solve_with_tier_retry` with hardcoded tiers 0--4 in code (`ST
 
 #### 8.5.2 Policy asset
 
-- **Path:** `assets/analytics/military_score_build_inference/tier_policy.yaml` at repo root (`assets/analytics/<analytic_id>/` pattern for analytic static config; distinct from `packages/api/api/storage/assets/` test/seed JSON).
+- **Path:** `assets/analytics/scores/tier_policy.yaml` at repo root (`assets/analytics/<analytic_id>/` pattern for analytic static config; distinct from `packages/api/api/storage/assets/` test/seed JSON).
 - **Loader:** `resolve_tier_policies(base_path, overlay: TierPolicyOverlay | None = None)` in `tier_policy.py`. Overlay types and merge contract documented in #77; merge implementation in #78.
 - **Steps:** ordered list of **inference tier policy** records. Each step is a strict superset of the prior step on every dimension it controls.
 
@@ -885,7 +885,7 @@ GitHub: **#77** (supersedes #52, #72, absorbs #54). Follow-on: **#78** (overlay 
 
 Files:
 
-- `assets/analytics/military_score_build_inference/tier_policy.yaml` (new),
+- `assets/analytics/scores/tier_policy.yaml` (new),
 - `packages/api/api/analytics/military_score_inference/tier_policy.py` (new),
 - `packages/api/api/analytics/military_score_inference/policy_ladder.py` (ladder walk and top-K merge),
 - refactors to `actions.py`, `ship_build_combos.py`, `component_eligibility.py`, `analytic.py`, `constraints.py` (band retry only; warship/freighter stay exact).
