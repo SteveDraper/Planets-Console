@@ -22,9 +22,9 @@ from api.analytics.military_score_inference.prior_weights import (
     PRIOR_WEIGHT_SCALE,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
-    laplace_log_weight,
     resolve_prior_weights_catalog,
 )
+from api.analytics.military_score_inference.prior_weights_laplace import laplace_log_weight
 from api.analytics.military_score_inference.probability_bucket_defaults import (
     BUCKETED_ACTION_IDS,
     base_buckets_for_action,

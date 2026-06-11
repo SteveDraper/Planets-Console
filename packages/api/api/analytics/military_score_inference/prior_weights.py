@@ -33,7 +33,6 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
     expand_wildcard_counts,
     finalize_counts_for_laplace,
     implicit_uniform_component_counts,
-    laplace_log_weight,
 )
 from api.analytics.military_score_inference.probability_bucket_defaults import (
     base_buckets_for_action,
@@ -49,16 +48,8 @@ SMALL_DEEP_SPACE_FREIGHTER_HULL_ID = 15
 __all__ = [
     "PRIOR_WEIGHT_SCALE",
     "SMALL_DEEP_SPACE_FREIGHTER_HULL_ID",
-    "WILDCARD_COUNT_KEY",
     "PriorWeightsCatalog",
     "PriorWeightsDiagnostics",
-    "counts_to_log_weights",
-    "default_prior_weights_dir",
-    "expand_wildcard_counts",
-    "implicit_uniform_component_counts",
-    "laplace_log_weight",
-    "load_prior_weights_for_category",
-    "parse_prior_weights_document",
     "resolve_prior_weights_catalog",
     "ship_limit_band_key",
 ]

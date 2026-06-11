@@ -19,17 +19,21 @@ from api.analytics.military_score_inference.models import InferenceObservation, 
 from api.analytics.military_score_inference.prior_weights import (
     PRIOR_WEIGHT_SCALE,
     SMALL_DEEP_SPACE_FREIGHTER_HULL_ID,
-    WILDCARD_COUNT_KEY,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
-    counts_to_log_weights,
-    default_prior_weights_dir,
-    expand_wildcard_counts,
-    implicit_uniform_component_counts,
-    load_prior_weights_for_category,
-    parse_prior_weights_document,
     resolve_prior_weights_catalog,
     ship_limit_band_key,
+)
+from api.analytics.military_score_inference.prior_weights_asset import (
+    default_prior_weights_dir,
+    load_prior_weights_for_category,
+    parse_prior_weights_document,
+)
+from api.analytics.military_score_inference.prior_weights_laplace import (
+    WILDCARD_COUNT_KEY,
+    counts_to_log_weights,
+    expand_wildcard_counts,
+    implicit_uniform_component_counts,
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
