@@ -50,10 +50,6 @@ SHIP_TORPEDO_BIN_BOUNDS = (
 PriorShape = Literal["histogram", "counts"]
 
 
-class PriorCatalogProbabilityWeightSource(Protocol):
-    def aggregate_probability_weight(self, action_id: str) -> int | None: ...
-
-
 class CatalogConfig(Protocol):
     max_planet_defense_posts: int
     max_starbase_defense_posts: int
@@ -84,22 +80,6 @@ class AggregateActionSpec:
     def is_template(self) -> bool:
         return self.action_id_prefix is not None
 
-    def catalog_probability_weight(
-        self,
-        action_id: str,
-        prior_catalog: PriorCatalogProbabilityWeightSource,
-    ) -> int:
-        if self.prior_shape == "histogram":
-            return 0
-        if self.prior_shape == "counts":
-            prior_weight = prior_catalog.aggregate_probability_weight(action_id)
-            if prior_weight is None:
-                raise ValueError(
-                    f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
-                )
-            return prior_weight
-        raise ValueError(f"unknown prior_shape {self.prior_shape!r} for action {action_id!r}")
-
 
 @dataclass(frozen=True)
 class AggregateRegistryEntry:
@@ -107,14 +87,10 @@ class AggregateRegistryEntry:
     fixed_action_id: str | None = None
 
 
-AssetRequirement = Literal["required", "optional_uniform_histogram"]
-
-
 @dataclass(frozen=True)
 class AggregateActionSlot:
     action_id: str
     spec: AggregateActionSpec
-    asset_requirement: AssetRequirement
     entity_id: int | None = None
 
 
@@ -128,7 +104,6 @@ def iter_aggregate_action_slots(
             yield AggregateActionSlot(
                 action_id=entry.fixed_action_id,
                 spec=entry.spec,
-                asset_requirement="required",
             )
             continue
         prefix = entry.spec.action_id_prefix
@@ -138,7 +113,6 @@ def iter_aggregate_action_slots(
             yield AggregateActionSlot(
                 action_id=f"{prefix}{torp_id}",
                 spec=entry.spec,
-                asset_requirement="optional_uniform_histogram",
                 entity_id=torp_id,
             )
 

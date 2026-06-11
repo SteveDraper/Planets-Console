@@ -302,7 +302,7 @@ def _parse_aggregate_tables(
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:
     band_tables = asset.aggregates.get(band, {})
     for slot in iter_aggregate_action_slots(eligible_torp_ids=frozenset()):
-        if slot.asset_requirement != "required":
+        if slot.spec.is_template:
             continue
         action_id = slot.action_id
         if action_id not in band_tables:

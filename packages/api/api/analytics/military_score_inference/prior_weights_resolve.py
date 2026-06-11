@@ -226,7 +226,7 @@ def _resolve_aggregate_priors(
     for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
         action_id = slot.action_id
         aggregate = band_tables.get(action_id)
-        if slot.asset_requirement == "required":
+        if not slot.spec.is_template:
             if aggregate is None:
                 raise ValueError(
                     f"incomplete prior: aggregates.{band} missing required action {action_id!r}"

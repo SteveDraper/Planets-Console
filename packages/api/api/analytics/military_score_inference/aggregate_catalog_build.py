@@ -91,7 +91,17 @@ def _append_aggregate_action(
     capped_upper = min(upper_bound, allowlist_cap)
     if capped_upper <= 0:
         return
-    probability_weight = spec.catalog_probability_weight(action_id, prior_catalog)
+    if spec.prior_shape == "histogram":
+        probability_weight = 0
+    elif spec.prior_shape == "counts":
+        prior_weight = prior_catalog.aggregate_probability_weight(action_id)
+        if prior_weight is None:
+            raise ValueError(
+                f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
+            )
+        probability_weight = prior_weight
+    else:
+        raise ValueError(f"unknown prior_shape {spec.prior_shape!r} for action {action_id!r}")
     actions.append(
         CandidateAction(
             id=action_id,
