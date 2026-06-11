@@ -114,6 +114,36 @@ def _generic_freighter_combo(
     )
 
 
+def _resolve_combo_probability_weight(
+    *,
+    combo_id: str,
+    hull: Hull,
+    engine: Engine,
+    beam: Beam | None,
+    torpedo: Torpedo | None,
+    beam_count: int,
+    launcher_count: int,
+    combo_config: ShipBuildComboConfig,
+    prior_weights: PriorWeightsCatalog | None,
+) -> int:
+    if prior_weights is not None:
+        return prior_weights.combo_probability_weight(
+            combo_id=combo_id,
+            hull=hull,
+            engine=engine,
+            beam=beam,
+            torpedo=torpedo,
+            beam_count=beam_count,
+            launcher_count=launcher_count,
+        )
+    armed = beam_count > 0 or launcher_count > 0
+    return (
+        combo_config.armed_probability_weight
+        if armed
+        else combo_config.default_probability_weight
+    )
+
+
 def generate_ship_build_combos(
     observation: InferenceObservation,
     *,
@@ -211,23 +241,17 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            if prior_weights is not None:
-                                probability_weight = prior_weights.combo_probability_weight(
-                                    combo_id=combo_id,
-                                    hull=hull,
-                                    engine=engine,
-                                    beam=beam,
-                                    torpedo=torpedo,
-                                    beam_count=beam_count,
-                                    launcher_count=launcher_count,
-                                )
-                            else:
-                                armed = beam_count > 0 or launcher_count > 0
-                                probability_weight = (
-                                    combo_config.armed_probability_weight
-                                    if armed
-                                    else combo_config.default_probability_weight
-                                )
+                            probability_weight = _resolve_combo_probability_weight(
+                                combo_id=combo_id,
+                                hull=hull,
+                                engine=engine,
+                                beam=beam,
+                                torpedo=torpedo,
+                                beam_count=beam_count,
+                                launcher_count=launcher_count,
+                                combo_config=combo_config,
+                                prior_weights=prior_weights,
+                            )
                             combos.append(
                                 ShipBuildCombo(
                                     combo_id=combo_id,
