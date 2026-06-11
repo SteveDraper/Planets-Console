@@ -1,5 +1,6 @@
 """Integration tests for prior-weights catalog resolution and combo weighting."""
 
+import pytest
 from dataclasses import replace
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
@@ -130,10 +131,25 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
     assert expected_uniform_weight < 0
 
 
+def test_resolve_prior_weights_catalog_rejects_all_empty_eligibility_universes(sample_turn):
+    with pytest.raises(ValueError, match="at least one non-empty eligibility universe"):
+        resolve_prior_weights_catalog(
+            _observation(),
+            replace(sample_turn.settings, endturn=100, shiplimit=200),
+            buildable_hull_ids=frozenset(),
+            eligible_engine_ids=frozenset(),
+            eligible_beam_ids=frozenset(),
+            eligible_torp_ids=frozenset(),
+        )
+
+
 def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
     catalog = resolve_prior_weights_catalog(
         _observation(),
         replace(sample_turn.settings, endturn=100, shiplimit=200),
+        buildable_hull_ids=frozenset(),
+        eligible_engine_ids=frozenset(),
+        eligible_beam_ids=frozenset(),
         eligible_torp_ids=frozenset({1, 12}),
     )
     expected_uniform_weights = tuple(

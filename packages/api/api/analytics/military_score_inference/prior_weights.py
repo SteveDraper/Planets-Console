@@ -455,13 +455,25 @@ def resolve_prior_weights_catalog(
     settings: GameSettings,
     *,
     race_id: int | None = None,
-    buildable_hull_ids: frozenset[int] = frozenset(),
-    eligible_engine_ids: frozenset[int] = frozenset(),
-    eligible_beam_ids: frozenset[int] = frozenset(),
-    eligible_torp_ids: frozenset[int] = frozenset(),
+    buildable_hull_ids: frozenset[int],
+    eligible_engine_ids: frozenset[int],
+    eligible_beam_ids: frozenset[int],
+    eligible_torp_ids: frozenset[int],
     base_dir: Path | None = None,
     scale: int = INFERENCE_PROBABILITY_WEIGHT_SCALE,
 ) -> PriorWeightsCatalog:
+    if not (
+        buildable_hull_ids
+        or eligible_engine_ids
+        or eligible_beam_ids
+        or eligible_torp_ids
+    ):
+        raise ValueError(
+            "resolve_prior_weights_catalog requires at least one non-empty eligibility "
+            "universe (buildable_hull_ids, eligible_engine_ids, eligible_beam_ids, "
+            "eligible_torp_ids)"
+        )
+
     category_id = resolve_inference_game_category(settings)
     asset, asset_path, fell_back = load_prior_weights_for_category(
         category_id,
