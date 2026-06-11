@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.hull_category import (
     InferenceHullCategory,
 )
 from api.analytics.military_score_inference.inference_game_category import (
+    INFERENCE_GAME_CATEGORY_RULES_VERSION,
     STANDARD_INFERENCE_GAME_CATEGORY,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
@@ -265,6 +266,12 @@ def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
     rules_version = document.get("gameCategoryRulesVersion")
     if not isinstance(rules_version, int) or rules_version < 1:
         raise ValueError("gameCategoryRulesVersion must be a positive integer")
+    if rules_version != INFERENCE_GAME_CATEGORY_RULES_VERSION:
+        raise ValueError(
+            "gameCategoryRulesVersion "
+            f"{rules_version} does not match expected inference rules version "
+            f"{INFERENCE_GAME_CATEGORY_RULES_VERSION}"
+        )
 
     overrides_raw = document.get("overrides", {})
     combo_overrides: dict[str, float] = {}

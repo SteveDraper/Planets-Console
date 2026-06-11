@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.hull_category import (
 from api.analytics.military_score_inference.inference_game_category import (
     BLITZ_INFERENCE_GAME_CATEGORY,
     EPIC_INFERENCE_GAME_CATEGORY,
+    INFERENCE_GAME_CATEGORY_RULES_VERSION,
     STANDARD_INFERENCE_GAME_CATEGORY,
     resolve_inference_game_category,
 )
@@ -221,6 +222,15 @@ def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
     }
     document.update(overrides)
     return document
+
+
+def test_game_category_rules_version_must_match_inference_rules():
+    with pytest.raises(ValueError, match="does not match expected inference rules version"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                gameCategoryRulesVersion=INFERENCE_GAME_CATEGORY_RULES_VERSION + 1,
+            )
+        )
 
 
 def test_histogram_rejects_wildcard_key():
