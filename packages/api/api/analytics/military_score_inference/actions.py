@@ -75,7 +75,6 @@ class ActionCatalogConfig:
     max_ship_torpedoes_per_type: int = 200
     max_fighter_transfers: int = 50
     ship_build_combo_config: ShipBuildComboConfig | None = None
-    fighter_transfer_probability_weight: int = 15
     evil_empire_free_starbase_fighter_pseudo_count: float = 500
 
 

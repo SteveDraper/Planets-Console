@@ -21,8 +21,6 @@ def is_generic_zero_military_score_combo_id(combo_id: str) -> bool:
 
 @dataclass(frozen=True)
 class ShipBuildComboConfig:
-    default_probability_weight: int = 80
-    armed_probability_weight: int = 85
     max_aggregate_residual_when_ship_builds: int | None = 1000
 
 
@@ -114,34 +112,6 @@ def _generic_freighter_combo(
     )
 
 
-def _resolve_combo_probability_weight(
-    *,
-    combo_id: str,
-    hull: Hull,
-    engine: Engine,
-    beam: Beam | None,
-    torpedo: Torpedo | None,
-    beam_count: int,
-    launcher_count: int,
-    combo_config: ShipBuildComboConfig,
-    prior_weights: PriorWeightsCatalog | None,
-) -> int:
-    if prior_weights is not None:
-        return prior_weights.combo_probability_weight(
-            combo_id=combo_id,
-            hull=hull,
-            engine=engine,
-            beam=beam,
-            torpedo=torpedo,
-            beam_count=beam_count,
-            launcher_count=launcher_count,
-        )
-    armed = beam_count > 0 or launcher_count > 0
-    return (
-        combo_config.armed_probability_weight if armed else combo_config.default_probability_weight
-    )
-
-
 def generate_ship_build_combos(
     observation: InferenceObservation,
     *,
@@ -153,8 +123,8 @@ def generate_ship_build_combos(
     eligible_engine_ids: frozenset[int],
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
+    prior_weights: PriorWeightsCatalog,
     config: ShipBuildComboConfig | None = None,
-    prior_weights: PriorWeightsCatalog | None = None,
     beam_slot_counts: SlotCountMode = "none",
     launcher_slot_counts: SlotCountMode = "none",
 ) -> tuple[ShipBuildCombo, ...]:
@@ -239,7 +209,7 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            probability_weight = _resolve_combo_probability_weight(
+                            probability_weight = prior_weights.combo_probability_weight(
                                 combo_id=combo_id,
                                 hull=hull,
                                 engine=engine,
@@ -247,8 +217,6 @@ def generate_ship_build_combos(
                                 torpedo=torpedo,
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
-                                combo_config=combo_config,
-                                prior_weights=prior_weights,
                             )
                             combos.append(
                                 ShipBuildCombo(
@@ -280,12 +248,10 @@ def generate_ship_build_combos(
                             )
 
     if freighter_upper_bound > 0:
-        freighter_weight = combo_config.default_probability_weight
-        if prior_weights is not None:
-            freighter_weight = prior_weights.freighter_probability_weight(
-                combo_id=GENERIC_FREIGHTER_COMBO_ID,
-                default_weight=freighter_weight,
-            )
+        freighter_weight = prior_weights.freighter_probability_weight(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            default_weight=0,
+        )
         combos.append(
             _generic_freighter_combo(
                 upper_bound=freighter_upper_bound,
