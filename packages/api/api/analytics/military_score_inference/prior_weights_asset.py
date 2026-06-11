@@ -38,7 +38,14 @@ SlotFillTableName = Literal["slotFill"]
 IntCountTable: TypeAlias = dict[int, float]
 IntCountTableInput: TypeAlias = dict[int | WildcardCountKey, float]
 SlotFillCountTable: TypeAlias = dict[str, float]
-ComponentCountTables: TypeAlias = dict[str, IntCountTableInput | SlotFillCountTable]
+
+
+@dataclass
+class ComponentCountTables:
+    engines: IntCountTableInput | None = None
+    beams: IntCountTableInput | None = None
+    torpedoes: IntCountTableInput | None = None
+    slot_fill: SlotFillCountTable | None = None
 
 STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yaml"
 
@@ -219,20 +226,34 @@ def _parse_band_component_tables(
             )
         if not isinstance(category_raw, dict):
             raise ValueError(f"components.{band}.{category} must be a mapping")
-        tables: ComponentCountTables = {}
+        engines = None
+        beams = None
+        torpedoes = None
         for table_name in COMPONENT_TABLE_NAMES:
             if table_name in category_raw:
-                tables[table_name] = _parse_int_keyed_counts(
+                parsed = _parse_int_keyed_counts(
                     category_raw[table_name],
                     field_name=f"components.{band}.{category}.{table_name}",
                 )
+                if table_name == "engines":
+                    engines = parsed
+                elif table_name == "beams":
+                    beams = parsed
+                else:
+                    torpedoes = parsed
+        slot_fill = None
         if "slotFill" in category_raw:
-            tables["slotFill"] = _parse_str_keyed_counts(
+            slot_fill = _parse_str_keyed_counts(
                 category_raw["slotFill"],
                 field_name=f"components.{band}.{category}.slotFill",
                 allow_wildcard=False,
             )
-        categories[category] = tables
+        categories[category] = ComponentCountTables(
+            engines=engines,
+            beams=beams,
+            torpedoes=torpedoes,
+            slot_fill=slot_fill,
+        )
     return categories
 
 

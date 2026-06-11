@@ -136,12 +136,12 @@ def battleship_hull() -> Hull:
 
 
 def _empty_component_table_shell() -> ResolvedComponentCountTables:
-    return {
-        "engines": {},
-        "beams": {},
-        "torpedoes": {},
-        "slotFill": {},
-    }
+    return ResolvedComponentCountTables(
+        engines={},
+        beams={},
+        torpedoes={},
+        slot_fill={},
+    )
 
 
 def _empty_component_tables() -> CategoryComponentLogTables:

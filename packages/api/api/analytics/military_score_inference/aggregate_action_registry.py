@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.prior_weights_catalog import PriorWeightsCatalog
 
 from api.analytics.military_score_inference.models import (
     MagnitudeCountBounds,
@@ -71,6 +74,24 @@ class AggregatePriorFields:
     allowlist_key: str | None = None
     is_fighter_channel_member: bool = False
     is_fine_grained_slack: bool = False
+
+    def catalog_action_probability_weight(
+        self,
+        prior_catalog: PriorWeightsCatalog,
+        action_id: str,
+    ) -> int:
+        if self.prior_shape == "histogram":
+            return 0
+        if self.prior_shape == "counts":
+            prior_weight = prior_catalog.aggregate_probability_weight(action_id)
+            if prior_weight is None:
+                raise ValueError(
+                    f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
+                )
+            return prior_weight
+        raise ValueError(
+            f"unknown prior_shape {self.prior_shape!r} for action {action_id!r}"
+        )
 
 
 @dataclass(frozen=True)

@@ -23,7 +23,6 @@ from api.analytics.military_score_inference.inference_probability_scale import (
 )
 from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBinBounds
 from api.analytics.military_score_inference.prior_weights_asset import (
-    COMPONENT_TABLE_NAMES,
     AggregatePrior,
     ComponentCountTables,
     CountsAggregate,
@@ -122,6 +121,25 @@ def _implicit_uniform_component_log_table(
     return counts_to_log_weights(implicit_uniform_component_counts(universe), scale=scale)
 
 
+def _resolve_int_component_log_table(
+    table_name: str,
+    counts: IntCountTableInput | None,
+    *,
+    band: ShipLimitBand,
+    category: InferenceHullCategory,
+    universe: frozenset[int],
+    scale: int,
+) -> IntLogWeightTable:
+    if counts is not None:
+        return _resolve_component_log_table(
+            counts,
+            universe=universe,
+            field_name=f"components.{band}.{category}.{table_name}",
+            scale=scale,
+        )
+    return _implicit_uniform_component_log_table(universe, scale=scale)
+
+
 def _resolve_category_component_tables(
     tables: ComponentCountTables | None,
     *,
@@ -130,30 +148,37 @@ def _resolve_category_component_tables(
     universe_by_table: dict[str, frozenset[int]],
     scale: int,
 ) -> ResolvedComponentCountTables:
-    asset_tables = tables or {}
-    resolved_tables: ResolvedComponentCountTables = {}
-    for table_name, counts in asset_tables.items():
-        if table_name == "slotFill":
-            resolved_tables[table_name] = counts_to_log_weights(
-                counts,
-                scale=scale,
-            )
-            continue
-        universe = universe_by_table.get(table_name, frozenset())
-        resolved_tables[table_name] = _resolve_component_log_table(
-            counts,
-            universe=universe,
-            field_name=f"components.{band}.{category}.{table_name}",
+    asset_tables = tables or ComponentCountTables()
+    slot_fill: dict[str, int] = {}
+    if asset_tables.slot_fill is not None:
+        slot_fill = counts_to_log_weights(asset_tables.slot_fill, scale=scale)
+    return ResolvedComponentCountTables(
+        engines=_resolve_int_component_log_table(
+            "engines",
+            asset_tables.engines,
+            band=band,
+            category=category,
+            universe=universe_by_table["engines"],
             scale=scale,
-        )
-    for table_name in COMPONENT_TABLE_NAMES:
-        if table_name in resolved_tables:
-            continue
-        resolved_tables[table_name] = _implicit_uniform_component_log_table(
-            universe_by_table[table_name],
+        ),
+        beams=_resolve_int_component_log_table(
+            "beams",
+            asset_tables.beams,
+            band=band,
+            category=category,
+            universe=universe_by_table["beams"],
             scale=scale,
-        )
-    return resolved_tables
+        ),
+        torpedoes=_resolve_int_component_log_table(
+            "torpedoes",
+            asset_tables.torpedoes,
+            band=band,
+            category=category,
+            universe=universe_by_table["torpedoes"],
+            scale=scale,
+        ),
+        slot_fill=slot_fill,
+    )
 
 
 def _resolve_component_tables(

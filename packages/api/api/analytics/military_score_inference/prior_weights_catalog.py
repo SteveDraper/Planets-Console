@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeAlias
 
 from api.analytics.military_score_inference.hull_category import (
@@ -25,10 +25,33 @@ GENERIC_FREIGHTER_PRIOR_HULL_ID = 999999
 
 IntLogWeightTable: TypeAlias = dict[int, int]
 SlotFillLogWeightTable: TypeAlias = dict[str, int]
-ResolvedComponentCountTables: TypeAlias = dict[
-    str,
-    IntLogWeightTable | SlotFillLogWeightTable,
-]
+
+
+@dataclass(frozen=True)
+class ResolvedComponentCountTables:
+    engines: IntLogWeightTable
+    beams: IntLogWeightTable
+    torpedoes: IntLogWeightTable
+    slot_fill: SlotFillLogWeightTable = field(default_factory=dict)
+
+    def log_weight_for_table_name(
+        self,
+        table_name: str,
+        key: int | str,
+        *,
+        default_weight: int = 0,
+    ) -> int:
+        if table_name == "engines":
+            return self.engines.get(key, default_weight)
+        if table_name == "beams":
+            return self.beams.get(key, default_weight)
+        if table_name == "torpedoes":
+            return self.torpedoes.get(key, default_weight)
+        if table_name == "slotFill":
+            return self.slot_fill.get(key, default_weight)
+        return default_weight
+
+
 CategoryComponentLogTables: TypeAlias = dict[
     InferenceHullCategory,
     ResolvedComponentCountTables,
@@ -114,7 +137,7 @@ class PriorWeightsCatalog:
         default_weight: int = 0,
     ) -> int:
         category_tables = self._component_tables[hull_category]
-        return category_tables.get(table_name, {}).get(key, default_weight)
+        return category_tables.log_weight_for_table_name(table_name, key, default_weight=default_weight)
 
     def _resolved_combo_log_weight(
         self,
@@ -162,12 +185,12 @@ class PriorWeightsCatalog:
         fill = slot_fill_pattern(hull, beam_count=beam_count, launcher_count=launcher_count)
 
         component_weight = 0
-        component_weight += category_tables["engines"].get(engine.id, 0)
+        component_weight += category_tables.engines.get(engine.id, 0)
         if beam is not None and beam_count > 0:
-            component_weight += category_tables["beams"].get(beam.id, 0)
+            component_weight += category_tables.beams.get(beam.id, 0)
         if torpedo is not None and launcher_count > 0:
-            component_weight += category_tables["torpedoes"].get(torpedo.id, 0)
-        component_weight += category_tables.get("slotFill", {}).get(fill, 0)
+            component_weight += category_tables.torpedoes.get(torpedo.id, 0)
+        component_weight += category_tables.slot_fill.get(fill, 0)
 
         return self._resolved_combo_log_weight(
             combo_id=combo_id,
