@@ -163,6 +163,16 @@ def build_action_catalog_from_turn(
         resolved_policy_step,
         resolved_mask=resolved_mask,
     )
+    player = player_by_id(turn, observation.player_id)
+    prior_catalog = resolve_prior_weights_catalog(
+        observation,
+        turn.settings,
+        race_id=player.raceid,
+        buildable_hull_ids=catalog_context.buildable_hull_ids,
+        eligible_engine_ids=catalog_context.eligible_engine_ids,
+        eligible_beam_ids=catalog_context.eligible_beam_ids,
+        eligible_torp_ids=catalog_context.eligible_torp_ids,
+    )
     return build_action_catalog(
         observation,
         hulls_by_id=catalog_context.hulls_by_id,
@@ -175,6 +185,7 @@ def build_action_catalog_from_turn(
         eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
         turn=turn,
+        prior_catalog=prior_catalog,
         policy_step=resolved_policy_step,
         policy_step_index=policy_step_index,
         policy_steps=resolve_tier_policies(),
@@ -194,26 +205,14 @@ def build_action_catalog(
     eligible_torp_ids: frozenset[int],
     config: ActionCatalogConfig | None = None,
     turn: TurnInfo | None = None,
+    prior_catalog: PriorWeightsCatalog | None = None,
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
     policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
-    prior_catalog: PriorWeightsCatalog | None = None
-    prior_diagnostics: PriorWeightsDiagnostics | None = None
-    if turn is not None:
-        player = player_by_id(turn, observation.player_id)
-        prior_catalog = resolve_prior_weights_catalog(
-            observation,
-            turn.settings,
-            race_id=player.raceid,
-            buildable_hull_ids=buildable_hull_ids,
-            eligible_engine_ids=eligible_engine_ids,
-            eligible_beam_ids=eligible_beam_ids,
-            eligible_torp_ids=eligible_torp_ids,
-        )
-        prior_diagnostics = prior_catalog.diagnostics
+    prior_diagnostics = prior_catalog.diagnostics if prior_catalog is not None else None
 
     actions: list[CandidateAction] = []
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
