@@ -36,11 +36,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
     laplace_log_weight,
 )
 from api.analytics.military_score_inference.probability_bucket_defaults import (
-    PLANET_DEFENSE_POST_BUCKETS,
-    SHIP_FIGHTER_BUCKETS,
-    SHIP_TORPEDO_BUCKETS,
-    STARBASE_DEFENSE_POST_BUCKETS,
-    STARBASE_FIGHTER_BUCKETS,
+    base_buckets_for_action,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
@@ -48,13 +44,6 @@ from api.models.game import GameSettings
 PRIOR_WEIGHT_SCALE = INFERENCE_PROBABILITY_WEIGHT_SCALE
 
 SMALL_DEEP_SPACE_FREIGHTER_HULL_ID = 15
-
-BASE_BUCKETS_BY_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
-    "planet_defense_posts_added_total": PLANET_DEFENSE_POST_BUCKETS,
-    "starbase_defense_posts_added_total": STARBASE_DEFENSE_POST_BUCKETS,
-    "starbase_fighters_added_total": STARBASE_FIGHTER_BUCKETS,
-    "ship_fighters_added_total": SHIP_FIGHTER_BUCKETS,
-}
 
 __all__ = [
     "PRIOR_WEIGHT_SCALE",
@@ -327,9 +316,7 @@ def _resolve_aggregate_weights(
 
     for action_id, tables in band_tables.items():
         if "histogram" in tables:
-            base_buckets = BASE_BUCKETS_BY_ACTION_ID.get(action_id)
-            if base_buckets is None and action_id.startswith("ship_torps_loaded_"):
-                base_buckets = SHIP_TORPEDO_BUCKETS
+            base_buckets = base_buckets_for_action(action_id)
             if base_buckets is None:
                 continue
             bucket_counts = _histogram_bucket_counts(tables["histogram"], base_buckets)

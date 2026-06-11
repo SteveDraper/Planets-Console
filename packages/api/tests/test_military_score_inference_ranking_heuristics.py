@@ -1,8 +1,9 @@
 """Tests for military score inference ranking heuristics (issue #85)."""
 
 from api.analytics.military_score_inference.accelerated_start import accelerated_inference_segments
-from api.analytics.military_score_inference.actions import (
+from api.analytics.military_score_inference.probability_bucket_defaults import (
     PLANET_DEFENSE_POST_BUCKETS,
+    SHIP_TORPEDO_BUCKETS,
     STARBASE_DEFENSE_POST_BUCKETS,
 )
 from api.analytics.military_score_inference.inference_accelerated import (
@@ -562,7 +563,6 @@ def test_628580_accel_window_ranks_ten_planet_defense_first():
 
 
 def test_ship_torpedo_modest_bin_covers_typical_load_counts():
-    from api.analytics.military_score_inference.actions import SHIP_TORPEDO_BUCKETS
     from api.analytics.military_score_inference.ranking_heuristics import (
         active_ranking_bin_index,
         max_marginal_weight,

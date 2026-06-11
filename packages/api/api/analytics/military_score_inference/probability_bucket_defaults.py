@@ -27,3 +27,23 @@ SHIP_TORPEDO_BUCKETS = (
     ProbabilityBucket("heavy load", 41, 100, 70),
     ProbabilityBucket("extreme load", 101, 200, 5),
 )
+
+_SHIP_TORPS_LOADED_ACTION_PREFIX = "ship_torps_loaded_"
+
+_BUCKETS_BY_EXACT_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
+    "planet_defense_posts_added_total": PLANET_DEFENSE_POST_BUCKETS,
+    "starbase_defense_posts_added_total": STARBASE_DEFENSE_POST_BUCKETS,
+    "starbase_fighters_added_total": STARBASE_FIGHTER_BUCKETS,
+    "ship_fighters_added_total": SHIP_FIGHTER_BUCKETS,
+}
+
+BUCKETED_ACTION_IDS = frozenset(_BUCKETS_BY_EXACT_ACTION_ID)
+
+
+def base_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...] | None:
+    base_buckets = _BUCKETS_BY_EXACT_ACTION_ID.get(action_id)
+    if base_buckets is not None:
+        return base_buckets
+    if action_id.startswith(_SHIP_TORPS_LOADED_ACTION_PREFIX):
+        return SHIP_TORPEDO_BUCKETS
+    return None

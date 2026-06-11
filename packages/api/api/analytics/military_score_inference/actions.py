@@ -26,11 +26,8 @@ from api.analytics.military_score_inference.prior_weights import (
     resolve_prior_weights_catalog,
 )
 from api.analytics.military_score_inference.probability_bucket_defaults import (
-    PLANET_DEFENSE_POST_BUCKETS,
-    SHIP_FIGHTER_BUCKETS,
-    SHIP_TORPEDO_BUCKETS,
-    STARBASE_DEFENSE_POST_BUCKETS,
-    STARBASE_FIGHTER_BUCKETS,
+    BUCKETED_ACTION_IDS,
+    base_buckets_for_action,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
@@ -64,16 +61,6 @@ from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
-
-BUCKETED_ACTION_IDS = frozenset(
-    {
-        "planet_defense_posts_added_total",
-        "starbase_defense_posts_added_total",
-        "starbase_fighters_added_total",
-        "ship_fighters_added_total",
-    }
-)
-
 
 @dataclass(frozen=True)
 class ActionCatalogConfig:
@@ -505,11 +492,7 @@ def _aggregate_action_with_prior(
         if prior_weight is not None:
             updated_action = replace(action, probability_weight=prior_weight)
 
-    base_buckets: tuple[ProbabilityBucket, ...] | None = None
-    if action.id in BUCKETED_ACTION_IDS:
-        base_buckets = _probability_buckets_for_action(action.id)
-    elif action.id.startswith("ship_torps_loaded_"):
-        base_buckets = SHIP_TORPEDO_BUCKETS
+    base_buckets = base_buckets_for_action(action.id)
 
     if base_buckets is not None and prior_catalog is not None:
         base_buckets = prior_catalog.probability_buckets_for_action(
@@ -517,15 +500,3 @@ def _aggregate_action_with_prior(
             base_buckets,
         )
     return updated_action, base_buckets
-
-
-def _probability_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...]:
-    if action_id == "planet_defense_posts_added_total":
-        return PLANET_DEFENSE_POST_BUCKETS
-    if action_id == "starbase_defense_posts_added_total":
-        return STARBASE_DEFENSE_POST_BUCKETS
-    if action_id == "starbase_fighters_added_total":
-        return STARBASE_FIGHTER_BUCKETS
-    if action_id == "ship_fighters_added_total":
-        return SHIP_FIGHTER_BUCKETS
-    raise ValueError(f"no probability buckets configured for action {action_id}")
