@@ -78,8 +78,6 @@ def _parse_count_table(
             if not allow_wildcard and key == WILDCARD_COUNT_KEY:
                 raise ValueError(f"{field_name} does not allow {WILDCARD_COUNT_KEY!r}")
             parsed_key = key
-        if not allow_wildcard and key == WILDCARD_COUNT_KEY:
-            raise ValueError(f"{field_name} does not allow {WILDCARD_COUNT_KEY!r}")
         if not isinstance(value, (int, float)) or value < 0:
             raise ValueError(f"{field_name} values must be non-negative numbers")
         if parsed_key in counts:
