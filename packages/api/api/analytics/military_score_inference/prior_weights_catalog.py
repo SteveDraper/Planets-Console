@@ -137,7 +137,11 @@ class PriorWeightsCatalog:
         default_weight: int = 0,
     ) -> int:
         category_tables = self._component_tables[hull_category]
-        return category_tables.log_weight_for_table_name(table_name, key, default_weight=default_weight)
+        return category_tables.log_weight_for_table_name(
+            table_name,
+            key,
+            default_weight=default_weight,
+        )
 
     def _resolved_combo_log_weight(
         self,

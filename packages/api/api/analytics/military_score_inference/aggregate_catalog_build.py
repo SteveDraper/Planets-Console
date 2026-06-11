@@ -104,9 +104,7 @@ def _append_aggregate_action(
             probability_weight=probability_weight,
         )
     )
-    buckets = _probability_buckets_for_aggregate_action(
-        action_id, prior_fields, prior_catalog
-    )
+    buckets = _probability_buckets_for_aggregate_action(action_id, prior_fields, prior_catalog)
     if buckets is not None:
         probability_buckets[action_id] = buckets
 

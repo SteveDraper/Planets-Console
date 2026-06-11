@@ -33,10 +33,10 @@ from api.analytics.military_score_inference.prior_weights_catalog import (
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
 )
+from api.analytics.military_score_inference.prior_weights_laplace import laplace_log_weight
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
 )
-from api.analytics.military_score_inference.prior_weights_laplace import laplace_log_weight
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     TierOverflowBand,

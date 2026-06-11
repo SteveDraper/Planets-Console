@@ -47,6 +47,7 @@ class ComponentCountTables:
     torpedoes: IntCountTableInput | None = None
     slot_fill: SlotFillCountTable | None = None
 
+
 STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yaml"
 
 
@@ -350,13 +351,9 @@ def lookup_slot_aggregate_prior(
         return aggregate
     if spec.prior_shape == "counts":
         if not isinstance(aggregate, CountsAggregate):
-            raise ValueError(
-                f"incomplete prior: aggregates.{band}.{action_id!r} must be counts"
-            )
+            raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
         return aggregate
-    raise ValueError(
-        f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape"
-    )
+    raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape")
 
 
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:

@@ -9,12 +9,12 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
-from api.analytics.military_score_inference.prior_weights_resolve import (
-    resolve_prior_weights_catalog,
-)
 from api.analytics.military_score_inference.prior_weights_laplace import (
     counts_to_log_weights,
     implicit_uniform_component_counts,
+)
+from api.analytics.military_score_inference.prior_weights_resolve import (
+    resolve_prior_weights_catalog,
 )
 from api.models.components import Beam, Engine, Torpedo
 
