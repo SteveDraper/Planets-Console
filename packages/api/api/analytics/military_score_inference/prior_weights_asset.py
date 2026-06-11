@@ -10,7 +10,7 @@ from typing import Any, Literal, TypeAlias, overload
 import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AGGREGATE_ACTION_SPECS,
+    iter_aggregate_action_slots,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
 )
@@ -301,17 +301,20 @@ def _parse_aggregate_tables(
 
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:
     band_tables = asset.aggregates.get(band, {})
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+    for slot in iter_aggregate_action_slots(eligible_torp_ids=frozenset()):
+        if slot.asset_requirement != "required":
+            continue
+        action_id = slot.action_id
         if action_id not in band_tables:
             raise ValueError(
                 f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
             )
         aggregate = band_tables[action_id]
-        if spec.prior_shape == "histogram" and not isinstance(aggregate, HistogramAggregate):
+        if slot.spec.prior_shape == "histogram" and not isinstance(aggregate, HistogramAggregate):
             raise ValueError(
                 f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
             )
-        if spec.prior_shape == "counts" and not isinstance(aggregate, CountsAggregate):
+        if slot.spec.prior_shape == "counts" and not isinstance(aggregate, CountsAggregate):
             raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -109,6 +109,42 @@ class TemplateAggregateRegistryEntry:
 
 
 AggregateRegistryEntry = FixedAggregateRegistryEntry | TemplateAggregateRegistryEntry
+
+AssetRequirement = Literal["required", "optional_uniform_histogram"]
+
+
+@dataclass(frozen=True)
+class AggregateActionSlot:
+    action_id: str
+    spec: AggregateActionSpec
+    asset_requirement: AssetRequirement
+    template: AggregateActionTemplateSpec | None = None
+    entity_id: int | None = None
+
+
+def iter_aggregate_action_slots(
+    *,
+    eligible_torp_ids: frozenset[int],
+) -> Iterator[AggregateActionSlot]:
+    """Yield one catalog/prior slot per aggregate action from the canonical registry."""
+    for entry in AGGREGATE_REGISTRY:
+        if isinstance(entry, FixedAggregateRegistryEntry):
+            yield AggregateActionSlot(
+                action_id=entry.action_id,
+                spec=entry.spec,
+                asset_requirement="required",
+            )
+            continue
+        template = entry.template
+        for torp_id in sorted(eligible_torp_ids):
+            yield AggregateActionSlot(
+                action_id=template.action_id_for_entity_id(torp_id),
+                spec=template.aggregate_spec(),
+                asset_requirement="optional_uniform_histogram",
+                template=template,
+                entity_id=torp_id,
+            )
+
 
 # Catalog build order: config-cap histogram actions, torpedo template, fighter transfers.
 AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (

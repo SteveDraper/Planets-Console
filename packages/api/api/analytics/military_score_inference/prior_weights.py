@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import TypeAlias
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AGGREGATE_REGISTRY,
-    FixedAggregateRegistryEntry,
     base_bin_bounds_for_action,
+    iter_aggregate_action_slots,
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -395,22 +394,30 @@ def _resolve_aggregate_priors(
     bucket_weights: dict[str, tuple[int, ...]] = {}
     band_tables = asset.aggregates.get(band, {})
 
-    for entry in AGGREGATE_REGISTRY:
-        if isinstance(entry, FixedAggregateRegistryEntry):
-            action_id = entry.action_id
-            aggregate = band_tables.get(action_id)
+    for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
+        action_id = slot.action_id
+        aggregate = band_tables.get(action_id)
+        if slot.asset_requirement == "required":
             if aggregate is None:
                 raise ValueError(
                     f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
                 )
-            if isinstance(aggregate, HistogramAggregate):
+            if slot.spec.prior_shape == "histogram":
+                if not isinstance(aggregate, HistogramAggregate):
+                    raise ValueError(
+                        f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
+                    )
                 bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
                     aggregate,
                     action_id,
                     band=band,
                     scale=scale,
                 )
-            elif isinstance(aggregate, CountsAggregate):
+            elif slot.spec.prior_shape == "counts":
+                if not isinstance(aggregate, CountsAggregate):
+                    raise ValueError(
+                        f"incomplete prior: aggregates.{band}.{action_id!r} must be counts"
+                    )
                 action_weights[action_id] = _resolve_counts_aggregate_weight(
                     aggregate,
                     scale=scale,
@@ -421,29 +428,25 @@ def _resolve_aggregate_priors(
                 )
             continue
 
-        template = entry.template
-        bin_bounds = template.bin_bounds
+        bin_bounds = slot.spec.bin_bounds
         if bin_bounds is None:
             raise ValueError(
-                f"aggregate template {template.action_id_prefix!r} has no solver bin definition"
+                f"aggregate action {action_id!r} has no solver bin definition"
             )
-        for torp_id in sorted(eligible_torp_ids):
-            action_id = template.action_id_for_entity_id(torp_id)
-            aggregate = band_tables.get(action_id)
-            if aggregate is None:
-                bucket_weights[action_id] = _implicit_uniform_histogram_bucket_weights(
-                    bin_bounds,
-                    scale=scale,
-                )
-            elif isinstance(aggregate, HistogramAggregate):
-                bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
-                    aggregate,
-                    action_id,
-                    band=band,
-                    scale=scale,
-                )
-            else:
-                raise ValueError(f"aggregates.{band}.{action_id!r} must be a histogram aggregate")
+        if aggregate is None:
+            bucket_weights[action_id] = _implicit_uniform_histogram_bucket_weights(
+                bin_bounds,
+                scale=scale,
+            )
+        elif isinstance(aggregate, HistogramAggregate):
+            bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
+                aggregate,
+                action_id,
+                band=band,
+                scale=scale,
+            )
+        else:
+            raise ValueError(f"aggregates.{band}.{action_id!r} must be a histogram aggregate")
 
     return action_weights, bucket_weights
 

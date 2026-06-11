@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AGGREGATE_REGISTRY,
+    AggregateActionSlot,
     AggregateActionSpec,
-    AggregateActionTemplateSpec,
     CatalogConfig,
-    FixedAggregateRegistryEntry,
     base_bin_bounds_for_action,
+    iter_aggregate_action_slots,
     lookup_aggregate_action_spec,
     resolved_aggregate_cap,
 )
@@ -51,29 +50,28 @@ def build_aggregate_actions(
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
     fighter_transfer_upper_bound = _fighter_transfer_upper_bound(observation, config)
 
-    for entry in AGGREGATE_REGISTRY:
-        if isinstance(entry, FixedAggregateRegistryEntry):
-            _append_fixed_catalog_action(
+    for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
+        if slot.template is not None:
+            _append_template_slot_catalog_action(
                 actions,
                 probability_buckets,
-                action_id=entry.action_id,
+                slot=slot,
+                observation=observation,
+                config=config,
+                torpedos_by_id=torpedos_by_id,
+                aggregate_allowlist=aggregate_allowlist,
+                prior_catalog=prior_catalog,
+            )
+        else:
+            _append_fixed_slot_catalog_action(
+                actions,
+                probability_buckets,
+                slot=slot,
                 observation=observation,
                 config=config,
                 aggregate_allowlist=aggregate_allowlist,
                 prior_catalog=prior_catalog,
                 fighter_transfer_upper_bound=fighter_transfer_upper_bound,
-            )
-        else:
-            _append_template_catalog_actions(
-                actions,
-                probability_buckets,
-                template=entry.template,
-                observation=observation,
-                config=config,
-                torpedos_by_id=torpedos_by_id,
-                eligible_torp_ids=eligible_torp_ids,
-                aggregate_allowlist=aggregate_allowlist,
-                prior_catalog=prior_catalog,
             )
 
     return actions, probability_buckets
@@ -199,22 +197,19 @@ def _fixed_action_upper_bound(
     return fighter_transfer_upper_bound
 
 
-def _append_fixed_catalog_action(
+def _append_fixed_slot_catalog_action(
     actions: list[CandidateAction],
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
     *,
-    action_id: str,
+    slot: AggregateActionSlot,
     observation: InferenceObservation,
     config: CatalogConfig,
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
     fighter_transfer_upper_bound: int,
 ) -> None:
-    spec = lookup_aggregate_action_spec(action_id)
-    if spec is None:
-        raise ValueError(f"unknown aggregate action {action_id!r}")
     upper_bound = _fixed_action_upper_bound(
-        spec,
+        slot.spec,
         observation=observation,
         config=config,
         fighter_transfer_upper_bound=fighter_transfer_upper_bound,
@@ -224,43 +219,45 @@ def _append_fixed_catalog_action(
     _append_catalog_spec_action(
         actions,
         probability_buckets,
-        action_id=action_id,
-        spec=spec,
+        action_id=slot.action_id,
+        spec=slot.spec,
         upper_bound=upper_bound,
         aggregate_allowlist=aggregate_allowlist,
         prior_catalog=prior_catalog,
     )
 
 
-def _append_template_catalog_actions(
+def _append_template_slot_catalog_action(
     actions: list[CandidateAction],
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
     *,
-    template: AggregateActionTemplateSpec,
+    slot: AggregateActionSlot,
     observation: InferenceObservation,
     config: CatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
-    eligible_torp_ids: frozenset[int],
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
 ) -> None:
+    template = slot.template
+    torpedo_id = slot.entity_id
+    if template is None or torpedo_id is None:
+        raise ValueError(f"template aggregate slot missing template metadata: {slot.action_id!r}")
+    torpedo = torpedos_by_id.get(torpedo_id)
+    if torpedo is None:
+        return
     configured_cap = template.catalog_config_cap(config)
-    for torpedo_id in sorted(eligible_torp_ids):
-        torpedo = torpedos_by_id.get(torpedo_id)
-        if torpedo is None:
-            continue
-        score_delta_2x = template.score_delta_2x_from_cost(torpedo.torpedocost)
-        _append_aggregate_action(
-            actions,
-            probability_buckets,
-            action_id=template.action_id_for_entity_id(torpedo_id),
-            label=template.catalog_label_format.format(name=torpedo.name),
-            score_delta_2x=score_delta_2x,
-            upper_bound=residual_count_bound(
-                observation,
-                score_delta_2x,
-                configured_cap,
-            ),
-            aggregate_allowlist=aggregate_allowlist,
-            prior_catalog=prior_catalog,
-        )
+    score_delta_2x = template.score_delta_2x_from_cost(torpedo.torpedocost)
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id=slot.action_id,
+        label=template.catalog_label_format.format(name=torpedo.name),
+        score_delta_2x=score_delta_2x,
+        upper_bound=residual_count_bound(
+            observation,
+            score_delta_2x,
+            configured_cap,
+        ),
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
