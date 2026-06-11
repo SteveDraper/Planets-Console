@@ -12,7 +12,6 @@ from api.analytics.military_score_inference.tier_policy import SlotCountMode
 from api.models.components import Beam, Engine, Hull, Torpedo
 
 GENERIC_FREIGHTER_COMBO_ID = "combo_freighter"
-GENERIC_FREIGHTER_PRIOR_HULL_ID = 999999
 GENERIC_ZERO_MILITARY_SCORE_LABEL = "Freighter"
 
 

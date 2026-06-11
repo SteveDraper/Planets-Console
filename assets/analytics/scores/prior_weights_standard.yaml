@@ -168,4 +168,4 @@ aggregates:
 overrides:
   combos: {}  # combo_id -> pseudo-count (optional sparse corrections; no wildcard)
   hulls:
-    999999: 220  # generic freighter combo marginal (pseudo hull id; not a buildable hull)
+    999999: 220  # GENERIC_FREIGHTER_PRIOR_HULL_ID -- freighter combo marginal (not a buildable hull)

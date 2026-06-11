@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.inference_probability_scale import (
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceProblem
 from api.analytics.military_score_inference.prior_weights import (
+    GENERIC_FREIGHTER_PRIOR_HULL_ID,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
     resolve_prior_weights_catalog,
@@ -30,7 +31,6 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 )
 from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
-    GENERIC_FREIGHTER_PRIOR_HULL_ID,
     ship_build_combo_id,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem

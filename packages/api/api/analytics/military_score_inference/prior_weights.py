@@ -43,7 +43,10 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
 
+GENERIC_FREIGHTER_PRIOR_HULL_ID = 999999
+
 __all__ = [
+    "GENERIC_FREIGHTER_PRIOR_HULL_ID",
     "PriorWeightsCatalog",
     "PriorWeightsDiagnostics",
     "resolve_prior_weights_catalog",
@@ -99,10 +102,6 @@ class PriorWeightsCatalog:
         return self.hull_log_weights.get(hull_id, default_weight)
 
     def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
-        from api.analytics.military_score_inference.ship_build_combos import (
-            GENERIC_FREIGHTER_PRIOR_HULL_ID,
-        )
-
         override = self.combo_log_overrides.get(combo_id)
         if override is not None:
             return override
