@@ -147,7 +147,10 @@ class PriorWeightsCatalog:
         return composed_weight
 
     def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
-        """Freighter likelihood: combo override, else pseudo-hull marginal (see GENERIC_FREIGHTER_PRIOR_HULL_ID)."""
+        """Freighter likelihood: combo override, else pseudo-hull marginal.
+
+        See ``GENERIC_FREIGHTER_PRIOR_HULL_ID``.
+        """
         return self._resolved_combo_log_weight(
             combo_id=combo_id,
             composed_weight=self.hull_marginal_log_weight(

@@ -1,6 +1,11 @@
 """Tests for military score inference ranking heuristics (issue #85)."""
 
 from api.analytics.military_score_inference.accelerated_start import accelerated_inference_segments
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    PLANET_DEFENSE_POST_BUCKETS,
+    SHIP_TORPEDO_BUCKETS,
+    STARBASE_DEFENSE_POST_BUCKETS,
+)
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_segment_policy_ladder,
 )
@@ -11,11 +16,6 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
-)
-from api.analytics.military_score_inference.aggregate_action_registry import (
-    PLANET_DEFENSE_POST_BUCKETS,
-    SHIP_TORPEDO_BUCKETS,
-    STARBASE_DEFENSE_POST_BUCKETS,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,

@@ -106,9 +106,7 @@ class ActionCatalog:
             "policy_step_id": self.policy_step_id,
             "policy_step_index": self.policy_step_index,
             "bucketed_action_count": sum(
-                1
-                for action in self.aggregate_actions
-                if is_histogram_aggregate_action(action.id)
+                1 for action in self.aggregate_actions if is_histogram_aggregate_action(action.id)
             ),
         }
         if self.prior_weights is not None:

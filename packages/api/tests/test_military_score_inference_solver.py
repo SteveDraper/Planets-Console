@@ -1,14 +1,14 @@
 """Tests for the military score inference CP-SAT solver."""
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    PLANET_DEFENSE_POST_BUCKETS,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
     InferenceSolutionAction,
     ProbabilityBucket,
-)
-from api.analytics.military_score_inference.aggregate_action_registry import (
-    PLANET_DEFENSE_POST_BUCKETS,
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,

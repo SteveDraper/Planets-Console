@@ -98,10 +98,7 @@ def _empty_component_table_shell() -> dict[str, dict[Any, int]]:
 
 
 def _empty_component_tables() -> dict[InferenceHullCategory, dict[str, dict[Any, int]]]:
-    return {
-        category: _empty_component_table_shell()
-        for category in INFERENCE_HULL_CATEGORIES
-    }
+    return {category: _empty_component_table_shell() for category in INFERENCE_HULL_CATEGORIES}
 
 
 def minimal_prior_catalog(
