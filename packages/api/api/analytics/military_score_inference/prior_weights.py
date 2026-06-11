@@ -1,13 +1,10 @@
-"""Load inference build prior assets and resolve catalog probability weights."""
+"""Resolve inference build prior catalogs from loaded assets."""
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
-
-import yaml
 
 from api.analytics.military_score_inference.hull_category import (
     InferenceHullCategory,
@@ -15,10 +12,27 @@ from api.analytics.military_score_inference.hull_category import (
     slot_fill_pattern,
 )
 from api.analytics.military_score_inference.inference_game_category import (
-    STANDARD_INFERENCE_GAME_CATEGORY,
     resolve_inference_game_category,
 )
 from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBucket
+from api.analytics.military_score_inference.prior_weights_asset import (
+    COMPONENT_TABLE_NAMES,
+    PriorWeightsAsset,
+    ShipLimitBand,
+    default_prior_weights_dir,
+    load_prior_weights_for_category,
+    parse_prior_weights_document,
+    prior_weights_asset_path,
+)
+from api.analytics.military_score_inference.prior_weights_laplace import (
+    PRIOR_WEIGHT_SCALE,
+    WILDCARD_COUNT_KEY,
+    counts_to_log_weights,
+    expand_wildcard_counts,
+    finalize_counts_for_laplace,
+    implicit_uniform_component_counts,
+    laplace_log_weight,
+)
 from api.analytics.military_score_inference.probability_bucket_defaults import (
     PLANET_DEFENSE_POST_BUCKETS,
     SHIP_FIGHTER_BUCKETS,
@@ -28,18 +42,6 @@ from api.analytics.military_score_inference.probability_bucket_defaults import (
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
-
-ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
-
-WILDCARD_COUNT_KEY = "*"
-
-LAPLACE_ALPHA = 1
-PRIOR_WEIGHT_SCALE = 100
-IMPLICIT_UNIFORM_PSEUDO_COUNT = 1.0
-
-COMPONENT_TABLE_NAMES = ("engines", "beams", "torpedoes")
-
-STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yaml"
 
 BUCKETED_AGGREGATE_ACTION_IDS = frozenset(
     {
@@ -57,151 +59,29 @@ BASE_BUCKETS_BY_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
     "ship_fighters_added_total": SHIP_FIGHTER_BUCKETS,
 }
 
-
-def default_prior_weights_dir() -> Path:
-    return (
-        Path(__file__).resolve().parents[5]
-        / "assets"
-        / "analytics"
-        / "military_score_build_inference"
-    )
+__all__ = [
+    "BUCKETED_AGGREGATE_ACTION_IDS",
+    "PRIOR_WEIGHT_SCALE",
+    "WILDCARD_COUNT_KEY",
+    "PriorWeightsCatalog",
+    "PriorWeightsDiagnostics",
+    "counts_to_log_weights",
+    "default_prior_weights_dir",
+    "expand_wildcard_counts",
+    "implicit_uniform_component_counts",
+    "laplace_log_weight",
+    "load_prior_weights_for_category",
+    "parse_prior_weights_document",
+    "prior_weights_asset_path",
+    "resolve_prior_weights_catalog",
+    "ship_limit_band_key",
+]
 
 
 def ship_limit_band_key(observation: InferenceObservation) -> ShipLimitBand:
     if observation.is_after_ship_limit:
         return "after_ship_limit"
     return "before_ship_limit"
-
-
-def laplace_log_weight(count: float, *, total: float, cell_count: int, scale: int) -> int:
-    probability = (count + LAPLACE_ALPHA) / (total + LAPLACE_ALPHA * cell_count)
-    return round(scale * math.log(probability))
-
-
-def counts_to_log_weights(
-    counts: dict[Any, float],
-    *,
-    scale: int = PRIOR_WEIGHT_SCALE,
-) -> dict[Any, int]:
-    if not counts:
-        return {}
-    if WILDCARD_COUNT_KEY in counts:
-        raise ValueError(f"wildcard {WILDCARD_COUNT_KEY!r} must be expanded before log conversion")
-    total = float(sum(counts.values()))
-    cell_count = len(counts)
-    return {
-        key: laplace_log_weight(value, total=total, cell_count=cell_count, scale=scale)
-        for key, value in counts.items()
-    }
-
-
-def _finalize_counts_for_laplace(counts: dict[Any, float]) -> dict[Any, float]:
-    if counts.keys() == {WILDCARD_COUNT_KEY}:
-        return {"default": counts[WILDCARD_COUNT_KEY]}
-    if WILDCARD_COUNT_KEY in counts:
-        raise ValueError(f"unexpanded {WILDCARD_COUNT_KEY!r} remains in count table")
-    return counts
-
-
-def implicit_uniform_component_counts(universe: frozenset[int]) -> dict[int, float]:
-    """Equal pseudo-count per eligible id when a component sub-table is absent from the asset."""
-    return dict.fromkeys(universe, IMPLICIT_UNIFORM_PSEUDO_COUNT)
-
-
-def expand_wildcard_counts(
-    counts: dict[Any, float],
-    *,
-    universe: frozenset[Any] | None,
-    field_name: str,
-) -> dict[Any, float]:
-    """Expand optional ``*`` default pseudo-count across ``universe`` before Laplace conversion."""
-    if WILDCARD_COUNT_KEY not in counts:
-        return dict(counts)
-
-    wildcard_value = counts[WILDCARD_COUNT_KEY]
-    explicit = {key: value for key, value in counts.items() if key != WILDCARD_COUNT_KEY}
-
-    expanded = dict(explicit)
-    for item_id in universe:
-        if item_id not in expanded:
-            expanded[item_id] = wildcard_value
-    if not expanded and wildcard_value is not None:
-        return {WILDCARD_COUNT_KEY: wildcard_value}
-    return expanded
-
-
-def _parse_count_table(
-    raw: object,
-    *,
-    field_name: str,
-    key_kind: Literal["int", "str"],
-    allow_wildcard: bool,
-) -> dict[Any, float]:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{field_name} must be a mapping")
-    counts: dict[Any, float] = {}
-    for key, value in raw.items():
-        if allow_wildcard and key == WILDCARD_COUNT_KEY:
-            parsed_key: Any = WILDCARD_COUNT_KEY
-        elif key_kind == "int":
-            if not isinstance(key, int):
-                raise ValueError(f"{field_name} keys must be integers")
-            parsed_key = key
-        else:
-            if not isinstance(key, str):
-                raise ValueError(f"{field_name} keys must be strings")
-            if not allow_wildcard and key == WILDCARD_COUNT_KEY:
-                raise ValueError(f"{field_name} does not allow {WILDCARD_COUNT_KEY!r}")
-            parsed_key = key
-        if not allow_wildcard and key == WILDCARD_COUNT_KEY:
-            raise ValueError(f"{field_name} does not allow {WILDCARD_COUNT_KEY!r}")
-        if not isinstance(value, (int, float)) or value < 0:
-            raise ValueError(f"{field_name} values must be non-negative numbers")
-        if parsed_key in counts:
-            raise ValueError(f"{field_name} contains duplicate key {parsed_key!r}")
-        counts[parsed_key] = float(value)
-    return counts
-
-
-def _parse_int_keyed_counts(
-    raw: object,
-    *,
-    field_name: str,
-    allow_wildcard: bool = True,
-) -> dict[Any, float]:
-    return _parse_count_table(
-        raw,
-        field_name=field_name,
-        key_kind="int",
-        allow_wildcard=allow_wildcard,
-    )
-
-
-def _parse_str_keyed_counts(
-    raw: object,
-    *,
-    field_name: str,
-    allow_wildcard: bool = True,
-) -> dict[str, float]:
-    parsed = _parse_count_table(
-        raw,
-        field_name=field_name,
-        key_kind="str",
-        allow_wildcard=allow_wildcard,
-    )
-    return parsed
-
-
-@dataclass(frozen=True)
-class PriorWeightsAsset:
-    version: int
-    category: str
-    game_category_rules_version: int
-    hulls: dict[ShipLimitBand, dict[str, dict[int, float]]]
-    components: dict[ShipLimitBand, dict[InferenceHullCategory, dict[str, dict[Any, float]]]]
-    aggregates: dict[ShipLimitBand, dict[str, dict[str, dict[int, float]]]]
-    combo_overrides: dict[str, float] = field(default_factory=dict)
-    hull_overrides: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -329,193 +209,6 @@ class PriorWeightsCatalog:
         )
 
 
-def _parse_hull_tables(raw: object) -> dict[ShipLimitBand, dict[str, dict[int, float]]]:
-    if not isinstance(raw, dict):
-        raise ValueError("hulls must be a mapping")
-    parsed: dict[ShipLimitBand, dict[str, dict[int, float]]] = {}
-    for band in ("before_ship_limit", "after_ship_limit"):
-        band_raw = raw.get(band)
-        if not isinstance(band_raw, dict):
-            raise ValueError(f"hulls.{band} must be a mapping")
-        global_counts = _parse_int_keyed_counts(
-            band_raw.get("global", {}),
-            field_name=f"hulls.{band}.global",
-        )
-        by_race: dict[str, dict[int, float]] = {"global": global_counts}
-        race_raw = band_raw.get("byRace", {})
-        if race_raw is not None:
-            if not isinstance(race_raw, dict):
-                raise ValueError(f"hulls.{band}.byRace must be a mapping")
-            for race_id, race_counts in race_raw.items():
-                if not isinstance(race_id, int):
-                    raise ValueError(f"hulls.{band}.byRace keys must be integers")
-                by_race[str(race_id)] = _parse_int_keyed_counts(
-                    race_counts,
-                    field_name=f"hulls.{band}.byRace[{race_id}]",
-                )
-        parsed[band] = by_race
-    return parsed
-
-
-def _parse_component_tables(
-    raw: object,
-) -> dict[ShipLimitBand, dict[InferenceHullCategory, dict[str, dict[Any, float]]]]:
-    if not isinstance(raw, dict):
-        raise ValueError("components must be a mapping")
-    parsed: dict[ShipLimitBand, dict[InferenceHullCategory, dict[str, dict[Any, float]]]] = {}
-    for band in ("before_ship_limit", "after_ship_limit"):
-        band_raw = raw.get(band)
-        if not isinstance(band_raw, dict):
-            raise ValueError(f"components.{band} must be a mapping")
-        categories: dict[InferenceHullCategory, dict[str, dict[Any, float]]] = {}
-        for category, category_raw in band_raw.items():
-            if not isinstance(category, str):
-                raise ValueError(f"components.{band} keys must be strings")
-            if not isinstance(category_raw, dict):
-                raise ValueError(f"components.{band}.{category} must be a mapping")
-            tables: dict[str, dict[Any, float]] = {}
-            for table_name in ("engines", "beams", "torpedoes"):
-                if table_name in category_raw:
-                    tables[table_name] = _parse_int_keyed_counts(
-                        category_raw[table_name],
-                        field_name=f"components.{band}.{category}.{table_name}",
-                    )
-            if "slotFill" in category_raw:
-                tables["slotFill"] = _parse_str_keyed_counts(
-                    category_raw["slotFill"],
-                    field_name=f"components.{band}.{category}.slotFill",
-                    allow_wildcard=False,
-                )
-            categories[category] = tables
-        parsed[band] = categories
-    return parsed
-
-
-def _parse_aggregate_tables(
-    raw: object,
-) -> dict[ShipLimitBand, dict[str, dict[str, dict[int, float]]]]:
-    if not isinstance(raw, dict):
-        raise ValueError("aggregates must be a mapping")
-    parsed: dict[ShipLimitBand, dict[str, dict[str, dict[int, float]]]] = {}
-    for band in ("before_ship_limit", "after_ship_limit"):
-        band_raw = raw.get(band)
-        if not isinstance(band_raw, dict):
-            raise ValueError(f"aggregates.{band} must be a mapping")
-        actions: dict[str, dict[str, dict[int, float]]] = {}
-        for action_id, action_raw in band_raw.items():
-            if not isinstance(action_id, str):
-                raise ValueError(f"aggregates.{band} keys must be strings")
-            if not isinstance(action_raw, dict):
-                raise ValueError(f"aggregates.{band}.{action_id} must be a mapping")
-            if "histogram" in action_raw:
-                actions[action_id] = {
-                    "histogram": _parse_int_keyed_counts(
-                        action_raw["histogram"],
-                        field_name=f"aggregates.{band}.{action_id}.histogram",
-                        allow_wildcard=False,
-                    )
-                }
-            elif "counts" in action_raw:
-                actions[action_id] = {
-                    "counts": _parse_str_keyed_counts(
-                        action_raw["counts"],
-                        field_name=f"aggregates.{band}.{action_id}.counts",
-                    )
-                }
-            else:
-                raise ValueError(f"aggregates.{band}.{action_id} must include histogram or counts")
-        parsed[band] = actions
-    return parsed
-
-
-def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
-    version = document.get("version")
-    if not isinstance(version, int) or version < 1:
-        raise ValueError("prior weights version must be a positive integer")
-
-    category = document.get("category")
-    if not isinstance(category, str) or not category:
-        raise ValueError("prior weights category must be a non-empty string")
-
-    rules_version = document.get("gameCategoryRulesVersion")
-    if not isinstance(rules_version, int) or rules_version < 1:
-        raise ValueError("gameCategoryRulesVersion must be a positive integer")
-
-    overrides_raw = document.get("overrides", {})
-    combo_overrides: dict[str, float] = {}
-    hull_overrides: dict[int, float] = {}
-    if overrides_raw is not None:
-        if not isinstance(overrides_raw, dict):
-            raise ValueError("overrides must be a mapping")
-        combo_raw = overrides_raw.get("combos", {})
-        if combo_raw:
-            combo_overrides = _parse_str_keyed_counts(
-                combo_raw,
-                field_name="overrides.combos",
-                allow_wildcard=False,
-            )
-        hull_raw = overrides_raw.get("hulls", {})
-        if hull_raw:
-            hull_overrides = _parse_int_keyed_counts(
-                hull_raw,
-                field_name="overrides.hulls",
-                allow_wildcard=False,
-            )
-
-    return PriorWeightsAsset(
-        version=version,
-        category=category,
-        game_category_rules_version=rules_version,
-        hulls=_parse_hull_tables(document.get("hulls")),
-        components=_parse_component_tables(document.get("components")),
-        aggregates=_parse_aggregate_tables(document.get("aggregates")),
-        combo_overrides=combo_overrides,
-        hull_overrides=hull_overrides,
-    )
-
-
-def load_prior_weights_asset(path: Path) -> PriorWeightsAsset:
-    with path.open(encoding="utf-8") as handle:
-        document = yaml.safe_load(handle)
-    if not isinstance(document, dict):
-        raise ValueError(f"prior weights root must be a mapping: {path}")
-    asset = parse_prior_weights_document(document)
-    expected_stem = f"prior_weights_{asset.category}"
-    if path.stem != expected_stem:
-        raise ValueError(
-            f"prior weights category {asset.category!r} does not match filename stem {path.stem!r}"
-        )
-    return asset
-
-
-def prior_weights_asset_path(
-    category_id: str,
-    *,
-    base_dir: Path | None = None,
-) -> Path:
-    directory = default_prior_weights_dir() if base_dir is None else base_dir
-    return directory / f"prior_weights_{category_id}.yaml"
-
-
-def load_prior_weights_for_category(
-    category_id: str,
-    *,
-    base_dir: Path | None = None,
-) -> tuple[PriorWeightsAsset, Path, bool]:
-    directory = default_prior_weights_dir() if base_dir is None else base_dir
-    category_path = directory / f"prior_weights_{category_id}.yaml"
-    if category_path.is_file():
-        return load_prior_weights_asset(category_path), category_path, False
-
-    if category_id == STANDARD_INFERENCE_GAME_CATEGORY:
-        raise FileNotFoundError(f"missing required prior weights asset: {category_path}")
-
-    standard_path = directory / STANDARD_PRIOR_FILENAME
-    if not standard_path.is_file():
-        raise FileNotFoundError(f"missing required prior weights asset: {standard_path}")
-    return load_prior_weights_asset(standard_path), standard_path, True
-
-
 def _histogram_bucket_counts(
     histogram: dict[int, float],
     buckets: tuple[ProbabilityBucket, ...],
@@ -556,7 +249,7 @@ def _resolve_hull_log_weights(
     )
     if WILDCARD_COUNT_KEY in expanded and buildable_hull_ids:
         raise ValueError(f"hulls.{band}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
-    return counts_to_log_weights(_finalize_counts_for_laplace(expanded), scale=scale)
+    return counts_to_log_weights(finalize_counts_for_laplace(expanded), scale=scale)
 
 
 def _resolve_component_log_table(
@@ -573,7 +266,7 @@ def _resolve_component_log_table(
     )
     if WILDCARD_COUNT_KEY in expanded:
         raise ValueError(f"{field_name}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
-    return counts_to_log_weights(_finalize_counts_for_laplace(expanded), scale=scale)
+    return counts_to_log_weights(finalize_counts_for_laplace(expanded), scale=scale)
 
 
 def _implicit_uniform_component_log_table(
