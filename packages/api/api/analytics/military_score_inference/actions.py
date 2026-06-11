@@ -218,6 +218,7 @@ def build_action_catalog(
         observation,
         catalog_config,
         torpedos_by_id,
+        eligible_torp_ids,
         resolved_policy_step.aggregate_allowlist,
         prior_catalog,
     )

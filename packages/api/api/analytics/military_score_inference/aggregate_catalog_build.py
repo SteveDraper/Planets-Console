@@ -44,6 +44,7 @@ def build_aggregate_actions(
     observation: InferenceObservation,
     config: CatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
+    eligible_torp_ids: frozenset[int],
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
 ) -> tuple[list[CandidateAction], dict[str, tuple[ProbabilityBucket, ...]]]:
@@ -71,6 +72,7 @@ def build_aggregate_actions(
                 observation=observation,
                 config=config,
                 torpedos_by_id=torpedos_by_id,
+                eligible_torp_ids=eligible_torp_ids,
                 aggregate_allowlist=aggregate_allowlist,
                 prior_catalog=prior_catalog,
             )
@@ -237,12 +239,15 @@ def _append_template_catalog_actions(
     observation: InferenceObservation,
     config: CatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
+    eligible_torp_ids: frozenset[int],
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
 ) -> None:
     configured_cap = template.catalog_config_cap(config)
-    for torpedo_id in sorted(torpedos_by_id):
-        torpedo = torpedos_by_id[torpedo_id]
+    for torpedo_id in sorted(eligible_torp_ids):
+        torpedo = torpedos_by_id.get(torpedo_id)
+        if torpedo is None:
+            continue
         score_delta_2x = template.score_delta_2x_from_cost(torpedo.torpedocost)
         _append_aggregate_action(
             actions,

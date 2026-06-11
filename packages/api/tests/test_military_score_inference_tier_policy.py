@@ -1,5 +1,6 @@
 """Tests for YAML inference search tier policy loading and catalog behavior."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -278,6 +279,38 @@ def test_slack_admitted_on_later_steps_with_caps(sample_turn):
     assert planet_action.upper_bound <= 16
     assert torp_actions
     assert all(action.upper_bound <= 40 for action in torp_actions)
+
+
+def test_restricted_activetorps_limits_ship_torpedo_aggregate_actions(sample_turn):
+    observation = _observation(military_delta_2x=500)
+    player_id = observation.player_id
+    restricted_player = replace(sample_turn.player, activetorps="1")
+    turn = replace(
+        sample_turn,
+        player=restricted_player,
+        players=[
+            restricted_player if player.id == player_id else player
+            for player in sample_turn.players
+        ],
+    )
+    torp_step = next(step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes")
+    catalog_context = turn_catalog_context_for_policy_step(turn, player_id, torp_step)
+
+    assert catalog_context.eligible_torp_ids == frozenset({1})
+    assert len(catalog_context.torpedos_by_id) > 1
+
+    catalog = build_action_catalog_from_turn(
+        observation,
+        turn,
+        policy_step=torp_step,
+    )
+
+    torp_action_ids = {
+        action.id
+        for action in catalog.aggregate_actions
+        if action.id.startswith("ship_torps_loaded_")
+    }
+    assert torp_action_ids == {"ship_torps_loaded_1"}
 
 
 def test_tech_level_filtering_derives_component_sets(synthetic_catalog_context):
