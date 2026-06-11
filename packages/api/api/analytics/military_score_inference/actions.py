@@ -247,27 +247,9 @@ def build_action_catalog(
     for action in actions:
         if action.upper_bound <= 0:
             continue
-        updated_action = action
-        if prior_catalog is not None:
-            prior_weight = prior_catalog.aggregate_probability_weight(action.id)
-            if prior_weight is not None:
-                updated_action = replace(action, probability_weight=prior_weight)
+        updated_action, base_buckets = _aggregate_action_with_prior(action, prior_catalog)
         kept_actions.append(updated_action)
-        if action.id in BUCKETED_ACTION_IDS:
-            base_buckets = _probability_buckets_for_action(action.id)
-            if prior_catalog is not None:
-                base_buckets = prior_catalog.probability_buckets_for_action(
-                    action.id,
-                    base_buckets,
-                )
-            probability_buckets[action.id] = base_buckets
-        elif action.id.startswith("ship_torps_loaded_"):
-            base_buckets = SHIP_TORPEDO_BUCKETS
-            if prior_catalog is not None:
-                base_buckets = prior_catalog.probability_buckets_for_action(
-                    action.id,
-                    base_buckets,
-                )
+        if base_buckets is not None:
             probability_buckets[action.id] = base_buckets
 
     policy_ladder = policy_steps or resolve_tier_policies()
@@ -511,6 +493,30 @@ def _aggregate_noisy_actions(
         actions.append(replace(action, upper_bound=capped_upper))
 
     return actions
+
+
+def _aggregate_action_with_prior(
+    action: CandidateAction,
+    prior_catalog: PriorWeightsCatalog | None,
+) -> tuple[CandidateAction, tuple[ProbabilityBucket, ...] | None]:
+    updated_action = action
+    if prior_catalog is not None:
+        prior_weight = prior_catalog.aggregate_probability_weight(action.id)
+        if prior_weight is not None:
+            updated_action = replace(action, probability_weight=prior_weight)
+
+    base_buckets: tuple[ProbabilityBucket, ...] | None = None
+    if action.id in BUCKETED_ACTION_IDS:
+        base_buckets = _probability_buckets_for_action(action.id)
+    elif action.id.startswith("ship_torps_loaded_"):
+        base_buckets = SHIP_TORPEDO_BUCKETS
+
+    if base_buckets is not None and prior_catalog is not None:
+        base_buckets = prior_catalog.probability_buckets_for_action(
+            action.id,
+            base_buckets,
+        )
+    return updated_action, base_buckets
 
 
 def _probability_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...]:
