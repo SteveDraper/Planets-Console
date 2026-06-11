@@ -7,7 +7,7 @@ from api.analytics.military_score_inference.accelerated_start import (
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    is_histogram_aggregate_action,
+    lookup_aggregate_action_spec,
     resolved_aggregate_cap,
 )
 from api.analytics.military_score_inference.aggregate_catalog_build import (
@@ -99,7 +99,10 @@ class ActionCatalog:
             "policy_step_id": self.policy_step_id,
             "policy_step_index": self.policy_step_index,
             "bucketed_action_count": sum(
-                1 for action in self.aggregate_actions if is_histogram_aggregate_action(action.id)
+                1
+                for action in self.aggregate_actions
+                if (spec := lookup_aggregate_action_spec(action.id)) is not None
+                and spec.prior_shape == "histogram"
             ),
         }
         if self.prior_weights_diagnostics is not None:

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AGGREGATE_ACTION_SPECS,
-    base_bin_bounds_for_action,
+    lookup_aggregate_action_spec,
 )
 from api.analytics.military_score_inference.hull_category import (
     BATTLESHIP_MASS_THRESHOLD,
@@ -44,7 +44,8 @@ def probability_buckets_for_test_action(
     *,
     marginal_weights: tuple[int, ...] | None = None,
 ) -> tuple[ProbabilityBucket, ...]:
-    bin_bounds = base_bin_bounds_for_action(action_id)
+    spec = lookup_aggregate_action_spec(action_id)
+    bin_bounds = spec.bin_bounds if spec is not None else None
     if bin_bounds is None:
         raise ValueError(f"action {action_id!r} has no solver bin bounds")
     weights = marginal_weights or STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS[action_id]

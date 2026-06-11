@@ -7,8 +7,8 @@ from pathlib import Path
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSlot,
-    base_bin_bounds_for_action,
     iter_aggregate_action_slots,
+    lookup_aggregate_action_spec,
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -200,7 +200,8 @@ def _resolve_histogram_aggregate_weights(
     band: ShipLimitBand,
     scale: int,
 ) -> tuple[int, ...]:
-    bin_bounds = base_bin_bounds_for_action(action_id)
+    spec = lookup_aggregate_action_spec(action_id)
+    bin_bounds = spec.bin_bounds if spec is not None else None
     if bin_bounds is None:
         raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bin definition")
     bucket_counts = _histogram_bucket_counts(aggregate.histogram, bin_bounds)

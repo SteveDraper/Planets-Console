@@ -279,54 +279,14 @@ def lookup_aggregate_action_spec(action_id: str) -> AggregateActionSpec | None:
     return None
 
 
-def is_ship_torps_loaded_action(action_id: str) -> bool:
-    return _AGGREGATE_TEMPLATE_PREFIX is not None and action_id.startswith(
-        _AGGREGATE_TEMPLATE_PREFIX
-    )
-
-
-def is_histogram_aggregate_action(action_id: str) -> bool:
-    spec = lookup_aggregate_action_spec(action_id)
-    return spec is not None and spec.prior_shape == "histogram"
-
-
-def is_counts_aggregate_action(action_id: str) -> bool:
-    spec = lookup_aggregate_action_spec(action_id)
-    return spec is not None and spec.prior_shape == "counts"
-
-
-def is_fine_grained_slack_action(action_id: str) -> bool:
-    spec = lookup_aggregate_action_spec(action_id)
-    return spec is not None and spec.is_fine_grained_slack
-
-
-def is_fighter_channel_member(action_id: str) -> bool:
-    spec = lookup_aggregate_action_spec(action_id)
-    return spec is not None and spec.is_fighter_channel_member
-
-
-def aggregate_allowlist_key(action_id: str) -> str | None:
-    spec = lookup_aggregate_action_spec(action_id)
-    if spec is None:
-        return None
-    return spec.allowlist_key
-
-
 def resolved_aggregate_cap(action_id: str, allowlist: dict[str, int]) -> int | None:
     """Return the allowlist cap for one aggregate action id."""
     if action_id in allowlist:
         return allowlist[action_id]
-    key = aggregate_allowlist_key(action_id)
-    if key is not None:
-        return allowlist.get(key)
-    return None
-
-
-def base_bin_bounds_for_action(action_id: str) -> tuple[ProbabilityBinBounds, ...] | None:
     spec = lookup_aggregate_action_spec(action_id)
-    if spec is None:
-        return None
-    return spec.bin_bounds
+    if spec is not None and spec.allowlist_key is not None:
+        return allowlist.get(spec.allowlist_key)
+    return None
 
 
 def magnitude_bin_index(magnitude: int, bin_bounds: tuple[MagnitudeCountBounds, ...]) -> int:

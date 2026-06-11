@@ -5,9 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    is_fighter_channel_member,
-    is_fine_grained_slack_action,
-    is_ship_torps_loaded_action,
+    SHIP_TORPS_LOADED_ACTION_PREFIX,
+    lookup_aggregate_action_spec,
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.inference_probability_scale import (
@@ -62,7 +61,8 @@ class TierOverflowBand:
 def is_parsimony_eligible_slack_action(action_id: str) -> bool:
     if action_id == EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID:
         return False
-    return is_fine_grained_slack_action(action_id)
+    spec = lookup_aggregate_action_spec(action_id)
+    return spec is not None and spec.is_fine_grained_slack
 
 
 def max_marginal_weight(buckets: tuple[ProbabilityBucket, ...]) -> int:
@@ -194,7 +194,9 @@ def compute_overflow_objective_contribution(
 def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
-            action_id for action_id in catalog_action_ids if is_ship_torps_loaded_action(action_id)
+            action_id
+            for action_id in catalog_action_ids
+            if action_id.startswith(SHIP_TORPS_LOADED_ACTION_PREFIX)
         )
     )
 
@@ -202,7 +204,10 @@ def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ..
 def fighter_channel_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
-            action_id for action_id in catalog_action_ids if is_fighter_channel_member(action_id)
+            action_id
+            for action_id in catalog_action_ids
+            if (spec := lookup_aggregate_action_spec(action_id)) is not None
+            and spec.is_fighter_channel_member
         )
     )
 

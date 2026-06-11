@@ -11,9 +11,8 @@ import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSpec,
-    is_counts_aggregate_action,
-    is_histogram_aggregate_action,
     iter_aggregate_action_slots,
+    lookup_aggregate_action_spec,
 )
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
@@ -258,7 +257,8 @@ def _parse_band_aggregate_tables(
         if not isinstance(action_raw, dict):
             raise ValueError(f"aggregates.{band}.{action_id} must be a mapping")
         if "histogram" in action_raw:
-            if not is_histogram_aggregate_action(action_id):
+            spec = lookup_aggregate_action_spec(action_id)
+            if spec is None or spec.prior_shape != "histogram":
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
                 )
@@ -270,7 +270,8 @@ def _parse_band_aggregate_tables(
                 )
             )
         elif "counts" in action_raw:
-            if not is_counts_aggregate_action(action_id):
+            spec = lookup_aggregate_action_spec(action_id)
+            if spec is None or spec.prior_shape != "counts":
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
                 )
