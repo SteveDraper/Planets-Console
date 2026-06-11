@@ -8,6 +8,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
     base_buckets_for_action,
+    is_counts_aggregate_action,
     is_histogram_aggregate_action,
 )
 from api.analytics.military_score_inference.component_eligibility import (
@@ -75,7 +76,6 @@ class ActionCatalogConfig:
     max_ship_torpedoes_per_type: int = 200
     max_fighter_transfers: int = 50
     ship_build_combo_config: ShipBuildComboConfig | None = None
-    noisy_action_probability_weight: int = 10
     fighter_transfer_probability_weight: int = 15
     evil_empire_free_starbase_fighter_pseudo_count: float = 500
 
@@ -228,19 +228,16 @@ def build_action_catalog(
         )
     prior_diagnostics = prior_catalog.diagnostics if prior_catalog is not None else None
 
-    actions: list[CandidateAction] = []
-    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
-
-    actions.extend(
-        _aggregate_noisy_actions(
-            observation,
-            catalog_config,
-            torpedos_by_id,
-            resolved_policy_step.aggregate_allowlist,
-        )
+    aggregate_actions, probability_buckets = _build_aggregate_actions(
+        observation,
+        catalog_config,
+        torpedos_by_id,
+        resolved_policy_step.aggregate_allowlist,
+        prior_catalog,
     )
+    kept_actions: list[CandidateAction] = list(aggregate_actions)
     if turn is not None and player is not None:
-        actions.extend(
+        kept_actions.extend(
             _evil_empire_free_starbase_fighter_actions(
                 observation,
                 turn,
@@ -248,15 +245,6 @@ def build_action_catalog(
                 player,
             )
         )
-
-    kept_actions: list[CandidateAction] = []
-    for action in actions:
-        if action.upper_bound <= 0:
-            continue
-        updated_action, base_buckets = _aggregate_action_with_prior(action, prior_catalog)
-        kept_actions.append(updated_action)
-        if base_buckets is not None:
-            probability_buckets[action.id] = base_buckets
 
     policy_ladder = policy_steps or resolve_tier_policies()
     ranking_heuristics = InferenceRankingHeuristics()
@@ -391,75 +379,165 @@ def _evil_empire_free_starbase_fighter_actions(
     ]
 
 
-def _aggregate_noisy_actions(
+def _counts_aggregate_probability_weight(
+    action_id: str,
+    config: ActionCatalogConfig,
+    prior_catalog: PriorWeightsCatalog | None,
+) -> int:
+    if prior_catalog is not None:
+        prior_weight = prior_catalog.aggregate_probability_weight(action_id)
+        if prior_weight is not None:
+            return prior_weight
+    return config.fighter_transfer_probability_weight
+
+
+def _aggregate_action_probability_weight(
+    action_id: str,
+    config: ActionCatalogConfig,
+    prior_catalog: PriorWeightsCatalog | None,
+) -> int:
+    if is_histogram_aggregate_action(action_id):
+        return 0
+    if is_counts_aggregate_action(action_id):
+        return _counts_aggregate_probability_weight(action_id, config, prior_catalog)
+    return 0
+
+
+def _probability_buckets_for_aggregate_action(
+    action_id: str,
+    prior_catalog: PriorWeightsCatalog | None,
+) -> tuple[ProbabilityBucket, ...] | None:
+    base_buckets = base_buckets_for_action(action_id)
+    if base_buckets is None:
+        return None
+    if prior_catalog is not None:
+        return prior_catalog.probability_buckets_for_action(action_id, base_buckets)
+    return base_buckets
+
+
+def _append_aggregate_action(
+    actions: list[CandidateAction],
+    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
+    *,
+    action_id: str,
+    label: str,
+    score_delta_2x: int,
+    upper_bound: int,
+    config: ActionCatalogConfig,
+    aggregate_allowlist: dict[str, int],
+    prior_catalog: PriorWeightsCatalog | None,
+) -> None:
+    allowlist_cap = resolved_aggregate_cap(action_id, aggregate_allowlist)
+    if allowlist_cap is None:
+        return
+    capped_upper = min(upper_bound, allowlist_cap)
+    if capped_upper <= 0:
+        return
+    actions.append(
+        CandidateAction(
+            id=action_id,
+            label=label,
+            score_delta_2x=score_delta_2x,
+            upper_bound=capped_upper,
+            probability_weight=_aggregate_action_probability_weight(
+                action_id,
+                config,
+                prior_catalog,
+            ),
+        )
+    )
+    buckets = _probability_buckets_for_aggregate_action(action_id, prior_catalog)
+    if buckets is not None:
+        probability_buckets[action_id] = buckets
+
+
+def _build_aggregate_actions(
     observation: InferenceObservation,
     config: ActionCatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
     aggregate_allowlist: dict[str, int],
-) -> list[CandidateAction]:
+    prior_catalog: PriorWeightsCatalog | None,
+) -> tuple[list[CandidateAction], dict[str, tuple[ProbabilityBucket, ...]]]:
     actions: list[CandidateAction] = []
+    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
 
-    fine_grained_candidates = [
-        CandidateAction(
-            id="planet_defense_posts_added_total",
-            label="Planet defense posts added",
-            score_delta_2x=planet_defense_post_score_delta_2x(),
-            upper_bound=_residual_count_bound(
-                observation,
-                planet_defense_post_score_delta_2x(),
-                config.max_planet_defense_posts,
-            ),
-            probability_weight=config.noisy_action_probability_weight,
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id="planet_defense_posts_added_total",
+        label="Planet defense posts added",
+        score_delta_2x=planet_defense_post_score_delta_2x(),
+        upper_bound=_residual_count_bound(
+            observation,
+            planet_defense_post_score_delta_2x(),
+            config.max_planet_defense_posts,
         ),
-        CandidateAction(
-            id="starbase_defense_posts_added_total",
-            label="Starbase defense posts added",
-            score_delta_2x=starbase_defense_post_score_delta_2x(),
-            upper_bound=_residual_count_bound(
-                observation,
-                starbase_defense_post_score_delta_2x(),
-                config.max_starbase_defense_posts,
-            ),
-            probability_weight=config.noisy_action_probability_weight,
+        config=config,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id="starbase_defense_posts_added_total",
+        label="Starbase defense posts added",
+        score_delta_2x=starbase_defense_post_score_delta_2x(),
+        upper_bound=_residual_count_bound(
+            observation,
+            starbase_defense_post_score_delta_2x(),
+            config.max_starbase_defense_posts,
         ),
-        CandidateAction(
-            id="starbase_fighters_added_total",
-            label="Starbase fighters added",
-            score_delta_2x=starbase_fighter_score_delta_2x(),
-            upper_bound=_residual_count_bound(
-                observation,
-                starbase_fighter_score_delta_2x(),
-                config.max_starbase_fighters,
-            ),
-            probability_weight=config.noisy_action_probability_weight,
+        config=config,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id="starbase_fighters_added_total",
+        label="Starbase fighters added",
+        score_delta_2x=starbase_fighter_score_delta_2x(),
+        upper_bound=_residual_count_bound(
+            observation,
+            starbase_fighter_score_delta_2x(),
+            config.max_starbase_fighters,
         ),
-        CandidateAction(
-            id="ship_fighters_added_total",
-            label="Ship fighters added",
-            score_delta_2x=loaded_ship_fighter_score_delta_2x(),
-            upper_bound=_residual_count_bound(
-                observation,
-                loaded_ship_fighter_score_delta_2x(),
-                config.max_ship_fighters,
-            ),
-            probability_weight=config.noisy_action_probability_weight,
+        config=config,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id="ship_fighters_added_total",
+        label="Ship fighters added",
+        score_delta_2x=loaded_ship_fighter_score_delta_2x(),
+        upper_bound=_residual_count_bound(
+            observation,
+            loaded_ship_fighter_score_delta_2x(),
+            config.max_ship_fighters,
         ),
-    ]
+        config=config,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
     for torpedo_id in sorted(torpedos_by_id):
         torpedo = torpedos_by_id[torpedo_id]
         per_torpedo_score = loaded_ship_torpedo_score_delta_2x(torpedo.torpedocost)
-        fine_grained_candidates.append(
-            CandidateAction(
-                id=f"ship_torps_loaded_{torpedo_id}",
-                label=f"Ship torpedoes loaded ({torpedo.name})",
-                score_delta_2x=per_torpedo_score,
-                upper_bound=_residual_count_bound(
-                    observation,
-                    per_torpedo_score,
-                    config.max_ship_torpedoes_per_type,
-                ),
-                probability_weight=config.noisy_action_probability_weight,
-            )
+        _append_aggregate_action(
+            actions,
+            probability_buckets,
+            action_id=f"ship_torps_loaded_{torpedo_id}",
+            label=f"Ship torpedoes loaded ({torpedo.name})",
+            score_delta_2x=per_torpedo_score,
+            upper_bound=_residual_count_bound(
+                observation,
+                per_torpedo_score,
+                config.max_ship_torpedoes_per_type,
+            ),
+            config=config,
+            aggregate_allowlist=aggregate_allowlist,
+            prior_catalog=prior_catalog,
         )
 
     transfer_cap = min(
@@ -470,52 +548,27 @@ def _aggregate_noisy_actions(
             config.max_fighter_transfers,
         ),
     )
-    fine_grained_candidates.extend(
-        [
-            CandidateAction(
-                id="fighters_starbase_to_ship",
-                label="Fighters transferred starbase to ship",
-                score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
-                upper_bound=transfer_cap,
-                probability_weight=config.fighter_transfer_probability_weight,
-            ),
-            CandidateAction(
-                id="fighters_ship_to_starbase",
-                label="Fighters transferred ship to starbase",
-                score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
-                upper_bound=transfer_cap,
-                probability_weight=config.fighter_transfer_probability_weight,
-            ),
-        ]
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id="fighters_starbase_to_ship",
+        label="Fighters transferred starbase to ship",
+        score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
+        upper_bound=transfer_cap,
+        config=config,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id="fighters_ship_to_starbase",
+        label="Fighters transferred ship to starbase",
+        score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
+        upper_bound=transfer_cap,
+        config=config,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
     )
 
-    for action in fine_grained_candidates:
-        allowlist_cap = resolved_aggregate_cap(action.id, aggregate_allowlist)
-        if allowlist_cap is None:
-            continue
-        capped_upper = min(action.upper_bound, allowlist_cap)
-        if capped_upper <= 0:
-            continue
-        actions.append(replace(action, upper_bound=capped_upper))
-
-    return actions
-
-
-def _aggregate_action_with_prior(
-    action: CandidateAction,
-    prior_catalog: PriorWeightsCatalog | None,
-) -> tuple[CandidateAction, tuple[ProbabilityBucket, ...] | None]:
-    updated_action = action
-    if prior_catalog is not None:
-        prior_weight = prior_catalog.aggregate_probability_weight(action.id)
-        if prior_weight is not None:
-            updated_action = replace(action, probability_weight=prior_weight)
-
-    base_buckets = base_buckets_for_action(action.id)
-
-    if base_buckets is not None and prior_catalog is not None:
-        base_buckets = prior_catalog.probability_buckets_for_action(
-            action.id,
-            base_buckets,
-        )
-    return updated_action, base_buckets
+    return actions, probability_buckets
