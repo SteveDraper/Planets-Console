@@ -11,6 +11,7 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     FixedAggregateCatalogBuildEntry,
     base_bin_bounds_for_action,
     lookup_aggregate_action_spec,
+    resolved_aggregate_cap,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -19,7 +20,6 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.prior_weights import PriorWeightsCatalog
 from api.analytics.military_score_inference.scoring import STARBASE_FIGHTER_SCORE_DELTA_2X
-from api.analytics.military_score_inference.tier_policy import resolved_aggregate_cap
 from api.models.components import Torpedo
 
 HISTOGRAM_ACTION_CATALOG_PROBABILITY_WEIGHT = 0

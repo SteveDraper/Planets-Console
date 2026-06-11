@@ -8,9 +8,6 @@ from typing import Any, Literal
 
 import yaml
 
-from api.analytics.military_score_inference.aggregate_action_registry import (
-    aggregate_allowlist_key,
-)
 from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
@@ -368,12 +365,3 @@ def compute_aggregate_admission_caps(
             if key not in caps:
                 caps[key] = cap
     return caps
-
-
-def resolved_aggregate_cap(action_id: str, allowlist: dict[str, int]) -> int | None:
-    if action_id in allowlist:
-        return allowlist[action_id]
-    key = aggregate_allowlist_key(action_id)
-    if key is not None:
-        return allowlist.get(key)
-    return None

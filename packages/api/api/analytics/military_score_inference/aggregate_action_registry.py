@@ -239,6 +239,16 @@ def aggregate_allowlist_key(action_id: str) -> str | None:
     return spec.allowlist_key
 
 
+def resolved_aggregate_cap(action_id: str, allowlist: dict[str, int]) -> int | None:
+    """Return the allowlist cap for one aggregate action id."""
+    if action_id in allowlist:
+        return allowlist[action_id]
+    key = aggregate_allowlist_key(action_id)
+    if key is not None:
+        return allowlist.get(key)
+    return None
+
+
 def base_bin_bounds_for_action(action_id: str) -> tuple[ProbabilityBinBounds, ...] | None:
     spec = lookup_aggregate_action_spec(action_id)
     if spec is None:

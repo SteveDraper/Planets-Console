@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    aggregate_allowlist_key,
     is_fighter_channel_member,
     is_fine_grained_slack_action,
     is_ship_torps_loaded_action,
@@ -58,16 +57,6 @@ class TierOverflowBand:
     admission_cap: int
     current_cap: int
     marginal_weight: int
-
-
-def admission_cap_for_action(action_id: str, admission_caps: dict[str, int]) -> int | None:
-    """Return the admission cap for one catalog action id from raw allowlist history."""
-    if action_id in admission_caps:
-        return admission_caps[action_id]
-    key = aggregate_allowlist_key(action_id)
-    if key is not None:
-        return admission_caps.get(key)
-    return None
 
 
 def is_parsimony_eligible_slack_action(action_id: str) -> bool:

@@ -8,6 +8,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
     is_histogram_aggregate_action,
+    resolved_aggregate_cap,
 )
 from api.analytics.military_score_inference.aggregate_catalog_build import (
     build_aggregate_actions,
@@ -37,7 +38,6 @@ from api.analytics.military_score_inference.prior_weights_laplace import laplace
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     TierOverflowBand,
-    admission_cap_for_action,
     build_tier_aware_probability_buckets,
 )
 from api.analytics.military_score_inference.scoring import starbase_fighter_score_delta_2x
@@ -241,7 +241,7 @@ def build_action_catalog(
     for action in kept_actions:
         if action.id not in probability_buckets:
             continue
-        admission_cap = admission_cap_for_action(action.id, admission_caps_raw)
+        admission_cap = resolved_aggregate_cap(action.id, admission_caps_raw)
         buckets, overflow_band = build_tier_aware_probability_buckets(
             probability_buckets[action.id],
             admission_cap=admission_cap,
