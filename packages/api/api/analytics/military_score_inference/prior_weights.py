@@ -43,6 +43,9 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
 
+# Synthetic hull id in prior-weight asset hull tables (not a buildable in-game hull).
+# Freighter combo likelihood uses this pseudo-hull's marginal log weight when no
+# per-combo override is present; see prior_weights_standard.yaml hulls.999999.
 GENERIC_FREIGHTER_PRIOR_HULL_ID = 999999
 
 __all__ = [
@@ -134,13 +137,25 @@ class PriorWeightsCatalog:
         category_tables = self._component_tables[hull_category]
         return category_tables.get(table_name, {}).get(key, default_weight)
 
-    def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
+    def _resolved_combo_log_weight(
+        self,
+        *,
+        combo_id: str,
+        composed_weight: int,
+    ) -> int:
         override = self._combo_log_overrides.get(combo_id)
         if override is not None:
             return override
-        return self.hull_marginal_log_weight(
-            GENERIC_FREIGHTER_PRIOR_HULL_ID,
-            default_weight=default_weight,
+        return composed_weight
+
+    def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
+        """Freighter likelihood: combo override, else pseudo-hull marginal (see GENERIC_FREIGHTER_PRIOR_HULL_ID)."""
+        return self._resolved_combo_log_weight(
+            combo_id=combo_id,
+            composed_weight=self.hull_marginal_log_weight(
+                GENERIC_FREIGHTER_PRIOR_HULL_ID,
+                default_weight=default_weight,
+            ),
         )
 
     def combo_probability_weight(
@@ -154,10 +169,6 @@ class PriorWeightsCatalog:
         beam_count: int,
         launcher_count: int,
     ) -> int:
-        override = self._combo_log_overrides.get(combo_id)
-        if override is not None:
-            return override
-
         hull_weight = self.hull_marginal_log_weight(hull.id)
 
         hull_category = resolve_inference_hull_category(
@@ -176,7 +187,10 @@ class PriorWeightsCatalog:
             component_weight += category_tables["torpedoes"].get(torpedo.id, 0)
         component_weight += category_tables.get("slotFill", {}).get(fill, 0)
 
-        return hull_weight + component_weight
+        return self._resolved_combo_log_weight(
+            combo_id=combo_id,
+            composed_weight=hull_weight + component_weight,
+        )
 
     def aggregate_probability_weight(self, action_id: str) -> int | None:
         return self._aggregate_action_weights.get(action_id)
