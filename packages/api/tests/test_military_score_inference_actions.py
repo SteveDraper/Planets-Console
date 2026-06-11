@@ -17,7 +17,9 @@ from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
     turn_catalog_context_for_policy_step,
 )
-from api.analytics.military_score_inference.prior_weights import resolve_prior_weights_catalog
+from api.analytics.military_score_inference.prior_weights_resolve import (
+    resolve_prior_weights_catalog,
+)
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     ship_construction_score_delta_2x,

@@ -1,6 +1,8 @@
 """Tests for freighter pseudo-hull prior weight resolution."""
 
-from api.analytics.military_score_inference.prior_weights import GENERIC_FREIGHTER_PRIOR_HULL_ID
+from api.analytics.military_score_inference.prior_weights_catalog import (
+    GENERIC_FREIGHTER_PRIOR_HULL_ID,
+)
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 
 from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog

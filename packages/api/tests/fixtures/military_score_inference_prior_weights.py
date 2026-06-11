@@ -14,7 +14,7 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     probability_buckets_from_bin_bounds,
 )
-from api.analytics.military_score_inference.prior_weights import (
+from api.analytics.military_score_inference.prior_weights_catalog import (
     CategoryComponentLogTables,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,

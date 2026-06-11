@@ -16,7 +16,7 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.prior_weights import (
+from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
     ship_limit_band_key,
 )
