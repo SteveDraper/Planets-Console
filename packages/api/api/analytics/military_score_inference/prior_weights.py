@@ -323,9 +323,11 @@ def _resolve_aggregate_weights(
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
                 )
-            log_weights = counts_to_log_weights(aggregate.counts, scale=scale)
-            if log_weights:
-                action_weights[action_id] = next(iter(log_weights.values()))
+            (count_key, count_value), = aggregate.counts.items()
+            action_weights[action_id] = counts_to_log_weights(
+                {count_key: count_value},
+                scale=scale,
+            )[count_key]
     return action_weights, bucket_weights
 
 
