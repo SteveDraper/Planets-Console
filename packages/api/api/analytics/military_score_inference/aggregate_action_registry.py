@@ -6,7 +6,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from api.analytics.military_score_inference.models import ProbabilityBinBounds
+from api.analytics.military_score_inference.models import (
+    MagnitudeCountBounds,
+    ProbabilityBinBounds,
+)
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     loaded_ship_fighter_score_delta_2x,
@@ -222,7 +225,7 @@ def base_bin_bounds_for_action(action_id: str) -> tuple[ProbabilityBinBounds, ..
     return spec.bin_bounds
 
 
-def magnitude_bin_index(magnitude: int, bin_bounds: tuple[ProbabilityBinBounds, ...]) -> int:
+def magnitude_bin_index(magnitude: int, bin_bounds: tuple[MagnitudeCountBounds, ...]) -> int:
     """Return the index of the magnitude bin for a positive magnitude count."""
     for index, bound in enumerate(bin_bounds):
         lower_bound = 1 if bound.lower_count == 0 else bound.lower_count

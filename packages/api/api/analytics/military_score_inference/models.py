@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.ranking_heuristics import (
@@ -44,6 +44,13 @@ class CandidateAction:
     lower_bound: int = 0
     upper_bound: int = 0
     probability_weight: int = 0
+
+
+class MagnitudeCountBounds(Protocol):
+    """Structural type for magnitude-bin count ranges (bounds or full buckets)."""
+
+    lower_count: int
+    upper_count: int
 
 
 @dataclass(frozen=True)
