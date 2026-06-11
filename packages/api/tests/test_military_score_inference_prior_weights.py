@@ -242,9 +242,7 @@ def test_aggregates_reject_unknown_histogram_action_id():
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
-                    "before_ship_limit": {
-                        "planet_defense_posts_typo": {"histogram": {5: 1}}
-                    },
+                    "before_ship_limit": {"planet_defense_posts_typo": {"histogram": {5: 1}}},
                     "after_ship_limit": {},
                 }
             )
@@ -271,9 +269,7 @@ def test_aggregates_reject_counts_with_multiple_keys():
             _minimal_prior_weights_document(
                 aggregates={
                     "before_ship_limit": {
-                        "fighters_starbase_to_ship": {
-                            "counts": {"default": 65, "alternate": 10}
-                        }
+                        "fighters_starbase_to_ship": {"counts": {"default": 65, "alternate": 10}}
                     },
                     "after_ship_limit": {},
                 }
@@ -286,9 +282,7 @@ def test_aggregates_reject_empty_counts():
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
-                    "before_ship_limit": {
-                        "fighters_ship_to_starbase": {"counts": {}}
-                    },
+                    "before_ship_limit": {"fighters_ship_to_starbase": {"counts": {}}},
                     "after_ship_limit": {},
                 }
             )

@@ -301,8 +301,7 @@ def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
         action.id: action.probability_weight for action in catalog_with_priors.aggregate_actions
     }
     without_prior_by_id = {
-        action.id: action.probability_weight
-        for action in catalog_without_priors.aggregate_actions
+        action.id: action.probability_weight for action in catalog_without_priors.aggregate_actions
     }
     assert (
         with_prior_by_id["fighters_starbase_to_ship"]

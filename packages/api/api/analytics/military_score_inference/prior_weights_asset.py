@@ -237,9 +237,7 @@ def _parse_band_aggregate_tables(
             if not isinstance(counts_raw, dict):
                 raise ValueError(f"aggregates.{band}.{action_id}.counts must be a mapping")
             if len(counts_raw) != 1:
-                raise ValueError(
-                    f"aggregates.{band}.{action_id}.counts must have exactly one key"
-                )
+                raise ValueError(f"aggregates.{band}.{action_id}.counts must have exactly one key")
             actions[action_id] = {
                 "counts": _parse_str_keyed_counts(
                     counts_raw,

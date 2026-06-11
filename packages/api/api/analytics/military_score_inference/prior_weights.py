@@ -23,9 +23,7 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     COMPONENT_TABLE_NAMES,
     PriorWeightsAsset,
     ShipLimitBand,
-    default_prior_weights_dir,
     load_prior_weights_for_category,
-    parse_prior_weights_document,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
     WILDCARD_COUNT_KEY,

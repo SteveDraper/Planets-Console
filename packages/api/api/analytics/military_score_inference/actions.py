@@ -62,6 +62,7 @@ from api.models.game import TurnInfo
 
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
 
+
 @dataclass(frozen=True)
 class ActionCatalogConfig:
     max_planet_defense_posts: int = 100
