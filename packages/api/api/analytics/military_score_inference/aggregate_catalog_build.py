@@ -20,8 +20,6 @@ from api.analytics.military_score_inference.prior_weights import PriorWeightsCat
 from api.analytics.military_score_inference.scoring import STARBASE_FIGHTER_SCORE_DELTA_2X
 from api.models.components import Torpedo
 
-HISTOGRAM_ACTION_CATALOG_PROBABILITY_WEIGHT = 0
-
 
 def residual_count_bound(
     observation: InferenceObservation,
@@ -77,18 +75,6 @@ def build_aggregate_actions(
     return actions, probability_buckets
 
 
-def _counts_aggregate_probability_weight(
-    action_id: str,
-    prior_catalog: PriorWeightsCatalog,
-) -> int:
-    prior_weight = prior_catalog.aggregate_probability_weight(action_id)
-    if prior_weight is None:
-        raise ValueError(
-            f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
-        )
-    return prior_weight
-
-
 def _probability_buckets_for_aggregate_action(
     action_id: str,
     prior_catalog: PriorWeightsCatalog,
@@ -119,12 +105,7 @@ def _append_aggregate_action(
     spec = lookup_aggregate_action_spec(action_id)
     if spec is None:
         raise ValueError(f"unknown aggregate action {action_id!r}")
-    if spec.prior_shape == "histogram":
-        probability_weight = HISTOGRAM_ACTION_CATALOG_PROBABILITY_WEIGHT
-    elif spec.prior_shape == "counts":
-        probability_weight = _counts_aggregate_probability_weight(action_id, prior_catalog)
-    else:
-        raise ValueError(f"unknown prior_shape {spec.prior_shape!r} for action {action_id!r}")
+    probability_weight = spec.catalog_probability_weight(action_id, prior_catalog)
     actions.append(
         CandidateAction(
             id=action_id,
