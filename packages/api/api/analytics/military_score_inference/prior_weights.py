@@ -15,6 +15,9 @@ from api.analytics.military_score_inference.hull_category import (
 from api.analytics.military_score_inference.inference_game_category import (
     resolve_inference_game_category,
 )
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBucket
 from api.analytics.military_score_inference.prior_weights_asset import (
     COMPONENT_TABLE_NAMES,
@@ -23,9 +26,6 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     default_prior_weights_dir,
     load_prior_weights_for_category,
     parse_prior_weights_document,
-)
-from api.analytics.military_score_inference.inference_probability_scale import (
-    INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
     WILDCARD_COUNT_KEY,

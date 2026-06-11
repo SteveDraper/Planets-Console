@@ -462,10 +462,13 @@ def test_freighter_probability_weight_uses_sdsf_hull_marginal():
     catalog = _minimal_prior_catalog(
         hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
     )
-    assert catalog.freighter_probability_weight(
-        combo_id=GENERIC_FREIGHTER_COMBO_ID,
-        default_weight=80,
-    ) == 42
+    assert (
+        catalog.freighter_probability_weight(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            default_weight=80,
+        )
+        == 42
+    )
 
 
 def test_freighter_probability_weight_prefers_combo_then_hull_override():
@@ -474,26 +477,35 @@ def test_freighter_probability_weight_prefers_combo_then_hull_override():
         hull_log_overrides={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 55},
         combo_log_overrides={GENERIC_FREIGHTER_COMBO_ID: 99},
     )
-    assert catalog.freighter_probability_weight(
-        combo_id=GENERIC_FREIGHTER_COMBO_ID,
-        default_weight=80,
-    ) == 99
+    assert (
+        catalog.freighter_probability_weight(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            default_weight=80,
+        )
+        == 99
+    )
     without_combo = _minimal_prior_catalog(
         hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
         hull_log_overrides={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 55},
     )
-    assert without_combo.freighter_probability_weight(
-        combo_id=GENERIC_FREIGHTER_COMBO_ID,
-        default_weight=80,
-    ) == 55
+    assert (
+        without_combo.freighter_probability_weight(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            default_weight=80,
+        )
+        == 55
+    )
 
 
 def test_freighter_probability_weight_falls_back_to_default():
     catalog = _minimal_prior_catalog()
-    assert catalog.freighter_probability_weight(
-        combo_id=GENERIC_FREIGHTER_COMBO_ID,
-        default_weight=80,
-    ) == 80
+    assert (
+        catalog.freighter_probability_weight(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            default_weight=80,
+        )
+        == 80
+    )
 
 
 def test_catalog_build_includes_prior_weights_diagnostics(sample_turn):

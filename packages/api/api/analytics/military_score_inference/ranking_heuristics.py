@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
-)
-from api.analytics.military_score_inference.inference_probability_scale import (
-    INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.tier_policy import (
     FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
