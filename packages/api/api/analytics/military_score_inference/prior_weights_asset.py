@@ -300,19 +300,26 @@ def _parse_aggregate_tables(
     )
 
 
-def required_aggregate_prior(
+def lookup_slot_aggregate_prior(
     band_tables: dict[str, AggregatePrior],
     *,
     band: ShipLimitBand,
     action_id: str,
     spec: AggregateActionSpec,
-) -> HistogramAggregate | CountsAggregate:
-    """Return the aggregate prior for a required slot, validating presence and shape."""
+) -> HistogramAggregate | CountsAggregate | None:
+    """Look up and validate the aggregate prior for a catalog slot.
+
+    Returns None when the slot allows implicit uniform and no aggregate is present.
+    Raises ValueError with an ``incomplete prior:`` prefix when a required slot is
+    missing or present with the wrong shape.
+    """
     aggregate = band_tables.get(action_id)
     if aggregate is None:
-        raise ValueError(
-            f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
-        )
+        if spec.missing_aggregate_policy == "required":
+            raise ValueError(
+                f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
+            )
+        return None
     if spec.prior_shape == "histogram":
         if not isinstance(aggregate, HistogramAggregate):
             raise ValueError(
@@ -321,9 +328,13 @@ def required_aggregate_prior(
         return aggregate
     if spec.prior_shape == "counts":
         if not isinstance(aggregate, CountsAggregate):
-            raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
+            raise ValueError(
+                f"incomplete prior: aggregates.{band}.{action_id!r} must be counts"
+            )
         return aggregate
-    raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape")
+    raise ValueError(
+        f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape"
+    )
 
 
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:
@@ -331,7 +342,7 @@ def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLi
     for slot in iter_aggregate_action_slots(eligible_torp_ids=frozenset()):
         if slot.spec.missing_aggregate_policy != "required":
             continue
-        required_aggregate_prior(
+        lookup_slot_aggregate_prior(
             band_tables,
             band=band,
             action_id=slot.action_id,

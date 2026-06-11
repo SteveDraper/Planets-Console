@@ -32,6 +32,7 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
+    lookup_slot_aggregate_prior,
 )
 from api.analytics.military_score_inference.prior_weights_catalog import (
     CategoryComponentLogTables,
@@ -236,24 +237,20 @@ def _resolve_slot_aggregate_prior(
     scale: int,
 ) -> ResolvedPrior:
     action_id = slot.action_id
-    spec = slot.spec
-    aggregate = band_tables.get(action_id)
-
+    aggregate = lookup_slot_aggregate_prior(
+        band_tables,
+        band=band,
+        action_id=action_id,
+        spec=slot.spec,
+    )
     if aggregate is None:
-        if spec.missing_aggregate_policy == "required":
-            raise ValueError(
-                f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
-            )
-        bin_bounds = spec.bin_bounds
+        bin_bounds = slot.spec.bin_bounds
         if bin_bounds is None:
             raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
         return HistogramBucketWeights(
             _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
         )
-
-    if spec.prior_shape == "histogram":
-        if not isinstance(aggregate, HistogramAggregate):
-            raise ValueError(f"aggregates.{band}.{action_id!r} must be a histogram aggregate")
+    if isinstance(aggregate, HistogramAggregate):
         return HistogramBucketWeights(
             _resolve_histogram_aggregate_weights(
                 aggregate,
@@ -262,9 +259,6 @@ def _resolve_slot_aggregate_prior(
                 scale=scale,
             )
         )
-
-    if not isinstance(aggregate, CountsAggregate):
-        raise ValueError(f"aggregates.{band}.{action_id!r} must be a counts aggregate")
     return CountsPriorWeight(_resolve_counts_aggregate_weight(aggregate, scale=scale))
 
 
