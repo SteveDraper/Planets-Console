@@ -1,8 +1,13 @@
 """Shared hull and catalog helpers for prior-weights catalog tests."""
 
 from dataclasses import replace
+from typing import Any
 
-from api.analytics.military_score_inference.hull_category import BATTLESHIP_MASS_THRESHOLD
+from api.analytics.military_score_inference.hull_category import (
+    BATTLESHIP_MASS_THRESHOLD,
+    INFERENCE_HULL_CATEGORIES,
+    InferenceHullCategory,
+)
 from api.analytics.military_score_inference.prior_weights import (
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
@@ -83,6 +88,22 @@ def battleship_hull() -> Hull:
     )
 
 
+def _empty_component_table_shell() -> dict[str, dict[Any, int]]:
+    return {
+        "engines": {},
+        "beams": {},
+        "torpedoes": {},
+        "slotFill": {},
+    }
+
+
+def _empty_component_tables() -> dict[InferenceHullCategory, dict[str, dict[Any, int]]]:
+    return {
+        category: _empty_component_table_shell()
+        for category in INFERENCE_HULL_CATEGORIES
+    }
+
+
 def minimal_prior_catalog(
     *,
     hull_log_weights: dict[int, int] | None = None,
@@ -100,7 +121,7 @@ def minimal_prior_catalog(
             race_id_used=None,
         ),
         hull_log_weights=hull_log_weights or {},
-        component_tables={},
+        component_tables=_empty_component_tables(),
         aggregate_action_weights={},
         aggregate_bucket_marginal_weights={},
         combo_log_overrides=combo_log_overrides or {},
