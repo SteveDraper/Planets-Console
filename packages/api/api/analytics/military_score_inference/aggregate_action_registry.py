@@ -179,20 +179,16 @@ class TemplateAggregateCatalogBuildEntry:
 AggregateCatalogBuildEntry = FixedAggregateCatalogBuildEntry | TemplateAggregateCatalogBuildEntry
 
 
-def aggregate_catalog_build_entries() -> tuple[AggregateCatalogBuildEntry, ...]:
-    entries: list[AggregateCatalogBuildEntry] = []
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
-        if spec.catalog_config_cap is not None:
-            entries.append(FixedAggregateCatalogBuildEntry(action_id))
-    for template in AGGREGATE_ACTION_TEMPLATES:
-        entries.append(TemplateAggregateCatalogBuildEntry(template))
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
-        if spec.catalog_config_cap is None and spec.score_delta_2x is not None:
-            entries.append(FixedAggregateCatalogBuildEntry(action_id))
-    return tuple(entries)
-
-
-AGGREGATE_CATALOG_BUILD_ENTRIES = aggregate_catalog_build_entries()
+# Catalog build order: config-cap histogram actions, torpedo template, fighter transfers.
+AGGREGATE_CATALOG_BUILD_ENTRIES: tuple[AggregateCatalogBuildEntry, ...] = (
+    FixedAggregateCatalogBuildEntry("planet_defense_posts_added_total"),
+    FixedAggregateCatalogBuildEntry("starbase_defense_posts_added_total"),
+    FixedAggregateCatalogBuildEntry("starbase_fighters_added_total"),
+    FixedAggregateCatalogBuildEntry("ship_fighters_added_total"),
+    TemplateAggregateCatalogBuildEntry(AGGREGATE_ACTION_TEMPLATES[0]),
+    FixedAggregateCatalogBuildEntry("fighters_starbase_to_ship"),
+    FixedAggregateCatalogBuildEntry("fighters_ship_to_starbase"),
+)
 
 
 def lookup_aggregate_action_template(action_id: str) -> AggregateActionTemplateSpec | None:
