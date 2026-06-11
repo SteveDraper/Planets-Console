@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
+from api.analytics.military_score_inference.probability_bucket_defaults import (
+    magnitude_bin_index,
+)
 from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
@@ -104,11 +107,7 @@ def active_ranking_bin_index(
     """Return the index of the single magnitude bin for a positive aggregate count."""
     if count <= 0:
         return None
-    for index, bucket in enumerate(buckets):
-        lower_bound = 1 if bucket.lower_count == 0 else bucket.lower_count
-        if lower_bound <= count <= bucket.upper_count:
-            return index
-    return len(buckets) - 1
+    return magnitude_bin_index(count, buckets)
 
 
 def active_ranking_bin_indicators(

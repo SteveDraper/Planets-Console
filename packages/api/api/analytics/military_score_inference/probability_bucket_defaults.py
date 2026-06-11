@@ -40,6 +40,15 @@ _BUCKETS_BY_EXACT_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
 BUCKETED_ACTION_IDS = frozenset(_BUCKETS_BY_EXACT_ACTION_ID)
 
 
+def magnitude_bin_index(magnitude: int, buckets: tuple[ProbabilityBucket, ...]) -> int:
+    """Return the index of the magnitude bin for a positive magnitude count."""
+    for index, bucket in enumerate(buckets):
+        lower_bound = 1 if bucket.lower_count == 0 else bucket.lower_count
+        if lower_bound <= magnitude <= bucket.upper_count:
+            return index
+    return len(buckets) - 1
+
+
 def base_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...] | None:
     base_buckets = _BUCKETS_BY_EXACT_ACTION_ID.get(action_id)
     if base_buckets is not None:

@@ -37,6 +37,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 )
 from api.analytics.military_score_inference.probability_bucket_defaults import (
     base_buckets_for_action,
+    magnitude_bin_index,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
@@ -184,15 +185,7 @@ def _histogram_bucket_counts(
 ) -> dict[int, float]:
     bucket_counts = dict.fromkeys(range(len(buckets)), 0.0)
     for magnitude, count in histogram.items():
-        assigned = False
-        for index, bucket in enumerate(buckets):
-            lower_bound = 1 if bucket.lower_count == 0 else bucket.lower_count
-            if lower_bound <= magnitude <= bucket.upper_count:
-                bucket_counts[index] += count
-                assigned = True
-                break
-        if not assigned:
-            bucket_counts[len(buckets) - 1] += count
+        bucket_counts[magnitude_bin_index(magnitude, buckets)] += count
     return bucket_counts
 
 
