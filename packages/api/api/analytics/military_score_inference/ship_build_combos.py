@@ -138,9 +138,7 @@ def _resolve_combo_probability_weight(
         )
     armed = beam_count > 0 or launcher_count > 0
     return (
-        combo_config.armed_probability_weight
-        if armed
-        else combo_config.default_probability_weight
+        combo_config.armed_probability_weight if armed else combo_config.default_probability_weight
     )
 
 
