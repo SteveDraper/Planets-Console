@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 from api.analytics.military_score_inference.actions import (
     ActionCatalogConfig,
-    _residual_count_bound,
     build_action_catalog,
     build_action_catalog_from_turn,
 )
+from api.analytics.military_score_inference.aggregate_catalog_build import residual_count_bound
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
@@ -104,7 +104,7 @@ def test_residual_count_bound_uses_abs_residual_regardless_of_sign(
     expected,
 ):
     observation = _observation(military_delta_2x=military_delta_2x)
-    assert _residual_count_bound(observation, score_delta_2x, configured_cap) == expected
+    assert residual_count_bound(observation, score_delta_2x, configured_cap) == expected
 
 
 def test_residual_count_bound_applies_scoreboard_partition_slack():
@@ -118,7 +118,7 @@ def test_residual_count_bound_applies_scoreboard_partition_slack():
         military_partition_slack_2x=SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
     )
     assert (
-        _residual_count_bound(
+        residual_count_bound(
             observation,
             STARBASE_FIGHTER_SCORE_DELTA_2X,
             100,

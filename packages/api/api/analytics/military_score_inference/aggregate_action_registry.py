@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 from api.analytics.military_score_inference.models import (
     MagnitudeCountBounds,
@@ -48,13 +48,18 @@ SHIP_TORPEDO_BIN_BOUNDS = (
 )
 
 PriorShape = Literal["histogram", "counts"]
-CatalogBuildPhase = Literal["pre_torpedo", "torpedo", "post_torpedo"]
 
-CATALOG_BUILD_PHASE_ORDER: tuple[CatalogBuildPhase, ...] = (
-    "pre_torpedo",
-    "torpedo",
-    "post_torpedo",
-)
+
+class CatalogConfig(Protocol):
+    max_planet_defense_posts: int
+    max_starbase_defense_posts: int
+    max_starbase_fighters: int
+    max_ship_fighters: int
+    max_ship_torpedoes_per_type: int
+    max_fighter_transfers: int
+
+
+CatalogConfigCap = Callable[[CatalogConfig], int]
 
 
 @dataclass(frozen=True)
@@ -66,8 +71,7 @@ class AggregateActionSpec:
     is_fine_grained_slack: bool = False
     catalog_label: str = ""
     score_delta_2x: Callable[[], int] | None = None
-    config_cap_field: str | None = None
-    catalog_build_phase: CatalogBuildPhase | None = None
+    catalog_config_cap: CatalogConfigCap | None = None
 
 
 @dataclass(frozen=True)
@@ -75,8 +79,7 @@ class AggregateActionTemplateSpec:
     action_id_prefix: str
     prior_shape: PriorShape
     bin_bounds: tuple[ProbabilityBinBounds, ...] | None
-    catalog_build_phase: CatalogBuildPhase
-    config_cap_field: str
+    catalog_config_cap: CatalogConfigCap
     catalog_label_format: str
     score_delta_2x_from_cost: Callable[[int], int]
     allowlist_key: str | None = None
@@ -101,8 +104,7 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         is_fine_grained_slack=True,
         catalog_label="Planet defense posts added",
         score_delta_2x=planet_defense_post_score_delta_2x,
-        config_cap_field="max_planet_defense_posts",
-        catalog_build_phase="pre_torpedo",
+        catalog_config_cap=lambda config: config.max_planet_defense_posts,
     ),
     "starbase_defense_posts_added_total": AggregateActionSpec(
         prior_shape="histogram",
@@ -110,8 +112,7 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         is_fine_grained_slack=True,
         catalog_label="Starbase defense posts added",
         score_delta_2x=starbase_defense_post_score_delta_2x,
-        config_cap_field="max_starbase_defense_posts",
-        catalog_build_phase="pre_torpedo",
+        catalog_config_cap=lambda config: config.max_starbase_defense_posts,
     ),
     "starbase_fighters_added_total": AggregateActionSpec(
         prior_shape="histogram",
@@ -120,8 +121,7 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         is_fine_grained_slack=True,
         catalog_label="Starbase fighters added",
         score_delta_2x=starbase_fighter_score_delta_2x,
-        config_cap_field="max_starbase_fighters",
-        catalog_build_phase="pre_torpedo",
+        catalog_config_cap=lambda config: config.max_starbase_fighters,
     ),
     "ship_fighters_added_total": AggregateActionSpec(
         prior_shape="histogram",
@@ -130,8 +130,7 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         is_fine_grained_slack=True,
         catalog_label="Ship fighters added",
         score_delta_2x=loaded_ship_fighter_score_delta_2x,
-        config_cap_field="max_ship_fighters",
-        catalog_build_phase="pre_torpedo",
+        catalog_config_cap=lambda config: config.max_ship_fighters,
     ),
     "fighters_starbase_to_ship": AggregateActionSpec(
         prior_shape="counts",
@@ -141,7 +140,6 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         is_fine_grained_slack=True,
         catalog_label="Fighters transferred starbase to ship",
         score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
-        catalog_build_phase="post_torpedo",
     ),
     "fighters_ship_to_starbase": AggregateActionSpec(
         prior_shape="counts",
@@ -151,7 +149,6 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         is_fine_grained_slack=True,
         catalog_label="Fighters transferred ship to starbase",
         score_delta_2x=lambda: -STARBASE_FIGHTER_SCORE_DELTA_2X,
-        catalog_build_phase="post_torpedo",
     ),
 }
 
@@ -162,12 +159,40 @@ AGGREGATE_ACTION_TEMPLATES: tuple[AggregateActionTemplateSpec, ...] = (
         bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
         allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
         is_fine_grained_slack=True,
-        catalog_build_phase="torpedo",
-        config_cap_field="max_ship_torpedoes_per_type",
+        catalog_config_cap=lambda config: config.max_ship_torpedoes_per_type,
         catalog_label_format="Ship torpedoes loaded ({name})",
         score_delta_2x_from_cost=loaded_ship_torpedo_score_delta_2x,
     ),
 )
+
+
+@dataclass(frozen=True)
+class FixedAggregateCatalogBuildEntry:
+    action_id: str
+
+
+@dataclass(frozen=True)
+class TemplateAggregateCatalogBuildEntry:
+    template: AggregateActionTemplateSpec
+
+
+AggregateCatalogBuildEntry = FixedAggregateCatalogBuildEntry | TemplateAggregateCatalogBuildEntry
+
+
+def aggregate_catalog_build_entries() -> tuple[AggregateCatalogBuildEntry, ...]:
+    entries: list[AggregateCatalogBuildEntry] = []
+    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+        if spec.catalog_config_cap is not None:
+            entries.append(FixedAggregateCatalogBuildEntry(action_id))
+    for template in AGGREGATE_ACTION_TEMPLATES:
+        entries.append(TemplateAggregateCatalogBuildEntry(template))
+    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+        if spec.catalog_config_cap is None and spec.score_delta_2x is not None:
+            entries.append(FixedAggregateCatalogBuildEntry(action_id))
+    return tuple(entries)
+
+
+AGGREGATE_CATALOG_BUILD_ENTRIES = aggregate_catalog_build_entries()
 
 
 def lookup_aggregate_action_template(action_id: str) -> AggregateActionTemplateSpec | None:

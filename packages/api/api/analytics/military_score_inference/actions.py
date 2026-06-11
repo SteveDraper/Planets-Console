@@ -7,14 +7,11 @@ from api.analytics.military_score_inference.accelerated_start import (
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AGGREGATE_ACTION_SPECS,
-    AGGREGATE_ACTION_TEMPLATES,
-    CATALOG_BUILD_PHASE_ORDER,
-    AggregateActionSpec,
-    CatalogBuildPhase,
-    base_bin_bounds_for_action,
-    is_counts_aggregate_action,
     is_histogram_aggregate_action,
+)
+from api.analytics.military_score_inference.aggregate_catalog_build import (
+    build_aggregate_actions,
+    residual_count_bound,
 )
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
@@ -43,10 +40,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     admission_cap_for_action,
     build_tier_aware_probability_buckets,
 )
-from api.analytics.military_score_inference.scoring import (
-    STARBASE_FIGHTER_SCORE_DELTA_2X,
-    starbase_fighter_score_delta_2x,
-)
+from api.analytics.military_score_inference.scoring import starbase_fighter_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
     ShipBuildComboConfig,
     generate_ship_build_combos,
@@ -55,7 +49,6 @@ from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     compute_aggregate_admission_caps,
     resolve_tier_policies,
-    resolved_aggregate_cap,
 )
 from api.concepts.races import (
     evil_empire_free_starbase_fighters_per_host_turn,
@@ -221,7 +214,7 @@ def build_action_catalog(
         player = player_by_id(turn, observation.player_id)
     prior_diagnostics = prior_catalog.diagnostics
 
-    aggregate_actions, probability_buckets = _build_aggregate_actions(
+    aggregate_actions, probability_buckets = build_aggregate_actions(
         observation,
         catalog_config,
         torpedos_by_id,
@@ -310,21 +303,6 @@ def _apply_combo_count_constraints(
     return tuple(constrained)
 
 
-def _residual_count_bound(
-    observation: InferenceObservation,
-    score_delta_2x: int,
-    configured_cap: int,
-) -> int:
-    if score_delta_2x == 0:
-        return 0
-    if observation.military_delta_2x == 0:
-        return 0
-
-    abs_score = abs(score_delta_2x)
-    abs_residual = abs(observation.military_delta_2x) + observation.military_partition_slack_2x
-    return min(configured_cap, abs_residual // abs_score)
-
-
 def _evil_empire_free_starbase_fighter_actions(
     observation: InferenceObservation,
     turn: TurnInfo,
@@ -346,7 +324,7 @@ def _evil_empire_free_starbase_fighter_actions(
         fighter_room_per_starbase,
     )
     count_upper = min(
-        _residual_count_bound(
+        residual_count_bound(
             observation,
             starbase_fighter_score_delta_2x(),
             config.max_starbase_fighters,
@@ -370,215 +348,3 @@ def _evil_empire_free_starbase_fighter_actions(
             ),
         )
     ]
-
-
-def _counts_aggregate_probability_weight(
-    action_id: str,
-    prior_catalog: PriorWeightsCatalog,
-) -> int:
-    prior_weight = prior_catalog.aggregate_probability_weight(action_id)
-    if prior_weight is None:
-        raise ValueError(
-            f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
-        )
-    return prior_weight
-
-
-def _aggregate_action_probability_weight(
-    action_id: str,
-    prior_catalog: PriorWeightsCatalog,
-) -> int:
-    if is_histogram_aggregate_action(action_id):
-        return 0
-    if is_counts_aggregate_action(action_id):
-        return _counts_aggregate_probability_weight(action_id, prior_catalog)
-    return 0
-
-
-def _probability_buckets_for_aggregate_action(
-    action_id: str,
-    prior_catalog: PriorWeightsCatalog,
-) -> tuple[ProbabilityBucket, ...] | None:
-    bin_bounds = base_bin_bounds_for_action(action_id)
-    if bin_bounds is None:
-        return None
-    return prior_catalog.probability_buckets_for_action(action_id, bin_bounds)
-
-
-def _append_aggregate_action(
-    actions: list[CandidateAction],
-    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
-    *,
-    action_id: str,
-    label: str,
-    score_delta_2x: int,
-    upper_bound: int,
-    aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog,
-) -> None:
-    allowlist_cap = resolved_aggregate_cap(action_id, aggregate_allowlist)
-    if allowlist_cap is None:
-        return
-    capped_upper = min(upper_bound, allowlist_cap)
-    if capped_upper <= 0:
-        return
-    actions.append(
-        CandidateAction(
-            id=action_id,
-            label=label,
-            score_delta_2x=score_delta_2x,
-            upper_bound=capped_upper,
-            probability_weight=_aggregate_action_probability_weight(action_id, prior_catalog),
-        )
-    )
-    buckets = _probability_buckets_for_aggregate_action(action_id, prior_catalog)
-    if buckets is not None:
-        probability_buckets[action_id] = buckets
-
-
-def _append_catalog_spec_action(
-    actions: list[CandidateAction],
-    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
-    *,
-    action_id: str,
-    spec: AggregateActionSpec,
-    upper_bound: int,
-    aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog,
-) -> None:
-    score_delta_2x = spec.score_delta_2x
-    if score_delta_2x is None:
-        return
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id=action_id,
-        label=spec.catalog_label,
-        score_delta_2x=score_delta_2x(),
-        upper_bound=upper_bound,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
-
-
-def _fighter_transfer_upper_bound(
-    observation: InferenceObservation,
-    config: ActionCatalogConfig,
-) -> int:
-    return min(
-        config.max_fighter_transfers,
-        _residual_count_bound(
-            observation,
-            STARBASE_FIGHTER_SCORE_DELTA_2X,
-            config.max_fighter_transfers,
-        ),
-    )
-
-
-def _append_fixed_catalog_actions_for_phase(
-    actions: list[CandidateAction],
-    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
-    *,
-    phase: CatalogBuildPhase,
-    observation: InferenceObservation,
-    config: ActionCatalogConfig,
-    aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog,
-    fighter_transfer_upper_bound: int,
-) -> None:
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
-        if spec.catalog_build_phase != phase:
-            continue
-        score_delta_2x = spec.score_delta_2x
-        if score_delta_2x is None:
-            continue
-        if phase == "post_torpedo":
-            upper_bound = fighter_transfer_upper_bound
-        else:
-            config_cap = spec.config_cap_field
-            if config_cap is None:
-                continue
-            upper_bound = _residual_count_bound(
-                observation,
-                score_delta_2x(),
-                getattr(config, config_cap),
-            )
-        _append_catalog_spec_action(
-            actions,
-            probability_buckets,
-            action_id=action_id,
-            spec=spec,
-            upper_bound=upper_bound,
-            aggregate_allowlist=aggregate_allowlist,
-            prior_catalog=prior_catalog,
-        )
-
-
-def _append_template_catalog_actions_for_phase(
-    actions: list[CandidateAction],
-    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
-    *,
-    phase: CatalogBuildPhase,
-    observation: InferenceObservation,
-    config: ActionCatalogConfig,
-    torpedos_by_id: dict[int, Torpedo],
-    aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog,
-) -> None:
-    for template in AGGREGATE_ACTION_TEMPLATES:
-        if template.catalog_build_phase != phase:
-            continue
-        configured_cap = getattr(config, template.config_cap_field)
-        for torpedo_id in sorted(torpedos_by_id):
-            torpedo = torpedos_by_id[torpedo_id]
-            score_delta_2x = template.score_delta_2x_from_cost(torpedo.torpedocost)
-            _append_aggregate_action(
-                actions,
-                probability_buckets,
-                action_id=template.action_id_for_entity_id(torpedo_id),
-                label=template.catalog_label_format.format(name=torpedo.name),
-                score_delta_2x=score_delta_2x,
-                upper_bound=_residual_count_bound(
-                    observation,
-                    score_delta_2x,
-                    configured_cap,
-                ),
-                aggregate_allowlist=aggregate_allowlist,
-                prior_catalog=prior_catalog,
-            )
-
-
-def _build_aggregate_actions(
-    observation: InferenceObservation,
-    config: ActionCatalogConfig,
-    torpedos_by_id: dict[int, Torpedo],
-    aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog,
-) -> tuple[list[CandidateAction], dict[str, tuple[ProbabilityBucket, ...]]]:
-    actions: list[CandidateAction] = []
-    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
-    fighter_transfer_upper_bound = _fighter_transfer_upper_bound(observation, config)
-
-    for phase in CATALOG_BUILD_PHASE_ORDER:
-        _append_fixed_catalog_actions_for_phase(
-            actions,
-            probability_buckets,
-            phase=phase,
-            observation=observation,
-            config=config,
-            aggregate_allowlist=aggregate_allowlist,
-            prior_catalog=prior_catalog,
-            fighter_transfer_upper_bound=fighter_transfer_upper_bound,
-        )
-        _append_template_catalog_actions_for_phase(
-            actions,
-            probability_buckets,
-            phase=phase,
-            observation=observation,
-            config=config,
-            torpedos_by_id=torpedos_by_id,
-            aggregate_allowlist=aggregate_allowlist,
-            prior_catalog=prior_catalog,
-        )
-
-    return actions, probability_buckets
