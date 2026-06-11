@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import TypeAlias
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    SHIP_TORPS_LOADED_ACTION_PREFIX,
+    AGGREGATE_CATALOG_BUILD_ENTRIES,
+    FixedAggregateCatalogBuildEntry,
     base_bin_bounds_for_action,
     magnitude_bin_index,
 )
@@ -359,52 +360,93 @@ def _implicit_uniform_histogram_bucket_weights(
     return tuple(log_weights[index] for index in range(len(bin_bounds)))
 
 
-def _fill_implicit_uniform_torpedo_histograms(
-    bucket_weights: dict[str, tuple[int, ...]],
-    eligible_torp_ids: frozenset[int],
+def _resolve_histogram_aggregate_weights(
+    aggregate: HistogramAggregate,
+    action_id: str,
+    *,
+    band: ShipLimitBand,
+    scale: int,
+) -> tuple[int, ...]:
+    bin_bounds = base_bin_bounds_for_action(action_id)
+    if bin_bounds is None:
+        raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bin definition")
+    bucket_counts = _histogram_bucket_counts(aggregate.histogram, bin_bounds)
+    log_weights = counts_to_log_weights(bucket_counts, scale=scale)
+    return tuple(log_weights[index] for index in range(len(bin_bounds)))
+
+
+def _resolve_counts_aggregate_weight(
+    aggregate: CountsAggregate,
     *,
     scale: int,
-) -> dict[str, tuple[int, ...]]:
-    filled = dict(bucket_weights)
-    for torp_id in eligible_torp_ids:
-        action_id = f"{SHIP_TORPS_LOADED_ACTION_PREFIX}{torp_id}"
-        if action_id in filled:
-            continue
-        bin_bounds = base_bin_bounds_for_action(action_id)
-        if bin_bounds is None:
-            raise ValueError(
-                f"eligible torpedo {torp_id} has no solver bin definition for {action_id!r}"
-            )
-        filled[action_id] = _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
-    return filled
+) -> int:
+    ((count_key, count_value),) = aggregate.counts.items()
+    return counts_to_log_weights({count_key: count_value}, scale=scale)[count_key]
 
 
-def _resolve_aggregate_weights(
+def _resolve_aggregate_priors(
     asset: PriorWeightsAsset,
     *,
     band: ShipLimitBand,
+    eligible_torp_ids: frozenset[int],
     scale: int,
 ) -> tuple[dict[str, int], dict[str, tuple[int, ...]]]:
     action_weights: dict[str, int] = {}
     bucket_weights: dict[str, tuple[int, ...]] = {}
     band_tables = asset.aggregates.get(band, {})
 
-    for action_id, aggregate in band_tables.items():
-        if isinstance(aggregate, HistogramAggregate):
-            bin_bounds = base_bin_bounds_for_action(action_id)
-            if bin_bounds is None:
-                raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bin definition")
-            bucket_counts = _histogram_bucket_counts(aggregate.histogram, bin_bounds)
-            log_weights = counts_to_log_weights(bucket_counts, scale=scale)
-            bucket_weights[action_id] = tuple(
-                log_weights[index] for index in range(len(bin_bounds))
+    for entry in AGGREGATE_CATALOG_BUILD_ENTRIES:
+        if isinstance(entry, FixedAggregateCatalogBuildEntry):
+            action_id = entry.action_id
+            aggregate = band_tables.get(action_id)
+            if aggregate is None:
+                raise ValueError(
+                    f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
+                )
+            if isinstance(aggregate, HistogramAggregate):
+                bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
+                    aggregate,
+                    action_id,
+                    band=band,
+                    scale=scale,
+                )
+            elif isinstance(aggregate, CountsAggregate):
+                action_weights[action_id] = _resolve_counts_aggregate_weight(
+                    aggregate,
+                    scale=scale,
+                )
+            else:
+                raise ValueError(
+                    f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape"
+                )
+            continue
+
+        template = entry.template
+        bin_bounds = template.bin_bounds
+        if bin_bounds is None:
+            raise ValueError(
+                f"aggregate template {template.action_id_prefix!r} has no solver bin definition"
             )
-        elif isinstance(aggregate, CountsAggregate):
-            ((count_key, count_value),) = aggregate.counts.items()
-            action_weights[action_id] = counts_to_log_weights(
-                {count_key: count_value},
-                scale=scale,
-            )[count_key]
+        for torp_id in sorted(eligible_torp_ids):
+            action_id = template.action_id_for_entity_id(torp_id)
+            aggregate = band_tables.get(action_id)
+            if aggregate is None:
+                bucket_weights[action_id] = _implicit_uniform_histogram_bucket_weights(
+                    bin_bounds,
+                    scale=scale,
+                )
+            elif isinstance(aggregate, HistogramAggregate):
+                bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
+                    aggregate,
+                    action_id,
+                    band=band,
+                    scale=scale,
+                )
+            else:
+                raise ValueError(
+                    f"aggregates.{band}.{action_id!r} must be a histogram aggregate"
+                )
+
     return action_weights, bucket_weights
 
 
@@ -442,17 +484,12 @@ def resolve_prior_weights_catalog(
         eligible_torp_ids=eligible_torp_ids,
         scale=scale,
     )
-    aggregate_action_weights, aggregate_bucket_weights = _resolve_aggregate_weights(
+    aggregate_action_weights, aggregate_bucket_weights = _resolve_aggregate_priors(
         asset,
         band=band,
+        eligible_torp_ids=eligible_torp_ids,
         scale=scale,
     )
-    if eligible_torp_ids:
-        aggregate_bucket_weights = _fill_implicit_uniform_torpedo_histograms(
-            aggregate_bucket_weights,
-            eligible_torp_ids,
-            scale=scale,
-        )
 
     combo_log_overrides = counts_to_log_weights(asset.combo_overrides, scale=scale)
     hull_log_overrides_int = counts_to_log_weights(asset.hull_overrides, scale=scale)
