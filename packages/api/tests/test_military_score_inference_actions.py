@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
+    player_by_id,
     turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.scoring import (
@@ -266,7 +267,7 @@ def test_build_action_catalog_from_turn_sample(sample_turn):
 
 
 def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
-    """Turn-based catalog applies priors; bare build_action_catalog with turn=None does not."""
+    """Priors resolve from settings and eligibility; apply_priors=False opts out."""
     observation = _observation(starbases_owned=10)
     full_step = resolve_tier_policies()[-1]
     context = turn_catalog_context_for_policy_step(
@@ -274,9 +275,24 @@ def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
         observation.player_id,
         full_step,
     )
+    player = player_by_id(sample_turn, observation.player_id)
     catalog_with_priors = build_action_catalog_from_turn(
         observation,
         sample_turn,
+        policy_step=full_step,
+    )
+    catalog_with_priors_no_turn = build_action_catalog(
+        observation,
+        hulls_by_id=context.hulls_by_id,
+        engines_by_id=context.engines_by_id,
+        beams_by_id=context.beams_by_id,
+        torpedos_by_id=context.torpedos_by_id,
+        buildable_hull_ids=context.buildable_hull_ids,
+        eligible_engine_ids=context.eligible_engine_ids,
+        eligible_beam_ids=context.eligible_beam_ids,
+        eligible_torp_ids=context.eligible_torp_ids,
+        settings=sample_turn.settings,
+        player=player,
         policy_step=full_step,
     )
     catalog_without_priors = build_action_catalog(
@@ -289,11 +305,14 @@ def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
         eligible_engine_ids=context.eligible_engine_ids,
         eligible_beam_ids=context.eligible_beam_ids,
         eligible_torp_ids=context.eligible_torp_ids,
+        settings=sample_turn.settings,
+        player=player,
         policy_step=full_step,
-        turn=None,
+        apply_priors=False,
     )
 
     assert catalog_with_priors.prior_weights is not None
+    assert catalog_with_priors_no_turn.prior_weights is not None
     assert catalog_without_priors.prior_weights is None
 
     default_config = ActionCatalogConfig()

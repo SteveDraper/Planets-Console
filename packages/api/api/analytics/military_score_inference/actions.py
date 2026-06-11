@@ -60,7 +60,7 @@ from api.concepts.races import (
     is_evil_empire,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
-from api.models.game import TurnInfo
+from api.models.game import GameSettings, TurnInfo
 from api.models.player import Player
 
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
@@ -180,6 +180,7 @@ def build_action_catalog_from_turn(
         eligible_beam_ids=catalog_context.eligible_beam_ids,
         eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
+        settings=turn.settings,
         turn=turn,
         player=player,
         policy_step=resolved_policy_step,
@@ -200,22 +201,26 @@ def build_action_catalog(
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
     config: ActionCatalogConfig | None = None,
+    settings: GameSettings | None = None,
     turn: TurnInfo | None = None,
     player: Player | None = None,
     prior_catalog: PriorWeightsCatalog | None = None,
+    apply_priors: bool = True,
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
     policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
+    if settings is None and turn is not None:
+        settings = turn.settings
     if turn is not None and player is None:
         player = player_by_id(turn, observation.player_id)
-    if turn is not None and prior_catalog is None and player is not None:
+    if apply_priors and prior_catalog is None and settings is not None:
         prior_catalog = resolve_prior_weights_catalog(
             observation,
-            turn.settings,
-            race_id=player.raceid,
+            settings,
+            race_id=player.raceid if player is not None else None,
             buildable_hull_ids=buildable_hull_ids,
             eligible_engine_ids=eligible_engine_ids,
             eligible_beam_ids=eligible_beam_ids,
