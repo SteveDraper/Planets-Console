@@ -85,7 +85,7 @@ class ActionCatalog:
     )
     admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
-    prior_weights: PriorWeightsDiagnostics | None = None
+    prior_weights_diagnostics: PriorWeightsDiagnostics | None = None
 
     @property
     def catalog_size(self) -> int:
@@ -102,8 +102,8 @@ class ActionCatalog:
                 1 for action in self.aggregate_actions if is_histogram_aggregate_action(action.id)
             ),
         }
-        if self.prior_weights is not None:
-            payload["priorWeights"] = self.prior_weights.to_payload()
+        if self.prior_weights_diagnostics is not None:
+            payload["priorWeights"] = self.prior_weights_diagnostics.to_payload()
         return payload
 
 
@@ -264,7 +264,7 @@ def build_action_catalog(
         eligible_beam_ids=eligible_beam_ids,
         eligible_torp_ids=eligible_torp_ids,
         config=catalog_config.ship_build_combo_config,
-        prior_weights=prior_catalog,
+        prior_catalog=prior_catalog,
         beam_slot_counts=resolved_policy_step.beam_slot_counts,
         launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
     )
@@ -278,7 +278,7 @@ def build_action_catalog(
         ranking_heuristics=ranking_heuristics,
         admission_caps_by_action_id=admission_caps_by_action_id,
         tier_overflow_by_action_id=tier_overflow_by_action_id,
-        prior_weights=prior_diagnostics,
+        prior_weights_diagnostics=prior_diagnostics,
     )
 
 

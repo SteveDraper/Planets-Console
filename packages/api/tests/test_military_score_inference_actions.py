@@ -309,8 +309,8 @@ def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
         policy_step=full_step,
     )
 
-    assert catalog_with_priors.prior_weights is not None
-    assert catalog_with_priors_no_turn.prior_weights is not None
+    assert catalog_with_priors.prior_weights_diagnostics is not None
+    assert catalog_with_priors_no_turn.prior_weights_diagnostics is not None
 
     planet_defense_id = "planet_defense_posts_added_total"
     prior_bucket_weights = tuple(

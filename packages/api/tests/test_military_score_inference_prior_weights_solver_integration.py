@@ -25,7 +25,7 @@ def test_catalog_build_includes_prior_weights_diagnostics(sample_turn):
     full_step = resolve_tier_policies()[-1]
     catalog = build_action_catalog_from_turn(observation, sample_turn, policy_step=full_step)
 
-    assert catalog.prior_weights is not None
+    assert catalog.prior_weights_diagnostics is not None
     diagnostics = catalog.diagnostics()
     assert "priorWeights" in diagnostics
     prior_payload = diagnostics["priorWeights"]

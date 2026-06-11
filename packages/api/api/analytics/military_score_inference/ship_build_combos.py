@@ -123,7 +123,7 @@ def generate_ship_build_combos(
     eligible_engine_ids: frozenset[int],
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
-    prior_weights: PriorWeightsCatalog,
+    prior_catalog: PriorWeightsCatalog,
     config: ShipBuildComboConfig | None = None,
     beam_slot_counts: SlotCountMode = "none",
     launcher_slot_counts: SlotCountMode = "none",
@@ -209,7 +209,7 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            probability_weight = prior_weights.combo_probability_weight(
+                            probability_weight = prior_catalog.combo_probability_weight(
                                 combo_id=combo_id,
                                 hull=hull,
                                 engine=engine,
@@ -248,7 +248,7 @@ def generate_ship_build_combos(
                             )
 
     if freighter_upper_bound > 0:
-        freighter_weight = prior_weights.freighter_probability_weight(
+        freighter_weight = prior_catalog.freighter_probability_weight(
             combo_id=GENERIC_FREIGHTER_COMBO_ID,
             default_weight=0,
         )

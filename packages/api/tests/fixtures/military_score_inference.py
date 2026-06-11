@@ -180,19 +180,10 @@ def synthetic_catalog_context():
         "eligible_engine_ids": frozenset({engine.id}),
         "eligible_beam_ids": frozenset({beam.id}),
         "eligible_torp_ids": frozenset({torpedo.id}),
-        "prior_weights": minimal_prior_catalog(),
+        "prior_catalog": minimal_prior_catalog(),
     }
 
 
 @pytest.fixture
 def synthetic_catalog_build_context(synthetic_catalog_context):
-    from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog
-
-    prior_catalog = minimal_prior_catalog()
-    context_without_prior_weights = {
-        key: value for key, value in synthetic_catalog_context.items() if key != "prior_weights"
-    }
-    return {
-        **context_without_prior_weights,
-        "prior_catalog": prior_catalog,
-    }
+    return synthetic_catalog_context
