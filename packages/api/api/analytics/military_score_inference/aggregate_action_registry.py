@@ -58,7 +58,6 @@ class AggregateActionSpec:
     score_delta_2x: Callable[[], int] | None = None
     config_cap_field: str | None = None
     catalog_build_phase: CatalogBuildPhase | None = None
-    uses_fighter_transfer_cap: bool = False
 
 
 AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
@@ -109,7 +108,6 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         catalog_label="Fighters transferred starbase to ship",
         score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
         catalog_build_phase="post_torpedo",
-        uses_fighter_transfer_cap=True,
     ),
     "fighters_ship_to_starbase": AggregateActionSpec(
         prior_shape="counts",
@@ -120,7 +118,6 @@ AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
         catalog_label="Fighters transferred ship to starbase",
         score_delta_2x=lambda: -STARBASE_FIGHTER_SCORE_DELTA_2X,
         catalog_build_phase="post_torpedo",
-        uses_fighter_transfer_cap=True,
     ),
 }
 
