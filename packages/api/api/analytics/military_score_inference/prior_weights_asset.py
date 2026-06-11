@@ -17,9 +17,19 @@ from api.analytics.military_score_inference.inference_game_category import (
     STANDARD_INFERENCE_GAME_CATEGORY,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
+from api.analytics.military_score_inference.probability_bucket_defaults import (
+    base_buckets_for_action,
+)
 from api.analytics.scores_assets import Scores
 
 ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
+
+_COUNTS_AGGREGATE_ACTION_IDS = frozenset(
+    {
+        "fighters_starbase_to_ship",
+        "fighters_ship_to_starbase",
+    }
+)
 
 SHIP_LIMIT_BANDS: tuple[ShipLimitBand, ...] = ("before_ship_limit", "after_ship_limit")
 
@@ -207,6 +217,10 @@ def _parse_band_aggregate_tables(
         if not isinstance(action_raw, dict):
             raise ValueError(f"aggregates.{band}.{action_id} must be a mapping")
         if "histogram" in action_raw:
+            if base_buckets_for_action(action_id) is None:
+                raise ValueError(
+                    f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
+                )
             actions[action_id] = {
                 "histogram": _parse_int_keyed_counts(
                     action_raw["histogram"],
@@ -215,9 +229,20 @@ def _parse_band_aggregate_tables(
                 )
             }
         elif "counts" in action_raw:
+            if action_id not in _COUNTS_AGGREGATE_ACTION_IDS:
+                raise ValueError(
+                    f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
+                )
+            counts_raw = action_raw["counts"]
+            if not isinstance(counts_raw, dict):
+                raise ValueError(f"aggregates.{band}.{action_id}.counts must be a mapping")
+            if len(counts_raw) != 1:
+                raise ValueError(
+                    f"aggregates.{band}.{action_id}.counts must have exactly one key"
+                )
             actions[action_id] = {
                 "counts": _parse_str_keyed_counts(
-                    action_raw["counts"],
+                    counts_raw,
                     field_name=f"aggregates.{band}.{action_id}.counts",
                 )
             }
