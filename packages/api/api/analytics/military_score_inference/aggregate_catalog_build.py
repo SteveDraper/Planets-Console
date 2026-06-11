@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AGGREGATE_ACTION_SPECS,
-    AGGREGATE_CATALOG_BUILD_ENTRIES,
+    AGGREGATE_REGISTRY,
     AggregateActionSpec,
     AggregateActionTemplateSpec,
     CatalogConfig,
-    FixedAggregateCatalogBuildEntry,
+    FixedAggregateRegistryEntry,
     base_bin_bounds_for_action,
     lookup_aggregate_action_spec,
     resolved_aggregate_cap,
@@ -52,8 +51,8 @@ def build_aggregate_actions(
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
     fighter_transfer_upper_bound = _fighter_transfer_upper_bound(observation, config)
 
-    for entry in AGGREGATE_CATALOG_BUILD_ENTRIES:
-        if isinstance(entry, FixedAggregateCatalogBuildEntry):
+    for entry in AGGREGATE_REGISTRY:
+        if isinstance(entry, FixedAggregateRegistryEntry):
             _append_fixed_catalog_action(
                 actions,
                 probability_buckets,
@@ -211,7 +210,9 @@ def _append_fixed_catalog_action(
     prior_catalog: PriorWeightsCatalog,
     fighter_transfer_upper_bound: int,
 ) -> None:
-    spec = AGGREGATE_ACTION_SPECS[action_id]
+    spec = lookup_aggregate_action_spec(action_id)
+    if spec is None:
+        raise ValueError(f"unknown aggregate action {action_id!r}")
     upper_bound = _fixed_action_upper_bound(
         spec,
         observation=observation,

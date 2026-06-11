@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import TypeAlias
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AGGREGATE_CATALOG_BUILD_ENTRIES,
-    FixedAggregateCatalogBuildEntry,
+    AGGREGATE_REGISTRY,
+    FixedAggregateRegistryEntry,
     base_bin_bounds_for_action,
     magnitude_bin_index,
 )
@@ -395,8 +395,8 @@ def _resolve_aggregate_priors(
     bucket_weights: dict[str, tuple[int, ...]] = {}
     band_tables = asset.aggregates.get(band, {})
 
-    for entry in AGGREGATE_CATALOG_BUILD_ENTRIES:
-        if isinstance(entry, FixedAggregateCatalogBuildEntry):
+    for entry in AGGREGATE_REGISTRY:
+        if isinstance(entry, FixedAggregateRegistryEntry):
             action_id = entry.action_id
             aggregate = band_tables.get(action_id)
             if aggregate is None:

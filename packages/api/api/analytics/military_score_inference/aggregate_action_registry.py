@@ -97,104 +97,118 @@ class AggregateActionTemplateSpec:
         return f"{self.action_id_prefix}{entity_id}"
 
 
-AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
-    "planet_defense_posts_added_total": AggregateActionSpec(
-        prior_shape="histogram",
-        bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
-        is_fine_grained_slack=True,
-        catalog_label="Planet defense posts added",
-        score_delta_2x=planet_defense_post_score_delta_2x,
-        catalog_config_cap=lambda config: config.max_planet_defense_posts,
-    ),
-    "starbase_defense_posts_added_total": AggregateActionSpec(
-        prior_shape="histogram",
-        bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
-        is_fine_grained_slack=True,
-        catalog_label="Starbase defense posts added",
-        score_delta_2x=starbase_defense_post_score_delta_2x,
-        catalog_config_cap=lambda config: config.max_starbase_defense_posts,
-    ),
-    "starbase_fighters_added_total": AggregateActionSpec(
-        prior_shape="histogram",
-        bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
-        is_fighter_channel_member=True,
-        is_fine_grained_slack=True,
-        catalog_label="Starbase fighters added",
-        score_delta_2x=starbase_fighter_score_delta_2x,
-        catalog_config_cap=lambda config: config.max_starbase_fighters,
-    ),
-    "ship_fighters_added_total": AggregateActionSpec(
-        prior_shape="histogram",
-        bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
-        is_fighter_channel_member=True,
-        is_fine_grained_slack=True,
-        catalog_label="Ship fighters added",
-        score_delta_2x=loaded_ship_fighter_score_delta_2x,
-        catalog_config_cap=lambda config: config.max_ship_fighters,
-    ),
-    "fighters_starbase_to_ship": AggregateActionSpec(
-        prior_shape="counts",
-        bin_bounds=None,
-        allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
-        is_fighter_channel_member=True,
-        is_fine_grained_slack=True,
-        catalog_label="Fighters transferred starbase to ship",
-        score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
-    ),
-    "fighters_ship_to_starbase": AggregateActionSpec(
-        prior_shape="counts",
-        bin_bounds=None,
-        allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
-        is_fighter_channel_member=True,
-        is_fine_grained_slack=True,
-        catalog_label="Fighters transferred ship to starbase",
-        score_delta_2x=lambda: -STARBASE_FIGHTER_SCORE_DELTA_2X,
-    ),
-}
-
-AGGREGATE_ACTION_TEMPLATES: tuple[AggregateActionTemplateSpec, ...] = (
-    AggregateActionTemplateSpec(
-        action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
-        prior_shape="histogram",
-        bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
-        allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
-        is_fine_grained_slack=True,
-        catalog_config_cap=lambda config: config.max_ship_torpedoes_per_type,
-        catalog_label_format="Ship torpedoes loaded ({name})",
-        score_delta_2x_from_cost=loaded_ship_torpedo_score_delta_2x,
-    ),
-)
-
-
 @dataclass(frozen=True)
-class FixedAggregateCatalogBuildEntry:
+class FixedAggregateRegistryEntry:
     action_id: str
+    spec: AggregateActionSpec
 
 
 @dataclass(frozen=True)
-class TemplateAggregateCatalogBuildEntry:
+class TemplateAggregateRegistryEntry:
     template: AggregateActionTemplateSpec
 
 
-AggregateCatalogBuildEntry = FixedAggregateCatalogBuildEntry | TemplateAggregateCatalogBuildEntry
-
+AggregateRegistryEntry = FixedAggregateRegistryEntry | TemplateAggregateRegistryEntry
 
 # Catalog build order: config-cap histogram actions, torpedo template, fighter transfers.
-AGGREGATE_CATALOG_BUILD_ENTRIES: tuple[AggregateCatalogBuildEntry, ...] = (
-    FixedAggregateCatalogBuildEntry("planet_defense_posts_added_total"),
-    FixedAggregateCatalogBuildEntry("starbase_defense_posts_added_total"),
-    FixedAggregateCatalogBuildEntry("starbase_fighters_added_total"),
-    FixedAggregateCatalogBuildEntry("ship_fighters_added_total"),
-    TemplateAggregateCatalogBuildEntry(AGGREGATE_ACTION_TEMPLATES[0]),
-    FixedAggregateCatalogBuildEntry("fighters_starbase_to_ship"),
-    FixedAggregateCatalogBuildEntry("fighters_ship_to_starbase"),
+AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
+    FixedAggregateRegistryEntry(
+        action_id="planet_defense_posts_added_total",
+        spec=AggregateActionSpec(
+            prior_shape="histogram",
+            bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
+            is_fine_grained_slack=True,
+            catalog_label="Planet defense posts added",
+            score_delta_2x=planet_defense_post_score_delta_2x,
+            catalog_config_cap=lambda config: config.max_planet_defense_posts,
+        ),
+    ),
+    FixedAggregateRegistryEntry(
+        action_id="starbase_defense_posts_added_total",
+        spec=AggregateActionSpec(
+            prior_shape="histogram",
+            bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
+            is_fine_grained_slack=True,
+            catalog_label="Starbase defense posts added",
+            score_delta_2x=starbase_defense_post_score_delta_2x,
+            catalog_config_cap=lambda config: config.max_starbase_defense_posts,
+        ),
+    ),
+    FixedAggregateRegistryEntry(
+        action_id="starbase_fighters_added_total",
+        spec=AggregateActionSpec(
+            prior_shape="histogram",
+            bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
+            is_fighter_channel_member=True,
+            is_fine_grained_slack=True,
+            catalog_label="Starbase fighters added",
+            score_delta_2x=starbase_fighter_score_delta_2x,
+            catalog_config_cap=lambda config: config.max_starbase_fighters,
+        ),
+    ),
+    FixedAggregateRegistryEntry(
+        action_id="ship_fighters_added_total",
+        spec=AggregateActionSpec(
+            prior_shape="histogram",
+            bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
+            is_fighter_channel_member=True,
+            is_fine_grained_slack=True,
+            catalog_label="Ship fighters added",
+            score_delta_2x=loaded_ship_fighter_score_delta_2x,
+            catalog_config_cap=lambda config: config.max_ship_fighters,
+        ),
+    ),
+    TemplateAggregateRegistryEntry(
+        template=AggregateActionTemplateSpec(
+            action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
+            prior_shape="histogram",
+            bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
+            allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
+            is_fine_grained_slack=True,
+            catalog_config_cap=lambda config: config.max_ship_torpedoes_per_type,
+            catalog_label_format="Ship torpedoes loaded ({name})",
+            score_delta_2x_from_cost=loaded_ship_torpedo_score_delta_2x,
+        ),
+    ),
+    FixedAggregateRegistryEntry(
+        action_id="fighters_starbase_to_ship",
+        spec=AggregateActionSpec(
+            prior_shape="counts",
+            bin_bounds=None,
+            allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
+            is_fighter_channel_member=True,
+            is_fine_grained_slack=True,
+            catalog_label="Fighters transferred starbase to ship",
+            score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
+        ),
+    ),
+    FixedAggregateRegistryEntry(
+        action_id="fighters_ship_to_starbase",
+        spec=AggregateActionSpec(
+            prior_shape="counts",
+            bin_bounds=None,
+            allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
+            is_fighter_channel_member=True,
+            is_fine_grained_slack=True,
+            catalog_label="Fighters transferred ship to starbase",
+            score_delta_2x=lambda: -STARBASE_FIGHTER_SCORE_DELTA_2X,
+        ),
+    ),
 )
+
+AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
+    entry.action_id: entry.spec
+    for entry in AGGREGATE_REGISTRY
+    if isinstance(entry, FixedAggregateRegistryEntry)
+}
 
 
 def lookup_aggregate_action_template(action_id: str) -> AggregateActionTemplateSpec | None:
-    for template in AGGREGATE_ACTION_TEMPLATES:
-        if action_id.startswith(template.action_id_prefix):
-            return template
+    for entry in AGGREGATE_REGISTRY:
+        if isinstance(entry, TemplateAggregateRegistryEntry):
+            template = entry.template
+            if action_id.startswith(template.action_id_prefix):
+                return template
     return None
 
 
