@@ -301,6 +301,8 @@ This bin-indicator pattern applies to:
 - loaded torpedoes by type,
 - future mine-laying quantities.
 
+**Inference build priors (#86):** population-level weights for ship combos and aggregate magnitude bins are loaded from per-**inference game category** YAML assets, converted from un-normalized counts to log-probability integer weights at catalog build. Authoritative spec: [design-military-score-inference-build-priors.md](design-military-score-inference-build-priors.md).
+
 ---
 
 ## 6. Top-K solving

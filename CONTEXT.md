@@ -356,6 +356,59 @@ _Avoid_: fleet prior, runtime tier config, injection source
 Static YAML ladder under `assets/analytics/military_score_build_inference/` (repo root). Defines ordered **inference tier policy** steps: per-axis tech-level allowlists, aggregate allowlists and caps, `alpha`, beam/launcher slot-count widening at named steps, and flags such as use-player-active-lists. Loaded at solve time via a resolver that accepts an optional **inference tier policy overlay** (no-op when absent). Not mixed with storage seed fixtures.
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
 
+**Inference build prior**:
+Population-level weights that feed **inference solution rank weight** via additive log-probability composition at catalog-build time. The **inference build prior asset** (selected by **inference game category**) stores **un-normalized empirical count distributions**; a runtime step converts counts to integer log-probability weights when the catalog is built for a solve. Ship builds compose as `log P(hull) + log P(components | hull category) + optional sparse overrides`; aggregate actions use histogram-derived magnitude-bin distributions. Within each asset, partition keys: **inference ship-limit band** on all families; **race** modifiers on hull marginals only. Distinct from **inference tier policy overlay** (fleet-informed runtime adjustments, #87).
+_Avoid_: probability score, prior_weights.yaml (filename in prose only when citing path)
+
+**Inference game category**:
+Immutable label for a class of games (e.g. standard, epic, blitz) used to select which **inference build prior asset** the console loads. Assigned by a deterministic ordered-predicate function of game settings in Core (same function in the mining sampler and at solve time). v1 ids include at least `standard`, `blitz`, `epic`; first matching rule wins. Categories have stable unique identifiers; once defined they do not change meaning. If no asset exists for the resolved category, fall back to the `standard` asset. Separate assets per category avoid runtime cross-partition overhead.
+_Avoid_: game mode (unqualified), gametype int alone (wire field -- not the category id unless a rule maps it)
+
+**Inference prior mining corpus**:
+Explicit allowlist of finished game ids used to mine **inference build prior asset** count tables. All listed games must be finished so every perspective's turns are available. One mined asset (or asset set) per **inference game category**. Distinct from the inference regression corpus (#62--#66) and from ad-hoc storage enumeration.
+_Avoid_: all stored games, in-progress games
+
+**Inference build prior asset**:
+Static YAML under `assets/analytics/military_score_build_inference/` holding un-normalized count tables for hull marginals, **inference conditional component prior** cells, and **inference aggregate prior** histograms. One file per **inference game category** (e.g. category id in filename). At catalog-build time the console resolves category from the loaded game, loads the matching file, normalizes each table with Laplace smoothing (`alpha = 1`), converts to integer log-probability weights, and composes additively in log space for ship combos. v1 hand-seeds pseudo-counts; structure accepts mined replacements without solver changes.
+_Avoid_: normalized probabilities in the asset, hardcoded weights in Python, single monolithic asset for all game types
+
+**Inference hull category**:
+A role label derived from hull characteristics and build configuration (not a hand-maintained hull-id table) that keys **inference conditional component prior** cells. Assignment uses priority predicates with sparse hull-id overrides (`concepts/` or equivalent). v1 categories:
+
+| Category | Predicate (summary) |
+|----------|----------------------|
+| **true freighter** | No fighter bays, beams, or launcher slots |
+| **weaponless hull** | Has weapon slots but built empty (counts as freighter on scoreboard; Fed refit relevance) |
+| **alchemy ship** | Override / `special` (explicit rules) |
+| **carrier** | `fighterbays > 0` |
+| **battleship** | `beams > 0`, `launchers > 0`, and `mass >` fixed hand-tuned constant in Core (v1; verified against anchor hulls in the standard roster) |
+| **torpedo ship** | `launchers > 0` (beams allowed) |
+| **beam-ship** | `beams > 0`, `launchers == 0` |
+| **utility** | Sparse overrides only; priority list should not reach this in normal cases |
+
+`techlevel` is not a category axis in v1. Shared resolver lives in Core (alongside hull classification helpers), not in the prior YAML.
+_Avoid_: hull class (unqualified), ship type preset, freighter (unqualified -- use **true freighter** or **weaponless hull**)
+
+**Inference conditional component prior**:
+Un-normalized count distribution over engine, beam, torpedo type, and slot-fill pattern conditioned on `(inference hull category, inference ship-limit band)`, composed additively in log space into each **ship build combo**'s rank-weight contribution at catalog-build time. Race-agnostic in v1 (pooled across races).
+_Avoid_: combo prior, factored weight table
+
+**Inference aggregate prior**:
+Un-normalized count distribution over aggregate inference actions, stored as raw magnitude histograms (discrete totals or histogram edges in the **inference build prior asset**). At catalog-build time the loader aggregates histogram counts into the solver's fixed **probability bucket** ranges and converts via the same Laplace log rule as other tables. Partitioned by **inference ship-limit band**. v1 hand-seeds use pseudo-counts on histogram edges chosen so runtime bucketing reproduces intended modest/heavy/extreme ratios (mapping is not unique). Mined from per-turn-player inventory-delta observations.
+_Avoid_: bin-level-only asset (without histogram layer), per-unit aggregate weights
+
+**Inference hull marginal prior**:
+Un-normalized count distribution over hull ids for **inference prior ship-build observation** mining. Partitioned by **inference ship-limit band**; optional per-race count slices in the asset schema, with global pooled tables as default and sparse per-race rows for race-exclusive or strongly race-characteristic hulls. v1 hand-seeds global + overrides only; full race-stratified tables filled by mining later. Component conditionals do not cross race.
+_Avoid_: race-conditioned engine priors (v1 -- see fleet overlay #87)
+
+**Inference ship-limit band**:
+Coarse partition for **inference build prior** tables: whether ship-limit queue rules apply on the observation turn (`before_ship_limit` vs `after_ship_limit`). Derived from the same signal as `InferenceObservation.is_after_ship_limit` (game-total or per-player limit per `shiplimittype`). All prior families -- hull, component, aggregate -- split on this band in v1.
+_Avoid_: turn band, early/mid/late game (for priors v1)
+
+**Inference prior ship-build observation**:
+One counted ship build for **inference build prior** mining. On turn *T*, take a player-owned **starbase** with `isbuilding == true` and read its build order (`buildhullid`, `buildengineid`, `buildbeamid`, `buildtorpedoid`, `buildbeamcount`, `buildtorpcount`). On turn *T+1*, validate by a **new** ship (ship id absent on turn *T*) at that starbase's planet whose fitted spec **exactly matches** the order. Reject pre-existing ships that moved to the same coordinates with an identical spec. Excludes inventory-diff detection (trades, destruction noise) and unvalidated queued orders. Distinct from inference corpus inventory ground truth (#64).
+_Avoid_: new ship diff, build queue snapshot alone, hull-only match
+
 **Inference solution streaming**:
 NDJSON wire protocol (**#71**, Phase 1H). The SPA opens **one multiplexed table stream** (`GET .../inference/table-stream`) for all scoreboard rows on the current shell scope; events carry an optional `playerId` tag (except `globalPause`). Emits whenever a **new** **inference explanation signature** is admitted to **inference merged top-K** -- within-tier enumeration and cross-tier ladder progress -- so the dashed-zero badge transitions to a solid count before top-K is full. Admission is incremental-only: the solver `on_solution` callback merges into held top-K; there is no post-solve re-merge. Each `solution` event carries the **full held top-K** for that row (ranked by **inference solution rank weight**); the consumer replaces local held state from the event (no client-side merge). Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness. **Stream disconnect** (refresh, network loss, disable build inference, tab close) cancels all in-flight work and clears **inference global pause** on the server; reopening the table stream on the same scope **recalculates from scratch**.
 _Avoid_: websocket inference
