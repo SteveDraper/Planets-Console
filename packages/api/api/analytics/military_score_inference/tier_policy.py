@@ -8,24 +8,18 @@ from typing import Any, Literal
 
 import yaml
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    aggregate_allowlist_key,
+)
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    is_fine_grained_slack_action as registry_is_fine_grained_slack_action,
+)
 from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
 FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
 FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
 
-FINE_GRAINED_SLACK_ACTION_IDS = frozenset(
-    {
-        "planet_defense_posts_added_total",
-        "starbase_defense_posts_added_total",
-        "starbase_fighters_added_total",
-        "ship_fighters_added_total",
-        "fighters_starbase_to_ship",
-        "fighters_ship_to_starbase",
-    }
-)
-SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY = "ship_torps_per_type"
-FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY = "fighter_transfers_per_direction"
 DEFAULT_MAX_SEEDS = 5
 
 # ``all: true`` widens eligibility on that axis. It does **not** mean "every component id
@@ -367,9 +361,7 @@ def resolve_tier_policies(
 
 
 def is_fine_grained_slack_action(action_id: str) -> bool:
-    if action_id in FINE_GRAINED_SLACK_ACTION_IDS:
-        return True
-    return action_id.startswith("ship_torps_loaded_")
+    return registry_is_fine_grained_slack_action(action_id)
 
 
 def compute_aggregate_admission_caps(
@@ -388,8 +380,7 @@ def compute_aggregate_admission_caps(
 def resolved_aggregate_cap(action_id: str, allowlist: dict[str, int]) -> int | None:
     if action_id in allowlist:
         return allowlist[action_id]
-    if action_id.startswith("ship_torps_loaded_"):
-        return allowlist.get(SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY)
-    if action_id in {"fighters_starbase_to_ship", "fighters_ship_to_starbase"}:
-        return allowlist.get(FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY)
+    key = aggregate_allowlist_key(action_id)
+    if key is not None:
+        return allowlist.get(key)
     return None

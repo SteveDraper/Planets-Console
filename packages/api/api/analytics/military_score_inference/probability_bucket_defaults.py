@@ -1,5 +1,9 @@
 """Default magnitude-bin definitions for aggregate inference actions."""
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    HISTOGRAM_EXACT_ACTION_IDS,
+    SHIP_TORPS_LOADED_ACTION_PREFIX,
+)
 from api.analytics.military_score_inference.models import ProbabilityBucket
 
 PLANET_DEFENSE_POST_BUCKETS = (
@@ -28,8 +32,6 @@ SHIP_TORPEDO_BUCKETS = (
     ProbabilityBucket("extreme load", 101, 200, 5),
 )
 
-_SHIP_TORPS_LOADED_ACTION_PREFIX = "ship_torps_loaded_"
-
 _BUCKETS_BY_EXACT_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
     "planet_defense_posts_added_total": PLANET_DEFENSE_POST_BUCKETS,
     "starbase_defense_posts_added_total": STARBASE_DEFENSE_POST_BUCKETS,
@@ -37,7 +39,7 @@ _BUCKETS_BY_EXACT_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
     "ship_fighters_added_total": SHIP_FIGHTER_BUCKETS,
 }
 
-BUCKETED_ACTION_IDS = frozenset(_BUCKETS_BY_EXACT_ACTION_ID)
+BUCKETED_ACTION_IDS = HISTOGRAM_EXACT_ACTION_IDS
 
 
 def magnitude_bin_index(magnitude: int, buckets: tuple[ProbabilityBucket, ...]) -> int:
@@ -53,6 +55,6 @@ def base_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...] | N
     base_buckets = _BUCKETS_BY_EXACT_ACTION_ID.get(action_id)
     if base_buckets is not None:
         return base_buckets
-    if action_id.startswith(_SHIP_TORPS_LOADED_ACTION_PREFIX):
+    if action_id.startswith(SHIP_TORPS_LOADED_ACTION_PREFIX):
         return SHIP_TORPEDO_BUCKETS
     return None

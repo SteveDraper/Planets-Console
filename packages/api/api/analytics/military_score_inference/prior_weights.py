@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    is_counts_aggregate_action,
+    is_histogram_aggregate_action,
+)
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
@@ -298,15 +302,25 @@ def _resolve_aggregate_weights(
 
     for action_id, tables in band_tables.items():
         if "histogram" in tables:
+            if not is_histogram_aggregate_action(action_id):
+                raise ValueError(
+                    f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
+                )
             base_buckets = base_buckets_for_action(action_id)
             if base_buckets is None:
-                continue
+                raise ValueError(
+                    f"aggregates.{band}.{action_id!r} has no solver bucket definition"
+                )
             bucket_counts = _histogram_bucket_counts(tables["histogram"], base_buckets)
             log_weights = counts_to_log_weights(bucket_counts, scale=scale)
             bucket_weights[action_id] = tuple(
                 log_weights[index] for index in range(len(base_buckets))
             )
         elif "counts" in tables:
+            if not is_counts_aggregate_action(action_id):
+                raise ValueError(
+                    f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
+                )
             log_weights = counts_to_log_weights(tables["counts"], scale=scale)
             if log_weights:
                 action_weights[action_id] = next(iter(log_weights.values()))

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    aggregate_allowlist_key,
+    is_fighter_channel_member,
+    is_fine_grained_slack_action,
+    is_ship_torps_loaded_action,
+)
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
@@ -15,26 +21,11 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.probability_bucket_defaults import (
     magnitude_bin_index,
 )
-from api.analytics.military_score_inference.tier_policy import (
-    FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
-    SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
-    is_fine_grained_slack_action,
-)
 
 EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID = "evil_empire_free_starbase_fighters"
 
 TORPEDO_LOADS_SUPERCLASS = "torpedo_loads"
 FIGHTER_CHANNEL_SUPERCLASS = "fighter_channel"
-
-FIGHTER_CHANNEL_MEMBER_IDS = frozenset(
-    {
-        "starbase_fighters_added_total",
-        "ship_fighters_added_total",
-        "fighters_starbase_to_ship",
-        "fighters_ship_to_starbase",
-    }
-)
-
 
 def _default_parsimony_per_active_slack_type() -> int:
     return -(INFERENCE_PROBABILITY_WEIGHT_SCALE // 2)
@@ -74,10 +65,9 @@ def admission_cap_for_action(action_id: str, admission_caps: dict[str, int]) -> 
     """Return the admission cap for one catalog action id from raw allowlist history."""
     if action_id in admission_caps:
         return admission_caps[action_id]
-    if action_id.startswith("ship_torps_loaded_"):
-        return admission_caps.get(SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY)
-    if action_id in {"fighters_starbase_to_ship", "fighters_ship_to_starbase"}:
-        return admission_caps.get(FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY)
+    key = aggregate_allowlist_key(action_id)
+    if key is not None:
+        return admission_caps.get(key)
     return None
 
 
@@ -218,7 +208,7 @@ def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ..
         sorted(
             action_id
             for action_id in catalog_action_ids
-            if action_id.startswith("ship_torps_loaded_")
+            if is_ship_torps_loaded_action(action_id)
         )
     )
 
@@ -226,7 +216,7 @@ def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ..
 def fighter_channel_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
-            action_id for action_id in catalog_action_ids if action_id in FIGHTER_CHANNEL_MEMBER_IDS
+            action_id for action_id in catalog_action_ids if is_fighter_channel_member(action_id)
         )
     )
 
