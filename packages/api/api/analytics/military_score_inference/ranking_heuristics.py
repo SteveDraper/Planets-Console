@@ -27,6 +27,7 @@ EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID = "evil_empire_free_starbase_fighters"
 TORPEDO_LOADS_SUPERCLASS = "torpedo_loads"
 FIGHTER_CHANNEL_SUPERCLASS = "fighter_channel"
 
+
 def _default_parsimony_per_active_slack_type() -> int:
     return -(INFERENCE_PROBABILITY_WEIGHT_SCALE // 2)
 
@@ -206,9 +207,7 @@ def compute_overflow_objective_contribution(
 def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
-            action_id
-            for action_id in catalog_action_ids
-            if is_ship_torps_loaded_action(action_id)
+            action_id for action_id in catalog_action_ids if is_ship_torps_loaded_action(action_id)
         )
     )
 

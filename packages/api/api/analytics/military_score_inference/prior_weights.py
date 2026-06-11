@@ -308,9 +308,7 @@ def _resolve_aggregate_weights(
                 )
             base_buckets = base_buckets_for_action(action_id)
             if base_buckets is None:
-                raise ValueError(
-                    f"aggregates.{band}.{action_id!r} has no solver bucket definition"
-                )
+                raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bucket definition")
             bucket_counts = _histogram_bucket_counts(aggregate.histogram, base_buckets)
             log_weights = counts_to_log_weights(bucket_counts, scale=scale)
             bucket_weights[action_id] = tuple(
@@ -321,7 +319,7 @@ def _resolve_aggregate_weights(
                 raise ValueError(
                     f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
                 )
-            (count_key, count_value), = aggregate.counts.items()
+            ((count_key, count_value),) = aggregate.counts.items()
             action_weights[action_id] = counts_to_log_weights(
                 {count_key: count_value},
                 scale=scale,

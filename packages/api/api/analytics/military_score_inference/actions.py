@@ -11,15 +11,15 @@ from api.analytics.military_score_inference.component_eligibility import (
     turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
     ProbabilityBucket,
     ShipBuildCombo,
-)
-from api.analytics.military_score_inference.inference_probability_scale import (
-    INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.prior_weights import (
     PriorWeightsCatalog,
