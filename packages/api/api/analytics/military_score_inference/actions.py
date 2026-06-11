@@ -61,6 +61,7 @@ from api.concepts.races import (
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
+from api.models.player import Player
 
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
 
@@ -187,6 +188,7 @@ def build_action_catalog_from_turn(
         eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
         turn=turn,
+        player=player,
         prior_catalog=prior_catalog,
         policy_step=resolved_policy_step,
         policy_step_index=policy_step_index,
@@ -207,6 +209,7 @@ def build_action_catalog(
     eligible_torp_ids: frozenset[int],
     config: ActionCatalogConfig | None = None,
     turn: TurnInfo | None = None,
+    player: Player | None = None,
     prior_catalog: PriorWeightsCatalog | None = None,
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
@@ -214,6 +217,8 @@ def build_action_catalog(
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
+    if turn is not None and player is None:
+        player = player_by_id(turn, observation.player_id)
     prior_diagnostics = prior_catalog.diagnostics if prior_catalog is not None else None
 
     actions: list[CandidateAction] = []
@@ -227,9 +232,14 @@ def build_action_catalog(
             resolved_policy_step.aggregate_allowlist,
         )
     )
-    if turn is not None:
+    if turn is not None and player is not None:
         actions.extend(
-            _evil_empire_free_starbase_fighter_actions(observation, turn, catalog_config)
+            _evil_empire_free_starbase_fighter_actions(
+                observation,
+                turn,
+                catalog_config,
+                player,
+            )
         )
 
     kept_actions: list[CandidateAction] = []
@@ -331,9 +341,9 @@ def _evil_empire_free_starbase_fighter_actions(
     observation: InferenceObservation,
     turn: TurnInfo,
     config: ActionCatalogConfig,
+    player: Player,
 ) -> list[CandidateAction]:
     """High-probability free starbase fighters for Evil Empire when resources allow."""
-    player = player_by_id(turn, observation.player_id)
     if not is_evil_empire(player.raceid):
         return []
 
