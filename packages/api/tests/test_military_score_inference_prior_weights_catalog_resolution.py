@@ -2,11 +2,17 @@
 
 from dataclasses import replace
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    SHIP_TORPEDO_BIN_BOUNDS,
+)
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.prior_weights import resolve_prior_weights_catalog
-from api.analytics.military_score_inference.prior_weights_laplace import counts_to_log_weights
+from api.analytics.military_score_inference.prior_weights_laplace import (
+    counts_to_log_weights,
+    implicit_uniform_component_counts,
+)
 from api.models.components import Beam, Engine, Torpedo
 
 from tests.fixtures.military_score_inference import _observation
@@ -122,6 +128,36 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
     assert with_beam_two == with_beam_three
     assert beam_two_weight == beam_three_weight == expected_uniform_weight
     assert expected_uniform_weight < 0
+
+
+def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
+    catalog = resolve_prior_weights_catalog(
+        _observation(),
+        replace(sample_turn.settings, endturn=100, shiplimit=200),
+        eligible_torp_ids=frozenset({1, 12}),
+    )
+    expected_uniform_weights = tuple(
+        counts_to_log_weights(
+            implicit_uniform_component_counts(frozenset(range(len(SHIP_TORPEDO_BIN_BOUNDS)))),
+            scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
+        )[index]
+        for index in range(len(SHIP_TORPEDO_BIN_BOUNDS))
+    )
+    asset_buckets = catalog.probability_buckets_for_action(
+        "ship_torps_loaded_1",
+        SHIP_TORPEDO_BIN_BOUNDS,
+    )
+    implicit_buckets = catalog.probability_buckets_for_action(
+        "ship_torps_loaded_12",
+        SHIP_TORPEDO_BIN_BOUNDS,
+    )
+
+    asset_marginals = tuple(bucket.marginal_weight for bucket in asset_buckets)
+    implicit_marginals = tuple(bucket.marginal_weight for bucket in implicit_buckets)
+
+    assert implicit_marginals == expected_uniform_weights
+    assert len(set(implicit_marginals)) == 1
+    assert asset_marginals != implicit_marginals
 
 
 def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):

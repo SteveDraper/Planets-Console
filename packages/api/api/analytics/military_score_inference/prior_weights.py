@@ -337,6 +337,36 @@ def _resolve_component_tables(
     }
 
 
+def _implicit_uniform_histogram_bucket_weights(
+    bin_bounds: tuple[ProbabilityBinBounds, ...],
+    *,
+    scale: int,
+) -> tuple[int, ...]:
+    bucket_counts = implicit_uniform_component_counts(frozenset(range(len(bin_bounds))))
+    log_weights = counts_to_log_weights(bucket_counts, scale=scale)
+    return tuple(log_weights[index] for index in range(len(bin_bounds)))
+
+
+def _fill_implicit_uniform_torpedo_histograms(
+    bucket_weights: dict[str, tuple[int, ...]],
+    eligible_torp_ids: frozenset[int],
+    *,
+    scale: int,
+) -> dict[str, tuple[int, ...]]:
+    filled = dict(bucket_weights)
+    for torp_id in eligible_torp_ids:
+        action_id = f"{SHIP_TORPS_LOADED_ACTION_PREFIX}{torp_id}"
+        if action_id in filled:
+            continue
+        bin_bounds = base_bin_bounds_for_action(action_id)
+        if bin_bounds is None:
+            raise ValueError(
+                f"eligible torpedo {torp_id} has no solver bin definition for {action_id!r}"
+            )
+        filled[action_id] = _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
+    return filled
+
+
 def _resolve_aggregate_weights(
     asset: PriorWeightsAsset,
     *,
@@ -364,19 +394,6 @@ def _resolve_aggregate_weights(
                 scale=scale,
             )[count_key]
     return action_weights, bucket_weights
-
-
-def _validate_eligible_torpedo_histograms(
-    bucket_weights: dict[str, tuple[int, ...]],
-    eligible_torp_ids: frozenset[int],
-) -> None:
-    for torp_id in eligible_torp_ids:
-        action_id = f"{SHIP_TORPS_LOADED_ACTION_PREFIX}{torp_id}"
-        if action_id not in bucket_weights:
-            raise ValueError(
-                f"incomplete prior: missing histogram marginal weights for aggregate action "
-                f"{action_id!r}"
-            )
 
 
 def resolve_prior_weights_catalog(
@@ -420,7 +437,11 @@ def resolve_prior_weights_catalog(
         scale=scale,
     )
     if eligible_torp_ids:
-        _validate_eligible_torpedo_histograms(aggregate_bucket_weights, eligible_torp_ids)
+        aggregate_bucket_weights = _fill_implicit_uniform_torpedo_histograms(
+            aggregate_bucket_weights,
+            eligible_torp_ids,
+            scale=scale,
+        )
 
     combo_log_overrides = counts_to_log_weights(asset.combo_overrides, scale=scale)
     hull_log_overrides_int = counts_to_log_weights(asset.hull_overrides, scale=scale)
