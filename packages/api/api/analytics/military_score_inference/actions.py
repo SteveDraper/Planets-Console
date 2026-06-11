@@ -7,7 +7,9 @@ from api.analytics.military_score_inference.accelerated_start import (
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    base_buckets_for_action,
+    AGGREGATE_ACTION_SPECS,
+    AggregateActionSpec,
+    base_bin_bounds_for_action,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
 )
@@ -40,10 +42,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
 )
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
-    loaded_ship_fighter_score_delta_2x,
     loaded_ship_torpedo_score_delta_2x,
-    planet_defense_post_score_delta_2x,
-    starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
@@ -61,7 +60,7 @@ from api.concepts.races import (
     is_evil_empire,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
-from api.models.game import GameSettings, TurnInfo
+from api.models.game import TurnInfo
 from api.models.player import Player
 
 DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
@@ -167,6 +166,15 @@ def build_action_catalog_from_turn(
         resolved_mask=resolved_mask,
     )
     player = player_by_id(turn, observation.player_id)
+    prior_catalog = resolve_prior_weights_catalog(
+        observation,
+        turn.settings,
+        race_id=player.raceid,
+        buildable_hull_ids=catalog_context.buildable_hull_ids,
+        eligible_engine_ids=catalog_context.eligible_engine_ids,
+        eligible_beam_ids=catalog_context.eligible_beam_ids,
+        eligible_torp_ids=catalog_context.eligible_torp_ids,
+    )
     return build_action_catalog(
         observation,
         hulls_by_id=catalog_context.hulls_by_id,
@@ -178,7 +186,7 @@ def build_action_catalog_from_turn(
         eligible_beam_ids=catalog_context.eligible_beam_ids,
         eligible_torp_ids=catalog_context.eligible_torp_ids,
         config=config,
-        settings=turn.settings,
+        prior_catalog=prior_catalog,
         turn=turn,
         player=player,
         policy_step=resolved_policy_step,
@@ -198,33 +206,19 @@ def build_action_catalog(
     eligible_engine_ids: frozenset[int],
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
+    prior_catalog: PriorWeightsCatalog,
     config: ActionCatalogConfig | None = None,
-    settings: GameSettings | None = None,
     turn: TurnInfo | None = None,
     player: Player | None = None,
-    prior_catalog: PriorWeightsCatalog | None = None,
-    apply_priors: bool = True,
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
     policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
-    if settings is None and turn is not None:
-        settings = turn.settings
     if turn is not None and player is None:
         player = player_by_id(turn, observation.player_id)
-    if apply_priors and prior_catalog is None and settings is not None:
-        prior_catalog = resolve_prior_weights_catalog(
-            observation,
-            settings,
-            race_id=player.raceid if player is not None else None,
-            buildable_hull_ids=buildable_hull_ids,
-            eligible_engine_ids=eligible_engine_ids,
-            eligible_beam_ids=eligible_beam_ids,
-            eligible_torp_ids=eligible_torp_ids,
-        )
-    prior_diagnostics = prior_catalog.diagnostics if prior_catalog is not None else None
+    prior_diagnostics = prior_catalog.diagnostics
 
     aggregate_actions, probability_buckets = _build_aggregate_actions(
         observation,
@@ -379,38 +373,35 @@ def _evil_empire_free_starbase_fighter_actions(
 
 def _counts_aggregate_probability_weight(
     action_id: str,
-    config: ActionCatalogConfig,
-    prior_catalog: PriorWeightsCatalog | None,
+    prior_catalog: PriorWeightsCatalog,
 ) -> int:
-    if prior_catalog is not None:
-        prior_weight = prior_catalog.aggregate_probability_weight(action_id)
-        if prior_weight is not None:
-            return prior_weight
-    return config.fighter_transfer_probability_weight
+    prior_weight = prior_catalog.aggregate_probability_weight(action_id)
+    if prior_weight is None:
+        raise ValueError(
+            f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
+        )
+    return prior_weight
 
 
 def _aggregate_action_probability_weight(
     action_id: str,
-    config: ActionCatalogConfig,
-    prior_catalog: PriorWeightsCatalog | None,
+    prior_catalog: PriorWeightsCatalog,
 ) -> int:
     if is_histogram_aggregate_action(action_id):
         return 0
     if is_counts_aggregate_action(action_id):
-        return _counts_aggregate_probability_weight(action_id, config, prior_catalog)
+        return _counts_aggregate_probability_weight(action_id, prior_catalog)
     return 0
 
 
 def _probability_buckets_for_aggregate_action(
     action_id: str,
-    prior_catalog: PriorWeightsCatalog | None,
+    prior_catalog: PriorWeightsCatalog,
 ) -> tuple[ProbabilityBucket, ...] | None:
-    base_buckets = base_buckets_for_action(action_id)
-    if base_buckets is None:
+    bin_bounds = base_bin_bounds_for_action(action_id)
+    if bin_bounds is None:
         return None
-    if prior_catalog is not None:
-        return prior_catalog.probability_buckets_for_action(action_id, base_buckets)
-    return base_buckets
+    return prior_catalog.probability_buckets_for_action(action_id, bin_bounds)
 
 
 def _append_aggregate_action(
@@ -421,9 +412,8 @@ def _append_aggregate_action(
     label: str,
     score_delta_2x: int,
     upper_bound: int,
-    config: ActionCatalogConfig,
     aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog | None,
+    prior_catalog: PriorWeightsCatalog,
 ) -> None:
     allowlist_cap = resolved_aggregate_cap(action_id, aggregate_allowlist)
     if allowlist_cap is None:
@@ -437,11 +427,7 @@ def _append_aggregate_action(
             label=label,
             score_delta_2x=score_delta_2x,
             upper_bound=capped_upper,
-            probability_weight=_aggregate_action_probability_weight(
-                action_id,
-                config,
-                prior_catalog,
-            ),
+            probability_weight=_aggregate_action_probability_weight(action_id, prior_catalog),
         )
     )
     buckets = _probability_buckets_for_aggregate_action(action_id, prior_catalog)
@@ -449,76 +435,61 @@ def _append_aggregate_action(
         probability_buckets[action_id] = buckets
 
 
+def _append_catalog_spec_action(
+    actions: list[CandidateAction],
+    probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
+    *,
+    action_id: str,
+    spec: AggregateActionSpec,
+    upper_bound: int,
+    aggregate_allowlist: dict[str, int],
+    prior_catalog: PriorWeightsCatalog,
+) -> None:
+    score_delta_2x = spec.score_delta_2x
+    if score_delta_2x is None:
+        return
+    _append_aggregate_action(
+        actions,
+        probability_buckets,
+        action_id=action_id,
+        label=spec.catalog_label,
+        score_delta_2x=score_delta_2x(),
+        upper_bound=upper_bound,
+        aggregate_allowlist=aggregate_allowlist,
+        prior_catalog=prior_catalog,
+    )
+
+
 def _build_aggregate_actions(
     observation: InferenceObservation,
     config: ActionCatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
     aggregate_allowlist: dict[str, int],
-    prior_catalog: PriorWeightsCatalog | None,
+    prior_catalog: PriorWeightsCatalog,
 ) -> tuple[list[CandidateAction], dict[str, tuple[ProbabilityBucket, ...]]]:
     actions: list[CandidateAction] = []
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
 
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id="planet_defense_posts_added_total",
-        label="Planet defense posts added",
-        score_delta_2x=planet_defense_post_score_delta_2x(),
-        upper_bound=_residual_count_bound(
-            observation,
-            planet_defense_post_score_delta_2x(),
-            config.max_planet_defense_posts,
-        ),
-        config=config,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id="starbase_defense_posts_added_total",
-        label="Starbase defense posts added",
-        score_delta_2x=starbase_defense_post_score_delta_2x(),
-        upper_bound=_residual_count_bound(
-            observation,
-            starbase_defense_post_score_delta_2x(),
-            config.max_starbase_defense_posts,
-        ),
-        config=config,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id="starbase_fighters_added_total",
-        label="Starbase fighters added",
-        score_delta_2x=starbase_fighter_score_delta_2x(),
-        upper_bound=_residual_count_bound(
-            observation,
-            starbase_fighter_score_delta_2x(),
-            config.max_starbase_fighters,
-        ),
-        config=config,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id="ship_fighters_added_total",
-        label="Ship fighters added",
-        score_delta_2x=loaded_ship_fighter_score_delta_2x(),
-        upper_bound=_residual_count_bound(
-            observation,
-            loaded_ship_fighter_score_delta_2x(),
-            config.max_ship_fighters,
-        ),
-        config=config,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
+    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+        if spec.catalog_build_phase != "pre_torpedo":
+            continue
+        config_cap = spec.config_cap_field
+        if config_cap is None or spec.score_delta_2x is None:
+            continue
+        _append_catalog_spec_action(
+            actions,
+            probability_buckets,
+            action_id=action_id,
+            spec=spec,
+            upper_bound=_residual_count_bound(
+                observation,
+                spec.score_delta_2x(),
+                getattr(config, config_cap),
+            ),
+            aggregate_allowlist=aggregate_allowlist,
+            prior_catalog=prior_catalog,
+        )
+
     for torpedo_id in sorted(torpedos_by_id):
         torpedo = torpedos_by_id[torpedo_id]
         per_torpedo_score = loaded_ship_torpedo_score_delta_2x(torpedo.torpedocost)
@@ -533,7 +504,6 @@ def _build_aggregate_actions(
                 per_torpedo_score,
                 config.max_ship_torpedoes_per_type,
             ),
-            config=config,
             aggregate_allowlist=aggregate_allowlist,
             prior_catalog=prior_catalog,
         )
@@ -546,27 +516,17 @@ def _build_aggregate_actions(
             config.max_fighter_transfers,
         ),
     )
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id="fighters_starbase_to_ship",
-        label="Fighters transferred starbase to ship",
-        score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
-        upper_bound=transfer_cap,
-        config=config,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
-    _append_aggregate_action(
-        actions,
-        probability_buckets,
-        action_id="fighters_ship_to_starbase",
-        label="Fighters transferred ship to starbase",
-        score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
-        upper_bound=transfer_cap,
-        config=config,
-        aggregate_allowlist=aggregate_allowlist,
-        prior_catalog=prior_catalog,
-    )
+    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
+        if spec.catalog_build_phase != "post_torpedo":
+            continue
+        _append_catalog_spec_action(
+            actions,
+            probability_buckets,
+            action_id=action_id,
+            spec=spec,
+            upper_bound=transfer_cap,
+            aggregate_allowlist=aggregate_allowlist,
+            prior_catalog=prior_catalog,
+        )
 
     return actions, probability_buckets

@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
     turn_catalog_context_for_policy_step,
 )
+from api.analytics.military_score_inference.prior_weights import resolve_prior_weights_catalog
 from api.analytics.military_score_inference.scoring import (
     STARBASE_FIGHTER_SCORE_DELTA_2X,
     ship_construction_score_delta_2x,
@@ -38,11 +39,11 @@ P5_TURN6_PATH = REPO_ROOT / ".data" / "games" / "628580" / "5" / "turns" / "6.js
 GAME_INFO_PATH = REPO_ROOT / ".data" / "games" / "628580" / "info.json"
 
 
-def test_generated_actions_have_finite_bounds(synthetic_catalog_context):
+def test_generated_actions_have_finite_bounds(synthetic_catalog_build_context):
     catalog = build_action_catalog(
         _observation(),
         config=ActionCatalogConfig(max_fighter_transfers=10),
-        **synthetic_catalog_context,
+        **synthetic_catalog_build_context,
     )
 
     assert catalog.catalog_size > 0
@@ -56,8 +57,8 @@ def test_generated_actions_have_finite_bounds(synthetic_catalog_context):
         assert combo.upper_bound < 10_000
 
 
-def test_noisy_actions_are_aggregate_actions(synthetic_catalog_context):
-    catalog = build_action_catalog(_observation(), **synthetic_catalog_context)
+def test_noisy_actions_are_aggregate_actions(synthetic_catalog_build_context):
+    catalog = build_action_catalog(_observation(), **synthetic_catalog_build_context)
     aggregate_actions = [
         action
         for action in catalog.aggregate_actions
@@ -69,10 +70,10 @@ def test_noisy_actions_are_aggregate_actions(synthetic_catalog_context):
         assert "planet" in action.id or "starbase" in action.id or "ship_" in action.id
 
 
-def test_ship_build_combos_respect_observed_count_deltas(synthetic_catalog_context):
+def test_ship_build_combos_respect_observed_count_deltas(synthetic_catalog_build_context):
     catalog = build_action_catalog(
         _observation(warship_delta=2, freighter_delta=1, starbases_owned=5),
-        **synthetic_catalog_context,
+        **synthetic_catalog_build_context,
     )
 
     warship_builds = [combo for combo in catalog.ship_build_combos if combo.warship_delta == 1]
@@ -129,6 +130,8 @@ def test_residual_count_bound_applies_scoreboard_partition_slack():
 def test_negative_fighter_transfer_cannot_create_unbounded_cancellation_loops():
     config = ActionCatalogConfig(max_fighter_transfers=7)
     full_step = resolve_tier_policies()[-1]
+    from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog
+
     catalog = build_action_catalog(
         _observation(military_delta_2x=500),
         hulls_by_id={},
@@ -141,6 +144,7 @@ def test_negative_fighter_transfer_cannot_create_unbounded_cancellation_loops():
         eligible_torp_ids=frozenset(),
         config=config,
         policy_step=full_step,
+        prior_catalog=minimal_prior_catalog(),
     )
 
     negative_transfer = next(
@@ -156,8 +160,8 @@ def test_negative_fighter_transfer_cannot_create_unbounded_cancellation_loops():
     assert negative_transfer.upper_bound == 500 // STARBASE_FIGHTER_SCORE_DELTA_2X
 
 
-def test_catalog_size_exposed_in_diagnostics(synthetic_catalog_context):
-    catalog = build_action_catalog(_observation(), **synthetic_catalog_context)
+def test_catalog_size_exposed_in_diagnostics(synthetic_catalog_build_context):
+    catalog = build_action_catalog(_observation(), **synthetic_catalog_build_context)
 
     diagnostics = catalog.diagnostics()
     assert diagnostics["catalog_size"] == catalog.catalog_size
@@ -167,8 +171,8 @@ def test_catalog_size_exposed_in_diagnostics(synthetic_catalog_context):
     assert diagnostics["ship_build_combo_count"] == len(catalog.ship_build_combos)
 
 
-def test_ship_build_combos_exclude_build_time_ammo(synthetic_catalog_context):
-    catalog = build_action_catalog(_observation(), **synthetic_catalog_context)
+def test_ship_build_combos_exclude_build_time_ammo(synthetic_catalog_build_context):
+    catalog = build_action_catalog(_observation(), **synthetic_catalog_build_context)
     combo_ids = {combo.combo_id for combo in catalog.ship_build_combos}
 
     assert not any("fighters" in combo_id for combo_id in combo_ids)
@@ -178,8 +182,8 @@ def test_ship_build_combos_exclude_build_time_ammo(synthetic_catalog_context):
         for combo in catalog.ship_build_combos
         if combo.hull_id == 71 and combo.beam_count == 0 and combo.launcher_count == 0
     )
-    hull = synthetic_catalog_context["hulls_by_id"][71]
-    engine = synthetic_catalog_context["engines_by_id"][1]
+    hull = synthetic_catalog_build_context["hulls_by_id"][71]
+    engine = synthetic_catalog_build_context["engines_by_id"][1]
     assert carrier_unarmed.score_delta_2x == ship_build_military_score_delta_2x(
         hull,
         engine,
@@ -214,13 +218,13 @@ def test_ship_build_score_scales_engine_cost_by_hull_engine_slots(synthetic_cata
     assert hull.engines == 2
 
 
-def test_ship_build_combos_are_not_filtered_by_hull_isbase_flag(synthetic_catalog_context):
+def test_ship_build_combos_are_not_filtered_by_hull_isbase_flag(synthetic_catalog_build_context):
     """Planets.nu hull catalog entries use isbase=true for starships too."""
     hulls_by_id = {
         hull_id: replace(hull, isbase=True)
-        for hull_id, hull in synthetic_catalog_context["hulls_by_id"].items()
+        for hull_id, hull in synthetic_catalog_build_context["hulls_by_id"].items()
     }
-    context = {**synthetic_catalog_context, "hulls_by_id": hulls_by_id}
+    context = {**synthetic_catalog_build_context, "hulls_by_id": hulls_by_id}
     catalog = build_action_catalog(
         _observation(warship_delta=1, freighter_delta=0, starbases_owned=3),
         **context,
@@ -228,8 +232,8 @@ def test_ship_build_combos_are_not_filtered_by_hull_isbase_flag(synthetic_catalo
     assert catalog.ship_build_combos
 
 
-def test_no_flat_build_preset_actions_remain(synthetic_catalog_context):
-    catalog = build_action_catalog(_observation(), **synthetic_catalog_context)
+def test_no_flat_build_preset_actions_remain(synthetic_catalog_build_context):
+    catalog = build_action_catalog(_observation(), **synthetic_catalog_build_context)
     assert not any(action.id.startswith("build_") for action in catalog.aggregate_actions)
 
 
@@ -267,7 +271,7 @@ def test_build_action_catalog_from_turn_sample(sample_turn):
 
 
 def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
-    """Priors resolve from settings and eligibility; apply_priors=False opts out."""
+    """Priors resolve from settings and eligibility; bucket weights come from the asset."""
     observation = _observation(starbases_owned=10)
     full_step = resolve_tier_policies()[-1]
     context = turn_catalog_context_for_policy_step(
@@ -281,6 +285,15 @@ def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
         sample_turn,
         policy_step=full_step,
     )
+    prior_catalog = resolve_prior_weights_catalog(
+        observation,
+        sample_turn.settings,
+        race_id=player.raceid,
+        buildable_hull_ids=context.buildable_hull_ids,
+        eligible_engine_ids=context.eligible_engine_ids,
+        eligible_beam_ids=context.eligible_beam_ids,
+        eligible_torp_ids=context.eligible_torp_ids,
+    )
     catalog_with_priors_no_turn = build_action_catalog(
         observation,
         hulls_by_id=context.hulls_by_id,
@@ -291,56 +304,24 @@ def test_build_action_catalog_from_turn_applies_prior_weights(sample_turn):
         eligible_engine_ids=context.eligible_engine_ids,
         eligible_beam_ids=context.eligible_beam_ids,
         eligible_torp_ids=context.eligible_torp_ids,
-        settings=sample_turn.settings,
+        prior_catalog=prior_catalog,
         player=player,
         policy_step=full_step,
-    )
-    catalog_without_priors = build_action_catalog(
-        observation,
-        hulls_by_id=context.hulls_by_id,
-        engines_by_id=context.engines_by_id,
-        beams_by_id=context.beams_by_id,
-        torpedos_by_id=context.torpedos_by_id,
-        buildable_hull_ids=context.buildable_hull_ids,
-        eligible_engine_ids=context.eligible_engine_ids,
-        eligible_beam_ids=context.eligible_beam_ids,
-        eligible_torp_ids=context.eligible_torp_ids,
-        settings=sample_turn.settings,
-        player=player,
-        policy_step=full_step,
-        apply_priors=False,
     )
 
     assert catalog_with_priors.prior_weights is not None
     assert catalog_with_priors_no_turn.prior_weights is not None
-    assert catalog_without_priors.prior_weights is None
-
-    default_config = ActionCatalogConfig()
-    with_prior_by_id = {
-        action.id: action.probability_weight for action in catalog_with_priors.aggregate_actions
-    }
-    without_prior_by_id = {
-        action.id: action.probability_weight for action in catalog_without_priors.aggregate_actions
-    }
-    assert (
-        with_prior_by_id["fighters_starbase_to_ship"]
-        != default_config.fighter_transfer_probability_weight
-    )
-    assert (
-        with_prior_by_id["fighters_starbase_to_ship"]
-        != without_prior_by_id["fighters_starbase_to_ship"]
-    )
 
     planet_defense_id = "planet_defense_posts_added_total"
     prior_bucket_weights = tuple(
         bucket.marginal_weight
         for bucket in catalog_with_priors.probability_buckets_by_action_id[planet_defense_id]
     )
-    default_bucket_weights = tuple(
-        bucket.marginal_weight
-        for bucket in catalog_without_priors.probability_buckets_by_action_id[planet_defense_id]
+    assert all(weight != 0 for weight in prior_bucket_weights)
+    assert (
+        catalog_with_priors.aggregate_actions
+        and catalog_with_priors.probability_buckets_by_action_id[planet_defense_id]
     )
-    assert prior_bucket_weights != default_bucket_weights
 
 
 @pytest.mark.skipif(not GAME_INFO_PATH.is_file(), reason="local store only")

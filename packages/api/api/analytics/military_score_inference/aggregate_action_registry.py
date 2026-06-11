@@ -2,96 +2,131 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from api.analytics.military_score_inference.models import ProbabilityBucket
+from api.analytics.military_score_inference.models import ProbabilityBinBounds
+from api.analytics.military_score_inference.scoring import (
+    STARBASE_FIGHTER_SCORE_DELTA_2X,
+    loaded_ship_fighter_score_delta_2x,
+    planet_defense_post_score_delta_2x,
+    starbase_defense_post_score_delta_2x,
+    starbase_fighter_score_delta_2x,
+)
 
 SHIP_TORPS_LOADED_ACTION_PREFIX = "ship_torps_loaded_"
 
 SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY = "ship_torps_per_type"
 FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY = "fighter_transfers_per_direction"
 
-PLANET_DEFENSE_POST_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 10, 100),
-    ProbabilityBucket("heavy build-up", 11, 50, 20),
-    ProbabilityBucket("extreme build-up", 51, 100, 5),
+DEFENSE_POST_BIN_BOUNDS = (
+    ProbabilityBinBounds("modest build-up", 0, 10),
+    ProbabilityBinBounds("heavy build-up", 11, 50),
+    ProbabilityBinBounds("extreme build-up", 51, 100),
 )
-STARBASE_DEFENSE_POST_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 10, 100),
-    ProbabilityBucket("heavy build-up", 11, 50, 20),
-    ProbabilityBucket("extreme build-up", 51, 100, 5),
+PLANET_DEFENSE_POST_BIN_BOUNDS = DEFENSE_POST_BIN_BOUNDS
+STARBASE_DEFENSE_POST_BIN_BOUNDS = DEFENSE_POST_BIN_BOUNDS
+STARBASE_FIGHTER_BIN_BOUNDS = (
+    ProbabilityBinBounds("modest build-up", 0, 20),
+    ProbabilityBinBounds("heavy build-up", 21, 100),
+    ProbabilityBinBounds("extreme build-up", 101, 200),
 )
-STARBASE_FIGHTER_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 20, 80),
-    ProbabilityBucket("heavy build-up", 21, 100, 15),
-    ProbabilityBucket("extreme build-up", 101, 200, 3),
+SHIP_FIGHTER_BIN_BOUNDS = (
+    ProbabilityBinBounds("modest load", 0, 20),
+    ProbabilityBinBounds("heavy load", 21, 100),
+    ProbabilityBinBounds("extreme load", 101, 500),
 )
-SHIP_FIGHTER_BUCKETS = (
-    ProbabilityBucket("modest load", 0, 20, 70),
-    ProbabilityBucket("heavy load", 21, 100, 20),
-    ProbabilityBucket("extreme load", 101, 500, 5),
-)
-SHIP_TORPEDO_BUCKETS = (
-    ProbabilityBucket("modest load", 0, 40, 70),
-    ProbabilityBucket("heavy load", 41, 100, 70),
-    ProbabilityBucket("extreme load", 101, 200, 5),
+SHIP_TORPEDO_BIN_BOUNDS = (
+    ProbabilityBinBounds("modest load", 0, 40),
+    ProbabilityBinBounds("heavy load", 41, 100),
+    ProbabilityBinBounds("extreme load", 101, 200),
 )
 
 PriorShape = Literal["histogram", "counts"]
+CatalogBuildPhase = Literal["pre_torpedo", "post_torpedo"]
 
 
 @dataclass(frozen=True)
 class AggregateActionSpec:
     prior_shape: PriorShape
-    buckets: tuple[ProbabilityBucket, ...] | None
+    bin_bounds: tuple[ProbabilityBinBounds, ...] | None
     allowlist_key: str | None = None
     is_fighter_channel_member: bool = False
     is_fine_grained_slack: bool = False
+    catalog_label: str = ""
+    score_delta_2x: Callable[[], int] | None = None
+    config_cap_field: str | None = None
+    catalog_build_phase: CatalogBuildPhase | None = None
+    uses_fighter_transfer_cap: bool = False
 
 
 AGGREGATE_ACTION_SPECS: dict[str, AggregateActionSpec] = {
     "planet_defense_posts_added_total": AggregateActionSpec(
         prior_shape="histogram",
-        buckets=PLANET_DEFENSE_POST_BUCKETS,
+        bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
         is_fine_grained_slack=True,
+        catalog_label="Planet defense posts added",
+        score_delta_2x=planet_defense_post_score_delta_2x,
+        config_cap_field="max_planet_defense_posts",
+        catalog_build_phase="pre_torpedo",
     ),
     "starbase_defense_posts_added_total": AggregateActionSpec(
         prior_shape="histogram",
-        buckets=STARBASE_DEFENSE_POST_BUCKETS,
+        bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
         is_fine_grained_slack=True,
+        catalog_label="Starbase defense posts added",
+        score_delta_2x=starbase_defense_post_score_delta_2x,
+        config_cap_field="max_starbase_defense_posts",
+        catalog_build_phase="pre_torpedo",
     ),
     "starbase_fighters_added_total": AggregateActionSpec(
         prior_shape="histogram",
-        buckets=STARBASE_FIGHTER_BUCKETS,
+        bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
         is_fighter_channel_member=True,
         is_fine_grained_slack=True,
+        catalog_label="Starbase fighters added",
+        score_delta_2x=starbase_fighter_score_delta_2x,
+        config_cap_field="max_starbase_fighters",
+        catalog_build_phase="pre_torpedo",
     ),
     "ship_fighters_added_total": AggregateActionSpec(
         prior_shape="histogram",
-        buckets=SHIP_FIGHTER_BUCKETS,
+        bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
         is_fighter_channel_member=True,
         is_fine_grained_slack=True,
+        catalog_label="Ship fighters added",
+        score_delta_2x=loaded_ship_fighter_score_delta_2x,
+        config_cap_field="max_ship_fighters",
+        catalog_build_phase="pre_torpedo",
     ),
     "fighters_starbase_to_ship": AggregateActionSpec(
         prior_shape="counts",
-        buckets=None,
+        bin_bounds=None,
         allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
         is_fighter_channel_member=True,
         is_fine_grained_slack=True,
+        catalog_label="Fighters transferred starbase to ship",
+        score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
+        catalog_build_phase="post_torpedo",
+        uses_fighter_transfer_cap=True,
     ),
     "fighters_ship_to_starbase": AggregateActionSpec(
         prior_shape="counts",
-        buckets=None,
+        bin_bounds=None,
         allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
         is_fighter_channel_member=True,
         is_fine_grained_slack=True,
+        catalog_label="Fighters transferred ship to starbase",
+        score_delta_2x=lambda: -STARBASE_FIGHTER_SCORE_DELTA_2X,
+        catalog_build_phase="post_torpedo",
+        uses_fighter_transfer_cap=True,
     ),
 }
 
 SHIP_TORPS_LOADED_SPEC = AggregateActionSpec(
     prior_shape="histogram",
-    buckets=SHIP_TORPEDO_BUCKETS,
+    bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
     allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
     is_fine_grained_slack=True,
 )
@@ -137,17 +172,17 @@ def aggregate_allowlist_key(action_id: str) -> str | None:
     return spec.allowlist_key
 
 
-def base_buckets_for_action(action_id: str) -> tuple[ProbabilityBucket, ...] | None:
+def base_bin_bounds_for_action(action_id: str) -> tuple[ProbabilityBinBounds, ...] | None:
     spec = lookup_aggregate_action_spec(action_id)
     if spec is None:
         return None
-    return spec.buckets
+    return spec.bin_bounds
 
 
-def magnitude_bin_index(magnitude: int, buckets: tuple[ProbabilityBucket, ...]) -> int:
+def magnitude_bin_index(magnitude: int, bin_bounds: tuple[ProbabilityBinBounds, ...]) -> int:
     """Return the index of the magnitude bin for a positive magnitude count."""
-    for index, bucket in enumerate(buckets):
-        lower_bound = 1 if bucket.lower_count == 0 else bucket.lower_count
-        if lower_bound <= magnitude <= bucket.upper_count:
+    for index, bound in enumerate(bin_bounds):
+        lower_bound = 1 if bound.lower_count == 0 else bound.lower_count
+        if lower_bound <= magnitude <= bound.upper_count:
             return index
-    return len(buckets) - 1
+    return len(bin_bounds) - 1
