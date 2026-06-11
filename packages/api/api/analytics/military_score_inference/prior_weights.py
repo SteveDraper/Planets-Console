@@ -8,8 +8,6 @@ from typing import Any
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     base_buckets_for_action,
-    is_counts_aggregate_action,
-    is_histogram_aggregate_action,
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -346,10 +344,6 @@ def _resolve_aggregate_weights(
 
     for action_id, aggregate in band_tables.items():
         if isinstance(aggregate, HistogramAggregate):
-            if not is_histogram_aggregate_action(action_id):
-                raise ValueError(
-                    f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
-                )
             base_buckets = base_buckets_for_action(action_id)
             if base_buckets is None:
                 raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bucket definition")
@@ -359,10 +353,6 @@ def _resolve_aggregate_weights(
                 log_weights[index] for index in range(len(base_buckets))
             )
         elif isinstance(aggregate, CountsAggregate):
-            if not is_counts_aggregate_action(action_id):
-                raise ValueError(
-                    f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
-                )
             ((count_key, count_value),) = aggregate.counts.items()
             action_weights[action_id] = counts_to_log_weights(
                 {count_key: count_value},
