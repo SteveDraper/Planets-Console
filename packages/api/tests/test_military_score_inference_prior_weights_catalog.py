@@ -1,9 +1,7 @@
-"""Tests for inference build prior assets and catalog integration."""
+"""Tests for inference build prior catalog resolution and integration."""
 
 from dataclasses import replace
-from pathlib import Path
 
-import pytest
 from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
 from api.analytics.military_score_inference.hull_category import (
     BATTLESHIP_MASS_THRESHOLD,
@@ -12,14 +10,13 @@ from api.analytics.military_score_inference.hull_category import (
 from api.analytics.military_score_inference.inference_game_category import (
     BLITZ_INFERENCE_GAME_CATEGORY,
     EPIC_INFERENCE_GAME_CATEGORY,
-    INFERENCE_GAME_CATEGORY_RULES_VERSION,
     STANDARD_INFERENCE_GAME_CATEGORY,
     resolve_inference_game_category,
 )
-from api.analytics.military_score_inference.models import InferenceObservation, InferenceProblem
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
+from api.analytics.military_score_inference.models import InferenceObservation, InferenceProblem
 from api.analytics.military_score_inference.prior_weights import (
     SMALL_DEEP_SPACE_FREIGHTER_HULL_ID,
     PriorWeightsCatalog,
@@ -27,18 +24,15 @@ from api.analytics.military_score_inference.prior_weights import (
     resolve_prior_weights_catalog,
     ship_limit_band_key,
 )
-from api.analytics.military_score_inference.prior_weights_asset import (
-    default_prior_weights_dir,
-    load_prior_weights_for_category,
-    parse_prior_weights_document,
-)
 from api.analytics.military_score_inference.prior_weights_laplace import (
-    WILDCARD_COUNT_KEY,
     counts_to_log_weights,
     expand_wildcard_counts,
     implicit_uniform_component_counts,
 )
-from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
+from api.analytics.military_score_inference.ship_build_combos import (
+    GENERIC_FREIGHTER_COMBO_ID,
+    ship_build_combo_id,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.components import Beam, Engine, Hull, Torpedo
@@ -119,6 +113,31 @@ def _battleship_hull() -> Hull:
     )
 
 
+def _minimal_prior_catalog(
+    *,
+    hull_log_weights: dict[int, int] | None = None,
+    combo_log_overrides: dict[str, int] | None = None,
+    hull_log_overrides: dict[int, int] | None = None,
+) -> PriorWeightsCatalog:
+    return PriorWeightsCatalog(
+        diagnostics=PriorWeightsDiagnostics(
+            category_id="standard",
+            asset_path="test",
+            asset_version=1,
+            game_category_rules_version=1,
+            fell_back_to_standard=False,
+            ship_limit_band="before_ship_limit",
+            race_id_used=None,
+        ),
+        hull_log_weights=hull_log_weights or {},
+        component_tables={},
+        aggregate_action_weights={},
+        aggregate_bucket_marginal_weights={},
+        combo_log_overrides=combo_log_overrides or {},
+        hull_log_overrides=hull_log_overrides or {},
+    )
+
+
 def test_resolve_inference_game_category_rules(sample_turn):
     assert resolve_inference_game_category(replace(sample_turn.settings, endturn=30)) == (
         BLITZ_INFERENCE_GAME_CATEGORY
@@ -159,30 +178,6 @@ def test_counts_to_log_weights_prefers_likely_cells():
     assert unlikely[1] < unlikely[2]
 
 
-def test_standard_prior_asset_loads():
-    asset, path, fell_back = load_prior_weights_for_category(STANDARD_INFERENCE_GAME_CATEGORY)
-    assert not fell_back
-    assert path.name == "prior_weights_standard.yaml"
-    assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
-    assert asset.version == 2
-    assert asset.hulls["before_ship_limit"]["global"][WILDCARD_COUNT_KEY] == 50
-
-
-def test_missing_category_falls_back_to_standard(tmp_path: Path):
-    standard_src = default_prior_weights_dir() / "prior_weights_standard.yaml"
-    tmp_path.joinpath("prior_weights_standard.yaml").write_text(
-        standard_src.read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    asset, path, fell_back = load_prior_weights_for_category(
-        BLITZ_INFERENCE_GAME_CATEGORY,
-        base_dir=tmp_path,
-    )
-    assert fell_back
-    assert path.name == "prior_weights_standard.yaml"
-    assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
-
-
 def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
     catalog = resolve_prior_weights_catalog(
         _observation(),
@@ -202,149 +197,6 @@ def test_expand_wildcard_counts_fills_universe():
         universe=frozenset({24, 15}),
     )
     assert expanded == {24: 100, 15: 10}
-
-
-def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
-    document: dict[str, object] = {
-        "version": 2,
-        "category": "standard",
-        "gameCategoryRulesVersion": 1,
-        "hulls": {
-            "before_ship_limit": {"global": {}},
-            "after_ship_limit": {"global": {}},
-        },
-        "components": {
-            "before_ship_limit": {},
-            "after_ship_limit": {},
-        },
-        "aggregates": {
-            "before_ship_limit": {},
-            "after_ship_limit": {},
-        },
-    }
-    document.update(overrides)
-    return document
-
-
-def test_game_category_rules_version_must_match_inference_rules():
-    with pytest.raises(ValueError, match="does not match expected inference rules version"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                gameCategoryRulesVersion=INFERENCE_GAME_CATEGORY_RULES_VERSION + 1,
-            )
-        )
-
-
-def test_histogram_rejects_wildcard_key():
-    with pytest.raises(ValueError, match="must be integers"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": {
-                        "planet_defense_posts_added_total": {"histogram": {"*": 10, 5: 1}}
-                    },
-                    "after_ship_limit": {},
-                }
-            )
-        )
-
-
-def test_aggregates_reject_unknown_histogram_action_id():
-    with pytest.raises(ValueError, match="not a known bucketed aggregate action"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": {"planet_defense_posts_typo": {"histogram": {5: 1}}},
-                    "after_ship_limit": {},
-                }
-            )
-        )
-
-
-def test_aggregates_reject_unknown_counts_action_id():
-    with pytest.raises(ValueError, match="not a known counts aggregate action"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": {
-                        "evil_empire_free_starbase_fighters": {"counts": {"default": 10}}
-                    },
-                    "after_ship_limit": {},
-                }
-            )
-        )
-
-
-def test_aggregates_reject_counts_with_multiple_keys():
-    with pytest.raises(ValueError, match="must have exactly one key"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": {
-                        "fighters_starbase_to_ship": {"counts": {"default": 65, "alternate": 10}}
-                    },
-                    "after_ship_limit": {},
-                }
-            )
-        )
-
-
-def test_aggregates_reject_empty_counts():
-    with pytest.raises(ValueError, match="must have exactly one key"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": {"fighters_ship_to_starbase": {"counts": {}}},
-                    "after_ship_limit": {},
-                }
-            )
-        )
-
-
-def test_component_tables_reject_unknown_hull_category():
-    with pytest.raises(ValueError, match="not a valid inference hull category"):
-        parse_prior_weights_document(
-            {
-                "version": 2,
-                "category": "standard",
-                "gameCategoryRulesVersion": 1,
-                "hulls": {
-                    "before_ship_limit": {"global": {}},
-                    "after_ship_limit": {"global": {}},
-                },
-                "components": {
-                    "before_ship_limit": {"beam_ships": {"engines": {1: 1}}},
-                    "after_ship_limit": {},
-                },
-                "aggregates": {
-                    "before_ship_limit": {},
-                    "after_ship_limit": {},
-                },
-            }
-        )
-
-
-def test_slotfill_rejects_wildcard_key():
-    with pytest.raises(ValueError, match="does not allow '\\*'"):
-        parse_prior_weights_document(
-            {
-                "version": 2,
-                "category": "standard",
-                "gameCategoryRulesVersion": 1,
-                "hulls": {
-                    "before_ship_limit": {"global": {}},
-                    "after_ship_limit": {"global": {}},
-                },
-                "components": {
-                    "before_ship_limit": {"beam_ship": {"slotFill": {"*": 10, "full": 1}}},
-                    "after_ship_limit": {},
-                },
-                "aggregates": {
-                    "before_ship_limit": {},
-                    "after_ship_limit": {},
-                },
-            }
-        )
 
 
 def test_implicit_uniform_component_counts_are_equal_per_id():
@@ -514,31 +366,6 @@ def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):
     assert likely > unlikely
 
 
-def _minimal_prior_catalog(
-    *,
-    hull_log_weights: dict[int, int] | None = None,
-    combo_log_overrides: dict[str, int] | None = None,
-    hull_log_overrides: dict[int, int] | None = None,
-) -> PriorWeightsCatalog:
-    return PriorWeightsCatalog(
-        diagnostics=PriorWeightsDiagnostics(
-            category_id="standard",
-            asset_path="test",
-            asset_version=1,
-            game_category_rules_version=1,
-            fell_back_to_standard=False,
-            ship_limit_band="before_ship_limit",
-            race_id_used=None,
-        ),
-        hull_log_weights=hull_log_weights or {},
-        component_tables={},
-        aggregate_action_weights={},
-        aggregate_bucket_marginal_weights={},
-        combo_log_overrides=combo_log_overrides or {},
-        hull_log_overrides=hull_log_overrides or {},
-    )
-
-
 def test_freighter_probability_weight_uses_sdsf_hull_marginal():
     catalog = _minimal_prior_catalog(
         hull_log_weights={SMALL_DEEP_SPACE_FREIGHTER_HULL_ID: 42},
@@ -605,7 +432,6 @@ def test_catalog_build_includes_prior_weights_diagnostics(sample_turn):
 
 def test_top_k_prefers_higher_prior_feasible_combo(sample_turn, synthetic_catalog_context):
     from api.analytics.military_score_inference.models import ShipBuildCombo
-    from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 
     hull = synthetic_catalog_context["hulls_by_id"][24]
     engine = synthetic_catalog_context["engines_by_id"][1]

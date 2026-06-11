@@ -7,6 +7,9 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionAction,
     ProbabilityBucket,
 )
+from api.analytics.military_score_inference.probability_bucket_defaults import (
+    PLANET_DEFENSE_POST_BUCKETS,
+)
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
     PLANET_DEFENSE_POST_SCORE_DELTA_2X,
@@ -55,13 +58,6 @@ def _problem(
         max_solutions=max_solutions,
         time_limit_seconds=time_limit_seconds,
     )
-
-
-PLANET_DEFENSE_POST_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 10, 100),
-    ProbabilityBucket("heavy build-up", 11, 50, 20),
-    ProbabilityBucket("extreme build-up", 51, 100, 5),
-)
 
 
 def _planet_defense_posts_action(*, upper_bound: int = 100) -> CandidateAction:

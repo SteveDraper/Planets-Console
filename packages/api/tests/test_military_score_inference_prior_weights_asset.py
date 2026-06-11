@@ -1,0 +1,183 @@
+"""Tests for inference build prior asset parsing and loading."""
+
+from pathlib import Path
+
+import pytest
+from api.analytics.military_score_inference.inference_game_category import (
+    BLITZ_INFERENCE_GAME_CATEGORY,
+    INFERENCE_GAME_CATEGORY_RULES_VERSION,
+    STANDARD_INFERENCE_GAME_CATEGORY,
+)
+from api.analytics.military_score_inference.prior_weights_asset import (
+    default_prior_weights_dir,
+    load_prior_weights_for_category,
+    parse_prior_weights_document,
+)
+from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
+
+
+def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "version": 2,
+        "category": "standard",
+        "gameCategoryRulesVersion": 1,
+        "hulls": {
+            "before_ship_limit": {"global": {}},
+            "after_ship_limit": {"global": {}},
+        },
+        "components": {
+            "before_ship_limit": {},
+            "after_ship_limit": {},
+        },
+        "aggregates": {
+            "before_ship_limit": {},
+            "after_ship_limit": {},
+        },
+    }
+    document.update(overrides)
+    return document
+
+
+def test_standard_prior_asset_loads():
+    asset, path, fell_back = load_prior_weights_for_category(STANDARD_INFERENCE_GAME_CATEGORY)
+    assert not fell_back
+    assert path.name == "prior_weights_standard.yaml"
+    assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
+    assert asset.version == 2
+    assert asset.hulls["before_ship_limit"]["global"][WILDCARD_COUNT_KEY] == 50
+
+
+def test_missing_category_falls_back_to_standard(tmp_path: Path):
+    standard_src = default_prior_weights_dir() / "prior_weights_standard.yaml"
+    tmp_path.joinpath("prior_weights_standard.yaml").write_text(
+        standard_src.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    asset, path, fell_back = load_prior_weights_for_category(
+        BLITZ_INFERENCE_GAME_CATEGORY,
+        base_dir=tmp_path,
+    )
+    assert fell_back
+    assert path.name == "prior_weights_standard.yaml"
+    assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
+
+
+def test_game_category_rules_version_must_match_inference_rules():
+    with pytest.raises(ValueError, match="does not match expected inference rules version"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                gameCategoryRulesVersion=INFERENCE_GAME_CATEGORY_RULES_VERSION + 1,
+            )
+        )
+
+
+def test_histogram_rejects_wildcard_key():
+    with pytest.raises(ValueError, match="must be integers"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": {
+                        "planet_defense_posts_added_total": {"histogram": {"*": 10, 5: 1}}
+                    },
+                    "after_ship_limit": {},
+                }
+            )
+        )
+
+
+def test_aggregates_reject_unknown_histogram_action_id():
+    with pytest.raises(ValueError, match="not a known bucketed aggregate action"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": {"planet_defense_posts_typo": {"histogram": {5: 1}}},
+                    "after_ship_limit": {},
+                }
+            )
+        )
+
+
+def test_aggregates_reject_unknown_counts_action_id():
+    with pytest.raises(ValueError, match="not a known counts aggregate action"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": {
+                        "evil_empire_free_starbase_fighters": {"counts": {"default": 10}}
+                    },
+                    "after_ship_limit": {},
+                }
+            )
+        )
+
+
+def test_aggregates_reject_counts_with_multiple_keys():
+    with pytest.raises(ValueError, match="must have exactly one key"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": {
+                        "fighters_starbase_to_ship": {"counts": {"default": 65, "alternate": 10}}
+                    },
+                    "after_ship_limit": {},
+                }
+            )
+        )
+
+
+def test_aggregates_reject_empty_counts():
+    with pytest.raises(ValueError, match="must have exactly one key"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": {"fighters_ship_to_starbase": {"counts": {}}},
+                    "after_ship_limit": {},
+                }
+            )
+        )
+
+
+def test_component_tables_reject_unknown_hull_category():
+    with pytest.raises(ValueError, match="not a valid inference hull category"):
+        parse_prior_weights_document(
+            {
+                "version": 2,
+                "category": "standard",
+                "gameCategoryRulesVersion": 1,
+                "hulls": {
+                    "before_ship_limit": {"global": {}},
+                    "after_ship_limit": {"global": {}},
+                },
+                "components": {
+                    "before_ship_limit": {"beam_ships": {"engines": {1: 1}}},
+                    "after_ship_limit": {},
+                },
+                "aggregates": {
+                    "before_ship_limit": {},
+                    "after_ship_limit": {},
+                },
+            }
+        )
+
+
+def test_slotfill_rejects_wildcard_key():
+    with pytest.raises(ValueError, match="does not allow '\\*'"):
+        parse_prior_weights_document(
+            {
+                "version": 2,
+                "category": "standard",
+                "gameCategoryRulesVersion": 1,
+                "hulls": {
+                    "before_ship_limit": {"global": {}},
+                    "after_ship_limit": {"global": {}},
+                },
+                "components": {
+                    "before_ship_limit": {"beam_ship": {"slotFill": {"*": 10, "full": 1}}},
+                    "after_ship_limit": {},
+                },
+                "aggregates": {
+                    "before_ship_limit": {},
+                    "after_ship_limit": {},
+                },
+            }
+        )
