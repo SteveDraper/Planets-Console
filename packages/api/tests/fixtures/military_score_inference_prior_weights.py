@@ -6,7 +6,6 @@ from api.analytics.military_score_inference.hull_category import BATTLESHIP_MASS
 from api.analytics.military_score_inference.prior_weights import (
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
-    _prior_weights_catalog_from_tables,
 )
 from api.models.components import Hull
 
@@ -90,7 +89,7 @@ def minimal_prior_catalog(
     combo_log_overrides: dict[str, int] | None = None,
     hull_log_overrides: dict[int, int] | None = None,
 ) -> PriorWeightsCatalog:
-    return _prior_weights_catalog_from_tables(
+    return PriorWeightsCatalog.from_resolved_tables(
         diagnostics=PriorWeightsDiagnostics(
             category_id="standard",
             asset_path="test",

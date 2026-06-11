@@ -95,6 +95,28 @@ class PriorWeightsCatalog:
     _combo_log_overrides: dict[str, int]
     _hull_log_overrides: dict[int, int]
 
+    @classmethod
+    def from_resolved_tables(
+        cls,
+        *,
+        diagnostics: PriorWeightsDiagnostics,
+        hull_log_weights: dict[int, int],
+        component_tables: dict[InferenceHullCategory, dict[str, dict[Any, int]]],
+        aggregate_action_weights: dict[str, int],
+        aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]],
+        combo_log_overrides: dict[str, int],
+        hull_log_overrides: dict[int, int],
+    ) -> PriorWeightsCatalog:
+        return cls(
+            diagnostics=diagnostics,
+            _hull_log_weights=hull_log_weights,
+            _component_tables=component_tables,
+            _aggregate_action_weights=aggregate_action_weights,
+            _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights,
+            _combo_log_overrides=combo_log_overrides,
+            _hull_log_overrides=hull_log_overrides,
+        )
+
     def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
         hull_override = self._hull_log_overrides.get(hull_id)
         if hull_override is not None:
@@ -388,7 +410,7 @@ def resolve_prior_weights_catalog(
         race_id_used=race_id,
     )
 
-    return _prior_weights_catalog_from_tables(
+    return PriorWeightsCatalog.from_resolved_tables(
         diagnostics=diagnostics,
         hull_log_weights=hull_log_weights,
         component_tables=component_tables,
@@ -396,25 +418,4 @@ def resolve_prior_weights_catalog(
         aggregate_bucket_marginal_weights=aggregate_bucket_weights,
         combo_log_overrides=combo_log_overrides,
         hull_log_overrides=hull_log_overrides_int,
-    )
-
-
-def _prior_weights_catalog_from_tables(
-    *,
-    diagnostics: PriorWeightsDiagnostics,
-    hull_log_weights: dict[int, int],
-    component_tables: dict[InferenceHullCategory, dict[str, dict[Any, int]]],
-    aggregate_action_weights: dict[str, int],
-    aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]],
-    combo_log_overrides: dict[str, int],
-    hull_log_overrides: dict[int, int],
-) -> PriorWeightsCatalog:
-    return PriorWeightsCatalog(
-        diagnostics=diagnostics,
-        _hull_log_weights=hull_log_weights,
-        _component_tables=component_tables,
-        _aggregate_action_weights=aggregate_action_weights,
-        _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights,
-        _combo_log_overrides=combo_log_overrides,
-        _hull_log_overrides=hull_log_overrides,
     )
