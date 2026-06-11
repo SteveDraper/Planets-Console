@@ -223,6 +223,29 @@ def test_histogram_rejects_wildcard_key():
         )
 
 
+def test_component_tables_reject_unknown_hull_category():
+    with pytest.raises(ValueError, match="not a valid inference hull category"):
+        parse_prior_weights_document(
+            {
+                "version": 2,
+                "category": "standard",
+                "gameCategoryRulesVersion": 1,
+                "hulls": {
+                    "before_ship_limit": {"global": {}},
+                    "after_ship_limit": {"global": {}},
+                },
+                "components": {
+                    "before_ship_limit": {"beam_ships": {"engines": {1: 1}}},
+                    "after_ship_limit": {},
+                },
+                "aggregates": {
+                    "before_ship_limit": {},
+                    "after_ship_limit": {},
+                },
+            }
+        )
+
+
 def test_slotfill_rejects_wildcard_key():
     with pytest.raises(ValueError, match="does not allow '\\*'"):
         parse_prior_weights_document(

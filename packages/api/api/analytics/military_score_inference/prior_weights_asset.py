@@ -10,7 +10,10 @@ from typing import Any, Literal
 import yaml
 
 from api.analytics.assets import analytics_assets_dir
-from api.analytics.military_score_inference.hull_category import InferenceHullCategory
+from api.analytics.military_score_inference.hull_category import (
+    INFERENCE_HULL_CATEGORIES,
+    InferenceHullCategory,
+)
 from api.analytics.military_score_inference.inference_game_category import (
     STANDARD_INFERENCE_GAME_CATEGORY,
 )
@@ -158,6 +161,12 @@ def _parse_band_component_tables(
     for category, category_raw in band_raw.items():
         if not isinstance(category, str):
             raise ValueError(f"components.{band} keys must be strings")
+        if category not in INFERENCE_HULL_CATEGORIES:
+            allowed = ", ".join(INFERENCE_HULL_CATEGORIES)
+            raise ValueError(
+                f"components.{band}.{category!r} is not a valid inference hull category; "
+                f"expected one of: {allowed}"
+            )
         if not isinstance(category_raw, dict):
             raise ValueError(f"components.{band}.{category} must be a mapping")
         tables: dict[str, dict[Any, float]] = {}
