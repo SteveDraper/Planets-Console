@@ -45,12 +45,9 @@ from api.analytics.military_score_inference.probability_bucket_defaults import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
 
-PRIOR_WEIGHT_SCALE = INFERENCE_PROBABILITY_WEIGHT_SCALE
-
 SMALL_DEEP_SPACE_FREIGHTER_HULL_ID = 15
 
 __all__ = [
-    "PRIOR_WEIGHT_SCALE",
     "SMALL_DEEP_SPACE_FREIGHTER_HULL_ID",
     "PriorWeightsCatalog",
     "PriorWeightsDiagnostics",
@@ -341,7 +338,7 @@ def resolve_prior_weights_catalog(
     eligible_beam_ids: frozenset[int] = frozenset(),
     eligible_torp_ids: frozenset[int] = frozenset(),
     base_dir: Path | None = None,
-    scale: int = PRIOR_WEIGHT_SCALE,
+    scale: int = INFERENCE_PROBABILITY_WEIGHT_SCALE,
 ) -> PriorWeightsCatalog:
     category_id = resolve_inference_game_category(settings)
     asset, asset_path, fell_back = load_prior_weights_for_category(

@@ -18,8 +18,10 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.prior_weights import (
-    PRIOR_WEIGHT_SCALE,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
     resolve_prior_weights_catalog,
@@ -366,7 +368,7 @@ def _evil_empire_free_starbase_fighter_actions(
                 config.evil_empire_free_starbase_fighter_pseudo_count,
                 total=config.evil_empire_free_starbase_fighter_pseudo_count,
                 cell_count=1,
-                scale=PRIOR_WEIGHT_SCALE,
+                scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
             ),
         )
     ]

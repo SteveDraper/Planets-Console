@@ -17,8 +17,10 @@ from api.analytics.military_score_inference.inference_game_category import (
     resolve_inference_game_category,
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceProblem
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.prior_weights import (
-    PRIOR_WEIGHT_SCALE,
     SMALL_DEEP_SPACE_FREIGHTER_HULL_ID,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
@@ -438,7 +440,9 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
     )
 
     beams_table = catalog.component_tables["torpedo_ship"]["beams"]
-    expected_uniform_weight = counts_to_log_weights({2: 1.0, 3: 1.0}, scale=PRIOR_WEIGHT_SCALE)[2]
+    expected_uniform_weight = counts_to_log_weights(
+        {2: 1.0, 3: 1.0}, scale=INFERENCE_PROBABILITY_WEIGHT_SCALE
+    )[2]
 
     assert with_beam_two == with_beam_three
     assert beams_table[2] == beams_table[3] == expected_uniform_weight
