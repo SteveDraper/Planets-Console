@@ -11,6 +11,7 @@ import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSpec,
+    FixedAggregateSlot,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
     iter_aggregate_action_slots,
@@ -329,7 +330,7 @@ def required_aggregate_prior(
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:
     band_tables = asset.aggregates.get(band, {})
     for slot in iter_aggregate_action_slots(eligible_torp_ids=frozenset()):
-        if slot.spec.is_template:
+        if not isinstance(slot, FixedAggregateSlot):
             continue
         required_aggregate_prior(
             band_tables,

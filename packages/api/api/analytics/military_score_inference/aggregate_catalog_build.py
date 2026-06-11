@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    AggregateActionSlot,
-    AggregateActionSpec,
+    AggregatePriorFields,
     CatalogConfig,
+    FixedAggregateSlot,
+    TemplateAggregateSlot,
     base_bin_bounds_for_action,
     iter_aggregate_action_slots,
     resolved_aggregate_cap,
@@ -83,7 +84,7 @@ def _append_aggregate_action(
     upper_bound: int,
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
-    spec: AggregateActionSpec,
+    prior_fields: AggregatePriorFields,
 ) -> None:
     allowlist_cap = resolved_aggregate_cap(action_id, aggregate_allowlist)
     if allowlist_cap is None:
@@ -91,9 +92,9 @@ def _append_aggregate_action(
     capped_upper = min(upper_bound, allowlist_cap)
     if capped_upper <= 0:
         return
-    if spec.prior_shape == "histogram":
+    if prior_fields.prior_shape == "histogram":
         probability_weight = 0
-    elif spec.prior_shape == "counts":
+    elif prior_fields.prior_shape == "counts":
         prior_weight = prior_catalog.aggregate_probability_weight(action_id)
         if prior_weight is None:
             raise ValueError(
@@ -101,7 +102,9 @@ def _append_aggregate_action(
             )
         probability_weight = prior_weight
     else:
-        raise ValueError(f"unknown prior_shape {spec.prior_shape!r} for action {action_id!r}")
+        raise ValueError(
+            f"unknown prior_shape {prior_fields.prior_shape!r} for action {action_id!r}"
+        )
     actions.append(
         CandidateAction(
             id=action_id,
@@ -130,63 +133,18 @@ def _fighter_transfer_upper_bound(
     )
 
 
-def _slot_catalog_label(
-    slot: AggregateActionSlot,
-    *,
-    torpedos_by_id: dict[int, Torpedo],
-) -> str | None:
-    spec = slot.spec
-    if spec.is_template:
-        entity_id = slot.entity_id
-        if entity_id is None:
-            raise ValueError(f"template aggregate slot missing entity id: {slot.action_id!r}")
-        torpedo = torpedos_by_id.get(entity_id)
-        if torpedo is None:
-            return None
-        if spec.catalog_label_format is None:
-            raise ValueError(f"template aggregate slot missing catalog label: {slot.action_id!r}")
-        return spec.catalog_label_format.format(name=torpedo.name)
-    return spec.catalog_label
-
-
-def _slot_score_delta_2x(
-    slot: AggregateActionSlot,
-    *,
-    torpedos_by_id: dict[int, Torpedo],
-) -> int | None:
-    spec = slot.spec
-    if spec.is_template:
-        entity_id = slot.entity_id
-        if entity_id is None:
-            raise ValueError(f"template aggregate slot missing entity id: {slot.action_id!r}")
-        torpedo = torpedos_by_id.get(entity_id)
-        if torpedo is None:
-            return None
-        if spec.score_delta_2x_from_cost is None:
-            raise ValueError(f"template aggregate slot missing score delta: {slot.action_id!r}")
-        return spec.score_delta_2x_from_cost(torpedo.torpedocost)
-    if spec.score_delta_2x is None:
-        return None
-    return spec.score_delta_2x()
-
-
-def _slot_upper_bound(
-    slot: AggregateActionSlot,
+def _upper_bound_for_fixed_slot(
+    slot: FixedAggregateSlot,
     *,
     observation: InferenceObservation,
     config: CatalogConfig,
-    torpedos_by_id: dict[int, Torpedo],
     fighter_transfer_upper_bound: int,
-) -> int | None:
-    spec = slot.spec
-    score_delta_2x = _slot_score_delta_2x(slot, torpedos_by_id=torpedos_by_id)
-    if score_delta_2x is None:
-        return None
-    if spec.catalog_config_cap is not None:
+) -> int:
+    if slot.spec.catalog_config_cap is not None:
         return residual_count_bound(
             observation,
-            score_delta_2x,
-            spec.catalog_config_cap(config),
+            slot.score_delta_2x,
+            slot.spec.catalog_config_cap(config),
         )
     return fighter_transfer_upper_bound
 
@@ -195,7 +153,7 @@ def _append_slot_catalog_action(
     actions: list[CandidateAction],
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
     *,
-    slot: AggregateActionSlot,
+    slot: FixedAggregateSlot | TemplateAggregateSlot,
     observation: InferenceObservation,
     config: CatalogConfig,
     torpedos_by_id: dict[int, Torpedo],
@@ -203,29 +161,45 @@ def _append_slot_catalog_action(
     prior_catalog: PriorWeightsCatalog,
     fighter_transfer_upper_bound: int,
 ) -> None:
-    label = _slot_catalog_label(slot, torpedos_by_id=torpedos_by_id)
-    if label is None:
+    if isinstance(slot, FixedAggregateSlot):
+        _append_aggregate_action(
+            actions,
+            probability_buckets,
+            action_id=slot.action_id,
+            label=slot.catalog_label,
+            score_delta_2x=slot.score_delta_2x,
+            upper_bound=_upper_bound_for_fixed_slot(
+                slot,
+                observation=observation,
+                config=config,
+                fighter_transfer_upper_bound=fighter_transfer_upper_bound,
+            ),
+            aggregate_allowlist=aggregate_allowlist,
+            prior_catalog=prior_catalog,
+            prior_fields=slot.spec,
+        )
         return
-    score_delta_2x = _slot_score_delta_2x(slot, torpedos_by_id=torpedos_by_id)
-    if score_delta_2x is None:
+
+    torpedo = torpedos_by_id.get(slot.entity_id)
+    if torpedo is None:
         return
-    upper_bound = _slot_upper_bound(
-        slot,
-        observation=observation,
-        config=config,
-        torpedos_by_id=torpedos_by_id,
-        fighter_transfer_upper_bound=fighter_transfer_upper_bound,
-    )
-    if upper_bound is None:
-        return
+    if slot.spec.score_delta_2x_from_cost is None:
+        raise ValueError(f"template aggregate slot missing score delta: {slot.action_id!r}")
+    if slot.spec.catalog_config_cap is None:
+        raise ValueError(f"template aggregate slot missing config cap: {slot.action_id!r}")
+    score_delta_2x = slot.spec.score_delta_2x_from_cost(torpedo.torpedocost)
     _append_aggregate_action(
         actions,
         probability_buckets,
         action_id=slot.action_id,
-        label=label,
+        label=slot.spec.catalog_label_format.format(name=torpedo.name),
         score_delta_2x=score_delta_2x,
-        upper_bound=upper_bound,
+        upper_bound=residual_count_bound(
+            observation,
+            score_delta_2x,
+            slot.spec.catalog_config_cap(config),
+        ),
         aggregate_allowlist=aggregate_allowlist,
         prior_catalog=prior_catalog,
-        spec=slot.spec,
+        prior_fields=slot.spec,
     )

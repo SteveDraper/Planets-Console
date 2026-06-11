@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    FixedAggregateSlot,
+    TemplateAggregateSlot,
     base_bin_bounds_for_action,
     iter_aggregate_action_slots,
     magnitude_bin_index,
@@ -227,7 +229,7 @@ def _resolve_aggregate_priors(
     for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
         action_id = slot.action_id
         aggregate = band_tables.get(action_id)
-        if not slot.spec.is_template:
+        if isinstance(slot, FixedAggregateSlot):
             resolved_aggregate = required_aggregate_prior(
                 band_tables,
                 band=band,
@@ -248,6 +250,8 @@ def _resolve_aggregate_priors(
                 )
             continue
 
+        if not isinstance(slot, TemplateAggregateSlot):
+            raise ValueError(f"unknown aggregate slot type for action {action_id!r}")
         bin_bounds = slot.spec.bin_bounds
         if bin_bounds is None:
             raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")

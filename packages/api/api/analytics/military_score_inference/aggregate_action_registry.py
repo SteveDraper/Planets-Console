@@ -63,35 +63,62 @@ CatalogConfigCap = Callable[[CatalogConfig], int]
 
 
 @dataclass(frozen=True)
-class AggregateActionSpec:
+class AggregatePriorFields:
     prior_shape: PriorShape
     bin_bounds: tuple[ProbabilityBinBounds, ...] | None
     allowlist_key: str | None = None
     is_fighter_channel_member: bool = False
     is_fine_grained_slack: bool = False
+
+
+@dataclass(frozen=True)
+class FixedAggregateSpec(AggregatePriorFields):
     catalog_label: str = ""
     score_delta_2x: Callable[[], int] | None = None
     catalog_config_cap: CatalogConfigCap | None = None
-    action_id_prefix: str | None = None
-    catalog_label_format: str | None = None
+
+
+@dataclass(frozen=True)
+class TemplateAggregateSpec(AggregatePriorFields):
+    action_id_prefix: str = ""
+    catalog_label_format: str = ""
     score_delta_2x_from_cost: Callable[[int], int] | None = None
-
-    @property
-    def is_template(self) -> bool:
-        return self.action_id_prefix is not None
+    catalog_config_cap: CatalogConfigCap | None = None
 
 
-@dataclass(frozen=True)
-class AggregateRegistryEntry:
-    spec: AggregateActionSpec
-    fixed_action_id: str | None = None
+AggregateActionSpec = FixedAggregateSpec | TemplateAggregateSpec
 
 
 @dataclass(frozen=True)
-class AggregateActionSlot:
+class FixedAggregateRegistryEntry:
     action_id: str
-    spec: AggregateActionSpec
-    entity_id: int | None = None
+    spec: FixedAggregateSpec
+
+
+@dataclass(frozen=True)
+class TemplateAggregateRegistryEntry:
+    spec: TemplateAggregateSpec
+
+
+AggregateRegistryEntry = FixedAggregateRegistryEntry | TemplateAggregateRegistryEntry
+
+
+@dataclass(frozen=True)
+class FixedAggregateSlot:
+    action_id: str
+    spec: FixedAggregateSpec
+    catalog_label: str
+    score_delta_2x: int
+
+
+@dataclass(frozen=True)
+class TemplateAggregateSlot:
+    action_id: str
+    spec: TemplateAggregateSpec
+    entity_id: int
+
+
+AggregateActionSlot = FixedAggregateSlot | TemplateAggregateSlot
 
 
 def iter_aggregate_action_slots(
@@ -100,17 +127,24 @@ def iter_aggregate_action_slots(
 ) -> Iterator[AggregateActionSlot]:
     """Yield one catalog/prior slot per aggregate action from the canonical registry."""
     for entry in AGGREGATE_REGISTRY:
-        if entry.fixed_action_id is not None:
-            yield AggregateActionSlot(
-                action_id=entry.fixed_action_id,
-                spec=entry.spec,
+        if isinstance(entry, FixedAggregateRegistryEntry):
+            spec = entry.spec
+            if spec.score_delta_2x is None:
+                raise ValueError(
+                    f"fixed aggregate slot missing score delta: {entry.action_id!r}"
+                )
+            yield FixedAggregateSlot(
+                action_id=entry.action_id,
+                spec=spec,
+                catalog_label=spec.catalog_label,
+                score_delta_2x=spec.score_delta_2x(),
             )
             continue
         prefix = entry.spec.action_id_prefix
-        if prefix is None:
-            raise ValueError("registry entry has neither fixed_action_id nor action_id_prefix")
+        if not prefix:
+            raise ValueError("template aggregate registry entry missing action_id_prefix")
         for torp_id in sorted(eligible_torp_ids):
-            yield AggregateActionSlot(
+            yield TemplateAggregateSlot(
                 action_id=f"{prefix}{torp_id}",
                 spec=entry.spec,
                 entity_id=torp_id,
@@ -119,9 +153,9 @@ def iter_aggregate_action_slots(
 
 # Catalog build order: config-cap histogram actions, torpedo template, fighter transfers.
 AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
-    AggregateRegistryEntry(
-        fixed_action_id="planet_defense_posts_added_total",
-        spec=AggregateActionSpec(
+    FixedAggregateRegistryEntry(
+        action_id="planet_defense_posts_added_total",
+        spec=FixedAggregateSpec(
             prior_shape="histogram",
             bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
             is_fine_grained_slack=True,
@@ -130,9 +164,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_planet_defense_posts,
         ),
     ),
-    AggregateRegistryEntry(
-        fixed_action_id="starbase_defense_posts_added_total",
-        spec=AggregateActionSpec(
+    FixedAggregateRegistryEntry(
+        action_id="starbase_defense_posts_added_total",
+        spec=FixedAggregateSpec(
             prior_shape="histogram",
             bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
             is_fine_grained_slack=True,
@@ -141,9 +175,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_starbase_defense_posts,
         ),
     ),
-    AggregateRegistryEntry(
-        fixed_action_id="starbase_fighters_added_total",
-        spec=AggregateActionSpec(
+    FixedAggregateRegistryEntry(
+        action_id="starbase_fighters_added_total",
+        spec=FixedAggregateSpec(
             prior_shape="histogram",
             bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
             is_fighter_channel_member=True,
@@ -153,9 +187,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_starbase_fighters,
         ),
     ),
-    AggregateRegistryEntry(
-        fixed_action_id="ship_fighters_added_total",
-        spec=AggregateActionSpec(
+    FixedAggregateRegistryEntry(
+        action_id="ship_fighters_added_total",
+        spec=FixedAggregateSpec(
             prior_shape="histogram",
             bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
             is_fighter_channel_member=True,
@@ -165,8 +199,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             catalog_config_cap=lambda config: config.max_ship_fighters,
         ),
     ),
-    AggregateRegistryEntry(
-        spec=AggregateActionSpec(
+    TemplateAggregateRegistryEntry(
+        spec=TemplateAggregateSpec(
             prior_shape="histogram",
             bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
             allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
@@ -177,9 +211,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             score_delta_2x_from_cost=loaded_ship_torpedo_score_delta_2x,
         ),
     ),
-    AggregateRegistryEntry(
-        fixed_action_id="fighters_starbase_to_ship",
-        spec=AggregateActionSpec(
+    FixedAggregateRegistryEntry(
+        action_id="fighters_starbase_to_ship",
+        spec=FixedAggregateSpec(
             prior_shape="counts",
             bin_bounds=None,
             allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
@@ -189,9 +223,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
             score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
         ),
     ),
-    AggregateRegistryEntry(
-        fixed_action_id="fighters_ship_to_starbase",
-        spec=AggregateActionSpec(
+    FixedAggregateRegistryEntry(
+        action_id="fighters_ship_to_starbase",
+        spec=FixedAggregateSpec(
             prior_shape="counts",
             bin_bounds=None,
             allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
@@ -205,20 +239,20 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
 
 
 def _build_aggregate_action_spec_caches() -> tuple[
-    dict[str, AggregateActionSpec],
+    dict[str, FixedAggregateSpec],
     str | None,
-    AggregateActionSpec | None,
+    TemplateAggregateSpec | None,
 ]:
-    fixed_specs: dict[str, AggregateActionSpec] = {}
+    fixed_specs: dict[str, FixedAggregateSpec] = {}
     template_prefix: str | None = None
-    template_spec: AggregateActionSpec | None = None
+    template_spec: TemplateAggregateSpec | None = None
     for entry in AGGREGATE_REGISTRY:
-        if entry.fixed_action_id is not None:
-            fixed_specs[entry.fixed_action_id] = entry.spec
+        if isinstance(entry, FixedAggregateRegistryEntry):
+            fixed_specs[entry.action_id] = entry.spec
             continue
         prefix = entry.spec.action_id_prefix
-        if prefix is None:
-            raise ValueError("registry entry has neither fixed_action_id nor action_id_prefix")
+        if not prefix:
+            raise ValueError("template aggregate registry entry missing action_id_prefix")
         if template_prefix is not None:
             raise ValueError("multiple template aggregate registry entries are not supported")
         template_prefix = prefix
