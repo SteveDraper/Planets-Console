@@ -22,6 +22,8 @@ from api.analytics.military_score_inference.scoring import STARBASE_FIGHTER_SCOR
 from api.analytics.military_score_inference.tier_policy import resolved_aggregate_cap
 from api.models.components import Torpedo
 
+HISTOGRAM_ACTION_CATALOG_PROBABILITY_WEIGHT = 0
+
 
 def residual_count_bound(
     observation: InferenceObservation,
@@ -88,20 +90,6 @@ def _counts_aggregate_probability_weight(
     return prior_weight
 
 
-def _aggregate_action_probability_weight(
-    action_id: str,
-    prior_catalog: PriorWeightsCatalog,
-) -> int:
-    spec = lookup_aggregate_action_spec(action_id)
-    if spec is None:
-        raise ValueError(f"unknown aggregate action {action_id!r}")
-    if spec.prior_shape == "histogram":
-        return 0
-    if spec.prior_shape == "counts":
-        return _counts_aggregate_probability_weight(action_id, prior_catalog)
-    raise ValueError(f"unknown prior_shape {spec.prior_shape!r} for action {action_id!r}")
-
-
 def _probability_buckets_for_aggregate_action(
     action_id: str,
     prior_catalog: PriorWeightsCatalog,
@@ -129,13 +117,22 @@ def _append_aggregate_action(
     capped_upper = min(upper_bound, allowlist_cap)
     if capped_upper <= 0:
         return
+    spec = lookup_aggregate_action_spec(action_id)
+    if spec is None:
+        raise ValueError(f"unknown aggregate action {action_id!r}")
+    if spec.prior_shape == "histogram":
+        probability_weight = HISTOGRAM_ACTION_CATALOG_PROBABILITY_WEIGHT
+    elif spec.prior_shape == "counts":
+        probability_weight = _counts_aggregate_probability_weight(action_id, prior_catalog)
+    else:
+        raise ValueError(f"unknown prior_shape {spec.prior_shape!r} for action {action_id!r}")
     actions.append(
         CandidateAction(
             id=action_id,
             label=label,
             score_delta_2x=score_delta_2x,
             upper_bound=capped_upper,
-            probability_weight=_aggregate_action_probability_weight(action_id, prior_catalog),
+            probability_weight=probability_weight,
         )
     )
     buckets = _probability_buckets_for_aggregate_action(action_id, prior_catalog)
