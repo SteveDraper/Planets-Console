@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from api.models.game import GameInfo, GameSettings
+from api.models.game import GameSettings
 
 BLITZ_MAX_ENDTURN = 30
 EPIC_MIN_SHIPLIMIT = 500
@@ -21,7 +21,3 @@ def resolve_inference_game_category(settings: GameSettings) -> str:
     if settings.shiplimit >= EPIC_MIN_SHIPLIMIT:
         return EPIC_INFERENCE_GAME_CATEGORY
     return STANDARD_INFERENCE_GAME_CATEGORY
-
-
-def resolve_inference_game_category_from_info(info: GameInfo) -> str:
-    return resolve_inference_game_category(info.settings)

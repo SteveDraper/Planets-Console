@@ -54,7 +54,6 @@ def expand_wildcard_counts(
     counts: dict[Any, float],
     *,
     universe: frozenset[Any] | None,
-    field_name: str,
 ) -> dict[Any, float]:
     """Expand optional ``*`` default pseudo-count across ``universe`` before Laplace conversion."""
     if WILDCARD_COUNT_KEY not in counts:

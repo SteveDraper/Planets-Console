@@ -23,7 +23,6 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     default_prior_weights_dir,
     load_prior_weights_for_category,
     parse_prior_weights_document,
-    prior_weights_asset_path,
 )
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
@@ -50,15 +49,6 @@ PRIOR_WEIGHT_SCALE = INFERENCE_PROBABILITY_WEIGHT_SCALE
 
 SMALL_DEEP_SPACE_FREIGHTER_HULL_ID = 15
 
-BUCKETED_AGGREGATE_ACTION_IDS = frozenset(
-    {
-        "planet_defense_posts_added_total",
-        "starbase_defense_posts_added_total",
-        "starbase_fighters_added_total",
-        "ship_fighters_added_total",
-    }
-)
-
 BASE_BUCKETS_BY_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
     "planet_defense_posts_added_total": PLANET_DEFENSE_POST_BUCKETS,
     "starbase_defense_posts_added_total": STARBASE_DEFENSE_POST_BUCKETS,
@@ -67,7 +57,6 @@ BASE_BUCKETS_BY_ACTION_ID: dict[str, tuple[ProbabilityBucket, ...]] = {
 }
 
 __all__ = [
-    "BUCKETED_AGGREGATE_ACTION_IDS",
     "PRIOR_WEIGHT_SCALE",
     "SMALL_DEEP_SPACE_FREIGHTER_HULL_ID",
     "WILDCARD_COUNT_KEY",
@@ -80,7 +69,6 @@ __all__ = [
     "laplace_log_weight",
     "load_prior_weights_for_category",
     "parse_prior_weights_document",
-    "prior_weights_asset_path",
     "resolve_prior_weights_catalog",
     "ship_limit_band_key",
 ]
@@ -237,7 +225,6 @@ def _resolve_hull_log_weights(
     expanded = expand_wildcard_counts(
         merged_counts,
         universe=buildable_hull_ids,
-        field_name=f"hulls.{band}",
     )
     if WILDCARD_COUNT_KEY in expanded and buildable_hull_ids:
         raise ValueError(f"hulls.{band}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
@@ -254,7 +241,6 @@ def _resolve_component_log_table(
     expanded = expand_wildcard_counts(
         counts,
         universe=universe,
-        field_name=field_name,
     )
     if WILDCARD_COUNT_KEY in expanded:
         raise ValueError(f"{field_name}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")

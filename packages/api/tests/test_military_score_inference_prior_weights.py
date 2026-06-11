@@ -193,7 +193,6 @@ def test_expand_wildcard_counts_fills_universe():
     expanded = expand_wildcard_counts(
         {"*": 10, 24: 100},
         universe=frozenset({24, 15}),
-        field_name="test",
     )
     assert expanded == {24: 100, 15: 10}
 

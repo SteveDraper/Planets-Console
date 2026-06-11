@@ -296,15 +296,6 @@ def load_prior_weights_asset(path: Path) -> PriorWeightsAsset:
     return asset
 
 
-def prior_weights_asset_path(
-    category_id: str,
-    *,
-    base_dir: Path | None = None,
-) -> Path:
-    directory = default_prior_weights_dir() if base_dir is None else base_dir
-    return directory / f"prior_weights_{category_id}.yaml"
-
-
 def load_prior_weights_for_category(
     category_id: str,
     *,
