@@ -96,28 +96,6 @@ SHIP_TORPS_LOADED_SPEC = AggregateActionSpec(
     is_fine_grained_slack=True,
 )
 
-HISTOGRAM_EXACT_ACTION_IDS = frozenset(
-    action_id
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items()
-    if spec.prior_shape == "histogram"
-)
-
-COUNTS_AGGREGATE_ACTION_IDS = frozenset(
-    action_id for action_id, spec in AGGREGATE_ACTION_SPECS.items() if spec.prior_shape == "counts"
-)
-
-FIGHTER_CHANNEL_MEMBER_IDS = frozenset(
-    action_id
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items()
-    if spec.is_fighter_channel_member
-)
-
-FINE_GRAINED_SLACK_EXACT_ACTION_IDS = frozenset(
-    action_id for action_id, spec in AGGREGATE_ACTION_SPECS.items() if spec.is_fine_grained_slack
-)
-
-BUCKETED_ACTION_IDS = HISTOGRAM_EXACT_ACTION_IDS
-
 
 def lookup_aggregate_action_spec(action_id: str) -> AggregateActionSpec | None:
     spec = AGGREGATE_ACTION_SPECS.get(action_id)

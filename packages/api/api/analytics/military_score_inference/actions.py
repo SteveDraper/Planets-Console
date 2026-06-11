@@ -7,8 +7,8 @@ from api.analytics.military_score_inference.accelerated_start import (
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    BUCKETED_ACTION_IDS,
     base_buckets_for_action,
+    is_histogram_aggregate_action,
 )
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
@@ -106,7 +106,9 @@ class ActionCatalog:
             "policy_step_id": self.policy_step_id,
             "policy_step_index": self.policy_step_index,
             "bucketed_action_count": sum(
-                1 for action in self.aggregate_actions if action.id in BUCKETED_ACTION_IDS
+                1
+                for action in self.aggregate_actions
+                if is_histogram_aggregate_action(action.id)
             ),
         }
         if self.prior_weights is not None:
