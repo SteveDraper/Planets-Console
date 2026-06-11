@@ -29,6 +29,7 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
+    required_aggregate_prior,
 )
 from api.analytics.military_score_inference.prior_weights_catalog import (
     CategoryComponentLogTables,
@@ -227,33 +228,23 @@ def _resolve_aggregate_priors(
         action_id = slot.action_id
         aggregate = band_tables.get(action_id)
         if not slot.spec.is_template:
-            if aggregate is None:
-                raise ValueError(
-                    f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
-                )
+            resolved_aggregate = required_aggregate_prior(
+                band_tables,
+                band=band,
+                action_id=action_id,
+                spec=slot.spec,
+            )
             if slot.spec.prior_shape == "histogram":
-                if not isinstance(aggregate, HistogramAggregate):
-                    raise ValueError(
-                        f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
-                    )
                 bucket_weights[action_id] = _resolve_histogram_aggregate_weights(
-                    aggregate,
+                    resolved_aggregate,
                     action_id,
                     band=band,
                     scale=scale,
                 )
-            elif slot.spec.prior_shape == "counts":
-                if not isinstance(aggregate, CountsAggregate):
-                    raise ValueError(
-                        f"incomplete prior: aggregates.{band}.{action_id!r} must be counts"
-                    )
-                action_weights[action_id] = _resolve_counts_aggregate_weight(
-                    aggregate,
-                    scale=scale,
-                )
             else:
-                raise ValueError(
-                    f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape"
+                action_weights[action_id] = _resolve_counts_aggregate_weight(
+                    resolved_aggregate,
+                    scale=scale,
                 )
             continue
 

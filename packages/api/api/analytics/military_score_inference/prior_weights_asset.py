@@ -10,6 +10,7 @@ from typing import Any, Literal, TypeAlias, overload
 import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    AggregateActionSpec,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
     iter_aggregate_action_slots,
@@ -299,23 +300,43 @@ def _parse_aggregate_tables(
     )
 
 
+def required_aggregate_prior(
+    band_tables: dict[str, AggregatePrior],
+    *,
+    band: ShipLimitBand,
+    action_id: str,
+    spec: AggregateActionSpec,
+) -> HistogramAggregate | CountsAggregate:
+    """Return the aggregate prior for a required slot, validating presence and shape."""
+    aggregate = band_tables.get(action_id)
+    if aggregate is None:
+        raise ValueError(
+            f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
+        )
+    if spec.prior_shape == "histogram":
+        if not isinstance(aggregate, HistogramAggregate):
+            raise ValueError(
+                f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
+            )
+        return aggregate
+    if spec.prior_shape == "counts":
+        if not isinstance(aggregate, CountsAggregate):
+            raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
+        return aggregate
+    raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape")
+
+
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:
     band_tables = asset.aggregates.get(band, {})
     for slot in iter_aggregate_action_slots(eligible_torp_ids=frozenset()):
         if slot.spec.is_template:
             continue
-        action_id = slot.action_id
-        if action_id not in band_tables:
-            raise ValueError(
-                f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
-            )
-        aggregate = band_tables[action_id]
-        if slot.spec.prior_shape == "histogram" and not isinstance(aggregate, HistogramAggregate):
-            raise ValueError(
-                f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
-            )
-        if slot.spec.prior_shape == "counts" and not isinstance(aggregate, CountsAggregate):
-            raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
+        required_aggregate_prior(
+            band_tables,
+            band=band,
+            action_id=slot.action_id,
+            spec=slot.spec,
+        )
 
 
 def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
