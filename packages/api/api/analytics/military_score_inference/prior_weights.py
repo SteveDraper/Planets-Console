@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TypeAlias
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
@@ -31,8 +31,10 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.prior_weights_asset import (
     COMPONENT_TABLE_NAMES,
+    ComponentCountTables,
     CountsAggregate,
     HistogramAggregate,
+    IntCountTableInput,
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
@@ -51,6 +53,17 @@ from api.models.game import GameSettings
 # Freighter combo likelihood uses this pseudo-hull's marginal log weight when no
 # per-combo override is present; see prior_weights_standard.yaml hulls.999999.
 GENERIC_FREIGHTER_PRIOR_HULL_ID = 999999
+
+IntLogWeightTable: TypeAlias = dict[int, int]
+SlotFillLogWeightTable: TypeAlias = dict[str, int]
+ResolvedComponentCountTables: TypeAlias = dict[
+    str,
+    IntLogWeightTable | SlotFillLogWeightTable,
+]
+CategoryComponentLogTables: TypeAlias = dict[
+    InferenceHullCategory,
+    ResolvedComponentCountTables,
+]
 
 __all__ = [
     "GENERIC_FREIGHTER_PRIOR_HULL_ID",
@@ -93,10 +106,7 @@ class PriorWeightsDiagnostics:
 class PriorWeightsCatalog:
     diagnostics: PriorWeightsDiagnostics
     _hull_log_weights: dict[int, int]
-    _component_tables: dict[
-        InferenceHullCategory,
-        dict[str, dict[Any, int]],
-    ]
+    _component_tables: CategoryComponentLogTables
     _aggregate_action_weights: dict[str, int]
     _aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
     _combo_log_overrides: dict[str, int]
@@ -108,7 +118,7 @@ class PriorWeightsCatalog:
         *,
         diagnostics: PriorWeightsDiagnostics,
         hull_log_weights: dict[int, int],
-        component_tables: dict[InferenceHullCategory, dict[str, dict[Any, int]]],
+        component_tables: CategoryComponentLogTables,
         aggregate_action_weights: dict[str, int],
         aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]],
         combo_log_overrides: dict[str, int],
@@ -134,7 +144,7 @@ class PriorWeightsCatalog:
         self,
         hull_category: InferenceHullCategory,
         table_name: str,
-        key: Any,
+        key: int | str,
         *,
         default_weight: int = 0,
     ) -> int:
@@ -238,7 +248,7 @@ def _resolve_hull_log_weights(
 ) -> dict[int, int]:
     band_tables = asset.hulls.get(band, {})
     global_counts = band_tables.get("global", {})
-    race_counts: dict[Any, float] = {}
+    race_counts: IntCountTableInput = {}
     if race_id is not None:
         race_counts = band_tables.get(str(race_id), {})
     merged_counts = dict(global_counts)
@@ -253,12 +263,12 @@ def _resolve_hull_log_weights(
 
 
 def _resolve_component_log_table(
-    counts: dict[Any, float],
+    counts: IntCountTableInput,
     *,
     universe: frozenset[int],
     field_name: str,
     scale: int,
-) -> dict[Any, int]:
+) -> IntLogWeightTable:
     expanded = expand_wildcard_counts(
         counts,
         universe=universe,
@@ -272,25 +282,28 @@ def _implicit_uniform_component_log_table(
     universe: frozenset[int],
     *,
     scale: int,
-) -> dict[Any, int]:
+) -> IntLogWeightTable:
     if not universe:
         return {}
     return counts_to_log_weights(implicit_uniform_component_counts(universe), scale=scale)
 
 
 def _resolve_category_component_tables(
-    tables: dict[str, dict[Any, float]] | None,
+    tables: ComponentCountTables | None,
     *,
     band: ShipLimitBand,
     category: InferenceHullCategory,
     universe_by_table: dict[str, frozenset[int]],
     scale: int,
-) -> dict[str, dict[Any, int]]:
+) -> ResolvedComponentCountTables:
     asset_tables = tables or {}
-    resolved_tables: dict[str, dict[Any, int]] = {}
+    resolved_tables: ResolvedComponentCountTables = {}
     for table_name, counts in asset_tables.items():
         if table_name == "slotFill":
-            resolved_tables[table_name] = counts_to_log_weights(counts, scale=scale)
+            resolved_tables[table_name] = counts_to_log_weights(
+                counts,
+                scale=scale,
+            )
             continue
         universe = universe_by_table.get(table_name, frozenset())
         resolved_tables[table_name] = _resolve_component_log_table(
@@ -317,7 +330,7 @@ def _resolve_component_tables(
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
     scale: int,
-) -> dict[InferenceHullCategory, dict[str, dict[Any, int]]]:
+) -> CategoryComponentLogTables:
     band_tables = asset.components.get(band, {})
     universe_by_table = {
         "engines": eligible_engine_ids,

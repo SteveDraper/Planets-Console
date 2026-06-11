@@ -1,7 +1,6 @@
 """Shared hull and catalog helpers for prior-weights catalog tests."""
 
 from dataclasses import replace
-from typing import Any
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AGGREGATE_ACTION_SPECS,
@@ -10,15 +9,16 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
 from api.analytics.military_score_inference.hull_category import (
     BATTLESHIP_MASS_THRESHOLD,
     INFERENCE_HULL_CATEGORIES,
-    InferenceHullCategory,
 )
 from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     probability_buckets_from_bin_bounds,
 )
 from api.analytics.military_score_inference.prior_weights import (
+    CategoryComponentLogTables,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
+    ResolvedComponentCountTables,
 )
 from api.models.components import Hull
 
@@ -134,7 +134,7 @@ def battleship_hull() -> Hull:
     )
 
 
-def _empty_component_table_shell() -> dict[str, dict[Any, int]]:
+def _empty_component_table_shell() -> ResolvedComponentCountTables:
     return {
         "engines": {},
         "beams": {},
@@ -143,7 +143,7 @@ def _empty_component_table_shell() -> dict[str, dict[Any, int]]:
     }
 
 
-def _empty_component_tables() -> dict[InferenceHullCategory, dict[str, dict[Any, int]]]:
+def _empty_component_tables() -> CategoryComponentLogTables:
     return {category: _empty_component_table_shell() for category in INFERENCE_HULL_CATEGORIES}
 
 

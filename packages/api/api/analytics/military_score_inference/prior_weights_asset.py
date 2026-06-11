@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias, overload
 
 import yaml
 
@@ -30,6 +30,15 @@ ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
 SHIP_LIMIT_BANDS: tuple[ShipLimitBand, ...] = ("before_ship_limit", "after_ship_limit")
 
 COMPONENT_TABLE_NAMES = ("engines", "beams", "torpedoes")
+
+WildcardCountKey = Literal["*"]
+IntComponentTableName = Literal["engines", "beams", "torpedoes"]
+SlotFillTableName = Literal["slotFill"]
+
+IntCountTable: TypeAlias = dict[int, float]
+IntCountTableInput: TypeAlias = dict[int | WildcardCountKey, float]
+SlotFillCountTable: TypeAlias = dict[str, float]
+ComponentCountTables: TypeAlias = dict[str, IntCountTableInput | SlotFillCountTable]
 
 STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yaml"
 
@@ -61,13 +70,18 @@ def _parse_count_table(
     field_name: str,
     key_kind: Literal["int", "str"],
     allow_wildcard: bool,
-) -> dict[Any, float]:
+) -> IntCountTableInput | SlotFillCountTable:
     if not isinstance(raw, dict):
         raise ValueError(f"{field_name} must be a mapping")
-    counts: dict[Any, float] = {}
+    if key_kind == "int":
+        counts: IntCountTableInput = {}
+    else:
+        counts = {}
     for key, value in raw.items():
         if allow_wildcard and key == WILDCARD_COUNT_KEY:
-            parsed_key: Any = WILDCARD_COUNT_KEY
+            if key_kind != "int":
+                raise ValueError(f"{field_name} does not allow {WILDCARD_COUNT_KEY!r}")
+            parsed_key: int | WildcardCountKey = WILDCARD_COUNT_KEY
         elif key_kind == "int":
             if not isinstance(key, int):
                 raise ValueError(f"{field_name} keys must be integers")
@@ -86,18 +100,37 @@ def _parse_count_table(
     return counts
 
 
+@overload
+def _parse_int_keyed_counts(
+    raw: object,
+    *,
+    field_name: str,
+    allow_wildcard: Literal[True] = True,
+) -> IntCountTableInput: ...
+
+
+@overload
+def _parse_int_keyed_counts(
+    raw: object,
+    *,
+    field_name: str,
+    allow_wildcard: Literal[False],
+) -> IntCountTable: ...
+
+
 def _parse_int_keyed_counts(
     raw: object,
     *,
     field_name: str,
     allow_wildcard: bool = True,
-) -> dict[Any, float]:
-    return _parse_count_table(
+) -> IntCountTableInput | IntCountTable:
+    parsed = _parse_count_table(
         raw,
         field_name=field_name,
         key_kind="int",
         allow_wildcard=allow_wildcard,
     )
+    return parsed
 
 
 def _parse_str_keyed_counts(
@@ -105,7 +138,7 @@ def _parse_str_keyed_counts(
     *,
     field_name: str,
     allow_wildcard: bool = True,
-) -> dict[str, float]:
+) -> SlotFillCountTable:
     return _parse_count_table(
         raw,
         field_name=field_name,
@@ -133,7 +166,7 @@ class PriorWeightsAsset:
     category: str
     game_category_rules_version: int
     hulls: dict[ShipLimitBand, dict[str, dict[int, float]]]
-    components: dict[ShipLimitBand, dict[InferenceHullCategory, dict[str, dict[Any, float]]]]
+    components: dict[ShipLimitBand, dict[InferenceHullCategory, ComponentCountTables]]
     aggregates: dict[ShipLimitBand, dict[str, AggregatePrior]]
     combo_overrides: dict[str, float] = field(default_factory=dict)
     hull_overrides: dict[int, float] = field(default_factory=dict)
@@ -173,8 +206,8 @@ def _parse_hull_tables(raw: object) -> dict[ShipLimitBand, dict[str, dict[int, f
 def _parse_band_component_tables(
     band_raw: object,
     band: ShipLimitBand,
-) -> dict[InferenceHullCategory, dict[str, dict[Any, float]]]:
-    categories: dict[InferenceHullCategory, dict[str, dict[Any, float]]] = {}
+) -> dict[InferenceHullCategory, ComponentCountTables]:
+    categories: dict[InferenceHullCategory, ComponentCountTables] = {}
     for category, category_raw in band_raw.items():
         if not isinstance(category, str):
             raise ValueError(f"components.{band} keys must be strings")
@@ -186,7 +219,7 @@ def _parse_band_component_tables(
             )
         if not isinstance(category_raw, dict):
             raise ValueError(f"components.{band}.{category} must be a mapping")
-        tables: dict[str, dict[Any, float]] = {}
+        tables: ComponentCountTables = {}
         for table_name in COMPONENT_TABLE_NAMES:
             if table_name in category_raw:
                 tables[table_name] = _parse_int_keyed_counts(
@@ -205,7 +238,7 @@ def _parse_band_component_tables(
 
 def _parse_component_tables(
     raw: object,
-) -> dict[ShipLimitBand, dict[InferenceHullCategory, dict[str, dict[Any, float]]]]:
+) -> dict[ShipLimitBand, dict[InferenceHullCategory, ComponentCountTables]]:
     return _parse_ship_limit_bands(
         raw,
         section_name="components",
