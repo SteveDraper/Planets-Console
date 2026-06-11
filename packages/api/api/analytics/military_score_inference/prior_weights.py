@@ -25,8 +25,10 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     parse_prior_weights_document,
     prior_weights_asset_path,
 )
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.prior_weights_laplace import (
-    PRIOR_WEIGHT_SCALE,
     WILDCARD_COUNT_KEY,
     counts_to_log_weights,
     expand_wildcard_counts,
@@ -43,6 +45,8 @@ from api.analytics.military_score_inference.probability_bucket_defaults import (
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
+
+PRIOR_WEIGHT_SCALE = INFERENCE_PROBABILITY_WEIGHT_SCALE
 
 SMALL_DEEP_SPACE_FREIGHTER_HULL_ID = 15
 

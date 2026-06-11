@@ -9,7 +9,9 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.prior_weights import PRIOR_WEIGHT_SCALE
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.tier_policy import (
     FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
     SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
@@ -32,15 +34,15 @@ FIGHTER_CHANNEL_MEMBER_IDS = frozenset(
 
 
 def _default_parsimony_per_active_slack_type() -> int:
-    return -(PRIOR_WEIGHT_SCALE // 2)
+    return -(INFERENCE_PROBABILITY_WEIGHT_SCALE // 2)
 
 
 def _default_partial_weapon_slot_penalty_per_line() -> int:
-    return -(PRIOR_WEIGHT_SCALE // 4)
+    return -(INFERENCE_PROBABILITY_WEIGHT_SCALE // 4)
 
 
 def _default_tier_overflow_marginal_weight() -> int:
-    return PRIOR_WEIGHT_SCALE // 2
+    return INFERENCE_PROBABILITY_WEIGHT_SCALE // 2
 
 
 @dataclass(frozen=True)

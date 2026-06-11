@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 import yaml
 
+from api.analytics.assets import analytics_assets_dir
+
 SlotCountMode = Literal["none", "partial"]
 FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
 FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
@@ -127,13 +129,7 @@ class InferenceTierPolicyStep:
 
 
 def default_tier_policy_path() -> Path:
-    return (
-        Path(__file__).resolve().parents[5]
-        / "assets"
-        / "analytics"
-        / "military_score_build_inference"
-        / "tier_policy.yaml"
-    )
+    return analytics_assets_dir("military_score_build_inference") / "tier_policy.yaml"
 
 
 def load_tier_policy_document(path: Path) -> dict[str, Any]:

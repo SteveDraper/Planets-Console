@@ -5,10 +5,13 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
+
 WILDCARD_COUNT_KEY = "*"
 
 LAPLACE_ALPHA = 1
-PRIOR_WEIGHT_SCALE = 100
 IMPLICIT_UNIFORM_PSEUDO_COUNT = 1.0
 
 
@@ -20,7 +23,7 @@ def laplace_log_weight(count: float, *, total: float, cell_count: int, scale: in
 def counts_to_log_weights(
     counts: dict[Any, float],
     *,
-    scale: int = PRIOR_WEIGHT_SCALE,
+    scale: int = INFERENCE_PROBABILITY_WEIGHT_SCALE,
 ) -> dict[Any, int]:
     if not counts:
         return {}

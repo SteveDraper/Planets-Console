@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import yaml
 
+from api.analytics.assets import analytics_assets_dir
 from api.analytics.military_score_inference.hull_category import InferenceHullCategory
 from api.analytics.military_score_inference.inference_game_category import (
     STANDARD_INFERENCE_GAME_CATEGORY,
@@ -25,12 +26,7 @@ STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yam
 
 
 def default_prior_weights_dir() -> Path:
-    return (
-        Path(__file__).resolve().parents[5]
-        / "assets"
-        / "analytics"
-        / "military_score_build_inference"
-    )
+    return analytics_assets_dir("military_score_build_inference")
 
 
 def _parse_ship_limit_bands[T](
