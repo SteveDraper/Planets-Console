@@ -12,7 +12,7 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.probability_bucket_defaults import (
+from api.analytics.military_score_inference.aggregate_action_registry import (
     PLANET_DEFENSE_POST_BUCKETS,
     SHIP_TORPEDO_BUCKETS,
     STARBASE_DEFENSE_POST_BUCKETS,

@@ -7,7 +7,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionAction,
     ProbabilityBucket,
 )
-from api.analytics.military_score_inference.probability_bucket_defaults import (
+from api.analytics.military_score_inference.aggregate_action_registry import (
     PLANET_DEFENSE_POST_BUCKETS,
 )
 from api.analytics.military_score_inference.scoring import (
