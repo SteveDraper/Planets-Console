@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     is_fighter_channel_member,
     is_fine_grained_slack_action,
     is_ship_torps_loaded_action,
+    magnitude_bin_index,
 )
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
@@ -17,9 +18,6 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
-)
-from api.analytics.military_score_inference.probability_bucket_defaults import (
-    magnitude_bin_index,
 )
 
 EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID = "evil_empire_free_starbase_fighters"

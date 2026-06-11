@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    base_buckets_for_action,
     is_counts_aggregate_action,
     is_histogram_aggregate_action,
+    magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
@@ -37,10 +39,6 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
     expand_wildcard_counts,
     finalize_counts_for_laplace,
     implicit_uniform_component_counts,
-)
-from api.analytics.military_score_inference.probability_bucket_defaults import (
-    base_buckets_for_action,
-    magnitude_bin_index,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings

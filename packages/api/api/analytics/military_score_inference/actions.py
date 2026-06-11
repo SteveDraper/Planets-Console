@@ -6,6 +6,10 @@ from api.analytics.military_score_inference.accelerated_start import (
     HOMEBASE_STARBASE_FIGHTERS,
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    BUCKETED_ACTION_IDS,
+    base_buckets_for_action,
+)
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
     turn_catalog_context_for_policy_step,
@@ -27,10 +31,6 @@ from api.analytics.military_score_inference.prior_weights import (
     resolve_prior_weights_catalog,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import laplace_log_weight
-from api.analytics.military_score_inference.probability_bucket_defaults import (
-    BUCKETED_ACTION_IDS,
-    base_buckets_for_action,
-)
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     TierOverflowBand,
