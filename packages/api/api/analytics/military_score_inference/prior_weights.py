@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from api.analytics.military_score_inference.hull_category import (
+    INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
     resolve_inference_hull_category,
     slot_fill_pattern,
@@ -118,31 +119,6 @@ class PriorWeightsCatalog:
     aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
     combo_log_overrides: dict[str, int]
     hull_log_overrides: dict[int, int]
-    eligible_engine_ids: frozenset[int] = frozenset()
-    eligible_beam_ids: frozenset[int] = frozenset()
-    eligible_torp_ids: frozenset[int] = frozenset()
-    scale: int = PRIOR_WEIGHT_SCALE
-
-    def _component_log_weights(
-        self,
-        hull_category: InferenceHullCategory,
-        table_name: Literal["engines", "beams", "torpedoes"],
-    ) -> dict[Any, int]:
-        category_tables = self.component_tables.get(hull_category, {})
-        if table_name in category_tables:
-            return category_tables[table_name]
-        universe_by_table = {
-            "engines": self.eligible_engine_ids,
-            "beams": self.eligible_beam_ids,
-            "torpedoes": self.eligible_torp_ids,
-        }
-        universe = universe_by_table[table_name]
-        if not universe:
-            return {}
-        return counts_to_log_weights(
-            implicit_uniform_component_counts(universe),
-            scale=self.scale,
-        )
 
     def combo_probability_weight(
         self,
@@ -169,18 +145,15 @@ class PriorWeightsCatalog:
             beam_count=beam_count,
             launcher_count=launcher_count,
         )
-        category_tables = self.component_tables.get(hull_category, {})
+        category_tables = self.component_tables[hull_category]
         fill = slot_fill_pattern(hull, beam_count=beam_count, launcher_count=launcher_count)
 
         component_weight = 0
-        component_weight += self._component_log_weights(hull_category, "engines").get(engine.id, 0)
+        component_weight += category_tables["engines"].get(engine.id, 0)
         if beam is not None and beam_count > 0:
-            component_weight += self._component_log_weights(hull_category, "beams").get(beam.id, 0)
+            component_weight += category_tables["beams"].get(beam.id, 0)
         if torpedo is not None and launcher_count > 0:
-            component_weight += self._component_log_weights(hull_category, "torpedoes").get(
-                torpedo.id,
-                0,
-            )
+            component_weight += category_tables["torpedoes"].get(torpedo.id, 0)
         component_weight += category_tables.get("slotFill", {}).get(fill, 0)
 
         return hull_weight + component_weight
@@ -279,6 +252,37 @@ def _implicit_uniform_component_log_table(
     return counts_to_log_weights(implicit_uniform_component_counts(universe), scale=scale)
 
 
+def _resolve_category_component_tables(
+    tables: dict[str, dict[Any, float]] | None,
+    *,
+    band: ShipLimitBand,
+    category: InferenceHullCategory,
+    universe_by_table: dict[str, frozenset[int]],
+    scale: int,
+) -> dict[str, dict[Any, int]]:
+    asset_tables = tables or {}
+    resolved_tables: dict[str, dict[Any, int]] = {}
+    for table_name, counts in asset_tables.items():
+        if table_name == "slotFill":
+            resolved_tables[table_name] = counts_to_log_weights(counts, scale=scale)
+            continue
+        universe = universe_by_table.get(table_name, frozenset())
+        resolved_tables[table_name] = _resolve_component_log_table(
+            counts,
+            universe=universe,
+            field_name=f"components.{band}.{category}.{table_name}",
+            scale=scale,
+        )
+    for table_name in COMPONENT_TABLE_NAMES:
+        if table_name in resolved_tables:
+            continue
+        resolved_tables[table_name] = _implicit_uniform_component_log_table(
+            universe_by_table[table_name],
+            scale=scale,
+        )
+    return resolved_tables
+
+
 def _resolve_component_tables(
     asset: PriorWeightsAsset,
     *,
@@ -289,34 +293,21 @@ def _resolve_component_tables(
     scale: int,
 ) -> dict[InferenceHullCategory, dict[str, dict[Any, int]]]:
     band_tables = asset.components.get(band, {})
-    resolved: dict[InferenceHullCategory, dict[str, dict[Any, int]]] = {}
     universe_by_table = {
         "engines": eligible_engine_ids,
         "beams": eligible_beam_ids,
         "torpedoes": eligible_torp_ids,
     }
-    for category, tables in band_tables.items():
-        resolved_tables: dict[str, dict[Any, int]] = {}
-        for table_name, counts in tables.items():
-            if table_name == "slotFill":
-                resolved_tables[table_name] = counts_to_log_weights(counts, scale=scale)
-                continue
-            universe = universe_by_table.get(table_name, frozenset())
-            resolved_tables[table_name] = _resolve_component_log_table(
-                counts,
-                universe=universe,
-                field_name=f"components.{band}.{category}.{table_name}",
-                scale=scale,
-            )
-        for table_name in COMPONENT_TABLE_NAMES:
-            if table_name in resolved_tables:
-                continue
-            resolved_tables[table_name] = _implicit_uniform_component_log_table(
-                universe_by_table[table_name],
-                scale=scale,
-            )
-        resolved[category] = resolved_tables
-    return resolved
+    return {
+        category: _resolve_category_component_tables(
+            band_tables.get(category),
+            band=band,
+            category=category,
+            universe_by_table=universe_by_table,
+            scale=scale,
+        )
+        for category in INFERENCE_HULL_CATEGORIES
+    }
 
 
 def _resolve_aggregate_weights(
@@ -409,8 +400,4 @@ def resolve_prior_weights_catalog(
         aggregate_bucket_marginal_weights=aggregate_bucket_weights,
         combo_log_overrides=combo_log_overrides,
         hull_log_overrides=hull_log_overrides_int,
-        eligible_engine_ids=eligible_engine_ids,
-        eligible_beam_ids=eligible_beam_ids,
-        eligible_torp_ids=eligible_torp_ids,
-        scale=scale,
     )

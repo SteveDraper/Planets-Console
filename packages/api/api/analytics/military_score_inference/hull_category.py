@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from api.models.components import Hull
 
@@ -16,6 +16,8 @@ InferenceHullCategory = Literal[
     "weaponless_hull",
     "utility",
 ]
+
+INFERENCE_HULL_CATEGORIES: tuple[InferenceHullCategory, ...] = get_args(InferenceHullCategory)
 
 BATTLESHIP_MASS_THRESHOLD = 150
 
