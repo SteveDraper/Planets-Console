@@ -36,7 +36,6 @@ from api.analytics.military_score_inference.prior_weights_asset import (
     PriorWeightsAsset,
     ShipLimitBand,
     load_prior_weights_for_category,
-    validate_complete_aggregate_priors,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
     WILDCARD_COUNT_KEY,
@@ -414,7 +413,6 @@ def resolve_prior_weights_catalog(
         base_dir=base_dir,
     )
     band = ship_limit_band_key(observation)
-    validate_complete_aggregate_priors(asset, band=band)
 
     hull_log_weights = _resolve_hull_log_weights(
         asset,
