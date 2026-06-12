@@ -52,7 +52,7 @@ assets/analytics/scores/
 
 At solve time:
 
-1. `resolve_inference_game_category(game_info) -> category_id` (Core; same function as miner).
+1. `GameCategory.from_game_settings(settings)` (Core `api.concepts.game_category`; same function as miner).
 2. Load `prior_weights_{category_id}.yaml`.
 3. If missing, fall back to `prior_weights_standard.yaml` and record fallback in diagnostics.
 
@@ -60,22 +60,11 @@ At solve time:
 
 ### 3.1 Category resolution (v1)
 
-Ordered predicate rules in Core (first match wins). Minimum category ids: `standard`, `blitz`, `epic`. Rules are immutable once published; extend by adding new ids, not redefining existing ones.
+Ordered predicate rules in Core (first match wins). Category ids: `campaign`, `blitz`, `epic`, `standard`. Rules are immutable once published; extend by adding new ids, not redefining existing ones.
 
-Example shape (exact predicates TBD against Planets.nu settings):
+Implemented in `api/concepts/game_category.py` as `GameCategory.from_game_settings(settings)` (`campaignmode` first, then blitz/epic/standard predicates).
 
-```python
-# Illustrative only -- implement in Core alongside hull category resolver
-def resolve_inference_game_category(info: GameInfo) -> str:
-    settings = info.settings
-    if settings.endturn <= 30:  # example blitz rule
-        return "blitz"
-    if settings.shiplimit >= 500:  # example epic rule
-        return "epic"
-    return "standard"
-```
-
-Glossary: `CONTEXT.md` -- **Inference game category**.
+Glossary: `CONTEXT.md` -- **Game category**.
 
 ---
 
@@ -207,7 +196,7 @@ Malformed suffixes are rejected instead of being accepted by prefix match alone.
 ```yaml
 version: 1
 category: standard   # must match filename stem
-gameCategoryRulesVersion: 1  # bump when resolve_inference_game_category rules change
+gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
 
 hulls:
   before_ship_limit:
@@ -252,7 +241,7 @@ Exact key names validated by loader; schema evolution bumps `version`.
 ```text
 packages/api/api/analytics/military_score_inference/
   prior_weights.py           # load YAML, convert counts, resolve tables for observation
-  inference_game_category.py # resolve_inference_game_category (or colocate with prior_weights)
+  concepts/game_category.py  # GameCategory.from_game_settings()
   hull_category.py             # resolve_inference_hull_category(hull, *, beam_count, launcher_count)
   actions.py                 # consume prior weights instead of hardcoded constants
   ship_build_combos.py       # combo probability_weight from prior_weights
@@ -279,7 +268,7 @@ categories:
   epic: []
 ```
 
-Miner assigns each game to a category via `resolve_inference_game_category` and must agree with manifest grouping.
+Miner assigns each game to a category via `GameCategory.from_game_settings` and must agree with manifest grouping.
 
 ### 10.2 Ship-build observations
 
@@ -332,7 +321,7 @@ Write `prior_weights_{category}.yaml` count tables (single histogram shape per a
 ## 11. #86 acceptance criteria
 
 - [ ] `prior_weights_standard.yaml` with hand-seeded pseudo-counts (hulls, at least two hull categories of component tables, aggregate histograms)
-- [ ] `resolve_inference_game_category()` and `resolve_inference_hull_category()` in Core with unit tests
+- [x] `GameCategory.from_game_settings()` and `resolve_inference_hull_category()` in Core with unit tests
 - [ ] Loader applies priors at catalog build; hardcoded placeholder weights removed or demoted to emergency fallback only
 - [ ] Per-table Laplace log conversion; combo weights compose additively
 - [ ] Missing category asset falls back to `standard` with diagnostics flag

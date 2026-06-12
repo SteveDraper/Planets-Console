@@ -173,7 +173,7 @@ def minimal_prior_catalog(
             category_id="standard",
             asset_path="test",
             asset_version=1,
-            game_category_rules_version=1,
+            game_category_rules_version=2,
             fell_back_to_standard=False,
             ship_limit_band="before_ship_limit",
             race_id_used=None,

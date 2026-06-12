@@ -12,9 +12,6 @@ from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
 )
-from api.analytics.military_score_inference.inference_game_category import (
-    resolve_inference_game_category,
-)
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
@@ -48,6 +45,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
     implicit_uniform_component_counts,
     none_bin_pseudo_count,
 )
+from api.concepts.game_category import GameCategory
 from api.models.game import GameSettings
 
 _GENERIC_FREIGHTER_HULL_PRIOR_KEY = "generic_freighter"
@@ -327,9 +325,9 @@ def resolve_prior_weights_catalog(
             "eligible_torp_ids)"
         )
 
-    category_id = resolve_inference_game_category(settings)
+    category = GameCategory.from_game_settings(settings)
     asset, asset_path, fell_back = load_prior_weights_for_category(
-        category_id,
+        category,
         base_dir=base_dir,
     )
     band = ship_limit_band_key(observation)
@@ -361,7 +359,7 @@ def resolve_prior_weights_catalog(
     hull_log_overrides_int = counts_to_log_weights(asset.hull_overrides, scale=scale)
 
     diagnostics = PriorWeightsDiagnostics(
-        category_id=category_id,
+        category_id=category,
         asset_path=str(asset_path),
         asset_version=asset.version,
         game_category_rules_version=asset.game_category_rules_version,

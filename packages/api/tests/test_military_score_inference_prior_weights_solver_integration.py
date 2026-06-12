@@ -8,9 +8,6 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog_from_turn,
     build_inference_problem,
 )
-from api.analytics.military_score_inference.inference_game_category import (
-    resolve_inference_game_category,
-)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -23,6 +20,7 @@ from api.analytics.military_score_inference.prior_weights_resolve import (
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.concepts.game_category import GameCategory
 
 from tests.fixtures.military_score_inference import _observation
 
@@ -60,7 +58,7 @@ def test_catalog_build_includes_prior_weights_diagnostics(sample_turn):
     assert "priorWeights" in diagnostics
     prior_payload = diagnostics["priorWeights"]
     assert isinstance(prior_payload, dict)
-    assert prior_payload["categoryId"] == resolve_inference_game_category(sample_turn.settings)
+    assert prior_payload["categoryId"] == GameCategory.from_game_settings(sample_turn.settings)
     assert prior_payload["shipLimitBand"] == ship_limit_band_key(observation)
 
 

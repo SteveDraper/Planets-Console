@@ -12,7 +12,7 @@
 
 version: 3
 category: standard  # must match filename stem prior_weights_{category}.yaml
-gameCategoryRulesVersion: 1  # bump when resolve_inference_game_category() rules change
+gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
 
 hulls:
   # Inference ship-limit band: tables split on whether the player is before/after ship limit.

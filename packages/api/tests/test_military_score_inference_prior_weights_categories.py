@@ -1,34 +1,14 @@
-"""Unit tests for inference game and hull category resolution."""
+"""Unit tests for inference hull category resolution."""
 
 from dataclasses import replace
 
 from api.analytics.military_score_inference.hull_category import resolve_inference_hull_category
-from api.analytics.military_score_inference.inference_game_category import (
-    BLITZ_INFERENCE_GAME_CATEGORY,
-    EPIC_INFERENCE_GAME_CATEGORY,
-    STANDARD_INFERENCE_GAME_CATEGORY,
-    resolve_inference_game_category,
-)
 
 from tests.fixtures.military_score_inference_prior_weights import (
     battleship_hull,
     beam_ship_hull,
     torpedo_hull,
 )
-
-
-def test_resolve_inference_game_category_rules(sample_turn):
-    assert resolve_inference_game_category(replace(sample_turn.settings, endturn=30)) == (
-        BLITZ_INFERENCE_GAME_CATEGORY
-    )
-    assert (
-        resolve_inference_game_category(replace(sample_turn.settings, endturn=31, shiplimit=499))
-        == STANDARD_INFERENCE_GAME_CATEGORY
-    )
-    assert (
-        resolve_inference_game_category(replace(sample_turn.settings, endturn=100, shiplimit=500))
-        == EPIC_INFERENCE_GAME_CATEGORY
-    )
 
 
 def test_resolve_inference_hull_category_priority():

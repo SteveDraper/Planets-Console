@@ -18,12 +18,9 @@ from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
 )
-from api.analytics.military_score_inference.inference_game_category import (
-    INFERENCE_GAME_CATEGORY_RULES_VERSION,
-    STANDARD_INFERENCE_GAME_CATEGORY,
-)
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
 from api.analytics.scores_assets import Scores
+from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
 
 ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
 
@@ -48,7 +45,7 @@ class ComponentCountTables:
     slot_fill: SlotFillCountTable | None = None
 
 
-STANDARD_PRIOR_FILENAME = f"prior_weights_{STANDARD_INFERENCE_GAME_CATEGORY}.yaml"
+STANDARD_PRIOR_FILENAME = f"prior_weights_{GameCategory.STANDARD}.yaml"
 
 
 def default_prior_weights_dir() -> Path:
@@ -355,11 +352,11 @@ def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
     rules_version = document.get("gameCategoryRulesVersion")
     if not isinstance(rules_version, int) or rules_version < 1:
         raise ValueError("gameCategoryRulesVersion must be a positive integer")
-    if rules_version != INFERENCE_GAME_CATEGORY_RULES_VERSION:
+    if rules_version != GAME_CATEGORY_RULES_VERSION:
         raise ValueError(
             "gameCategoryRulesVersion "
-            f"{rules_version} does not match expected inference rules version "
-            f"{INFERENCE_GAME_CATEGORY_RULES_VERSION}"
+            f"{rules_version} does not match expected game category rules version "
+            f"{GAME_CATEGORY_RULES_VERSION}"
         )
 
     overrides_raw = document.get("overrides", {})
@@ -413,16 +410,16 @@ def load_prior_weights_asset(path: Path) -> PriorWeightsAsset:
 
 
 def load_prior_weights_for_category(
-    category_id: str,
+    category: GameCategory,
     *,
     base_dir: Path | None = None,
 ) -> tuple[PriorWeightsAsset, Path, bool]:
     directory = default_prior_weights_dir() if base_dir is None else base_dir
-    category_path = directory / f"prior_weights_{category_id}.yaml"
+    category_path = directory / f"prior_weights_{category}.yaml"
     if category_path.is_file():
         return load_prior_weights_asset(category_path), category_path, False
 
-    if category_id == STANDARD_INFERENCE_GAME_CATEGORY:
+    if category == GameCategory.STANDARD:
         raise FileNotFoundError(f"missing required prior weights asset: {category_path}")
 
     standard_path = directory / STANDARD_PRIOR_FILENAME
