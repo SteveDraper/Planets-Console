@@ -165,6 +165,7 @@ def minimal_prior_catalog(
     hull_log_weights: dict[int, int] | None = None,
     combo_log_overrides: dict[str, int] | None = None,
     hull_log_overrides: dict[int, int] | None = None,
+    generic_freighter_log_weight: int | None = None,
     aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]] | None = None,
 ) -> PriorWeightsCatalog:
     return PriorWeightsCatalog(
@@ -183,4 +184,5 @@ def minimal_prior_catalog(
         or complete_test_aggregate_bucket_weights(),
         _combo_log_overrides=combo_log_overrides or {},
         _hull_log_overrides=hull_log_overrides or {},
+        _generic_freighter_log_weight=generic_freighter_log_weight,
     )

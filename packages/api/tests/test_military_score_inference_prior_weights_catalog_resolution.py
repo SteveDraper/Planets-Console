@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
 )
+from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.models.components import Beam, Engine, Torpedo
 
 from tests.fixtures.military_score_inference import _observation
@@ -36,6 +37,32 @@ def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
     )
     assert catalog.hull_marginal_log_weight(99, default_weight=-1) != -1
     assert catalog.hull_marginal_log_weight(24) > catalog.hull_marginal_log_weight(99)
+
+
+def test_true_freighter_hull_counts_collapse_to_generic_solver_combo(sample_turn):
+    catalog = resolve_prior_weights_catalog(
+        _observation(),
+        replace(sample_turn.settings, endturn=100, shiplimit=200),
+        buildable_hull_ids=frozenset({15, 24}),
+        generic_freighter_hull_ids=frozenset({15}),
+        eligible_engine_ids=frozenset({1}),
+        eligible_beam_ids=frozenset({1}),
+        eligible_torp_ids=frozenset({1}),
+    )
+    expected_weights = counts_to_log_weights(
+        {24: 450.0, "generic_freighter": 220.0},
+        scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
+    )
+
+    assert catalog.hull_marginal_log_weight(24) == expected_weights[24]
+    assert catalog.hull_marginal_log_weight(15, default_weight=-1) == -1
+    assert (
+        catalog.freighter_probability_weight(
+            combo_id=GENERIC_FREIGHTER_COMBO_ID,
+            default_weight=0,
+        )
+        == expected_weights["generic_freighter"]
+    )
 
 
 def test_missing_component_subtable_uses_uniform_distribution(sample_turn):

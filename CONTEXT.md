@@ -429,7 +429,7 @@ Explicit allowlist of finished game ids used to mine **inference build prior ass
 _Avoid_: all stored games, in-progress games
 
 **Inference build prior asset**:
-Static YAML under `assets/analytics/scores/` holding un-normalized count tables for hull marginals, **inference conditional component prior** cells, and **inference aggregate prior** histograms. One file per **inference game category** (e.g. category id in filename). At catalog-build time the console resolves category from the loaded game, loads the matching file, normalizes each table with Laplace smoothing (`alpha = 1`), converts to integer log-probability weights, and composes additively in log space for ship combos. v1 hand-seeds pseudo-counts; structure accepts mined replacements without solver changes.
+Static YAML under `assets/analytics/scores/` holding un-normalized count tables for hull marginals, **inference conditional component prior** cells, and **inference aggregate prior** histograms. One file per **inference game category** (e.g. category id in filename). At catalog-build time the console resolves category from the loaded game, loads the matching file, normalizes each table with Laplace smoothing (`alpha = 1`), converts to integer log-probability weights, and composes additively in log space for ship combos. Real freighter hull ids stay in the asset; Core collapses eligible true-freighter hull counts into the solver's generic freighter combo during catalog resolution. v1 hand-seeds pseudo-counts; structure accepts mined replacements without solver changes.
 _Avoid_: normalized probabilities in the asset, hardcoded weights in Python, single monolithic asset for all game types
 
 **Inference hull category**:
@@ -458,7 +458,7 @@ Un-normalized count distribution over aggregate inference actions, stored as raw
 _Avoid_: bin-level-only asset (without histogram layer), per-unit aggregate weights
 
 **Inference hull marginal prior**:
-Un-normalized count distribution over hull ids for **inference prior ship-build observation** mining. Partitioned by **inference ship-limit band**; optional per-race count slices in the asset schema, with global pooled tables as default and sparse per-race rows for race-exclusive or strongly race-characteristic hulls. v1 hand-seeds global + overrides only; full race-stratified tables filled by mining later. Component conditionals do not cross race.
+Un-normalized count distribution over real hull ids for **inference prior ship-build observation** mining, including actual freighter hull ids. Partitioned by **inference ship-limit band**; optional per-race count slices in the asset schema, with global pooled tables as default and sparse per-race rows for race-exclusive or strongly race-characteristic hulls. v1 hand-seeds global + overrides only; full race-stratified tables filled by mining later. Component conditionals do not cross race. Solver-only compression rows, such as the generic freighter combo, are derived from these real hull counts at catalog build and do not appear as synthetic hull ids in the asset.
 _Avoid_: race-conditioned engine priors (v1 -- see fleet overlay #87)
 
 **Inference ship-limit band**:

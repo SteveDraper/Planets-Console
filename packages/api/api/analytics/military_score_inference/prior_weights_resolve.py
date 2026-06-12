@@ -50,6 +50,8 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
 )
 from api.models.game import GameSettings
 
+_GENERIC_FREIGHTER_HULL_PRIOR_KEY = "generic_freighter"
+
 __all__ = [
     "resolve_prior_weights_catalog",
     "ship_limit_band_key",
@@ -78,8 +80,9 @@ def _resolve_hull_log_weights(
     band: ShipLimitBand,
     race_id: int | None,
     buildable_hull_ids: frozenset[int],
+    generic_freighter_hull_ids: frozenset[int],
     scale: int,
-) -> dict[int, int]:
+) -> tuple[dict[int, int], int | None]:
     band_tables = asset.hulls.get(band, {})
     global_counts = band_tables.get("global", {})
     race_counts: IntCountTableInput = {}
@@ -91,9 +94,38 @@ def _resolve_hull_log_weights(
         merged_counts,
         universe=buildable_hull_ids,
     )
-    if WILDCARD_COUNT_KEY in expanded and buildable_hull_ids:
-        raise ValueError(f"hulls.{band}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
-    return counts_to_log_weights(finalize_counts_for_laplace(expanded), scale=scale)
+    if WILDCARD_COUNT_KEY in expanded:
+        if not buildable_hull_ids:
+            expanded = {}
+        else:
+            raise ValueError(f"hulls.{band}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
+    else:
+        expanded = {
+            hull_id: count
+            for hull_id, count in expanded.items()
+            if isinstance(hull_id, int) and hull_id in buildable_hull_ids
+        }
+    freighter_hull_ids = generic_freighter_hull_ids & frozenset(
+        hull_id for hull_id in expanded if isinstance(hull_id, int)
+    )
+    generic_freighter_log_weight = None
+    if freighter_hull_ids:
+        freighter_count = sum(expanded[hull_id] for hull_id in freighter_hull_ids)
+        solver_counts: dict[int | str, float] = {
+            hull_id: count
+            for hull_id, count in expanded.items()
+            if hull_id not in freighter_hull_ids
+        }
+        solver_counts[_GENERIC_FREIGHTER_HULL_PRIOR_KEY] = freighter_count
+        solver_log_weights = counts_to_log_weights(solver_counts, scale=scale)
+        generic_freighter_log_weight = solver_log_weights.pop(_GENERIC_FREIGHTER_HULL_PRIOR_KEY)
+        return {
+            hull_id: weight
+            for hull_id, weight in solver_log_weights.items()
+            if isinstance(hull_id, int)
+        }, generic_freighter_log_weight
+
+    return counts_to_log_weights(finalize_counts_for_laplace(expanded), scale=scale), None
 
 
 def _resolve_component_log_table(
@@ -281,6 +313,7 @@ def resolve_prior_weights_catalog(
     *,
     race_id: int | None = None,
     buildable_hull_ids: frozenset[int],
+    generic_freighter_hull_ids: frozenset[int] = frozenset(),
     eligible_engine_ids: frozenset[int],
     eligible_beam_ids: frozenset[int],
     eligible_torp_ids: frozenset[int],
@@ -301,11 +334,12 @@ def resolve_prior_weights_catalog(
     )
     band = ship_limit_band_key(observation)
 
-    hull_log_weights = _resolve_hull_log_weights(
+    hull_log_weights, generic_freighter_log_weight = _resolve_hull_log_weights(
         asset,
         band=band,
         race_id=race_id,
         buildable_hull_ids=buildable_hull_ids,
+        generic_freighter_hull_ids=generic_freighter_hull_ids,
         scale=scale,
     )
     component_tables = _resolve_component_tables(
@@ -343,4 +377,5 @@ def resolve_prior_weights_catalog(
         _aggregate_bucket_marginal_weights=aggregate_bucket_weights,
         _combo_log_overrides=combo_log_overrides,
         _hull_log_overrides=hull_log_overrides_int,
+        _generic_freighter_log_weight=generic_freighter_log_weight,
     )

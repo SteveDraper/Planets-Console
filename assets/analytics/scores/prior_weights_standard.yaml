@@ -19,7 +19,7 @@ hulls:
   before_ship_limit:
     global:
       "*": 50  # default pseudo-count for any other buildable hull id
-      15: 220  # Small Deep Space Freighter
+      15: 220  # Small Deep Space Freighter; collapsed into the solver generic freighter combo
       24: 450  # Serpent Class Escort
       71: 140  # Swift Wind Class Carrier
       44: 90  # Br4 Class Gunship
@@ -30,7 +30,7 @@ hulls:
   after_ship_limit:
     global:
       "*": 40
-      15: 180  # Small Deep Space Freighter
+      15: 180  # Small Deep Space Freighter; collapsed into the solver generic freighter combo
       24: 320  # Serpent Class Escort
       71: 200  # Swift Wind Class Carrier
       44: 70  # Br4 Class Gunship
@@ -239,5 +239,4 @@ aggregates:
 
 overrides:
   combos: {}  # combo_id -> pseudo-count (optional sparse corrections; no wildcard)
-  hulls:
-    999999: 220  # GENERIC_FREIGHTER_PRIOR_HULL_ID -- freighter combo marginal (not a buildable hull)
+  hulls: {}

@@ -153,11 +153,16 @@ def build_action_catalog_from_turn(
         resolved_mask=resolved_mask,
     )
     player = player_by_id(turn, observation.player_id)
+    generic_freighter_hull_ids = _generic_solver_freighter_hull_ids(
+        catalog_context.hulls_by_id,
+        catalog_context.buildable_hull_ids,
+    )
     prior_catalog = resolve_prior_weights_catalog(
         observation,
         turn.settings,
         race_id=player.raceid,
         buildable_hull_ids=catalog_context.buildable_hull_ids,
+        generic_freighter_hull_ids=generic_freighter_hull_ids,
         eligible_engine_ids=catalog_context.eligible_engine_ids,
         eligible_beam_ids=catalog_context.eligible_beam_ids,
         eligible_torp_ids=catalog_context.eligible_torp_ids,
@@ -179,6 +184,21 @@ def build_action_catalog_from_turn(
         policy_step=resolved_policy_step,
         policy_step_index=policy_step_index,
         policy_steps=resolve_tier_policies(),
+    )
+
+
+def _generic_solver_freighter_hull_ids(
+    hulls_by_id: dict[int, Hull],
+    buildable_hull_ids: frozenset[int],
+) -> frozenset[int]:
+    """True freighter hulls collapsed into the solver's generic freighter combo."""
+    return frozenset(
+        hull_id
+        for hull_id in buildable_hull_ids
+        if (hull := hulls_by_id.get(hull_id)) is not None
+        and hull.fighterbays == 0
+        and hull.launchers == 0
+        and hull.beams == 0
     )
 
 

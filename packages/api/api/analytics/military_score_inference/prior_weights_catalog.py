@@ -18,11 +18,6 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.prior_weights_asset import ShipLimitBand
 from api.models.components import Beam, Engine, Hull, Torpedo
 
-# Synthetic hull id in prior-weight asset hull tables (not a buildable in-game hull).
-# Freighter combo likelihood uses this pseudo-hull's marginal log weight when no
-# per-combo override is present; see prior_weights_standard.yaml hulls.999999.
-GENERIC_FREIGHTER_PRIOR_HULL_ID = 999999
-
 IntLogWeightTable: TypeAlias = dict[int, int]
 SlotFillLogWeightTable: TypeAlias = dict[str, int]
 
@@ -41,7 +36,6 @@ CategoryComponentLogTables: TypeAlias = dict[
 ]
 
 __all__ = [
-    "GENERIC_FREIGHTER_PRIOR_HULL_ID",
     "CategoryComponentLogTables",
     "IntLogWeightTable",
     "PriorWeightsCatalog",
@@ -81,6 +75,7 @@ class PriorWeightsCatalog:
     _aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
     _combo_log_overrides: dict[str, int]
     _hull_log_overrides: dict[int, int]
+    _generic_freighter_log_weight: int | None = None
 
     def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
         hull_override = self._hull_log_overrides.get(hull_id)
@@ -100,16 +95,15 @@ class PriorWeightsCatalog:
         return composed_weight
 
     def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
-        """Freighter likelihood: combo override, else pseudo-hull marginal.
-
-        See ``GENERIC_FREIGHTER_PRIOR_HULL_ID``.
-        """
+        """Freighter likelihood for the solver's generic freighter combo."""
+        generic_weight = (
+            self._generic_freighter_log_weight
+            if self._generic_freighter_log_weight is not None
+            else default_weight
+        )
         return self._resolved_combo_log_weight(
             combo_id=combo_id,
-            composed_weight=self.hull_marginal_log_weight(
-                GENERIC_FREIGHTER_PRIOR_HULL_ID,
-                default_weight=default_weight,
-            ),
+            composed_weight=generic_weight,
         )
 
     def combo_probability_weight(

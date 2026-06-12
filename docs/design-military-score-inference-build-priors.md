@@ -99,7 +99,9 @@ Glossary: `CONTEXT.md` -- **Inference hull marginal prior**, **Inference conditi
 
 ### 5.1 Hull marginal
 
-Un-normalized counts over hull ids. Optional per-race slices in schema; v1 hand-seeds global counts plus sparse overrides for race-characteristic hulls (`concepts/races.py` alignment).
+Un-normalized counts over real hull ids, including actual freighter hulls. Optional per-race slices in schema; v1 hand-seeds global counts plus sparse overrides for race-characteristic hulls (`concepts/races.py` alignment).
+
+The solver still exposes one generic `combo_freighter` row for true freighter builds whose construction contributes no military score. That generic row is a solver compression artifact, not an asset concept: at catalog build, Core collapses the eligible **true freighter** hull counts (`fighterbays == 0`, `launchers == 0`, `beams == 0`) into one generic freighter marginal before Laplace conversion. Miner output therefore samples freighter builds exactly like any other hull build and writes the observed real hull ids to the asset.
 
 ### 5.2 Component conditional
 
@@ -135,7 +137,7 @@ Glossary: `CONTEXT.md` -- **Inference hull category**.
 
 ### 5.4 Sparse overrides
 
-YAML (or code) may supply explicit log-offset or count overrides for specific combo ids or hull ids where decomposition is wrong.
+YAML (or code) may supply explicit log-offset or count overrides for specific combo ids or hull ids where decomposition is wrong. Do not use overrides to introduce synthetic solver-only hull ids; solver compression such as `combo_freighter` is derived from real asset hull counts during catalog resolution.
 
 ---
 
@@ -152,7 +154,7 @@ weight_i = round(SCALE * log(p_i))
 - `K` = number of cells in that table
 - `SCALE` = fixed integer (tune once against synthetic fixtures; target range above aggregate slack ~10)
 
-Ship combo final weight: `round(SCALE * sum of log weights from hull + component tables)` (plus overrides).
+Ship combo final weight: `round(SCALE * sum of log weights from hull + component tables)` (plus overrides). For the solver's generic freighter combo, Core first collapses eligible true-freighter real hull counts into a single solver cell, then applies the same table-level Laplace conversion.
 
 Hand-seeded v1 YAML uses round pseudo-counts; miner output uses the same schema.
 
@@ -203,6 +205,7 @@ hulls:
     global:
       12: 450   # hull id -> pseudo-count
       45: 120
+      15: 220   # true freighter hull; Core collapses eligible freighters into combo_freighter
     byRace:
       9:          # race id
         12: 800
