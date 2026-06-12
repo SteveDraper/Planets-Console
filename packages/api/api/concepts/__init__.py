@@ -13,6 +13,7 @@ from api.concepts.flare_points import (
     FlareMovementKind,
     flare_points_for_warp,
 )
+from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
 from api.concepts.races import (
     EVIL_EMPIRE_RACE_ID,
     evil_empire_free_starbase_fighters_per_host_turn,
@@ -29,6 +30,8 @@ from api.concepts.warp_well import (
 )
 
 __all__ = [
+    "GAME_CATEGORY_RULES_VERSION",
+    "GameCategory",
     "EVIL_EMPIRE_RACE_ID",
     "FLARE_POINT_TUPLES_GRAVITONIC_MOVEMENT",
     "FLARE_POINT_TUPLES_REGULAR_MOVEMENT",

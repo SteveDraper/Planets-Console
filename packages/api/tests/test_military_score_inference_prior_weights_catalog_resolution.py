@@ -9,9 +9,6 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     iter_aggregate_action_slots,
 )
 from api.analytics.military_score_inference.hull_category import INFERENCE_HULL_CATEGORIES
-from api.analytics.military_score_inference.inference_game_category import (
-    STANDARD_INFERENCE_GAME_CATEGORY,
-)
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
@@ -31,6 +28,7 @@ from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
+from api.concepts.game_category import GameCategory
 from api.models.components import Beam, Engine, Torpedo
 
 from tests.fixtures.military_score_inference import _observation
@@ -271,7 +269,7 @@ def test_none_bin_seed_reproduces_legacy_parsimony_penalty(sample_turn):
 
 
 def test_standard_asset_occurrence_bins_reproduce_legacy_penalty_for_every_aggregate(sample_turn):
-    asset, _, _ = load_prior_weights_for_category(STANDARD_INFERENCE_GAME_CATEGORY)
+    asset, _, _ = load_prior_weights_for_category(GameCategory.STANDARD)
     observations_by_band = {
         "before_ship_limit": _observation(),
         "after_ship_limit": replace(_observation(), is_after_ship_limit=True),

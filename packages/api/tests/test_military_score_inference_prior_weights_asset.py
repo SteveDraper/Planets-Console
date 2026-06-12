@@ -4,17 +4,13 @@ from pathlib import Path
 
 import pytest
 from api.analytics.military_score_inference.aggregate_action_registry import AGGREGATE_ACTION_SPECS
-from api.analytics.military_score_inference.inference_game_category import (
-    BLITZ_INFERENCE_GAME_CATEGORY,
-    INFERENCE_GAME_CATEGORY_RULES_VERSION,
-    STANDARD_INFERENCE_GAME_CATEGORY,
-)
 from api.analytics.military_score_inference.prior_weights_asset import (
     default_prior_weights_dir,
     load_prior_weights_for_category,
     parse_prior_weights_document,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
+from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
 
 
 def _complete_aggregates_band() -> dict[str, object]:
@@ -29,7 +25,7 @@ def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "version": 3,
         "category": "standard",
-        "gameCategoryRulesVersion": 1,
+        "gameCategoryRulesVersion": 2,
         "hulls": {
             "before_ship_limit": {"global": {}},
             "after_ship_limit": {"global": {}},
@@ -48,10 +44,10 @@ def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
 
 
 def test_standard_prior_asset_loads():
-    asset, path, fell_back = load_prior_weights_for_category(STANDARD_INFERENCE_GAME_CATEGORY)
+    asset, path, fell_back = load_prior_weights_for_category(GameCategory.STANDARD)
     assert not fell_back
     assert path.name == "prior_weights_standard.yaml"
-    assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
+    assert asset.category == GameCategory.STANDARD
     assert asset.version == 3
     assert asset.hulls["before_ship_limit"]["global"][WILDCARD_COUNT_KEY] == 50
 
@@ -63,19 +59,19 @@ def test_missing_category_falls_back_to_standard(tmp_path: Path):
         encoding="utf-8",
     )
     asset, path, fell_back = load_prior_weights_for_category(
-        BLITZ_INFERENCE_GAME_CATEGORY,
+        GameCategory.BLITZ,
         base_dir=tmp_path,
     )
     assert fell_back
     assert path.name == "prior_weights_standard.yaml"
-    assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
+    assert asset.category == GameCategory.STANDARD
 
 
-def test_game_category_rules_version_must_match_inference_rules():
-    with pytest.raises(ValueError, match="does not match expected inference rules version"):
+def test_game_category_rules_version_must_match_expected_rules():
+    with pytest.raises(ValueError, match="does not match expected game category rules version"):
         parse_prior_weights_document(
             _minimal_prior_weights_document(
-                gameCategoryRulesVersion=INFERENCE_GAME_CATEGORY_RULES_VERSION + 1,
+                gameCategoryRulesVersion=GAME_CATEGORY_RULES_VERSION + 1,
             )
         )
 
@@ -206,7 +202,7 @@ def test_component_tables_reject_unknown_hull_category():
             {
                 "version": 2,
                 "category": "standard",
-                "gameCategoryRulesVersion": 1,
+                "gameCategoryRulesVersion": 2,
                 "hulls": {
                     "before_ship_limit": {"global": {}},
                     "after_ship_limit": {"global": {}},
@@ -229,7 +225,7 @@ def test_slotfill_rejects_wildcard_key():
             {
                 "version": 2,
                 "category": "standard",
-                "gameCategoryRulesVersion": 1,
+                "gameCategoryRulesVersion": 2,
                 "hulls": {
                     "before_ship_limit": {"global": {}},
                     "after_ship_limit": {"global": {}},
