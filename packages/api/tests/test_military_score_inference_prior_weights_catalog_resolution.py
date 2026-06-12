@@ -74,7 +74,6 @@ def test_true_freighter_hull_counts_collapse_to_generic_solver_combo(sample_turn
     assert (
         catalog.freighter_probability_weight(
             combo_id=GENERIC_FREIGHTER_COMBO_ID,
-            default_weight=0,
         )
         == expected_weights["generic_freighter"]
     )

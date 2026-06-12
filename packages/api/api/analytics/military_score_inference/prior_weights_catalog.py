@@ -106,16 +106,13 @@ class PriorWeightsCatalog:
             return override
         return composed_weight
 
-    def freighter_probability_weight(self, *, combo_id: str, default_weight: int) -> int:
+    def freighter_probability_weight(self, *, combo_id: str) -> int:
         """Freighter likelihood for the solver's generic freighter combo."""
-        generic_weight = (
-            self._generic_freighter_log_weight
-            if self._generic_freighter_log_weight is not None
-            else default_weight
-        )
+        if self._generic_freighter_log_weight is None:
+            raise ValueError("incomplete prior: missing generic freighter marginal weight")
         return self._resolved_combo_log_weight(
             combo_id=combo_id,
-            composed_weight=generic_weight,
+            composed_weight=self._generic_freighter_log_weight,
         )
 
     def combo_probability_weight(

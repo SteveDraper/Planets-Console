@@ -250,7 +250,6 @@ def generate_ship_build_combos(
     if freighter_upper_bound > 0:
         freighter_weight = prior_catalog.freighter_probability_weight(
             combo_id=GENERIC_FREIGHTER_COMBO_ID,
-            default_weight=0,
         )
         combos.append(
             _generic_freighter_combo(
