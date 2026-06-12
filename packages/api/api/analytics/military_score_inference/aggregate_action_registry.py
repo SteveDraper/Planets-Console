@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from api.analytics.military_score_inference.models import (
-    MagnitudeCountBounds,
     ProbabilityBinBounds,
 )
 from api.analytics.military_score_inference.scoring import (
@@ -287,12 +286,3 @@ def resolved_aggregate_cap(action_id: str, allowlist: dict[str, int]) -> int | N
     if spec is not None and spec.allowlist_key is not None:
         return allowlist.get(spec.allowlist_key)
     return None
-
-
-def magnitude_bin_index(magnitude: int, bin_bounds: tuple[MagnitudeCountBounds, ...]) -> int:
-    """Return the index of the magnitude bin for a positive magnitude count."""
-    for index, bound in enumerate(bin_bounds):
-        lower_bound = 1 if bound.lower_count == 0 else bound.lower_count
-        if lower_bound <= magnitude <= bound.upper_count:
-            return index
-    return len(bin_bounds) - 1

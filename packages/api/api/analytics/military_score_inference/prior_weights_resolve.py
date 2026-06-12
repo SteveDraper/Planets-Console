@@ -7,7 +7,6 @@ from pathlib import Path
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSlot,
     iter_aggregate_action_slots,
-    magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
@@ -19,7 +18,11 @@ from api.analytics.military_score_inference.inference_game_category import (
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
-from api.analytics.military_score_inference.models import InferenceObservation, ProbabilityBinBounds
+from api.analytics.military_score_inference.models import (
+    InferenceObservation,
+    ProbabilityBinBounds,
+    magnitude_bin_index,
+)
 from api.analytics.military_score_inference.prior_weights_asset import (
     AggregatePrior,
     ComponentCountTables,

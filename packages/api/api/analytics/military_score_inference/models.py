@@ -53,6 +53,15 @@ class MagnitudeCountBounds(Protocol):
     upper_count: int
 
 
+def magnitude_bin_index(magnitude: int, bin_bounds: tuple[MagnitudeCountBounds, ...]) -> int:
+    """Return the index of the magnitude bin for a positive magnitude count."""
+    for index, bound in enumerate(bin_bounds):
+        lower_bound = 1 if bound.lower_count == 0 else bound.lower_count
+        if lower_bound <= magnitude <= bound.upper_count:
+            return index
+    return len(bin_bounds) - 1
+
+
 @dataclass(frozen=True)
 class ProbabilityBinBounds:
     """Solver magnitude-bin geometry (labels and count ranges only)."""

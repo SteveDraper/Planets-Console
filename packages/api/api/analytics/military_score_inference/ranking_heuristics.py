@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
     lookup_aggregate_action_spec,
-    magnitude_bin_index,
 )
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
@@ -16,6 +15,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
+    magnitude_bin_index,
 )
 
 EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID = "evil_empire_free_starbase_fighters"
