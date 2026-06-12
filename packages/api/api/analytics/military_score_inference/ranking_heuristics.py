@@ -18,14 +18,8 @@ from api.analytics.military_score_inference.models import (
     magnitude_bin_index,
 )
 
-EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID = "evil_empire_free_starbase_fighters"
-
 TORPEDO_LOADS_SUPERCLASS = "torpedo_loads"
 FIGHTER_CHANNEL_SUPERCLASS = "fighter_channel"
-
-
-def _default_parsimony_per_active_slack_type() -> int:
-    return -(INFERENCE_PROBABILITY_WEIGHT_SCALE // 2)
 
 
 def _default_partial_weapon_slot_penalty_per_line() -> int:
@@ -38,9 +32,6 @@ def _default_tier_overflow_marginal_weight() -> int:
 
 @dataclass(frozen=True)
 class InferenceRankingHeuristics:
-    parsimony_per_active_slack_type: int = field(
-        default_factory=_default_parsimony_per_active_slack_type
-    )
     partial_weapon_slot_penalty_per_line: int = field(
         default_factory=_default_partial_weapon_slot_penalty_per_line
     )
@@ -56,13 +47,6 @@ class TierOverflowBand:
     admission_cap: int
     current_cap: int
     marginal_weight: int
-
-
-def is_parsimony_eligible_slack_action(action_id: str) -> bool:
-    if action_id == EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID:
-        return False
-    spec = lookup_aggregate_action_spec(action_id)
-    return spec is not None and spec.is_fine_grained_slack
 
 
 def max_marginal_weight(buckets: tuple[ProbabilityBucket, ...]) -> int:
@@ -81,10 +65,11 @@ def ranking_penalty_from_marginal_weight(
 def active_ranking_bin_index(
     count: int,
     buckets: tuple[ProbabilityBucket, ...],
-) -> int | None:
-    """Return the index of the single magnitude bin for a positive aggregate count."""
-    if count <= 0:
-        return None
+) -> int:
+    """Return the index of the single magnitude bin for an aggregate count.
+
+    A count of ``0`` lands in the leading none bin (index 0), matching the solver.
+    """
     return magnitude_bin_index(count, buckets)
 
 
@@ -104,8 +89,6 @@ def compute_bin_penalty_objective_contribution(
     contribution = 0
     for action_id, buckets in buckets_by_action_id.items():
         active_index = active_ranking_bin_index(action_counts.get(action_id, 0), buckets)
-        if active_index is None:
-            continue
         penalty = ranking_penalty_from_marginal_weight(
             buckets[active_index].marginal_weight,
             max_marginal_weight=max_marginal_weight(buckets),
@@ -167,18 +150,6 @@ def compute_partial_weapon_slot_penalty_contribution(
     return contribution
 
 
-def compute_parsimony_objective_contribution(
-    action_counts: dict[str, int],
-    heuristics: InferenceRankingHeuristics,
-) -> int:
-    active_slack_types = sum(
-        1
-        for action_id, count in action_counts.items()
-        if count > 0 and is_parsimony_eligible_slack_action(action_id)
-    )
-    return active_slack_types * heuristics.parsimony_per_active_slack_type
-
-
 def compute_overflow_objective_contribution(
     action_counts: dict[str, int],
     tier_overflow_by_action_id: dict[str, TierOverflowBand],
@@ -218,7 +189,6 @@ def ranking_heuristics_diagnostics_payload(
     admission_caps_by_action_id: dict[str, int],
 ) -> dict[str, object]:
     return {
-        "parsimonyPerActiveSlackType": heuristics.parsimony_per_active_slack_type,
         "partialWeaponSlotPenaltyPerLine": heuristics.partial_weapon_slot_penalty_per_line,
         "tierOverflowMarginalWeight": heuristics.tier_overflow_marginal_weight,
         "diversityCaps": [

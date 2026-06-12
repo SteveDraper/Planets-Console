@@ -4,14 +4,17 @@ from dataclasses import replace
 
 import pytest
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    PLANET_DEFENSE_POST_BIN_BOUNDS,
     SHIP_TORPEDO_BIN_BOUNDS,
 )
 from api.analytics.military_score_inference.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
+    IMPLICIT_UNIFORM_PSEUDO_COUNT,
+    LEGACY_PARSIMONY_OCCURRENCE_PENALTY,
     counts_to_log_weights,
-    implicit_uniform_component_counts,
+    none_bin_pseudo_count,
 )
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
@@ -154,12 +157,17 @@ def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
         eligible_beam_ids=frozenset(),
         eligible_torp_ids=frozenset({1, 12}),
     )
-    expected_uniform_weights = tuple(
-        counts_to_log_weights(
-            implicit_uniform_component_counts(frozenset(range(len(SHIP_TORPEDO_BIN_BOUNDS)))),
-            scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
-        )[index]
-        for index in range(len(SHIP_TORPEDO_BIN_BOUNDS))
+    # The implicit-uniform path seeds active bins uniformly and the leading none bin
+    # via none_bin_pseudo_count, so the missing table keeps the occurrence cost.
+    implicit_counts = {0: none_bin_pseudo_count(IMPLICIT_UNIFORM_PSEUDO_COUNT)}
+    for index in range(1, len(SHIP_TORPEDO_BIN_BOUNDS)):
+        implicit_counts[index] = IMPLICIT_UNIFORM_PSEUDO_COUNT
+    expected_implicit_log_weights = counts_to_log_weights(
+        implicit_counts,
+        scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
+    )
+    expected_implicit_weights = tuple(
+        expected_implicit_log_weights[index] for index in range(len(SHIP_TORPEDO_BIN_BOUNDS))
     )
     asset_buckets = catalog.probability_buckets_for_action(
         "ship_torps_loaded_1",
@@ -173,9 +181,37 @@ def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
     asset_marginals = tuple(bucket.marginal_weight for bucket in asset_buckets)
     implicit_marginals = tuple(bucket.marginal_weight for bucket in implicit_buckets)
 
-    assert implicit_marginals == expected_uniform_weights
-    assert len(set(implicit_marginals)) == 1
+    assert implicit_marginals == expected_implicit_weights
+    # The none bin is the most likely outcome; the active bins are equal and lower.
+    assert implicit_marginals[0] == max(implicit_marginals)
+    assert len(set(implicit_marginals[1:])) == 1
+    # The gap from the none bin to the active bins reproduces the legacy occurrence cost.
+    assert implicit_marginals[0] - implicit_marginals[1] == LEGACY_PARSIMONY_OCCURRENCE_PENALTY
     assert asset_marginals != implicit_marginals
+
+
+def test_none_bin_seed_reproduces_legacy_parsimony_penalty(sample_turn):
+    """The asset 0: seeds make count 0 free and the most likely active bin cost ~ -50."""
+    catalog = resolve_prior_weights_catalog(
+        _observation(),
+        replace(sample_turn.settings, endturn=100, shiplimit=200),
+        buildable_hull_ids=frozenset({24}),
+        eligible_engine_ids=frozenset({1}),
+        eligible_beam_ids=frozenset({1}),
+        eligible_torp_ids=frozenset({1}),
+    )
+    buckets = catalog.probability_buckets_for_action(
+        "planet_defense_posts_added_total",
+        PLANET_DEFENSE_POST_BIN_BOUNDS,
+    )
+    weights = [bucket.marginal_weight for bucket in buckets]
+    none_weight = weights[0]
+    best_active_weight = max(weights[1:])
+
+    # The none bin is the max-weight bin, so choosing count 0 costs nothing.
+    assert none_weight == max(weights)
+    # The gap from the none bin to the most likely active bin reproduces parsimony.
+    assert abs((none_weight - best_active_weight) - LEGACY_PARSIMONY_OCCURRENCE_PENALTY) <= 1
 
 
 def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):

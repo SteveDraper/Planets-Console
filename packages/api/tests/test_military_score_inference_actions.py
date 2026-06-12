@@ -351,5 +351,4 @@ def test_evil_empire_catalog_includes_likely_free_starbase_fighters():
         None,
     )
     assert free_action is not None
-    assert free_action.probability_weight == 0
     assert free_action.upper_bound > 0

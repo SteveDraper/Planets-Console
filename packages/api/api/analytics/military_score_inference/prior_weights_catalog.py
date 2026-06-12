@@ -95,7 +95,6 @@ class PriorWeightsCatalog:
     diagnostics: PriorWeightsDiagnostics
     _hull_log_weights: dict[int, int]
     _component_tables: CategoryComponentLogTables
-    _aggregate_action_weights: dict[str, int]
     _aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
     _combo_log_overrides: dict[str, int]
     _hull_log_overrides: dict[int, int]
@@ -107,7 +106,6 @@ class PriorWeightsCatalog:
         diagnostics: PriorWeightsDiagnostics,
         hull_log_weights: dict[int, int],
         component_tables: CategoryComponentLogTables,
-        aggregate_action_weights: dict[str, int],
         aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]],
         combo_log_overrides: dict[str, int],
         hull_log_overrides: dict[int, int],
@@ -116,7 +114,6 @@ class PriorWeightsCatalog:
             diagnostics=diagnostics,
             _hull_log_weights=hull_log_weights,
             _component_tables=component_tables,
-            _aggregate_action_weights=aggregate_action_weights,
             _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights,
             _combo_log_overrides=combo_log_overrides,
             _hull_log_overrides=hull_log_overrides,
@@ -200,9 +197,6 @@ class PriorWeightsCatalog:
             combo_id=combo_id,
             composed_weight=hull_weight + component_weight,
         )
-
-    def aggregate_probability_weight(self, action_id: str) -> int | None:
-        return self._aggregate_action_weights.get(action_id)
 
     def probability_buckets_for_action(
         self,

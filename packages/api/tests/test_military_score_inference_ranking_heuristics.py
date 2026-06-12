@@ -21,7 +21,6 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     active_ranking_bin_indicators,
     build_tier_aware_probability_buckets,
     compute_bin_penalty_objective_contribution,
-    compute_parsimony_objective_contribution,
     partial_weapon_slot_penalty_for_fit,
     ranking_heuristics_diagnostics_payload,
 )
@@ -104,7 +103,6 @@ def test_diversity_cap_blocks_three_torp_types():
             label=f"Torpedoes {torp_id}",
             score_delta_2x=torp_score,
             upper_bound=2,
-            probability_weight=10,
         )
         for torp_id in (1, 2, 3)
     )
@@ -135,14 +133,12 @@ def test_ship_build_outranks_noise_multiset():
         label="Planet defense posts",
         score_delta_2x=200,
         upper_bound=2,
-        probability_weight=40,
     )
     slack_two = CandidateAction(
         id="starbase_fighters_added_total",
         label="Starbase fighters",
         score_delta_2x=200,
         upper_bound=2,
-        probability_weight=40,
     )
     ship_combo_no_warship = ShipBuildCombo(
         combo_id="combo_warship",
@@ -164,6 +160,10 @@ def test_ship_build_outranks_noise_multiset():
             slack_one,
             slack_two,
             ship_build_combos=(ship_combo_no_warship,),
+            probability_buckets_by_action_id={
+                slack_one.id: probability_buckets_for_test_action(slack_one.id),
+                slack_two.id: probability_buckets_for_test_action(slack_two.id),
+            },
             max_solutions=5,
         )
     )
@@ -175,45 +175,8 @@ def test_ship_build_outranks_noise_multiset():
     assert result.solutions[0].objective_value > result.solutions[1].objective_value
 
 
-def test_parsimony_allows_planet_and_starbase_defense():
-    planet = CandidateAction(
-        id="planet_defense_posts_added_total",
-        label="Planet defense posts",
-        score_delta_2x=PLANET_DEFENSE_POST_SCORE_DELTA_2X,
-        upper_bound=10,
-        probability_weight=10,
-    )
-    starbase = CandidateAction(
-        id="starbase_defense_posts_added_total",
-        label="Starbase defense posts",
-        score_delta_2x=STARBASE_DEFENSE_POST_SCORE_DELTA_2X,
-        upper_bound=10,
-        probability_weight=10,
-    )
-    military_delta_2x = (
-        5 * PLANET_DEFENSE_POST_SCORE_DELTA_2X + 3 * STARBASE_DEFENSE_POST_SCORE_DELTA_2X
-    )
-    result = solve_inference_problem(
-        _problem(
-            _observation(military_delta_2x=military_delta_2x),
-            planet,
-            starbase,
-            probability_buckets_by_action_id={
-                planet.id: _PLANET_DEFENSE_POST_TEST_BUCKETS,
-                starbase.id: _STARBASE_DEFENSE_POST_TEST_BUCKETS,
-            },
-            max_solutions=5,
-        )
-    )
-
-    assert result.status == STATUS_EXACT
-    counts = {action.action_id: action.count for action in result.solutions[0].actions}
-    assert counts.get(planet.id, 0) > 0
-    assert counts.get(starbase.id, 0) > 0
-
-
 def test_tier_overflow_penalizes_count_above_admission_cap():
-    heuristics = InferenceRankingHeuristics(parsimony_per_active_slack_type=-5)
+    heuristics = InferenceRankingHeuristics()
     admission_cap = 16
     current_cap = 100
     planet = CandidateAction(
@@ -221,14 +184,12 @@ def test_tier_overflow_penalizes_count_above_admission_cap():
         label="Planet defense posts",
         score_delta_2x=PLANET_DEFENSE_POST_SCORE_DELTA_2X,
         upper_bound=current_cap,
-        probability_weight=10,
     )
     alt_slack = CandidateAction(
         id="starbase_defense_posts_added_total",
         label="Starbase defense posts substitute",
         score_delta_2x=PLANET_DEFENSE_POST_SCORE_DELTA_2X,
         upper_bound=admission_cap + 18,
-        probability_weight=10,
     )
     planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
     buckets, overflow_band = build_tier_aware_probability_buckets(
@@ -284,21 +245,18 @@ def test_fighter_channel_diversity_cap():
             label="Starbase fighters",
             score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
             upper_bound=1,
-            probability_weight=10,
         ),
         CandidateAction(
             id="ship_fighters_added_total",
             label="Ship fighters",
             score_delta_2x=LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
             upper_bound=1,
-            probability_weight=10,
         ),
         CandidateAction(
             id="fighters_starbase_to_ship",
             label="Fighters starbase to ship",
             score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
             upper_bound=1,
-            probability_weight=15,
         ),
     )
     military_delta_2x = sum(action.score_delta_2x for action in fighter_actions)
@@ -313,25 +271,28 @@ def test_fighter_channel_diversity_cap():
         assert result.status == STATUS_NO_EXACT_SOLUTION
 
 
-def test_objective_value_includes_parsimony():
+def test_objective_value_includes_occurrence_cost():
+    """The most likely active bin carries the occurrence cost in place of parsimony."""
     slack_one = CandidateAction(
         id="planet_defense_posts_added_total",
         label="Planet defense posts",
         score_delta_2x=200,
         upper_bound=1,
-        probability_weight=50,
     )
     slack_two = CandidateAction(
         id="starbase_fighters_added_total",
         label="Starbase fighters",
         score_delta_2x=200,
         upper_bound=1,
-        probability_weight=50,
     )
     problem = _problem(
         _observation(military_delta_2x=400),
         slack_one,
         slack_two,
+        probability_buckets_by_action_id={
+            slack_one.id: probability_buckets_for_test_action(slack_one.id),
+            slack_two.id: probability_buckets_for_test_action(slack_two.id),
+        },
     )
     result = solve_inference_problem(problem)
 
@@ -342,11 +303,9 @@ def test_objective_value_includes_parsimony():
         action_counts[action.action_id] = action.count
     recomputed = _objective_value(problem, action_counts, solution.ship_builds)
     assert recomputed == solution.objective_value
-    parsimony = compute_parsimony_objective_contribution(
-        action_counts,
-        problem.ranking_heuristics,
-    )
-    assert parsimony == -100
+    # Both slack types fire at count 1 (their most likely active bin), each carrying
+    # the legacy occurrence penalty of -50.
+    assert solution.objective_value == -100
 
 
 def test_top_k_still_descending_objective_order():
@@ -355,14 +314,12 @@ def test_top_k_still_descending_objective_order():
         label="Planet defense posts",
         score_delta_2x=PLANET_DEFENSE_POST_SCORE_DELTA_2X,
         upper_bound=20,
-        probability_weight=100,
     )
     alternate = CandidateAction(
         id="starbase_defense_posts_added_total",
         label="Starbase defense posts",
         score_delta_2x=STARBASE_DEFENSE_POST_SCORE_DELTA_2X,
         upper_bound=20,
-        probability_weight=50,
     )
     military_delta_2x = 10 * PLANET_DEFENSE_POST_SCORE_DELTA_2X
     result = solve_inference_problem(
@@ -400,7 +357,6 @@ def test_ranking_heuristics_diagnostics_payload_shape():
         admission_caps_by_action_id={"planet_defense_posts_added_total": 16},
     )
 
-    assert payload["parsimonyPerActiveSlackType"] == -50
     assert payload["partialWeaponSlotPenaltyPerLine"] == -25
     assert payload["tierOverflowMarginalWeight"] == 50
     assert payload["admissionCaps"] == {"planet_defense_posts_added_total": 16}
@@ -519,10 +475,15 @@ def test_partial_weapon_slot_fill_ranks_below_full_slots():
 
 def test_ranking_bin_penalty_is_per_bin_not_per_unit():
     planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
-    assert active_ranking_bin_indicators(1, planet_defense_buckets) == (1, 0, 0)
-    assert active_ranking_bin_indicators(10, planet_defense_buckets) == (1, 0, 0)
-    assert active_ranking_bin_indicators(100, planet_defense_buckets) == (0, 0, 1)
+    assert active_ranking_bin_indicators(0, planet_defense_buckets) == (1, 0, 0, 0)
+    assert active_ranking_bin_indicators(1, planet_defense_buckets) == (0, 1, 0, 0)
+    assert active_ranking_bin_indicators(10, planet_defense_buckets) == (0, 1, 0, 0)
+    assert active_ranking_bin_indicators(100, planet_defense_buckets) == (0, 0, 0, 1)
 
+    no_posts = compute_bin_penalty_objective_contribution(
+        {"planet_defense_posts_added_total": 0},
+        {"planet_defense_posts_added_total": planet_defense_buckets},
+    )
     ten_posts = compute_bin_penalty_objective_contribution(
         {"planet_defense_posts_added_total": 10},
         {"planet_defense_posts_added_total": planet_defense_buckets},
@@ -531,9 +492,12 @@ def test_ranking_bin_penalty_is_per_bin_not_per_unit():
         {"planet_defense_posts_added_total": 100},
         {"planet_defense_posts_added_total": planet_defense_buckets},
     )
-    assert ten_posts == 0
-    assert hundred_posts == -95
-    assert ten_posts > hundred_posts
+    # The none bin (count 0) is the max-weight bin: free. Active bins carry the
+    # occurrence cost, and the spacing between active bins is preserved.
+    assert no_posts == 0
+    assert ten_posts == -50
+    assert hundred_posts == -145
+    assert no_posts > ten_posts > hundred_posts
 
 
 def test_628580_accel_window_ranks_ten_planet_defense_first():
@@ -581,14 +545,16 @@ def test_ship_torpedo_modest_bin_covers_typical_load_counts():
     )
 
     ship_torpedo_buckets = probability_buckets_for_test_action("ship_torps_loaded_1")
-    assert SHIP_TORPEDO_BIN_BOUNDS[0].upper_count == 40
-    assert active_ranking_bin_index(30, ship_torpedo_buckets) == 0
-    assert active_ranking_bin_index(41, ship_torpedo_buckets) == 1
+    # Bin 0 is the none bin [0, 0]; bin 1 is the modest load band [1, 40].
+    assert SHIP_TORPEDO_BIN_BOUNDS[1].upper_count == 40
+    assert active_ranking_bin_index(30, ship_torpedo_buckets) == 1
+    assert active_ranking_bin_index(41, ship_torpedo_buckets) == 2
     max_weight = max_marginal_weight(ship_torpedo_buckets)
-    assert (
-        ranking_penalty_from_marginal_weight(
-            ship_torpedo_buckets[1].marginal_weight,
-            max_marginal_weight=max_weight,
-        )
-        == 0
+    # The modest and heavy active bins are equally likely, so they share a penalty.
+    assert ranking_penalty_from_marginal_weight(
+        ship_torpedo_buckets[1].marginal_weight,
+        max_marginal_weight=max_weight,
+    ) == ranking_penalty_from_marginal_weight(
+        ship_torpedo_buckets[2].marginal_weight,
+        max_marginal_weight=max_weight,
     )

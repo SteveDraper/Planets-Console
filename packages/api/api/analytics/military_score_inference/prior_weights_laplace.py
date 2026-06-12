@@ -14,6 +14,22 @@ WILDCARD_COUNT_KEY = "*"
 LAPLACE_ALPHA = 1
 IMPLICIT_UNIFORM_PSEUDO_COUNT = 1.0
 
+# The legacy standalone parsimony penalty magnitude, now expressed as the
+# occupancy gap between the leading "none" bin and the most likely active bin.
+LEGACY_PARSIMONY_OCCURRENCE_PENALTY = INFERENCE_PROBABILITY_WEIGHT_SCALE // 2  # 50
+
+
+def none_bin_pseudo_count(active_max: float) -> float:
+    """Pseudo-count for the count==0 (none) bin that reproduces the legacy
+    occurrence/parsimony penalty against the most likely active bin.
+
+    Returned as a float (not rounded) so the small-count implicit-uniform path
+    stays accurate.
+    """
+    return (active_max + 1.0) * math.exp(
+        LEGACY_PARSIMONY_OCCURRENCE_PENALTY / INFERENCE_PROBABILITY_WEIGHT_SCALE
+    ) - 1.0
+
 
 def laplace_log_weight(count: float, *, total: float, cell_count: int, scale: int) -> int:
     probability = (count + LAPLACE_ALPHA) / (total + LAPLACE_ALPHA * cell_count)

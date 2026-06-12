@@ -20,10 +20,15 @@ from api.analytics.military_score_inference.prior_weights_catalog import (
     PriorWeightsDiagnostics,
     ResolvedComponentCountTables,
 )
+from api.analytics.military_score_inference.prior_weights_laplace import (
+    LEGACY_PARSIMONY_OCCURRENCE_PENALTY,
+)
 from api.models.components import Hull
 
-# Marginal weights matching the pre-prior registry placeholders (for solver/ranking tests).
-STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS: dict[str, tuple[int, ...]] = {
+# Active-bin marginal weights matching the pre-prior registry placeholders. The leading
+# none-bin weight is derived (active max + occurrence penalty) so the gap from the none
+# bin down to the most likely active bin reproduces the legacy parsimony penalty.
+_STANDARD_TEST_ACTIVE_MARGINAL_WEIGHTS: dict[str, tuple[int, ...]] = {
     "planet_defense_posts_added_total": (100, 20, 5),
     "starbase_defense_posts_added_total": (100, 20, 5),
     "starbase_fighters_added_total": (80, 15, 3),
@@ -31,11 +36,20 @@ STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS: dict[str, tuple[int, ...]] = {
     "ship_torps_loaded_1": (70, 70, 5),
     "ship_torps_loaded_2": (70, 70, 5),
     "ship_torps_loaded_3": (70, 70, 5),
+    "fighters_starbase_to_ship": (15,),
+    "fighters_ship_to_starbase": (10,),
 }
 
-STANDARD_TEST_COUNTS_AGGREGATE_WEIGHTS: dict[str, int] = {
-    "fighters_starbase_to_ship": 15,
-    "fighters_ship_to_starbase": 10,
+
+def _with_none_bin_weight(active_weights: tuple[int, ...]) -> tuple[int, ...]:
+    """Prepend the leading none-bin weight (active max + occurrence penalty)."""
+    none_weight = max(active_weights) + LEGACY_PARSIMONY_OCCURRENCE_PENALTY
+    return (none_weight, *active_weights)
+
+
+STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS: dict[str, tuple[int, ...]] = {
+    action_id: _with_none_bin_weight(active)
+    for action_id, active in _STANDARD_TEST_ACTIVE_MARGINAL_WEIGHTS.items()
 }
 
 
@@ -45,20 +59,18 @@ def probability_buckets_for_test_action(
     marginal_weights: tuple[int, ...] | None = None,
 ) -> tuple[ProbabilityBucket, ...]:
     spec = lookup_aggregate_action_spec(action_id)
-    bin_bounds = spec.bin_bounds if spec is not None else None
-    if bin_bounds is None:
+    if spec is None:
         raise ValueError(f"action {action_id!r} has no solver bin bounds")
     weights = marginal_weights or STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS[action_id]
-    return probability_buckets_from_bin_bounds(bin_bounds, weights)
+    return probability_buckets_from_bin_bounds(spec.bin_bounds, weights)
 
 
 def complete_test_aggregate_bucket_weights() -> dict[str, tuple[int, ...]]:
     weights = dict(STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS)
     for action_id, spec in AGGREGATE_ACTION_SPECS.items():
-        if spec.prior_shape == "histogram" and action_id not in weights:
-            bin_bounds = spec.bin_bounds
-            if bin_bounds is not None:
-                weights[action_id] = tuple(10 for _ in bin_bounds)
+        if action_id not in weights:
+            active = tuple(10 for _ in spec.bin_bounds[1:])
+            weights[action_id] = _with_none_bin_weight(active)
     return weights
 
 
@@ -153,7 +165,6 @@ def minimal_prior_catalog(
     hull_log_weights: dict[int, int] | None = None,
     combo_log_overrides: dict[str, int] | None = None,
     hull_log_overrides: dict[int, int] | None = None,
-    aggregate_action_weights: dict[str, int] | None = None,
     aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]] | None = None,
 ) -> PriorWeightsCatalog:
     return PriorWeightsCatalog.from_resolved_tables(
@@ -168,8 +179,6 @@ def minimal_prior_catalog(
         ),
         hull_log_weights=hull_log_weights or {},
         component_tables=_empty_component_tables(),
-        aggregate_action_weights=aggregate_action_weights
-        or dict(STANDARD_TEST_COUNTS_AGGREGATE_WEIGHTS),
         aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights
         or complete_test_aggregate_bucket_weights(),
         combo_log_overrides=combo_log_overrides or {},

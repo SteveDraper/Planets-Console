@@ -343,7 +343,7 @@ def test_build_inference_solver_diagnostics_passes_through_solver_owned_keys():
 
     solver_owned = {
         "status": "exact",
-        "rankingHeuristics": {"parsimonyPerActiveSlackType": -5},
+        "rankingHeuristics": {"partialWeaponSlotPenaltyPerLine": -25},
         "diversityCapsApplied": [{"superclass": "torpedo_loads", "cap": 2}],
         "solver_status": "OPTIMAL",
     }
@@ -352,7 +352,7 @@ def test_build_inference_solver_diagnostics_passes_through_solver_owned_keys():
         solver=solver_owned,
     )
 
-    assert payload["rankingHeuristics"] == {"parsimonyPerActiveSlackType": -5}
+    assert payload["rankingHeuristics"] == {"partialWeaponSlotPenaltyPerLine": -25}
     assert payload["solver"] == {"status": "exact", "solver_status": "OPTIMAL"}
 
 

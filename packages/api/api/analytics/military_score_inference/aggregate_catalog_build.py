@@ -67,27 +67,8 @@ def _probability_buckets_for_aggregate_action(
     action_id: str,
     prior_fields: AggregatePriorFields,
     prior_catalog: PriorWeightsCatalog,
-) -> tuple[ProbabilityBucket, ...] | None:
-    if prior_fields.bin_bounds is None:
-        return None
+) -> tuple[ProbabilityBucket, ...]:
     return prior_catalog.probability_buckets_for_action(action_id, prior_fields.bin_bounds)
-
-
-def _aggregate_action_probability_weight(
-    action_id: str,
-    prior_fields: AggregatePriorFields,
-    prior_catalog: PriorWeightsCatalog,
-) -> int:
-    if prior_fields.prior_shape == "histogram":
-        return 0
-    if prior_fields.prior_shape == "counts":
-        prior_weight = prior_catalog.aggregate_probability_weight(action_id)
-        if prior_weight is None:
-            raise ValueError(
-                f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
-            )
-        return prior_weight
-    raise ValueError(f"unknown prior_shape {prior_fields.prior_shape!r} for action {action_id!r}")
 
 
 def _append_aggregate_action(
@@ -108,23 +89,17 @@ def _append_aggregate_action(
     capped_upper = min(upper_bound, allowlist_cap)
     if capped_upper <= 0:
         return
-    probability_weight = _aggregate_action_probability_weight(
-        action_id,
-        prior_fields,
-        prior_catalog,
-    )
     actions.append(
         CandidateAction(
             id=action_id,
             label=label,
             score_delta_2x=score_delta_2x,
             upper_bound=capped_upper,
-            probability_weight=probability_weight,
         )
     )
-    buckets = _probability_buckets_for_aggregate_action(action_id, prior_fields, prior_catalog)
-    if buckets is not None:
-        probability_buckets[action_id] = buckets
+    probability_buckets[action_id] = _probability_buckets_for_aggregate_action(
+        action_id, prior_fields, prior_catalog
+    )
 
 
 def _fighter_transfer_upper_bound(

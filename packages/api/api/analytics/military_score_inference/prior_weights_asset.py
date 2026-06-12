@@ -161,21 +161,13 @@ class HistogramAggregate:
 
 
 @dataclass(frozen=True)
-class CountsAggregate:
-    pseudo_count: float
-
-
-AggregatePrior = HistogramAggregate | CountsAggregate
-
-
-@dataclass(frozen=True)
 class PriorWeightsAsset:
     version: int
     category: str
     game_category_rules_version: int
     hulls: dict[ShipLimitBand, dict[str, dict[int, float]]]
     components: dict[ShipLimitBand, dict[InferenceHullCategory, ComponentCountTables]]
-    aggregates: dict[ShipLimitBand, dict[str, AggregatePrior]]
+    aggregates: dict[ShipLimitBand, dict[str, HistogramAggregate]]
     combo_overrides: dict[str, float] = field(default_factory=dict)
     hull_overrides: dict[int, float] = field(default_factory=dict)
 
@@ -271,51 +263,32 @@ def _parse_component_tables(
 def _parse_band_aggregate_tables(
     band_raw: object,
     band: ShipLimitBand,
-) -> dict[str, AggregatePrior]:
-    actions: dict[str, AggregatePrior] = {}
+) -> dict[str, HistogramAggregate]:
+    actions: dict[str, HistogramAggregate] = {}
     for action_id, action_raw in band_raw.items():
         if not isinstance(action_id, str):
             raise ValueError(f"aggregates.{band} keys must be strings")
         if not isinstance(action_raw, dict):
             raise ValueError(f"aggregates.{band}.{action_id} must be a mapping")
-        if "histogram" in action_raw:
-            spec = lookup_aggregate_action_spec(action_id)
-            if spec is None or spec.prior_shape != "histogram":
-                raise ValueError(
-                    f"aggregates.{band}.{action_id!r} is not a known bucketed aggregate action"
-                )
-            actions[action_id] = HistogramAggregate(
-                histogram=_parse_int_keyed_counts(
-                    action_raw["histogram"],
-                    field_name=f"aggregates.{band}.{action_id}.histogram",
-                    allow_wildcard=False,
-                )
+        if "histogram" not in action_raw:
+            raise ValueError(f"aggregates.{band}.{action_id} must include a histogram")
+        if lookup_aggregate_action_spec(action_id) is None:
+            raise ValueError(f"aggregates.{band}.{action_id!r} is not a known aggregate action")
+        # Histogram keys are non-negative magnitude counts; an optional 0 key carries
+        # the occurrence (count == 0) pseudo-count routed into the leading none bin.
+        actions[action_id] = HistogramAggregate(
+            histogram=_parse_int_keyed_counts(
+                action_raw["histogram"],
+                field_name=f"aggregates.{band}.{action_id}.histogram",
+                allow_wildcard=False,
             )
-        elif "counts" in action_raw:
-            spec = lookup_aggregate_action_spec(action_id)
-            if spec is None or spec.prior_shape != "counts":
-                raise ValueError(
-                    f"aggregates.{band}.{action_id!r} is not a known counts aggregate action"
-                )
-            counts_raw = action_raw["counts"]
-            if not isinstance(counts_raw, dict):
-                raise ValueError(f"aggregates.{band}.{action_id}.counts must be a mapping")
-            if len(counts_raw) != 1:
-                raise ValueError(f"aggregates.{band}.{action_id}.counts must have exactly one key")
-            ((count_key, count_value),) = counts_raw.items()
-            if not isinstance(count_key, str):
-                raise ValueError(f"aggregates.{band}.{action_id}.counts keys must be strings")
-            if not isinstance(count_value, (int, float)):
-                raise ValueError(f"aggregates.{band}.{action_id}.counts values must be numbers")
-            actions[action_id] = CountsAggregate(pseudo_count=float(count_value))
-        else:
-            raise ValueError(f"aggregates.{band}.{action_id} must include histogram or counts")
+        )
     return actions
 
 
 def _parse_aggregate_tables(
     raw: object,
-) -> dict[ShipLimitBand, dict[str, AggregatePrior]]:
+) -> dict[ShipLimitBand, dict[str, HistogramAggregate]]:
     return _parse_ship_limit_bands(
         raw,
         section_name="aggregates",
@@ -324,17 +297,17 @@ def _parse_aggregate_tables(
 
 
 def lookup_slot_aggregate_prior(
-    band_tables: dict[str, AggregatePrior],
+    band_tables: dict[str, HistogramAggregate],
     *,
     band: ShipLimitBand,
     action_id: str,
     spec: AggregateActionSpec,
-) -> HistogramAggregate | CountsAggregate | None:
-    """Look up and validate the aggregate prior for a catalog slot.
+) -> HistogramAggregate | None:
+    """Look up and validate the aggregate histogram prior for a catalog slot.
 
     Returns None when the slot allows implicit uniform and no aggregate is present.
     Raises ValueError with an ``incomplete prior:`` prefix when a required slot is
-    missing or present with the wrong shape.
+    missing.
     """
     aggregate = band_tables.get(action_id)
     if aggregate is None:
@@ -343,17 +316,7 @@ def lookup_slot_aggregate_prior(
                 f"incomplete prior: aggregates.{band} missing required action {action_id!r}"
             )
         return None
-    if spec.prior_shape == "histogram":
-        if not isinstance(aggregate, HistogramAggregate):
-            raise ValueError(
-                f"incomplete prior: aggregates.{band}.{action_id!r} must be a histogram"
-            )
-        return aggregate
-    if spec.prior_shape == "counts":
-        if not isinstance(aggregate, CountsAggregate):
-            raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} must be counts")
-        return aggregate
-    raise ValueError(f"incomplete prior: aggregates.{band}.{action_id!r} has unsupported shape")
+    return aggregate
 
 
 def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLimitBand) -> None:

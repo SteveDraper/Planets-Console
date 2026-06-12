@@ -43,7 +43,6 @@ class CandidateAction:
     build_slot_usage: int = 0
     lower_bound: int = 0
     upper_bound: int = 0
-    probability_weight: int = 0
 
 
 class MagnitudeCountBounds(Protocol):
@@ -54,10 +53,13 @@ class MagnitudeCountBounds(Protocol):
 
 
 def magnitude_bin_index(magnitude: int, bin_bounds: tuple[MagnitudeCountBounds, ...]) -> int:
-    """Return the index of the magnitude bin for a positive magnitude count."""
+    """Return the index of the magnitude bin containing a non-negative count.
+
+    The leading ``none`` bin ``[0, 0]`` matches ``magnitude == 0``; counts above the
+    top bin fall through to the last bin.
+    """
     for index, bound in enumerate(bin_bounds):
-        lower_bound = 1 if bound.lower_count == 0 else bound.lower_count
-        if lower_bound <= magnitude <= bound.upper_count:
+        if bound.lower_count <= magnitude <= bound.upper_count:
             return index
     return len(bin_bounds) - 1
 

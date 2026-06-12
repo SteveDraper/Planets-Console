@@ -162,7 +162,7 @@ Hand-seeded v1 YAML uses round pseudo-counts; miner output uses the same schema.
 
 ### 7.1 Histogram schema (asset)
 
-Store **raw magnitude histograms** -- counts on discrete totals or histogram edges -- not pre-binned solver weights:
+Every aggregate is a **single histogram shape** (there is no separate `counts` shape). Store **raw magnitude histograms** -- counts on discrete totals or histogram edges -- not pre-binned solver weights. An optional `0:` key carries the **occurrence prior**: the pseudo-count for "this action did not happen" (`count == 0`), routed into a leading `none` bin:
 
 ```yaml
 # Illustrative fragment
@@ -170,21 +170,24 @@ aggregates:
   before_ship_limit:
     planet_defense_posts_added_total:
       histogram:
+        0: 198   # occurrence (none) bin: count == 0
         5: 120
         15: 80
         40: 20
         90: 5
 ```
 
-### 7.2 Runtime bucketing
+### 7.2 Runtime bucketing and the occurrence (none) bin
 
-Loader aggregates histogram counts into the solver's fixed **probability bucket** ranges defined in `actions.py` (`PLANET_DEFENSE_POST_BUCKETS`, etc.), then applies the same Laplace log conversion per `(action_id, ship_limit_band)` across bins.
+Every aggregate histogram has a leading `none` bin `[0, 0]` ahead of the positive magnitude bins. The loader aggregates histogram counts into the solver's fixed **probability bucket** ranges defined in `aggregate_action_registry.py` (`PLANET_DEFENSE_POST_BIN_BOUNDS`, etc.), then applies the same Laplace log conversion per `(action_id, ship_limit_band)` across bins. The solver requires **exactly one** bin to be active, including the `none` bin, so each action contributes a self-normalised `log P(observed bin)` term that includes the "did not happen" outcome.
 
-v1 hand-seed: choose histogram pseudo-counts so bucketing reproduces intended modest / heavy / extreme ratios (mapping is not unique).
+This subsumes the old standalone parsimony penalty: the `0:` seeds are computed via `none_bin_pseudo_count` so the gap from the `none` bin (the max-weight bin, cost `0`) down to the most likely active bin reproduces the legacy penalty `LEGACY_PARSIMONY_OCCURRENCE_PENALTY` (`SCALE // 2 = 50`). Because adding the `none` cell changes the denominator for all bins equally, the spacing among the positive bins is unchanged, so behaviour is preserved within +/-1 (integer log rounding).
 
-Non-bucketed aggregates (`fighters_starbase_to_ship`, etc.) use simple count tables per `(action_id, ship_limit_band)`.
+v1 hand-seed: choose positive histogram pseudo-counts so bucketing reproduces intended modest / heavy / extreme ratios (mapping is not unique), then add the `0:` seed for occurrence.
 
-Torpedo loads by type remain separate action ids (`ship_torps_loaded_{id}`) with per-type histograms.
+Fighter transfers (`fighters_starbase_to_ship`, `fighters_ship_to_starbase`) are occurrence-only **2-bin histograms** (`none` plus a single active band), e.g. `{0: 108, 1: 65}`; they have no magnitude prior.
+
+Torpedo loads by type remain separate action ids (`ship_torps_loaded_{id}`) with per-type histograms. When a torpedo table is absent from the asset (implicit-uniform policy), the loader still seeds the `none` bin via `none_bin_pseudo_count` so the occurrence cost is retained rather than the action becoming free.
 
 ---
 
@@ -218,7 +221,9 @@ components:
 aggregates:
   before_ship_limit:
     planet_defense_posts_added_total:
-      histogram: { 5: 120, 15: 80, 40: 20 }
+      histogram: { 0: 198, 5: 120, 15: 80, 40: 20 }   # 0: = occurrence (none) bin
+    fighters_starbase_to_ship:
+      histogram: { 0: 108, 1: 65 }                     # occurrence-only 2-bin
   after_ship_limit: { ... }
 
 overrides:
@@ -291,15 +296,24 @@ Record: hull, components, `hull_category`, `ship_limit_band` (from score turn), 
 
 ### 10.3 Aggregate observations
 
-Per host-turn-player multiset from inventory deltas on **existing** ships/planets/starbases (corpus section 9.2 rules). Assign each positive delta to histogram keys; exclude loads on newly built ships per corpus ammo rules.
+Per host-turn-player multiset from inventory deltas on **existing** ships/planets/starbases (corpus section 9.2 rules). Assign each positive delta to a positive histogram key; exclude loads on newly built ships per corpus ammo rules.
+
+**Occurrence (`none` bin) sampling.** Every aggregate is a single histogram shape with a leading `none` bin (`count == 0`) carrying the occurrence prior (see [section 7.2](#72-runtime-bucketing-and-the-occurrence-none-bin)). The miner samples occurrence as a first-class quantity: for each `(action_id, ship_limit_band)`, count the **eligible player-turns with a zero delta** and write that as the histogram `0:` key alongside the positive keys.
+
+The `0:` denominator population is **all eligible player-turns for that action** in the band, not only the turns where the action fired. Sampling occurrence over fired-only turns systematically under-counts the `none` bin and collapses occurrence cost toward zero (every action looks free). "Eligible" must therefore be defined per action as the player-turns where the action was physically possible (e.g. the player owns the relevant asset class), independent of whether it fired -- this is the population the eligibility filter must yield for occurrence (see 10.4).
+
+**Fighter transfers** (`fighters_starbase_to_ship`, `fighters_ship_to_starbase`) are occurrence-only 2-bin histograms: sample only a `0:` count (eligible player-turns with no transfer in that direction) and a single active key (`1:`, or any key `>= 1`, for turns with a transfer). Magnitude within the active band is not modeled. Keep the two directions as independent observations. The miner emits `histogram:` blocks only; the `counts:` shape no longer exists.
 
 ### 10.4 Eligibility filter
 
-Within manifest games, include turn pairs with build activity (validated ship build and/or non-zero aggregate deltas for that player). Skip eliminated players (no owned starbases / no score row).
+Two distinct populations, both within manifest games and excluding eliminated players (no owned starbases / no score row):
+
+- **Magnitude / build-activity population:** turn pairs with build activity (validated ship build and/or non-zero aggregate deltas for that player) feed the positive histogram keys and ship-build observations.
+- **Occurrence population:** for each aggregate action, **all** player-turns where the action was physically possible (per the per-action eligibility definition in 10.3), regardless of build activity. Zero-delta turns from this population establish the `0:` (none-bin) count. This population is strictly broader than the build-activity one and must not be filtered down to fired-only turns.
 
 ### 10.5 Miner output
 
-Write `prior_weights_{category}.yaml` count tables; no log conversion in miner. Optional report: observation counts, dropped validations, ambiguous matches.
+Write `prior_weights_{category}.yaml` count tables (single histogram shape per aggregate, including the `0:` none-bin key; no `counts:` blocks); no log conversion in miner (the loader converts `0:`/positive counts to bin weights via Laplace, reproducing the legacy occurrence cost). Optional report: observation counts, dropped validations, ambiguous matches, and per-action eligible-turn / zero-occurrence / positive-occurrence tallies.
 
 ---
 

@@ -24,9 +24,7 @@ from api.analytics.military_score_inference.models import (
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.prior_weights_asset import (
-    AggregatePrior,
     ComponentCountTables,
-    CountsAggregate,
     HistogramAggregate,
     IntCountTableInput,
     PriorWeightsAsset,
@@ -42,11 +40,13 @@ from api.analytics.military_score_inference.prior_weights_catalog import (
     ResolvedComponentCountTables,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
+    IMPLICIT_UNIFORM_PSEUDO_COUNT,
     WILDCARD_COUNT_KEY,
     counts_to_log_weights,
     expand_wildcard_counts,
     finalize_counts_for_laplace,
     implicit_uniform_component_counts,
+    none_bin_pseudo_count,
 )
 from api.models.game import GameSettings
 
@@ -214,7 +214,12 @@ def _implicit_uniform_histogram_bucket_weights(
     *,
     scale: int,
 ) -> tuple[int, ...]:
-    bucket_counts = implicit_uniform_component_counts(frozenset(range(len(bin_bounds))))
+    # Seed active bins uniformly and the leading none bin so a missing asset table
+    # still carries the ~LEGACY_PARSIMONY_OCCURRENCE_PENALTY occurrence cost instead
+    # of becoming free.
+    bucket_counts: dict[int, float] = {0: none_bin_pseudo_count(IMPLICIT_UNIFORM_PSEUDO_COUNT)}
+    for index in range(1, len(bin_bounds)):
+        bucket_counts[index] = IMPLICIT_UNIFORM_PSEUDO_COUNT
     log_weights = counts_to_log_weights(bucket_counts, scale=scale)
     return tuple(log_weights[index] for index in range(len(bin_bounds)))
 
@@ -230,54 +235,23 @@ def _resolve_histogram_aggregate_weights(
     return tuple(log_weights[index] for index in range(len(bin_bounds)))
 
 
-def _resolve_counts_aggregate_weight(
-    aggregate: CountsAggregate,
-    *,
-    scale: int,
-) -> int:
-    return counts_to_log_weights({"default": aggregate.pseudo_count}, scale=scale)["default"]
-
-
 def _resolve_slot_histogram_bucket_weights(
     slot: AggregateActionSlot,
-    band_tables: dict[str, AggregatePrior],
+    band_tables: dict[str, HistogramAggregate],
     *,
     band: ShipLimitBand,
     scale: int,
 ) -> tuple[int, ...]:
-    action_id = slot.action_id
     bin_bounds = slot.spec.bin_bounds
-    if bin_bounds is None:
-        raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
-    aggregate = lookup_slot_aggregate_prior(
-        band_tables,
-        band=band,
-        action_id=action_id,
-        spec=slot.spec,
-    )
-    if aggregate is None:
-        return _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
-    if not isinstance(aggregate, HistogramAggregate):
-        raise ValueError(f"aggregate action {action_id!r} must be a histogram")
-    return _resolve_histogram_aggregate_weights(aggregate, bin_bounds, scale=scale)
-
-
-def _resolve_slot_counts_weight(
-    slot: AggregateActionSlot,
-    band_tables: dict[str, AggregatePrior],
-    *,
-    band: ShipLimitBand,
-    scale: int,
-) -> int:
     aggregate = lookup_slot_aggregate_prior(
         band_tables,
         band=band,
         action_id=slot.action_id,
         spec=slot.spec,
     )
-    if not isinstance(aggregate, CountsAggregate):
-        raise ValueError(f"aggregate action {slot.action_id!r} must be counts")
-    return _resolve_counts_aggregate_weight(aggregate, scale=scale)
+    if aggregate is None:
+        return _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
+    return _resolve_histogram_aggregate_weights(aggregate, bin_bounds, scale=scale)
 
 
 def _resolve_aggregate_priors(
@@ -286,28 +260,19 @@ def _resolve_aggregate_priors(
     band: ShipLimitBand,
     eligible_torp_ids: frozenset[int],
     scale: int,
-) -> tuple[dict[str, int], dict[str, tuple[int, ...]]]:
-    action_weights: dict[str, int] = {}
+) -> dict[str, tuple[int, ...]]:
     bucket_weights: dict[str, tuple[int, ...]] = {}
     band_tables = asset.aggregates.get(band, {})
 
     for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
-        if slot.spec.prior_shape == "histogram":
-            bucket_weights[slot.action_id] = _resolve_slot_histogram_bucket_weights(
-                slot,
-                band_tables,
-                band=band,
-                scale=scale,
-            )
-        else:
-            action_weights[slot.action_id] = _resolve_slot_counts_weight(
-                slot,
-                band_tables,
-                band=band,
-                scale=scale,
-            )
+        bucket_weights[slot.action_id] = _resolve_slot_histogram_bucket_weights(
+            slot,
+            band_tables,
+            band=band,
+            scale=scale,
+        )
 
-    return action_weights, bucket_weights
+    return bucket_weights
 
 
 def resolve_prior_weights_catalog(
@@ -351,7 +316,7 @@ def resolve_prior_weights_catalog(
         eligible_torp_ids=eligible_torp_ids,
         scale=scale,
     )
-    aggregate_action_weights, aggregate_bucket_weights = _resolve_aggregate_priors(
+    aggregate_bucket_weights = _resolve_aggregate_priors(
         asset,
         band=band,
         eligible_torp_ids=eligible_torp_ids,
@@ -375,7 +340,6 @@ def resolve_prior_weights_catalog(
         diagnostics=diagnostics,
         hull_log_weights=hull_log_weights,
         component_tables=component_tables,
-        aggregate_action_weights=aggregate_action_weights,
         aggregate_bucket_marginal_weights=aggregate_bucket_weights,
         combo_log_overrides=combo_log_overrides,
         hull_log_overrides=hull_log_overrides_int,

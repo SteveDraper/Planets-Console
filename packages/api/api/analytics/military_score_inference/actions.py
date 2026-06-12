@@ -8,7 +8,6 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateCatalogCaps,
-    lookup_aggregate_action_spec,
     resolved_aggregate_cap,
 )
 from api.analytics.military_score_inference.aggregate_catalog_build import (
@@ -20,9 +19,6 @@ from api.analytics.military_score_inference.component_eligibility import (
     turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_probability_scale import (
-    INFERENCE_PROBABILITY_WEIGHT_SCALE,
-)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -34,7 +30,6 @@ from api.analytics.military_score_inference.prior_weights_catalog import (
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
 )
-from api.analytics.military_score_inference.prior_weights_laplace import laplace_log_weight
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
 )
@@ -67,7 +62,6 @@ DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
 @dataclass(frozen=True)
 class ActionCatalogConfig(AggregateCatalogCaps):
     ship_build_combo_config: ShipBuildComboConfig | None = None
-    evil_empire_free_starbase_fighter_pseudo_count: float = 500
 
 
 @dataclass(frozen=True)
@@ -98,8 +92,7 @@ class ActionCatalog:
             "bucketed_action_count": sum(
                 1
                 for action in self.aggregate_actions
-                if (spec := lookup_aggregate_action_spec(action.id)) is not None
-                and spec.prior_shape == "histogram"
+                if action.id in self.probability_buckets_by_action_id
             ),
         }
         if self.prior_weights_diagnostics is not None:
@@ -341,11 +334,5 @@ def _evil_empire_free_starbase_fighter_actions(
             label="Evil Empire free starbase fighters (likely)",
             score_delta_2x=starbase_fighter_score_delta_2x(),
             upper_bound=count_upper,
-            probability_weight=laplace_log_weight(
-                config.evil_empire_free_starbase_fighter_pseudo_count,
-                total=config.evil_empire_free_starbase_fighter_pseudo_count,
-                cell_count=1,
-                scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
-            ),
         )
     ]

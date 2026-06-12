@@ -23,30 +23,47 @@ SHIP_TORPS_LOADED_ACTION_PREFIX = "ship_torps_loaded_"
 SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY = "ship_torps_per_type"
 FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY = "fighter_transfers_per_direction"
 
+# Leading occurrence bin shared by every aggregate histogram: count == 0 ("did not
+# happen"). Its data-derived weight carries the occurrence/parsimony prior.
+NONE_BIN = ProbabilityBinBounds("no build-up", 0, 0)
+
 DEFENSE_POST_BIN_BOUNDS = (
-    ProbabilityBinBounds("modest build-up", 0, 10),
+    NONE_BIN,
+    ProbabilityBinBounds("modest build-up", 1, 10),
     ProbabilityBinBounds("heavy build-up", 11, 50),
     ProbabilityBinBounds("extreme build-up", 51, 100),
 )
 PLANET_DEFENSE_POST_BIN_BOUNDS = DEFENSE_POST_BIN_BOUNDS
 STARBASE_DEFENSE_POST_BIN_BOUNDS = DEFENSE_POST_BIN_BOUNDS
 STARBASE_FIGHTER_BIN_BOUNDS = (
-    ProbabilityBinBounds("modest build-up", 0, 20),
+    NONE_BIN,
+    ProbabilityBinBounds("modest build-up", 1, 20),
     ProbabilityBinBounds("heavy build-up", 21, 100),
     ProbabilityBinBounds("extreme build-up", 101, 200),
 )
 SHIP_FIGHTER_BIN_BOUNDS = (
-    ProbabilityBinBounds("modest load", 0, 20),
+    NONE_BIN,
+    ProbabilityBinBounds("modest load", 1, 20),
     ProbabilityBinBounds("heavy load", 21, 100),
     ProbabilityBinBounds("extreme load", 101, 500),
 )
 SHIP_TORPEDO_BIN_BOUNDS = (
-    ProbabilityBinBounds("modest load", 0, 40),
+    NONE_BIN,
+    ProbabilityBinBounds("modest load", 1, 40),
     ProbabilityBinBounds("heavy load", 41, 100),
     ProbabilityBinBounds("extreme load", 101, 200),
 )
 
-PriorShape = Literal["histogram", "counts"]
+
+def _fighter_transfer_bin_bounds() -> tuple[ProbabilityBinBounds, ...]:
+    # Occurrence-only histogram: a none bin plus a single active band. The active
+    # upper bound is cosmetic because anything >= 1 routes to the last bin.
+    return (
+        NONE_BIN,
+        ProbabilityBinBounds("transferred", 1, AggregateCatalogCaps().max_fighter_transfers),
+    )
+
+
 MissingAggregatePolicy = Literal["required", "implicit_uniform"]
 
 
@@ -60,17 +77,18 @@ class AggregateCatalogCaps:
     max_fighter_transfers: int = 50
 
 
+FIGHTER_TRANSFER_BIN_BOUNDS = _fighter_transfer_bin_bounds()
+
+
 CatalogConfigCap = Callable[[AggregateCatalogCaps], int]
 
 
 @dataclass(frozen=True)
 class AggregatePriorFields:
-    prior_shape: PriorShape
-    bin_bounds: tuple[ProbabilityBinBounds, ...] | None
+    bin_bounds: tuple[ProbabilityBinBounds, ...]
     missing_aggregate_policy: MissingAggregatePolicy = "required"
     allowlist_key: str | None = None
     is_fighter_channel_member: bool = False
-    is_fine_grained_slack: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,9 +174,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="planet_defense_posts_added_total",
         spec=FixedAggregateSpec(
-            prior_shape="histogram",
             bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
-            is_fine_grained_slack=True,
             catalog_label="Planet defense posts added",
             score_delta_2x=planet_defense_post_score_delta_2x,
             catalog_config_cap=lambda config: config.max_planet_defense_posts,
@@ -167,9 +183,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="starbase_defense_posts_added_total",
         spec=FixedAggregateSpec(
-            prior_shape="histogram",
             bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
-            is_fine_grained_slack=True,
             catalog_label="Starbase defense posts added",
             score_delta_2x=starbase_defense_post_score_delta_2x,
             catalog_config_cap=lambda config: config.max_starbase_defense_posts,
@@ -178,10 +192,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="starbase_fighters_added_total",
         spec=FixedAggregateSpec(
-            prior_shape="histogram",
             bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
             is_fighter_channel_member=True,
-            is_fine_grained_slack=True,
             catalog_label="Starbase fighters added",
             score_delta_2x=starbase_fighter_score_delta_2x,
             catalog_config_cap=lambda config: config.max_starbase_fighters,
@@ -190,10 +202,8 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="ship_fighters_added_total",
         spec=FixedAggregateSpec(
-            prior_shape="histogram",
             bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
             is_fighter_channel_member=True,
-            is_fine_grained_slack=True,
             catalog_label="Ship fighters added",
             score_delta_2x=loaded_ship_fighter_score_delta_2x,
             catalog_config_cap=lambda config: config.max_ship_fighters,
@@ -201,11 +211,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     ),
     TemplateAggregateRegistryEntry(
         spec=TemplateAggregateSpec(
-            prior_shape="histogram",
             bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
             missing_aggregate_policy="implicit_uniform",
             allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
-            is_fine_grained_slack=True,
             action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
             catalog_config_cap=lambda config: config.max_ship_torpedoes_per_type,
             catalog_label_format="Ship torpedoes loaded ({name})",
@@ -215,11 +223,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="fighters_starbase_to_ship",
         spec=FixedAggregateSpec(
-            prior_shape="counts",
-            bin_bounds=None,
+            bin_bounds=FIGHTER_TRANSFER_BIN_BOUNDS,
             allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
             is_fighter_channel_member=True,
-            is_fine_grained_slack=True,
             catalog_label="Fighters transferred starbase to ship",
             score_delta_2x=lambda: STARBASE_FIGHTER_SCORE_DELTA_2X,
         ),
@@ -227,11 +233,9 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="fighters_ship_to_starbase",
         spec=FixedAggregateSpec(
-            prior_shape="counts",
-            bin_bounds=None,
+            bin_bounds=FIGHTER_TRANSFER_BIN_BOUNDS,
             allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
             is_fighter_channel_member=True,
-            is_fine_grained_slack=True,
             catalog_label="Fighters transferred ship to starbase",
             score_delta_2x=lambda: -STARBASE_FIGHTER_SCORE_DELTA_2X,
         ),

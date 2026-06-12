@@ -19,18 +19,15 @@ from api.analytics.military_score_inference.prior_weights_laplace import WILDCAR
 
 def _complete_aggregates_band() -> dict[str, object]:
     band: dict[str, object] = {}
-    for action_id, spec in AGGREGATE_ACTION_SPECS.items():
-        if spec.prior_shape == "histogram":
-            band[action_id] = {"histogram": {5: 1}}
-        else:
-            band[action_id] = {"counts": {"default": 1}}
+    for action_id in AGGREGATE_ACTION_SPECS:
+        band[action_id] = {"histogram": {0: 5, 1: 1}}
     return band
 
 
 def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
     complete_band = _complete_aggregates_band()
     document: dict[str, object] = {
-        "version": 2,
+        "version": 3,
         "category": "standard",
         "gameCategoryRulesVersion": 1,
         "hulls": {
@@ -55,7 +52,7 @@ def test_standard_prior_asset_loads():
     assert not fell_back
     assert path.name == "prior_weights_standard.yaml"
     assert asset.category == STANDARD_INFERENCE_GAME_CATEGORY
-    assert asset.version == 2
+    assert asset.version == 3
     assert asset.hulls["before_ship_limit"]["global"][WILDCARD_COUNT_KEY] == 50
 
 
@@ -98,7 +95,7 @@ def test_histogram_rejects_wildcard_key():
 
 
 def test_aggregates_reject_unknown_histogram_action_id():
-    with pytest.raises(ValueError, match="not a known bucketed aggregate action"):
+    with pytest.raises(ValueError, match="not a known aggregate action"):
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
@@ -112,25 +109,11 @@ def test_aggregates_reject_unknown_histogram_action_id():
         )
 
 
-def test_aggregates_reject_unknown_counts_action_id():
-    with pytest.raises(ValueError, match="not a known counts aggregate action"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": {
-                        **_complete_aggregates_band(),
-                        "evil_empire_free_starbase_fighters": {"counts": {"default": 10}},
-                    },
-                    "after_ship_limit": _complete_aggregates_band(),
-                }
-            )
-        )
-
-
-def test_aggregates_reject_counts_with_multiple_keys():
+def test_aggregates_reject_counts_shape():
+    """The counts shape no longer exists; guard against accidental reintroduction."""
     before_ship_limit = _complete_aggregates_band()
-    before_ship_limit["fighters_starbase_to_ship"] = {"counts": {"default": 65, "alternate": 10}}
-    with pytest.raises(ValueError, match="must have exactly one key"):
+    before_ship_limit["fighters_starbase_to_ship"] = {"counts": {"default": 65}}
+    with pytest.raises(ValueError, match="must include a histogram"):
         parse_prior_weights_document(
             _minimal_prior_weights_document(
                 aggregates={
@@ -141,18 +124,37 @@ def test_aggregates_reject_counts_with_multiple_keys():
         )
 
 
-def test_aggregates_reject_empty_counts():
-    before_ship_limit = _complete_aggregates_band()
-    before_ship_limit["fighters_ship_to_starbase"] = {"counts": {}}
-    with pytest.raises(ValueError, match="must have exactly one key"):
-        parse_prior_weights_document(
-            _minimal_prior_weights_document(
-                aggregates={
-                    "before_ship_limit": before_ship_limit,
-                    "after_ship_limit": _complete_aggregates_band(),
-                }
-            )
+def test_histogram_accepts_and_routes_zero_occurrence_key():
+    asset = parse_prior_weights_document(
+        _minimal_prior_weights_document(
+            aggregates={
+                "before_ship_limit": {
+                    **_complete_aggregates_band(),
+                    "planet_defense_posts_added_total": {"histogram": {0: 200, 5: 120}},
+                },
+                "after_ship_limit": _complete_aggregates_band(),
+            }
         )
+    )
+    histogram = asset.aggregates["before_ship_limit"]["planet_defense_posts_added_total"].histogram
+    assert histogram[0] == 200
+    assert histogram[5] == 120
+
+
+def test_histogram_without_zero_key_still_parses():
+    """Occurrence mass is opt-in: a histogram missing its 0 key parses (no none seed)."""
+    before_ship_limit = _complete_aggregates_band()
+    before_ship_limit["planet_defense_posts_added_total"] = {"histogram": {5: 120}}
+    asset = parse_prior_weights_document(
+        _minimal_prior_weights_document(
+            aggregates={
+                "before_ship_limit": before_ship_limit,
+                "after_ship_limit": _complete_aggregates_band(),
+            }
+        )
+    )
+    histogram = asset.aggregates["before_ship_limit"]["planet_defense_posts_added_total"].histogram
+    assert 0 not in histogram
 
 
 def test_parse_rejects_incomplete_aggregate_priors():
