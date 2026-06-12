@@ -1,6 +1,6 @@
 # Adding a turn analytic
 
-Step-by-step guide for registering a new **turn analytic** in Planets Console. Read [design-analytics-structure.md](design-analytics-structure.md) first for layer roles and the BFF descriptor model.
+Step-by-step guide for registering a new **turn analytic** in Planets Console. Read [design-analytics-structure.md](design-analytics-structure.md) first for layer roles and the BFF descriptor model. Cross-analytic queries: [design-analytic-exports.md](design-analytic-exports.md).
 
 **Prerequisites:** the analytic computes from **TurnInfo** for a game id, **perspective**, and turn. The SPA must wait for **turn ensure** before fetching analytic data (see [design-frontend-and-backend-state.md](design-frontend-and-backend-state.md)).
 
@@ -60,14 +60,62 @@ _HANDLERS_BY_ID: dict[str, TurnAnalyticHandler] = {
 
 `TURN_ANALYTICS` is derived from the catalog at import; a missing or extra handler raises `RuntimeError` on startup.
 
-### 2.3 Core tests
+### 2.3 Core -- exports (required)
+
+Every turn analytic registers an export catalog (may be **empty**). See [design-analytic-exports.md](design-analytic-exports.md) for the full mechanism.
+
+Add `packages/api/api/analytics/<id>/exports.py` (or `exports.py` beside a single-file analytic):
+
+```python
+EXPORT_VALUE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "meta": { "type": "object", "properties": { "searchStatus": { "enum": [...] } } },
+        # … branches this analytic exposes
+    },
+}
+
+PATH_PREFIX_SCOPE_RULES = [
+    # e.g. {"prefix": "$.solution", "requires": ["player_id"]},
+]
+
+def materialize_export_tree(scope, ctx) -> dict:
+    ...
+
+EXPORT_CATALOG = {
+    "schema": EXPORT_VALUE_SCHEMA,
+    "path_prefix_scope_rules": PATH_PREFIX_SCOPE_RULES,
+    "materialize": materialize_export_tree,
+}
+```
+
+Register in `packages/api/api/analytics/exports/registry.py`. Import-time validation: every `TURN_ANALYTIC_CATALOG` id has an entry (use `EmptyExportCatalog` when nothing is queryable yet).
+
+Guidelines:
+
+- **One schema tree** per analytic; scope is on the query, not separate root shapes.
+- **JSONPath** selectors (`$.solution.ships[0]`); document array ordering in the catalog.
+- **Concept-shim:** delegate to `api/concepts/` inside `materialize_export_tree` (Connections pattern).
+- Table/map handlers should call the same materializer (or shared helpers) where the tree is the source of truth.
+- Consumers query only via **`AnalyticQueryContext`** passed into handlers -- not direct imports of other analytics.
+- **`$.meta.searchStatus`:** use generic lifecycle values (`not_started`, `in_progress`, `paused`, `stopped`, `complete`); warn downstream consumers when not `complete`.
+
+Empty catalog example:
+
+```python
+from api.analytics.exports.empty import EMPTY_EXPORT_CATALOG
+EXPORT_CATALOG = EMPTY_EXPORT_CATALOG
+```
+
+### 2.4 Core tests
 
 Add `packages/api/tests/test_<id>_analytic.py` (or extend an existing file):
 
 - Handler behaviour against fixture `TurnInfo` (storage assets or builders).
+- Export materializer + JSONPath golden paths when `exports.py` is non-empty.
 - Unknown `analytic_id` still raises `ValidationError` via registry (existing test pattern).
 
-### 2.4 Core router query params (if needed)
+### 2.5 Core router query params (if needed)
 
 If the analytic accepts query knobs (like Connections):
 
@@ -230,6 +278,7 @@ Use this before opening a PR:
 
 - [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
 - [ ] **Core:** module + `_HANDLERS_BY_ID` entry + unit tests
+- [ ] **Core exports:** `exports.py` + export registry entry (empty allowed) + export tests when non-empty
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
 - [ ] **BFF:** unit/integration tests for dispatch and HTTP shape
@@ -245,6 +294,7 @@ Use this before opening a PR:
 
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
+| Export registry missing for catalog id | Startup `RuntimeError` | Add `exports.py` (or `EMPTY_EXPORT_CATALOG`) + registry entry |
 | Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add catalog entry + BFF module + `_BFF_DESCRIPTORS_BY_ID` |
 | BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Add Core registry entry |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |

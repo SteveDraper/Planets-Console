@@ -2,9 +2,9 @@
 
 Authoritative contract for the **inference corpus** harness (#62–#66 under epic #39). Summary and glossary: [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 11.2, repo root `CONTEXT.md`.
 
-**Related:** [design-military-score-build-inference.md](design-military-score-build-inference.md), [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md).
+**Related:** [design-military-score-build-inference.md](design-military-score-build-inference.md), [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md), [design-military-score-inference-build-priors.md](design-military-score-inference-build-priors.md).
 
----
+**Distinct corpora:** This document defines the **inference regression corpus** (scoreboard row regression, #62--#66). **Inference prior mining** uses a separate finished-game allowlist and validated starbase build observations -- see [design-military-score-inference-build-priors.md](design-military-score-inference-build-priors.md) section 10.
 
 ## 1. Layout and imports
 

@@ -136,6 +136,66 @@ _Avoid_: single registration list (handlers and shapers are still per-layer dict
 The BFF registration object for one **turn analytic** -- optional table/map handlers and diagnostic hooks, with catalog metadata from `TURN_ANALYTIC_CATALOG` via `from_catalog_entry`. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.
 _Avoid_: METADATA dict, handler registry (when meaning the consolidated descriptor)
 
+**Analytic export**:
+A queryable surface one **turn analytic** exposes as a single **analytic export value schema** tree, queried with JSONPath **analytic export paths** and scope parameters (game, turn, **perspective**, optional **Player**). Scope binds on the query with ambient defaults; path-prefix rules override where defaults are wrong or forbidden. Distinct from the **turn analytic wire contract** and from direct **game concept** imports -- consumers use the **analytic query context** even when the provider delegates to `api/concepts/`.
+_Avoid_: analytic API, internal getter, wire payload reuse, flat scalar export per field
+
+**Analytic export catalog**:
+The self-describing **analytic export value schema** tree and path-prefix scope rules registered by one **turn analytic**. One schema tree per analytic; scope is not baked into separate root shapes. Every turn analytic implements the pattern; an empty catalog is valid. Aggregated at the Core layer for discovery (future analytic MCP: describe tree, query JSONPath + scope).
+_Avoid_: multiple scope-specific root schemas per analytic, OpenAPI per path (v1)
+
+**Concept-shim analytic**:
+A **turn analytic** whose primary job is to expose **game concept** results as **analytic exports** with a stable catalog id, while its SPA table/map surface may be thin or absent. **Connections** is the reference shape: reachability math lives in **Connections engine** (`concepts/`); the analytic adds export entry points and UI-facing options. Allows arbitrary Core information to enter the uniform export graph without duplicating concept code inside unrelated analytics.
+_Avoid_: fake analytic, concept wrapper module (when meaning the registered turn analytic)
+
+**Analytic query context**:
+The in-process Core facility passed into **turn analytic** computation through which one analytic requests **analytic exports** from another. Owns scope validation (game, turn, **perspective**, optional **Player**), per-request memoization, and cycle detection. v1: export queries run only through this context during Core compute -- not nested HTTP. A future analytic MCP reuses the same export handler implementations with an HTTP/JSON adapter.
+_Avoid_: export microservice, cross-analytic REST (v1)
+
+**Analytic export scope**:
+Scope parameters on an export query (game, turn, **perspective**, `player_id`, connection **options**, etc.). Unspecified dimensions default to the ambient compute scope (shell turn, **perspective**, and related context). **Path-prefix scope rules** in the **analytic export catalog** declare where defaults are wrong or forbidden (e.g. `$.evidence.*` uses ambient **perspective** only; `$.solution.*` requires explicit `player_id`). The **analytic query context** validates scope, enforces **perspective**-visible stored turns for cross-turn reads, and merges **analytic persistence** when needed. Missing stored turns or unknown players yield root **unavailable** -- not silent fallback.
+_Avoid_: scope baked into separate root schemas, omniscient cross-perspective reads
+
+**Analytic export cycle detection**:
+While resolving exports in-process, the **analytic query context** maintains a resolution stack keyed by `(analytic_id, normalized scope parameters, normalized path set)`. Re-entering the same key is a hard error (true cycle). Cross-turn chains differ in scope (e.g. turn *N* vs *N−1*) and are not cycles. Different paths at the same scope (`$.ships` vs `$.aggregates`) are not a cycle. Per-request memoization applies for identical keys.
+_Avoid_: analytic-id-only cycle check, treating path variants as re-entrant cycles
+
+**Analytic export availability**:
+Whether a Core **analytic export** query can be satisfied for the requested scope. Independent of SPA sidebar enablement (**client preference** in localStorage) -- enablement controls which table/map wire payloads the SPA fetches, not whether Core may resolve exports during compute or future MCP calls. An export may still return unavailable when data is missing (turn not stored, persistence not populated, invalid scope, **analytic export cycle detection** trip, etc.).
+_Avoid_: enabled analytic check, client toggle gate
+
+**Analytic export value schema**:
+The single self-describing JSON-shaped type tree one **turn analytic** publishes in the **analytic export catalog**. Structure is independent of scope -- scope selects which slice of the tree is populated. Top-level branches may differ in role (e.g. `solution`, `hullCatalogMask`, `slots`, `evidence`) with **path-prefix scope rules** per branch. Catalog documents array **ordering semantics** (e.g. `solution.ships` sorted by **inference solution rank weight** so `$.solution.ships[0]` is top ship). Wire values are JSON-serializable for future MCP adapters.
+_Avoid_: flat scalar-only catalog, separate schema per scope, SPA table row as the schema
+
+**Analytic export path**:
+A JSONPath selector into the analytic's **value schema** tree -- e.g. `$`, `$.solution.ships`, `$.solution.ships[0]`, `$.solution.ships[*].hull_id`. One **analytic query context** request binds scope once, materializes the tree (memoized), then resolves one or more paths (**batched export query**). Zero matches yield **analytic export path none**, not root **unavailable**.
+_Avoid_: custom path dialect, treating empty index as query failure
+
+**Analytic export result**:
+Discriminated outcome of one path query through the **analytic query context**. Top level: **`ok`** when the export tree can be established for scope; **`unavailable`** when it cannot (e.g. `turn_not_stored`, `invalid_scope`, `persistence_empty`). Under **`ok`**, each path gets a **path result**: **`value`**, **`none`** (zero matches -- e.g. `$.solution.ships[0]` when `ships` is `[]`), or **`invalid_path`**. Batched paths do not fail the whole query when one path is **`none`**. **`cycle_detected`** is a hard error (exception).
+_Avoid_: top-level failure for path none, conflating none with turn_not_stored
+
+**Analytic export path none**:
+A **path result** status: root available, JSONPath valid, zero nodes matched. Distinct from a matched JSON **`null`** and from root **unavailable**. No ships in a solution is **`none`**, not an error.
+_Avoid_: path miss as query failure
+
+**Batched export query**:
+One **analytic query context** request resolving multiple JSONPath selectors under one scope binding -- e.g. `["$.solution.ships[0]", "$.solution.aggregates"]` without re-materializing the tree.
+_Avoid_: N sequential queries when one tree pass suffices
+
+**Analytic export materializer**:
+The per-**turn analytic** function (`materialize_export_tree`) registered in Core that builds the JSON tree for a validated **analytic export scope** on first path touch (memoized on the **analytic query context**). Declared alongside **`EXPORT_VALUE_SCHEMA`** (JSON Schema dict), **path-prefix scope rules**, and ordering semantics in `analytics/<id>/exports.py`. Table/map handlers and **concept-shim analytic** providers should call the same materializer (or shared helpers it uses) so wire output and export queries stay one source of truth. When materialization can be incomplete (e.g. **military score build inference** still running or not yet started for that scope), the tree includes a documented **`meta`** branch with explicit status so consumers can warn users -- not only best-so-far data with no signal.
+_Avoid_: duplicate domain logic in handler vs exports, silent partial data without status
+
+**Analytic export meta**:
+A documented branch of the export value tree (e.g. `$.meta`) carrying **materialization lifecycle** status independent of path **`none`** / **`value`**. Generic **`searchStatus`** values: **`not_started`**, **`in_progress`**, **`paused`**, **`stopped`**, **`complete`**. Consumers warn users when status is not **`complete`** (e.g. fleet analytic: prior-turn inference not ready). **`complete`** with path **`none`** is authoritative empty data, not bad data. Solver-specific outcomes (e.g. inference `no_exact_solution`, band residual) live under domain branches (e.g. `$.solution.diagnostics`), not in **`searchStatus`**. Optional **`solutionsHeld`** counts held rows under **`complete`** / in-progress partial trees.
+_Avoid_: inference-only statuses in generic meta, inferring quality from empty paths alone
+
+**Analytic export registry**:
+Core aggregation of every turn analytic's export catalog (`analytics/exports/registry.py`). Import-time validation: each `TURN_ANALYTIC_CATALOG` id has a registry entry (empty catalog allowed). Dispatches materialize + JSONPath resolution for **analytic query context** queries.
+_Avoid_: per-consumer ad hoc import of analytic modules
+
 **Base map**:
 The always-on map layer (`type: base`, id `base-map`) that renders planet nodes from **TurnInfo**. Fetched automatically in **map mode** and omitted from the analytics sidebar; other map analytics overlay it.
 _Avoid_: background layer, planet layer (without "base map")
@@ -321,7 +381,7 @@ Up to K distinct exact explanations held across the full **inference search tier
 _Avoid_: per-tier top-K, solution buffer
 
 **Inference solution rank weight**:
-The solver maximize objective attached to one explanation, expressed in inverted penalty space (higher is better). Legacy positive marginal weights map to penalties via `(max_marginal - weight)` so more plausible bins and actions score higher. **Bucketed aggregate actions** contribute one rescaled bin penalty for the single active magnitude bin when count is positive -- not a sum of all bucket marginals and not per unit in the bin. Non-bucketed aggregate actions and **ship build combos** contribute inverted probability weights (combos per combo count). **Inference ranking heuristics** layer on top: parsimony per active slack type, flat tier-overflow when count exceeds **inference aggregate admission cap**, and partial weapon-slot fill penalties. Combos are not subject to **inference ranking parsimony**. Orders the merged top-K and each streamed `solution` event; the consumer may maintain final ranked order incrementally from this weight without waiting for the full ladder to finish. Serialized on the wire as `objectiveValue` per solution row.
+The solver maximize objective attached to one explanation, expressed in inverted penalty space (higher is better). Legacy positive marginal weights map to penalties via `(max_marginal - weight)` so more plausible bins and actions score higher. Every aggregate action is a **bucketed aggregate action** and contributes exactly one rescaled bin penalty for its single active magnitude bin, where the bins include a leading **occurrence (none) bin** (`count == 0`); choosing the `none` bin costs `0`, and any active bin carries the **occurrence cost** that subsumes the old standalone parsimony penalty -- not a sum of all bucket marginals and not per unit in the bin. **Ship build combos** contribute inverted probability weights (per combo count). The only non-bucketed candidate (`evil_empire_free_starbase_fighters`) contributes no ranking term. **Inference ranking heuristics** layer on top: flat tier-overflow when count exceeds **inference aggregate admission cap**, and partial weapon-slot fill penalties. Orders the merged top-K and each streamed `solution` event; the consumer may maintain final ranked order incrementally from this weight without waiting for the full ladder to finish. Serialized on the wire as `objectiveValue` per solution row.
 _Avoid_: probability score, objective value (implementation field name)
 
 **Inference solution plausibility (display)**:
@@ -332,12 +392,12 @@ _Avoid_: likelihood percent, log probability (in modal copy without qualificatio
 Player-facing dialog opened from the **inference solution count indicator** when **N > 0** on a `success` or `paused` row. Shows observed constraint deltas, ranked solutions (icon | action | military subtotal tables, plausibility headers, reconciliation footers), and live updates while search continues. Does not surface `accelerated_segments`, `appliedEqualities`, priority-point constraint notes, spectator delta-source notes, or other developer diagnostics (those belong in the Scores diagnostics panel). Spec: [design-military-score-inference-solution-modal.md](docs/design-military-score-inference-solution-modal.md). Tracker: #48.
 _Avoid_: inference detail dialog (generic), diagnostic modal
 
-**Inference ranking parsimony**:
-Per-active-type penalty in the CP-SAT objective for **fine-grained slack action** aggregate variables (`count > 0`). Penalizes explanation breadth (many distinct slack types in one multiset), not ship-build combo types. Sufficient on its own for defense-post slack (planet and starbase defense posts may both be non-zero in plausible explanations). Distinct from count-dependent **probability buckets**, **inference tier-overflow bands**, and **inference action-family diversity caps**.
-_Avoid_: complexity score, moving-parts penalty
+**Inference occurrence prior (none bin)**:
+The leading **none bin** (`count == 0`) present in every aggregate **probability bucket** set. It carries a data-derived occurrence pseudo-count (asset `0:` key, or `none_bin_pseudo_count` for implicit-uniform tables) so that each aggregate contributes a self-normalised `log P(observed bin)` term including the "did not happen" outcome. The `none` bin is the max-weight bin (cost `0`); any active bin sits below it by the **occurrence cost**, reproducing the legacy flat parsimony penalty (`LEGACY_PARSIMONY_OCCURRENCE_PENALTY = SCALE // 2 = 50`) within +/-1. This replaces the former standalone parsimony penalty and the degenerate `counts` aggregate shape (both removed). Distinct from count-dependent positive **probability buckets**, **inference tier-overflow bands**, and **inference action-family diversity caps**.
+_Avoid_: parsimony penalty (removed), complexity score, moving-parts penalty
 
 **Inference action-family diversity cap**:
-Hard CP-SAT constraint: at most N distinct catalog members from a **superclass** may be non-zero in one explanation (indicator `count > 0`, then `sum(indicators) <= cap`). Used where parsimony alone does not stop degeneracy -- e.g. many distinct torpedo-load types padding score. Not applied to defense-post slack (planet + starbase posts together are plausible; parsimony only there). v1 superclasses: **torpedo loads** (`ship_torps_loaded_{id}`, cap 2); **fighter channel** (`starbase_fighters_added_total`, `ship_fighters_added_total`, `fighters_starbase_to_ship`, `fighters_ship_to_starbase`, cap 2). **`evil_empire_free_starbase_fighters`** is excluded from diversity caps and parsimony (race-specific high-prior action).
+Hard CP-SAT constraint: at most N distinct catalog members from a **superclass** may be non-zero in one explanation (indicator `count > 0`, then `sum(indicators) <= cap`). Used where the **inference occurrence prior (none bin)** alone does not stop degeneracy -- e.g. many distinct torpedo-load types padding score. Not applied to defense-post slack (planet + starbase posts together are plausible; the occurrence cost alone governs there). v1 superclasses: **torpedo loads** (`ship_torps_loaded_{id}`, cap 2); **fighter channel** (`starbase_fighters_added_total`, `ship_fighters_added_total`, `fighters_starbase_to_ship`, `fighters_ship_to_starbase`, cap 2). **`evil_empire_free_starbase_fighters`** is excluded from diversity caps and, being non-bucketed, contributes no ranking term (race-specific high-prior action).
 _Avoid_: superclass limit (without "inference"), defense cap
 
 **Inference tier-overflow band**:
@@ -353,8 +413,61 @@ Solver-side merge of injected parameters into the static **inference tier policy
 _Avoid_: fleet prior, runtime tier config, injection source
 
 **Inference tier policy asset**:
-Static YAML ladder under `assets/analytics/military_score_build_inference/` (repo root). Defines ordered **inference tier policy** steps: per-axis tech-level allowlists, aggregate allowlists and caps, `alpha`, beam/launcher slot-count widening at named steps, and flags such as use-player-active-lists. Loaded at solve time via a resolver that accepts an optional **inference tier policy overlay** (no-op when absent). Not mixed with storage seed fixtures.
+Static YAML ladder under `assets/analytics/scores/` (repo root). Defines ordered **inference tier policy** steps: per-axis tech-level allowlists, aggregate allowlists and caps, `alpha`, beam/launcher slot-count widening at named steps, and flags such as use-player-active-lists. Loaded at solve time via a resolver that accepts an optional **inference tier policy overlay** (no-op when absent). Not mixed with storage seed fixtures.
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
+
+**Inference build prior**:
+Population-level weights that feed **inference solution rank weight** via additive log-probability composition at catalog-build time. The **inference build prior asset** (selected by **inference game category**) stores **un-normalized empirical count distributions**; a runtime step converts counts to integer log-probability weights when the catalog is built for a solve. Ship builds compose as `log P(hull) + log P(components | hull category) + optional sparse overrides`; aggregate actions use histogram-derived magnitude-bin distributions. Within each asset, partition keys: **inference ship-limit band** on all families; **race** modifiers on hull marginals only. Distinct from **inference tier policy overlay** (fleet-informed runtime adjustments, #87).
+_Avoid_: probability score, prior_weights.yaml (filename in prose only when citing path)
+
+**Inference game category**:
+Immutable label for a class of games (e.g. standard, epic, blitz) used to select which **inference build prior asset** the console loads. Assigned by a deterministic ordered-predicate function of game settings in Core (same function in the mining sampler and at solve time). v1 ids include at least `standard`, `blitz`, `epic`; first matching rule wins. Categories have stable unique identifiers; once defined they do not change meaning. If no asset exists for the resolved category, fall back to the `standard` asset. Separate assets per category avoid runtime cross-partition overhead.
+_Avoid_: game mode (unqualified), gametype int alone (wire field -- not the category id unless a rule maps it)
+
+**Inference prior mining corpus**:
+Explicit allowlist of finished game ids used to mine **inference build prior asset** count tables. All listed games must be finished so every perspective's turns are available. One mined asset (or asset set) per **inference game category**. Distinct from the inference regression corpus (#62--#66) and from ad-hoc storage enumeration.
+_Avoid_: all stored games, in-progress games
+
+**Inference build prior asset**:
+Static YAML under `assets/analytics/scores/` holding un-normalized count tables for hull marginals, **inference conditional component prior** cells, and **inference aggregate prior** histograms. One file per **inference game category** (e.g. category id in filename). At catalog-build time the console resolves category from the loaded game, loads the matching file, normalizes each table with Laplace smoothing (`alpha = 1`), converts to integer log-probability weights, and composes additively in log space for ship combos. Real freighter hull ids stay in the asset; Core collapses eligible true-freighter hull counts into the solver's generic freighter combo during catalog resolution. v1 hand-seeds pseudo-counts; structure accepts mined replacements without solver changes.
+_Avoid_: normalized probabilities in the asset, hardcoded weights in Python, single monolithic asset for all game types
+
+**Inference hull category**:
+A role label derived from hull characteristics and build configuration (not a hand-maintained hull-id table) that keys **inference conditional component prior** cells. Assignment uses priority predicates with sparse hull-id overrides (`concepts/` or equivalent). v1 categories:
+
+| Category | Predicate (summary) |
+|----------|----------------------|
+| **true freighter** | No fighter bays, beams, or launcher slots |
+| **weaponless hull** | Has weapon slots but built empty (counts as freighter on scoreboard; Fed refit relevance) |
+| **alchemy ship** | Override / `special` (explicit rules) |
+| **carrier** | `fighterbays > 0` |
+| **battleship** | `beams > 0`, `launchers > 0`, and `mass >` fixed hand-tuned constant in Core (v1; verified against anchor hulls in the standard roster) |
+| **torpedo ship** | `launchers > 0` (beams allowed) |
+| **beam-ship** | `beams > 0`, `launchers == 0` |
+| **utility** | Sparse overrides only; priority list should not reach this in normal cases |
+
+`techlevel` is not a category axis in v1. Shared resolver lives in Core (alongside hull classification helpers), not in the prior YAML.
+_Avoid_: hull class (unqualified), ship type preset, freighter (unqualified -- use **true freighter** or **weaponless hull**)
+
+**Inference conditional component prior**:
+Un-normalized count distribution over engine, beam, torpedo type, and slot-fill pattern conditioned on `(inference hull category, inference ship-limit band)`, composed additively in log space into each **ship build combo**'s rank-weight contribution at catalog-build time. Race-agnostic in v1 (pooled across races).
+_Avoid_: combo prior, factored weight table
+
+**Inference aggregate prior**:
+Un-normalized count distribution over aggregate inference actions, stored as raw magnitude histograms (discrete totals or histogram edges in the **inference build prior asset**). There is a single histogram shape (the degenerate `counts` shape was removed); an optional `0:` key carries the **inference occurrence prior (none bin)**. At catalog-build time the loader aggregates histogram counts into the solver's fixed **probability bucket** ranges (including the leading `none` bin) and converts via the same Laplace log rule as other tables. Partitioned by **inference ship-limit band**. v1 hand-seeds use pseudo-counts on histogram edges chosen so runtime bucketing reproduces intended modest/heavy/extreme ratios (mapping is not unique), plus a computed `0:` occurrence seed. Fighter transfers are occurrence-only 2-bin histograms. Mined from per-turn-player inventory-delta observations.
+_Avoid_: bin-level-only asset (without histogram layer), per-unit aggregate weights
+
+**Inference hull marginal prior**:
+Un-normalized count distribution over real hull ids for **inference prior ship-build observation** mining, including actual freighter hull ids. Partitioned by **inference ship-limit band**; optional per-race count slices in the asset schema, with global pooled tables as default and sparse per-race rows for race-exclusive or strongly race-characteristic hulls. v1 hand-seeds global + overrides only; full race-stratified tables filled by mining later. Component conditionals do not cross race. Solver-only compression rows, such as the generic freighter combo, are derived from these real hull counts at catalog build and do not appear as synthetic hull ids in the asset.
+_Avoid_: race-conditioned engine priors (v1 -- see fleet overlay #87)
+
+**Inference ship-limit band**:
+Coarse partition for **inference build prior** tables: whether ship-limit queue rules apply on the observation turn (`before_ship_limit` vs `after_ship_limit`). Derived from the same signal as `InferenceObservation.is_after_ship_limit` (game-total or per-player limit per `shiplimittype`). All prior families -- hull, component, aggregate -- split on this band in v1.
+_Avoid_: turn band, early/mid/late game (for priors v1)
+
+**Inference prior ship-build observation**:
+One counted ship build for **inference build prior** mining. On turn *T*, take a player-owned **starbase** with `isbuilding == true` and read its build order (`buildhullid`, `buildengineid`, `buildbeamid`, `buildtorpedoid`, `buildbeamcount`, `buildtorpcount`). On turn *T+1*, validate by a **new** ship (ship id absent on turn *T*) at that starbase's planet whose fitted spec **exactly matches** the order. Reject pre-existing ships that moved to the same coordinates with an identical spec. Excludes inventory-diff detection (trades, destruction noise) and unvalidated queued orders. Distinct from inference corpus inventory ground truth (#64).
+_Avoid_: new ship diff, build queue snapshot alone, hull-only match
 
 **Inference solution streaming**:
 NDJSON wire protocol (**#71**, Phase 1H). The SPA opens **one multiplexed table stream** (`GET .../inference/table-stream`) for all scoreboard rows on the current shell scope; events carry an optional `playerId` tag (except `globalPause`). Emits whenever a **new** **inference explanation signature** is admitted to **inference merged top-K** -- within-tier enumeration and cross-tier ladder progress -- so the dashed-zero badge transitions to a solid count before top-K is full. Admission is incremental-only: the solver `on_solution` callback merges into held top-K; there is no post-solve re-merge. Each `solution` event carries the **full held top-K** for that row (ranked by **inference solution rank weight**); the consumer replaces local held state from the event (no client-side merge). Follows the load-all progress stream pattern (Zod-owned events). Batch JSON remains for the inference corpus harness. **Stream disconnect** (refresh, network loss, disable build inference, tab close) cancels all in-flight work and clears **inference global pause** on the server; reopening the table stream on the same scope **recalculates from scratch**.

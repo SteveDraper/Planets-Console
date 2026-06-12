@@ -104,7 +104,6 @@ def catalog_to_actions_payload(
                 "buildSlotUsage": action.build_slot_usage,
                 "lowerBound": action.lower_bound,
                 "upperBound": action.upper_bound,
-                "probabilityWeight": action.probability_weight,
             }
             for action in catalog.aggregate_actions
         ],

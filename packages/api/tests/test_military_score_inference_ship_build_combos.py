@@ -319,7 +319,6 @@ def test_solver_joint_constraints_with_combo_and_aggregate():
         label="Loaded torps",
         score_delta_2x=50,
         upper_bound=40,
-        probability_weight=10,
     )
     combo = ShipBuildCombo(
         combo_id="combo_13_9_3_6_8_6",

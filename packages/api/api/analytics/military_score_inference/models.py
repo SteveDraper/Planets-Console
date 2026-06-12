@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.ranking_heuristics import (
@@ -43,7 +43,34 @@ class CandidateAction:
     build_slot_usage: int = 0
     lower_bound: int = 0
     upper_bound: int = 0
-    probability_weight: int = 0
+
+
+class MagnitudeCountBounds(Protocol):
+    """Structural type for magnitude-bin count ranges (bounds or full buckets)."""
+
+    lower_count: int
+    upper_count: int
+
+
+def magnitude_bin_index(magnitude: int, bin_bounds: tuple[MagnitudeCountBounds, ...]) -> int:
+    """Return the index of the magnitude bin containing a non-negative count.
+
+    The leading ``none`` bin ``[0, 0]`` matches ``magnitude == 0``; counts above the
+    top bin fall through to the last bin.
+    """
+    for index, bound in enumerate(bin_bounds):
+        if bound.lower_count <= magnitude <= bound.upper_count:
+            return index
+    return len(bin_bounds) - 1
+
+
+@dataclass(frozen=True)
+class ProbabilityBinBounds:
+    """Solver magnitude-bin geometry (labels and count ranges only)."""
+
+    label: str
+    lower_count: int
+    upper_count: int
 
 
 @dataclass(frozen=True)
@@ -52,6 +79,23 @@ class ProbabilityBucket:
     lower_count: int
     upper_count: int
     marginal_weight: int
+
+
+def probability_buckets_from_bin_bounds(
+    bounds: tuple[ProbabilityBinBounds, ...],
+    marginal_weights: tuple[int, ...],
+) -> tuple[ProbabilityBucket, ...]:
+    if len(bounds) != len(marginal_weights):
+        raise ValueError("bin bounds and marginal weight count must match")
+    return tuple(
+        ProbabilityBucket(
+            label=bound.label,
+            lower_count=bound.lower_count,
+            upper_count=bound.upper_count,
+            marginal_weight=weight,
+        )
+        for bound, weight in zip(bounds, marginal_weights, strict=True)
+    )
 
 
 @dataclass(frozen=True)

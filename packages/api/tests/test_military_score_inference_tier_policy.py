@@ -1,5 +1,6 @@
 """Tests for YAML inference search tier policy loading and catalog behavior."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,7 @@ def _emit_mock_solver_solutions(result: InferenceResult, **kwargs) -> InferenceR
 def test_default_policy_path_exists():
     path = default_tier_policy_path()
     assert path.is_file()
-    assert path == REPO_ROOT / "assets/analytics/military_score_build_inference/tier_policy.yaml"
+    assert path == REPO_ROOT / "assets/analytics/scores/tier_policy.yaml"
 
 
 def test_policy_loader_validates_final_alpha_zero():
@@ -280,6 +281,38 @@ def test_slack_admitted_on_later_steps_with_caps(sample_turn):
     assert all(action.upper_bound <= 40 for action in torp_actions)
 
 
+def test_restricted_activetorps_limits_ship_torpedo_aggregate_actions(sample_turn):
+    observation = _observation(military_delta_2x=500)
+    player_id = observation.player_id
+    restricted_player = replace(sample_turn.player, activetorps="1")
+    turn = replace(
+        sample_turn,
+        player=restricted_player,
+        players=[
+            restricted_player if player.id == player_id else player
+            for player in sample_turn.players
+        ],
+    )
+    torp_step = next(step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes")
+    catalog_context = turn_catalog_context_for_policy_step(turn, player_id, torp_step)
+
+    assert catalog_context.eligible_torp_ids == frozenset({1})
+    assert len(catalog_context.torpedos_by_id) > 1
+
+    catalog = build_action_catalog_from_turn(
+        observation,
+        turn,
+        policy_step=torp_step,
+    )
+
+    torp_action_ids = {
+        action.id
+        for action in catalog.aggregate_actions
+        if action.id.startswith("ship_torps_loaded_")
+    }
+    assert torp_action_ids == {"ship_torps_loaded_1"}
+
+
 def test_tech_level_filtering_derives_component_sets(synthetic_catalog_context):
     early_step = resolve_tier_policies()[0]
     high_tech_engine = Engine(
@@ -311,13 +344,18 @@ def test_tech_level_filtering_derives_component_sets(synthetic_catalog_context):
         components_by_id=synthetic_catalog_context["beams_by_id"],
     )
     context = {
-        **synthetic_catalog_context,
+        key: value for key, value in synthetic_catalog_context.items() if key != "prior_catalog"
+    }
+    context |= {
         "engines_by_id": engines_by_id,
         "eligible_beam_ids": eligible_beam_ids,
     }
+    from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog
+
     early_catalog = build_action_catalog(
         _observation(warship_delta=1),
         policy_step=early_step,
+        prior_catalog=minimal_prior_catalog(),
         **context,
     )
     assert high_tech_engine.id not in {combo.engine_id for combo in early_catalog.ship_build_combos}
@@ -732,7 +770,7 @@ def test_full_catalog_step_applies_tier_overflow_to_planet_defense(sample_turn):
     assert catalog.admission_caps_by_action_id["planet_defense_posts_added_total"] == 16
     assert "planet_defense_posts_added_total" in catalog.tier_overflow_by_action_id
     overflow = catalog.tier_overflow_by_action_id["planet_defense_posts_added_total"]
-    assert overflow.marginal_weight == 5
+    assert overflow.marginal_weight == 50
 
 
 def test_compute_aggregate_admission_caps_records_first_step_appearance():

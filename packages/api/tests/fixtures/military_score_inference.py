@@ -40,6 +40,8 @@ def sample_turn():
 
 @pytest.fixture
 def synthetic_catalog_context():
+    from tests.fixtures.military_score_inference_prior_weights import minimal_prior_catalog
+
     freighter = Hull(
         id=15,
         name="Small Deep Space Freighter",
@@ -178,4 +180,10 @@ def synthetic_catalog_context():
         "eligible_engine_ids": frozenset({engine.id}),
         "eligible_beam_ids": frozenset({beam.id}),
         "eligible_torp_ids": frozenset({torpedo.id}),
+        "prior_catalog": minimal_prior_catalog(),
     }
+
+
+@pytest.fixture
+def synthetic_catalog_build_context(synthetic_catalog_context):
+    return synthetic_catalog_context

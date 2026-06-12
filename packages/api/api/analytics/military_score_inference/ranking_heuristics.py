@@ -2,39 +2,42 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    SHIP_TORPS_LOADED_ACTION_PREFIX,
+    lookup_aggregate_action_spec,
+)
+from api.analytics.military_score_inference.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
+    magnitude_bin_index,
 )
-from api.analytics.military_score_inference.tier_policy import (
-    FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
-    SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
-    is_fine_grained_slack_action,
-)
-
-EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID = "evil_empire_free_starbase_fighters"
 
 TORPEDO_LOADS_SUPERCLASS = "torpedo_loads"
 FIGHTER_CHANNEL_SUPERCLASS = "fighter_channel"
 
-FIGHTER_CHANNEL_MEMBER_IDS = frozenset(
-    {
-        "starbase_fighters_added_total",
-        "ship_fighters_added_total",
-        "fighters_starbase_to_ship",
-        "fighters_ship_to_starbase",
-    }
-)
+
+def _default_partial_weapon_slot_penalty_per_line() -> int:
+    return -(INFERENCE_PROBABILITY_WEIGHT_SCALE // 4)
+
+
+def _default_tier_overflow_marginal_weight() -> int:
+    return INFERENCE_PROBABILITY_WEIGHT_SCALE // 2
 
 
 @dataclass(frozen=True)
 class InferenceRankingHeuristics:
-    parsimony_per_active_slack_type: int = -5
-    partial_weapon_slot_penalty_per_line: int = -8
-    tier_overflow_marginal_weight: int = 5
+    partial_weapon_slot_penalty_per_line: int = field(
+        default_factory=_default_partial_weapon_slot_penalty_per_line
+    )
+    tier_overflow_marginal_weight: int = field(
+        default_factory=_default_tier_overflow_marginal_weight
+    )
     torpedo_load_diversity_cap: int = 2
     fighter_channel_diversity_cap: int = 2
 
@@ -44,23 +47,6 @@ class TierOverflowBand:
     admission_cap: int
     current_cap: int
     marginal_weight: int
-
-
-def admission_cap_for_action(action_id: str, admission_caps: dict[str, int]) -> int | None:
-    """Return the admission cap for one catalog action id from raw allowlist history."""
-    if action_id in admission_caps:
-        return admission_caps[action_id]
-    if action_id.startswith("ship_torps_loaded_"):
-        return admission_caps.get(SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY)
-    if action_id in {"fighters_starbase_to_ship", "fighters_ship_to_starbase"}:
-        return admission_caps.get(FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY)
-    return None
-
-
-def is_parsimony_eligible_slack_action(action_id: str) -> bool:
-    if action_id == EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ID:
-        return False
-    return is_fine_grained_slack_action(action_id)
 
 
 def max_marginal_weight(buckets: tuple[ProbabilityBucket, ...]) -> int:
@@ -79,15 +65,12 @@ def ranking_penalty_from_marginal_weight(
 def active_ranking_bin_index(
     count: int,
     buckets: tuple[ProbabilityBucket, ...],
-) -> int | None:
-    """Return the index of the single magnitude bin for a positive aggregate count."""
-    if count <= 0:
-        return None
-    for index, bucket in enumerate(buckets):
-        lower_bound = 1 if bucket.lower_count == 0 else bucket.lower_count
-        if lower_bound <= count <= bucket.upper_count:
-            return index
-    return len(buckets) - 1
+) -> int:
+    """Return the index of the single magnitude bin for an aggregate count.
+
+    A count of ``0`` lands in the leading none bin (index 0), matching the solver.
+    """
+    return magnitude_bin_index(count, buckets)
 
 
 def active_ranking_bin_indicators(
@@ -106,8 +89,6 @@ def compute_bin_penalty_objective_contribution(
     contribution = 0
     for action_id, buckets in buckets_by_action_id.items():
         active_index = active_ranking_bin_index(action_counts.get(action_id, 0), buckets)
-        if active_index is None:
-            continue
         penalty = ranking_penalty_from_marginal_weight(
             buckets[active_index].marginal_weight,
             max_marginal_weight=max_marginal_weight(buckets),
@@ -169,18 +150,6 @@ def compute_partial_weapon_slot_penalty_contribution(
     return contribution
 
 
-def compute_parsimony_objective_contribution(
-    action_counts: dict[str, int],
-    heuristics: InferenceRankingHeuristics,
-) -> int:
-    active_slack_types = sum(
-        1
-        for action_id, count in action_counts.items()
-        if count > 0 and is_parsimony_eligible_slack_action(action_id)
-    )
-    return active_slack_types * heuristics.parsimony_per_active_slack_type
-
-
 def compute_overflow_objective_contribution(
     action_counts: dict[str, int],
     tier_overflow_by_action_id: dict[str, TierOverflowBand],
@@ -198,7 +167,7 @@ def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ..
         sorted(
             action_id
             for action_id in catalog_action_ids
-            if action_id.startswith("ship_torps_loaded_")
+            if action_id.startswith(SHIP_TORPS_LOADED_ACTION_PREFIX)
         )
     )
 
@@ -206,7 +175,10 @@ def torpedo_load_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ..
 def fighter_channel_action_ids(catalog_action_ids: frozenset[str]) -> tuple[str, ...]:
     return tuple(
         sorted(
-            action_id for action_id in catalog_action_ids if action_id in FIGHTER_CHANNEL_MEMBER_IDS
+            action_id
+            for action_id in catalog_action_ids
+            if (spec := lookup_aggregate_action_spec(action_id)) is not None
+            and spec.is_fighter_channel_member
         )
     )
 
@@ -217,7 +189,6 @@ def ranking_heuristics_diagnostics_payload(
     admission_caps_by_action_id: dict[str, int],
 ) -> dict[str, object]:
     return {
-        "parsimonyPerActiveSlackType": heuristics.parsimony_per_active_slack_type,
         "partialWeaponSlotPenaltyPerLine": heuristics.partial_weapon_slot_penalty_per_line,
         "tierOverflowMarginalWeight": heuristics.tier_overflow_marginal_weight,
         "diversityCaps": [

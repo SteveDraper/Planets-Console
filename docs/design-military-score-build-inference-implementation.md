@@ -149,10 +149,9 @@ class CandidateAction:
     build_slot_usage: int = 0
     lower_bound: int = 0
     upper_bound: int = 0
-    probability_weight: int = 0
 ```
 
-The important modeling rule is that action variables are non-negative integers, but action contribution vectors may contain positive or negative values. `probability_weight` is enough for simple actions, but repeated actions also need count-dependent probability terms.
+The important modeling rule is that action variables are non-negative integers, but action contribution vectors may contain positive or negative values. Aggregate actions carry no scalar probability weight: their plausibility is expressed entirely through count-dependent probability bins (`ProbabilityBucket`), including a leading `none` bin for `count == 0` (see section 5.1).
 
 ```python
 @dataclass(frozen=True)
@@ -268,28 +267,28 @@ Example for planetary defense posts:
 
 | Bin | Count range | Marginal meaning |
 |-----|-------------|------------------|
-| modest build-up | 0-10 | plausible local development |
+| none | 0-0 | action did not happen (occurrence prior) |
+| modest build-up | 1-10 | plausible local development |
 | heavy build-up | 11-50 | less likely but common in border areas |
 | extreme build-up | 51-100 | possible but strongly penalized |
 
-The action still has a single integer count variable (`defense_posts_total`). CP-SAT does **not** decompose that count into per-bin integer variables. Instead, for each bin the solver adds one **ranking bin indicator** boolean that is active when the count falls in that bin's range:
+Every bucketed action has a leading **`none` bin** `[0, 0]` ahead of its positive magnitude bins, so `count == 0` ("did not happen") is a first-class outcome that carries its own marginal weight (the **occurrence prior**). The action still has a single integer count variable (`defense_posts_total`). CP-SAT does **not** decompose that count into per-bin integer variables. Instead, for each bin the solver adds one **ranking bin indicator** boolean that is active when the count falls in that bin's range:
 
 ```text
-has_positive_count <=> defense_posts_total >= 1
 for each bin i with range [lower_i, upper_i]:
   ranking_bin_i active => lower_i <= defense_posts_total <= upper_i
-sum(ranking_bin_i) == has_positive_count
+sum(ranking_bin_i) == 1
 ```
 
-When the count is zero, no bin indicator is active. When the count is positive, exactly one bin indicator is active -- the bin whose range contains the count.
+Exactly one bin indicator is always active. When the count is zero the `none` bin is active; when the count is positive, the bin whose range contains the count is active.
 
-The objective applies **one rescaled penalty per active bin**, not a per-unit sum across bins. Each active indicator contributes `-ranking_penalty_from_marginal_weight(bin.marginal_weight, max_marginal_weight)` where `max_marginal_weight` is the largest marginal weight among that action's bins. This keeps the CP-SAT objective linear while avoiding the wrong assumption that 100 defense posts are as unlikely as 100 fully independent one-post actions.
+The objective applies **one rescaled penalty per active bin**, not a per-unit sum across bins. Each active indicator contributes `-ranking_penalty_from_marginal_weight(bin.marginal_weight, max_marginal_weight)` where `max_marginal_weight` is the largest marginal weight among that action's bins. The `none` bin is seeded as the max-weight bin (penalty `0`); any positive bin sits below it by the **occurrence cost**, so an action that fires pays a fixed occurrence penalty on top of its magnitude cost. This keeps the CP-SAT objective linear while avoiding the wrong assumption that 100 defense posts are as unlikely as 100 fully independent one-post actions.
 
-Non-bucketed aggregate actions use the same pattern with a single active indicator and one rescaled penalty when count is positive. Ship-build combo counts use per-unit combo penalties (plus partial-weapon-slot penalties when configured).
+Every aggregate action is bucketed this way. The sole exception is `evil_empire_free_starbase_fighters`, which is non-bucketed and contributes no ranking term. Ship-build combo counts use per-unit combo penalties (plus partial-weapon-slot penalties when configured).
 
 **Ranking heuristics** layer on top of bin and action penalties (see `ranking_heuristics.py`):
 
-- **Parsimony:** penalize each active fine-grained slack action type (boolean per eligible action).
+- **Occurrence prior (none bin):** the gap from the `none` bin down to any active bin is the per-action occurrence cost. It is encoded directly in the bin marginals (data-derived from the asset `0:` seed), not as a separate parsimony term; it reproduces the legacy flat parsimony penalty (`LEGACY_PARSIMONY_OCCURRENCE_PENALTY`).
 - **Tier overflow:** when tier policy raises an action's upper bound above its admission cap, a flat boolean fires when count exceeds the admission cap and adds one overflow marginal penalty (not per unit above the cap).
 - **Action-family diversity caps:** hard constraints limiting how many distinct torpedo-load or fighter-channel member actions may be active simultaneously.
 
@@ -300,6 +299,8 @@ This bin-indicator pattern applies to:
 - loaded fighter increases,
 - loaded torpedoes by type,
 - future mine-laying quantities.
+
+**Inference build priors (#86):** population-level weights for ship combos and aggregate magnitude bins are loaded from per-**inference game category** YAML assets, converted from un-normalized counts to log-probability integer weights at catalog build. Authoritative spec: [design-military-score-inference-build-priors.md](design-military-score-inference-build-priors.md).
 
 ---
 
@@ -550,7 +551,7 @@ Phase 1G shipped `_solve_with_tier_retry` with hardcoded tiers 0--4 in code (`ST
 
 #### 8.5.2 Policy asset
 
-- **Path:** `assets/analytics/military_score_build_inference/tier_policy.yaml` at repo root (`assets/analytics/<analytic_id>/` pattern for analytic static config; distinct from `packages/api/api/storage/assets/` test/seed JSON).
+- **Path:** `assets/analytics/scores/tier_policy.yaml` at repo root (`assets/analytics/<analytic_id>/` pattern for analytic static config; distinct from `packages/api/api/storage/assets/` test/seed JSON).
 - **Loader:** `resolve_tier_policies(base_path, overlay: TierPolicyOverlay | None = None)` in `tier_policy.py`. Overlay types and merge contract documented in #77; merge implementation in #78.
 - **Steps:** ordered list of **inference tier policy** records. Each step is a strict superset of the prior step on every dimension it controls.
 
@@ -797,7 +798,7 @@ Files:
 Steps:
 
 1. Add `ProbabilityBucket` support to `InferenceProblem`.
-2. For each bucketed action, add ranking bin indicators (one active bin per positive count).
+2. For each bucketed action, add ranking bin indicators (a leading `none` bin plus the positive magnitude bins) with `sum(indicators) == 1` so exactly one bin is always active.
 3. Apply one rescaled bin penalty per active indicator in the objective.
 4. Prefer bin-indicator penalties for defense posts, starbase fighters, loaded fighters, and loaded torpedoes.
 
@@ -805,7 +806,7 @@ Tests:
 
 - 10 defense posts has a different marginal penalty from 100 defense posts,
 - a bucketed action still satisfies the exact score constraint,
-- exactly one bin indicator is active for each positive bucketed count.
+- exactly one bin indicator is active for every bucketed count (the `none` bin when count is zero).
 
 Done when:
 
@@ -883,7 +884,7 @@ GitHub: **#77** (supersedes #52, #72, absorbs #54). Follow-on: **#78** (overlay 
 
 Files:
 
-- `assets/analytics/military_score_build_inference/tier_policy.yaml` (new),
+- `assets/analytics/scores/tier_policy.yaml` (new),
 - `packages/api/api/analytics/military_score_inference/tier_policy.py` (new),
 - `packages/api/api/analytics/military_score_inference/policy_ladder.py` (ladder walk and top-K merge),
 - refactors to `actions.py`, `ship_build_combos.py`, `component_eligibility.py`, `analytic.py`, `constraints.py` (band retry only; warship/freighter stay exact).

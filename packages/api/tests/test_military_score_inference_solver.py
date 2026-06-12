@@ -20,6 +20,14 @@ from api.analytics.military_score_inference.solver import (
     solve_inference_problem,
 )
 
+from tests.fixtures.military_score_inference_prior_weights import (
+    probability_buckets_for_test_action,
+)
+
+_PLANET_DEFENSE_POST_TEST_BUCKETS = probability_buckets_for_test_action(
+    "planet_defense_posts_added_total"
+)
+
 
 def _observation(
     *,
@@ -57,13 +65,6 @@ def _problem(
     )
 
 
-PLANET_DEFENSE_POST_BUCKETS = (
-    ProbabilityBucket("modest build-up", 0, 10, 100),
-    ProbabilityBucket("heavy build-up", 11, 50, 20),
-    ProbabilityBucket("extreme build-up", 51, 100, 5),
-)
-
-
 def _planet_defense_posts_action(*, upper_bound: int = 100) -> CandidateAction:
     return CandidateAction(
         id="planet_defense_posts",
@@ -87,7 +88,6 @@ def test_solve_exact_positive_action_solution():
         warship_delta=1,
         build_slot_usage=1,
         upper_bound=1,
-        probability_weight=100,
     )
     result = solve_inference_problem(
         _problem(_observation(military_delta_2x=400, warship_delta=1), build_warship)
@@ -110,14 +110,12 @@ def test_solve_solution_with_negative_action_contribution():
         label="Load ship fighters",
         score_delta_2x=LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
         upper_bound=1,
-        probability_weight=50,
     )
     transfer_to_starbase = CandidateAction(
         id="transfer_to_starbase",
         label="Transfer fighters ship to starbase",
         score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
         upper_bound=1,
-        probability_weight=10,
     )
     result = solve_inference_problem(
         _problem(
@@ -141,7 +139,6 @@ def test_solve_enforced_priority_point_constraint_requires_catalog_pp_deltas():
         warship_delta=1,
         build_slot_usage=1,
         upper_bound=1,
-        probability_weight=100,
     )
     problem = InferenceProblem(
         observation=_observation(
@@ -168,7 +165,6 @@ def test_solve_non_zero_priority_points_with_zero_pp_catalog_actions():
         warship_delta=1,
         build_slot_usage=1,
         upper_bound=1,
-        probability_weight=100,
     )
     result = solve_inference_problem(
         _problem(
@@ -242,28 +238,42 @@ def test_top_k_returns_higher_weight_solutions_first():
         label="Build preferred hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=100,
     )
     alternate_build = CandidateAction(
         id="build_alternate",
         label="Build alternate hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=50,
     )
     paired_build = CandidateAction(
         id="build_small",
         label="Build small hull twice",
         score_delta_2x=200,
         upper_bound=2,
-        probability_weight=30,
     )
+    # Ranking preference is now expressed through per-action bin penalties: the none
+    # bin is the max weight, so the gap to the active bin sets the occurrence cost.
+    buckets = {
+        "build_preferred": (
+            ProbabilityBucket("none", 0, 0, 100),
+            ProbabilityBucket("active", 1, 1, 100),
+        ),
+        "build_alternate": (
+            ProbabilityBucket("none", 0, 0, 100),
+            ProbabilityBucket("active", 1, 1, 50),
+        ),
+        "build_small": (
+            ProbabilityBucket("none", 0, 0, 100),
+            ProbabilityBucket("active", 1, 2, 30),
+        ),
+    }
     result = solve_inference_problem(
         _problem(
             _observation(military_delta_2x=400),
             preferred_build,
             alternate_build,
             paired_build,
+            probability_buckets_by_action_id=buckets,
             max_solutions=3,
         )
     )
@@ -279,14 +289,12 @@ def test_top_k_no_good_cuts_prevent_duplicate_action_vectors():
         label="Build preferred hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=100,
     )
     alternate_build = CandidateAction(
         id="build_alternate",
         label="Build alternate hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=50,
     )
     result = solve_inference_problem(
         _problem(
@@ -310,21 +318,18 @@ def test_top_k_stops_at_configured_max_solutions():
         label="Build preferred hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=100,
     )
     alternate_build = CandidateAction(
         id="build_alternate",
         label="Build alternate hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=50,
     )
     paired_build = CandidateAction(
         id="build_small",
         label="Build small hull twice",
         score_delta_2x=200,
         upper_bound=2,
-        probability_weight=30,
     )
     result = solve_inference_problem(
         _problem(
@@ -349,14 +354,12 @@ def test_top_k_surfaces_time_limited_status(monkeypatch):
         label="Build preferred hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=100,
     )
     alternate_build = CandidateAction(
         id="build_alternate",
         label="Build alternate hull",
         score_delta_2x=400,
         upper_bound=1,
-        probability_weight=50,
     )
     solve_calls = {"count": 0}
     original_solve = inference_solver.cp_model.CpSolver.solve
@@ -390,7 +393,8 @@ def test_top_k_surfaces_time_limited_status(monkeypatch):
 
 def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100():
     action = _planet_defense_posts_action()
-    buckets = {"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS}
+    planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
+    buckets = {"planet_defense_posts": planet_defense_buckets}
 
     result_ten = solve_inference_problem(
         _problem(
@@ -410,8 +414,10 @@ def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100(
     assert result_ten.solutions[0].actions[0].count == 10
     assert result_hundred.solutions[0].actions[0].count == 100
     assert result_ten.solutions[0].objective_value > result_hundred.solutions[0].objective_value
-    assert result_ten.solutions[0].objective_value == 0
-    assert result_hundred.solutions[0].objective_value == -95
+    # Active bins now sit below the none max-weight bin by the occurrence cost; the
+    # spacing between the modest and extreme bins (95) is preserved.
+    assert result_ten.solutions[0].objective_value == -50
+    assert result_hundred.solutions[0].objective_value == -145
 
 
 def test_bucketed_action_satisfies_exact_score_constraint():
@@ -420,7 +426,9 @@ def test_bucketed_action_satisfies_exact_score_constraint():
         _problem(
             _observation(military_delta_2x=55 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
             action,
-            probability_buckets_by_action_id={"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS},
+            probability_buckets_by_action_id={
+                "planet_defense_posts": _PLANET_DEFENSE_POST_TEST_BUCKETS,
+            },
         )
     )
 
@@ -434,12 +442,14 @@ def test_bucket_variables_respect_configured_count_ranges():
         _problem(
             _observation(military_delta_2x=100 * PLANET_DEFENSE_POST_SCORE_DELTA_2X),
             action,
-            probability_buckets_by_action_id={"planet_defense_posts": PLANET_DEFENSE_POST_BUCKETS},
+            probability_buckets_by_action_id={
+                "planet_defense_posts": _PLANET_DEFENSE_POST_TEST_BUCKETS,
+            },
         )
     )
 
     active_bins = result.diagnostics["rankingBinIndicatorsByActionId"]["planet_defense_posts"]
-    assert active_bins == (0, 0, 1)
+    assert active_bins == (0, 0, 0, 1)
 
 
 def test_solver_diagnostics_include_build_time_ranking_metadata():
@@ -449,7 +459,6 @@ def test_solver_diagnostics_include_build_time_ranking_metadata():
             label=f"Torpedoes {torp_id}",
             score_delta_2x=100,
             upper_bound=2,
-            probability_weight=10,
         )
         for torp_id in (1, 2)
     )
@@ -461,7 +470,6 @@ def test_solver_diagnostics_include_build_time_ranking_metadata():
     )
 
     assert "rankingHeuristics" in result.diagnostics
-    assert result.diagnostics["rankingHeuristics"]["parsimonyPerActiveSlackType"] == -5
     assert "diversityCapsApplied" in result.diagnostics
     diversity_caps = result.diagnostics["diversityCapsApplied"]
     assert isinstance(diversity_caps, list)

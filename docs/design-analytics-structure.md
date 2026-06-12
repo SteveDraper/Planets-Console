@@ -5,6 +5,7 @@ Analytics use generic HTTP routes but keep per-analytic implementation in layer-
 Related docs:
 
 - [Adding a turn analytic](design-adding-a-turn-analytic.md) -- step-by-step checklist for new analytics
+- [Analytic exports](design-analytic-exports.md) -- cross-analytic queries, JSONPath, materializers
 - [Connections analytic](design-connections-analytic.md) -- reference for a map analytic with query params
 - [Frontend/backend state](design-frontend-and-backend-state.md) -- shell context and turn ensure gating
 
@@ -31,6 +32,21 @@ Related docs:
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
 
 **Shared catalog:** `TURN_ANALYTIC_CATALOG` is the single declarative list of turn analytic ids and SPA metadata. Core attaches computation handlers; BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. `dict_aligned_with_turn_analytic_catalog` / `tuple_aligned_with_turn_analytic_catalog` in `catalog.py` validate each layer's registry keys and preserve catalog order at import. Id or metadata drift raises `RuntimeError` on startup. Handlers and descriptors are still registered separately (see [Registration touch points](#registration-touch-points)).
+
+### Fixed analytic assets
+
+Some analytics load static YAML or other files from the repo (distinct from `packages/api/api/storage/assets/` seed JSON).
+
+| Rule | Detail |
+|------|--------|
+| **Directory** | `assets/analytics/{analytic_id}/` at repo root |
+| **Id match** | The subdirectory name must equal the analytic's canonical `ANALYTIC_ID` exactly |
+| **Resolution** | Subclass `FixedAssetAnalytic` (`api/analytics/fixed_asset_analytic.py`), set `ANALYTIC_ID`, and resolve paths only via `Subclass.assets_dir()` |
+| **No ad-hoc strings** | Do not call `analytics_assets_dir(...)` with a string literal outside the `FixedAssetAnalytic` subclass that owns that id |
+
+The asset directory name is always the **catalog turn analytic id** (e.g. `scores`), not a Python subpackage folder name. Features implemented in subpackages (e.g. military score build inference under `api/analytics/military_score_inference/`) load fixed assets via the parent analytic's `FixedAssetAnalytic` subclass (`Scores` in `scores_assets.py`).
+
+Shared helper: `analytics_assets_dir(analytic_name)` in `api/analytics/assets.py` (repo-root walk-up). Only `FixedAssetAnalytic.assets_dir()` should call it for a given analytic.
 
 ### Race-specific rules vs analytic modules
 
@@ -100,7 +116,8 @@ Adding a **turn analytic** touches:
 
 1. **Catalog** -- one `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
 2. **Core** -- module + handler in `_HANDLERS_BY_ID` (`registry.py`)
-3. **BFF** -- module with `from_catalog_entry` descriptor + entry in `_BFF_DESCRIPTORS_BY_ID` (`registry.py`)
+3. **Core exports** -- `analytics/<id>/exports.py` + entry in export registry (may be empty); see [design-analytic-exports.md](design-analytic-exports.md)
+4. **BFF** -- module with `from_catalog_entry` descriptor + entry in `_BFF_DESCRIPTORS_BY_ID` (`registry.py`)
 
 Frontend registration is **optional** and only needed when generic shells are insufficient (custom sidebar controls, non-default query keys, bespoke map merge logic). See [design-adding-a-turn-analytic.md](design-adding-a-turn-analytic.md).
 

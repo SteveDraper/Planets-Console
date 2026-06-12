@@ -25,14 +25,12 @@ def _fighter_transfer_actions(*, upper_bound: int = 4) -> tuple[CandidateAction,
         label="Fighters SB to ship",
         score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
         upper_bound=upper_bound,
-        probability_weight=10,
     )
     ship_to_starbase = CandidateAction(
         id="fighters_ship_to_starbase",
         label="Fighters ship to SB",
         score_delta_2x=-STARBASE_FIGHTER_SCORE_DELTA_2X,
         upper_bound=upper_bound,
-        probability_weight=10,
     )
     return starbase_to_ship, ship_to_starbase
 
@@ -75,7 +73,6 @@ def _build_warship_action(*, priority_point_delta: int = 0) -> CandidateAction:
         priority_point_delta=priority_point_delta,
         build_slot_usage=1,
         upper_bound=1,
-        probability_weight=100,
     )
 
 
@@ -169,7 +166,6 @@ def test_military_score_band_constraint_allows_lower_explained_score():
         score_delta_2x=400,
         warship_delta=1,
         upper_bound=1,
-        probability_weight=100,
     )
     observation = _observation(military_delta_2x=450, warship_delta=1)
     exact_problem = InferenceProblem(
@@ -201,7 +197,6 @@ def test_scoreboard_partition_slack_allows_half_point_military_rounding():
         label="Starbase fighters",
         score_delta_2x=STARBASE_FIGHTER_SCORE_DELTA_2X,
         upper_bound=5,
-        probability_weight=10,
     )
     observation = _observation(
         military_delta_2x=624,

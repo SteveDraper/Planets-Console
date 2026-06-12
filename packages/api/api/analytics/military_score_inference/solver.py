@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 from api.analytics.military_score_inference.constraints import InferenceHardConstraints
 from api.analytics.military_score_inference.inference_objective import (
     build_inference_objective_terms,
-    max_aggregate_probability_weight,
     max_combo_probability_weight,
 )
 from api.analytics.military_score_inference.models import (
@@ -30,7 +29,6 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.ranking_heuristics import (
     compute_bin_penalty_objective_contribution,
     compute_overflow_objective_contribution,
-    compute_parsimony_objective_contribution,
     compute_partial_weapon_slot_penalty_contribution,
     ranking_heuristics_diagnostics_payload,
     ranking_penalty_from_marginal_weight,
@@ -282,29 +280,16 @@ def _objective_value(
     action_counts: dict[str, int],
     ship_builds: tuple[InferenceSolutionShipBuild, ...],
 ) -> int:
-    max_aggregate_weight = max_aggregate_probability_weight(problem)
     max_combo_weight = max_combo_probability_weight(problem)
+    # The bin penalty naturally includes the occurrence cost: active positive bins
+    # sit below the none max-weight bin, so no separate parsimony term is needed.
     objective_value = compute_bin_penalty_objective_contribution(
         action_counts,
         problem.probability_buckets_by_action_id,
     )
-    for action in problem.aggregate_actions:
-        if action.id in problem.probability_buckets_by_action_id:
-            continue
-        if action_counts.get(action.id, 0) <= 0:
-            continue
-        penalty = ranking_penalty_from_marginal_weight(
-            action.probability_weight,
-            max_marginal_weight=max_aggregate_weight,
-        )
-        objective_value -= penalty
     objective_value += compute_overflow_objective_contribution(
         action_counts,
         problem.tier_overflow_by_action_id,
-    )
-    objective_value += compute_parsimony_objective_contribution(
-        action_counts,
-        problem.ranking_heuristics,
     )
     combo_by_id = {combo.combo_id: combo for combo in problem.ship_build_combos}
     for ship_build in ship_builds:
