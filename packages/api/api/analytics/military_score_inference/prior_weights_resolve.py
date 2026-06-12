@@ -336,11 +336,11 @@ def resolve_prior_weights_catalog(
         race_id_used=race_id,
     )
 
-    return PriorWeightsCatalog.from_resolved_tables(
+    return PriorWeightsCatalog(
         diagnostics=diagnostics,
-        hull_log_weights=hull_log_weights,
-        component_tables=component_tables,
-        aggregate_bucket_marginal_weights=aggregate_bucket_weights,
-        combo_log_overrides=combo_log_overrides,
-        hull_log_overrides=hull_log_overrides_int,
+        _hull_log_weights=hull_log_weights,
+        _component_tables=component_tables,
+        _aggregate_bucket_marginal_weights=aggregate_bucket_weights,
+        _combo_log_overrides=combo_log_overrides,
+        _hull_log_overrides=hull_log_overrides_int,
     )

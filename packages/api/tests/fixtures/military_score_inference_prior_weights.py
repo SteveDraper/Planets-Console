@@ -167,7 +167,7 @@ def minimal_prior_catalog(
     hull_log_overrides: dict[int, int] | None = None,
     aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]] | None = None,
 ) -> PriorWeightsCatalog:
-    return PriorWeightsCatalog.from_resolved_tables(
+    return PriorWeightsCatalog(
         diagnostics=PriorWeightsDiagnostics(
             category_id="standard",
             asset_path="test",
@@ -177,10 +177,10 @@ def minimal_prior_catalog(
             ship_limit_band="before_ship_limit",
             race_id_used=None,
         ),
-        hull_log_weights=hull_log_weights or {},
-        component_tables=_empty_component_tables(),
-        aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights
+        _hull_log_weights=hull_log_weights or {},
+        _component_tables=_empty_component_tables(),
+        _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights
         or complete_test_aggregate_bucket_weights(),
-        combo_log_overrides=combo_log_overrides or {},
-        hull_log_overrides=hull_log_overrides or {},
+        _combo_log_overrides=combo_log_overrides or {},
+        _hull_log_overrides=hull_log_overrides or {},
     )

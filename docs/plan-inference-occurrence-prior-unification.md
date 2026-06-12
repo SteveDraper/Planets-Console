@@ -99,7 +99,6 @@ These have no magnitude prior -- only a `none` bin and a single `active` bin `[1
 ## 4. Phasing
 
 - **Phase 1 (atomic, behaviour-neutral): occurrence-prior unification.** The model change, asset reseed, and all dead-code removal on the `counts` / parsimony / non-bucketed-aggregate-weight paths. This must land as one PR: partial application drifts behaviour (e.g. removing parsimony before the `none` seeds exist makes every action free). The existing solver and ranking tests are the behaviour-preservation guard.
-- **Phase 2 (independent cleanups surfaced by review):** the test-only `component_log_weight` accessor and the `PriorWeightsCatalog.from_resolved_tables` pass-through factory. Orthogonal to Phase 1; each independently mergeable. Optional.
 
 Per `planning.mdc`, confirm Phase 1's plan is approved before implementing, and stop at the decision points in Section 7.
 
@@ -189,7 +188,7 @@ def none_bin_pseudo_count(active_max: float) -> float:
 
 ### 5.6 `prior_weights_catalog.py` -- remove the aggregate action-weight surface
 
-- Drop the `_aggregate_action_weights` field, the `aggregate_action_weights` parameter on `from_resolved_tables`, and the `aggregate_probability_weight(action_id)` method.
+- Drop the `_aggregate_action_weights` field, the aggregate action-weight constructor input, and the `aggregate_probability_weight(action_id)` method.
 - `probability_buckets_for_action` is unchanged (still maps bin bounds + marginal weights to buckets), but it now always has buckets for every aggregate action.
 
 ### 5.7 `aggregate_catalog_build.py` -- every aggregate is bucketed
@@ -282,12 +281,9 @@ The behaviour-preservation strategy: the solver-integration and ranking objectiv
 4. **`none` bucket label surfacing.** A `none`/`no build-up` `ProbabilityBucket` now exists for every action. Check `inference_api_payload.py` / row rendering to confirm a zero-count bucket label is not surfaced in a confusing way in tabular output. **Recommended:** verify; relabel if it leaks to the UI.
 5. **Keep the `65/35` direction values or unify them?** They are behaviourally identical until mined. Keep-as-documentation vs. collapse-to-one-shared-pair (Section 3 note). Cosmetic.
 
-## 8. Phase 2 -- adjacent cleanups (optional, independent)
+## 8. Adjacent cleanups
 
-Surfaced by the review; not required for the unification.
-
-- **`PriorWeightsCatalog.component_log_weight` / `ResolvedComponentCountTables.log_weight_for_table_name`:** a string-dispatch accessor used **only** by `test_military_score_inference_prior_weights_catalog_resolution.py`; production reads tables by direct attribute access in `combo_probability_weight`. Either route `combo_probability_weight` through the accessor (so the test covers the real path) or delete the accessor and have the test assert on `combo_probability_weight`. Removes a test-only, stringly-typed indirection with a silent `default_weight` fall-through.
-- **`PriorWeightsCatalog.from_resolved_tables`:** a pure pass-through factory that only renames kwargs to underscore fields. Either drop it and construct the dataclass directly at the single call site, or drop the underscore-prefix convention. Removes ~20 lines of identity wrapper.
+No pending adjacent cleanups remain in this plan.
 
 ## 9. Acceptance criteria
 

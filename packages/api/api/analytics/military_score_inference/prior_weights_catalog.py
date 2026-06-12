@@ -34,23 +34,6 @@ class ResolvedComponentCountTables:
     torpedoes: IntLogWeightTable
     slot_fill: SlotFillLogWeightTable = field(default_factory=dict)
 
-    def log_weight_for_table_name(
-        self,
-        table_name: str,
-        key: int | str,
-        *,
-        default_weight: int = 0,
-    ) -> int:
-        if table_name == "engines":
-            return self.engines.get(key, default_weight)
-        if table_name == "beams":
-            return self.beams.get(key, default_weight)
-        if table_name == "torpedoes":
-            return self.torpedoes.get(key, default_weight)
-        if table_name == "slotFill":
-            return self.slot_fill.get(key, default_weight)
-        return default_weight
-
 
 CategoryComponentLogTables: TypeAlias = dict[
     InferenceHullCategory,
@@ -99,46 +82,11 @@ class PriorWeightsCatalog:
     _combo_log_overrides: dict[str, int]
     _hull_log_overrides: dict[int, int]
 
-    @classmethod
-    def from_resolved_tables(
-        cls,
-        *,
-        diagnostics: PriorWeightsDiagnostics,
-        hull_log_weights: dict[int, int],
-        component_tables: CategoryComponentLogTables,
-        aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]],
-        combo_log_overrides: dict[str, int],
-        hull_log_overrides: dict[int, int],
-    ) -> PriorWeightsCatalog:
-        return cls(
-            diagnostics=diagnostics,
-            _hull_log_weights=hull_log_weights,
-            _component_tables=component_tables,
-            _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights,
-            _combo_log_overrides=combo_log_overrides,
-            _hull_log_overrides=hull_log_overrides,
-        )
-
     def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
         hull_override = self._hull_log_overrides.get(hull_id)
         if hull_override is not None:
             return hull_override
         return self._hull_log_weights.get(hull_id, default_weight)
-
-    def component_log_weight(
-        self,
-        hull_category: InferenceHullCategory,
-        table_name: str,
-        key: int | str,
-        *,
-        default_weight: int = 0,
-    ) -> int:
-        category_tables = self._component_tables[hull_category]
-        return category_tables.log_weight_for_table_name(
-            table_name,
-            key,
-            default_weight=default_weight,
-        )
 
     def _resolved_combo_log_weight(
         self,

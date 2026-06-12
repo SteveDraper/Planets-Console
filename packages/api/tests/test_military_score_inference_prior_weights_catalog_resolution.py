@@ -124,15 +124,30 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
         beam_count=1,
         launcher_count=2,
     )
+    single_beam_catalog = resolve_prior_weights_catalog(
+        _observation(),
+        replace(sample_turn.settings, endturn=100, shiplimit=200),
+        buildable_hull_ids=frozenset({65}),
+        eligible_engine_ids=frozenset({1}),
+        eligible_beam_ids=frozenset({2}),
+        eligible_torp_ids=frozenset({1, 8}),
+    )
+    with_single_beam_universe = single_beam_catalog.combo_probability_weight(
+        combo_id="combo_single_beam_universe",
+        hull=hull,
+        engine=engine,
+        beam=beam_two,
+        torpedo=torpedo_common,
+        beam_count=1,
+        launcher_count=2,
+    )
 
     expected_uniform_weight = counts_to_log_weights(
         {2: 1.0, 3: 1.0}, scale=INFERENCE_PROBABILITY_WEIGHT_SCALE
     )[2]
-    beam_two_weight = catalog.component_log_weight("torpedo_ship", "beams", 2)
-    beam_three_weight = catalog.component_log_weight("torpedo_ship", "beams", 3)
 
     assert with_beam_two == with_beam_three
-    assert beam_two_weight == beam_three_weight == expected_uniform_weight
+    assert with_beam_two - with_single_beam_universe == expected_uniform_weight
     assert expected_uniform_weight < 0
 
 
