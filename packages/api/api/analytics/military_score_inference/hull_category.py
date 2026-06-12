@@ -51,14 +51,14 @@ def resolve_inference_hull_category(
     if has_fighter_bays:
         return "carrier"
 
+    if has_weapon_slots and beam_count == 0 and launcher_count == 0:
+        return "weaponless_hull"
+
     if hull.beams > 0 and hull.launchers > 0 and hull.mass > BATTLESHIP_MASS_THRESHOLD:
         return "battleship"
 
     if hull.launchers > 0:
         return "torpedo_ship"
-
-    if has_weapon_slots and beam_count == 0 and launcher_count == 0:
-        return "weaponless_hull"
 
     if hull.beams > 0:
         return "beam_ship"

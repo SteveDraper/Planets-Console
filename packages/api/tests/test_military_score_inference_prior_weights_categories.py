@@ -37,6 +37,12 @@ def test_resolve_inference_hull_category_priority():
     assert resolve_inference_hull_category(beam_ship_hull(), beam_count=0, launcher_count=0) == (
         "weaponless_hull"
     )
+    assert resolve_inference_hull_category(torpedo_hull(), beam_count=0, launcher_count=0) == (
+        "weaponless_hull"
+    )
+    assert resolve_inference_hull_category(battleship_hull(), beam_count=0, launcher_count=0) == (
+        "weaponless_hull"
+    )
     carrier = replace(beam_ship_hull(), fighterbays=4, beams=0)
     assert resolve_inference_hull_category(carrier) == "carrier"
     assert resolve_inference_hull_category(torpedo_hull(), beam_count=1, launcher_count=2) == (
