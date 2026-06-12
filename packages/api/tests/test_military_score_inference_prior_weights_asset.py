@@ -94,6 +94,20 @@ def test_histogram_rejects_wildcard_key():
         )
 
 
+def test_histogram_rejects_negative_magnitude_key():
+    before_ship_limit = _complete_aggregates_band()
+    before_ship_limit["planet_defense_posts_added_total"] = {"histogram": {-1: 10, 5: 1}}
+    with pytest.raises(ValueError, match="keys must be non-negative integers"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": before_ship_limit,
+                    "after_ship_limit": _complete_aggregates_band(),
+                }
+            )
+        )
+
+
 def test_aggregates_reject_unknown_histogram_action_id():
     with pytest.raises(ValueError, match="not a known aggregate action"):
         parse_prior_weights_document(

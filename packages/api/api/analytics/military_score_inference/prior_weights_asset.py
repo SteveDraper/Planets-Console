@@ -141,6 +141,18 @@ def _parse_int_keyed_counts(
     return parsed
 
 
+def _parse_histogram_counts(raw: object, *, field_name: str) -> IntCountTable:
+    histogram = _parse_int_keyed_counts(
+        raw,
+        field_name=field_name,
+        allow_wildcard=False,
+    )
+    for magnitude in histogram:
+        if magnitude < 0:
+            raise ValueError(f"{field_name} keys must be non-negative integers")
+    return histogram
+
+
 def _parse_str_keyed_counts(
     raw: object,
     *,
@@ -277,10 +289,9 @@ def _parse_band_aggregate_tables(
         # Histogram keys are non-negative magnitude counts; an optional 0 key carries
         # the occurrence (count == 0) pseudo-count routed into the leading none bin.
         actions[action_id] = HistogramAggregate(
-            histogram=_parse_int_keyed_counts(
+            histogram=_parse_histogram_counts(
                 action_raw["histogram"],
                 field_name=f"aggregates.{band}.{action_id}.histogram",
-                allow_wildcard=False,
             )
         )
     return actions
