@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal
 
 from api.analytics.military_score_inference.models import (
     ProbabilityBinBounds,
@@ -50,16 +50,17 @@ PriorShape = Literal["histogram", "counts"]
 MissingAggregatePolicy = Literal["required", "implicit_uniform"]
 
 
-class CatalogConfig(Protocol):
-    max_planet_defense_posts: int
-    max_starbase_defense_posts: int
-    max_starbase_fighters: int
-    max_ship_fighters: int
-    max_ship_torpedoes_per_type: int
-    max_fighter_transfers: int
+@dataclass(frozen=True)
+class AggregateCatalogCaps:
+    max_planet_defense_posts: int = 100
+    max_starbase_defense_posts: int = 100
+    max_starbase_fighters: int = 200
+    max_ship_fighters: int = 500
+    max_ship_torpedoes_per_type: int = 200
+    max_fighter_transfers: int = 50
 
 
-CatalogConfigCap = Callable[[CatalogConfig], int]
+CatalogConfigCap = Callable[[AggregateCatalogCaps], int]
 
 
 @dataclass(frozen=True)

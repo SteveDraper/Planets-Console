@@ -7,6 +7,7 @@ from api.analytics.military_score_inference.accelerated_start import (
     STANDARD_STARBASE_MAX_FIGHTERS,
 )
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    AggregateCatalogCaps,
     lookup_aggregate_action_spec,
     resolved_aggregate_cap,
 )
@@ -64,13 +65,7 @@ DEFAULT_INFERENCE_TIME_LIMIT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
-class ActionCatalogConfig:
-    max_planet_defense_posts: int = 100
-    max_starbase_defense_posts: int = 100
-    max_starbase_fighters: int = 200
-    max_ship_fighters: int = 500
-    max_ship_torpedoes_per_type: int = 200
-    max_fighter_transfers: int = 50
+class ActionCatalogConfig(AggregateCatalogCaps):
     ship_build_combo_config: ShipBuildComboConfig | None = None
     evil_empire_free_starbase_fighter_pseudo_count: float = 500
 

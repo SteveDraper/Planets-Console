@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    AggregateCatalogCaps,
     AggregatePriorFields,
-    CatalogConfig,
     FixedAggregateSlot,
     TemplateAggregateSlot,
     iter_aggregate_action_slots,
@@ -37,7 +37,7 @@ def residual_count_bound(
 
 def build_aggregate_actions(
     observation: InferenceObservation,
-    config: CatalogConfig,
+    config: AggregateCatalogCaps,
     torpedos_by_id: dict[int, Torpedo],
     eligible_torp_ids: frozenset[int],
     aggregate_allowlist: dict[str, int],
@@ -131,7 +131,7 @@ def _append_aggregate_action(
 
 def _fighter_transfer_upper_bound(
     observation: InferenceObservation,
-    config: CatalogConfig,
+    config: AggregateCatalogCaps,
 ) -> int:
     return min(
         config.max_fighter_transfers,
@@ -147,7 +147,7 @@ def _upper_bound_for_fixed_slot(
     slot: FixedAggregateSlot,
     *,
     observation: InferenceObservation,
-    config: CatalogConfig,
+    config: AggregateCatalogCaps,
     fighter_transfer_upper_bound: int,
 ) -> int:
     if slot.spec.catalog_config_cap is not None:
@@ -165,7 +165,7 @@ def _append_slot_catalog_action(
     *,
     slot: FixedAggregateSlot | TemplateAggregateSlot,
     observation: InferenceObservation,
-    config: CatalogConfig,
+    config: AggregateCatalogCaps,
     torpedos_by_id: dict[int, Torpedo],
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
