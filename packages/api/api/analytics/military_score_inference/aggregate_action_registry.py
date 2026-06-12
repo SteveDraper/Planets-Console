@@ -270,6 +270,11 @@ AGGREGATE_ACTION_SPECS, _AGGREGATE_TEMPLATE_PREFIX, _AGGREGATE_TEMPLATE_SPEC = (
 )
 
 
+def _is_valid_template_action_id(action_id: str, prefix: str) -> bool:
+    suffix = action_id.removeprefix(prefix)
+    return suffix.isdecimal() and int(suffix) > 0
+
+
 def lookup_aggregate_action_spec(action_id: str) -> AggregateActionSpec | None:
     spec = AGGREGATE_ACTION_SPECS.get(action_id)
     if spec is not None:
@@ -278,6 +283,7 @@ def lookup_aggregate_action_spec(action_id: str) -> AggregateActionSpec | None:
         _AGGREGATE_TEMPLATE_PREFIX is not None
         and _AGGREGATE_TEMPLATE_SPEC is not None
         and action_id.startswith(_AGGREGATE_TEMPLATE_PREFIX)
+        and _is_valid_template_action_id(action_id, _AGGREGATE_TEMPLATE_PREFIX)
     ):
         return _AGGREGATE_TEMPLATE_SPEC
     return None

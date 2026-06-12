@@ -158,6 +158,12 @@ Ship combo final weight: `round(SCALE * sum of log weights from hull + component
 
 Hand-seeded v1 YAML uses round pseudo-counts; miner output uses the same schema.
 
+After wildcard expansion, each resolved hull/component table must cover every eligible id
+used by catalog generation. Missing ids are asset/resolution errors, not neutral zero
+weights: real Laplace weights are negative, so an implicit `0` would make omitted ids
+artificially most likely. A completely absent component sub-table still resolves to an
+implicit uniform distribution for that eligible component universe.
+
 ---
 
 ## 7. Aggregate priors
@@ -190,6 +196,9 @@ v1 hand-seed: choose positive histogram pseudo-counts so bucketing reproduces in
 Fighter transfers (`fighters_starbase_to_ship`, `fighters_ship_to_starbase`) are occurrence-only **2-bin histograms** (`none` plus a single active band), e.g. `{0: 108, 1: 65}`; they have no magnitude prior.
 
 Torpedo loads by type remain separate action ids (`ship_torps_loaded_{id}`) with per-type histograms. When a torpedo table is absent from the asset (implicit-uniform policy), the loader still seeds the `none` bin via `none_bin_pseudo_count` so the occurrence cost is retained rather than the action becoming free.
+
+Template aggregate action ids are schema-validated as `ship_torps_loaded_<positive integer>`.
+Malformed suffixes are rejected instead of being accepted by prefix match alone.
 
 ---
 

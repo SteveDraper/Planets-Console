@@ -22,6 +22,13 @@ IntLogWeightTable: TypeAlias = dict[int, int]
 SlotFillLogWeightTable: TypeAlias = dict[str, int]
 
 
+def _required_log_weight(table: dict[int | str, int], key: int | str, *, field_name: str) -> int:
+    weight = table.get(key)
+    if weight is None:
+        raise ValueError(f"incomplete prior: missing {field_name} weight for {key!r}")
+    return weight
+
+
 @dataclass(frozen=True)
 class ResolvedComponentCountTables:
     engines: IntLogWeightTable
@@ -77,11 +84,16 @@ class PriorWeightsCatalog:
     _hull_log_overrides: dict[int, int]
     _generic_freighter_log_weight: int | None = None
 
-    def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int = 0) -> int:
+    def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int | None = None) -> int:
         hull_override = self._hull_log_overrides.get(hull_id)
         if hull_override is not None:
             return hull_override
-        return self._hull_log_weights.get(hull_id, default_weight)
+        hull_weight = self._hull_log_weights.get(hull_id)
+        if hull_weight is not None:
+            return hull_weight
+        if default_weight is not None:
+            return default_weight
+        raise ValueError(f"incomplete prior: missing hull marginal weight for {hull_id!r}")
 
     def _resolved_combo_log_weight(
         self,
@@ -127,13 +139,29 @@ class PriorWeightsCatalog:
         category_tables = self._component_tables[hull_category]
         fill = slot_fill_pattern(hull, beam_count=beam_count, launcher_count=launcher_count)
 
-        component_weight = 0
-        component_weight += category_tables.engines.get(engine.id, 0)
+        component_weight = _required_log_weight(
+            category_tables.engines,
+            engine.id,
+            field_name=f"{hull_category}.engines",
+        )
         if beam is not None and beam_count > 0:
-            component_weight += category_tables.beams.get(beam.id, 0)
+            component_weight += _required_log_weight(
+                category_tables.beams,
+                beam.id,
+                field_name=f"{hull_category}.beams",
+            )
         if torpedo is not None and launcher_count > 0:
-            component_weight += category_tables.torpedoes.get(torpedo.id, 0)
-        component_weight += category_tables.slot_fill.get(fill, 0)
+            component_weight += _required_log_weight(
+                category_tables.torpedoes,
+                torpedo.id,
+                field_name=f"{hull_category}.torpedoes",
+            )
+        if category_tables.slot_fill:
+            component_weight += _required_log_weight(
+                category_tables.slot_fill,
+                fill,
+                field_name=f"{hull_category}.slotFill",
+            )
 
         return self._resolved_combo_log_weight(
             combo_id=combo_id,

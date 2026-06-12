@@ -123,6 +123,21 @@ def test_aggregates_reject_unknown_histogram_action_id():
         )
 
 
+def test_aggregates_reject_malformed_template_action_id():
+    with pytest.raises(ValueError, match="not a known aggregate action"):
+        parse_prior_weights_document(
+            _minimal_prior_weights_document(
+                aggregates={
+                    "before_ship_limit": {
+                        **_complete_aggregates_band(),
+                        "ship_torps_loaded_typo": {"histogram": {0: 5, 1: 1}},
+                    },
+                    "after_ship_limit": _complete_aggregates_band(),
+                }
+            )
+        )
+
+
 def test_aggregates_reject_counts_shape():
     """The counts shape no longer exists; guard against accidental reintroduction."""
     before_ship_limit = _complete_aggregates_band()

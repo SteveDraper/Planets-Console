@@ -147,17 +147,17 @@ def battleship_hull() -> Hull:
     )
 
 
-def _empty_component_table_shell() -> ResolvedComponentCountTables:
+def _neutral_component_table_shell() -> ResolvedComponentCountTables:
     return ResolvedComponentCountTables(
-        engines={},
-        beams={},
-        torpedoes={},
-        slot_fill={},
+        engines=dict.fromkeys(range(1, 101), 0),
+        beams=dict.fromkeys(range(1, 101), 0),
+        torpedoes=dict.fromkeys(range(1, 101), 0),
+        slot_fill={"full": 0, "partial": 0},
     )
 
 
-def _empty_component_tables() -> CategoryComponentLogTables:
-    return {category: _empty_component_table_shell() for category in INFERENCE_HULL_CATEGORIES}
+def _neutral_component_tables() -> CategoryComponentLogTables:
+    return {category: _neutral_component_table_shell() for category in INFERENCE_HULL_CATEGORIES}
 
 
 def minimal_prior_catalog(
@@ -178,8 +178,10 @@ def minimal_prior_catalog(
             ship_limit_band="before_ship_limit",
             race_id_used=None,
         ),
-        _hull_log_weights=hull_log_weights or {},
-        _component_tables=_empty_component_tables(),
+        _hull_log_weights=(
+            dict.fromkeys(range(1, 101), 0) if hull_log_weights is None else hull_log_weights
+        ),
+        _component_tables=_neutral_component_tables(),
         _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights
         or complete_test_aggregate_bucket_weights(),
         _combo_log_overrides=combo_log_overrides or {},

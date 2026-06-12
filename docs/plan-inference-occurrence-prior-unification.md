@@ -158,6 +158,7 @@ FIGHTER_TRANSFER_BIN_BOUNDS = (
 - **Delete `CountsAggregate`** and the `AggregatePrior = HistogramAggregate | CountsAggregate` union. Replace remaining `AggregatePrior` references with `HistogramAggregate` (or keep `AggregatePrior` as a thin alias `= HistogramAggregate` if it reduces churn; prefer using `HistogramAggregate` directly).
 - In `_parse_band_aggregate_tables`: remove the entire `elif "counts" in action_raw:` branch and the "is not a known counts aggregate action" path. Every aggregate must now parse as `histogram`. Drop the `spec.prior_shape != "histogram"` check (no more shapes) -- keep the "is this a known aggregate action id" validation via `lookup_aggregate_action_spec`.
 - Histogram parsing already accepts a `0` key (non-negative int, `allow_wildcard=False`). No change needed for `0`, but update the surrounding comments.
+- Keep aggregate action id validation exact: fixed action ids must match the registry, and template torpedo-load ids must match `ship_torps_loaded_<positive integer>` rather than any string with the template prefix.
 - Simplify `lookup_slot_aggregate_prior` to the histogram-only case: keep the "required vs implicit-uniform when absent" logic; drop the `CountsAggregate` shape check. Its return type becomes `HistogramAggregate | None`.
 - `validate_complete_aggregate_priors` is unchanged in intent (iterate required slots, raise on missing); it now only ever validates histograms.
 - Update the module docstring and any `ShipLimitBand`/comment references to drop "counts".
@@ -185,6 +186,7 @@ def none_bin_pseudo_count(active_max: float) -> float:
 - `_resolve_slot_histogram_bucket_weights`: drop the `bin_bounds is None` raise (now always set) and the redundant `isinstance(aggregate, HistogramAggregate)` re-check (`lookup_slot_aggregate_prior` already guarantees the type). When the slot is absent and policy is `implicit_uniform`, call the updated `_implicit_uniform_histogram_bucket_weights`.
 - `_implicit_uniform_histogram_bucket_weights`: the bins now include the leading `none` bin. Seed active bins with `IMPLICIT_UNIFORM_PSEUDO_COUNT` (1.0) and the `none` bin (index 0) with `none_bin_pseudo_count(IMPLICIT_UNIFORM_PSEUDO_COUNT)` so missing-asset torpedo tables retain the ~`-50` occurrence cost instead of becoming free. Build the count dict explicitly rather than `dict.fromkeys(range(len(bin_bounds)), 1.0)`.
 - `resolve_prior_weights_catalog`: stop computing/passing `aggregate_action_weights`; pass only `aggregate_bucket_marginal_weights`.
+- Ensure resolved hull/component tables cover every eligible id after wildcard expansion or implicit-uniform fallback. Do not let catalog lookup silently default missing ids to weight `0`, since all real log weights are negative and `0` would make omitted ids artificially most likely.
 
 ### 5.6 `prior_weights_catalog.py` -- remove the aggregate action-weight surface
 
@@ -292,6 +294,8 @@ No pending adjacent cleanups remain in this plan.
 - [ ] Every aggregate is a histogram with a leading `none` bin; `magnitude_bin_index` routes `0` to it; the objective enforces exactly one active bin.
 - [ ] Asset reseeded with the Section 3 `0:` values; fighter transfers converted to histograms; `version` bumped.
 - [ ] Implicit-uniform torpedo tables retain the occurrence cost via `none_bin_pseudo_count`.
+- [ ] Resolved hull/component tables are complete for the eligible catalog universe; missing entries fail instead of defaulting to `0`.
+- [ ] Template aggregate asset keys reject malformed torpedo-load ids.
 - [ ] Solver-integration and ranking objective values preserved within +/-1 (behaviour-neutral).
 - [ ] `make lint` and `make test_api` pass; tests updated per Section 6.
 - [ ] Docs and glossary updated.
