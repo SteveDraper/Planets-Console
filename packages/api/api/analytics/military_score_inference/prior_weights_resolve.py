@@ -7,7 +7,6 @@ from pathlib import Path
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSlot,
     iter_aggregate_action_slots,
-    lookup_aggregate_action_spec,
     magnitude_bin_index,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -219,15 +218,10 @@ def _implicit_uniform_histogram_bucket_weights(
 
 def _resolve_histogram_aggregate_weights(
     aggregate: HistogramAggregate,
-    action_id: str,
+    bin_bounds: tuple[ProbabilityBinBounds, ...],
     *,
-    band: ShipLimitBand,
     scale: int,
 ) -> tuple[int, ...]:
-    spec = lookup_aggregate_action_spec(action_id)
-    bin_bounds = spec.bin_bounds if spec is not None else None
-    if bin_bounds is None:
-        raise ValueError(f"aggregates.{band}.{action_id!r} has no solver bin definition")
     bucket_counts = _histogram_bucket_counts(aggregate.histogram, bin_bounds)
     log_weights = counts_to_log_weights(bucket_counts, scale=scale)
     return tuple(log_weights[index] for index in range(len(bin_bounds)))
@@ -249,6 +243,9 @@ def _resolve_slot_histogram_bucket_weights(
     scale: int,
 ) -> tuple[int, ...]:
     action_id = slot.action_id
+    bin_bounds = slot.spec.bin_bounds
+    if bin_bounds is None:
+        raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
     aggregate = lookup_slot_aggregate_prior(
         band_tables,
         band=band,
@@ -256,18 +253,10 @@ def _resolve_slot_histogram_bucket_weights(
         spec=slot.spec,
     )
     if aggregate is None:
-        bin_bounds = slot.spec.bin_bounds
-        if bin_bounds is None:
-            raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
         return _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
     if not isinstance(aggregate, HistogramAggregate):
         raise ValueError(f"aggregate action {action_id!r} must be a histogram")
-    return _resolve_histogram_aggregate_weights(
-        aggregate,
-        action_id,
-        band=band,
-        scale=scale,
-    )
+    return _resolve_histogram_aggregate_weights(aggregate, bin_bounds, scale=scale)
 
 
 def _resolve_slot_counts_weight(
