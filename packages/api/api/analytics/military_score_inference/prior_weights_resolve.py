@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
@@ -242,26 +241,13 @@ def _resolve_counts_aggregate_weight(
     return counts_to_log_weights({"default": aggregate.pseudo_count}, scale=scale)["default"]
 
 
-@dataclass(frozen=True)
-class HistogramBucketWeights:
-    weights: tuple[int, ...]
-
-
-@dataclass(frozen=True)
-class CountsPriorWeight:
-    weight: int
-
-
-ResolvedPrior = HistogramBucketWeights | CountsPriorWeight
-
-
-def _resolve_slot_aggregate_prior(
+def _resolve_slot_histogram_bucket_weights(
     slot: AggregateActionSlot,
     band_tables: dict[str, AggregatePrior],
     *,
     band: ShipLimitBand,
     scale: int,
-) -> ResolvedPrior:
+) -> tuple[int, ...]:
     action_id = slot.action_id
     aggregate = lookup_slot_aggregate_prior(
         band_tables,
@@ -273,19 +259,33 @@ def _resolve_slot_aggregate_prior(
         bin_bounds = slot.spec.bin_bounds
         if bin_bounds is None:
             raise ValueError(f"aggregate action {action_id!r} has no solver bin definition")
-        return HistogramBucketWeights(
-            _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
-        )
-    if isinstance(aggregate, HistogramAggregate):
-        return HistogramBucketWeights(
-            _resolve_histogram_aggregate_weights(
-                aggregate,
-                action_id,
-                band=band,
-                scale=scale,
-            )
-        )
-    return CountsPriorWeight(_resolve_counts_aggregate_weight(aggregate, scale=scale))
+        return _implicit_uniform_histogram_bucket_weights(bin_bounds, scale=scale)
+    if not isinstance(aggregate, HistogramAggregate):
+        raise ValueError(f"aggregate action {action_id!r} must be a histogram")
+    return _resolve_histogram_aggregate_weights(
+        aggregate,
+        action_id,
+        band=band,
+        scale=scale,
+    )
+
+
+def _resolve_slot_counts_weight(
+    slot: AggregateActionSlot,
+    band_tables: dict[str, AggregatePrior],
+    *,
+    band: ShipLimitBand,
+    scale: int,
+) -> int:
+    aggregate = lookup_slot_aggregate_prior(
+        band_tables,
+        band=band,
+        action_id=slot.action_id,
+        spec=slot.spec,
+    )
+    if not isinstance(aggregate, CountsAggregate):
+        raise ValueError(f"aggregate action {slot.action_id!r} must be counts")
+    return _resolve_counts_aggregate_weight(aggregate, scale=scale)
 
 
 def _resolve_aggregate_priors(
@@ -300,16 +300,20 @@ def _resolve_aggregate_priors(
     band_tables = asset.aggregates.get(band, {})
 
     for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
-        resolved = _resolve_slot_aggregate_prior(
-            slot,
-            band_tables,
-            band=band,
-            scale=scale,
-        )
-        if isinstance(resolved, HistogramBucketWeights):
-            bucket_weights[slot.action_id] = resolved.weights
+        if slot.spec.prior_shape == "histogram":
+            bucket_weights[slot.action_id] = _resolve_slot_histogram_bucket_weights(
+                slot,
+                band_tables,
+                band=band,
+                scale=scale,
+            )
         else:
-            action_weights[slot.action_id] = resolved.weight
+            action_weights[slot.action_id] = _resolve_slot_counts_weight(
+                slot,
+                band_tables,
+                band=band,
+                scale=scale,
+            )
 
     return action_weights, bucket_weights
 
