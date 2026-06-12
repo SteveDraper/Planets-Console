@@ -87,9 +87,7 @@ def _aggregate_action_probability_weight(
                 f"incomplete prior: missing counts aggregate weight for action {action_id!r}"
             )
         return prior_weight
-    raise ValueError(
-        f"unknown prior_shape {prior_fields.prior_shape!r} for action {action_id!r}"
-    )
+    raise ValueError(f"unknown prior_shape {prior_fields.prior_shape!r} for action {action_id!r}")
 
 
 def _append_aggregate_action(
