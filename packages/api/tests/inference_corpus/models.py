@@ -10,6 +10,7 @@ class CaseOutcome(StrEnum):
     FAILED = "failed"
     SKIPPED_COMPLEXITY = "skipped_complexity"
     SKIPPED_INCOMPLETE_MULTI_VIEW = "skipped_incomplete_multi_view"
+    SKIPPED_PENDING_SOLVER = "skipped_pending_solver"
     OUT_OF_SEARCH_SPACE = "out_of_search_space"
     RANKING_MISS = "ranking_miss"
 
@@ -124,6 +125,7 @@ class CorpusReport:
                 f"{buckets[CaseOutcome.SKIPPED_COMPLEXITY]} "
                 f"skipped_incomplete_multi_view="
                 f"{buckets[CaseOutcome.SKIPPED_INCOMPLETE_MULTI_VIEW]} "
+                f"skipped_pending_solver={buckets[CaseOutcome.SKIPPED_PENDING_SOLVER]} "
                 f"out_of_search_space={buckets[CaseOutcome.OUT_OF_SEARCH_SPACE]} "
                 f"ranking_miss={buckets[CaseOutcome.RANKING_MISS]}"
             ),

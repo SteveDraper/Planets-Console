@@ -228,7 +228,7 @@ def test_unreliable_turn2_fails_when_turn3_not_stored():
 
 def test_corpus_case_still_infers_exact_with_accelerated_adjustment():
     _, cases = load_manifest()
-    case = cases[0]
+    case = next(entry for entry in cases if entry.id == "628580-p1-host2")
     turn = load_turn_fixture(case.score_turn_path)
     player_id = resolve_player_id(case)
     score = next(s for s in turn.scores if s.ownerid == player_id)

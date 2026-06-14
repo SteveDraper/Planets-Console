@@ -278,6 +278,29 @@ def planet_defense_for_owner(turn: TurnInfo, player_id: int) -> int:
     return sum(planet.defense for planet in turn.planets if planet.ownerid == player_id)
 
 
+def owned_planet_ids_for_player(turn: TurnInfo, player_id: int) -> set[int]:
+    return {planet.id for planet in turn.planets if planet.ownerid == player_id}
+
+
+def _defense_posts_net_delta(
+    prior_turn: TurnInfo,
+    score_turn: TurnInfo,
+    player_id: int,
+    *,
+    built_on_prior_owned: int,
+    defense_on_score_captured: int,
+    defense_on_prior_lost: int,
+) -> int:
+    """Three-component defense post ground truth: built + capture gain - capture loss."""
+    prior_owned = owned_planet_ids_for_player(prior_turn, player_id)
+    score_owned = owned_planet_ids_for_player(score_turn, player_id)
+    captured = score_owned - prior_owned
+    lost = prior_owned - score_owned
+    capture_gain = defense_on_score_captured(score_turn, captured)
+    capture_loss = -defense_on_prior_lost(prior_turn, lost)
+    return built_on_prior_owned(prior_turn, prior_owned) + capture_gain + capture_loss
+
+
 def _positive_inventory_delta(prior_value: int, score_value: int) -> int:
     return max(0, score_value - prior_value)
 
@@ -294,18 +317,67 @@ def starbase_fighter_inventory_delta(
 def starbase_defense_inventory_delta(
     prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int
 ) -> int:
-    return _positive_inventory_delta(
-        starbase_defense_for_owner(prior_turn, player_id),
-        starbase_defense_for_owner(score_turn, player_id),
+    prior_owner_by_planet = {planet.id: planet.ownerid for planet in prior_turn.planets}
+    prior_defense_by_planet = starbase_defense_by_planet(prior_turn)
+    score_defense_by_planet = starbase_defense_by_planet(score_turn)
+
+    def built_on_prior_owned(turn: TurnInfo, prior_owned: set[int]) -> int:
+        del turn, prior_owned
+        return sum(
+            starbase.builtdefense
+            for starbase in prior_turn.starbases
+            if prior_owner_by_planet.get(starbase.planetid) == player_id
+        )
+
+    def defense_on_score_captured(turn: TurnInfo, captured: set[int]) -> int:
+        del turn
+        return sum(score_defense_by_planet.get(planet_id, 0) for planet_id in captured)
+
+    def defense_on_prior_lost(turn: TurnInfo, lost: set[int]) -> int:
+        del turn
+        return sum(prior_defense_by_planet.get(planet_id, 0) for planet_id in lost)
+
+    return _defense_posts_net_delta(
+        prior_turn,
+        score_turn,
+        player_id,
+        built_on_prior_owned=built_on_prior_owned,
+        defense_on_score_captured=defense_on_score_captured,
+        defense_on_prior_lost=defense_on_prior_lost,
     )
 
 
 def planet_defense_inventory_delta(
     prior_turn: TurnInfo, score_turn: TurnInfo, player_id: int
 ) -> int:
-    return _positive_inventory_delta(
-        planet_defense_for_owner(prior_turn, player_id),
-        planet_defense_for_owner(score_turn, player_id),
+    def built_on_prior_owned(turn: TurnInfo, prior_owned: set[int]) -> int:
+        return sum(
+            planet.builtdefense
+            for planet in turn.planets
+            if planet.id in prior_owned and planet.ownerid == player_id
+        )
+
+    def defense_on_score_captured(turn: TurnInfo, captured: set[int]) -> int:
+        return sum(
+            planet.defense
+            for planet in turn.planets
+            if planet.id in captured and planet.ownerid == player_id
+        )
+
+    def defense_on_prior_lost(turn: TurnInfo, lost: set[int]) -> int:
+        return sum(
+            planet.defense
+            for planet in turn.planets
+            if planet.id in lost and planet.ownerid == player_id
+        )
+
+    return _defense_posts_net_delta(
+        prior_turn,
+        score_turn,
+        player_id,
+        built_on_prior_owned=built_on_prior_owned,
+        defense_on_score_captured=defense_on_score_captured,
+        defense_on_prior_lost=defense_on_prior_lost,
     )
 
 

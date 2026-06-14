@@ -361,9 +361,19 @@ When inventory shows activity on **existing** ships, planets, or starbases, map 
 | `ship_fighters_added_total` | Positive fighter load delta on **existing** ships (new-ship ids excluded) |
 | `ship_torps_loaded_{torpedoId}` | Torp load delta on **existing** ships (new-ship ids excluded) |
 | `starbase_fighters_added_total` | Positive starbase fighter inventory delta |
-| `starbase_defense_posts_added_total` | Positive starbase defense inventory delta |
-| `planet_defense_posts_added_total` | Positive planet defense inventory delta |
+| `starbase_defense_posts_added_total` | Net starbase defense ground truth (three-component model; see below) |
+| `planet_defense_posts_added_total` | Net planet defense ground truth (three-component model; see below) |
 | `fighters_starbase_to_ship` / `fighters_ship_to_starbase` | Only when inventory shows starbase vs ship fighter counts support transfer |
+
+**Defense post ground truth (net):** Planet and starbase defense aggregates use a three-component model per player across `(priorTurn, scoreTurn)`:
+
+1. **Built:** `sum(builtdefense)` on bodies at planets owned by the player on the **prior** turn.
+2. **Capture gain:** `sum(defense)` on bodies at planets owned on the **score** turn that were not owned by the player on the prior turn.
+3. **Capture loss:** `-sum(defense)` on bodies at planets owned by the player on the **prior** turn but not on the **score** turn.
+
+Do **not** use `Δdefense` on continuously owned bodies (Rule A: scored builds appear in prior `builtdefense`). Net is `built + capture_gain + capture_loss` with **no clamping**; negative values are valid ground truth.
+
+When any defense aggregate count in extracted ground truth is `< 0`, the harness sets `groundTruthAvailable: true`, outcome `skipped_pending_solver`, `skip_reason: negative_defense_gt_pending_solver`, skips catalog coverage and ranking, and still runs Tier 1. Solver support for negative defense counts is tracked separately.
 
 If a new ship cannot be mapped to a combo id, set `groundTruthAvailable: false`. An empty inventory delta yields an empty ground-truth multiset (still available).
 

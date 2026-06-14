@@ -34,6 +34,15 @@ from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel
 
 GroundTruth = tuple[tuple[str, int], ...]
 
+PLANET_DEFENSE_AGGREGATE_ACTION_ID = "planet_defense_posts_added_total"
+STARBASE_DEFENSE_AGGREGATE_ACTION_ID = "starbase_defense_posts_added_total"
+DEFENSE_AGGREGATE_ACTION_IDS = frozenset(
+    {
+        PLANET_DEFENSE_AGGREGATE_ACTION_ID,
+        STARBASE_DEFENSE_AGGREGATE_ACTION_ID,
+    }
+)
+
 
 @dataclass(frozen=True)
 class GroundTruthExtraction:
@@ -79,6 +88,13 @@ def extract_ground_truth_for_player(
         player_id=player_id,
         score=score,
         complexity=complexity,
+    )
+
+
+def defense_aggregate_counts_negative(ground_truth: GroundTruth) -> bool:
+    """True when extracted GT includes a negative defense aggregate count."""
+    return any(
+        action_id in DEFENSE_AGGREGATE_ACTION_IDS and count < 0 for action_id, count in ground_truth
     )
 
 
@@ -247,7 +263,13 @@ def format_unavailable_ground_truth(
 
 
 def _sorted_multiset(counter: Counter[str]) -> GroundTruth:
-    return tuple(sorted((action_id, count) for action_id, count in counter.items() if count > 0))
+    items: list[tuple[str, int]] = []
+    for action_id, count in counter.items():
+        if count > 0:
+            items.append((action_id, count))
+        elif count != 0 and action_id in DEFENSE_AGGREGATE_ACTION_IDS:
+            items.append((action_id, count))
+    return tuple(sorted(items))
 
 
 def _inventory_aggregate_actions(
@@ -285,11 +307,11 @@ def _inventory_aggregate_actions(
         allocated["starbase_fighters_added_total"] += starbase_fighter_delta
 
     starbase_defense_delta = starbase_defense_inventory_delta(prior_turn, score_turn, player_id)
-    if starbase_defense_delta > 0:
+    if starbase_defense_delta != 0:
         allocated["starbase_defense_posts_added_total"] += starbase_defense_delta
 
     planet_defense_delta = planet_defense_inventory_delta(prior_turn, score_turn, player_id)
-    if planet_defense_delta > 0:
+    if planet_defense_delta != 0:
         allocated["planet_defense_posts_added_total"] += planet_defense_delta
 
     transfer = fighter_transfer_counts(prior_turn, score_turn, player_id)

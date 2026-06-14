@@ -13,7 +13,7 @@ def test_fixed_inference_corpus_tier1_passes():
     assert report.failed_count == 0, "\n".join(report.summary_lines())
     assert report.hard_ranking_misses == []
     assert report.passed_count == len(report.results)
-    assert len(report.results) == 2
+    assert len(report.results) == 3
     for result in report.results:
         assert result.outcome == CaseOutcome.PASSED, (
             f"{result.case_id}: {result.outcome} ({result.failure_message or result.skip_reason})"

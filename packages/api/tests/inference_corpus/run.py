@@ -39,7 +39,10 @@ from tests.inference_corpus.fixtures import (
     load_manifest_ground_truth_turn_snapshots,
     load_turn_fixture,
 )
-from tests.inference_corpus.ground_truth import extract_ground_truth_v1
+from tests.inference_corpus.ground_truth import (
+    defense_aggregate_counts_negative,
+    extract_ground_truth_v1,
+)
 from tests.inference_corpus.manifest import FIXTURES_ROOT, resolve_player_id
 from tests.inference_corpus.models import (
     COMPLEXITY_ORDINAL,
@@ -76,6 +79,23 @@ class LoadedCorpusCase:
     complexity_reasons: tuple[str, ...]
     expected_status: str
     expect_coverage: bool
+
+
+def _manifest_scoreboard_turn_loader(
+    case: ManifestCase,
+    *,
+    fixtures_root: Path = FIXTURES_ROOT,
+):
+    """Load optional scoreboard turns from the fixture tree (accelerated backfill)."""
+
+    def load_scoreboard_turn(turn_number: int) -> TurnInfo | None:
+        relative = f"{case.game_id}/{case.perspective}/turns/{turn_number}.json"
+        path = fixtures_root / relative
+        if not path.is_file():
+            return None
+        return load_turn_fixture(relative, fixtures_root=fixtures_root)
+
+    return load_scoreboard_turn
 
 
 def run_manifest_case(
@@ -184,6 +204,7 @@ def run_manifest_case(
         ),
         ground_truth_prior_turn=gt_prior_turn,
         ground_truth_score_turn=gt_score_turn,
+        load_scoreboard_turn=_manifest_scoreboard_turn_loader(case, fixtures_root=fixtures_root),
         top_k=top_k,
         enable_tier2=enable_tier2 or case.tier >= 2,
         hard_ranking=case.require_top_k or fail_on_ranking_miss,
@@ -336,6 +357,9 @@ def run_loaded_case(
         score=loaded.score,
         complexity=loaded.complexity,
     )
+    negative_defense_gt = extraction.available and defense_aggregate_counts_negative(
+        extraction.ground_truth
+    )
     host_turn = loaded.score_turn.settings.turn - 1
     resolved = resolve_inference_target_for_host_turn(
         loaded.score,
@@ -351,6 +375,32 @@ def run_loaded_case(
         catalog_turn = loaded.score_turn
 
     catalog = build_action_catalog_from_turn(observation, catalog_turn)
+    if negative_defense_gt:
+        tier1_result, _inference_payload = _run_tier1_for_loaded_case(
+            case_id=loaded.case_id,
+            score_turn=loaded.score_turn,
+            score=loaded.score,
+            complexity=loaded.complexity,
+            complexity_reasons=loaded.complexity_reasons,
+            expected_status=loaded.expected_status,
+            ground_truth_available=True,
+            observation=observation,
+            catalog=catalog,
+            load_scoreboard_turn=load_scoreboard_turn,
+        )
+        if tier1_result.outcome != CaseOutcome.PASSED:
+            return tier1_result
+        return CorpusCaseResult(
+            case_id=loaded.case_id,
+            outcome=CaseOutcome.SKIPPED_PENDING_SOLVER,
+            status=tier1_result.status,
+            solution_count=tier1_result.solution_count,
+            complexity=loaded.complexity,
+            complexity_reasons=loaded.complexity_reasons,
+            ground_truth_available=True,
+            skip_reason="negative_defense_gt_pending_solver",
+        )
+
     skip_coverage = (
         extraction.available
         and resolved is None
