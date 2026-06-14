@@ -141,7 +141,10 @@ def _registration_for_validation(*, compute=None, **catalog_overrides):
     catalog_fields.update(catalog_overrides)
     catalog_entry = TurnAnalyticCatalogEntry(**catalog_fields)
     if compute is None:
-        compute = lambda _turn, _options: {"analyticId": catalog_entry.id}
+
+        def compute(_turn, _options):
+            return {"analyticId": catalog_entry.id}
+
     return TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute)
 
 

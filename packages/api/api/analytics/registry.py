@@ -8,8 +8,7 @@ from api.errors import ValidationError
 from api.models.game import TurnInfo
 
 _TURN_ANALYTIC_REGISTRATIONS_BY_ID: dict[str, TurnAnalyticRegistration] = {
-    registration.catalog_entry.id: registration
-    for registration in TURN_ANALYTIC_REGISTRATIONS
+    registration.catalog_entry.id: registration for registration in TURN_ANALYTIC_REGISTRATIONS
 }
 
 
