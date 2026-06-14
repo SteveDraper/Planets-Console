@@ -26,10 +26,10 @@ Related docs:
   - `scores.py`
   - `connections.py`
   - `stellar_cartography.py`
-  - `catalog.py` -- `TURN_ANALYTIC_CATALOG` (shared ids and SPA catalog metadata; derived from Core registrations)
-  - `registration.py` / `registrations.py` -- `TurnAnalyticRegistration` tuple; each analytic module exports `REGISTRATION`
-  - `registry.py` -- `TURN_ANALYTICS` id-to-handler map (derived from registrations)
-  - `compute_context.py` -- `AnalyticComputeContext` passed into compute handlers
+  - `catalog.py` -- `TurnAnalyticCatalogEntry` and catalog-order alignment helpers
+  - `registration.py` -- `TurnAnalyticRegistration`, `turn_only` / `with_options` wrappers; each analytic module exports `REGISTRATION`
+  - `registry.py` -- `TURN_ANALYTIC_REGISTRATIONS` tuple, derived `TURN_ANALYTIC_CATALOG` and `TURN_ANALYTICS`, `catalog_entry()` lookup, `get_turn_analytic` dispatch
+  - `compute_context.py` -- `AnalyticComputeContext` passed into compute handlers (`turn`, `options`, `diagnostics`, and later `query`)
 
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
 
@@ -94,8 +94,8 @@ Each BFF analytic module exports a single `DESCRIPTOR: AnalyticDescriptor` (`bff
 
 Adding a new analytic to the BFF requires:
 
-1. Add a `TurnAnalyticCatalogEntry` to `TURN_ANALYTIC_CATALOG` in `api/analytics/catalog.py`.
-2. Create `bff/analytics/<id>.py` with handlers and `DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(catalog_entry(...), ...)`.
+1. Add a Core `TurnAnalyticRegistration` in `api/analytics/<id>.py` and append it to `TURN_ANALYTIC_REGISTRATIONS` in `api/analytics/registry.py` (catalog metadata is on the registration; `TURN_ANALYTIC_CATALOG` is derived).
+2. Create `bff/analytics/<id>.py` with handlers and `DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(catalog_entry(...), ...)` (`catalog_entry` from `api.analytics.registry`).
 3. Register the module descriptor in `_BFF_DESCRIPTORS_BY_ID` in `bff/analytics/registry.py`.
 
 Dispatch is descriptor-driven -- no per-id `if/elif` chains in `registry.py`.
@@ -116,7 +116,7 @@ This is deliberate for now: one route, one OpenAPI shape, Connections works with
 
 Adding a **turn analytic** touches:
 
-1. **Core registration** -- one `TurnAnalyticRegistration` in the analytic module (`catalog_entry`, `handler`, `export_catalog` placeholder); append to `TURN_ANALYTIC_REGISTRATIONS` in `registrations.py`
+1. **Core registration** -- one `TurnAnalyticRegistration` in the analytic module (`catalog_entry`, context `compute` handler via `turn_only` / `with_options` or a custom `AnalyticComputeContext` handler, `export_catalog` placeholder); append to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py`
 2. **Core exports** -- `analytics/<id>/exports.py` + entry in export registry (may be empty until wired in #95); see [design-analytic-exports.md](design-analytic-exports.md)
 3. **BFF** -- module with `from_catalog_entry` descriptor + entry in `_BFF_DESCRIPTORS_BY_ID` (`registry.py`)
 

@@ -25,6 +25,8 @@ Step-by-step guide for registering a new **turn analytic** in Planets Console. R
 Add `packages/api/api/analytics/<id>.py`:
 
 ```python
+from api.analytics.registration import TurnAnalyticRegistration, with_options
+
 ANALYTIC_ID = "my-analytic"
 
 def get_my_analytic(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
@@ -39,21 +41,21 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=False,
         type="selectable",
     ),
-    compute=get_my_analytic,
+    compute=with_options(get_my_analytic),
 )
 ```
 
 Guidelines:
 
-- Domain functions take `TurnInfo` + `TurnAnalyticsOptions` (see `api/analytics/options.py`). Set `uses_options=False` when the analytic ignores options (e.g. `base-map`). Registry dispatch adapts registrations to `AnalyticComputeContext` at runtime (`turn`, `options`, `diagnostics`, and later `query`).
+- Each registration's `compute` is a `TurnAnalyticHandler`: `Callable[[AnalyticComputeContext], dict]`. Wrap domain functions with `turn_only` when they take only `TurnInfo` (e.g. `base-map`) or `with_options` when they take `TurnInfo` + `TurnAnalyticsOptions` (see `api/analytics/options.py`). When a handler needs **request diagnostics**, use a context handler and read `ctx.diagnostics` (e.g. `lambda ctx: get_connections_map(ctx.turn, ctx.options, diagnostics=ctx.diagnostics)`).
 - Return a JSON-serializable dict with domain field names. BFF reshapes for the SPA if needed.
 - Reuse **game concepts** from `api/concepts/` rather than duplicating rules.
 - **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
-- Attach **request diagnostics** at meaningful boundaries (`diagnostics.child(...)`) when work is non-trivial.
+- Attach **request diagnostics** at meaningful boundaries (`ctx.diagnostics.child(...)`) when work is non-trivial.
 
 ### 2.2 Register in Core
 
-Append the module's `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `packages/api/api/analytics/registrations.py`:
+Append the module's `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `packages/api/api/analytics/registry.py`:
 
 ```python
 from api.analytics.my_analytic import REGISTRATION as MY_ANALYTIC_REGISTRATION
@@ -140,7 +142,7 @@ Add `packages/bff/bff/analytics/<id>.py` exporting **`DESCRIPTOR`**.
 **Table-only example (Scores pattern):**
 
 ```python
-from api.analytics.catalog import catalog_entry
+from api.analytics.registry import catalog_entry
 from bff.analytics.descriptor import AnalyticDescriptor
 
 ANALYTIC_ID = "my-table-analytic"
@@ -282,8 +284,7 @@ When triggered, prefer a small registry refactor over accumulating `MainArea` br
 
 Use this before opening a PR:
 
-- [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
-- [ ] **Core:** module + `_HANDLERS_BY_ID` entry + unit tests
+- [ ] **Core:** module with `TurnAnalyticRegistration` (`catalog_entry` + `compute` via `turn_only` / `with_options` or context handler) appended to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` + unit tests
 - [ ] **Core exports:** `exports.py` + export registry entry (empty allowed) + export tests when non-empty
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
@@ -301,8 +302,8 @@ Use this before opening a PR:
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
 | Export registry missing for catalog id | Startup `RuntimeError` | Add `exports.py` (or `EMPTY_EXPORT_CATALOG`) + registry entry |
-| Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add catalog entry + BFF module + `_BFF_DESCRIPTORS_BY_ID` |
-| BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Add Core registry entry |
+| Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add BFF module + `_BFF_DESCRIPTORS_BY_ID` entry |
+| BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Append `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |
 | Frontend query param names drift from BFF | Silent wrong results or ignored params | Share wire names via `api/transport/` |
 | Second Connections-style `MainArea` branch | Shell accumulates analytic-specific fetch logic | See [§4.1 re-examination triggers](#41-map-fetch-orchestration-current-vs-future); generalize map fetch instead |
