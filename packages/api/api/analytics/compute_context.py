@@ -8,17 +8,20 @@ from api.models.game import TurnInfo
 
 
 class AnalyticQueryContext:
-    """Placeholder for analytic export query context; replaced in #93."""
+    """Placeholder for the analytic export query context.
+
+    Full type and wiring are specified in ``docs/design-analytic-exports.md`` (planned
+    module ``api/analytics/export_context.py``).
+    """
 
 
 @dataclass(frozen=True)
 class AnalyticComputeContext:
     """Cross-cutting inputs for one turn analytic compute invocation.
 
-    Handlers should read ``diagnostics`` from this carrier (``ctx.diagnostics``), not
-    from ``ctx.options.diagnostics``. Both are set to the same object at dispatch;
-    ``options.diagnostics`` remains only so routers and services can pass diagnostics
-    through ``TurnAnalyticsOptions`` until that wire path is retired.
+    Handlers read ``diagnostics`` from ``ctx.diagnostics``, not from
+    ``ctx.options.diagnostics``. Dispatch sets both fields to the same object; routers
+    and services pass diagnostics through ``TurnAnalyticsOptions``.
     """
 
     turn: TurnInfo
