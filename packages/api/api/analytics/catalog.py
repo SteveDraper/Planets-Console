@@ -17,17 +17,60 @@ class TurnAnalyticCatalogEntry:
     type: AnalyticType
 
 
+TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
+    TurnAnalyticCatalogEntry(
+        id="base-map",
+        name="Map",
+        supports_table=False,
+        supports_map=True,
+        type="base",
+    ),
+    TurnAnalyticCatalogEntry(
+        id="scores",
+        name="Scores",
+        supports_table=True,
+        supports_map=False,
+        type="selectable",
+    ),
+    TurnAnalyticCatalogEntry(
+        id="connections",
+        name="Connections",
+        supports_table=False,
+        supports_map=True,
+        type="selectable",
+    ),
+    TurnAnalyticCatalogEntry(
+        id="stellar-cartography",
+        name="Stellar Cartography",
+        supports_table=False,
+        supports_map=True,
+        type="selectable",
+    ),
+)
+
+_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
+    entry.id: entry for entry in TURN_ANALYTIC_CATALOG
+}
+
 T = TypeVar("T")
+
+
+def publish_turn_analytic_catalog(catalog: tuple[TurnAnalyticCatalogEntry, ...]) -> None:
+    """Validate registrations-derived catalog matches bootstrap metadata."""
+    if catalog != TURN_ANALYTIC_CATALOG:
+        raise RuntimeError(
+            "Turn analytic registrations catalog drift from bootstrap catalog: "
+            f"derived={[entry.id for entry in catalog]!r}, "
+            f"bootstrap={[entry.id for entry in TURN_ANALYTIC_CATALOG]!r}"
+        )
 
 
 def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
     """Return catalog metadata for one turn analytic id."""
-    from api.analytics.registry import TURN_ANALYTIC_CATALOG
-
-    for entry in TURN_ANALYTIC_CATALOG:
-        if entry.id == analytic_id:
-            return entry
-    raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}")
+    try:
+        return _CATALOG_BY_ID[analytic_id]
+    except KeyError as err:
+        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
 
 
 def _validate_registry_ids_match_catalog(

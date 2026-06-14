@@ -2,8 +2,8 @@
 
 from collections.abc import Callable, Iterator
 
-from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.catalog import catalog_entry
+from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -68,9 +68,7 @@ def get_scores_table(
     options: TurnAnalyticsOptions | None = None,
 ) -> dict:
     """Convenience entry for tests and direct callers."""
-    return compute_scores_table(
-        AnalyticComputeContext(turn=turn, options=options or TurnAnalyticsOptions())
-    )
+    return invoke_analytic_compute(compute_scores_table, turn, options)
 
 
 def get_scores_row_inference(
@@ -125,12 +123,6 @@ def iter_scores_table_inference_stream(
 
 
 REGISTRATION = TurnAnalyticRegistration(
-    catalog_entry=TurnAnalyticCatalogEntry(
-        id=ANALYTIC_ID,
-        name="Scores",
-        supports_table=True,
-        supports_map=False,
-        type="selectable",
-    ),
+    catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_scores_table,
 )

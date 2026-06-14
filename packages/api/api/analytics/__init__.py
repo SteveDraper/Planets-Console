@@ -1,6 +1,10 @@
 """Core turn analytics."""
 
-from api.analytics.catalog import TurnAnalyticCatalogEntry, catalog_entry
+from api.analytics.catalog import (
+    TURN_ANALYTIC_CATALOG,
+    TurnAnalyticCatalogEntry,
+    catalog_entry,
+)
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import (
@@ -25,7 +29,6 @@ __all__ = [
 
 _LAZY_REGISTRY_EXPORTS = frozenset(
     {
-        "TURN_ANALYTIC_CATALOG",
         "TURN_ANALYTIC_REGISTRATIONS",
         "TURN_ANALYTICS",
         "get_turn_analytic",

@@ -1,5 +1,6 @@
 """Compute-time context passed into Core turn analytic handlers."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.options import TurnAnalyticsOptions
@@ -28,3 +29,25 @@ class AnalyticComputeContext:
     options: TurnAnalyticsOptions
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS
     query: AnalyticQueryContext | None = None
+
+
+def make_analytic_compute_context(
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions | None = None,
+) -> AnalyticComputeContext:
+    """Build dispatch context; mirrors diagnostics from options when present."""
+    resolved = options or TurnAnalyticsOptions()
+    return AnalyticComputeContext(
+        turn=turn,
+        options=resolved,
+        diagnostics=resolved.diagnostics,
+    )
+
+
+def invoke_analytic_compute(
+    compute: Callable[[AnalyticComputeContext], dict],
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions | None = None,
+) -> dict:
+    """Run a context-first compute handler for tests and direct callers."""
+    return compute(make_analytic_compute_context(turn, options))

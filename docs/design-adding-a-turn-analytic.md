@@ -25,7 +25,7 @@ Step-by-step guide for registering a new **turn analytic** in Planets Console. R
 Add `packages/api/api/analytics/<id>.py`:
 
 ```python
-from api.analytics.catalog import TurnAnalyticCatalogEntry
+from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.registration import TurnAnalyticRegistration
 
@@ -38,13 +38,7 @@ def compute_my_analytic(ctx: AnalyticComputeContext) -> dict:
     return {"analyticId": ANALYTIC_ID, ...}
 
 REGISTRATION = TurnAnalyticRegistration(
-    catalog_entry=TurnAnalyticCatalogEntry(
-        id=ANALYTIC_ID,
-        name="My Analytic",
-        supports_table=True,
-        supports_map=False,
-        type="selectable",
-    ),
+    catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_my_analytic,
 )
 ```
@@ -56,6 +50,10 @@ Guidelines:
 - Reuse **game concepts** from `api/concepts/` rather than duplicating rules.
 - **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 - Attach **request diagnostics** at meaningful boundaries (`ctx.diagnostics.child(...)`) when work is non-trivial.
+
+### 2.1a Add bootstrap catalog metadata
+
+In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to the bootstrap `TURN_ANALYTIC_CATALOG` tuple (id, name, `supports_table`, `supports_map`, `type`). The registration references it via `catalog_entry(ANALYTIC_ID)`. At Core import, `registry.py` derives the catalog from registrations and validates it matches this bootstrap tuple via `publish_turn_analytic_catalog`.
 
 ### 2.2 Register in Core
 
@@ -289,6 +287,7 @@ When triggered, prefer a small registry refactor over accumulating `MainArea` br
 Use this before opening a PR:
 
 - [ ] **Core:** module with `TurnAnalyticRegistration` (`catalog_entry` + ctx-first `compute` handler) appended to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` + unit tests
+- [ ] **Catalog bootstrap:** `TurnAnalyticCatalogEntry` in bootstrap `TURN_ANALYTIC_CATALOG` (`catalog.py`)
 - [ ] **Core exports:** `exports.py` + export registry entry (empty allowed) + export tests when non-empty
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry

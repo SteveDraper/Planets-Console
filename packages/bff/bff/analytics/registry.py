@@ -1,7 +1,6 @@
 """BFF analytics catalog and dispatch."""
 
-from api.analytics.catalog import tuple_aligned_with_turn_analytic_catalog
-from api.analytics.registry import TURN_ANALYTIC_CATALOG
+from api.analytics.catalog import TURN_ANALYTIC_CATALOG, tuple_aligned_with_turn_analytic_catalog
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor

@@ -1,7 +1,7 @@
 """Core base-map analytic."""
 
-from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.catalog import catalog_entry
+from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.warp_well import WarpWellKind, map_cell_indices_in_warp_well
 from api.models.game import TurnInfo
@@ -42,18 +42,10 @@ def compute_base_map(ctx: AnalyticComputeContext) -> dict:
 
 def get_base_map(turn: TurnInfo) -> dict:
     """Convenience entry for tests and direct callers that only have a turn."""
-    from api.analytics.options import TurnAnalyticsOptions
-
-    return compute_base_map(AnalyticComputeContext(turn=turn, options=TurnAnalyticsOptions()))
+    return invoke_analytic_compute(compute_base_map, turn)
 
 
 REGISTRATION = TurnAnalyticRegistration(
-    catalog_entry=TurnAnalyticCatalogEntry(
-        id=ANALYTIC_ID,
-        name="Map",
-        supports_table=False,
-        supports_map=True,
-        type="base",
-    ),
+    catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_base_map,
 )
