@@ -124,3 +124,49 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
 
     with pytest.raises(RuntimeError, match="Duplicate"):
         validate_turn_analytic_registrations(registrations)
+
+
+def _registration_for_validation(*, handler=None, **catalog_overrides):
+    from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.registration import TurnAnalyticRegistration
+
+    catalog_fields = {
+        "id": "test-analytic",
+        "name": "Test",
+        "supports_table": True,
+        "supports_map": False,
+        "type": "selectable",
+    }
+    catalog_fields.update(catalog_overrides)
+    catalog_entry = TurnAnalyticCatalogEntry(**catalog_fields)
+    if handler is None:
+        handler = lambda _ctx: {"analyticId": catalog_entry.id}
+    return TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler)
+
+
+@pytest.mark.parametrize(
+    ("catalog_overrides", "match"),
+    [
+        ({"id": ""}, "catalog entry id"),
+        ({"id": "   "}, "catalog entry id"),
+        ({"name": ""}, "catalog entry name"),
+        ({"name": "  \t"}, "catalog entry name"),
+        ({"type": "invalid"}, "type must be"),
+        ({"supports_table": False, "supports_map": False}, "at least one of table or map"),
+    ],
+)
+def test_validate_turn_analytic_registrations_rejects_invalid_catalog_entry(
+    catalog_overrides,
+    match,
+):
+    from api.analytics.registration import validate_turn_analytic_registrations
+
+    with pytest.raises(RuntimeError, match=match):
+        validate_turn_analytic_registrations((_registration_for_validation(**catalog_overrides),))
+
+
+def test_validate_turn_analytic_registrations_rejects_non_callable_handler():
+    from api.analytics.registration import validate_turn_analytic_registrations
+
+    with pytest.raises(RuntimeError, match="handler must be callable"):
+        validate_turn_analytic_registrations((_registration_for_validation(handler=object()),))
