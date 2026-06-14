@@ -4,9 +4,9 @@ from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
-from api.models.game import TurnInfo
 from api.concepts.planet_connections import connection_routes_with_options
 from api.errors import ValidationError
+from api.models.game import TurnInfo
 from api.transport.connections_options import FlareConnectionMode
 
 ANALYTIC_ID = "connections"
