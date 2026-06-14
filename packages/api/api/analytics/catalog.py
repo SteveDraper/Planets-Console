@@ -55,16 +55,6 @@ _CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
 T = TypeVar("T")
 
 
-def publish_turn_analytic_catalog(catalog: tuple[TurnAnalyticCatalogEntry, ...]) -> None:
-    """Validate registrations-derived catalog matches bootstrap metadata."""
-    if catalog != TURN_ANALYTIC_CATALOG:
-        raise RuntimeError(
-            "Turn analytic registrations catalog drift from bootstrap catalog: "
-            f"derived={[entry.id for entry in catalog]!r}, "
-            f"bootstrap={[entry.id for entry in TURN_ANALYTIC_CATALOG]!r}"
-        )
-
-
 def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
     """Return catalog metadata for one turn analytic id."""
     try:

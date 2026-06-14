@@ -1,7 +1,10 @@
 """Registry for Core turn analytics."""
 
 from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
-from api.analytics.catalog import TurnAnalyticCatalogEntry, publish_turn_analytic_catalog
+from api.analytics.catalog import (
+    TURN_ANALYTIC_CATALOG,
+    tuple_aligned_with_turn_analytic_catalog,
+)
 from api.analytics.compute_context import make_analytic_compute_context
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.options import TurnAnalyticsOptions
@@ -15,21 +18,26 @@ from api.analytics.stellar_cartography import REGISTRATION as STELLAR_CARTOGRAPH
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 
-TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
+_IMPORTED_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
     BASE_MAP_REGISTRATION,
     SCORES_REGISTRATION,
     CONNECTIONS_REGISTRATION,
     STELLAR_CARTOGRAPHY_REGISTRATION,
 )
 
-validate_turn_analytic_registrations(TURN_ANALYTIC_REGISTRATIONS)
+validate_turn_analytic_registrations(_IMPORTED_REGISTRATIONS)
 
-_DERIVED_TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
-    registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
+# The catalog is the single source of truth for analytic identity and order.
+# Registrations are aligned to it with the same helper the BFF uses for its
+# descriptors, so a missing/extra registration fails at import and the public
+# order always follows the catalog.
+TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
+    tuple_aligned_with_turn_analytic_catalog(
+        {registration.catalog_entry.id: registration for registration in _IMPORTED_REGISTRATIONS},
+        TURN_ANALYTIC_CATALOG,
+        role="Core turn analytic registrations",
+    )
 )
-publish_turn_analytic_catalog(_DERIVED_TURN_ANALYTIC_CATALOG)
-
-TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = _DERIVED_TURN_ANALYTIC_CATALOG
 
 TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
     registration.catalog_entry.id: registration.compute

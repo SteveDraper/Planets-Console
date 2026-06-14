@@ -51,9 +51,9 @@ Guidelines:
 - **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 - Attach **request diagnostics** at meaningful boundaries (`ctx.diagnostics.child(...)`) when work is non-trivial.
 
-### 2.1a Add bootstrap catalog metadata
+### 2.1a Add catalog metadata
 
-In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to the bootstrap `TURN_ANALYTIC_CATALOG` tuple (id, name, `supports_table`, `supports_map`, `type`). The registration references it via `catalog_entry(ANALYTIC_ID)`. At Core import, `registry.py` derives the catalog from registrations and validates it matches this bootstrap tuple via `publish_turn_analytic_catalog`.
+In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to the `TURN_ANALYTIC_CATALOG` tuple (id, name, `supports_table`, `supports_map`, `type`). This is the single source of truth for the analytic's identity, metadata, and order; the registration references it via `catalog_entry(ANALYTIC_ID)`.
 
 ### 2.2 Register in Core
 
@@ -68,7 +68,7 @@ TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
 )
 ```
 
-`TURN_ANALYTIC_CATALOG` and `TURN_ANALYTICS` are derived from that tuple at import; a missing or extra registration raises `RuntimeError` on startup.
+`TURN_ANALYTICS` is derived from that tuple at import and the registrations are aligned to `TURN_ANALYTIC_CATALOG` (the same helper the BFF uses); a missing or extra registration raises `RuntimeError` on startup.
 
 ### 2.3 Core -- exports (required)
 
@@ -287,7 +287,7 @@ When triggered, prefer a small registry refactor over accumulating `MainArea` br
 Use this before opening a PR:
 
 - [ ] **Core:** module with `TurnAnalyticRegistration` (`catalog_entry` + ctx-first `compute` handler) appended to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` + unit tests
-- [ ] **Catalog bootstrap:** `TurnAnalyticCatalogEntry` in bootstrap `TURN_ANALYTIC_CATALOG` (`catalog.py`)
+- [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG` (`catalog.py`)
 - [ ] **Core exports:** `exports.py` + export registry entry (empty allowed) + export tests when non-empty
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry

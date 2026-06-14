@@ -69,7 +69,7 @@ if heavy:
 
 
 def test_bff_analytics_registry_import_does_not_load_compute_graph():
-    """BFF registry alignment should use bootstrap catalog without Core compute."""
+    """BFF registry alignment should use the catalog without Core compute."""
     script = """
 import sys
 import bff.analytics.registry
