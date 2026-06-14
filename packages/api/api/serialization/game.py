@@ -6,6 +6,7 @@ import dacite
 
 from api.models.game import GameInfo
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
+from api.serialization.game_settings import coerce_game_settings_int_fields
 
 
 def _coerce_game_info_year_int_fields(payload: dict) -> None:
@@ -32,6 +33,9 @@ def game_info_from_json(data: dict) -> GameInfo:
     """
     payload = copy.deepcopy(data)
     _coerce_game_info_year_int_fields(payload)
+    settings = payload.get("settings")
+    if isinstance(settings, dict):
+        coerce_game_settings_int_fields(settings)
     return dacite.from_dict(data_class=GameInfo, data=payload, config=DACITE_CONFIG)
 
 

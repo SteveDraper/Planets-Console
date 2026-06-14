@@ -1,6 +1,7 @@
 """Bounded aggregate action catalog for military score build inference."""
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from api.analytics.military_score_inference.accelerated_start import (
     HOMEBASE_STARBASE_FIGHTERS,
@@ -142,6 +143,7 @@ def build_action_catalog_from_turn(
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    prior_weights_base_dir: Path | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step
     if resolved_policy_step is None:
@@ -166,6 +168,7 @@ def build_action_catalog_from_turn(
         eligible_engine_ids=catalog_context.eligible_engine_ids,
         eligible_beam_ids=catalog_context.eligible_beam_ids,
         eligible_torp_ids=catalog_context.eligible_torp_ids,
+        base_dir=prior_weights_base_dir,
     )
     return build_action_catalog(
         observation,

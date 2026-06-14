@@ -139,3 +139,45 @@ class PlanetsNuClient:
                 raise UpstreamPlanetsError(str(detail))
 
         return body
+
+    def games_list(
+        self,
+        *,
+        status: int | str = 3,
+        scope: int | str = 0,
+    ) -> list[dict[str, Any]]:
+        """GET /games/list; returns finished/public games matching status and scope."""
+        url = f"{self._base_url}/games/list"
+        params = {"status": status, "scope": scope}
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPError as exc:
+            logger.warning("Planets.nu games list HTTP error: %s", _safe_httpx_error_summary(exc))
+            raise UpstreamPlanetsError("Planets.nu games list request failed.") from exc
+        except ValueError as exc:
+            raise UpstreamPlanetsError("Planets.nu games list returned invalid JSON.") from exc
+
+        if isinstance(data, list):
+            games = data
+        elif isinstance(data, dict):
+            if not data.get("success", True):
+                detail = (
+                    data.get("error") or data.get("message") or "Games list was not successful."
+                )
+                raise UpstreamPlanetsError(str(detail))
+            games_raw = data.get("games", data)
+            if not isinstance(games_raw, list):
+                raise UpstreamPlanetsError("Planets.nu games list returned an unexpected payload.")
+            games = games_raw
+        else:
+            raise UpstreamPlanetsError("Planets.nu games list returned an unexpected payload.")
+
+        parsed: list[dict[str, Any]] = []
+        for item in games:
+            if not isinstance(item, dict):
+                raise UpstreamPlanetsError("Planets.nu games list entry was not an object.")
+            parsed.append(item)
+        return parsed

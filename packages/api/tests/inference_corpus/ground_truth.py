@@ -8,16 +8,12 @@ from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_ZERO_MILITARY_SCORE_LABEL,
     ship_build_combo_label,
 )
-from api.models.game import GameInfo, TurnInfo
-from api.models.player import Score
-from api.services.turn_load_service import TurnLoadService
-
-from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel
-from tests.inference_corpus.ship_inventory import (
+from api.analytics.military_score_inference.ship_inventory import (
     beams_by_id,
     describe_new_ship_build,
     engines_by_id,
     fighter_load_delta,
+    fighter_transfer_counts,
     hulls_by_id,
     new_owned_ships,
     new_ship_load_action_counts,
@@ -25,13 +21,16 @@ from tests.inference_corpus.ship_inventory import (
     ship_to_build_combo_id,
     starbase_defense_inventory_delta,
     starbase_fighter_inventory_delta,
-    starbase_fighters_for_owner,
     torpedo_load_delta_by_type,
-    total_loaded_fighters,
 )
-from tests.inference_corpus.ship_inventory import (
+from api.analytics.military_score_inference.ship_inventory import (
     torpedos_by_id as torpedos_by_id_from_turn,
 )
+from api.models.game import GameInfo, TurnInfo
+from api.models.player import Score
+from api.services.turn_load_service import TurnLoadService
+
+from tests.inference_corpus.models import COMPLEXITY_ORDINAL, ComplexityLevel
 
 GroundTruth = tuple[tuple[str, int], ...]
 
@@ -293,7 +292,7 @@ def _inventory_aggregate_actions(
     if planet_defense_delta > 0:
         allocated["planet_defense_posts_added_total"] += planet_defense_delta
 
-    transfer = _fighter_transfer_counts(prior_turn, score_turn, player_id)
+    transfer = fighter_transfer_counts(prior_turn, score_turn, player_id)
     if transfer is not None:
         direction, count = transfer
         if count > 0:
@@ -354,21 +353,3 @@ def _combo_ground_truth_label(combo_id: str, turn: TurnInfo) -> str:
         beam_count=beam_count,
         launcher_count=launcher_count,
     )
-
-
-def _fighter_transfer_counts(
-    prior_turn: TurnInfo,
-    score_turn: TurnInfo,
-    player_id: int,
-) -> tuple[str, int] | None:
-    prior_ship = total_loaded_fighters(prior_turn, player_id)
-    score_ship = total_loaded_fighters(score_turn, player_id)
-    prior_base = starbase_fighters_for_owner(prior_turn, player_id)
-    score_base = starbase_fighters_for_owner(score_turn, player_id)
-    ship_delta = score_ship - prior_ship
-    base_delta = score_base - prior_base
-    if ship_delta > 0 and base_delta < 0 and ship_delta == -base_delta:
-        return ("fighters_starbase_to_ship", ship_delta)
-    if ship_delta < 0 and base_delta > 0 and -ship_delta == base_delta:
-        return ("fighters_ship_to_starbase", base_delta)
-    return None

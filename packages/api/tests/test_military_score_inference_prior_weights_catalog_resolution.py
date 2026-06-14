@@ -1,8 +1,10 @@
 """Integration tests for prior-weights catalog resolution and combo weighting."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
+import yaml
 from api.analytics.military_score_inference.aggregate_action_registry import (
     PLANET_DEFENSE_POST_BIN_BOUNDS,
     SHIP_TORPEDO_BIN_BOUNDS,
@@ -31,12 +33,44 @@ from api.analytics.military_score_inference.ship_build_combos import GENERIC_FRE
 from api.concepts.game_category import GameCategory
 from api.models.components import Beam, Engine, Torpedo
 
+from tests.fixtures.hand_seeded_prior_weights import HAND_SEEDED_PRIOR_WEIGHTS_DIR
 from tests.fixtures.military_score_inference import _observation
 from tests.fixtures.military_score_inference_prior_weights import (
     beam_ship_hull,
     minimal_prior_catalog,
     torpedo_hull,
 )
+
+
+def test_sparse_hull_table_assigns_implicit_uniform_to_unlisted_buildable_hulls(
+    sample_turn,
+    tmp_path: Path,
+):
+    """Mined assets omit wildcard keys; unlisted buildable hulls get implicit uniform mass."""
+    from tests.test_military_score_inference_prior_weights_asset import (
+        _minimal_prior_weights_document,
+    )
+
+    document = _minimal_prior_weights_document(
+        hulls={
+            "before_ship_limit": {"global": {24: 450}},
+            "after_ship_limit": {"global": {24: 450}},
+        },
+    )
+    asset_path = tmp_path / "prior_weights_standard.yaml"
+    asset_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    catalog = resolve_prior_weights_catalog(
+        _observation(),
+        replace(sample_turn.settings, endturn=100, shiplimit=200),
+        buildable_hull_ids=frozenset({24, 99}),
+        eligible_engine_ids=frozenset({1}),
+        eligible_beam_ids=frozenset({1}),
+        eligible_torp_ids=frozenset({1}),
+        base_dir=tmp_path,
+    )
+
+    assert catalog.hull_marginal_log_weight(24) > catalog.hull_marginal_log_weight(99)
 
 
 def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
@@ -47,6 +81,7 @@ def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
         eligible_engine_ids=frozenset({1, 5}),
         eligible_beam_ids=frozenset({1, 3}),
         eligible_torp_ids=frozenset({1, 8}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     assert catalog.hull_marginal_log_weight(99, default_weight=-1) != -1
     assert catalog.hull_marginal_log_weight(24) > catalog.hull_marginal_log_weight(99)
@@ -61,6 +96,7 @@ def test_true_freighter_hull_counts_collapse_to_generic_solver_combo(sample_turn
         eligible_engine_ids=frozenset({1}),
         eligible_beam_ids=frozenset({1}),
         eligible_torp_ids=frozenset({1}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     expected_weights = counts_to_log_weights(
         {24: 450.0, "generic_freighter": 220.0},
@@ -85,6 +121,7 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
         eligible_engine_ids=frozenset({1}),
         eligible_beam_ids=frozenset({2, 3}),
         eligible_torp_ids=frozenset({1, 8}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     hull = torpedo_hull()
     engine = Engine(
@@ -170,6 +207,7 @@ def test_missing_component_subtable_uses_uniform_distribution(sample_turn):
         eligible_engine_ids=frozenset({1}),
         eligible_beam_ids=frozenset({2}),
         eligible_torp_ids=frozenset({1, 8}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     with_single_beam_universe = single_beam_catalog.combo_probability_weight(
         combo_id="combo_single_beam_universe",
@@ -210,6 +248,7 @@ def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
         eligible_engine_ids=frozenset(),
         eligible_beam_ids=frozenset(),
         eligible_torp_ids=frozenset({1, 12}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     # The implicit-uniform path seeds active bins uniformly and the leading none bin
     # via none_bin_pseudo_count, so the missing table keeps the occurrence cost.
@@ -253,6 +292,7 @@ def test_none_bin_seed_reproduces_legacy_parsimony_penalty(sample_turn):
         eligible_engine_ids=frozenset({1}),
         eligible_beam_ids=frozenset({1}),
         eligible_torp_ids=frozenset({1}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     buckets = catalog.probability_buckets_for_action(
         "planet_defense_posts_added_total",
@@ -269,7 +309,10 @@ def test_none_bin_seed_reproduces_legacy_parsimony_penalty(sample_turn):
 
 
 def test_standard_asset_occurrence_bins_reproduce_legacy_penalty_for_every_aggregate(sample_turn):
-    asset, _, _ = load_prior_weights_for_category(GameCategory.STANDARD)
+    asset, _, _ = load_prior_weights_for_category(
+        GameCategory.STANDARD,
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
+    )
     observations_by_band = {
         "before_ship_limit": _observation(),
         "after_ship_limit": replace(_observation(), is_after_ship_limit=True),
@@ -283,6 +326,7 @@ def test_standard_asset_occurrence_bins_reproduce_legacy_penalty_for_every_aggre
             eligible_engine_ids=frozenset({1}),
             eligible_beam_ids=frozenset({1}),
             eligible_torp_ids=frozenset(range(1, 12)),
+            base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
         )
 
         for slot in iter_aggregate_action_slots(eligible_torp_ids=frozenset(range(1, 12))):
@@ -387,6 +431,7 @@ def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):
         eligible_engine_ids=frozenset({1, 5}),
         eligible_beam_ids=frozenset({1}),
         eligible_torp_ids=frozenset({1, 8}),
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     hull = beam_ship_hull()
     engine_common = Engine(

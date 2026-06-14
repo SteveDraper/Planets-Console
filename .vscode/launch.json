@@ -1,0 +1,74 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Inference prior miner (dry run)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_inference_prior_miner.py",
+      "args": [
+        "--dry-run",
+        "--patterns",
+        "${workspaceFolder}/assets/analytics/scores/prior_mining_patterns_standard.yaml",
+        "--storage-root",
+        "${workspaceFolder}/.sampler_data",
+        "--report",
+        "${workspaceFolder}/local/prior-miner-dry-run-report.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Inference prior miner (standard)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_inference_prior_miner.py",
+      "args": [
+        "--patterns",
+        "${workspaceFolder}/assets/analytics/scores/prior_mining_patterns_standard.yaml",
+        "--workers",
+        "8",
+        "--storage-root",
+        "${workspaceFolder}/.sampler_data"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Inference prior miner (epic)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_inference_prior_miner.py",
+      "args": [
+        "--patterns",
+        "${workspaceFolder}/assets/analytics/scores/prior_mining_patterns_epic.yaml",
+        "--workers",
+        "8",
+        "--storage-root",
+        "${workspaceFolder}/.sampler_data"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Inference prior miner (campaign)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_inference_prior_miner.py",
+      "args": [
+        "--patterns",
+        "${workspaceFolder}/assets/analytics/scores/prior_mining_patterns_campaign.yaml",
+        "--workers",
+        "8",
+        "--storage-root",
+        "${workspaceFolder}/.sampler_data"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

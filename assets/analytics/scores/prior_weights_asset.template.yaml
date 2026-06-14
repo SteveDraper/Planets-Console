@@ -1,0 +1,39 @@
+# Inference build prior for the "__CATEGORY__" game category (mined pseudo-counts).
+# Counts are un-normalized; Core converts each table to log-probability integer weights
+# at catalog build (Laplace smoothing, alpha=1). See design-military-score-inference-build-priors.md.
+#
+# Wildcard: key '*' is the default pseudo-count for any id not listed explicitly in that table.
+# Illegal in histogram and slotFill tables. Expanded to the catalog candidate set at resolve time.
+#
+# Aggregate histograms carry an occurrence prior in a leading none bin (count == 0). The `0:`
+# key holds the none-bin pseudo-count; it was computed via none_bin_pseudo_count() so the gap to
+# the most likely active bin reproduces the legacy parsimony penalty (LEGACY_PARSIMONY_OCCURRENCE_PENALTY).
+# There is no separate `counts` shape: every aggregate, including fighter transfers, is a histogram.
+#
+# This file is the comment and outline template for prior_weights_{category}.yaml.
+# The prior miner substitutes __CATEGORY__ and fills counts when writing a new category asset.
+
+version: 3
+category: __CATEGORY__  # must match filename stem prior_weights_{category}.yaml
+gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
+
+hulls:
+  # Inference ship-limit band: tables split on whether the player is before/after ship limit.
+  before_ship_limit:
+    global: {}
+    # byRace: optional race-specific hull tables (race id -> hull id counts)
+  after_ship_limit:
+    global: {}
+
+components:
+  # Component conditional priors keyed by inference hull category (race-agnostic in v1).
+  before_ship_limit: {}
+  after_ship_limit: {}
+
+aggregates:
+  before_ship_limit: {}
+  after_ship_limit: {}
+
+overrides:
+  combos: {}  # combo_id -> pseudo-count (optional sparse corrections; no wildcard)
+  hulls: {}

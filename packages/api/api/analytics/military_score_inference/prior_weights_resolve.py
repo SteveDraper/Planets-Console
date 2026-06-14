@@ -88,6 +88,7 @@ def _resolve_hull_log_weights(
         race_counts = band_tables.get(str(race_id), {})
     merged_counts = dict(global_counts)
     merged_counts.update(race_counts)
+    had_wildcard = WILDCARD_COUNT_KEY in merged_counts
     expanded = expand_wildcard_counts(
         merged_counts,
         universe=buildable_hull_ids,
@@ -103,6 +104,10 @@ def _resolve_hull_log_weights(
             for hull_id, count in expanded.items()
             if isinstance(hull_id, int) and hull_id in buildable_hull_ids
         }
+        if not had_wildcard:
+            for hull_id in buildable_hull_ids:
+                if hull_id not in expanded:
+                    expanded[hull_id] = IMPLICIT_UNIFORM_PSEUDO_COUNT
     freighter_hull_ids = generic_freighter_hull_ids & frozenset(
         hull_id for hull_id in expanded if isinstance(hull_id, int)
     )

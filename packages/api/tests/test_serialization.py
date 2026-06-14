@@ -196,6 +196,13 @@ class TestTurnInfoSerialization:
         assert ti.scores[0].technologicalaccumulator == 0
         assert ti.scores[0].widestreach == 0
 
+    def test_score_float_int_fields_coerced_from_wire(self, turn_sample_data):
+        """Planets.nu may send whole-number score fields as floats (e.g. happybeings)."""
+        data = copy.deepcopy(turn_sample_data)
+        data["scores"][0]["happybeings"] = 84.5555555555556
+        ti = turn_info_from_json(data, settings_defaults=data["settings"])
+        assert ti.scores[0].happybeings == 85
+
     def test_turn_info_from_json_does_not_mutate_input(self, turn_sample_data):
         data = copy.deepcopy(turn_sample_data)
         before = copy.deepcopy(data)
@@ -291,3 +298,9 @@ class TestGameInfoSerialization:
         before = copy.deepcopy(data)
         _ = game_info_from_json(data)
         assert data == before
+
+    def test_game_info_settings_coerces_float_int_fields(self, game_info_sample_data):
+        data = copy.deepcopy(game_info_sample_data)
+        data["settings"]["mining200adjustment"] = 1.5
+        gi = game_info_from_json(data)
+        assert gi.settings.mining200adjustment == 2
