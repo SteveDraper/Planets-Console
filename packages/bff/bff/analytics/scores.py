@@ -1,6 +1,6 @@
 """BFF Scores table analytic handler."""
 
-from api.analytics.registrations import catalog_entry
+from api.analytics.registry import catalog_entry
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor

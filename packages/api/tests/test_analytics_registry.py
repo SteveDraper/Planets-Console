@@ -68,7 +68,7 @@ def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn):
 
 
 def test_turn_analytic_registrations_derive_catalog_and_handlers():
-    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
+    from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
     assert TURN_ANALYTIC_CATALOG == tuple(
         registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
@@ -83,7 +83,7 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
 
 def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
     from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
-    from api.analytics.registrations import TURN_ANALYTIC_CATALOG
+    from api.analytics.registry import TURN_ANALYTIC_CATALOG
 
     with pytest.raises(RuntimeError, match="Core handlers"):
         dict_aligned_with_turn_analytic_catalog(

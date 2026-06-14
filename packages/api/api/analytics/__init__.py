@@ -10,12 +10,13 @@ from api.analytics.registration import (
     turn_only,
     with_options,
 )
-from api.analytics.registrations import (
+from api.analytics.registry import (
     TURN_ANALYTIC_CATALOG,
     TURN_ANALYTIC_REGISTRATIONS,
+    TURN_ANALYTICS,
     catalog_entry,
+    get_turn_analytic,
 )
-from api.analytics.registry import TURN_ANALYTICS, get_turn_analytic
 
 __all__ = [
     "AnalyticComputeContext",

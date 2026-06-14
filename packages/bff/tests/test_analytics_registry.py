@@ -1,7 +1,7 @@
 """Tests for BFF analytics modules and registry dispatch."""
 
 import pytest
-from api.analytics.registrations import TURN_ANALYTIC_CATALOG
+from api.analytics.registry import TURN_ANALYTIC_CATALOG
 from api.diagnostics import NOOP_DIAGNOSTICS
 from api.transport.connections_options import derive_include_illustrative_routes
 from bff.analytics import (

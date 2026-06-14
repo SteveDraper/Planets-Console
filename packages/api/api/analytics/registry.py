@@ -1,15 +1,43 @@
 """Registry for Core turn analytics."""
 
+from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
+from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.registration import TurnAnalyticHandler, TurnAnalyticRegistration
-from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
+from api.analytics.registration import (
+    TurnAnalyticHandler,
+    TurnAnalyticRegistration,
+    validate_turn_analytic_registrations,
+)
+from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
+from api.analytics.stellar_cartography import REGISTRATION as STELLAR_CARTOGRAPHY_REGISTRATION
 from api.errors import ValidationError
 from api.models.game import TurnInfo
+
+TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
+    BASE_MAP_REGISTRATION,
+    SCORES_REGISTRATION,
+    CONNECTIONS_REGISTRATION,
+    STELLAR_CARTOGRAPHY_REGISTRATION,
+)
+
+validate_turn_analytic_registrations(TURN_ANALYTIC_REGISTRATIONS)
+
+TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
+    registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
+)
 
 _TURN_ANALYTIC_REGISTRATIONS_BY_ID: dict[str, TurnAnalyticRegistration] = {
     registration.catalog_entry.id: registration for registration in TURN_ANALYTIC_REGISTRATIONS
 }
+
+
+def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
+    try:
+        return _TURN_ANALYTIC_REGISTRATIONS_BY_ID[analytic_id].catalog_entry
+    except KeyError as err:
+        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
 
 
 TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
