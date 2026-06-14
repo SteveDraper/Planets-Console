@@ -2,7 +2,9 @@
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
+from api.models.game import TurnInfo
 from api.concepts.planet_connections import connection_routes_with_options
 from api.errors import ValidationError
 from api.transport.connections_options import FlareConnectionMode
@@ -38,6 +40,16 @@ def compute_connections_map(ctx: AnalyticComputeContext) -> dict:
         "edges": [],
         "routes": out.routes,
     }
+
+
+def get_connections_map(
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions | None = None,
+) -> dict:
+    """Convenience entry for tests and direct callers."""
+    return compute_connections_map(
+        AnalyticComputeContext(turn=turn, options=options or TurnAnalyticsOptions())
+    )
 
 
 REGISTRATION = TurnAnalyticRegistration(
