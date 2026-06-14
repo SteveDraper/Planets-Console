@@ -47,6 +47,26 @@ def test_registry_rejects_unknown_analytic(sample_turn):
         get_turn_analytic("missing", sample_turn, TurnAnalyticsOptions())
 
 
+def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn):
+    from api.diagnostics import DiagnosticNode
+
+    diagnostics = DiagnosticNode(name="test-root")
+    captured: dict[str, object] = {}
+
+    def capture_handler(ctx):
+        captured["diagnostics"] = ctx.diagnostics
+        return {"analyticId": "scores"}
+
+    original_handler = TURN_ANALYTICS["scores"]
+    TURN_ANALYTICS["scores"] = capture_handler
+    try:
+        get_turn_analytic("scores", sample_turn, TurnAnalyticsOptions(diagnostics=diagnostics))
+    finally:
+        TURN_ANALYTICS["scores"] = original_handler
+
+    assert captured["diagnostics"] is diagnostics
+
+
 def test_turn_analytic_registrations_derive_catalog_and_handlers():
     from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
 

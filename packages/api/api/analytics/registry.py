@@ -18,5 +18,5 @@ def get_turn_analytic(analytic_id: str, turn: TurnInfo, options: TurnAnalyticsOp
         handler = TURN_ANALYTICS[analytic_id]
     except KeyError as err:
         raise ValidationError(f"Unknown analytic_id: {analytic_id!r}") from err
-    ctx = AnalyticComputeContext(turn=turn, options=options)
+    ctx = AnalyticComputeContext(turn=turn, options=options, diagnostics=options.diagnostics)
     return handler(ctx)
