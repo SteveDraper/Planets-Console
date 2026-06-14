@@ -73,3 +73,31 @@ def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
             {"not-in-catalog": object()},
             role="Core handlers",
         )
+
+
+def test_validate_turn_analytic_registrations_rejects_empty_tuple():
+    from api.analytics.registration import validate_turn_analytic_registrations
+
+    with pytest.raises(RuntimeError, match="must not be empty"):
+        validate_turn_analytic_registrations(())
+
+
+def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
+    from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.registration import TurnAnalyticRegistration, validate_turn_analytic_registrations
+
+    catalog_entry = TurnAnalyticCatalogEntry(
+        id="duplicate-id",
+        name="Duplicate",
+        supports_table=True,
+        supports_map=False,
+        type="selectable",
+    )
+    handler = lambda ctx: {"analyticId": "duplicate-id"}
+    registrations = (
+        TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler),
+        TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler),
+    )
+
+    with pytest.raises(RuntimeError, match="Duplicate"):
+        validate_turn_analytic_registrations(registrations)
