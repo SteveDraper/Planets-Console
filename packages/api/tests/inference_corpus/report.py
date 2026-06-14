@@ -14,6 +14,7 @@ from tests.inference_corpus.discovery import discover_cases
 from tests.inference_corpus.manifest import DEFAULT_MANIFEST_PATH, load_manifest
 from tests.inference_corpus.models import (
     INFERENCE_FAILURE_OUTCOMES,
+    CaseOutcome,
     ComplexityLevel,
     CorpusCaseResult,
     CorpusReport,
@@ -28,6 +29,8 @@ def run_fixed_corpus(
     manifest_path: Path | None = None,
     max_complexity: ComplexityLevel = "heavy",
     include_adjunct: bool = False,
+    top_k: int = 3,
+    fail_on_ranking_miss: bool = False,
 ) -> CorpusReport:
     """Run every case listed in the fixed corpus manifest."""
     _, cases = load_manifest(manifest_path or DEFAULT_MANIFEST_PATH)
@@ -38,6 +41,8 @@ def run_fixed_corpus(
                 case,
                 max_complexity=max_complexity,
                 include_adjunct=include_adjunct,
+                top_k=top_k,
+                fail_on_ranking_miss=fail_on_ranking_miss,
             )
         )
     return report
@@ -65,6 +70,9 @@ def run_local_corpus(
     probe_time_limit_seconds: float | None = None,
     workers: int = 1,
     storage_root: Path | None = None,
+    top_k: int = 3,
+    enable_tier2: bool = False,
+    fail_on_ranking_miss: bool = False,
 ) -> CorpusReport:
     """Discover and run inference corpus cases from the file storage backend."""
     if workers < 1:
@@ -95,6 +103,9 @@ def run_local_corpus(
             include_adjunct=include_adjunct,
             stop_after_failures=stop_after_failures,
             probe_time_limit_seconds=probe_time_limit_seconds,
+            top_k=top_k,
+            enable_tier2=enable_tier2,
+            fail_on_ranking_miss=fail_on_ranking_miss,
         )
         return report
 
@@ -113,6 +124,9 @@ def run_local_corpus(
             probe_time_limit_seconds=probe_time_limit_seconds,
             workers=workers,
             num_search_workers=search_workers,
+            top_k=top_k,
+            enable_tier2=enable_tier2,
+            fail_on_ranking_miss=fail_on_ranking_miss,
         )
     return report
 
@@ -163,6 +177,9 @@ def _run_cases_sequential(
     include_adjunct: bool,
     stop_after_failures: int | None,
     probe_time_limit_seconds: float | None,
+    top_k: int,
+    enable_tier2: bool,
+    fail_on_ranking_miss: bool,
 ) -> None:
     for case in cases:
         if _probe_time_limit_reached(started_at, probe_time_limit_seconds):
@@ -177,6 +194,9 @@ def _run_cases_sequential(
                 store=store,
                 max_complexity=max_complexity,
                 include_adjunct=include_adjunct,
+                top_k=top_k,
+                enable_tier2=enable_tier2,
+                fail_on_ranking_miss=fail_on_ranking_miss,
             )
         )
         if _should_stop_after_failures(report.results, stop_after_failures):
@@ -197,6 +217,9 @@ def _run_cases_in_process_pool(
     probe_time_limit_seconds: float | None,
     workers: int,
     num_search_workers: int | None,
+    top_k: int,
+    enable_tier2: bool,
+    fail_on_ranking_miss: bool,
 ) -> None:
     index = 0
     while index < len(cases):
@@ -212,6 +235,9 @@ def _run_cases_in_process_pool(
                 max_complexity=max_complexity,
                 include_adjunct=include_adjunct,
                 num_search_workers=num_search_workers,
+                top_k=top_k,
+                enable_tier2=enable_tier2,
+                fail_on_ranking_miss=fail_on_ranking_miss,
             )
             for case in batch
         ]
@@ -248,6 +274,14 @@ def case_result_to_dict(result: CorpusCaseResult) -> dict[str, object]:
         payload["skipReason"] = result.skip_reason
     if result.failure_message is not None:
         payload["failureMessage"] = result.failure_message
+    if result.outcome == CaseOutcome.RANKING_MISS:
+        payload["groundTruthRank"] = result.ground_truth_rank
+        if result.top_k is not None:
+            payload["topK"] = result.top_k
+    elif result.ground_truth_rank is not None:
+        payload["groundTruthRank"] = result.ground_truth_rank
+    elif result.top_k is not None:
+        payload["topK"] = result.top_k
     return payload
 
 

@@ -71,6 +71,9 @@ class CorpusCaseResult:
     coverage_reason: str | None = None
     skip_reason: str | None = None
     failure_message: str | None = None
+    ground_truth_rank: int | None = None
+    top_k: int | None = None
+    hard_ranking_miss: bool = False
 
 
 @dataclass
@@ -100,8 +103,14 @@ class CorpusReport:
         return [result for result in self.results if result.outcome == CaseOutcome.FAILED]
 
     @property
+    def hard_ranking_misses(self) -> list[CorpusCaseResult]:
+        return [result for result in self.results if result.hard_ranking_miss]
+
+    @property
     def exit_code(self) -> int:
-        return 1 if self.failed_count else 0
+        if self.failed_count or self.hard_ranking_misses:
+            return 1
+        return 0
 
     def summary_lines(self) -> list[str]:
         buckets = dict.fromkeys(CaseOutcome, 0)
@@ -121,6 +130,11 @@ class CorpusReport:
         ]
         for result in self.hard_failures:
             lines.append(f"  FAIL {result.case_id}: {result.failure_message}")
+        for result in self.hard_ranking_misses:
+            lines.append(
+                f"  RANKING_MISS {result.case_id}: {result.failure_message} "
+                f"(rank={result.ground_truth_rank}, topK={result.top_k})"
+            )
         if self.stopped_early and self.stop_reason is not None:
             lines.append(f"  stopped_early={self.stop_reason}")
         return lines

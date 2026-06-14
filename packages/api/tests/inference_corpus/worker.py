@@ -24,6 +24,9 @@ class DiscoveredCaseJob:
     max_complexity: ComplexityLevel
     include_adjunct: bool
     num_search_workers: int | None = None
+    top_k: int = 3
+    enable_tier2: bool = False
+    fail_on_ranking_miss: bool = False
 
 
 def run_discovered_case_job(job: DiscoveredCaseJob) -> CorpusCaseResult:
@@ -45,4 +48,7 @@ def run_discovered_case_job(job: DiscoveredCaseJob) -> CorpusCaseResult:
         store=store,
         max_complexity=job.max_complexity,
         include_adjunct=job.include_adjunct,
+        top_k=job.top_k,
+        enable_tier2=job.enable_tier2,
+        fail_on_ranking_miss=job.fail_on_ranking_miss,
     )

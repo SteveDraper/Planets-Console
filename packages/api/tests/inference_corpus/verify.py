@@ -1,7 +1,11 @@
-"""Tier 1 constraint re-check for inference corpus cases."""
+"""Tier 1 constraint re-check and top-K ranking for inference corpus cases."""
+
+from collections import Counter
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.models import CandidateAction, InferenceObservation
+
+from tests.inference_corpus.ground_truth import GroundTruth
 
 
 def verify_top_solution_hard_equalities(
@@ -118,3 +122,50 @@ def _parse_solution_ship_build_entry(
         return f"top solution shipBuilds[{index}].count must be positive, got {count}"
 
     return combo_id, count
+
+
+def solution_to_ground_truth(solution: dict[str, object]) -> GroundTruth:
+    """Normalize one wire solution into a sorted ground-truth multiset."""
+    multiset: Counter[str] = Counter()
+
+    action_entries = solution.get("actions")
+    if isinstance(action_entries, list):
+        for entry in action_entries:
+            if not isinstance(entry, dict):
+                continue
+            action_id = entry.get("actionId")
+            count = entry.get("count")
+            if isinstance(action_id, str) and isinstance(count, int) and count > 0:
+                multiset[action_id] += count
+
+    ship_build_entries = solution.get("shipBuilds")
+    if isinstance(ship_build_entries, list):
+        for entry in ship_build_entries:
+            if not isinstance(entry, dict):
+                continue
+            combo_id = entry.get("comboId")
+            count = entry.get("count")
+            if isinstance(combo_id, str) and isinstance(count, int) and count > 0:
+                multiset[combo_id] += count
+
+    return tuple(sorted((action_id, count) for action_id, count in multiset.items()))
+
+
+def check_ground_truth_in_top_k(
+    ground_truth: GroundTruth,
+    solutions: list[object],
+    *,
+    k: int,
+) -> tuple[bool, int | None]:
+    """Return whether GT appears in the first K solutions and its 1-based full-list rank."""
+    ground_truth_rank: int | None = None
+    for index, solution in enumerate(solutions):
+        if not isinstance(solution, dict):
+            continue
+        if solution_to_ground_truth(solution) == ground_truth:
+            ground_truth_rank = index + 1
+            break
+
+    if ground_truth_rank is None:
+        return False, None
+    return ground_truth_rank <= k, ground_truth_rank

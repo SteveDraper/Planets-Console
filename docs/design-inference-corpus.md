@@ -68,7 +68,7 @@ File: `packages/api/tests/fixtures/inference_corpus/manifest.json`
       "complexity": "minimal",
       "tier": 1,
       "expectedStatus": "exact",
-      "requireTopK": false,
+      "requireTopK": true,
       "expectCoverage": false,
       "requiredPerspectives": [],
       "notes": "Seed build case; strict ground truth may be unavailable until combo catalog (#51)"
@@ -405,26 +405,30 @@ Manifest `expectCoverage` is a **CI assertion** only: when `true`, the case must
 
 ## 10. Top-K ranking check (#65)
 
-When `groundTruthAvailable` and catalog coverage passed and Tier 1 status is `exact`:
+After Tier 1 passes with `status == exact`, when `groundTruthAvailable` is true and catalog coverage passed:
 
-1. Normalize solver solutions to `GroundTruth` from payload `solutions[i].actions` (`actionId`, `count`; ignore zero counts).
-2. Compare to ground truth multiset (order-insensitive).
-3. If not found in first `K` solutions (default `K=3`, `--top-k`): emit `ranking_miss`.
-4. **Soft** unless manifest `requireTopK: true` or `--fail-on-ranking-miss`.
+1. Normalize each solver solution via `solution_to_ground_truth` -- merge wire `actions` and `shipBuilds`, drop `count <= 0`, sort by action id (same shape as section 9.1).
+2. Scan `solutions[0:K]` in wire order (default `K=3`, CLI `--top-k`) for an order-insensitive multiset match to ground truth.
+3. Miss -> outcome `ranking_miss` (distinct from `failed` and `out_of_search_space`). Per-case JSON may include `groundTruthRank` (1-based index in the full held list, or `null` when the GT multiset appears in no returned solution) and `topK`.
+4. **Soft** by default for probe/local runs. **Hard** when manifest `requireTopK: true` or CLI `--fail-on-ranking-miss` -- exit code 1 while outcome stays `ranking_miss`.
+5. Skip ranking for `time_limited` and other non-`exact` Tier 1 passes; outcome stays `passed` from Tier 1 alone.
+6. No complexity-based auto-harden in v1 (`heavy` / `adjunct` misses stay soft unless manifest or CLI hardens).
 
-**Complexity:** soft for `minimal` and `routine`; manifest may harden for `heavy` later.
+Fixed corpus and probe/local discovery share the same `run_loaded_case` pipeline.
 
 ---
 
 ## 11. Tier 2 compatibility (#65)
 
-When `--tier 2` or manifest `tier: 2`:
+When `--tier 2` or manifest `tier: 2`, after catalog coverage and before the solver:
 
-- Recompute inventory delta rules from section 9.2 without collapsing to aggregates where ship-level detail exists.
-- **Pass:** every GT ship build and aggregate count is **compatible** with visible inventory (no requirement that GT equals top solver solution).
-- **Fail:** GT implies ships or loads that contradict merged inventory.
+- Recompute ground truth from **multi-perspective** inventory (section 8 merge) using section 9.2 rules without collapsing ship-level detail.
+- **Pass:** every ground-truth `(action_id, count)` is compatible with the merged inventory multiset (primary counts must not exceed merged counts).
+- **Fail:** outcome `failed` when ground truth contradicts merged inventory (not `ranking_miss`).
+- Skip when `groundTruthAvailable: false`.
+- Tier 2 does **not** compare ground truth to the solver top solution.
 
-Skip Tier 2 when `groundTruthAvailable: false`.
+No `tier: 2` manifest rows are required in #65; CLI `--tier 2` exercises the path until #66 multi-view fixtures land.
 
 ---
 
@@ -434,12 +438,12 @@ Skip Tier 2 when `groundTruthAvailable: false`.
 
 `passed` | `failed` | `skipped_complexity` | `skipped_incomplete_multi_view` | `out_of_search_space` | `ranking_miss`
 
-`ranking_miss` does not set exit code 1 unless hard mode (section 10).
+`ranking_miss` does not set exit code 1 unless hard mode (section 10): manifest `requireTopK: true` or `--fail-on-ranking-miss`.
 
 ### 12.2 Script exit code
 
-- `0` -- no `failed` cases
-- `1` -- one or more `failed`
+- `0` -- no `failed` cases and no hard `ranking_miss`
+- `1` -- one or more `failed`, or one or more hard `ranking_miss`
 
 Print summary counts and optional `--json` array of per-case records (`caseId`, `outcome`, `status`, `complexity`, `coverageReason`, ...). JSON does **not** include ground truth; see **section 5.2** for investigating failures without re-running the probe.
 

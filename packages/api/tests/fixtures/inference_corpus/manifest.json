@@ -13,7 +13,7 @@
       "complexity": "minimal",
       "tier": 1,
       "expectedStatus": "exact",
-      "requireTopK": false,
+      "requireTopK": true,
       "expectCoverage": false,
       "requiredPerspectives": [],
       "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth is Missouri combo (turn-pair scope; Tier 1 inference uses cumulative accel observation on turn 3)."

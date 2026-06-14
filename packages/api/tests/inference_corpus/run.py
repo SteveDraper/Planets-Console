@@ -33,6 +33,7 @@ from tests.inference_corpus.complexity import (
     merge_turn_inventories,
     merged_inventory_for_case,
 )
+from tests.inference_corpus.discovery import list_perspectives_with_turn_pair
 from tests.inference_corpus.fixtures import (
     assert_required_perspectives_present,
     load_manifest_ground_truth_turn_snapshots,
@@ -52,9 +53,14 @@ from tests.inference_corpus.storage_loader import (
     load_ground_truth_turn_snapshots,
     resolve_player_id_for_case,
 )
-from tests.inference_corpus.verify import verify_top_solution_hard_equalities
+from tests.inference_corpus.tier2 import verify_tier2_compatibility
+from tests.inference_corpus.verify import (
+    check_ground_truth_in_top_k,
+    verify_top_solution_hard_equalities,
+)
 
 DEFAULT_MAX_COMPLEXITY: ComplexityLevel = "heavy"
+DEFAULT_TOP_K = 3
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,9 @@ def run_manifest_case(
     fixtures_root: Path = FIXTURES_ROOT,
     max_complexity: ComplexityLevel = DEFAULT_MAX_COMPLEXITY,
     include_adjunct: bool = False,
+    top_k: int = DEFAULT_TOP_K,
+    enable_tier2: bool = False,
+    fail_on_ranking_miss: bool = False,
 ) -> CorpusCaseResult:
     """Execute Tier 1 pipeline for one manifest case."""
     skip_reason = _complexity_skip_reason(
@@ -175,6 +184,9 @@ def run_manifest_case(
         ),
         ground_truth_prior_turn=gt_prior_turn,
         ground_truth_score_turn=gt_score_turn,
+        top_k=top_k,
+        enable_tier2=enable_tier2 or case.tier >= 2,
+        hard_ranking=case.require_top_k or fail_on_ranking_miss,
     )
 
 
@@ -188,6 +200,9 @@ def run_discovered_case(
     include_adjunct: bool = False,
     expected_status: str = "exact",
     expect_coverage: bool = False,
+    top_k: int = DEFAULT_TOP_K,
+    enable_tier2: bool = False,
+    fail_on_ranking_miss: bool = False,
 ) -> CorpusCaseResult:
     """Execute Tier 1 pipeline for one case discovered from local storage."""
     score_turn_number = case.host_turn + 1
@@ -254,6 +269,30 @@ def run_discovered_case(
         case.host_turn,
     )
 
+    score_turn_number = case.host_turn + 1
+    other_perspectives = [
+        perspective
+        for perspective in list_perspectives_with_turn_pair(
+            store,
+            game_id=case.game_id,
+            host_turn=case.host_turn,
+            score_turn=score_turn_number,
+        )
+        if perspective != case.perspective
+    ]
+    tier2_other_prior: list[TurnInfo] = []
+    tier2_other_score: list[TurnInfo] = []
+    for perspective in other_perspectives:
+        try:
+            tier2_other_prior.append(
+                turn_load.get_turn_info(case.game_id, perspective, case.host_turn)
+            )
+            tier2_other_score.append(
+                turn_load.get_turn_info(case.game_id, perspective, score_turn_number)
+            )
+        except OSError, ValueError, KeyError:
+            continue
+
     return run_loaded_case(
         LoadedCorpusCase(
             case_id=case.id,
@@ -269,6 +308,11 @@ def run_discovered_case(
         load_scoreboard_turn=load_scoreboard_turn,
         ground_truth_prior_turn=gt_prior_turn,
         ground_truth_score_turn=gt_score_turn,
+        top_k=top_k,
+        enable_tier2=enable_tier2,
+        hard_ranking=fail_on_ranking_miss,
+        tier2_other_prior_turns=tuple(tier2_other_prior),
+        tier2_other_score_turns=tuple(tier2_other_score),
     )
 
 
@@ -278,6 +322,11 @@ def run_loaded_case(
     ground_truth_prior_turn: TurnInfo,
     ground_truth_score_turn: TurnInfo,
     load_scoreboard_turn=None,
+    top_k: int = DEFAULT_TOP_K,
+    enable_tier2: bool = False,
+    hard_ranking: bool = False,
+    tier2_other_prior_turns: tuple[TurnInfo, ...] = (),
+    tier2_other_score_turns: tuple[TurnInfo, ...] = (),
 ) -> CorpusCaseResult:
     """Ground truth, coverage, and Tier 1 on one observation and catalog build."""
     extraction = extract_ground_truth_v1(
@@ -358,7 +407,31 @@ def run_loaded_case(
             coverage_reason=coverage_block.coverage_reason,
         )
 
-    return _run_tier1_for_loaded_case(
+    coverage_passed = coverage_block is None or coverage_block.in_search_space
+
+    if enable_tier2 and extraction.available:
+        tier2_failure = verify_tier2_compatibility(
+            ground_truth=extraction.ground_truth,
+            prior_turn=ground_truth_prior_turn,
+            score_turn=ground_truth_score_turn,
+            player_id=loaded.player_id,
+            score=loaded.score,
+            complexity=loaded.complexity,
+            other_prior_turns=tier2_other_prior_turns,
+            other_score_turns=tier2_other_score_turns,
+        )
+        if tier2_failure is not None:
+            return CorpusCaseResult(
+                case_id=loaded.case_id,
+                outcome=CaseOutcome.FAILED,
+                complexity=loaded.complexity,
+                complexity_reasons=loaded.complexity_reasons,
+                ground_truth_available=True,
+                coverage_reason=coverage_block.coverage_reason if coverage_block else None,
+                failure_message=tier2_failure,
+            )
+
+    tier1_result, inference_payload = _run_tier1_for_loaded_case(
         case_id=loaded.case_id,
         score_turn=loaded.score_turn,
         score=loaded.score,
@@ -369,6 +442,24 @@ def run_loaded_case(
         observation=observation,
         catalog=catalog,
         load_scoreboard_turn=load_scoreboard_turn,
+    )
+    if tier1_result.outcome != CaseOutcome.PASSED:
+        return tier1_result
+
+    if not (
+        extraction.available
+        and coverage_passed
+        and tier1_result.status == STATUS_EXACT
+        and inference_payload is not None
+    ):
+        return tier1_result
+
+    return _apply_ranking_check(
+        tier1_result,
+        ground_truth=extraction.ground_truth,
+        inference_payload=inference_payload,
+        top_k=top_k,
+        hard_ranking=hard_ranking,
     )
 
 
@@ -384,7 +475,7 @@ def _run_tier1_for_loaded_case(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     load_scoreboard_turn=None,
-) -> CorpusCaseResult:
+) -> tuple[CorpusCaseResult, dict[str, object] | None]:
     inference, inference_observation, solve_catalog = run_inference_with_artifacts(
         score,
         score_turn,
@@ -392,13 +483,16 @@ def _run_tier1_for_loaded_case(
     )
     status = inference.get("status")
     if not isinstance(status, str):
-        return CorpusCaseResult(
-            case_id=case_id,
-            outcome=CaseOutcome.FAILED,
-            failure_message="inference payload missing status",
-            complexity=complexity,
-            complexity_reasons=complexity_reasons,
-            ground_truth_available=ground_truth_available,
+        return (
+            CorpusCaseResult(
+                case_id=case_id,
+                outcome=CaseOutcome.FAILED,
+                failure_message="inference payload missing status",
+                complexity=complexity,
+                complexity_reasons=complexity_reasons,
+                ground_truth_available=ground_truth_available,
+            ),
+            None,
         )
 
     solution_count_raw = inference.get("solutionCount", 0)
@@ -411,15 +505,18 @@ def _run_tier1_for_loaded_case(
         solution_count=solution_count,
     )
     if status_failure is not None:
-        return CorpusCaseResult(
-            case_id=case_id,
-            outcome=CaseOutcome.FAILED,
-            status=status,
-            solution_count=solution_count,
-            complexity=complexity,
-            complexity_reasons=complexity_reasons,
-            ground_truth_available=ground_truth_available,
-            failure_message=status_failure,
+        return (
+            CorpusCaseResult(
+                case_id=case_id,
+                outcome=CaseOutcome.FAILED,
+                status=status,
+                solution_count=solution_count,
+                complexity=complexity,
+                complexity_reasons=complexity_reasons,
+                ground_truth_available=ground_truth_available,
+                failure_message=status_failure,
+            ),
+            None,
         )
 
     if status in {STATUS_EXACT, STATUS_TIME_LIMITED} and solution_count >= 1:
@@ -429,25 +526,72 @@ def _run_tier1_for_loaded_case(
             inference_payload=inference,
         )
         if verify_failure is not None:
-            return CorpusCaseResult(
-                case_id=case_id,
-                outcome=CaseOutcome.FAILED,
-                status=status,
-                solution_count=solution_count,
-                complexity=complexity,
-                complexity_reasons=complexity_reasons,
-                ground_truth_available=ground_truth_available,
-                failure_message=verify_failure,
+            return (
+                CorpusCaseResult(
+                    case_id=case_id,
+                    outcome=CaseOutcome.FAILED,
+                    status=status,
+                    solution_count=solution_count,
+                    complexity=complexity,
+                    complexity_reasons=complexity_reasons,
+                    ground_truth_available=ground_truth_available,
+                    failure_message=verify_failure,
+                ),
+                None,
             )
 
+    return (
+        CorpusCaseResult(
+            case_id=case_id,
+            outcome=CaseOutcome.PASSED,
+            status=status,
+            solution_count=solution_count,
+            complexity=complexity,
+            complexity_reasons=complexity_reasons,
+            ground_truth_available=ground_truth_available,
+        ),
+        inference,
+    )
+
+
+def _apply_ranking_check(
+    tier1_result: CorpusCaseResult,
+    *,
+    ground_truth: tuple[tuple[str, int], ...],
+    inference_payload: dict[str, object],
+    top_k: int,
+    hard_ranking: bool,
+) -> CorpusCaseResult:
+    solutions = inference_payload.get("solutions")
+    if not isinstance(solutions, list):
+        return tier1_result
+
+    hit, ground_truth_rank = check_ground_truth_in_top_k(
+        ground_truth,
+        solutions,
+        k=top_k,
+    )
+    if hit:
+        return tier1_result
+
+    if ground_truth_rank is None:
+        failure_message = f"ground truth not found in any of {len(solutions)} returned solution(s)"
+    else:
+        failure_message = f"ground truth at rank {ground_truth_rank} is outside top {top_k}"
+
     return CorpusCaseResult(
-        case_id=case_id,
-        outcome=CaseOutcome.PASSED,
-        status=status,
-        solution_count=solution_count,
-        complexity=complexity,
-        complexity_reasons=complexity_reasons,
-        ground_truth_available=ground_truth_available,
+        case_id=tier1_result.case_id,
+        outcome=CaseOutcome.RANKING_MISS,
+        status=tier1_result.status,
+        solution_count=tier1_result.solution_count,
+        complexity=tier1_result.complexity,
+        complexity_reasons=tier1_result.complexity_reasons,
+        ground_truth_available=tier1_result.ground_truth_available,
+        coverage_reason=tier1_result.coverage_reason,
+        failure_message=failure_message,
+        ground_truth_rank=ground_truth_rank,
+        top_k=top_k,
+        hard_ranking_miss=hard_ranking,
     )
 
 
