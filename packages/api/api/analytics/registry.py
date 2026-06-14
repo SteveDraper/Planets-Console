@@ -1,7 +1,7 @@
 """Registry for Core turn analytics."""
 
 from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
-from api.analytics.catalog import TurnAnalyticCatalogEntry
+from api.analytics.catalog import TurnAnalyticCatalogEntry, publish_turn_analytic_catalog
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.options import TurnAnalyticsOptions
@@ -24,21 +24,16 @@ TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
 
 validate_turn_analytic_registrations(TURN_ANALYTIC_REGISTRATIONS)
 
-TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
+_derived_catalog: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
     registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
 )
+TURN_ANALYTIC_CATALOG = _derived_catalog
+publish_turn_analytic_catalog(_derived_catalog)
+
 
 _TURN_ANALYTIC_REGISTRATIONS_BY_ID: dict[str, TurnAnalyticRegistration] = {
     registration.catalog_entry.id: registration for registration in TURN_ANALYTIC_REGISTRATIONS
 }
-
-
-def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
-    try:
-        return _TURN_ANALYTIC_REGISTRATIONS_BY_ID[analytic_id].catalog_entry
-    except KeyError as err:
-        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
-
 
 TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
     analytic_id: registration.compute
@@ -51,5 +46,6 @@ def get_turn_analytic(analytic_id: str, turn: TurnInfo, options: TurnAnalyticsOp
         handler = TURN_ANALYTICS[analytic_id]
     except KeyError as err:
         raise ValidationError(f"Unknown analytic_id: {analytic_id!r}") from err
+    # ctx.diagnostics mirrors options.diagnostics; handlers should use ctx.diagnostics.
     ctx = AnalyticComputeContext(turn=turn, options=options, diagnostics=options.diagnostics)
     return handler(ctx)

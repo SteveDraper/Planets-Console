@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from api.analytics import TURN_ANALYTIC_CATALOG, TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.base_map import get_base_map
+from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.registry import TURN_ANALYTICS
 from api.analytics.scores import get_scores_table
 from api.errors import ValidationError
@@ -47,23 +48,18 @@ def test_registry_rejects_unknown_analytic(sample_turn):
         get_turn_analytic("missing", sample_turn, TurnAnalyticsOptions())
 
 
-def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn):
+def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn, monkeypatch):
     from api.diagnostics import DiagnosticNode
 
     diagnostics = DiagnosticNode(name="test-root")
     captured: dict[str, object] = {}
 
-    def capture_handler(ctx):
+    def capture_handler(ctx: AnalyticComputeContext) -> dict:
         captured["diagnostics"] = ctx.diagnostics
         return {"analyticId": "scores"}
 
-    original_handler = TURN_ANALYTICS["scores"]
-    TURN_ANALYTICS["scores"] = capture_handler
-    try:
-        get_turn_analytic("scores", sample_turn, TurnAnalyticsOptions(diagnostics=diagnostics))
-    finally:
-        TURN_ANALYTICS["scores"] = original_handler
-
+    monkeypatch.setitem(TURN_ANALYTICS, "scores", capture_handler)
+    get_turn_analytic("scores", sample_turn, TurnAnalyticsOptions(diagnostics=diagnostics))
     assert captured["diagnostics"] is diagnostics
 
 
@@ -83,7 +79,6 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
 
 def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
     from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
-    from api.analytics.registry import TURN_ANALYTIC_CATALOG
 
     with pytest.raises(RuntimeError, match="Core handlers"):
         dict_aligned_with_turn_analytic_catalog(
@@ -105,10 +100,9 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     from api.analytics.registration import (
         TurnAnalyticRegistration,
         validate_turn_analytic_registrations,
-        with_options,
     )
 
-    catalog_entry = TurnAnalyticCatalogEntry(
+    entry = TurnAnalyticCatalogEntry(
         id="duplicate-id",
         name="Duplicate",
         supports_table=True,
@@ -116,13 +110,12 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
         type="selectable",
     )
 
-    def compute(_turn, _options):
+    def compute(_ctx: AnalyticComputeContext) -> dict:
         return {"analyticId": "duplicate-id"}
 
-    handler = with_options(compute)
     registrations = (
-        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=handler),
-        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=handler),
+        TurnAnalyticRegistration(catalog_entry=entry, compute=compute),
+        TurnAnalyticRegistration(catalog_entry=entry, compute=compute),
     )
 
     with pytest.raises(RuntimeError, match="Duplicate"):
@@ -131,7 +124,7 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
 
 def _registration_for_validation(*, compute=None, **catalog_overrides):
     from api.analytics.catalog import TurnAnalyticCatalogEntry
-    from api.analytics.registration import TurnAnalyticRegistration, with_options
+    from api.analytics.registration import TurnAnalyticRegistration
 
     catalog_fields = {
         "id": "test-analytic",
@@ -141,15 +134,13 @@ def _registration_for_validation(*, compute=None, **catalog_overrides):
         "type": "selectable",
     }
     catalog_fields.update(catalog_overrides)
-    catalog_entry = TurnAnalyticCatalogEntry(**catalog_fields)
+    entry = TurnAnalyticCatalogEntry(**catalog_fields)
     if compute is None:
 
-        def compute(_turn, _options):
-            return {"analyticId": catalog_entry.id}
+        def compute(_ctx: AnalyticComputeContext) -> dict:
+            return {"analyticId": entry.id}
 
-        compute = with_options(compute)
-
-    return TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute)
+    return TurnAnalyticRegistration(catalog_entry=entry, compute=compute)
 
 
 @pytest.mark.parametrize(

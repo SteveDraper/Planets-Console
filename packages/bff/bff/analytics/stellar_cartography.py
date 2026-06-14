@@ -1,6 +1,6 @@
 """BFF Stellar Cartography map analytic handler."""
 
-from api.analytics.registry import catalog_entry
+from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor

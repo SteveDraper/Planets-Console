@@ -1,7 +1,8 @@
 """Core base-map analytic."""
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.registration import TurnAnalyticRegistration, turn_only
+from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.warp_well import WarpWellKind, map_cell_indices_in_warp_well
 from api.models.game import TurnInfo
 from api.serialization.planet import planet_to_public_json
@@ -9,8 +10,9 @@ from api.serialization.planet import planet_to_public_json
 ANALYTIC_ID = "base-map"
 
 
-def get_base_map(turn: TurnInfo) -> dict:
+def compute_base_map(ctx: AnalyticComputeContext) -> dict:
     """Return planet nodes for the fixed map base layer."""
+    turn = ctx.turn
     players_by_id = {pl.id: pl for pl in turn.players}
 
     def owner_name(owner_id: int) -> str | None:
@@ -38,6 +40,13 @@ def get_base_map(turn: TurnInfo) -> dict:
     return {"analyticId": ANALYTIC_ID, "nodes": nodes, "edges": []}
 
 
+def get_base_map(turn: TurnInfo) -> dict:
+    """Convenience entry for tests and direct callers that only have a turn."""
+    from api.analytics.options import TurnAnalyticsOptions
+
+    return compute_base_map(AnalyticComputeContext(turn=turn, options=TurnAnalyticsOptions()))
+
+
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=TurnAnalyticCatalogEntry(
         id=ANALYTIC_ID,
@@ -46,5 +55,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="base",
     ),
-    compute=turn_only(get_base_map),
+    compute=compute_base_map,
 )

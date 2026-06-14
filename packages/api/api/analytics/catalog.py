@@ -17,7 +17,34 @@ class TurnAnalyticCatalogEntry:
     type: AnalyticType
 
 
+TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = ()
+_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {}
+
 T = TypeVar("T")
+
+
+def publish_turn_analytic_catalog(catalog: tuple[TurnAnalyticCatalogEntry, ...]) -> None:
+    """Install the derived catalog published by ``api.analytics.registry`` at import."""
+    global TURN_ANALYTIC_CATALOG
+    if _CATALOG_BY_ID:
+        raise RuntimeError("Turn analytic catalog already published")
+    TURN_ANALYTIC_CATALOG = catalog
+    _CATALOG_BY_ID.update((entry.id, entry) for entry in catalog)
+
+
+def _ensure_turn_analytic_catalog_published() -> None:
+    if _CATALOG_BY_ID:
+        return
+    import api.analytics.registry  # noqa: F401
+
+
+def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
+    """Return catalog metadata for one turn analytic id."""
+    _ensure_turn_analytic_catalog_published()
+    try:
+        return _CATALOG_BY_ID[analytic_id]
+    except KeyError as err:
+        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
 
 
 def _validate_registry_ids_match_catalog(

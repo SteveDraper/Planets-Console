@@ -5,8 +5,6 @@ from dataclasses import dataclass
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
-from api.analytics.options import TurnAnalyticsOptions
-from api.models.game import TurnInfo
 
 
 @dataclass(frozen=True)
@@ -17,26 +15,6 @@ class EmptyExportCatalog:
 EMPTY_EXPORT_CATALOG = EmptyExportCatalog()
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
-TurnAnalyticTurnCompute = Callable[[TurnInfo], dict]
-TurnAnalyticTurnOptionsCompute = Callable[[TurnInfo, TurnAnalyticsOptions], dict]
-
-
-def turn_only(compute: TurnAnalyticTurnCompute) -> TurnAnalyticHandler:
-    """Wrap a turn-only domain function as a context handler."""
-
-    def handler(ctx: AnalyticComputeContext) -> dict:
-        return compute(ctx.turn)
-
-    return handler
-
-
-def with_options(compute: TurnAnalyticTurnOptionsCompute) -> TurnAnalyticHandler:
-    """Wrap a turn+options domain function as a context handler."""
-
-    def handler(ctx: AnalyticComputeContext) -> dict:
-        return compute(ctx.turn, ctx.options)
-
-    return handler
 
 
 @dataclass(frozen=True)
