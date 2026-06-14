@@ -79,7 +79,10 @@ def test_validate_turn_analytic_registrations_rejects_empty_tuple():
 
 def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     from api.analytics.catalog import TurnAnalyticCatalogEntry
-    from api.analytics.registration import TurnAnalyticRegistration, validate_turn_analytic_registrations
+    from api.analytics.registration import (
+        TurnAnalyticRegistration,
+        validate_turn_analytic_registrations,
+    )
 
     catalog_entry = TurnAnalyticCatalogEntry(
         id="duplicate-id",
@@ -88,7 +91,10 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
         supports_map=False,
         type="selectable",
     )
-    handler = lambda ctx: {"analyticId": "duplicate-id"}
+
+    def handler(_ctx):
+        return {"analyticId": "duplicate-id"}
+
     registrations = (
         TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler),
         TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler),
