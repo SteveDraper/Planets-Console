@@ -58,11 +58,8 @@ def tuple_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) 
 
 
 def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
-    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
-
-    by_id = {entry.catalog_entry.id: entry.catalog_entry for entry in TURN_ANALYTIC_REGISTRATIONS}
     try:
-        return by_id[analytic_id]
+        return _CATALOG_BY_ID[analytic_id]
     except KeyError as err:
         raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
 
