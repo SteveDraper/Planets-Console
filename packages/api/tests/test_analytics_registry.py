@@ -76,18 +76,6 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
         assert registration.catalog_entry.id in TURN_ANALYTICS
         assert callable(registration.compute)
 
-
-def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
-    from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
-
-    with pytest.raises(RuntimeError, match="Core handlers"):
-        dict_aligned_with_turn_analytic_catalog(
-            {"not-in-catalog": object()},
-            TURN_ANALYTIC_CATALOG,
-            role="Core handlers",
-        )
-
-
 def test_validate_turn_analytic_registrations_rejects_empty_tuple():
     from api.analytics.registration import validate_turn_analytic_registrations
 

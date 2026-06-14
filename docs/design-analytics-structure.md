@@ -33,7 +33,7 @@ Related docs:
 
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
 
-**Shared catalog:** `TURN_ANALYTIC_CATALOG` is derived from Core **turn analytic registration** objects (`TURN_ANALYTIC_REGISTRATIONS`). Each registration bundles catalog metadata, a compute handler, and an export-catalog placeholder. BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. `dict_aligned_with_turn_analytic_catalog` / `tuple_aligned_with_turn_analytic_catalog` in `catalog.py` validate BFF descriptor keys against the catalog and preserve catalog order at import. Id or metadata drift raises `RuntimeError` on startup. Core handlers and BFF descriptors remain registered separately (cross-layer); within Core, catalog and handlers are derived from one registration tuple.
+**Shared catalog:** `TURN_ANALYTIC_CATALOG` is derived from Core **turn analytic registration** objects (`TURN_ANALYTIC_REGISTRATIONS`). Each registration bundles catalog metadata, a compute handler, and an export-catalog placeholder. BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. `tuple_aligned_with_turn_analytic_catalog` in `catalog.py` validates BFF descriptor keys against the catalog and preserves catalog order at import. Id or metadata drift raises `RuntimeError` on startup. Core handlers and BFF descriptors remain registered separately (cross-layer); within Core, catalog and handlers are derived from one registration tuple.
 
 ### Fixed analytic assets
 

@@ -46,18 +46,6 @@ def _validate_registry_ids_match_catalog(
     )
 
 
-def dict_aligned_with_turn_analytic_catalog(
-    by_id: dict[str, T],
-    catalog: tuple[TurnAnalyticCatalogEntry, ...],
-    *,
-    role: str,
-) -> dict[str, T]:
-    """Return *by_id* in catalog order after verifying its keys match the catalog exactly."""
-    catalog_ids = {entry.id for entry in catalog}
-    _validate_registry_ids_match_catalog(catalog_ids, set(by_id), role=role)
-    return {entry.id: by_id[entry.id] for entry in catalog}
-
-
 def tuple_aligned_with_turn_analytic_catalog(
     by_id: dict[str, T],
     catalog: tuple[TurnAnalyticCatalogEntry, ...],
