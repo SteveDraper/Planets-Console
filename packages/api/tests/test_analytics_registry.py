@@ -47,11 +47,6 @@ def test_registry_rejects_unknown_analytic(sample_turn):
         get_turn_analytic("missing", sample_turn, TurnAnalyticsOptions())
 
 
-def test_turn_analytics_registry_follows_catalog():
-    assert list(TURN_ANALYTICS) == [entry.id for entry in TURN_ANALYTIC_CATALOG]
-    assert set(TURN_ANALYTICS) == {entry.id for entry in TURN_ANALYTIC_CATALOG}
-
-
 def test_turn_analytic_registrations_derive_catalog_and_handlers():
     from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
 
