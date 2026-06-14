@@ -1,8 +1,7 @@
 """Core base-map analytic."""
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.compute_context import AnalyticComputeContext
-from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.registration import TurnAnalyticRegistration, handler_from_turn
 from api.concepts.warp_well import WarpWellKind, map_cell_indices_in_warp_well
 from api.models.game import TurnInfo
 from api.serialization.planet import planet_to_public_json
@@ -39,10 +38,6 @@ def get_base_map(turn: TurnInfo) -> dict:
     return {"analyticId": ANALYTIC_ID, "nodes": nodes, "edges": []}
 
 
-def _compute_base_map(ctx: AnalyticComputeContext) -> dict:
-    return get_base_map(ctx.turn)
-
-
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=TurnAnalyticCatalogEntry(
         id=ANALYTIC_ID,
@@ -51,5 +46,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="base",
     ),
-    handler=_compute_base_map,
+    handler=handler_from_turn(get_base_map),
 )

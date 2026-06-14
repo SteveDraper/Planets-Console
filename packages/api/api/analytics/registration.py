@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.options import TurnAnalyticsOptions
+from api.models.game import TurnInfo
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,16 @@ class EmptyExportCatalog:
 EMPTY_EXPORT_CATALOG = EmptyExportCatalog()
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
+
+
+def handler_from_turn_and_options(
+    fn: Callable[[TurnInfo, TurnAnalyticsOptions], dict],
+) -> TurnAnalyticHandler:
+    return lambda ctx: fn(ctx.turn, ctx.options)
+
+
+def handler_from_turn(fn: Callable[[TurnInfo], dict]) -> TurnAnalyticHandler:
+    return lambda ctx: fn(ctx.turn)
 
 
 @dataclass(frozen=True)

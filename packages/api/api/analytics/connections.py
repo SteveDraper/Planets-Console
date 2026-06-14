@@ -1,9 +1,8 @@
 """Core Connections analytic adapter."""
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.registration import TurnAnalyticRegistration, handler_from_turn_and_options
 from api.concepts.planet_connections import connection_routes_with_options
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -40,10 +39,6 @@ def get_connections_map(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
     }
 
 
-def _compute_connections_map(ctx: AnalyticComputeContext) -> dict:
-    return get_connections_map(ctx.turn, ctx.options)
-
-
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=TurnAnalyticCatalogEntry(
         id=ANALYTIC_ID,
@@ -52,5 +47,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="selectable",
     ),
-    handler=_compute_connections_map,
+    handler=handler_from_turn_and_options(get_connections_map),
 )
