@@ -1,6 +1,7 @@
 """Aggregated Core turn analytic registrations."""
 
 from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
+from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.registration import (
     TurnAnalyticRegistration,
@@ -17,3 +18,7 @@ TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
 )
 
 validate_turn_analytic_registrations(TURN_ANALYTIC_REGISTRATIONS)
+
+TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
+    registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
+)

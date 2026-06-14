@@ -36,25 +36,25 @@ def _validate_registry_ids_match_catalog(
     )
 
 
+from api.analytics.registrations import TURN_ANALYTIC_CATALOG  # noqa: E402
+
+_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
+    entry.id: entry for entry in TURN_ANALYTIC_CATALOG
+}
+
+
 def dict_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) -> dict[str, T]:
     """Return *by_id* in catalog order after verifying its keys match the catalog exactly."""
-    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
-
-    catalog_ids = {entry.catalog_entry.id for entry in TURN_ANALYTIC_REGISTRATIONS}
+    catalog_ids = {entry.id for entry in TURN_ANALYTIC_CATALOG}
     _validate_registry_ids_match_catalog(catalog_ids, set(by_id), role=role)
-    return {
-        entry.catalog_entry.id: by_id[entry.catalog_entry.id]
-        for entry in TURN_ANALYTIC_REGISTRATIONS
-    }
+    return {entry.id: by_id[entry.id] for entry in TURN_ANALYTIC_CATALOG}
 
 
 def tuple_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) -> tuple[T, ...]:
     """Return *by_id* values in catalog order after verifying keys match the catalog exactly."""
-    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
-
-    catalog_ids = {entry.catalog_entry.id for entry in TURN_ANALYTIC_REGISTRATIONS}
+    catalog_ids = {entry.id for entry in TURN_ANALYTIC_CATALOG}
     _validate_registry_ids_match_catalog(catalog_ids, set(by_id), role=role)
-    return tuple(by_id[entry.catalog_entry.id] for entry in TURN_ANALYTIC_REGISTRATIONS)
+    return tuple(by_id[entry.id] for entry in TURN_ANALYTIC_CATALOG)
 
 
 def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
@@ -62,14 +62,3 @@ def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
         return _CATALOG_BY_ID[analytic_id]
     except KeyError as err:
         raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
-
-
-from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS  # noqa: E402
-
-TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
-    registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
-)
-
-_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
-    entry.id: entry for entry in TURN_ANALYTIC_CATALOG
-}
