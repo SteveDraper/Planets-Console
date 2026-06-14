@@ -1,6 +1,7 @@
 """BFF analytics catalog and dispatch."""
 
 from api.analytics.catalog import tuple_aligned_with_turn_analytic_catalog
+from api.analytics.registrations import TURN_ANALYTIC_CATALOG
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor
@@ -19,6 +20,7 @@ _BFF_DESCRIPTORS_BY_ID: dict[str, AnalyticDescriptor] = {
 
 REGISTERED_ANALYTICS: tuple[AnalyticDescriptor, ...] = tuple_aligned_with_turn_analytic_catalog(
     _BFF_DESCRIPTORS_BY_ID,
+    TURN_ANALYTIC_CATALOG,
     role="BFF descriptors",
 )
 

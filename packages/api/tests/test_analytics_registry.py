@@ -62,10 +62,12 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
 
 def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
     from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
+    from api.analytics.registrations import TURN_ANALYTIC_CATALOG
 
     with pytest.raises(RuntimeError, match="Core handlers"):
         dict_aligned_with_turn_analytic_catalog(
             {"not-in-catalog": object()},
+            TURN_ANALYTIC_CATALOG,
             role="Core handlers",
         )
 

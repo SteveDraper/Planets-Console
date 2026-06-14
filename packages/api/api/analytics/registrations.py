@@ -22,3 +22,14 @@ validate_turn_analytic_registrations(TURN_ANALYTIC_REGISTRATIONS)
 TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
     registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
 )
+
+_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
+    entry.id: entry for entry in TURN_ANALYTIC_CATALOG
+}
+
+
+def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
+    try:
+        return _CATALOG_BY_ID[analytic_id]
+    except KeyError as err:
+        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err

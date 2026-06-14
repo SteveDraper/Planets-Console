@@ -1,6 +1,6 @@
 """BFF Connections map analytic handler."""
 
-from api.analytics.catalog import catalog_entry
+from api.analytics.registrations import catalog_entry
 from api.diagnostics import Diagnostics
 from api.transport.connections_options import (
     FLARE_DEPTH_QUERY,

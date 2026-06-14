@@ -370,7 +370,7 @@ def test_inference_diagnostics_include_policy_ladder_fields(sample_turn):
 
 
 def test_registry_still_exposes_only_scores_analytic(sample_turn):
-    from api.analytics.catalog import TURN_ANALYTIC_CATALOG
+    from api.analytics.registrations import TURN_ANALYTIC_CATALOG
     from api.analytics.registry import TURN_ANALYTICS
 
     assert set(TURN_ANALYTICS) == {entry.id for entry in TURN_ANALYTIC_CATALOG}
