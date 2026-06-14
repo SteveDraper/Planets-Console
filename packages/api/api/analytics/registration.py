@@ -50,7 +50,3 @@ def validate_turn_analytic_registrations(
         if analytic_id in seen_ids:
             raise RuntimeError(f"Duplicate turn analytic registration id: {analytic_id!r}")
         seen_ids.add(analytic_id)
-        if registration.handler is None:
-            raise RuntimeError(
-                f"Turn analytic registration {analytic_id!r} is missing a compute handler."
-            )
