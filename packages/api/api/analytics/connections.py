@@ -2,8 +2,9 @@
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.registration import TurnAnalyticRegistration, with_options
+from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.planet_connections import connection_routes_with_options
+from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.transport.connections_options import FlareConnectionMode
@@ -11,7 +12,12 @@ from api.transport.connections_options import FlareConnectionMode
 ANALYTIC_ID = "connections"
 
 
-def get_connections_map(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
+def get_connections_map(
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions,
+    *,
+    diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
+) -> dict:
     """Return connection route pairs for the selected turn."""
     warp = options.connection_warp_speed if options.connection_warp_speed is not None else 9
     if warp < 1 or warp > 9:
@@ -28,7 +34,7 @@ def get_connections_map(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
         gravitonic_movement=options.connection_gravitonic_movement,
         flare_mode=flare_mode,
         flare_depth=options.connection_flare_depth,
-        diagnostics=options.diagnostics,
+        diagnostics=diagnostics,
         include_illustrative_routes=options.connection_include_illustrative_routes,
     )
     return {
@@ -47,5 +53,7 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="selectable",
     ),
-    compute=with_options(get_connections_map),
+    compute=lambda ctx: get_connections_map(
+        ctx.turn, ctx.options, diagnostics=ctx.diagnostics
+    ),
 )
