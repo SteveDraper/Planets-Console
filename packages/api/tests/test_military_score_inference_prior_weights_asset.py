@@ -5,12 +5,16 @@ from pathlib import Path
 import pytest
 from api.analytics.military_score_inference.aggregate_action_registry import AGGREGATE_ACTION_SPECS
 from api.analytics.military_score_inference.prior_weights_asset import (
-    default_prior_weights_dir,
     load_prior_weights_for_category,
     parse_prior_weights_document,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
 from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
+
+from tests.fixtures.hand_seeded_prior_weights import (
+    HAND_SEEDED_PRIOR_WEIGHTS_DIR,
+    HAND_SEEDED_STANDARD_PRIOR_PATH,
+)
 
 
 def _complete_aggregates_band() -> dict[str, object]:
@@ -43,19 +47,29 @@ def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
     return document
 
 
-def test_standard_prior_asset_loads():
-    asset, path, fell_back = load_prior_weights_for_category(GameCategory.STANDARD)
+def test_hand_seeded_standard_prior_fixture_loads():
+    asset, path, fell_back = load_prior_weights_for_category(
+        GameCategory.STANDARD,
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
+    )
     assert not fell_back
-    assert path.name == "prior_weights_standard.yaml"
+    assert path == HAND_SEEDED_STANDARD_PRIOR_PATH
     assert asset.category == GameCategory.STANDARD
     assert asset.version == 3
     assert asset.hulls["before_ship_limit"]["global"][WILDCARD_COUNT_KEY] == 50
 
 
+def test_production_standard_prior_asset_loads():
+    asset, path, fell_back = load_prior_weights_for_category(GameCategory.STANDARD)
+    assert not fell_back
+    assert path.name == "prior_weights_standard.yaml"
+    assert asset.category == GameCategory.STANDARD
+    assert asset.version == 3
+
+
 def test_missing_category_falls_back_to_standard(tmp_path: Path):
-    standard_src = default_prior_weights_dir() / "prior_weights_standard.yaml"
     tmp_path.joinpath("prior_weights_standard.yaml").write_text(
-        standard_src.read_text(encoding="utf-8"),
+        HAND_SEEDED_STANDARD_PRIOR_PATH.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     asset, path, fell_back = load_prior_weights_for_category(

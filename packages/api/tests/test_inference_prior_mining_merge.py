@@ -17,11 +17,11 @@ from api.analytics.military_score_inference.prior_mining.merge import (
 )
 from api.analytics.military_score_inference.prior_mining.observations import ShipBuildObservation
 from api.analytics.military_score_inference.prior_weights_asset import (
-    default_prior_weights_dir,
     load_prior_weights_asset,
     parse_prior_weights_document,
 )
 
+from tests.fixtures.hand_seeded_prior_weights import HAND_SEEDED_STANDARD_PRIOR_PATH
 from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.test_military_score_inference_prior_weights_asset import _minimal_prior_weights_document
 
@@ -33,7 +33,7 @@ def _catalog_from_turn_fixture(relative_path: str):
 
 
 def test_merge_accumulation_adds_counts_and_contributing_game_ids(tmp_path: Path):
-    source = default_prior_weights_dir() / "prior_weights_standard.yaml"
+    source = HAND_SEEDED_STANDARD_PRIOR_PATH
     asset = load_prior_weights_asset(source)
     before_hull = asset.hulls["before_ship_limit"]["global"].get(13, 0)
 
@@ -78,7 +78,7 @@ def test_merge_accumulation_adds_counts_and_contributing_game_ids(tmp_path: Path
 
 
 def test_merge_accumulation_appends_rejected_game_ids_to_provenance(tmp_path: Path):
-    source = default_prior_weights_dir() / "prior_weights_standard.yaml"
+    source = HAND_SEEDED_STANDARD_PRIOR_PATH
     asset = load_prior_weights_asset(source)
     before_hull = asset.hulls["before_ship_limit"]["global"].get(13, 0)
 

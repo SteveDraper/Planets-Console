@@ -23,9 +23,10 @@ from api.analytics.military_score_inference.prior_mining.runner import (
 )
 from api.analytics.military_score_inference.prior_weights_asset import (
     create_empty_prior_weights_asset,
-    default_prior_weights_dir,
 )
 from api.concepts.game_category import GameCategory
+
+from tests.fixtures.hand_seeded_prior_weights import HAND_SEEDED_STANDARD_PRIOR_PATH
 
 
 def _standard_pattern(*, pattern_id: str = "standard-v1", max_games: int = 2) -> PriorMiningPattern:
@@ -125,7 +126,7 @@ def test_run_prior_miner_flushes_accumulation_when_pattern_loop_aborts(tmp_path:
     patterns_path.write_text("version: 1\npatterns: []\n", encoding="utf-8")
     assets_dir = tmp_path / "assets"
     assets_dir.mkdir()
-    source = default_prior_weights_dir() / "prior_weights_standard.yaml"
+    source = HAND_SEEDED_STANDARD_PRIOR_PATH
     (assets_dir / "prior_weights_standard.yaml").write_text(
         source.read_text(encoding="utf-8"),
         encoding="utf-8",

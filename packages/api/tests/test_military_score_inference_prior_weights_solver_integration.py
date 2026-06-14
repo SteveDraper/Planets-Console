@@ -22,6 +22,7 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_in
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.concepts.game_category import GameCategory
 
+from tests.fixtures.hand_seeded_prior_weights import HAND_SEEDED_PRIOR_WEIGHTS_DIR
 from tests.fixtures.military_score_inference import _observation
 
 # Player 8 in turn_sample.json only has freighter hull 15 buildable; player 3 has warships.
@@ -74,6 +75,7 @@ def test_top_k_prefers_higher_prior_feasible_combo(sample_turn, synthetic_catalo
         eligible_engine_ids=synthetic_catalog_context["eligible_engine_ids"],
         eligible_beam_ids=synthetic_catalog_context["eligible_beam_ids"],
         eligible_torp_ids=synthetic_catalog_context["eligible_torp_ids"],
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
     likely_weight = prior_catalog.combo_probability_weight(
         combo_id="likely",
@@ -187,11 +189,14 @@ def test_full_path_catalog_build_top_k_prefers_higher_prior_combo(sample_turn):
         bootstrap_observation,
         standard_turn,
         policy_step=full_step,
+        prior_weights_base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
 
     assert catalog.prior_weights_diagnostics is not None
     assert catalog.prior_weights_diagnostics.category_id == GameCategory.STANDARD
-    assert catalog.prior_weights_diagnostics.asset_path.endswith("prior_weights_standard.yaml")
+    assert catalog.prior_weights_diagnostics.asset_path.endswith(
+        "hand_seeded_prior_weights/prior_weights_standard.yaml"
+    )
 
     higher_prior, lower_prior, military_score = _find_warship_combo_pair_with_prior_gap(catalog)
     assert higher_prior.probability_weight > lower_prior.probability_weight
