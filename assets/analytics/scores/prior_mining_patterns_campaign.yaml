@@ -6,6 +6,6 @@ patterns:
   # v1 seed pattern: small cap until loadall + mining pipeline is validated in CI/dev.
   - id: campaign-v1-seed
     game_category: campaign
-    max_games: 20
+    max_games: 50
     min_difficulty: 1.0
     earliest_date: "2024-01-01"
