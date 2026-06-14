@@ -52,6 +52,19 @@ def test_turn_analytics_registry_follows_catalog():
     assert set(TURN_ANALYTICS) == {entry.id for entry in TURN_ANALYTIC_CATALOG}
 
 
+def test_turn_analytic_registrations_derive_catalog_and_handlers():
+    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
+
+    assert TURN_ANALYTIC_CATALOG == tuple(
+        registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
+    )
+    assert list(TURN_ANALYTICS) == [
+        registration.catalog_entry.id for registration in TURN_ANALYTIC_REGISTRATIONS
+    ]
+    for registration in TURN_ANALYTIC_REGISTRATIONS:
+        assert TURN_ANALYTICS[registration.catalog_entry.id] is registration.handler
+
+
 def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
     from api.analytics.catalog import dict_aligned_with_turn_analytic_catalog
 

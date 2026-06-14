@@ -2,6 +2,8 @@
 
 from collections.abc import Callable, Iterator
 
+from api.analytics.catalog import TurnAnalyticCatalogEntry
+from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -11,6 +13,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 
@@ -112,3 +115,19 @@ def iter_scores_table_inference_stream(
         load_scoreboard_turn=load_scoreboard_turn,
         resolve_mask_for_player=resolve_mask_for_player,
     )
+
+
+def _compute_scores_table(ctx: AnalyticComputeContext) -> dict:
+    return get_scores_table(ctx.turn, ctx.options)
+
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=TurnAnalyticCatalogEntry(
+        id=ANALYTIC_ID,
+        name="Scores",
+        supports_table=True,
+        supports_map=False,
+        type="selectable",
+    ),
+    handler=_compute_scores_table,
+)

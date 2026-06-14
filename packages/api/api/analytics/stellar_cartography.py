@@ -1,6 +1,9 @@
 """Core Stellar Cartography map analytic."""
 
+from api.analytics.catalog import TurnAnalyticCatalogEntry
+from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
@@ -214,3 +217,19 @@ def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) 
         "edges": wormhole_edges,
         "meta": meta,
     }
+
+
+def _compute_stellar_cartography_map(ctx: AnalyticComputeContext) -> dict:
+    return get_stellar_cartography_map(ctx.turn, ctx.options)
+
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=TurnAnalyticCatalogEntry(
+        id=ANALYTIC_ID,
+        name="Stellar Cartography",
+        supports_table=False,
+        supports_map=True,
+        type="selectable",
+    ),
+    handler=_compute_stellar_cartography_map,
+)

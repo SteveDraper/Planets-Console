@@ -17,46 +17,15 @@ class TurnAnalyticCatalogEntry:
     type: AnalyticType
 
 
-TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
-    TurnAnalyticCatalogEntry(
-        id="base-map",
-        name="Map",
-        supports_table=False,
-        supports_map=True,
-        type="base",
-    ),
-    TurnAnalyticCatalogEntry(
-        id="scores",
-        name="Scores",
-        supports_table=True,
-        supports_map=False,
-        type="selectable",
-    ),
-    TurnAnalyticCatalogEntry(
-        id="connections",
-        name="Connections",
-        supports_table=False,
-        supports_map=True,
-        type="selectable",
-    ),
-    TurnAnalyticCatalogEntry(
-        id="stellar-cartography",
-        name="Stellar Cartography",
-        supports_table=False,
-        supports_map=True,
-        type="selectable",
-    ),
-)
-
-_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
-    entry.id: entry for entry in TURN_ANALYTIC_CATALOG
-}
-
 T = TypeVar("T")
 
 
-def _validate_registry_ids_match_catalog(registered_ids: set[str], *, role: str) -> None:
-    catalog_ids = {entry.id for entry in TURN_ANALYTIC_CATALOG}
+def _validate_registry_ids_match_catalog(
+    catalog_ids: set[str],
+    registered_ids: set[str],
+    *,
+    role: str,
+) -> None:
     if catalog_ids == registered_ids:
         return
     missing = sorted(catalog_ids - registered_ids)
@@ -69,18 +38,41 @@ def _validate_registry_ids_match_catalog(registered_ids: set[str], *, role: str)
 
 def dict_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) -> dict[str, T]:
     """Return *by_id* in catalog order after verifying its keys match the catalog exactly."""
-    _validate_registry_ids_match_catalog(set(by_id), role=role)
-    return {entry.id: by_id[entry.id] for entry in TURN_ANALYTIC_CATALOG}
+    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
+
+    catalog_ids = {entry.catalog_entry.id for entry in TURN_ANALYTIC_REGISTRATIONS}
+    _validate_registry_ids_match_catalog(catalog_ids, set(by_id), role=role)
+    return {
+        entry.catalog_entry.id: by_id[entry.catalog_entry.id]
+        for entry in TURN_ANALYTIC_REGISTRATIONS
+    }
 
 
 def tuple_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) -> tuple[T, ...]:
-    """Return *by_id* values in catalog order after verifying its keys match the catalog exactly."""
-    _validate_registry_ids_match_catalog(set(by_id), role=role)
-    return tuple(by_id[entry.id] for entry in TURN_ANALYTIC_CATALOG)
+    """Return *by_id* values in catalog order after verifying keys match the catalog exactly."""
+    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
+
+    catalog_ids = {entry.catalog_entry.id for entry in TURN_ANALYTIC_REGISTRATIONS}
+    _validate_registry_ids_match_catalog(catalog_ids, set(by_id), role=role)
+    return tuple(by_id[entry.catalog_entry.id] for entry in TURN_ANALYTIC_REGISTRATIONS)
 
 
 def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
+    from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
+
+    by_id = {entry.catalog_entry.id: entry.catalog_entry for entry in TURN_ANALYTIC_REGISTRATIONS}
     try:
-        return _CATALOG_BY_ID[analytic_id]
+        return by_id[analytic_id]
     except KeyError as err:
         raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
+
+
+from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS  # noqa: E402
+
+TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
+    registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
+)
+
+_CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
+    entry.id: entry for entry in TURN_ANALYTIC_CATALOG
+}

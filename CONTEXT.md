@@ -129,8 +129,8 @@ Application code imports the smallest matching `schema-<slice>.ts` module for ty
 _Avoid_: `import from './schema'` as the default in feature folders
 
 **Turn analytic catalog**:
-Shared declarative list (`TURN_ANALYTIC_CATALOG` in `api/analytics/catalog.py`) of turn analytic ids and SPA-facing metadata (`name`, `supports_table`, `supports_map`, `type`). Core and BFF both import it; handler and descriptor registries are validated against it at import. Adding an analytic still requires three registrations: one **catalog** entry (identity + metadata), one Core `_HANDLERS_BY_ID` entry (computation), and one BFF `_BFF_DESCRIPTORS_BY_ID` entry (table/map shaping). The catalog does not replace handler or descriptor registration -- it prevents metadata and id drift between layers.
-_Avoid_: single registration list (handlers and shapers are still per-layer dicts)
+Shared declarative list (`TURN_ANALYTIC_CATALOG` in `api/analytics/catalog.py`) of turn analytic ids and SPA-facing metadata (`name`, `supports_table`, `supports_map`, `type`). Derived from Core **turn analytic registration** objects in `api/analytics/registrations.py`. BFF descriptor registries are validated against the catalog at import. Adding an analytic requires: one Core **registration** (catalog entry + compute handler + export catalog placeholder), one BFF `_BFF_DESCRIPTORS_BY_ID` entry (table/map shaping), and -- once exports ship (#95) -- wiring the registration's export catalog into the export registry. Core catalog and handler maps are no longer edited separately; they are derived from the registration tuple. The catalog still prevents metadata and id drift between Core and BFF.
+_Avoid_: editing `TURN_ANALYTIC_CATALOG` and `_HANDLERS_BY_ID` in separate files (Core uses one registration per analytic); merging Core handlers with BFF shapers into one cross-layer list
 
 **Analytic descriptor**:
 The BFF registration object for one **turn analytic** -- optional table/map handlers and diagnostic hooks, with catalog metadata from `TURN_ANALYTIC_CATALOG` via `from_catalog_entry`. Aggregated in `REGISTERED_ANALYTICS`; the SPA catalog comes from this list via `GET /bff/analytics`.

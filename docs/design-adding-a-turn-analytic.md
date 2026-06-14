@@ -30,35 +30,44 @@ ANALYTIC_ID = "my-analytic"
 def get_my_analytic(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
     ...
     return {"analyticId": ANALYTIC_ID, ...}
+
+def _compute_my_analytic(ctx: AnalyticComputeContext) -> dict:
+    return get_my_analytic(ctx.turn, ctx.options)
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=TurnAnalyticCatalogEntry(
+        id=ANALYTIC_ID,
+        name="My Analytic",
+        supports_table=True,
+        supports_map=False,
+        type="selectable",
+    ),
+    handler=_compute_my_analytic,
+)
 ```
 
 Guidelines:
 
-- Input is always `TurnInfo` + `TurnAnalyticsOptions` (see `api/analytics/options.py`).
+- Input is always `TurnInfo` + `TurnAnalyticsOptions` (see `api/analytics/options.py`) on the domain function; the registered handler receives **`AnalyticComputeContext`** (`turn`, `options`, and later `query`).
 - Return a JSON-serializable dict with domain field names. BFF reshapes for the SPA if needed.
 - Reuse **game concepts** from `api/concepts/` rather than duplicating rules.
 - **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 - Attach **request diagnostics** at meaningful boundaries (`diagnostics.child(...)`) when work is non-trivial.
 
-### 2.1a Register in the shared catalog
-
-In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to `TURN_ANALYTIC_CATALOG` (id, name, `supports_table`, `supports_map`, `type`).
-
 ### 2.2 Register in Core
 
-In `packages/api/api/analytics/registry.py`, add the handler to `_HANDLERS_BY_ID`:
+Append the module's `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `packages/api/api/analytics/registrations.py`:
 
 ```python
-from api.analytics.my_analytic import ANALYTIC_ID as MY_ANALYTIC_ID
-from api.analytics.my_analytic import get_my_analytic
+from api.analytics.my_analytic import REGISTRATION as MY_ANALYTIC_REGISTRATION
 
-_HANDLERS_BY_ID: dict[str, TurnAnalyticHandler] = {
+TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
     ...
-    MY_ANALYTIC_ID: get_my_analytic,
-}
+    MY_ANALYTIC_REGISTRATION,
+)
 ```
 
-`TURN_ANALYTICS` is derived from the catalog at import; a missing or extra handler raises `RuntimeError` on startup.
+`TURN_ANALYTIC_CATALOG` and `TURN_ANALYTICS` are derived from that tuple at import; a missing or extra registration raises `RuntimeError` on startup.
 
 ### 2.3 Core -- exports (required)
 
