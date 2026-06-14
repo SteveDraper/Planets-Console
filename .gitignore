@@ -12,4 +12,8 @@ __pycache__/
 # Durable file storage (api.storage_root default)
 .data/
 
+# Local miner data and script reports (not committed)
+local/
+.sampler_data/
+
 # Frontend (packages/frontend has its own .gitignore for node_modules, dist)

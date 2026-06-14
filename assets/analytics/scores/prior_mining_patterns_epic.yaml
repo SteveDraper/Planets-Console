@@ -1,0 +1,11 @@
+# Inference prior miner discovery config for epic games (#92).
+# Epic: shiplimit >= 500, not campaign, endturn > 30 (GameCategory.from_game_settings).
+# Authoritative spec: docs/design-military-score-inference-build-priors.md section 10.1
+version: 1
+patterns:
+  # v1 seed pattern: small cap until loadall + mining pipeline is validated in CI/dev.
+  - id: epic-v1-seed
+    game_category: epic
+    max_games: 100
+    min_difficulty: 1.0
+    earliest_date: "2024-01-01"

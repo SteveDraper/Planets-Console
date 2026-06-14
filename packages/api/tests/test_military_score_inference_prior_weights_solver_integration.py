@@ -168,6 +168,10 @@ def test_top_k_prefers_higher_prior_feasible_combo(sample_turn, synthetic_catalo
 
 def test_full_path_catalog_build_top_k_prefers_higher_prior_combo(sample_turn):
     """End-to-end: turn catalog build with standard YAML priors, then solver top-K ranking."""
+    standard_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, shiplimit=180),
+    )
     bootstrap_observation = InferenceObservation(
         player_id=_SAMPLE_TURN_WARSHIP_PLAYER_ID,
         turn=111,
@@ -181,11 +185,12 @@ def test_full_path_catalog_build_top_k_prefers_higher_prior_combo(sample_turn):
     full_step = resolve_tier_policies()[-1]
     catalog = build_action_catalog_from_turn(
         bootstrap_observation,
-        sample_turn,
+        standard_turn,
         policy_step=full_step,
     )
 
     assert catalog.prior_weights_diagnostics is not None
+    assert catalog.prior_weights_diagnostics.category_id == GameCategory.STANDARD
     assert catalog.prior_weights_diagnostics.asset_path.endswith("prior_weights_standard.yaml")
 
     higher_prior, lower_prior, military_score = _find_warship_combo_pair_with_prior_gap(catalog)

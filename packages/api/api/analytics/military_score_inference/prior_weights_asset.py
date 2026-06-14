@@ -179,6 +179,7 @@ class PriorWeightsAsset:
     aggregates: dict[ShipLimitBand, dict[str, HistogramAggregate]]
     combo_overrides: dict[str, float] = field(default_factory=dict)
     hull_overrides: dict[int, float] = field(default_factory=dict)
+    contributing_game_ids: tuple[int, ...] = ()
 
 
 def _parse_band_hull_tables(
@@ -340,7 +341,11 @@ def validate_complete_aggregate_priors(asset: PriorWeightsAsset, *, band: ShipLi
         )
 
 
-def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
+def parse_prior_weights_document(
+    document: dict[str, Any],
+    *,
+    require_complete_aggregates: bool = True,
+) -> PriorWeightsAsset:
     version = document.get("version")
     if not isinstance(version, int) or version < 1:
         raise ValueError("prior weights version must be a positive integer")
@@ -362,6 +367,19 @@ def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
     overrides_raw = document.get("overrides", {})
     combo_overrides: dict[str, float] = {}
     hull_overrides: dict[int, float] = {}
+    contributing_game_ids: tuple[int, ...] = ()
+    contributing_raw = document.get("contributingGameIds")
+    if contributing_raw is not None:
+        if not isinstance(contributing_raw, list):
+            raise ValueError("contributingGameIds must be a list")
+        parsed_ids: list[int] = []
+        for game_id in contributing_raw:
+            if not isinstance(game_id, int):
+                raise ValueError("contributingGameIds entries must be integers")
+            if game_id in parsed_ids:
+                raise ValueError(f"contributingGameIds contains duplicate id {game_id}")
+            parsed_ids.append(game_id)
+        contributing_game_ids = tuple(parsed_ids)
     if overrides_raw is not None:
         if not isinstance(overrides_raw, dict):
             raise ValueError("overrides must be a mapping")
@@ -389,24 +407,45 @@ def parse_prior_weights_document(document: dict[str, Any]) -> PriorWeightsAsset:
         aggregates=_parse_aggregate_tables(document.get("aggregates")),
         combo_overrides=combo_overrides,
         hull_overrides=hull_overrides,
+        contributing_game_ids=contributing_game_ids,
     )
     for band in SHIP_LIMIT_BANDS:
-        validate_complete_aggregate_priors(asset, band=band)
+        if require_complete_aggregates:
+            validate_complete_aggregate_priors(asset, band=band)
     return asset
 
 
-def load_prior_weights_asset(path: Path) -> PriorWeightsAsset:
+def load_prior_weights_asset(
+    path: Path,
+    *,
+    require_complete_aggregates: bool = True,
+) -> PriorWeightsAsset:
     with path.open(encoding="utf-8") as handle:
         document = yaml.safe_load(handle)
     if not isinstance(document, dict):
         raise ValueError(f"prior weights root must be a mapping: {path}")
-    asset = parse_prior_weights_document(document)
+    asset = parse_prior_weights_document(
+        document,
+        require_complete_aggregates=require_complete_aggregates,
+    )
     expected_stem = f"prior_weights_{asset.category}"
     if path.stem != expected_stem:
         raise ValueError(
             f"prior weights category {asset.category!r} does not match filename stem {path.stem!r}"
         )
     return asset
+
+
+def create_empty_prior_weights_asset(category: GameCategory) -> PriorWeightsAsset:
+    """Return a merge-ready prior asset with no counts (for first-time category mining)."""
+    return PriorWeightsAsset(
+        version=3,
+        category=category.value,
+        game_category_rules_version=GAME_CATEGORY_RULES_VERSION,
+        hulls={band: {"global": {}} for band in SHIP_LIMIT_BANDS},
+        components={band: {} for band in SHIP_LIMIT_BANDS},
+        aggregates={band: {} for band in SHIP_LIMIT_BANDS},
+    )
 
 
 def load_prior_weights_for_category(

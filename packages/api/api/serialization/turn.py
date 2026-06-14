@@ -1,11 +1,17 @@
 """Codec for TurnInfo (rst object from Load Turn Data)."""
 
 import copy
+from dataclasses import fields
 
 import dacite
 
 from api.models.game import TurnInfo
+from api.models.player import Score
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
+from api.serialization.game_settings import (
+    coerce_game_settings_int_fields,
+    settings_dict_needs_int_coercion,
+)
 
 SCORE_FIELD_DEFAULTS: dict[str, int | float | str] = {
     "id": 0,
@@ -37,6 +43,42 @@ SCORE_FIELD_DEFAULTS: dict[str, int | float | str] = {
     "percentchange": 0.0,
     "victoryscorechange": 0,
 }
+
+SCORE_INT_FIELD_NAMES = frozenset(field.name for field in fields(Score) if field.type is int)
+
+
+def _score_entry_needs_int_coercion(entry: dict) -> bool:
+    for key in SCORE_INT_FIELD_NAMES:
+        value = entry.get(key)
+        if isinstance(value, float) and not isinstance(value, bool):
+            return True
+    return False
+
+
+def _coerce_score_entry_int_fields(entry: dict) -> dict:
+    coerced = entry.copy()
+    for key in SCORE_INT_FIELD_NAMES:
+        value = coerced.get(key)
+        if isinstance(value, float) and not isinstance(value, bool):
+            coerced[key] = round(value)
+    return coerced
+
+
+def _payload_with_coerced_score_int_fields(data: dict) -> dict:
+    """Shallow-copy when score rows carry float values for int Score fields."""
+    scores = data.get("scores")
+    if not isinstance(scores, list):
+        return data
+    if not any(
+        isinstance(entry, dict) and _score_entry_needs_int_coercion(entry) for entry in scores
+    ):
+        return data
+    payload = data.copy()
+    payload["scores"] = [
+        _coerce_score_entry_int_fields(entry) if isinstance(entry, dict) else entry
+        for entry in scores
+    ]
+    return payload
 
 
 def _backfill_turn_settings_from_defaults(settings: dict, defaults: dict) -> None:
@@ -89,6 +131,17 @@ def _payload_with_backfilled_scores(
     return payload
 
 
+def _payload_with_coerced_settings_int_fields(data: dict) -> dict:
+    settings = data.get("settings")
+    if not isinstance(settings, dict) or not settings_dict_needs_int_coercion(settings):
+        return data
+    payload = data.copy()
+    settings_copy = settings.copy()
+    coerce_game_settings_int_fields(settings_copy)
+    payload["settings"] = settings_copy
+    return payload
+
+
 def _prepare_turn_payload(
     data: dict,
     *,
@@ -98,7 +151,9 @@ def _prepare_turn_payload(
     payload = data
     if settings_defaults is not None:
         payload = _payload_with_backfilled_settings(payload, settings_defaults)
-    return _payload_with_backfilled_scores(payload, score_defaults)
+    payload = _payload_with_backfilled_scores(payload, score_defaults)
+    payload = _payload_with_coerced_settings_int_fields(payload)
+    return _payload_with_coerced_score_int_fields(payload)
 
 
 def turn_info_from_json(data: dict, *, settings_defaults: dict | None = None) -> TurnInfo:

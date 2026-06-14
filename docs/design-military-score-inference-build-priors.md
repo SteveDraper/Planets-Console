@@ -14,7 +14,7 @@ Exact feasibility remains the contract; priors only affect ranking within the fe
 
 **Phase 1J-A (#86):** static YAML assets, Core loaders, catalog integration, hand-seeded v1 values, diagnostics.
 
-**Follow-on:** offline miner that fills assets from finished games (separate ticket).
+**Follow-on (#92):** pattern-driven offline miner that discovers finished games, `loadall`s turns, and incrementally fills assets.
 
 ---
 
@@ -227,6 +227,8 @@ aggregates:
       histogram: { 0: 108, 1: 65 }                     # occurrence-only 2-bin
   after_ship_limit: { ... }
 
+contributingGameIds: [628580]   # optional; miner provenance -- ignored by catalog loader
+
 overrides:
   combos: {}
   hulls: {}
@@ -251,26 +253,67 @@ Diagnostics payload (`priorWeights` block): resolved category id, asset path/ver
 
 ---
 
-## 10. Mining specification (follow-on)
+## 10. Mining specification (#92)
 
-Distinct from the **inference regression corpus** ([design-inference-corpus.md](design-inference-corpus.md)). Glossary: **Inference prior mining corpus**.
+Distinct from the **inference regression corpus** ([design-inference-corpus.md](design-inference-corpus.md)). Glossary: `CONTEXT.md` -- **Inference prior miner**, **Inference prior mining pattern**, **Inference prior player-host-turn**, **Inference prior contributing games**, **Inference prior ship-build observation**, **Inference aggregate prior**.
 
-### 10.1 Corpus manifest
+### 10.1 Pattern config and game discovery
 
-Explicit allowlist of **finished** game ids grouped by category (all perspectives must be available):
+The miner is driven by **patterns YAML files** under `assets/analytics/scores/` (e.g. `prior_mining_patterns_standard.yaml` for standard-only runs -- not a hand-maintained game-id manifest). Each row is an **inference prior mining pattern**:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `id` | string | Stable unique id (miner report provenance) |
+| `game_category` | string | Target bucket: `standard` \| `blitz` \| `epic` \| `campaign` (must match `GameCategory` / `from_game_settings`) |
+| `max_games` | int | **Lifetime** cap on games this pattern may contribute across incremental runs (not a per-run batch) |
+| `min_difficulty` | float | Floor on `Game.difficulty` from upstream |
+| `earliest_date` | string | ISO calendar date `YYYY-MM-DD`; floor on `datecreated` |
 
 ```yaml
-# assets/analytics/scores/mining_corpus.yaml (spec)
+# assets/analytics/scores/prior_mining_patterns_standard.yaml
 version: 1
-categories:
-  standard: [628580, ...]
-  blitz: []
-  epic: []
+patterns:
+  - id: standard-recent
+    game_category: standard
+    max_games: 30
+    min_difficulty: 1.0
+    earliest_date: "2024-01-01"
 ```
 
-Miner assigns each game to a category via `GameCategory.from_game_settings` and must agree with manifest grouping.
+**Discovery pipeline** (public finished games; no api key required):
 
-### 10.2 Ship-build observations
+1. `GET https://api.planets.nu/games/list?status=3&scope=0` ([API games list](https://help.planets.nu/API-games-list)).
+2. Client-side filter: `datecreated >= earliest_date`, `difficulty >= min_difficulty` (parse host date strings).
+3. Sort candidates: **`dateended` descending**, tie-break **`game.id` ascending**.
+4. For each candidate not already in the target asset's `contributingGameIds`: `loadinfo`, then `GameCategory.from_game_settings(settings)` must equal `game_category`. Skip on mismatch (do not mine into the wrong category file).
+5. Stop when this pattern has contributed `max_games` ids (track per-pattern counts in the miner report; patterns targeting the same category file have **independent** caps).
+6. **Global dedup:** one `contributingGameIds` list per category asset; any id already listed is skipped by every pattern.
+
+Do **not** infer blitz/epic/standard from list `gametype` alone; category resolution requires `loadinfo` settings (`campaignmode`, `endturn`, `shiplimit`).
+
+### 10.2 Turn data (`loadall` import)
+
+For each newly selected game id:
+
+1. If `--storage-root` already holds a **complete** finished-game turn set for that id, skip download. Completeness: for every player slot `1..game.slots`, all turns in `required_turn_numbers(player, game.turn)` are stored (same semantics as `LoadAllTurnsService._is_load_all_complete`, without username-scoped perspective filtering).
+2. Otherwise: `PlanetsNuClient.load_all`, parse via `load_all_archive`, import into storage.
+3. Extract observations via `TurnLoadService` / `StorageBackend` (not by re-parsing the ZIP during extraction).
+
+CLI: `--patterns` (required path to patterns YAML), `--storage-root` (default `./.data`), `--dry-run` (discovery + report only, no asset write).
+
+### 10.3 Sampling unit (`inference prior player-host-turn`)
+
+Atomic traversal unit: `(game_id, player_id, host_turn N)` where:
+
+- Turn documents `N` and `N+1` exist at the owning player's **perspective** (`GameService.perspective_for_player_id`).
+- Player is **not eliminated** on or before turn `N+1` (`is_eliminated_at_turn` / `last_meaningful_turn` from `api.services.player_elimination`).
+- **Inference ship-limit band** derived from turn `N+1` (score turn), matching `InferenceObservation.is_after_ship_limit` at solve time.
+
+Iterate every active player and every `host_turn` from `1` through `last_meaningful_turn - 1` where the pair exists. Not one row per perspective slot; not omniscient multi-perspective merge.
+
+**Adjunct exclusion:** skip units classified `adjunct` by inference corpus complexity signals (`tests.inference_corpus.complexity`); report skip counts. Remaining units use unconditional aggregate marginals (below).
+
+### 10.4 Ship-build observations
 
 One **inference prior ship-build observation** per validated build:
 
@@ -293,28 +336,57 @@ Rejects:
 
 Do **not** use the corpus harness inventory-diff ship extraction ([design-inference-corpus.md](design-inference-corpus.md) section 9) for priors.
 
-Record: hull, components, `hull_category`, `ship_limit_band` (from score turn), race, game category.
+Record: hull, components, `hull_category`, `ship_limit_band` (from score turn), race. Fold into hull marginal and component conditional count tables for the game's resolved category.
 
-### 10.3 Aggregate observations
+### 10.5 Aggregate observations
 
-Per host-turn-player multiset from inventory deltas on **existing** ships/planets/starbases (corpus section 9.2 rules). Assign each positive delta to a positive histogram key; exclude loads on newly built ships per corpus ammo rules.
+Per **inference prior player-host-turn**, single traversal over aggregate action ids (corpus section 9.2 inventory rules on **existing** ships/planets/starbases; exclude ammo loads on newly built ships):
 
-**Occurrence (`none` bin) sampling.** Every aggregate is a single histogram shape with a leading `none` bin (`count == 0`) carrying the occurrence prior (see [section 7.2](#72-runtime-bucketing-and-the-occurrence-none-bin)). The miner samples occurrence as a first-class quantity: for each `(action_id, ship_limit_band)`, count the **eligible player-turns with a zero delta** and write that as the histogram `0:` key alongside the positive keys.
+1. Compute inventory delta per action (0 when none).
+2. Increment `histogram[delta]` for `(action_id, ship_limit_band)` -- including **`0:`** for zero-delta samples.
 
-The `0:` denominator population is **all eligible player-turns for that action** in the band, not only the turns where the action fired. Sampling occurrence over fired-only turns systematically under-counts the `none` bin and collapses occurrence cost toward zero (every action looks free). "Eligible" must therefore be defined per action as the player-turns where the action was physically possible (e.g. the player owns the relevant asset class), independent of whether it fired -- this is the population the eligibility filter must yield for occurrence (see 10.4).
+**Unconditional marginal (v1):** do **not** condition on asset ownership or per-action feasibility at mining time. Sample every aggregate action on every non-adjunct unit. The solver applies the same static prior whenever an action enters the catalog (tier allowlist + residual bounds -- not ownership). Runtime conditioning is **#87**, not mining.
 
-**Fighter transfers** (`fighters_starbase_to_ship`, `fighters_ship_to_starbase`) are occurrence-only 2-bin histograms: sample only a `0:` count (eligible player-turns with no transfer in that direction) and a single active key (`1:`, or any key `>= 1`, for turns with a transfer). Magnitude within the active band is not modeled. Keep the two directions as independent observations. The miner emits `histogram:` blocks only; the `counts:` shape no longer exists.
+**Histogram keys:** raw observed positive integer deltas (loader buckets via `magnitude_bin_index` at catalog build; miner does not pre-bin). Fighter transfers (`fighters_starbase_to_ship`, `fighters_ship_to_starbase`): occurrence-only 2-bin histograms (`0:` and `1:` for any positive transfer); use `_fighter_transfer_counts` logic from corpus ground truth. Emit `histogram:` only; no `counts:` shape.
 
-### 10.4 Eligibility filter
+**Torpedo loads:** one `ship_torps_loaded_{id}` histogram per torpedo id present in the turn catalog; delta 0 still increments `0:`.
 
-Two distinct populations, both within manifest games and excluding eliminated players (no owned starbases / no score row):
+Do **not** gate on scoreboard `militarychange`; inventory-only (same rationale as corpus ground truth).
 
-- **Magnitude / build-activity population:** turn pairs with build activity (validated ship build and/or non-zero aggregate deltas for that player) feed the positive histogram keys and ship-build observations.
-- **Occurrence population:** for each aggregate action, **all** player-turns where the action was physically possible (per the per-action eligibility definition in 10.3), regardless of build activity. Zero-delta turns from this population establish the `0:` (none-bin) count. This population is strictly broader than the build-activity one and must not be filtered down to fired-only turns.
+### 10.6 Incremental merge and asset output
 
-### 10.5 Miner output
+**In-place merge** into `assets/analytics/scores/prior_weights_{category}.yaml`:
 
-Write `prior_weights_{category}.yaml` count tables (single histogram shape per aggregate, including the `0:` none-bin key; no `counts:` blocks); no log conversion in miner (the loader converts `0:`/positive counts to bin weights via Laplace, reproducing the legacy occurrence cost). Optional report: observation counts, dropped validations, ambiguous matches, and per-action eligible-turn / zero-occurrence / positive-occurrence tallies.
+- Read existing asset if present; **add** mined counts into hull/component/aggregate tables.
+- Append new game ids to **`contributingGameIds`** (monotonic; never remove). Parsed as metadata on `PriorWeightsAsset`; **ignored** by `resolve_prior_weights_catalog`.
+- Set `category` and `gameCategoryRulesVersion` to current Core values.
+- `--dry-run`: run discovery and extraction tallies; do not write YAML.
+
+No log conversion in miner (loader owns Laplace conversion).
+
+**Miner JSON report** (stdout or `--report` path): per-pattern discovery stats (`patternId`, candidates examined, games added, slots remaining), global skips (already contributed, category mismatch, incomplete loadall), adjunct skips, ship-build validation drops, per-action sample counts (`zero` / `positive`).
+
+### 10.7 Implementation layout
+
+| Piece | Location |
+|-------|----------|
+| Pattern load, discovery, observation extraction, accumulation, YAML merge | `packages/api/api/analytics/military_score_inference/prior_mining/` |
+| Shared inventory deltas | Hoist from `tests/inference_corpus/ship_inventory.py` into Core (used by corpus harness and miner) |
+| `PlanetsNuClient.games_list` | `packages/api/api/planets_nu.py` (new) |
+| `contributingGameIds` on asset | `prior_weights_asset.py` (optional metadata field) |
+| CLI | `scripts/run_inference_prior_miner.py` (thin Typer; pattern `run_inference_corpus.py`) |
+| Unit tests | `packages/api/tests/test_inference_prior_mining*.py` (fixture turns; no live API in CI) |
+
+### 10.8 #92 acceptance criteria
+
+- [ ] Patterns YAML committed with documented schema (e.g. `prior_mining_patterns_standard.yaml`; may use small `max_games` for v1)
+- [ ] `games/list` client; discovery + category filter + ordering per 10.1
+- [ ] `loadall` import path; completeness skip per 10.2
+- [ ] In-place merge produces/updates `prior_weights_standard.yaml` with `contributingGameIds` and merged counts from at least one finished standard game
+- [ ] Ship observations: starbase order + T+1 validation (not inventory-diff ships)
+- [ ] Aggregate histograms: raw delta keys including `0:`; fighter transfer 2-bin shape; no `counts:` blocks
+- [ ] Adjunct player-host-turns excluded; unconditional marginals on retained units
+- [ ] Unit tests on extraction (fixtures); `make lint` and relevant tests pass
 
 ---
 
@@ -342,7 +414,7 @@ Write `prior_weights_{category}.yaml` count tables (single histogram shape per a
 | Ticket | Role |
 |--------|------|
 | **#86** | Asset schema, loaders, hand-seed `standard`, catalog integration |
-| **Mining follow-on** | Typer/CLI miner, `mining_corpus.yaml`, fill assets from finished games |
+| **#92** | Pattern-driven miner, per-category patterns YAML (e.g. `prior_mining_patterns_standard.yaml`), `loadall`, incremental `prior_weights_{category}.yaml` |
 | **#87** | Fleet-informed runtime overlay on static priors |
 | **#65** | Top-K regression after priors stabilize |
 | **#64** | Regression ground truth (inventory diff) -- not prior mining |
