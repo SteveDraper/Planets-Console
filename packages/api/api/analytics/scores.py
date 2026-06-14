@@ -2,6 +2,8 @@
 
 from collections.abc import Callable, Iterator
 
+from api.analytics.catalog import catalog_entry
+from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -11,6 +13,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 
@@ -47,12 +50,9 @@ def _score_row(
     }
 
 
-def get_scores_table(
-    turn: TurnInfo,
-    options: TurnAnalyticsOptions | None = None,
-) -> dict:
+def compute_scores_table(ctx: AnalyticComputeContext) -> dict:
     """Return scoreboard values for each player in a turn."""
-    _ = options or TurnAnalyticsOptions()
+    turn = ctx.turn
     players_by_id = {player.id: player for player in [turn.player, *turn.players]}
     races_by_id = {race.id: race for race in turn.races}
 
@@ -61,6 +61,14 @@ def get_scores_table(
         for score in turn.scores
     ]
     return {"analyticId": ANALYTIC_ID, "rows": rows}
+
+
+def get_scores_table(
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions | None = None,
+) -> dict:
+    """Convenience entry for tests and direct callers."""
+    return invoke_analytic_compute(compute_scores_table, turn, options)
 
 
 def get_scores_row_inference(
@@ -112,3 +120,9 @@ def iter_scores_table_inference_stream(
         load_scoreboard_turn=load_scoreboard_turn,
         resolve_mask_for_player=resolve_mask_for_player,
     )
+
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_scores_table,
+)

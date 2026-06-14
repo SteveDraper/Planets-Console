@@ -1,6 +1,9 @@
 """Core Stellar Cartography map analytic."""
 
+from api.analytics.catalog import catalog_entry
+from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
@@ -136,8 +139,9 @@ def _debris_disk_overlay(planet) -> dict | None:
     }
 
 
-def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) -> dict:
+def compute_stellar_cartography_map(ctx: AnalyticComputeContext) -> dict:
     """Return cartography overlay circles and wormhole graph geometry for the turn."""
+    turn = ctx.turn
     overlay_circles: list[dict] = []
 
     for planet in turn.planets:
@@ -214,3 +218,17 @@ def get_stellar_cartography_map(turn: TurnInfo, _options: TurnAnalyticsOptions) 
         "edges": wormhole_edges,
         "meta": meta,
     }
+
+
+def get_stellar_cartography_map(
+    turn: TurnInfo,
+    options: TurnAnalyticsOptions | None = None,
+) -> dict:
+    """Convenience entry for tests and direct callers."""
+    return invoke_analytic_compute(compute_stellar_cartography_map, turn, options)
+
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_stellar_cartography_map,
+)

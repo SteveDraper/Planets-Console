@@ -26,12 +26,14 @@ Related docs:
   - `scores.py`
   - `connections.py`
   - `stellar_cartography.py`
-  - `catalog.py` -- `TURN_ANALYTIC_CATALOG` (shared ids and SPA catalog metadata)
-  - `registry.py` -- `TURN_ANALYTICS` id-to-handler map (aligned with the catalog at import)
+  - `catalog.py` -- `TURN_ANALYTIC_CATALOG` (single source of truth for ids, SPA metadata, and order), `TurnAnalyticCatalogEntry`, `catalog_entry()` lookup, and catalog-order alignment helpers; imports no Core compute
+  - `registration.py` -- `TurnAnalyticRegistration`; each analytic module exports `REGISTRATION` with a ctx-first `compute` handler
+  - `registry.py` -- `TURN_ANALYTIC_REGISTRATIONS` (aligned to the catalog), derived `TURN_ANALYTICS` handler map, `get_turn_analytic` dispatch
+  - `compute_context.py` -- `AnalyticComputeContext` and `invoke_analytic_compute` for context-first handlers (`turn`, `options`, `diagnostics`, and later `query`)
 
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
 
-**Shared catalog:** `TURN_ANALYTIC_CATALOG` is the single declarative list of turn analytic ids and SPA metadata. Core attaches computation handlers; BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. `dict_aligned_with_turn_analytic_catalog` / `tuple_aligned_with_turn_analytic_catalog` in `catalog.py` validate each layer's registry keys and preserve catalog order at import. Id or metadata drift raises `RuntimeError` on startup. Handlers and descriptors are still registered separately (see [Registration touch points](#registration-touch-points)).
+**Shared catalog:** `TURN_ANALYTIC_CATALOG` in `catalog.py` is the single declarative source of truth for analytic ids, SPA metadata, and order; it imports no Core compute, so BFF and `catalog_entry()` read it without pulling in the compute graph. Core **turn analytic registration** objects (`TURN_ANALYTIC_REGISTRATIONS`) reference catalog entries and bundle compute handlers plus an export-catalog placeholder; `registry.py` derives only the `TURN_ANALYTICS` handler map and aligns registrations to the catalog with `tuple_aligned_with_turn_analytic_catalog` -- the same helper the BFF uses for its descriptors. BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. The alignment helper validates each layer's keys against the catalog and preserves catalog order at import; a missing or extra registration/descriptor raises `RuntimeError` on startup. Core handlers and BFF descriptors remain registered separately (cross-layer); within Core, the handler map is derived from one registration tuple.
 
 ### Fixed analytic assets
 
@@ -93,7 +95,8 @@ Each BFF analytic module exports a single `DESCRIPTOR: AnalyticDescriptor` (`bff
 Adding a new analytic to the BFF requires:
 
 1. Add a `TurnAnalyticCatalogEntry` to `TURN_ANALYTIC_CATALOG` in `api/analytics/catalog.py`.
-2. Create `bff/analytics/<id>.py` with handlers and `DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(catalog_entry(...), ...)`.
+2. Add a Core `TurnAnalyticRegistration` in `api/analytics/<id>.py` (reference `catalog_entry(analytic_id)` + ctx-first `compute`) and append it to `TURN_ANALYTIC_REGISTRATIONS` in `api/analytics/registry.py`.
+3. Create `bff/analytics/<id>.py` with handlers and `DESCRIPTOR = AnalyticDescriptor.from_catalog_entry(catalog_entry(...), ...)` (`catalog_entry` from `api.analytics.catalog`).
 3. Register the module descriptor in `_BFF_DESCRIPTORS_BY_ID` in `bff/analytics/registry.py`.
 
 Dispatch is descriptor-driven -- no per-id `if/elif` chains in `registry.py`.
@@ -114,10 +117,12 @@ This is deliberate for now: one route, one OpenAPI shape, Connections works with
 
 Adding a **turn analytic** touches:
 
-1. **Catalog** -- one `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
-2. **Core** -- module + handler in `_HANDLERS_BY_ID` (`registry.py`)
-3. **Core exports** -- `analytics/<id>/exports.py` + entry in export registry (may be empty); see [design-analytic-exports.md](design-analytic-exports.md)
+1. **Catalog** -- one `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG` (`catalog.py`)
+2. **Core registration** -- one `TurnAnalyticRegistration` in the analytic module (`catalog_entry` reference, ctx-first `compute` handler, `export_catalog` placeholder); append to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py`
+3. **Core exports** -- `analytics/<id>/exports.py` + entry in export registry (may be empty until wired in #95); see [design-analytic-exports.md](design-analytic-exports.md)
 4. **BFF** -- module with `from_catalog_entry` descriptor + entry in `_BFF_DESCRIPTORS_BY_ID` (`registry.py`)
+
+`TURN_ANALYTICS` is derived from registrations at import and aligned to the catalog; a missing or extra registration raises `RuntimeError` on startup.
 
 Frontend registration is **optional** and only needed when generic shells are insufficient (custom sidebar controls, non-default query keys, bespoke map merge logic). See [design-adding-a-turn-analytic.md](design-adding-a-turn-analytic.md).
 

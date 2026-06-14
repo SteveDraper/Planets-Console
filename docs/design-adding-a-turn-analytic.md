@@ -25,40 +25,50 @@ Step-by-step guide for registering a new **turn analytic** in Planets Console. R
 Add `packages/api/api/analytics/<id>.py`:
 
 ```python
+from api.analytics.catalog import catalog_entry
+from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.registration import TurnAnalyticRegistration
+
 ANALYTIC_ID = "my-analytic"
 
-def get_my_analytic(turn: TurnInfo, options: TurnAnalyticsOptions) -> dict:
+def compute_my_analytic(ctx: AnalyticComputeContext) -> dict:
+    turn = ctx.turn
+    options = ctx.options
     ...
     return {"analyticId": ANALYTIC_ID, ...}
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_my_analytic,
+)
 ```
 
 Guidelines:
 
-- Input is always `TurnInfo` + `TurnAnalyticsOptions` (see `api/analytics/options.py`).
+- Each registration's `compute` is a `TurnAnalyticHandler`: `Callable[[AnalyticComputeContext], dict]`. Read `ctx.turn`, `ctx.options`, `ctx.diagnostics`, and (when wired) `ctx.query` from the carrier; do not reach through `ctx.options.diagnostics`.
 - Return a JSON-serializable dict with domain field names. BFF reshapes for the SPA if needed.
 - Reuse **game concepts** from `api/concepts/` rather than duplicating rules.
 - **Race-specific** mechanics (`raceid`, per-race caps, settings keyed to one race) go in **`api/concepts/races.py`** only -- do not add new race constants inside `api/analytics/<id>/`. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
-- Attach **request diagnostics** at meaningful boundaries (`diagnostics.child(...)`) when work is non-trivial.
+- Attach **request diagnostics** at meaningful boundaries (`ctx.diagnostics.child(...)`) when work is non-trivial.
 
-### 2.1a Register in the shared catalog
+### 2.1a Add catalog metadata
 
-In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to `TURN_ANALYTIC_CATALOG` (id, name, `supports_table`, `supports_map`, `type`).
+In `packages/api/api/analytics/catalog.py`, append a `TurnAnalyticCatalogEntry` to the `TURN_ANALYTIC_CATALOG` tuple (id, name, `supports_table`, `supports_map`, `type`). This is the single source of truth for the analytic's identity, metadata, and order; the registration references it via `catalog_entry(ANALYTIC_ID)`.
 
 ### 2.2 Register in Core
 
-In `packages/api/api/analytics/registry.py`, add the handler to `_HANDLERS_BY_ID`:
+Append the module's `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `packages/api/api/analytics/registry.py`:
 
 ```python
-from api.analytics.my_analytic import ANALYTIC_ID as MY_ANALYTIC_ID
-from api.analytics.my_analytic import get_my_analytic
+from api.analytics.my_analytic import REGISTRATION as MY_ANALYTIC_REGISTRATION
 
-_HANDLERS_BY_ID: dict[str, TurnAnalyticHandler] = {
+TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
     ...
-    MY_ANALYTIC_ID: get_my_analytic,
-}
+    MY_ANALYTIC_REGISTRATION,
+)
 ```
 
-`TURN_ANALYTICS` is derived from the catalog at import; a missing or extra handler raises `RuntimeError` on startup.
+`TURN_ANALYTICS` is derived from that tuple at import and the registrations are aligned to `TURN_ANALYTIC_CATALOG` (the same helper the BFF uses); a missing or extra registration raises `RuntimeError` on startup.
 
 ### 2.3 Core -- exports (required)
 
@@ -276,8 +286,8 @@ When triggered, prefer a small registry refactor over accumulating `MainArea` br
 
 Use this before opening a PR:
 
-- [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG`
-- [ ] **Core:** module + `_HANDLERS_BY_ID` entry + unit tests
+- [ ] **Core:** module with `TurnAnalyticRegistration` (`catalog_entry` + ctx-first `compute` handler) appended to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` + unit tests
+- [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG` (`catalog.py`)
 - [ ] **Core exports:** `exports.py` + export registry entry (empty allowed) + export tests when non-empty
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
@@ -295,8 +305,8 @@ Use this before opening a PR:
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
 | Export registry missing for catalog id | Startup `RuntimeError` | Add `exports.py` (or `EMPTY_EXPORT_CATALOG`) + registry entry |
-| Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add catalog entry + BFF module + `_BFF_DESCRIPTORS_BY_ID` |
-| BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Add Core registry entry |
+| Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add BFF module + `_BFF_DESCRIPTORS_BY_ID` entry |
+| BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Append `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |
 | Frontend query param names drift from BFF | Silent wrong results or ignored params | Share wire names via `api/transport/` |
 | Second Connections-style `MainArea` branch | Shell accumulates analytic-specific fetch logic | See [§4.1 re-examination triggers](#41-map-fetch-orchestration-current-vs-future); generalize map fetch instead |

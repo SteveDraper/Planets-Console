@@ -55,8 +55,20 @@ _CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
 T = TypeVar("T")
 
 
-def _validate_registry_ids_match_catalog(registered_ids: set[str], *, role: str) -> None:
-    catalog_ids = {entry.id for entry in TURN_ANALYTIC_CATALOG}
+def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
+    """Return catalog metadata for one turn analytic id."""
+    try:
+        return _CATALOG_BY_ID[analytic_id]
+    except KeyError as err:
+        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
+
+
+def _validate_registry_ids_match_catalog(
+    catalog_ids: set[str],
+    registered_ids: set[str],
+    *,
+    role: str,
+) -> None:
     if catalog_ids == registered_ids:
         return
     missing = sorted(catalog_ids - registered_ids)
@@ -67,20 +79,13 @@ def _validate_registry_ids_match_catalog(registered_ids: set[str], *, role: str)
     )
 
 
-def dict_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) -> dict[str, T]:
-    """Return *by_id* in catalog order after verifying its keys match the catalog exactly."""
-    _validate_registry_ids_match_catalog(set(by_id), role=role)
-    return {entry.id: by_id[entry.id] for entry in TURN_ANALYTIC_CATALOG}
-
-
-def tuple_aligned_with_turn_analytic_catalog(by_id: dict[str, T], *, role: str) -> tuple[T, ...]:
-    """Return *by_id* values in catalog order after verifying its keys match the catalog exactly."""
-    _validate_registry_ids_match_catalog(set(by_id), role=role)
-    return tuple(by_id[entry.id] for entry in TURN_ANALYTIC_CATALOG)
-
-
-def catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
-    try:
-        return _CATALOG_BY_ID[analytic_id]
-    except KeyError as err:
-        raise KeyError(f"Unknown turn analytic catalog id: {analytic_id!r}") from err
+def tuple_aligned_with_turn_analytic_catalog(
+    by_id: dict[str, T],
+    catalog: tuple[TurnAnalyticCatalogEntry, ...],
+    *,
+    role: str,
+) -> tuple[T, ...]:
+    """Return *by_id* values in catalog order after verifying keys match the catalog exactly."""
+    catalog_ids = {entry.id for entry in catalog}
+    _validate_registry_ids_match_catalog(catalog_ids, set(by_id), role=role)
+    return tuple(by_id[entry.id] for entry in catalog)
