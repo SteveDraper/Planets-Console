@@ -12,24 +12,8 @@ _TURN_ANALYTIC_REGISTRATIONS_BY_ID: dict[str, TurnAnalyticRegistration] = {
 }
 
 
-def _turn_analytic_handler(registration: TurnAnalyticRegistration) -> TurnAnalyticHandler:
-    if registration.uses_options:
-        compute = registration.compute
-
-        def handler(ctx: AnalyticComputeContext) -> dict:
-            return compute(ctx.turn, ctx.options)
-
-        return handler
-    compute = registration.compute
-
-    def handler(ctx: AnalyticComputeContext) -> dict:
-        return compute(ctx.turn)
-
-    return handler
-
-
 TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
-    analytic_id: _turn_analytic_handler(registration)
+    analytic_id: registration.compute
     for analytic_id, registration in _TURN_ANALYTIC_REGISTRATIONS_BY_ID.items()
 }
 

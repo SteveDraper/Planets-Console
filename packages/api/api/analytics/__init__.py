@@ -5,9 +5,10 @@ from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import (
     EmptyExportCatalog,
-    TurnAnalyticCompute,
     TurnAnalyticHandler,
     TurnAnalyticRegistration,
+    turn_only,
+    with_options,
 )
 from api.analytics.registrations import (
     TURN_ANALYTIC_CATALOG,
@@ -19,7 +20,8 @@ from api.analytics.registry import TURN_ANALYTICS, get_turn_analytic
 __all__ = [
     "AnalyticComputeContext",
     "EmptyExportCatalog",
-    "TurnAnalyticCompute",
+    "turn_only",
+    "with_options",
     "catalog_entry",
     "TURN_ANALYTIC_CATALOG",
     "TURN_ANALYTIC_REGISTRATIONS",

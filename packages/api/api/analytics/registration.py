@@ -19,16 +19,32 @@ EMPTY_EXPORT_CATALOG = EmptyExportCatalog()
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
 TurnAnalyticTurnCompute = Callable[[TurnInfo], dict]
 TurnAnalyticTurnOptionsCompute = Callable[[TurnInfo, TurnAnalyticsOptions], dict]
-TurnAnalyticCompute = TurnAnalyticTurnCompute | TurnAnalyticTurnOptionsCompute
+
+
+def turn_only(compute: TurnAnalyticTurnCompute) -> TurnAnalyticHandler:
+    """Wrap a turn-only domain function as a context handler."""
+
+    def handler(ctx: AnalyticComputeContext) -> dict:
+        return compute(ctx.turn)
+
+    return handler
+
+
+def with_options(compute: TurnAnalyticTurnOptionsCompute) -> TurnAnalyticHandler:
+    """Wrap a turn+options domain function as a context handler."""
+
+    def handler(ctx: AnalyticComputeContext) -> dict:
+        return compute(ctx.turn, ctx.options)
+
+    return handler
 
 
 @dataclass(frozen=True)
 class TurnAnalyticRegistration:
-    """One turn analytic: catalog metadata, domain compute, and export catalog."""
+    """One turn analytic: catalog metadata, context handler, and export catalog."""
 
     catalog_entry: TurnAnalyticCatalogEntry
-    compute: TurnAnalyticCompute
-    uses_options: bool = True
+    compute: TurnAnalyticHandler
     export_catalog: EmptyExportCatalog = EMPTY_EXPORT_CATALOG
 
 

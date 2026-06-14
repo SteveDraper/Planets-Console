@@ -2,7 +2,7 @@
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.registration import TurnAnalyticRegistration, with_options
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
@@ -226,5 +226,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="selectable",
     ),
-    compute=get_stellar_cartography_map,
+    compute=with_options(get_stellar_cartography_map),
 )

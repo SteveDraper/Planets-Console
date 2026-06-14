@@ -1,7 +1,7 @@
 """Core base-map analytic."""
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.registration import TurnAnalyticRegistration, turn_only
 from api.concepts.warp_well import WarpWellKind, map_cell_indices_in_warp_well
 from api.models.game import TurnInfo
 from api.serialization.planet import planet_to_public_json
@@ -46,6 +46,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="base",
     ),
-    compute=get_base_map,
-    uses_options=False,
+    compute=turn_only(get_base_map),
 )

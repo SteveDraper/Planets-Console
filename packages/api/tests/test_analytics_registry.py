@@ -105,6 +105,7 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     from api.analytics.registration import (
         TurnAnalyticRegistration,
         validate_turn_analytic_registrations,
+        with_options,
     )
 
     catalog_entry = TurnAnalyticCatalogEntry(
@@ -118,9 +119,10 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     def compute(_turn, _options):
         return {"analyticId": "duplicate-id"}
 
+    handler = with_options(compute)
     registrations = (
-        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute),
-        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute),
+        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=handler),
+        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=handler),
     )
 
     with pytest.raises(RuntimeError, match="Duplicate"):
@@ -129,7 +131,7 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
 
 def _registration_for_validation(*, compute=None, **catalog_overrides):
     from api.analytics.catalog import TurnAnalyticCatalogEntry
-    from api.analytics.registration import TurnAnalyticRegistration
+    from api.analytics.registration import TurnAnalyticRegistration, with_options
 
     catalog_fields = {
         "id": "test-analytic",
@@ -144,6 +146,8 @@ def _registration_for_validation(*, compute=None, **catalog_overrides):
 
         def compute(_turn, _options):
             return {"analyticId": catalog_entry.id}
+
+        compute = with_options(compute)
 
     return TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute)
 

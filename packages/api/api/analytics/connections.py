@@ -2,7 +2,7 @@
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.registration import TurnAnalyticRegistration, with_options
 from api.concepts.planet_connections import connection_routes_with_options
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -47,5 +47,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="selectable",
     ),
-    compute=get_connections_map,
+    compute=with_options(get_connections_map),
 )
