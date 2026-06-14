@@ -2,14 +2,36 @@
 
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.registration import TurnAnalyticHandler
+from api.analytics.registration import TurnAnalyticHandler, TurnAnalyticRegistration
 from api.analytics.registrations import TURN_ANALYTIC_REGISTRATIONS
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 
-TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
-    registration.catalog_entry.id: registration.handler
+_TURN_ANALYTIC_REGISTRATIONS_BY_ID: dict[str, TurnAnalyticRegistration] = {
+    registration.catalog_entry.id: registration
     for registration in TURN_ANALYTIC_REGISTRATIONS
+}
+
+
+def _turn_analytic_handler(registration: TurnAnalyticRegistration) -> TurnAnalyticHandler:
+    if registration.uses_options:
+        compute = registration.compute
+
+        def handler(ctx: AnalyticComputeContext) -> dict:
+            return compute(ctx.turn, ctx.options)
+
+        return handler
+    compute = registration.compute
+
+    def handler(ctx: AnalyticComputeContext) -> dict:
+        return compute(ctx.turn)
+
+    return handler
+
+
+TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
+    analytic_id: _turn_analytic_handler(registration)
+    for analytic_id, registration in _TURN_ANALYTIC_REGISTRATIONS_BY_ID.items()
 }
 
 

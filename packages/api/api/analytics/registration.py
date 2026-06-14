@@ -17,24 +17,18 @@ class EmptyExportCatalog:
 EMPTY_EXPORT_CATALOG = EmptyExportCatalog()
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
-
-
-def handler_from_turn_and_options(
-    fn: Callable[[TurnInfo, TurnAnalyticsOptions], dict],
-) -> TurnAnalyticHandler:
-    return lambda ctx: fn(ctx.turn, ctx.options)
-
-
-def handler_from_turn(fn: Callable[[TurnInfo], dict]) -> TurnAnalyticHandler:
-    return lambda ctx: fn(ctx.turn)
+TurnAnalyticTurnCompute = Callable[[TurnInfo], dict]
+TurnAnalyticTurnOptionsCompute = Callable[[TurnInfo, TurnAnalyticsOptions], dict]
+TurnAnalyticCompute = TurnAnalyticTurnCompute | TurnAnalyticTurnOptionsCompute
 
 
 @dataclass(frozen=True)
 class TurnAnalyticRegistration:
-    """One turn analytic: catalog metadata, compute handler, and export catalog."""
+    """One turn analytic: catalog metadata, domain compute, and export catalog."""
 
     catalog_entry: TurnAnalyticCatalogEntry
-    handler: TurnAnalyticHandler
+    compute: TurnAnalyticCompute
+    uses_options: bool = True
     export_catalog: EmptyExportCatalog = EMPTY_EXPORT_CATALOG
 
 
@@ -72,8 +66,8 @@ def validate_turn_analytic_registrations(
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} must support at least one of table or map view"
             )
-        if not callable(registration.handler):
+        if not callable(registration.compute):
             raise RuntimeError(
-                f"Turn analytic {analytic_id!r} handler must be callable, "
-                f"got {type(registration.handler).__name__}"
+                f"Turn analytic {analytic_id!r} compute must be callable, "
+                f"got {type(registration.compute).__name__}"
             )

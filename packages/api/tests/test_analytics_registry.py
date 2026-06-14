@@ -77,7 +77,8 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
         registration.catalog_entry.id for registration in TURN_ANALYTIC_REGISTRATIONS
     ]
     for registration in TURN_ANALYTIC_REGISTRATIONS:
-        assert TURN_ANALYTICS[registration.catalog_entry.id] is registration.handler
+        assert registration.catalog_entry.id in TURN_ANALYTICS
+        assert callable(registration.compute)
 
 
 def test_dict_aligned_with_turn_analytic_catalog_reports_mismatch():
@@ -114,19 +115,19 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
         type="selectable",
     )
 
-    def handler(_ctx):
+    def compute(_turn, _options):
         return {"analyticId": "duplicate-id"}
 
     registrations = (
-        TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler),
-        TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler),
+        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute),
+        TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute),
     )
 
     with pytest.raises(RuntimeError, match="Duplicate"):
         validate_turn_analytic_registrations(registrations)
 
 
-def _registration_for_validation(*, handler=None, **catalog_overrides):
+def _registration_for_validation(*, compute=None, **catalog_overrides):
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.registration import TurnAnalyticRegistration
 
@@ -139,9 +140,9 @@ def _registration_for_validation(*, handler=None, **catalog_overrides):
     }
     catalog_fields.update(catalog_overrides)
     catalog_entry = TurnAnalyticCatalogEntry(**catalog_fields)
-    if handler is None:
-        handler = lambda _ctx: {"analyticId": catalog_entry.id}
-    return TurnAnalyticRegistration(catalog_entry=catalog_entry, handler=handler)
+    if compute is None:
+        compute = lambda _turn, _options: {"analyticId": catalog_entry.id}
+    return TurnAnalyticRegistration(catalog_entry=catalog_entry, compute=compute)
 
 
 @pytest.mark.parametrize(
@@ -165,8 +166,8 @@ def test_validate_turn_analytic_registrations_rejects_invalid_catalog_entry(
         validate_turn_analytic_registrations((_registration_for_validation(**catalog_overrides),))
 
 
-def test_validate_turn_analytic_registrations_rejects_non_callable_handler():
+def test_validate_turn_analytic_registrations_rejects_non_callable_compute():
     from api.analytics.registration import validate_turn_analytic_registrations
 
-    with pytest.raises(RuntimeError, match="handler must be callable"):
-        validate_turn_analytic_registrations((_registration_for_validation(handler=object()),))
+    with pytest.raises(RuntimeError, match="compute must be callable"):
+        validate_turn_analytic_registrations((_registration_for_validation(compute=object()),))
