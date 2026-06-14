@@ -33,7 +33,7 @@ from api.analytics.catalog import catalog_entry
 heavy = [name for name in sys.modules if "military_score_inference" in name]
 if heavy:
     raise SystemExit(f"unexpected modules before registry: {heavy}")
-import api.analytics.registry  # publishes catalog; compute graph loads here by design
+import api.analytics.registry  # compute graph loads here by design
 catalog_entry("scores")
 """
     result = subprocess.run(

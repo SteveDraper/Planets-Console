@@ -1,7 +1,7 @@
 """BFF analytics catalog and dispatch."""
 
-import api.analytics.registry  # noqa: F401 -- publishes TURN_ANALYTIC_CATALOG into catalog
-from api.analytics.catalog import TURN_ANALYTIC_CATALOG, tuple_aligned_with_turn_analytic_catalog
+from api.analytics.catalog import tuple_aligned_with_turn_analytic_catalog
+from api.analytics.registry import TURN_ANALYTIC_CATALOG
 from api.diagnostics import Diagnostics
 
 from bff.analytics.descriptor import AnalyticDescriptor

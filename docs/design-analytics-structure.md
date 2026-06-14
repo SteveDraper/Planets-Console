@@ -26,9 +26,9 @@ Related docs:
   - `scores.py`
   - `connections.py`
   - `stellar_cartography.py`
-  - `catalog.py` -- `TurnAnalyticCatalogEntry` and catalog-order alignment helpers
+  - `catalog.py` -- `TurnAnalyticCatalogEntry`, `catalog_entry()` lookup, and catalog-order alignment helpers
   - `registration.py` -- `TurnAnalyticRegistration`; each analytic module exports `REGISTRATION` with a ctx-first `compute` handler
-  - `registry.py` -- `TURN_ANALYTIC_REGISTRATIONS` tuple, derived `TURN_ANALYTIC_CATALOG` and `TURN_ANALYTICS`, `catalog_entry()` lookup, `get_turn_analytic` dispatch
+  - `registry.py` -- `TURN_ANALYTIC_REGISTRATIONS` tuple, derived `TURN_ANALYTIC_CATALOG` and `TURN_ANALYTICS`, `get_turn_analytic` dispatch
   - `compute_context.py` -- `AnalyticComputeContext` passed into compute handlers (`turn`, `options`, `diagnostics`, and later `query`)
 
 `TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.

@@ -1,7 +1,7 @@
 """Registry for Core turn analytics."""
 
 from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
-from api.analytics.catalog import TurnAnalyticCatalogEntry, publish_turn_analytic_catalog
+from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.options import TurnAnalyticsOptions
@@ -24,11 +24,9 @@ TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
 
 validate_turn_analytic_registrations(TURN_ANALYTIC_REGISTRATIONS)
 
-_derived_catalog: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
+TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = tuple(
     registration.catalog_entry for registration in TURN_ANALYTIC_REGISTRATIONS
 )
-TURN_ANALYTIC_CATALOG = _derived_catalog
-publish_turn_analytic_catalog(_derived_catalog)
 
 
 _TURN_ANALYTIC_REGISTRATIONS_BY_ID: dict[str, TurnAnalyticRegistration] = {
