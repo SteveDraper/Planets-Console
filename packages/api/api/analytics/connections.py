@@ -53,7 +53,5 @@ REGISTRATION = TurnAnalyticRegistration(
         supports_map=True,
         type="selectable",
     ),
-    compute=lambda ctx: get_connections_map(
-        ctx.turn, ctx.options, diagnostics=ctx.diagnostics
-    ),
+    compute=lambda ctx: get_connections_map(ctx.turn, ctx.options, diagnostics=ctx.diagnostics),
 )
