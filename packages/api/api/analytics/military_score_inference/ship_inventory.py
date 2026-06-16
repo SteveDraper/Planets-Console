@@ -301,9 +301,7 @@ def _starbase_builtdefense_on_prior_owned(
     turn: TurnInfo, prior_owned: set[int], player_id: int
 ) -> int:
     return sum(
-        starbase.builtdefense
-        for starbase in turn.starbases
-        if starbase.planetid in prior_owned
+        starbase.builtdefense for starbase in turn.starbases if starbase.planetid in prior_owned
     )
 
 

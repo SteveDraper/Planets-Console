@@ -75,9 +75,7 @@ def _solution_qualifies_for_ship_only_exact_early_stop(
     if not _solution_fully_explained_by_ship_builds_only(solution, observation, catalog):
         return False
     thresholds = resolve_solver_thresholds()
-    return (
-        solution.objective_value >= thresholds.ship_only_exact_early_stop_min_plausibility
-    )
+    return solution.objective_value >= thresholds.ship_only_exact_early_stop_min_plausibility
 
 
 def _explained_military_score_2x(

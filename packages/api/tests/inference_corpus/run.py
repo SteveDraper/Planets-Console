@@ -560,9 +560,8 @@ def _validate_coverage_for_loaded_case(
             ),
         )
 
-    skip_coverage = (
-        resolved is None
-        and needs_accelerated_backfill(loaded.score_turn.settings.turn, loaded.score_turn.settings)
+    skip_coverage = resolved is None and needs_accelerated_backfill(
+        loaded.score_turn.settings.turn, loaded.score_turn.settings
     )
     if skip_coverage:
         return None
