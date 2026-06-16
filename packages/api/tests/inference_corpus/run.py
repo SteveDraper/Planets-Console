@@ -475,7 +475,10 @@ def _build_loaded_case_pipeline_context(
         skip_coverage = (
             extraction.available
             and resolved is None
-            and needs_accelerated_backfill(loaded.score_turn.settings.turn, loaded.score_turn.settings)
+            and needs_accelerated_backfill(
+                loaded.score_turn.settings.turn,
+                loaded.score_turn.settings,
+            )
         )
         coverage_block = (
             None
