@@ -11,7 +11,6 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     is_torp_load_action_id,
     iter_aggregate_action_slots,
 )
-from api.analytics.military_score_inference.tier_policy import aggregate_bin_bounds_for_key
 from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
@@ -49,6 +48,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
     implicit_uniform_component_counts,
     none_bin_pseudo_count,
 )
+from api.analytics.military_score_inference.tier_policy import aggregate_bin_bounds_for_key
 from api.analytics.military_score_inference.torp_load_prior_pooling import (
     any_torp_load_histogram_for_band,
 )

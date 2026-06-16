@@ -31,7 +31,7 @@ from api.models.components import Hull
 # none-bin weight is derived (active max + occurrence penalty) so the gap from the none
 # bin down to the most likely active bin reproduces the legacy parsimony penalty.
 _STANDARD_TEST_ACTIVE_MARGINAL_WEIGHTS: dict[str, tuple[int, ...]] = {
-    "planet_defense_posts_added_total": (100, 20, 5),
+    "planet_defense_posts_added_total": (100, 20, 5, 1),
     "starbase_defense_posts_added_total": (100, 20, 5),
     "starbase_fighters_added_total": (80, 15, 3),
     "ship_fighters_added_total": (70, 20, 5),

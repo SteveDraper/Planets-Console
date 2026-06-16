@@ -87,6 +87,17 @@ class PlanetsNuClient:
         assert last_exc is not None
         raise last_exc
 
+    def _parse_json_from_response(
+        self,
+        response: httpx.Response,
+        *,
+        invalid_json_message: str,
+    ) -> Any:
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise UpstreamPlanetsError(invalid_json_message) from exc
+
     def _json_from_response(
         self,
         response: httpx.Response,
@@ -94,10 +105,10 @@ class PlanetsNuClient:
         invalid_json_message: str,
         unexpected_payload_message: str,
     ) -> dict[str, Any]:
-        try:
-            data = response.json()
-        except ValueError as exc:
-            raise UpstreamPlanetsError(invalid_json_message) from exc
+        data = self._parse_json_from_response(
+            response,
+            invalid_json_message=invalid_json_message,
+        )
         if not isinstance(data, dict):
             raise UpstreamPlanetsError(unexpected_payload_message)
         return data
@@ -223,12 +234,13 @@ class PlanetsNuClient:
                 "games list",
                 lambda client: client.get(url, params=params),
             )
-            data = response.json()
+            data = self._parse_json_from_response(
+                response,
+                invalid_json_message="Planets.nu games list returned invalid JSON.",
+            )
         except httpx.HTTPError as exc:
             logger.warning("Planets.nu games list HTTP error: %s", _safe_httpx_error_summary(exc))
             raise UpstreamPlanetsError("Planets.nu games list request failed.") from exc
-        except ValueError as exc:
-            raise UpstreamPlanetsError("Planets.nu games list returned invalid JSON.") from exc
 
         if isinstance(data, list):
             games = data

@@ -473,10 +473,10 @@ def test_partial_weapon_slot_fill_ranks_below_full_slots():
 
 def test_ranking_bin_penalty_is_per_bin_not_per_unit():
     planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
-    assert active_ranking_bin_indicators(0, planet_defense_buckets) == (1, 0, 0, 0)
-    assert active_ranking_bin_indicators(1, planet_defense_buckets) == (0, 1, 0, 0)
-    assert active_ranking_bin_indicators(10, planet_defense_buckets) == (0, 1, 0, 0)
-    assert active_ranking_bin_indicators(100, planet_defense_buckets) == (0, 0, 0, 1)
+    assert active_ranking_bin_indicators(0, planet_defense_buckets) == (1, 0, 0, 0, 0)
+    assert active_ranking_bin_indicators(1, planet_defense_buckets) == (0, 1, 0, 0, 0)
+    assert active_ranking_bin_indicators(10, planet_defense_buckets) == (0, 1, 0, 0, 0)
+    assert active_ranking_bin_indicators(100, planet_defense_buckets) == (0, 0, 0, 0, 1)
 
     no_posts = compute_bin_penalty_objective_contribution(
         {"planet_defense_posts_added_total": 0},
@@ -494,7 +494,7 @@ def test_ranking_bin_penalty_is_per_bin_not_per_unit():
     # occurrence cost, and the spacing between active bins is preserved.
     assert no_posts == 0
     assert ten_posts == -50
-    assert hundred_posts == -145
+    assert hundred_posts == -149
     assert no_posts > ten_posts > hundred_posts
 
 

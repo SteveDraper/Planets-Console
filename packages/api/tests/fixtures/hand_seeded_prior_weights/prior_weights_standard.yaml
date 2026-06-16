@@ -122,7 +122,7 @@ aggregates:
       histogram:
         0: 198  # none-bin occurrence pseudo-count (count == 0)
         5: 120  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
-        15: 80
+        25: 80  # heavy build-up band (17-30)
         40: 20
         90: 5
     ship_fighters_added_total:
@@ -202,7 +202,7 @@ aggregates:
       histogram:
         0: 166  # none-bin occurrence pseudo-count (count == 0)
         5: 100  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
-        15: 70
+        25: 70  # heavy build-up band (21-100)
         40: 18
         90: 4
     starbase_fighters_added_total:
@@ -223,7 +223,7 @@ aggregates:
       histogram:
         0: 149  # none-bin occurrence pseudo-count (count == 0)
         5: 90  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
-        15: 65
+        25: 65  # heavy build-up band (17-30)
         40: 16
         90: 3
     ship_fighters_added_total:
@@ -303,7 +303,7 @@ aggregates:
       histogram:
         0: 141  # none-bin occurrence pseudo-count (count == 0)
         5: 85  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
-        15: 60
+        25: 60  # heavy build-up band (21-100)
         40: 14
         90: 3
     starbase_fighters_added_total:
