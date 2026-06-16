@@ -24,7 +24,9 @@ from api.analytics.military_score_inference.tier_policy import (
     TierPolicyOverlay,
     compute_aggregate_admission_caps,
     default_tier_policy_path,
+    parse_solver_thresholds,
     parse_tier_policy_steps,
+    resolve_solver_thresholds,
     resolve_tier_policies,
 )
 from api.models.components import Engine
@@ -64,6 +66,22 @@ def test_policy_loader_reads_aggregate_probability_bins():
     assert "planet_defense_posts_added_total" in bins
     assert bins["planet_defense_posts_added_total"][0].upper_count == 0
     assert aggregate_bin_bounds_for_key("ship_torps_per_type")[1].upper_count == 40
+
+
+def test_policy_loader_reads_solver_thresholds():
+    thresholds = resolve_solver_thresholds()
+    assert thresholds.ship_only_exact_early_stop_min_plausibility == -300
+
+
+def test_policy_loader_rejects_non_int_solver_threshold():
+    with pytest.raises(ValueError, match="shipOnlyExactEarlyStopMinPlausibility must be an int"):
+        parse_solver_thresholds(
+            {
+                "solverThresholds": {
+                    "shipOnlyExactEarlyStopMinPlausibility": "-300",
+                }
+            }
+        )
 
 
 def test_policy_loader_rejects_non_superset_tech_levels():

@@ -117,6 +117,11 @@ class InferenceTierPolicyStep:
         }
 
 
+@dataclass(frozen=True)
+class SolverThresholds:
+    ship_only_exact_early_stop_min_plausibility: int
+
+
 def default_tier_policy_path() -> Path:
     return Scores.assets_dir() / "tier_policy.yaml"
 
@@ -435,6 +440,34 @@ def aggregate_bin_bounds_for_key(
     if bounds is None:
         raise ValueError(f"tier policy aggregateProbabilityBins missing key {key!r}")
     return bounds
+
+
+def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
+    raw_thresholds = document.get("solverThresholds")
+    if not isinstance(raw_thresholds, dict):
+        raise ValueError("tier policy must contain solverThresholds mapping")
+    ship_only_threshold = raw_thresholds.get("shipOnlyExactEarlyStopMinPlausibility")
+    if not isinstance(ship_only_threshold, int):
+        raise ValueError(
+            "tier policy solverThresholds.shipOnlyExactEarlyStopMinPlausibility must be an int"
+        )
+    return SolverThresholds(
+        ship_only_exact_early_stop_min_plausibility=ship_only_threshold,
+    )
+
+
+_default_solver_thresholds: SolverThresholds | None = None
+
+
+def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds:
+    global _default_solver_thresholds
+    if base_path is None and _default_solver_thresholds is not None:
+        return _default_solver_thresholds
+    policy_path = default_tier_policy_path() if base_path is None else base_path
+    parsed = parse_solver_thresholds(load_tier_policy_document(policy_path))
+    if base_path is None:
+        _default_solver_thresholds = parsed
+    return parsed
 
 
 def parse_tier_policy_steps(document: dict[str, Any]) -> tuple[InferenceTierPolicyStep, ...]:

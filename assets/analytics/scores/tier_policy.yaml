@@ -82,6 +82,9 @@ aggregateProbabilityBins:
       lowerCount: 1
       upperCount: 50
 
+solverThresholds:
+  shipOnlyExactEarlyStopMinPlausibility: -300
+
 steps:
   - id: early_game_bands
     filters:

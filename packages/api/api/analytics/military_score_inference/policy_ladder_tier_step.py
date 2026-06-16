@@ -32,10 +32,11 @@ from api.analytics.military_score_inference.solver import (
     solution_signature,
     solve_inference_problem,
 )
-from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
+from api.analytics.military_score_inference.tier_policy import (
+    InferenceTierPolicyStep,
+    resolve_solver_thresholds,
+)
 from api.models.game import TurnInfo
-
-SHIP_ONLY_EXACT_EARLY_STOP_MIN_PLAUSIBILITY = -300
 
 
 def remaining_time(started_at: float, time_limit_seconds: float | None) -> float:
@@ -73,7 +74,10 @@ def _solution_qualifies_for_ship_only_exact_early_stop(
 ) -> bool:
     if not _solution_fully_explained_by_ship_builds_only(solution, observation, catalog):
         return False
-    return solution.objective_value >= SHIP_ONLY_EXACT_EARLY_STOP_MIN_PLAUSIBILITY
+    thresholds = resolve_solver_thresholds()
+    return (
+        solution.objective_value >= thresholds.ship_only_exact_early_stop_min_plausibility
+    )
 
 
 def _explained_military_score_2x(
