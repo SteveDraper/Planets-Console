@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
 from api.services.store_service import StoreService
 
 from tests.inference_corpus.models import ComplexityLevel, CorpusCaseResult, DiscoveredCase
@@ -27,6 +28,7 @@ class DiscoveredCaseJob:
     top_k: int = 3
     enable_tier2: bool = False
     fail_on_ranking_miss: bool = False
+    case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
 
 
 def run_discovered_case_job(job: DiscoveredCaseJob) -> CorpusCaseResult:
@@ -51,4 +53,5 @@ def run_discovered_case_job(job: DiscoveredCaseJob) -> CorpusCaseResult:
         top_k=job.top_k,
         enable_tier2=job.enable_tier2,
         fail_on_ranking_miss=job.fail_on_ranking_miss,
+        case_time_limit_seconds=job.case_time_limit_seconds,
     )

@@ -54,6 +54,18 @@ def test_policy_loader_validates_final_alpha_zero():
     assert steps[0].id == "early_game_bands"
 
 
+def test_policy_loader_reads_aggregate_probability_bins():
+    from api.analytics.military_score_inference.tier_policy import (
+        aggregate_bin_bounds_for_key,
+        resolve_aggregate_probability_bins,
+    )
+
+    bins = resolve_aggregate_probability_bins()
+    assert "planet_defense_posts_added_total" in bins
+    assert bins["planet_defense_posts_added_total"][0].upper_count == 0
+    assert aggregate_bin_bounds_for_key("ship_torps_per_type")[1].upper_count == 40
+
+
 def test_policy_loader_rejects_non_superset_tech_levels():
     document = {
         "steps": [
@@ -260,13 +272,33 @@ def test_fighter_builds_admitted_on_full_components_step_with_caps(sample_turn):
     assert ship_fighters.upper_bound <= 20
 
 
-def test_slack_admitted_on_later_steps_with_caps(sample_turn):
+def test_ship_torpedoes_admitted_after_full_components_with_caps(sample_turn):
     observation = _observation(military_delta_2x=500)
     torp_step = next(step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes")
     catalog = build_action_catalog_from_turn(
         observation,
         sample_turn,
         policy_step=torp_step,
+    )
+    action_ids = {action.id for action in catalog.aggregate_actions}
+    assert "planet_defense_posts_added_total" not in action_ids
+    assert "starbase_fighters_added_total" not in action_ids
+    torp_actions = [
+        action for action in catalog.aggregate_actions if action.id.startswith("ship_torps_loaded_")
+    ]
+    assert torp_actions
+    assert all(action.upper_bound <= 40 for action in torp_actions)
+
+
+def test_slack_admitted_on_later_steps_with_caps(sample_turn):
+    observation = _observation(military_delta_2x=500)
+    defense_step = next(
+        step for step in resolve_tier_policies() if step.id == "full_components_planet_defense"
+    )
+    catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=defense_step,
     )
     planet_action = next(
         action
@@ -753,6 +785,111 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
     }
 
 
+def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_threshold(
+    sample_turn, monkeypatch
+):
+    observation = _observation(military_delta_2x=400, warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    threshold_solution = _ship_build_solution(combo_id="combo_a", objective_value=-300)
+
+    def _solve_side_effect(problem, **kwargs):
+        if problem.policy_step_id == policy_steps[0].id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(threshold_solution,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
+    _, _, _, attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    assert attempted == [policy_steps[0].id, policy_steps[1].id]
+
+
+def test_solve_with_policy_ladder_continues_when_ship_only_exact_below_plausibility_threshold(
+    sample_turn, monkeypatch
+):
+    observation = _observation(military_delta_2x=400, warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    low_plaus_solution = _ship_build_solution(combo_id="combo_a", objective_value=-301)
+
+    def _solve_side_effect(problem, **kwargs):
+        if problem.policy_step_id == policy_steps[0].id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(low_plaus_solution,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
+    _, _, _, attempted_low, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    threshold_solution = _ship_build_solution(combo_id="combo_a", objective_value=-300)
+
+    def _solve_side_effect_at_threshold(problem, **kwargs):
+        if problem.policy_step_id == policy_steps[0].id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(threshold_solution,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect_at_threshold,
+    )
+    _, _, _, attempted_at_threshold, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    assert len(attempted_low) > len(attempted_at_threshold)
+
+
 def test_full_catalog_step_applies_tier_overflow_to_planet_defense(sample_turn):
     steps = resolve_tier_policies()
     full_catalog_index = next(
@@ -779,6 +916,13 @@ def test_compute_aggregate_admission_caps_records_first_step_appearance():
         index for index, step in enumerate(steps) if step.id == "admit_ship_torpedoes"
     )
     caps = compute_aggregate_admission_caps(steps, torp_step_index)
+
+    assert caps == {"ship_torps_per_type": 40}
+
+    starbase_step_index = next(
+        index for index, step in enumerate(steps) if step.id == "admit_starbase_defense_posts"
+    )
+    caps = compute_aggregate_admission_caps(steps, starbase_step_index)
 
     assert caps["planet_defense_posts_added_total"] == 16
     assert caps["ship_torps_per_type"] == 40

@@ -107,6 +107,54 @@ def test_discover_games_for_pattern_resolves_category_via_loadinfo():
     assert result.games_attempted == (628580,)
 
 
+def test_discover_games_for_pattern_skips_loadinfo_upstream_error():
+    planets = MagicMock()
+    planets.games_list.return_value = [
+        {
+            "id": 100,
+            "difficulty": 2.0,
+            "datecreated": "10/26/2024 9:02:31 AM",
+            "dateended": "6/23/2025 2:53:43 PM",
+        },
+        {
+            "id": 628580,
+            "difficulty": 2.0,
+            "datecreated": "10/26/2024 9:02:31 AM",
+            "dateended": "6/23/2025 2:53:43 PM",
+        },
+    ]
+
+    from api.analytics.military_score_inference.prior_mining.patterns import PriorMiningPattern
+    from api.errors import UpstreamPlanetsError
+
+    def load_info(game_id: int):
+        if game_id == 100:
+            raise UpstreamPlanetsError("Planets.nu load game info request failed.")
+        return json.loads(
+            (
+                Path(__file__).resolve().parent / "fixtures/inference_corpus/628580/info.json"
+            ).read_text(encoding="utf-8")
+        )
+
+    planets.load_game_info.side_effect = load_info
+
+    pattern = PriorMiningPattern(
+        id="epic-test",
+        game_category=GameCategory.EPIC,
+        max_games=1,
+        min_difficulty=1.0,
+        earliest_date="2024-01-01",
+    )
+    result = discover_games_for_pattern(
+        pattern,
+        planets=planets,
+        contributing_game_ids=frozenset(),
+        pattern_contributed_count=0,
+        max_selections=1,
+    )
+    assert result.games_attempted == (628580,)
+
+
 def test_discover_games_for_pattern_skips_already_contributed():
     planets = MagicMock()
     planets.games_list.return_value = [

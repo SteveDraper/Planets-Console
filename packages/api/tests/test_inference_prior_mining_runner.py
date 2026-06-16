@@ -189,7 +189,7 @@ def test_run_prior_miner_flushes_accumulation_when_pattern_loop_aborts(tmp_path:
     reloaded = load_prior_weights_asset(assets_dir / "prior_weights_standard.yaml")
     assert 100001 in reloaded.contributing_game_ids
     assert 100002 in reloaded.contributing_game_ids
-    assert reloaded.hulls["before_ship_limit"]["global"][13] >= 1
+    assert reloaded.hulls["before_ship_limit"]["global"]["battleship"][13] >= 1
 
 
 def test_run_prior_miner_does_not_mark_aborted_when_all_patterns_complete(tmp_path: Path):

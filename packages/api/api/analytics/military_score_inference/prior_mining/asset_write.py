@@ -110,25 +110,29 @@ def _render_hulls(asset: PriorWeightsAsset, catalog: ComponentNameCatalog) -> li
     lines = [
         "hulls:",
         (
-            "  # Inference ship-limit band: tables split on whether the player is "
-            "before/after ship limit."
+            "  # Inference ship-limit band: P(hull|category) pseudo-counts keyed by "
+            "inference hull category."
         ),
     ]
     for band in SHIP_LIMIT_BANDS:
         lines.append(f"  {band}:")
         band_tables = asset.hulls[band]
-        global_counts = band_tables.get("global", {})
-        if global_counts:
+        global_by_category = band_tables.get("global", {})
+        if global_by_category:
             lines.append("    global:")
             lines.extend(
-                _render_int_count_table(global_counts, indent=6, catalog=catalog, table_kind="hull")
+                _render_category_hull_tables(
+                    global_by_category,
+                    indent=6,
+                    catalog=catalog,
+                )
             )
         else:
             lines.append("    global: {}")
         by_race = {
-            race_key: hull_table
-            for race_key, hull_table in band_tables.items()
-            if race_key != "global" and hull_table
+            race_key: category_tables
+            for race_key, category_tables in band_tables.items()
+            if race_key != "global" and category_tables
         }
         if by_race:
             lines.append("    byRace:")
@@ -137,13 +141,38 @@ def _render_hulls(asset: PriorWeightsAsset, catalog: ComponentNameCatalog) -> li
                 race_suffix = f"  # {race_comment}" if race_comment else ""
                 lines.append(f"      {race_id}:{race_suffix}")
                 lines.extend(
-                    _render_int_count_table(
+                    _render_category_hull_tables(
                         by_race[race_id],
                         indent=8,
                         catalog=catalog,
-                        table_kind="hull",
                     )
                 )
+    return lines
+
+
+def _render_category_hull_tables(
+    category_tables: dict[str, dict[int, float]],
+    *,
+    indent: int,
+    catalog: ComponentNameCatalog,
+) -> list[str]:
+    prefix = " " * indent
+    lines: list[str] = []
+    for category in INFERENCE_HULL_CATEGORIES:
+        counts = category_tables.get(category)
+        if not counts:
+            continue
+        category_comment = HULL_CATEGORY_COMMENTS.get(category, "")
+        category_suffix = f"  # {category_comment}" if category_comment else ""
+        lines.append(f"{prefix}{category}:{category_suffix}")
+        lines.extend(
+            _render_int_count_table(
+                counts,
+                indent=indent + 2,
+                catalog=catalog,
+                table_kind="hull",
+            )
+        )
     return lines
 
 

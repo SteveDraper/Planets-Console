@@ -35,6 +35,8 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
 from api.models.game import TurnInfo
 
+SHIP_ONLY_EXACT_EARLY_STOP_MIN_PLAUSIBILITY = -300
+
 
 def remaining_time(started_at: float, time_limit_seconds: float | None) -> float:
     if time_limit_seconds is None:
@@ -46,6 +48,14 @@ def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
     return {ship_build.combo_id: ship_build.count for ship_build in solution.ship_builds}
 
 
+def _best_merged_solution(
+    merged_solutions: list[InferenceSolution],
+) -> InferenceSolution | None:
+    if not merged_solutions:
+        return None
+    return max(merged_solutions, key=lambda solution: solution.objective_value)
+
+
 def _solution_fully_explained_by_ship_builds_only(
     solution: InferenceSolution,
     observation: InferenceObservation,
@@ -54,6 +64,16 @@ def _solution_fully_explained_by_ship_builds_only(
     if solution.actions:
         return False
     return solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+
+
+def _solution_qualifies_for_ship_only_exact_early_stop(
+    solution: InferenceSolution,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+) -> bool:
+    if not _solution_fully_explained_by_ship_builds_only(solution, observation, catalog):
+        return False
+    return solution.objective_value >= SHIP_ONLY_EXACT_EARLY_STOP_MIN_PLAUSIBILITY
 
 
 def _explained_military_score_2x(
@@ -445,8 +465,9 @@ def run_policy_ladder_tier_step(
 
     state.next_step_index = step_index + 1
 
-    if state.merged_solutions and _solution_fully_explained_by_ship_builds_only(
-        state.merged_solutions[0],
+    best_solution = _best_merged_solution(state.merged_solutions)
+    if best_solution is not None and _solution_qualifies_for_ship_only_exact_early_stop(
+        best_solution,
         observation,
         catalog,
     ):

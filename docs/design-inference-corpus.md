@@ -417,7 +417,7 @@ Manifest `expectCoverage` is a **CI assertion** only: when `true`, the case must
 
 After Tier 1 passes with `status == exact`, when `groundTruthAvailable` is true and catalog coverage passed:
 
-1. Normalize each solver solution via `solution_to_ground_truth` -- merge wire `actions` and `shipBuilds`, drop `count <= 0`, sort by action id (same shape as section 9.1).
+1. Normalize each solver solution via `solution_to_ground_truth` -- merge wire `actions` and `shipBuilds`, drop `count <= 0`, fold `evil_empire_free_starbase_fighters` into `starbase_fighters_added_total` (solver-internal race action; GT is inventory-only), sort by action id (same shape as section 9.1).
 2. Scan `solutions[0:K]` in wire order (default `K=3`, CLI `--top-k`) for an order-insensitive multiset match to ground truth.
 3. Miss -> outcome `ranking_miss` (distinct from `failed` and `out_of_search_space`). Per-case JSON may include `groundTruthRank` (1-based index in the full held list, or `null` when the GT multiset appears in no returned solution) and `topK`.
 4. **Soft** by default for probe/local runs. **Hard** when manifest `requireTopK: true` or CLI `--fail-on-ranking-miss` -- exit code 1 while outcome stays `ranking_miss`.

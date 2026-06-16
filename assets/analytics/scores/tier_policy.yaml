@@ -2,6 +2,86 @@
 # filters.*.all widens eligibility (see tier_policy.py module docstring).
 # filters.*.techLevels narrows by component techlevel; ids derived at runtime.
 version: 1
+
+# Solver magnitude bins for aggregate-action ranking (not per tier step).
+# Keys match aggregate action ids or allowlist keys (ship_torps_per_type, etc.).
+aggregateProbabilityBins:
+  planet_defense_posts_added_total:
+    - label: no build-up
+      lowerCount: 0
+      upperCount: 0
+    - label: modest build-up
+      lowerCount: 1
+      upperCount: 16
+    - label: heavy build-up
+      lowerCount: 17
+      upperCount: 30
+    - label: very heavy build-up
+      lowerCount: 31
+      upperCount: 79
+    - label: extreme build-up
+      lowerCount: 80
+      upperCount: 200
+  starbase_defense_posts_added_total:
+    - label: no build-up
+      lowerCount: 0
+      upperCount: 0
+    - label: modest build-up
+      lowerCount: 1
+      upperCount: 20
+    - label: heavy build-up
+      lowerCount: 21
+      upperCount: 100
+    - label: extreme build-up
+      lowerCount: 101
+      upperCount: 400
+  starbase_fighters_added_total:
+    - label: no build-up
+      lowerCount: 0
+      upperCount: 0
+    - label: modest build-up
+      lowerCount: 1
+      upperCount: 20
+    - label: heavy build-up
+      lowerCount: 21
+      upperCount: 100
+    - label: extreme build-up
+      lowerCount: 101
+      upperCount: 200
+  ship_fighters_added_total:
+    - label: no build-up
+      lowerCount: 0
+      upperCount: 0
+    - label: modest load
+      lowerCount: 1
+      upperCount: 20
+    - label: heavy load
+      lowerCount: 21
+      upperCount: 100
+    - label: extreme load
+      lowerCount: 101
+      upperCount: 500
+  ship_torps_per_type:
+    - label: no build-up
+      lowerCount: 0
+      upperCount: 0
+    - label: modest load
+      lowerCount: 1
+      upperCount: 40
+    - label: heavy load
+      lowerCount: 41
+      upperCount: 100
+    - label: extreme load
+      lowerCount: 101
+      upperCount: 200
+  fighter_transfers_per_direction:
+    - label: no build-up
+      lowerCount: 0
+      upperCount: 0
+    - label: transferred
+      lowerCount: 1
+      upperCount: 50
+
 steps:
   - id: early_game_bands
     filters:
@@ -67,6 +147,23 @@ steps:
     alpha: 50
     maxSeeds: 5
 
+  - id: admit_ship_torpedoes
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      ship_torps_per_type: 40
+    alpha: 30
+    maxSeeds: 5
+
   - id: full_components_planet_defense
     filters:
       hulls:
@@ -80,6 +177,7 @@ steps:
     beamSlotCounts: partial
     launcherSlotCounts: partial
     aggregateAllowlist:
+      ship_torps_per_type: 40
       planet_defense_posts_added_total: 16
       starbase_fighters_added_total: 50
       ship_fighters_added_total: 20
@@ -100,30 +198,9 @@ steps:
     beamSlotCounts: partial
     launcherSlotCounts: partial
     aggregateAllowlist:
-      planet_defense_posts_added_total: 16
-      starbase_defense_posts_added_total: 5
-      starbase_fighters_added_total: 50
-      ship_fighters_added_total: 20
-      fighter_transfers_per_direction: 50
-    alpha: 30
-    maxSeeds: 5
-
-  - id: admit_ship_torpedoes
-    filters:
-      hulls:
-        all: true
-      engines:
-        all: true
-      beams:
-        all: true
-      launchers:
-        all: true
-    beamSlotCounts: partial
-    launcherSlotCounts: partial
-    aggregateAllowlist:
-      planet_defense_posts_added_total: 16
-      starbase_defense_posts_added_total: 5
       ship_torps_per_type: 40
+      planet_defense_posts_added_total: 16
+      starbase_defense_posts_added_total: 5
       starbase_fighters_added_total: 50
       ship_fighters_added_total: 20
       fighter_transfers_per_direction: 50

@@ -20,6 +20,8 @@ from api.models.components import Beam, Engine, Hull, Torpedo
 
 IntLogWeightTable: TypeAlias = dict[int, int]
 SlotFillLogWeightTable: TypeAlias = dict[str, int]
+CategoryHullLogTables: TypeAlias = dict[InferenceHullCategory, IntLogWeightTable]
+CategoryLogWeightTable: TypeAlias = dict[InferenceHullCategory, int]
 
 
 def _required_log_weight(table: dict[int | str, int], key: int | str, *, field_name: str) -> int:
@@ -44,6 +46,8 @@ CategoryComponentLogTables: TypeAlias = dict[
 
 __all__ = [
     "CategoryComponentLogTables",
+    "CategoryHullLogTables",
+    "CategoryLogWeightTable",
     "IntLogWeightTable",
     "PriorWeightsCatalog",
     "PriorWeightsDiagnostics",
@@ -77,23 +81,48 @@ class PriorWeightsDiagnostics:
 @dataclass(frozen=True)
 class PriorWeightsCatalog:
     diagnostics: PriorWeightsDiagnostics
-    _hull_log_weights: dict[int, int]
+    _category_log_weights: CategoryLogWeightTable
+    _hull_log_weights_by_category: CategoryHullLogTables
     _component_tables: CategoryComponentLogTables
     _aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]]
     _combo_log_overrides: dict[str, int]
     _hull_log_overrides: dict[int, int]
     _generic_freighter_log_weight: int | None = None
 
-    def hull_marginal_log_weight(self, hull_id: int, *, default_weight: int | None = None) -> int:
+    def category_marginal_log_weight(self, hull_category: InferenceHullCategory) -> int:
+        weight = self._category_log_weights.get(hull_category)
+        if weight is None:
+            raise ValueError(
+                f"incomplete prior: missing category marginal weight for {hull_category!r}"
+            )
+        return weight
+
+    def hull_marginal_log_weight(
+        self,
+        hull_id: int,
+        *,
+        hull_category: InferenceHullCategory,
+        default_weight: int | None = None,
+    ) -> int:
         hull_override = self._hull_log_overrides.get(hull_id)
         if hull_override is not None:
             return hull_override
-        hull_weight = self._hull_log_weights.get(hull_id)
+        category_table = self._hull_log_weights_by_category.get(hull_category)
+        if category_table is None:
+            if default_weight is not None:
+                return default_weight
+            raise ValueError(
+                f"incomplete prior: missing hull marginal table for category {hull_category!r}"
+            )
+        hull_weight = category_table.get(hull_id)
         if hull_weight is not None:
             return hull_weight
         if default_weight is not None:
             return default_weight
-        raise ValueError(f"incomplete prior: missing hull marginal weight for {hull_id!r}")
+        raise ValueError(
+            f"incomplete prior: missing hull marginal weight for {hull_id!r} "
+            f"in category {hull_category!r}"
+        )
 
     def _resolved_combo_log_weight(
         self,
@@ -110,9 +139,11 @@ class PriorWeightsCatalog:
         """Freighter likelihood for the solver's generic freighter combo."""
         if self._generic_freighter_log_weight is None:
             raise ValueError("incomplete prior: missing generic freighter marginal weight")
+        composed_weight = self.category_marginal_log_weight("true_freighter")
+        composed_weight += self._generic_freighter_log_weight
         return self._resolved_combo_log_weight(
             combo_id=combo_id,
-            composed_weight=self._generic_freighter_log_weight,
+            composed_weight=composed_weight,
         )
 
     def combo_probability_weight(
@@ -126,8 +157,6 @@ class PriorWeightsCatalog:
         beam_count: int,
         launcher_count: int,
     ) -> int:
-        hull_weight = self.hull_marginal_log_weight(hull.id)
-
         hull_category = resolve_inference_hull_category(
             hull,
             beam_count=beam_count,
@@ -136,25 +165,27 @@ class PriorWeightsCatalog:
         category_tables = self._component_tables[hull_category]
         fill = slot_fill_pattern(hull, beam_count=beam_count, launcher_count=launcher_count)
 
-        component_weight = _required_log_weight(
+        composed_weight = self.category_marginal_log_weight(hull_category)
+        composed_weight += self.hull_marginal_log_weight(hull.id, hull_category=hull_category)
+        composed_weight += _required_log_weight(
             category_tables.engines,
             engine.id,
             field_name=f"{hull_category}.engines",
         )
         if beam is not None and beam_count > 0:
-            component_weight += _required_log_weight(
+            composed_weight += _required_log_weight(
                 category_tables.beams,
                 beam.id,
                 field_name=f"{hull_category}.beams",
             )
         if torpedo is not None and launcher_count > 0:
-            component_weight += _required_log_weight(
+            composed_weight += _required_log_weight(
                 category_tables.torpedoes,
                 torpedo.id,
                 field_name=f"{hull_category}.torpedoes",
             )
         if category_tables.slot_fill:
-            component_weight += _required_log_weight(
+            composed_weight += _required_log_weight(
                 category_tables.slot_fill,
                 fill,
                 field_name=f"{hull_category}.slotFill",
@@ -162,7 +193,7 @@ class PriorWeightsCatalog:
 
         return self._resolved_combo_log_weight(
             combo_id=combo_id,
-            composed_weight=hull_weight + component_weight,
+            composed_weight=composed_weight,
         )
 
     def probability_buckets_for_action(

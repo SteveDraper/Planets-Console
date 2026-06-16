@@ -9,7 +9,7 @@ from typing import Any
 import dacite
 
 from api.concepts.game_category import GameCategory
-from api.errors import ValidationError
+from api.errors import UpstreamPlanetsError, ValidationError
 from api.planets_nu import PlanetsNuClient
 from api.serialization.game import game_info_from_json
 from api.services.storage_json import require_dict
@@ -104,7 +104,16 @@ def iter_accepted_games_for_pattern(
             )
             continue
 
-        remote = planets.load_game_info(candidate.game_id)
+        try:
+            remote = planets.load_game_info(candidate.game_id)
+        except UpstreamPlanetsError as exc:
+            LOGGER.warning(
+                "pattern %s: skip game %s (loadinfo upstream error: %s)",
+                pattern.id,
+                candidate.game_id,
+                exc,
+            )
+            continue
         try:
             info = game_info_from_json(require_dict(remote, f"game info {candidate.game_id}"))
         except (ValidationError, dacite.DaciteError) as exc:

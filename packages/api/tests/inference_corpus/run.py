@@ -1,10 +1,12 @@
 """Run one inference corpus case through the production inference API."""
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
 from api.analytics.military_score_inference.actions import (
+    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
     build_action_catalog_from_turn,
 )
@@ -107,6 +109,7 @@ def run_manifest_case(
     top_k: int = DEFAULT_TOP_K,
     enable_tier2: bool = False,
     fail_on_ranking_miss: bool = False,
+    case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusCaseResult:
     """Execute Tier 1 pipeline for one manifest case."""
     skip_reason = _complexity_skip_reason(
@@ -208,6 +211,7 @@ def run_manifest_case(
         top_k=top_k,
         enable_tier2=enable_tier2 or case.tier >= 2,
         hard_ranking=case.require_top_k or fail_on_ranking_miss,
+        case_time_limit_seconds=case_time_limit_seconds,
     )
 
 
@@ -224,6 +228,7 @@ def run_discovered_case(
     top_k: int = DEFAULT_TOP_K,
     enable_tier2: bool = False,
     fail_on_ranking_miss: bool = False,
+    case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusCaseResult:
     """Execute Tier 1 pipeline for one case discovered from local storage."""
     score_turn_number = case.host_turn + 1
@@ -334,6 +339,7 @@ def run_discovered_case(
         hard_ranking=fail_on_ranking_miss,
         tier2_other_prior_turns=tuple(tier2_other_prior),
         tier2_other_score_turns=tuple(tier2_other_score),
+        case_time_limit_seconds=case_time_limit_seconds,
     )
 
 
@@ -348,6 +354,7 @@ def run_loaded_case(
     hard_ranking: bool = False,
     tier2_other_prior_turns: tuple[TurnInfo, ...] = (),
     tier2_other_score_turns: tuple[TurnInfo, ...] = (),
+    case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusCaseResult:
     """Ground truth, coverage, and Tier 1 on one observation and catalog build."""
     extraction = extract_ground_truth_v1(
@@ -387,6 +394,7 @@ def run_loaded_case(
             observation=observation,
             catalog=catalog,
             load_scoreboard_turn=load_scoreboard_turn,
+            case_time_limit_seconds=case_time_limit_seconds,
         )
         if tier1_result.outcome != CaseOutcome.PASSED:
             return tier1_result
@@ -399,6 +407,7 @@ def run_loaded_case(
             complexity_reasons=loaded.complexity_reasons,
             ground_truth_available=True,
             skip_reason="negative_defense_gt_pending_solver",
+            elapsed_seconds=tier1_result.elapsed_seconds,
         )
 
     skip_coverage = (
@@ -492,6 +501,7 @@ def run_loaded_case(
         observation=observation,
         catalog=catalog,
         load_scoreboard_turn=load_scoreboard_turn,
+        case_time_limit_seconds=case_time_limit_seconds,
     )
     if tier1_result.outcome != CaseOutcome.PASSED:
         return tier1_result
@@ -513,6 +523,13 @@ def run_loaded_case(
     )
 
 
+def _corpus_result_with_elapsed(
+    result: CorpusCaseResult,
+    elapsed_seconds: float,
+) -> CorpusCaseResult:
+    return replace(result, elapsed_seconds=elapsed_seconds)
+
+
 def _run_tier1_for_loaded_case(
     *,
     case_id: str,
@@ -525,22 +542,29 @@ def _run_tier1_for_loaded_case(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     load_scoreboard_turn=None,
+    case_time_limit_seconds: float | None = None,
 ) -> tuple[CorpusCaseResult, dict[str, object] | None]:
+    started_at = time.monotonic()
     inference, inference_observation, solve_catalog = run_inference_with_artifacts(
         score,
         score_turn,
         load_scoreboard_turn=load_scoreboard_turn,
+        time_limit_seconds=case_time_limit_seconds,
     )
+    elapsed_seconds = time.monotonic() - started_at
     status = inference.get("status")
     if not isinstance(status, str):
         return (
-            CorpusCaseResult(
-                case_id=case_id,
-                outcome=CaseOutcome.FAILED,
-                failure_message="inference payload missing status",
-                complexity=complexity,
-                complexity_reasons=complexity_reasons,
-                ground_truth_available=ground_truth_available,
+            _corpus_result_with_elapsed(
+                CorpusCaseResult(
+                    case_id=case_id,
+                    outcome=CaseOutcome.FAILED,
+                    failure_message="inference payload missing status",
+                    complexity=complexity,
+                    complexity_reasons=complexity_reasons,
+                    ground_truth_available=ground_truth_available,
+                ),
+                elapsed_seconds,
             ),
             None,
         )
@@ -556,15 +580,18 @@ def _run_tier1_for_loaded_case(
     )
     if status_failure is not None:
         return (
-            CorpusCaseResult(
-                case_id=case_id,
-                outcome=CaseOutcome.FAILED,
-                status=status,
-                solution_count=solution_count,
-                complexity=complexity,
-                complexity_reasons=complexity_reasons,
-                ground_truth_available=ground_truth_available,
-                failure_message=status_failure,
+            _corpus_result_with_elapsed(
+                CorpusCaseResult(
+                    case_id=case_id,
+                    outcome=CaseOutcome.FAILED,
+                    status=status,
+                    solution_count=solution_count,
+                    complexity=complexity,
+                    complexity_reasons=complexity_reasons,
+                    ground_truth_available=ground_truth_available,
+                    failure_message=status_failure,
+                ),
+                elapsed_seconds,
             ),
             None,
         )
@@ -577,28 +604,34 @@ def _run_tier1_for_loaded_case(
         )
         if verify_failure is not None:
             return (
-                CorpusCaseResult(
-                    case_id=case_id,
-                    outcome=CaseOutcome.FAILED,
-                    status=status,
-                    solution_count=solution_count,
-                    complexity=complexity,
-                    complexity_reasons=complexity_reasons,
-                    ground_truth_available=ground_truth_available,
-                    failure_message=verify_failure,
+                _corpus_result_with_elapsed(
+                    CorpusCaseResult(
+                        case_id=case_id,
+                        outcome=CaseOutcome.FAILED,
+                        status=status,
+                        solution_count=solution_count,
+                        complexity=complexity,
+                        complexity_reasons=complexity_reasons,
+                        ground_truth_available=ground_truth_available,
+                        failure_message=verify_failure,
+                    ),
+                    elapsed_seconds,
                 ),
                 None,
             )
 
     return (
-        CorpusCaseResult(
-            case_id=case_id,
-            outcome=CaseOutcome.PASSED,
-            status=status,
-            solution_count=solution_count,
-            complexity=complexity,
-            complexity_reasons=complexity_reasons,
-            ground_truth_available=ground_truth_available,
+        _corpus_result_with_elapsed(
+            CorpusCaseResult(
+                case_id=case_id,
+                outcome=CaseOutcome.PASSED,
+                status=status,
+                solution_count=solution_count,
+                complexity=complexity,
+                complexity_reasons=complexity_reasons,
+                ground_truth_available=ground_truth_available,
+            ),
+            elapsed_seconds,
         ),
         inference,
     )
@@ -642,6 +675,7 @@ def _apply_ranking_check(
         ground_truth_rank=ground_truth_rank,
         top_k=top_k,
         hard_ranking_miss=hard_ranking,
+        elapsed_seconds=tier1_result.elapsed_seconds,
     )
 
 

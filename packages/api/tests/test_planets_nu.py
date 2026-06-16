@@ -116,3 +116,44 @@ def test_load_all_raises_on_json_error_payload() -> None:
         client = PlanetsNuClient("https://api.planets.nu")
         with pytest.raises(UpstreamPlanetsError, match="game not finished"):
             client.load_all(1)
+
+
+def test_load_game_info_retries_transient_connect_timeout() -> None:
+    mock_client = MagicMock()
+    success_response = MagicMock()
+    success_response.json.return_value = {"success": True, "game": {"id": 1}}
+    success_response.raise_for_status = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    request = httpx.Request("GET", "https://api.planets.nu/game/loadinfo?gameid=1")
+    mock_client.get.side_effect = [
+        httpx.ConnectTimeout("handshake timed out", request=request),
+        success_response,
+    ]
+
+    with (
+        patch("api.planets_nu.httpx.Client", return_value=mock_client),
+        patch("api.planets_nu.time.sleep") as sleep,
+    ):
+        client = PlanetsNuClient("https://api.planets.nu", max_attempts=3)
+        data = client.load_game_info(1)
+
+    assert data["game"]["id"] == 1
+    assert mock_client.get.call_count == 2
+    sleep.assert_called_once_with(2.0)
+
+
+def test_load_game_info_does_not_retry_http_status_errors() -> None:
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    request = httpx.Request("GET", "https://api.planets.nu/game/loadinfo?gameid=1")
+    response = httpx.Response(503, request=request)
+    mock_client.get.return_value = response
+
+    with patch("api.planets_nu.httpx.Client", return_value=mock_client):
+        client = PlanetsNuClient("https://api.planets.nu", max_attempts=3)
+        with pytest.raises(UpstreamPlanetsError, match="load game info request failed"):
+            client.load_game_info(1)
+
+    assert mock_client.get.call_count == 1

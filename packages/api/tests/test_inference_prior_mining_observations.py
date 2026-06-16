@@ -6,6 +6,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from api.analytics.military_score_inference.aggregate_action_registry import (
+    SHIP_TORPS_LOADED_ANY_PRIOR_KEY,
+)
 from api.analytics.military_score_inference.prior_mining.observations import (
     _extract_player_host_turn,
     _ship_matches_starbase_order,
@@ -157,5 +160,8 @@ def test_aggregate_histogram_includes_zero_bins():
         race_id=1,
     )
     assert extraction.aggregate_deltas["planet_defense_posts_added_total"] == 0
+    assert extraction.aggregate_deltas[SHIP_TORPS_LOADED_ANY_PRIOR_KEY] == sum(
+        extraction.aggregate_deltas[f"ship_torps_loaded_{torp.id}"] for torp in prior_turn.torpedos
+    )
     assert "ship_fighters_added_total" in extraction.aggregate_deltas
     assert extraction.aggregate_deltas["fighters_starbase_to_ship"] in (0, 1)

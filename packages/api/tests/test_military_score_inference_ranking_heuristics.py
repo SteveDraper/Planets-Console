@@ -1,9 +1,6 @@
 """Tests for military score inference ranking heuristics (issue #85)."""
 
 from api.analytics.military_score_inference.accelerated_start import accelerated_inference_segments
-from api.analytics.military_score_inference.aggregate_action_registry import (
-    SHIP_TORPEDO_BIN_BOUNDS,
-)
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_segment_policy_ladder,
 )
@@ -37,6 +34,7 @@ from api.analytics.military_score_inference.solver import (
     solve_inference_problem,
 )
 from api.analytics.military_score_inference.tier_policy import (
+    aggregate_bin_bounds_for_key,
     compute_aggregate_admission_caps,
     resolve_tier_policies,
 )
@@ -546,7 +544,8 @@ def test_ship_torpedo_modest_bin_covers_typical_load_counts():
 
     ship_torpedo_buckets = probability_buckets_for_test_action("ship_torps_loaded_1")
     # Bin 0 is the none bin [0, 0]; bin 1 is the modest load band [1, 40].
-    assert SHIP_TORPEDO_BIN_BOUNDS[1].upper_count == 40
+    torp_bins = aggregate_bin_bounds_for_key("ship_torps_per_type")
+    assert torp_bins[1].upper_count == 40
     assert active_ranking_bin_index(30, ship_torpedo_buckets) == 1
     assert active_ranking_bin_index(41, ship_torpedo_buckets) == 2
     max_weight = max_marginal_weight(ship_torpedo_buckets)

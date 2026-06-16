@@ -1,5 +1,6 @@
 """Data types for the inference corpus harness."""
 
+import statistics
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
@@ -75,6 +76,7 @@ class CorpusCaseResult:
     ground_truth_rank: int | None = None
     top_k: int | None = None
     hard_ranking_miss: bool = False
+    elapsed_seconds: float | None = None
 
 
 @dataclass
@@ -130,12 +132,47 @@ class CorpusReport:
                 f"ranking_miss={buckets[CaseOutcome.RANKING_MISS]}"
             ),
         ]
+        elapsed = [
+            result.elapsed_seconds for result in self.results if result.elapsed_seconds is not None
+        ]
+        if elapsed:
+            mean_elapsed = statistics.mean(elapsed)
+            p90_elapsed = statistics.quantiles(elapsed, n=10)[8]
+            lines.append(
+                f"  inference_elapsed_seconds: mean={mean_elapsed:.2f} p90={p90_elapsed:.2f} "
+                f"(n={len(elapsed)})"
+            )
         for result in self.hard_failures:
-            lines.append(f"  FAIL {result.case_id}: {result.failure_message}")
+            elapsed_suffix = (
+                f" elapsed={result.elapsed_seconds:.2f}s"
+                if result.elapsed_seconds is not None
+                else ""
+            )
+            lines.append(f"  FAIL {result.case_id}: {result.failure_message}{elapsed_suffix}")
         for result in self.hard_ranking_misses:
+            elapsed_suffix = (
+                f" elapsed={result.elapsed_seconds:.2f}s"
+                if result.elapsed_seconds is not None
+                else ""
+            )
             lines.append(
                 f"  RANKING_MISS {result.case_id}: {result.failure_message} "
-                f"(rank={result.ground_truth_rank}, topK={result.top_k})"
+                f"(rank={result.ground_truth_rank}, topK={result.top_k}){elapsed_suffix}"
+            )
+        ranking_misses = [
+            result
+            for result in self.results
+            if result.outcome == CaseOutcome.RANKING_MISS and not result.hard_ranking_miss
+        ]
+        for result in ranking_misses:
+            elapsed_suffix = (
+                f" elapsed={result.elapsed_seconds:.2f}s"
+                if result.elapsed_seconds is not None
+                else ""
+            )
+            lines.append(
+                f"  ranking_miss {result.case_id}: {result.failure_message} "
+                f"(rank={result.ground_truth_rank}, topK={result.top_k}){elapsed_suffix}"
             )
         if self.stopped_early and self.stop_reason is not None:
             lines.append(f"  stopped_early={self.stop_reason}")

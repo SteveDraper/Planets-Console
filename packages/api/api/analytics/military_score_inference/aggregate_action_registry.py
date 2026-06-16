@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from api.analytics.military_score_inference.models import (
@@ -20,49 +21,22 @@ from api.analytics.military_score_inference.scoring import (
 
 SHIP_TORPS_LOADED_ACTION_PREFIX = "ship_torps_loaded_"
 
+SHIP_TORPS_LOADED_ANY_PRIOR_KEY = "ship_torps_loaded_any"
+
+
+def is_pooled_torp_load_prior_key(action_id: str) -> bool:
+    return action_id == SHIP_TORPS_LOADED_ANY_PRIOR_KEY
+
+
+def is_torp_load_action_id(action_id: str) -> bool:
+    if not action_id.startswith(SHIP_TORPS_LOADED_ACTION_PREFIX):
+        return False
+    suffix = action_id.removeprefix(SHIP_TORPS_LOADED_ACTION_PREFIX)
+    return suffix.isdecimal() and int(suffix) > 0
+
+
 SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY = "ship_torps_per_type"
 FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY = "fighter_transfers_per_direction"
-
-# Leading occurrence bin shared by every aggregate histogram: count == 0 ("did not
-# happen"). Its data-derived weight carries the occurrence/parsimony prior.
-NONE_BIN = ProbabilityBinBounds("no build-up", 0, 0)
-
-DEFENSE_POST_BIN_BOUNDS = (
-    NONE_BIN,
-    ProbabilityBinBounds("modest build-up", 1, 10),
-    ProbabilityBinBounds("heavy build-up", 11, 50),
-    ProbabilityBinBounds("extreme build-up", 51, 100),
-)
-PLANET_DEFENSE_POST_BIN_BOUNDS = DEFENSE_POST_BIN_BOUNDS
-STARBASE_DEFENSE_POST_BIN_BOUNDS = DEFENSE_POST_BIN_BOUNDS
-STARBASE_FIGHTER_BIN_BOUNDS = (
-    NONE_BIN,
-    ProbabilityBinBounds("modest build-up", 1, 20),
-    ProbabilityBinBounds("heavy build-up", 21, 100),
-    ProbabilityBinBounds("extreme build-up", 101, 200),
-)
-SHIP_FIGHTER_BIN_BOUNDS = (
-    NONE_BIN,
-    ProbabilityBinBounds("modest load", 1, 20),
-    ProbabilityBinBounds("heavy load", 21, 100),
-    ProbabilityBinBounds("extreme load", 101, 500),
-)
-SHIP_TORPEDO_BIN_BOUNDS = (
-    NONE_BIN,
-    ProbabilityBinBounds("modest load", 1, 40),
-    ProbabilityBinBounds("heavy load", 41, 100),
-    ProbabilityBinBounds("extreme load", 101, 200),
-)
-
-
-def _fighter_transfer_bin_bounds() -> tuple[ProbabilityBinBounds, ...]:
-    # Occurrence-only histogram: a none bin plus a single active band. The active
-    # upper bound is cosmetic because anything >= 1 routes to the last bin.
-    return (
-        NONE_BIN,
-        ProbabilityBinBounds("transferred", 1, AggregateCatalogCaps().max_fighter_transfers),
-    )
-
 
 MissingAggregatePolicy = Literal["required", "implicit_uniform"]
 
@@ -77,18 +51,38 @@ class AggregateCatalogCaps:
     max_fighter_transfers: int = 50
 
 
-FIGHTER_TRANSFER_BIN_BOUNDS = _fighter_transfer_bin_bounds()
-
+FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY = "fighter_transfers_per_direction"
 
 CatalogConfigCap = Callable[[AggregateCatalogCaps], int]
 
 
 @dataclass(frozen=True)
 class AggregatePriorFields:
-    bin_bounds: tuple[ProbabilityBinBounds, ...]
+    bin_bounds_key: str
     missing_aggregate_policy: MissingAggregatePolicy = "required"
     allowlist_key: str | None = None
     is_fighter_channel_member: bool = False
+
+
+def aggregate_bin_bounds_for_spec(
+    spec: AggregatePriorFields,
+    *,
+    tier_policy_path: Path | None = None,
+) -> tuple[ProbabilityBinBounds, ...]:
+    from api.analytics.military_score_inference.tier_policy import aggregate_bin_bounds_for_key
+
+    return aggregate_bin_bounds_for_key(spec.bin_bounds_key, base_path=tier_policy_path)
+
+
+def aggregate_bin_bounds_for_action(
+    action_id: str,
+    *,
+    tier_policy_path: Path | None = None,
+) -> tuple[ProbabilityBinBounds, ...]:
+    spec = lookup_aggregate_action_spec(action_id)
+    if spec is None:
+        raise ValueError(f"unknown aggregate action id {action_id!r}")
+    return aggregate_bin_bounds_for_spec(spec, tier_policy_path=tier_policy_path)
 
 
 @dataclass(frozen=True)
@@ -174,7 +168,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="planet_defense_posts_added_total",
         spec=FixedAggregateSpec(
-            bin_bounds=PLANET_DEFENSE_POST_BIN_BOUNDS,
+            bin_bounds_key="planet_defense_posts_added_total",
             catalog_label="Planet defense posts added",
             score_delta_2x=planet_defense_post_score_delta_2x,
             catalog_config_cap=lambda config: config.max_planet_defense_posts,
@@ -183,7 +177,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="starbase_defense_posts_added_total",
         spec=FixedAggregateSpec(
-            bin_bounds=STARBASE_DEFENSE_POST_BIN_BOUNDS,
+            bin_bounds_key="starbase_defense_posts_added_total",
             catalog_label="Starbase defense posts added",
             score_delta_2x=starbase_defense_post_score_delta_2x,
             catalog_config_cap=lambda config: config.max_starbase_defense_posts,
@@ -192,7 +186,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="starbase_fighters_added_total",
         spec=FixedAggregateSpec(
-            bin_bounds=STARBASE_FIGHTER_BIN_BOUNDS,
+            bin_bounds_key="starbase_fighters_added_total",
             is_fighter_channel_member=True,
             catalog_label="Starbase fighters added",
             score_delta_2x=starbase_fighter_score_delta_2x,
@@ -202,7 +196,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="ship_fighters_added_total",
         spec=FixedAggregateSpec(
-            bin_bounds=SHIP_FIGHTER_BIN_BOUNDS,
+            bin_bounds_key="ship_fighters_added_total",
             is_fighter_channel_member=True,
             catalog_label="Ship fighters added",
             score_delta_2x=loaded_ship_fighter_score_delta_2x,
@@ -211,7 +205,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     ),
     TemplateAggregateRegistryEntry(
         spec=TemplateAggregateSpec(
-            bin_bounds=SHIP_TORPEDO_BIN_BOUNDS,
+            bin_bounds_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
             missing_aggregate_policy="implicit_uniform",
             allowlist_key=SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
             action_id_prefix=SHIP_TORPS_LOADED_ACTION_PREFIX,
@@ -223,7 +217,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="fighters_starbase_to_ship",
         spec=FixedAggregateSpec(
-            bin_bounds=FIGHTER_TRANSFER_BIN_BOUNDS,
+            bin_bounds_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
             allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
             is_fighter_channel_member=True,
             catalog_label="Fighters transferred starbase to ship",
@@ -233,7 +227,7 @@ AGGREGATE_REGISTRY: tuple[AggregateRegistryEntry, ...] = (
     FixedAggregateRegistryEntry(
         action_id="fighters_ship_to_starbase",
         spec=FixedAggregateSpec(
-            bin_bounds=FIGHTER_TRANSFER_BIN_BOUNDS,
+            bin_bounds_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
             allowlist_key=FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY,
             is_fighter_channel_member=True,
             catalog_label="Fighters transferred ship to starbase",

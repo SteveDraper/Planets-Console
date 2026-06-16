@@ -7,6 +7,18 @@ from api.analytics.military_score_inference.models import CandidateAction, Infer
 
 from tests.inference_corpus.ground_truth import GroundTruth
 
+_EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ACTION_ID = "evil_empire_free_starbase_fighters"
+_STARBASE_FIGHTERS_AGGREGATE_ACTION_ID = "starbase_fighters_added_total"
+
+
+def normalize_ground_truth_multiset_for_comparison(multiset: GroundTruth) -> GroundTruth:
+    """Fold solver-internal action ids into inventory-derived GT aggregates for ranking."""
+    counter: Counter[str] = Counter(dict(multiset))
+    ee_free_fighters = counter.pop(_EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_ACTION_ID, 0)
+    if ee_free_fighters:
+        counter[_STARBASE_FIGHTERS_AGGREGATE_ACTION_ID] += ee_free_fighters
+    return tuple(sorted((action_id, count) for action_id, count in counter.items() if count != 0))
+
 
 def verify_top_solution_hard_equalities(
     *,
@@ -148,7 +160,9 @@ def solution_to_ground_truth(solution: dict[str, object]) -> GroundTruth:
             if isinstance(combo_id, str) and isinstance(count, int) and count > 0:
                 multiset[combo_id] += count
 
-    return tuple(sorted((action_id, count) for action_id, count in multiset.items()))
+    return normalize_ground_truth_multiset_for_comparison(
+        tuple(sorted((action_id, count) for action_id, count in multiset.items()))
+    )
 
 
 def check_ground_truth_in_top_k(
@@ -158,11 +172,12 @@ def check_ground_truth_in_top_k(
     k: int,
 ) -> tuple[bool, int | None]:
     """Return whether GT appears in the first K solutions and its 1-based full-list rank."""
+    normalized_ground_truth = normalize_ground_truth_multiset_for_comparison(ground_truth)
     ground_truth_rank: int | None = None
     for index, solution in enumerate(solutions):
         if not isinstance(solution, dict):
             continue
-        if solution_to_ground_truth(solution) == ground_truth:
+        if solution_to_ground_truth(solution) == normalized_ground_truth:
             ground_truth_rank = index + 1
             break
 

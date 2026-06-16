@@ -13,7 +13,7 @@
 # This file is the comment and outline template for prior_weights_{category}.yaml.
 # The prior miner substitutes __CATEGORY__ and fills counts when writing a new category asset.
 
-version: 3
+version: 4
 category: __CATEGORY__  # must match filename stem prior_weights_{category}.yaml
 gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
 

@@ -2,6 +2,7 @@
 
 from tests.inference_corpus.verify import (
     check_ground_truth_in_top_k,
+    normalize_ground_truth_multiset_for_comparison,
     solution_to_ground_truth,
 )
 
@@ -45,6 +46,37 @@ def test_check_ground_truth_in_top_k_miss_beyond_k():
     hit, rank = check_ground_truth_in_top_k(ground_truth, solutions, k=1)
     assert hit is False
     assert rank == 2
+
+
+def test_solution_to_ground_truth_folds_evil_empire_free_starbase_fighters():
+    solution = {
+        "actions": [
+            {"actionId": "evil_empire_free_starbase_fighters", "count": 5},
+        ],
+        "shipBuilds": [{"comboId": "combo_freighter", "count": 1}],
+    }
+    assert solution_to_ground_truth(solution) == (
+        ("combo_freighter", 1),
+        ("starbase_fighters_added_total", 5),
+    )
+
+
+def test_check_ground_truth_in_top_k_hit_when_solver_uses_ee_free_fighters():
+    ground_truth = (("combo_freighter", 1), ("starbase_fighters_added_total", 5))
+    solutions = [
+        {
+            "actions": [{"actionId": "evil_empire_free_starbase_fighters", "count": 5}],
+            "shipBuilds": [{"comboId": "combo_freighter", "count": 1}],
+        },
+    ]
+    hit, rank = check_ground_truth_in_top_k(ground_truth, solutions, k=3)
+    assert hit is True
+    assert rank == 1
+
+
+def test_normalize_ground_truth_multiset_for_comparison_is_idempotent():
+    already_normalized = (("starbase_fighters_added_total", 5),)
+    assert normalize_ground_truth_multiset_for_comparison(already_normalized) == already_normalized
 
 
 def test_check_ground_truth_in_top_k_absent_from_all_solutions():

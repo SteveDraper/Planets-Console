@@ -6,6 +6,7 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.actions import (
+    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
     build_inference_problem,
 )
@@ -252,6 +253,7 @@ def _run_policy_ladder_inference(
     turn: TurnInfo,
     *,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[
     InferenceResult,
     ActionCatalog | None,
@@ -263,6 +265,7 @@ def _run_policy_ladder_inference(
         resolved_observation,
         turn,
         resolved_mask=resolved_mask,
+        time_limit_seconds=time_limit_seconds,
     )
 
 
@@ -308,6 +311,7 @@ def _run_solver_inference_path(
     catalog: ActionCatalog | None,
     accelerated_segments: tuple[AcceleratedInferenceSegment, ...] | None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     if path == InferencePath.ACCELERATED_SPLIT:
         assert accelerated_segments is not None
@@ -326,6 +330,7 @@ def _run_solver_inference_path(
                     resolved_observation,
                     turn,
                     resolved_mask=resolved_mask,
+                    time_limit_seconds=time_limit_seconds,
                 )
             )
         else:
@@ -379,6 +384,7 @@ def run_inference_with_artifacts(
     catalog: ActionCatalog | None = None,
     load_scoreboard_turn: ScoreboardTurnLoader | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     """Run inference once; return API payload plus observation and catalog for re-checks.
 
@@ -416,6 +422,7 @@ def run_inference_with_artifacts(
         catalog=catalog,
         accelerated_segments=accelerated_segments,
         resolved_mask=resolved_mask,
+        time_limit_seconds=time_limit_seconds,
     )
 
 

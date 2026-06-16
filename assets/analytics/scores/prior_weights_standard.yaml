@@ -12,674 +12,770 @@
 #
 # The prior miner substitutes standard and fills counts when writing a new category asset.
 
-version: 3
+version: 4
 category: standard  # must match filename stem prior_weights_{category}.yaml
 gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
 
 hulls:
-  # Inference ship-limit band: tables split on whether the player is before/after ship limit.
+  # Inference ship-limit band: P(hull|category) pseudo-counts keyed by inference hull category.
   before_ship_limit:
     global:
-      1: 27  # Outrider Class Scout
-      2: 19  # Nocturne Class Destroyer
-      3: 127  # Bohemian Class Survey Ship
-      4: 18  # Vendetta Class Frigate
-      5: 167  # Nebula Class Cruiser
-      6: 20  # Banshee Class Destroyer
-      7: 271  # Loki Class Destroyer
-      8: 401  # Eros Class Research Vessel
-      9: 28  # Brynhild Class Escort
-      10: 15  # Arkham Class Frigate
-      11: 10  # Thor Class Frigate
-      12: 71  # Diplomacy Class Cruiser
-      13: 105  # Missouri Class Battleship
-      14: 60  # Neutronic Fuel Carrier
-      15: 193  # Small Deep Space Freighter
-      16: 1262  # Medium Deep Space Freighter
-      17: 2185  # Large Deep Space Freighter
-      18: 54  # Super Transport Freighter
-      19: 43  # Kittyhawk Class Carrier
-      20: 76  # Nova Class Super-dreadnought
-      21: 77  # Reptile Class Destroyer
-      22: 663  # Lizard Class Cruiser
-      23: 338  # T-Rex Class Battleship
-      24: 261  # Serpent Class Escort
-      25: 2  # Saurian Class Light Cruiser
-      26: 41  # White Falcon Class Cruiser
-      27: 368  # Swift Heart Class Scout
-      28: 74  # Fearless Wing Cruiser
-      29: 215  # Dark Wing Class Battleship
-      30: 3  # Valiant Wind Class Carrier
-      31: 387  # Resolute Class Battlecruiser
-      32: 13  # Bright Heart Class Destroyer
-      33: 129  # Deth Specula Class Frigate
-      34: 6  # D7a Painmaker Class Cruiser
-      35: 205  # Victorious Class Battleship
-      36: 423  # D7 Coldpain Class Cruiser
-      37: 166  # Ill Wind Class Battlecruiser
-      38: 20  # D3 Thorn Class Destroyer
-      39: 394  # D19b Nefarious Class Destroyer
-      40: 19  # Little Pest Class Escort
-      41: 18  # Saber Class Frigate
-      42: 338  # Lady Royale Class Cruiser
-      43: 7  # Dwarfstar Class Transport
-      44: 158  # Br4 Class Gunship
-      45: 42  # Br5 Kaye Class Torpedo Boat
-      46: 940  # Meteor Class Blockade Runner
-      47: 4  # Red Wind Class Carrier
-      48: 1  # Skyfire Class Cruiser
-      49: 71  # Madonnzila Class Carrier
-      50: 22  # Bloodfang Class Carrier
-      51: 322  # B200 Class Probe
-      52: 63  # Biocide Class Carrier
-      53: 34  # Annihilation Class Battleship
-      54: 33  # B41 Explorer
-      55: 20  # B222 Destroyer
-      56: 406  # Firecloud Class Cruiser
-      57: 9  # Watcher Class Scout
-      58: 17  # Quietus Class Cruiser
-      59: 20  # Small Transport
-      60: 443  # Ruby Class Light Cruiser
-      61: 289  # Emerald Class Battlecruiser
-      62: 10  # Sky Garnet Class Destroyer
-      63: 67  # Diamond Flame Class Battleship
-      64: 82  # Onyx Class Frigate
-      65: 12  # Topez Class Gunboat
-      66: 228  # Opal Class Torpedo Boat
-      67: 21  # Crystal Thunder Class Carrier
-      68: 22  # Moscow Class Star Escort
-      69: 189  # Super Star Destroyer
-      70: 104  # Gorbie Class Battlecarrier
-      71: 46  # Ru25 Gunboat
-      72: 22  # H-ross Class Light Carrier
-      73: 12  # Mig Class Scout
-      74: 13  # Super Star Cruiser
-      75: 116  # Super Star Frigate
-      76: 26  # Super Star Carrier
-      77: 294  # Pl21 Probe
-      78: 144  # Instrumentality Class Baseship
-      79: 98  # Golem Class Baseship
-      80: 70  # Automa Class Baseship
-      81: 421  # Cat's Paw Class Destroyer
-      82: 192  # Q Tanker
-      83: 1  # Cybernaut Class Baseship
-      84: 21  # Pawn Class Baseship
-      85: 52  # Iron Slave Class Baseship
-      86: 214  # Tranquility Class Cruiser
-      87: 501  # Falcon Class Escort
-      88: 26  # Gaurdian Class Destroyer
-      89: 30  # Iron Lady Class Frigate
-      91: 17  # Deep Space Scout
-      92: 392  # Patriot Class Light Carrier
-      93: 26  # Armored Transport
-      94: 215  # Rush Class Heavy Carrier
-      95: 13  # Little Joe Class Escort
-      96: 419  # Cobol Class Research Cruiser
-      97: 7  # Aries Class Transport
-      98: 9  # Taurus Class Scout
-      99: 238  # Virgo Class Battlestar
-      100: 72  # Sagittarius Class Transport
-      101: 250  # Gemini Class Transport
-      102: 2  # Scorpius Class Light Carrier
-      103: 77  # Cygnus Class Destroyer
-      104: 86  # Neutronic Refinery Ship
-      105: 365  # Merlin Class Alchemy Ship
-      106: 60  # Enlighten Class Research Vessel
-      123: 3  # Aggregator Class Interdictor
-      1058: 42  # Quietus Class Cruiser+
-      1073: 40  # Mig Class Transport
-      1074: 20  # Super Star Cruiser II
-      1090: 23  # Sage Class Repair Ship
-      1102: 20  # Scorpius Class Carrier
-      2034: 70  # D7c Painmaker Class Cruiser
-      2048: 9  # Skyfire Class Cruiser+
-      2076: 39  # Super Star Carrier+
-      2083: 50  # Cybernaut Light Baseship
-      2085: 3  # Iron Slave Class Scout
-      3025: 8  # Saurian Class Light Frigate
-    byRace:
-      1:  # The Solar Federation
-        1: 13  # Outrider Class Scout
-        2: 19  # Nocturne Class Destroyer
-        3: 127  # Bohemian Class Survey Ship
-        4: 13  # Vendetta Class Frigate
-        5: 167  # Nebula Class Cruiser
-        6: 20  # Banshee Class Destroyer
-        7: 125  # Loki Class Destroyer
-        8: 151  # Eros Class Research Vessel
-        9: 28  # Brynhild Class Escort
-        10: 15  # Arkham Class Frigate
-        11: 10  # Thor Class Frigate
-        12: 71  # Diplomacy Class Cruiser
-        13: 105  # Missouri Class Battleship
-        16: 134  # Medium Deep Space Freighter
-        17: 227  # Large Deep Space Freighter
-        18: 5  # Super Transport Freighter
+      true_freighter:
+        14: 60  # Neutronic Fuel Carrier
+        15: 193  # Small Deep Space Freighter
+        16: 1262  # Medium Deep Space Freighter
+        17: 2185  # Large Deep Space Freighter
+        18: 54  # Super Transport Freighter
+      alchemy_ship:
+        97: 7  # Aries Class Transport
+        104: 86  # Neutronic Refinery Ship
+        105: 365  # Merlin Class Alchemy Ship
+      carrier:
         19: 43  # Kittyhawk Class Carrier
-        20: 76  # Nova Class Super-dreadnought
-        104: 14  # Neutronic Refinery Ship
-        105: 30  # Merlin Class Alchemy Ship
-      2:  # The Lizard Alliance
-        4: 5  # Vendetta Class Frigate
-        7: 146  # Loki Class Destroyer
-        8: 250  # Eros Class Research Vessel
-        14: 11  # Neutronic Fuel Carrier
-        16: 69  # Medium Deep Space Freighter
-        17: 224  # Large Deep Space Freighter
-        18: 11  # Super Transport Freighter
-        21: 77  # Reptile Class Destroyer
-        22: 663  # Lizard Class Cruiser
-        23: 338  # T-Rex Class Battleship
-        24: 261  # Serpent Class Escort
-        25: 2  # Saurian Class Light Cruiser
+        30: 3  # Valiant Wind Class Carrier
+        47: 4  # Red Wind Class Carrier
         49: 71  # Madonnzila Class Carrier
-        104: 6  # Neutronic Refinery Ship
-        105: 50  # Merlin Class Alchemy Ship
-        3025: 8  # Saurian Class Light Frigate
-      3:  # The Empire of the Birds
-        14: 7  # Neutronic Fuel Carrier
-        15: 17  # Small Deep Space Freighter
-        16: 98  # Medium Deep Space Freighter
-        17: 225  # Large Deep Space Freighter
-        18: 3  # Super Transport Freighter
-        26: 41  # White Falcon Class Cruiser
-        27: 368  # Swift Heart Class Scout
-        28: 74  # Fearless Wing Cruiser
-        29: 215  # Dark Wing Class Battleship
-        30: 1  # Valiant Wind Class Carrier
-        31: 387  # Resolute Class Battlecruiser
-        32: 13  # Bright Heart Class Destroyer
-        33: 50  # Deth Specula Class Frigate
-        47: 3  # Red Wind Class Carrier
-        48: 1  # Skyfire Class Cruiser
-        59: 3  # Small Transport
-        104: 10  # Neutronic Refinery Ship
-        105: 31  # Merlin Class Alchemy Ship
-        106: 60  # Enlighten Class Research Vessel
-        2048: 5  # Skyfire Class Cruiser+
-      4:  # The Hordes of Fury
-        14: 9  # Neutronic Fuel Carrier
-        15: 24  # Small Deep Space Freighter
-        16: 160  # Medium Deep Space Freighter
-        17: 221  # Large Deep Space Freighter
-        18: 2  # Super Transport Freighter
-        30: 2  # Valiant Wind Class Carrier
-        33: 79  # Deth Specula Class Frigate
-        34: 4  # D7a Painmaker Class Cruiser
-        35: 205  # Victorious Class Battleship
-        36: 423  # D7 Coldpain Class Cruiser
-        37: 166  # Ill Wind Class Battlecruiser
-        38: 13  # D3 Thorn Class Destroyer
-        39: 394  # D19b Nefarious Class Destroyer
-        40: 11  # Little Pest Class Escort
-        41: 18  # Saber Class Frigate
-        59: 10  # Small Transport
-        104: 13  # Neutronic Refinery Ship
-        105: 38  # Merlin Class Alchemy Ship
-        2034: 64  # D7c Painmaker Class Cruiser
-      5:  # The Privateer Bands
-        1: 14  # Outrider Class Scout
-        14: 6  # Neutronic Fuel Carrier
-        15: 11  # Small Deep Space Freighter
-        16: 77  # Medium Deep Space Freighter
-        17: 148  # Large Deep Space Freighter
-        18: 3  # Super Transport Freighter
-        34: 2  # D7a Painmaker Class Cruiser
-        38: 7  # D3 Thorn Class Destroyer
-        40: 8  # Little Pest Class Escort
-        42: 157  # Lady Royale Class Cruiser
-        43: 7  # Dwarfstar Class Transport
-        44: 158  # Br4 Class Gunship
-        45: 42  # Br5 Kaye Class Torpedo Boat
-        46: 940  # Meteor Class Blockade Runner
-        47: 1  # Red Wind Class Carrier
         50: 22  # Bloodfang Class Carrier
-        59: 3  # Small Transport
-        104: 3  # Neutronic Refinery Ship
-        105: 23  # Merlin Class Alchemy Ship
-        2034: 6  # D7c Painmaker Class Cruiser
-        2048: 4  # Skyfire Class Cruiser+
-      6:  # The Cyborg
-        15: 11  # Small Deep Space Freighter
-        16: 111  # Medium Deep Space Freighter
-        17: 156  # Large Deep Space Freighter
-        18: 7  # Super Transport Freighter
-        51: 322  # B200 Class Probe
         52: 63  # Biocide Class Carrier
-        53: 34  # Annihilation Class Battleship
-        54: 33  # B41 Explorer
-        55: 20  # B222 Destroyer
-        56: 406  # Firecloud Class Cruiser
-        57: 9  # Watcher Class Scout
-        58: 17  # Quietus Class Cruiser
-        85: 11  # Iron Slave Class Baseship
-        104: 4  # Neutronic Refinery Ship
-        105: 25  # Merlin Class Alchemy Ship
-        1058: 42  # Quietus Class Cruiser+
-        2085: 3  # Iron Slave Class Scout
-      7:  # The Crystal Confederation
-        14: 12  # Neutronic Fuel Carrier
-        15: 36  # Small Deep Space Freighter
-        16: 162  # Medium Deep Space Freighter
-        17: 167  # Large Deep Space Freighter
-        18: 3  # Super Transport Freighter
-        59: 4  # Small Transport
-        60: 443  # Ruby Class Light Cruiser
-        61: 289  # Emerald Class Battlecruiser
-        62: 10  # Sky Garnet Class Destroyer
-        63: 67  # Diamond Flame Class Battleship
-        64: 82  # Onyx Class Frigate
-        65: 12  # Topez Class Gunboat
-        66: 228  # Opal Class Torpedo Boat
         67: 21  # Crystal Thunder Class Carrier
-        104: 12  # Neutronic Refinery Ship
-        105: 38  # Merlin Class Alchemy Ship
-      8:  # The Evil Empire
-        14: 9  # Neutronic Fuel Carrier
-        15: 31  # Small Deep Space Freighter
-        16: 139  # Medium Deep Space Freighter
-        17: 241  # Large Deep Space Freighter
-        18: 4  # Super Transport Freighter
         68: 22  # Moscow Class Star Escort
         69: 189  # Super Star Destroyer
         70: 104  # Gorbie Class Battlecarrier
-        71: 46  # Ru25 Gunboat
         72: 22  # H-ross Class Light Carrier
-        73: 12  # Mig Class Scout
         74: 13  # Super Star Cruiser
-        75: 116  # Super Star Frigate
         76: 26  # Super Star Carrier
-        77: 294  # Pl21 Probe
-        104: 6  # Neutronic Refinery Ship
-        105: 33  # Merlin Class Alchemy Ship
-        123: 3  # Aggregator Class Interdictor
-        1073: 40  # Mig Class Transport
-        1074: 20  # Super Star Cruiser II
-        2076: 39  # Super Star Carrier+
-      9:  # The Robotic Imperium
-        15: 12  # Small Deep Space Freighter
-        16: 165  # Medium Deep Space Freighter
-        17: 180  # Large Deep Space Freighter
-        18: 4  # Super Transport Freighter
         78: 144  # Instrumentality Class Baseship
         79: 98  # Golem Class Baseship
         80: 70  # Automa Class Baseship
-        81: 421  # Cat's Paw Class Destroyer
         82: 192  # Q Tanker
         83: 1  # Cybernaut Class Baseship
         84: 21  # Pawn Class Baseship
-        85: 41  # Iron Slave Class Baseship
-        104: 7  # Neutronic Refinery Ship
-        105: 19  # Merlin Class Alchemy Ship
-        2083: 50  # Cybernaut Light Baseship
-      10:  # The Rebel Confederation
-        14: 6  # Neutronic Fuel Carrier
-        15: 13  # Small Deep Space Freighter
-        16: 58  # Medium Deep Space Freighter
-        17: 199  # Large Deep Space Freighter
-        18: 6  # Super Transport Freighter
-        86: 169  # Tranquility Class Cruiser
-        87: 501  # Falcon Class Escort
-        88: 26  # Gaurdian Class Destroyer
-        89: 20  # Iron Lady Class Frigate
-        91: 17  # Deep Space Scout
-        92: 212  # Patriot Class Light Carrier
-        93: 26  # Armored Transport
+        85: 52  # Iron Slave Class Baseship
+        92: 392  # Patriot Class Light Carrier
         94: 215  # Rush Class Heavy Carrier
-        98: 6  # Taurus Class Scout
-        100: 36  # Sagittarius Class Transport
-        101: 124  # Gemini Class Transport
-        103: 39  # Cygnus Class Destroyer
-        104: 11  # Neutronic Refinery Ship
-        105: 32  # Merlin Class Alchemy Ship
-        1090: 23  # Sage Class Repair Ship
-      11:  # The Missing Colonies of Man
-        15: 38  # Small Deep Space Freighter
-        16: 89  # Medium Deep Space Freighter
-        17: 197  # Large Deep Space Freighter
-        18: 6  # Super Transport Freighter
-        42: 181  # Lady Royale Class Cruiser
-        86: 45  # Tranquility Class Cruiser
-        89: 10  # Iron Lady Class Frigate
-        92: 180  # Patriot Class Light Carrier
-        95: 13  # Little Joe Class Escort
-        96: 419  # Cobol Class Research Cruiser
-        97: 7  # Aries Class Transport
-        98: 3  # Taurus Class Scout
         99: 238  # Virgo Class Battlestar
-        100: 36  # Sagittarius Class Transport
-        101: 126  # Gemini Class Transport
+        100: 72  # Sagittarius Class Transport
+        101: 250  # Gemini Class Transport
         102: 2  # Scorpius Class Light Carrier
-        103: 38  # Cygnus Class Destroyer
-        105: 46  # Merlin Class Alchemy Ship
+        1074: 20  # Super Star Cruiser II
         1102: 20  # Scorpius Class Carrier
-  after_ship_limit:
-    global:
-      1: 15  # Outrider Class Scout
-      2: 10  # Nocturne Class Destroyer
-      3: 17  # Bohemian Class Survey Ship
-      4: 5  # Vendetta Class Frigate
-      5: 14  # Nebula Class Cruiser
-      6: 10  # Banshee Class Destroyer
-      7: 175  # Loki Class Destroyer
-      8: 74  # Eros Class Research Vessel
-      10: 7  # Arkham Class Frigate
-      11: 29  # Thor Class Frigate
-      12: 23  # Diplomacy Class Cruiser
-      13: 61  # Missouri Class Battleship
-      14: 108  # Neutronic Fuel Carrier
-      15: 149  # Small Deep Space Freighter
-      16: 132  # Medium Deep Space Freighter
-      17: 194  # Large Deep Space Freighter
-      18: 84  # Super Transport Freighter
-      19: 29  # Kittyhawk Class Carrier
-      20: 169  # Nova Class Super-dreadnought
-      21: 46  # Reptile Class Destroyer
-      22: 274  # Lizard Class Cruiser
-      23: 538  # T-Rex Class Battleship
-      24: 36  # Serpent Class Escort
-      25: 1  # Saurian Class Light Cruiser
-      26: 9  # White Falcon Class Cruiser
-      27: 51  # Swift Heart Class Scout
-      28: 5  # Fearless Wing Cruiser
-      29: 621  # Dark Wing Class Battleship
-      30: 9  # Valiant Wind Class Carrier
-      31: 217  # Resolute Class Battlecruiser
-      32: 16  # Bright Heart Class Destroyer
-      33: 61  # Deth Specula Class Frigate
-      34: 3  # D7a Painmaker Class Cruiser
-      35: 489  # Victorious Class Battleship
-      36: 151  # D7 Coldpain Class Cruiser
-      37: 75  # Ill Wind Class Battlecruiser
-      38: 31  # D3 Thorn Class Destroyer
-      39: 479  # D19b Nefarious Class Destroyer
-      40: 2  # Little Pest Class Escort
-      41: 45  # Saber Class Frigate
-      42: 74  # Lady Royale Class Cruiser
-      43: 23  # Dwarfstar Class Transport
-      44: 61  # Br4 Class Gunship
-      45: 5  # Br5 Kaye Class Torpedo Boat
-      46: 884  # Meteor Class Blockade Runner
-      47: 4  # Red Wind Class Carrier
-      48: 1  # Skyfire Class Cruiser
-      49: 99  # Madonnzila Class Carrier
-      50: 60  # Bloodfang Class Carrier
-      51: 20  # B200 Class Probe
-      52: 148  # Biocide Class Carrier
-      53: 69  # Annihilation Class Battleship
-      54: 4  # B41 Explorer
-      55: 9  # B222 Destroyer
-      56: 175  # Firecloud Class Cruiser
-      57: 2  # Watcher Class Scout
-      58: 1  # Quietus Class Cruiser
-      59: 4  # Small Transport
-      60: 91  # Ruby Class Light Cruiser
-      61: 178  # Emerald Class Battlecruiser
-      62: 35  # Sky Garnet Class Destroyer
-      63: 202  # Diamond Flame Class Battleship
-      64: 25  # Onyx Class Frigate
-      65: 1  # Topez Class Gunboat
-      66: 27  # Opal Class Torpedo Boat
-      67: 62  # Crystal Thunder Class Carrier
-      68: 17  # Moscow Class Star Escort
-      69: 50  # Super Star Destroyer
-      70: 207  # Gorbie Class Battlecarrier
-      71: 7  # Ru25 Gunboat
-      72: 15  # H-ross Class Light Carrier
-      74: 16  # Super Star Cruiser
-      75: 83  # Super Star Frigate
-      76: 8  # Super Star Carrier
-      77: 45  # Pl21 Probe
-      78: 49  # Instrumentality Class Baseship
-      79: 324  # Golem Class Baseship
-      80: 48  # Automa Class Baseship
-      81: 158  # Cat's Paw Class Destroyer
-      82: 57  # Q Tanker
-      83: 1  # Cybernaut Class Baseship
-      84: 1  # Pawn Class Baseship
-      85: 6  # Iron Slave Class Baseship
-      86: 104  # Tranquility Class Cruiser
-      87: 143  # Falcon Class Escort
-      88: 18  # Gaurdian Class Destroyer
-      89: 56  # Iron Lady Class Frigate
-      92: 55  # Patriot Class Light Carrier
-      93: 3  # Armored Transport
-      94: 300  # Rush Class Heavy Carrier
-      95: 9  # Little Joe Class Escort
-      96: 204  # Cobol Class Research Cruiser
-      97: 2  # Aries Class Transport
-      98: 4  # Taurus Class Scout
-      99: 399  # Virgo Class Battlestar
-      100: 16  # Sagittarius Class Transport
-      101: 48  # Gemini Class Transport
-      102: 1  # Scorpius Class Light Carrier
-      103: 43  # Cygnus Class Destroyer
-      104: 147  # Neutronic Refinery Ship
-      105: 281  # Merlin Class Alchemy Ship
-      106: 12  # Enlighten Class Research Vessel
-      123: 4  # Aggregator Class Interdictor
-      1058: 11  # Quietus Class Cruiser+
-      1073: 16  # Mig Class Transport
-      1074: 12  # Super Star Cruiser II
-      1090: 7  # Sage Class Repair Ship
-      1102: 9  # Scorpius Class Carrier
-      2034: 18  # D7c Painmaker Class Cruiser
-      2048: 6  # Skyfire Class Cruiser+
-      2076: 8  # Super Star Carrier+
-      2083: 8  # Cybernaut Light Baseship
-      2085: 1  # Iron Slave Class Scout
-      3025: 42  # Saurian Class Light Frigate
+      battleship:
+        13: 105  # Missouri Class Battleship
+        20: 76  # Nova Class Super-dreadnought
+        23: 338  # T-Rex Class Battleship
+        29: 215  # Dark Wing Class Battleship
+        35: 205  # Victorious Class Battleship
+        37: 166  # Ill Wind Class Battlecruiser
+        53: 34  # Annihilation Class Battleship
+        63: 67  # Diamond Flame Class Battleship
+      torpedo_ship:
+        2: 19  # Nocturne Class Destroyer
+        4: 18  # Vendetta Class Frigate
+        5: 167  # Nebula Class Cruiser
+        6: 20  # Banshee Class Destroyer
+        7: 271  # Loki Class Destroyer
+        10: 15  # Arkham Class Frigate
+        11: 10  # Thor Class Frigate
+        12: 71  # Diplomacy Class Cruiser
+        22: 663  # Lizard Class Cruiser
+        25: 2  # Saurian Class Light Cruiser
+        26: 41  # White Falcon Class Cruiser
+        28: 74  # Fearless Wing Cruiser
+        31: 387  # Resolute Class Battlecruiser
+        32: 13  # Bright Heart Class Destroyer
+        33: 129  # Deth Specula Class Frigate
+        36: 423  # D7 Coldpain Class Cruiser
+        38: 20  # D3 Thorn Class Destroyer
+        42: 338  # Lady Royale Class Cruiser
+        45: 42  # Br5 Kaye Class Torpedo Boat
+        46: 940  # Meteor Class Blockade Runner
+        48: 1  # Skyfire Class Cruiser
+        56: 406  # Firecloud Class Cruiser
+        58: 17  # Quietus Class Cruiser
+        60: 443  # Ruby Class Light Cruiser
+        61: 289  # Emerald Class Battlecruiser
+        62: 10  # Sky Garnet Class Destroyer
+        64: 82  # Onyx Class Frigate
+        66: 228  # Opal Class Torpedo Boat
+        75: 116  # Super Star Frigate
+        81: 421  # Cat's Paw Class Destroyer
+        86: 214  # Tranquility Class Cruiser
+        88: 26  # Gaurdian Class Destroyer
+        89: 30  # Iron Lady Class Frigate
+        96: 419  # Cobol Class Research Cruiser
+        103: 77  # Cygnus Class Destroyer
+        106: 60  # Enlighten Class Research Vessel
+        1090: 23  # Sage Class Repair Ship
+      beam_ship:  # resolve_inference_hull_category() label
+        1: 27  # Outrider Class Scout
+        3: 127  # Bohemian Class Survey Ship
+        8: 401  # Eros Class Research Vessel
+        9: 28  # Brynhild Class Escort
+        21: 77  # Reptile Class Destroyer
+        24: 261  # Serpent Class Escort
+        27: 368  # Swift Heart Class Scout
+        34: 6  # D7a Painmaker Class Cruiser
+        39: 394  # D19b Nefarious Class Destroyer
+        40: 19  # Little Pest Class Escort
+        41: 18  # Saber Class Frigate
+        43: 7  # Dwarfstar Class Transport
+        44: 158  # Br4 Class Gunship
+        51: 322  # B200 Class Probe
+        54: 33  # B41 Explorer
+        55: 20  # B222 Destroyer
+        57: 9  # Watcher Class Scout
+        59: 20  # Small Transport
+        65: 12  # Topez Class Gunboat
+        71: 46  # Ru25 Gunboat
+        73: 12  # Mig Class Scout
+        77: 294  # Pl21 Probe
+        87: 501  # Falcon Class Escort
+        91: 17  # Deep Space Scout
+        93: 26  # Armored Transport
+        95: 13  # Little Joe Class Escort
+        98: 9  # Taurus Class Scout
+        1073: 40  # Mig Class Transport
     byRace:
       1:  # The Solar Federation
-        1: 5  # Outrider Class Scout
-        2: 10  # Nocturne Class Destroyer
-        3: 17  # Bohemian Class Survey Ship
-        4: 2  # Vendetta Class Frigate
-        5: 14  # Nebula Class Cruiser
-        6: 10  # Banshee Class Destroyer
-        7: 49  # Loki Class Destroyer
-        8: 13  # Eros Class Research Vessel
-        10: 7  # Arkham Class Frigate
-        11: 29  # Thor Class Frigate
-        12: 23  # Diplomacy Class Cruiser
-        13: 61  # Missouri Class Battleship
-        16: 6  # Medium Deep Space Freighter
-        17: 14  # Large Deep Space Freighter
-        18: 7  # Super Transport Freighter
-        19: 29  # Kittyhawk Class Carrier
-        20: 169  # Nova Class Super-dreadnought
-        104: 13  # Neutronic Refinery Ship
-        105: 24  # Merlin Class Alchemy Ship
+        true_freighter:
+          16: 134  # Medium Deep Space Freighter
+          17: 227  # Large Deep Space Freighter
+          18: 5  # Super Transport Freighter
+        alchemy_ship:
+          104: 14  # Neutronic Refinery Ship
+          105: 30  # Merlin Class Alchemy Ship
+        carrier:
+          19: 43  # Kittyhawk Class Carrier
+        battleship:
+          13: 105  # Missouri Class Battleship
+          20: 76  # Nova Class Super-dreadnought
+        torpedo_ship:
+          2: 19  # Nocturne Class Destroyer
+          4: 13  # Vendetta Class Frigate
+          5: 167  # Nebula Class Cruiser
+          6: 20  # Banshee Class Destroyer
+          7: 125  # Loki Class Destroyer
+          10: 15  # Arkham Class Frigate
+          11: 10  # Thor Class Frigate
+          12: 71  # Diplomacy Class Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          1: 13  # Outrider Class Scout
+          3: 127  # Bohemian Class Survey Ship
+          8: 151  # Eros Class Research Vessel
+          9: 28  # Brynhild Class Escort
       2:  # The Lizard Alliance
-        4: 3  # Vendetta Class Frigate
-        7: 126  # Loki Class Destroyer
-        8: 61  # Eros Class Research Vessel
-        14: 20  # Neutronic Fuel Carrier
-        15: 10  # Small Deep Space Freighter
-        16: 6  # Medium Deep Space Freighter
-        17: 23  # Large Deep Space Freighter
-        18: 1  # Super Transport Freighter
-        21: 46  # Reptile Class Destroyer
-        22: 274  # Lizard Class Cruiser
-        23: 538  # T-Rex Class Battleship
-        24: 36  # Serpent Class Escort
-        25: 1  # Saurian Class Light Cruiser
-        49: 99  # Madonnzila Class Carrier
-        104: 13  # Neutronic Refinery Ship
-        105: 20  # Merlin Class Alchemy Ship
-        3025: 42  # Saurian Class Light Frigate
+        true_freighter:
+          14: 11  # Neutronic Fuel Carrier
+          16: 69  # Medium Deep Space Freighter
+          17: 224  # Large Deep Space Freighter
+          18: 11  # Super Transport Freighter
+        alchemy_ship:
+          104: 6  # Neutronic Refinery Ship
+          105: 50  # Merlin Class Alchemy Ship
+        carrier:
+          49: 71  # Madonnzila Class Carrier
+        battleship:
+          23: 338  # T-Rex Class Battleship
+        torpedo_ship:
+          4: 5  # Vendetta Class Frigate
+          7: 146  # Loki Class Destroyer
+          22: 663  # Lizard Class Cruiser
+          25: 2  # Saurian Class Light Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          8: 250  # Eros Class Research Vessel
+          21: 77  # Reptile Class Destroyer
+          24: 261  # Serpent Class Escort
       3:  # The Empire of the Birds
-        14: 19  # Neutronic Fuel Carrier
-        15: 9  # Small Deep Space Freighter
-        16: 3  # Medium Deep Space Freighter
-        17: 19  # Large Deep Space Freighter
-        18: 6  # Super Transport Freighter
-        26: 9  # White Falcon Class Cruiser
-        27: 51  # Swift Heart Class Scout
-        28: 5  # Fearless Wing Cruiser
-        29: 621  # Dark Wing Class Battleship
-        30: 1  # Valiant Wind Class Carrier
-        31: 217  # Resolute Class Battlecruiser
-        32: 16  # Bright Heart Class Destroyer
-        33: 15  # Deth Specula Class Frigate
-        47: 1  # Red Wind Class Carrier
-        104: 21  # Neutronic Refinery Ship
-        105: 28  # Merlin Class Alchemy Ship
-        106: 12  # Enlighten Class Research Vessel
-        2048: 3  # Skyfire Class Cruiser+
+        true_freighter:
+          14: 7  # Neutronic Fuel Carrier
+          15: 17  # Small Deep Space Freighter
+          16: 98  # Medium Deep Space Freighter
+          17: 225  # Large Deep Space Freighter
+          18: 3  # Super Transport Freighter
+        alchemy_ship:
+          104: 10  # Neutronic Refinery Ship
+          105: 31  # Merlin Class Alchemy Ship
+        carrier:
+          30: 1  # Valiant Wind Class Carrier
+          47: 3  # Red Wind Class Carrier
+        battleship:
+          29: 215  # Dark Wing Class Battleship
+        torpedo_ship:
+          26: 41  # White Falcon Class Cruiser
+          28: 74  # Fearless Wing Cruiser
+          31: 387  # Resolute Class Battlecruiser
+          32: 13  # Bright Heart Class Destroyer
+          33: 50  # Deth Specula Class Frigate
+          48: 1  # Skyfire Class Cruiser
+          106: 60  # Enlighten Class Research Vessel
+        beam_ship:  # resolve_inference_hull_category() label
+          27: 368  # Swift Heart Class Scout
+          59: 3  # Small Transport
       4:  # The Hordes of Fury
-        14: 18  # Neutronic Fuel Carrier
-        15: 13  # Small Deep Space Freighter
-        16: 30  # Medium Deep Space Freighter
-        17: 28  # Large Deep Space Freighter
-        18: 6  # Super Transport Freighter
-        30: 8  # Valiant Wind Class Carrier
-        33: 46  # Deth Specula Class Frigate
-        35: 489  # Victorious Class Battleship
-        36: 151  # D7 Coldpain Class Cruiser
-        37: 75  # Ill Wind Class Battlecruiser
-        38: 20  # D3 Thorn Class Destroyer
-        39: 479  # D19b Nefarious Class Destroyer
-        40: 2  # Little Pest Class Escort
-        41: 45  # Saber Class Frigate
-        59: 2  # Small Transport
-        104: 19  # Neutronic Refinery Ship
-        105: 14  # Merlin Class Alchemy Ship
-        2034: 16  # D7c Painmaker Class Cruiser
+        true_freighter:
+          14: 9  # Neutronic Fuel Carrier
+          15: 24  # Small Deep Space Freighter
+          16: 160  # Medium Deep Space Freighter
+          17: 221  # Large Deep Space Freighter
+          18: 2  # Super Transport Freighter
+        alchemy_ship:
+          104: 13  # Neutronic Refinery Ship
+          105: 38  # Merlin Class Alchemy Ship
+        carrier:
+          30: 2  # Valiant Wind Class Carrier
+        battleship:
+          35: 205  # Victorious Class Battleship
+          37: 166  # Ill Wind Class Battlecruiser
+        torpedo_ship:
+          33: 79  # Deth Specula Class Frigate
+          36: 423  # D7 Coldpain Class Cruiser
+          38: 13  # D3 Thorn Class Destroyer
+        beam_ship:  # resolve_inference_hull_category() label
+          34: 4  # D7a Painmaker Class Cruiser
+          39: 394  # D19b Nefarious Class Destroyer
+          40: 11  # Little Pest Class Escort
+          41: 18  # Saber Class Frigate
+          59: 10  # Small Transport
       5:  # The Privateer Bands
-        1: 10  # Outrider Class Scout
-        14: 5  # Neutronic Fuel Carrier
-        15: 20  # Small Deep Space Freighter
-        16: 14  # Medium Deep Space Freighter
-        17: 10  # Large Deep Space Freighter
-        18: 4  # Super Transport Freighter
-        34: 3  # D7a Painmaker Class Cruiser
-        38: 11  # D3 Thorn Class Destroyer
-        42: 45  # Lady Royale Class Cruiser
-        43: 23  # Dwarfstar Class Transport
-        44: 61  # Br4 Class Gunship
-        45: 5  # Br5 Kaye Class Torpedo Boat
-        46: 884  # Meteor Class Blockade Runner
-        47: 3  # Red Wind Class Carrier
-        48: 1  # Skyfire Class Cruiser
-        50: 60  # Bloodfang Class Carrier
-        104: 15  # Neutronic Refinery Ship
-        105: 39  # Merlin Class Alchemy Ship
-        2034: 2  # D7c Painmaker Class Cruiser
-        2048: 3  # Skyfire Class Cruiser+
+        true_freighter:
+          14: 6  # Neutronic Fuel Carrier
+          15: 11  # Small Deep Space Freighter
+          16: 77  # Medium Deep Space Freighter
+          17: 148  # Large Deep Space Freighter
+          18: 3  # Super Transport Freighter
+        alchemy_ship:
+          104: 3  # Neutronic Refinery Ship
+          105: 23  # Merlin Class Alchemy Ship
+        carrier:
+          47: 1  # Red Wind Class Carrier
+          50: 22  # Bloodfang Class Carrier
+        torpedo_ship:
+          38: 7  # D3 Thorn Class Destroyer
+          42: 157  # Lady Royale Class Cruiser
+          45: 42  # Br5 Kaye Class Torpedo Boat
+          46: 940  # Meteor Class Blockade Runner
+        beam_ship:  # resolve_inference_hull_category() label
+          1: 14  # Outrider Class Scout
+          34: 2  # D7a Painmaker Class Cruiser
+          40: 8  # Little Pest Class Escort
+          43: 7  # Dwarfstar Class Transport
+          44: 158  # Br4 Class Gunship
+          59: 3  # Small Transport
       6:  # The Cyborg
-        15: 1  # Small Deep Space Freighter
-        16: 10  # Medium Deep Space Freighter
-        17: 14  # Large Deep Space Freighter
-        18: 6  # Super Transport Freighter
-        51: 20  # B200 Class Probe
-        52: 148  # Biocide Class Carrier
-        53: 69  # Annihilation Class Battleship
-        54: 4  # B41 Explorer
-        55: 9  # B222 Destroyer
-        56: 175  # Firecloud Class Cruiser
-        57: 2  # Watcher Class Scout
-        58: 1  # Quietus Class Cruiser
-        85: 3  # Iron Slave Class Baseship
-        104: 4  # Neutronic Refinery Ship
-        105: 16  # Merlin Class Alchemy Ship
-        1058: 11  # Quietus Class Cruiser+
+        true_freighter:
+          15: 11  # Small Deep Space Freighter
+          16: 111  # Medium Deep Space Freighter
+          17: 156  # Large Deep Space Freighter
+          18: 7  # Super Transport Freighter
+        alchemy_ship:
+          104: 4  # Neutronic Refinery Ship
+          105: 25  # Merlin Class Alchemy Ship
+        carrier:
+          52: 63  # Biocide Class Carrier
+          85: 11  # Iron Slave Class Baseship
+        battleship:
+          53: 34  # Annihilation Class Battleship
+        torpedo_ship:
+          56: 406  # Firecloud Class Cruiser
+          58: 17  # Quietus Class Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          51: 322  # B200 Class Probe
+          54: 33  # B41 Explorer
+          55: 20  # B222 Destroyer
+          57: 9  # Watcher Class Scout
       7:  # The Crystal Confederation
-        14: 21  # Neutronic Fuel Carrier
-        15: 17  # Small Deep Space Freighter
-        16: 16  # Medium Deep Space Freighter
-        17: 16  # Large Deep Space Freighter
-        18: 4  # Super Transport Freighter
-        59: 2  # Small Transport
-        60: 91  # Ruby Class Light Cruiser
-        61: 178  # Emerald Class Battlecruiser
-        62: 35  # Sky Garnet Class Destroyer
-        63: 202  # Diamond Flame Class Battleship
-        64: 25  # Onyx Class Frigate
-        65: 1  # Topez Class Gunboat
-        66: 27  # Opal Class Torpedo Boat
-        67: 62  # Crystal Thunder Class Carrier
-        104: 13  # Neutronic Refinery Ship
-        105: 24  # Merlin Class Alchemy Ship
+        true_freighter:
+          14: 12  # Neutronic Fuel Carrier
+          15: 36  # Small Deep Space Freighter
+          16: 162  # Medium Deep Space Freighter
+          17: 167  # Large Deep Space Freighter
+          18: 3  # Super Transport Freighter
+        alchemy_ship:
+          104: 12  # Neutronic Refinery Ship
+          105: 38  # Merlin Class Alchemy Ship
+        carrier:
+          67: 21  # Crystal Thunder Class Carrier
+        battleship:
+          63: 67  # Diamond Flame Class Battleship
+        torpedo_ship:
+          60: 443  # Ruby Class Light Cruiser
+          61: 289  # Emerald Class Battlecruiser
+          62: 10  # Sky Garnet Class Destroyer
+          64: 82  # Onyx Class Frigate
+          66: 228  # Opal Class Torpedo Boat
+        beam_ship:  # resolve_inference_hull_category() label
+          59: 4  # Small Transport
+          65: 12  # Topez Class Gunboat
       8:  # The Evil Empire
-        14: 13  # Neutronic Fuel Carrier
-        15: 21  # Small Deep Space Freighter
-        16: 10  # Medium Deep Space Freighter
-        17: 20  # Large Deep Space Freighter
-        18: 16  # Super Transport Freighter
+        true_freighter:
+          14: 9  # Neutronic Fuel Carrier
+          15: 31  # Small Deep Space Freighter
+          16: 139  # Medium Deep Space Freighter
+          17: 241  # Large Deep Space Freighter
+          18: 4  # Super Transport Freighter
+        alchemy_ship:
+          104: 6  # Neutronic Refinery Ship
+          105: 33  # Merlin Class Alchemy Ship
+        carrier:
+          68: 22  # Moscow Class Star Escort
+          69: 189  # Super Star Destroyer
+          70: 104  # Gorbie Class Battlecarrier
+          72: 22  # H-ross Class Light Carrier
+          74: 13  # Super Star Cruiser
+          76: 26  # Super Star Carrier
+          1074: 20  # Super Star Cruiser II
+        torpedo_ship:
+          75: 116  # Super Star Frigate
+        beam_ship:  # resolve_inference_hull_category() label
+          71: 46  # Ru25 Gunboat
+          73: 12  # Mig Class Scout
+          77: 294  # Pl21 Probe
+          1073: 40  # Mig Class Transport
+      9:  # The Robotic Imperium
+        true_freighter:
+          15: 12  # Small Deep Space Freighter
+          16: 165  # Medium Deep Space Freighter
+          17: 180  # Large Deep Space Freighter
+          18: 4  # Super Transport Freighter
+        alchemy_ship:
+          104: 7  # Neutronic Refinery Ship
+          105: 19  # Merlin Class Alchemy Ship
+        carrier:
+          78: 144  # Instrumentality Class Baseship
+          79: 98  # Golem Class Baseship
+          80: 70  # Automa Class Baseship
+          82: 192  # Q Tanker
+          83: 1  # Cybernaut Class Baseship
+          84: 21  # Pawn Class Baseship
+          85: 41  # Iron Slave Class Baseship
+        torpedo_ship:
+          81: 421  # Cat's Paw Class Destroyer
+      10:  # The Rebel Confederation
+        true_freighter:
+          14: 6  # Neutronic Fuel Carrier
+          15: 13  # Small Deep Space Freighter
+          16: 58  # Medium Deep Space Freighter
+          17: 199  # Large Deep Space Freighter
+          18: 6  # Super Transport Freighter
+        alchemy_ship:
+          104: 11  # Neutronic Refinery Ship
+          105: 32  # Merlin Class Alchemy Ship
+        carrier:
+          92: 212  # Patriot Class Light Carrier
+          94: 215  # Rush Class Heavy Carrier
+          100: 36  # Sagittarius Class Transport
+          101: 124  # Gemini Class Transport
+        torpedo_ship:
+          86: 169  # Tranquility Class Cruiser
+          88: 26  # Gaurdian Class Destroyer
+          89: 20  # Iron Lady Class Frigate
+          103: 39  # Cygnus Class Destroyer
+          1090: 23  # Sage Class Repair Ship
+        beam_ship:  # resolve_inference_hull_category() label
+          87: 501  # Falcon Class Escort
+          91: 17  # Deep Space Scout
+          93: 26  # Armored Transport
+          98: 6  # Taurus Class Scout
+      11:  # The Missing Colonies of Man
+        true_freighter:
+          15: 38  # Small Deep Space Freighter
+          16: 89  # Medium Deep Space Freighter
+          17: 197  # Large Deep Space Freighter
+          18: 6  # Super Transport Freighter
+        alchemy_ship:
+          97: 7  # Aries Class Transport
+          105: 46  # Merlin Class Alchemy Ship
+        carrier:
+          92: 180  # Patriot Class Light Carrier
+          99: 238  # Virgo Class Battlestar
+          100: 36  # Sagittarius Class Transport
+          101: 126  # Gemini Class Transport
+          102: 2  # Scorpius Class Light Carrier
+          1102: 20  # Scorpius Class Carrier
+        torpedo_ship:
+          42: 181  # Lady Royale Class Cruiser
+          86: 45  # Tranquility Class Cruiser
+          89: 10  # Iron Lady Class Frigate
+          96: 419  # Cobol Class Research Cruiser
+          103: 38  # Cygnus Class Destroyer
+        beam_ship:  # resolve_inference_hull_category() label
+          95: 13  # Little Joe Class Escort
+          98: 3  # Taurus Class Scout
+  after_ship_limit:
+    global:
+      true_freighter:
+        14: 108  # Neutronic Fuel Carrier
+        15: 149  # Small Deep Space Freighter
+        16: 132  # Medium Deep Space Freighter
+        17: 194  # Large Deep Space Freighter
+        18: 84  # Super Transport Freighter
+      alchemy_ship:
+        97: 2  # Aries Class Transport
+        104: 147  # Neutronic Refinery Ship
+        105: 281  # Merlin Class Alchemy Ship
+      carrier:
+        19: 29  # Kittyhawk Class Carrier
+        30: 9  # Valiant Wind Class Carrier
+        47: 4  # Red Wind Class Carrier
+        49: 99  # Madonnzila Class Carrier
+        50: 60  # Bloodfang Class Carrier
+        52: 148  # Biocide Class Carrier
+        67: 62  # Crystal Thunder Class Carrier
         68: 17  # Moscow Class Star Escort
         69: 50  # Super Star Destroyer
         70: 207  # Gorbie Class Battlecarrier
-        71: 7  # Ru25 Gunboat
         72: 15  # H-ross Class Light Carrier
         74: 16  # Super Star Cruiser
-        75: 83  # Super Star Frigate
         76: 8  # Super Star Carrier
-        77: 45  # Pl21 Probe
-        104: 18  # Neutronic Refinery Ship
-        105: 28  # Merlin Class Alchemy Ship
-        123: 4  # Aggregator Class Interdictor
-        1073: 16  # Mig Class Transport
-        1074: 12  # Super Star Cruiser II
-        2076: 8  # Super Star Carrier+
-      9:  # The Robotic Imperium
-        15: 13  # Small Deep Space Freighter
-        16: 17  # Medium Deep Space Freighter
-        17: 22  # Large Deep Space Freighter
-        18: 14  # Super Transport Freighter
         78: 49  # Instrumentality Class Baseship
         79: 324  # Golem Class Baseship
         80: 48  # Automa Class Baseship
-        81: 158  # Cat's Paw Class Destroyer
         82: 57  # Q Tanker
         83: 1  # Cybernaut Class Baseship
         84: 1  # Pawn Class Baseship
-        85: 3  # Iron Slave Class Baseship
-        104: 22  # Neutronic Refinery Ship
-        105: 30  # Merlin Class Alchemy Ship
-        2083: 8  # Cybernaut Light Baseship
-        2085: 1  # Iron Slave Class Scout
-      10:  # The Rebel Confederation
-        14: 11  # Neutronic Fuel Carrier
-        15: 11  # Small Deep Space Freighter
-        16: 3  # Medium Deep Space Freighter
-        17: 19  # Large Deep Space Freighter
-        18: 6  # Super Transport Freighter
-        86: 80  # Tranquility Class Cruiser
-        87: 143  # Falcon Class Escort
-        88: 18  # Gaurdian Class Destroyer
-        89: 47  # Iron Lady Class Frigate
-        92: 31  # Patriot Class Light Carrier
-        93: 3  # Armored Transport
+        85: 6  # Iron Slave Class Baseship
+        92: 55  # Patriot Class Light Carrier
         94: 300  # Rush Class Heavy Carrier
-        98: 1  # Taurus Class Scout
-        100: 9  # Sagittarius Class Transport
-        101: 15  # Gemini Class Transport
-        103: 19  # Cygnus Class Destroyer
-        104: 9  # Neutronic Refinery Ship
-        105: 17  # Merlin Class Alchemy Ship
-        1090: 7  # Sage Class Repair Ship
-      11:  # The Missing Colonies of Man
-        14: 1  # Neutronic Fuel Carrier
-        15: 34  # Small Deep Space Freighter
-        16: 17  # Medium Deep Space Freighter
-        17: 9  # Large Deep Space Freighter
-        18: 14  # Super Transport Freighter
-        42: 29  # Lady Royale Class Cruiser
-        86: 24  # Tranquility Class Cruiser
-        89: 9  # Iron Lady Class Frigate
-        92: 24  # Patriot Class Light Carrier
-        95: 9  # Little Joe Class Escort
-        96: 204  # Cobol Class Research Cruiser
-        97: 2  # Aries Class Transport
-        98: 3  # Taurus Class Scout
         99: 399  # Virgo Class Battlestar
-        100: 7  # Sagittarius Class Transport
-        101: 33  # Gemini Class Transport
+        100: 16  # Sagittarius Class Transport
+        101: 48  # Gemini Class Transport
         102: 1  # Scorpius Class Light Carrier
-        103: 24  # Cygnus Class Destroyer
-        105: 41  # Merlin Class Alchemy Ship
+        1074: 12  # Super Star Cruiser II
         1102: 9  # Scorpius Class Carrier
+      battleship:
+        13: 61  # Missouri Class Battleship
+        20: 169  # Nova Class Super-dreadnought
+        23: 538  # T-Rex Class Battleship
+        29: 621  # Dark Wing Class Battleship
+        35: 489  # Victorious Class Battleship
+        37: 75  # Ill Wind Class Battlecruiser
+        53: 69  # Annihilation Class Battleship
+        63: 202  # Diamond Flame Class Battleship
+      torpedo_ship:
+        2: 10  # Nocturne Class Destroyer
+        4: 5  # Vendetta Class Frigate
+        5: 14  # Nebula Class Cruiser
+        6: 10  # Banshee Class Destroyer
+        7: 175  # Loki Class Destroyer
+        10: 7  # Arkham Class Frigate
+        11: 29  # Thor Class Frigate
+        12: 23  # Diplomacy Class Cruiser
+        22: 274  # Lizard Class Cruiser
+        25: 1  # Saurian Class Light Cruiser
+        26: 9  # White Falcon Class Cruiser
+        28: 5  # Fearless Wing Cruiser
+        31: 217  # Resolute Class Battlecruiser
+        32: 16  # Bright Heart Class Destroyer
+        33: 61  # Deth Specula Class Frigate
+        36: 151  # D7 Coldpain Class Cruiser
+        38: 31  # D3 Thorn Class Destroyer
+        42: 74  # Lady Royale Class Cruiser
+        45: 5  # Br5 Kaye Class Torpedo Boat
+        46: 884  # Meteor Class Blockade Runner
+        48: 1  # Skyfire Class Cruiser
+        56: 175  # Firecloud Class Cruiser
+        58: 1  # Quietus Class Cruiser
+        60: 91  # Ruby Class Light Cruiser
+        61: 178  # Emerald Class Battlecruiser
+        62: 35  # Sky Garnet Class Destroyer
+        64: 25  # Onyx Class Frigate
+        66: 27  # Opal Class Torpedo Boat
+        75: 83  # Super Star Frigate
+        81: 158  # Cat's Paw Class Destroyer
+        86: 104  # Tranquility Class Cruiser
+        88: 18  # Gaurdian Class Destroyer
+        89: 56  # Iron Lady Class Frigate
+        96: 204  # Cobol Class Research Cruiser
+        103: 43  # Cygnus Class Destroyer
+        106: 12  # Enlighten Class Research Vessel
+        1090: 7  # Sage Class Repair Ship
+      beam_ship:  # resolve_inference_hull_category() label
+        1: 15  # Outrider Class Scout
+        3: 17  # Bohemian Class Survey Ship
+        8: 74  # Eros Class Research Vessel
+        21: 46  # Reptile Class Destroyer
+        24: 36  # Serpent Class Escort
+        27: 51  # Swift Heart Class Scout
+        34: 3  # D7a Painmaker Class Cruiser
+        39: 479  # D19b Nefarious Class Destroyer
+        40: 2  # Little Pest Class Escort
+        41: 45  # Saber Class Frigate
+        43: 23  # Dwarfstar Class Transport
+        44: 61  # Br4 Class Gunship
+        51: 20  # B200 Class Probe
+        54: 4  # B41 Explorer
+        55: 9  # B222 Destroyer
+        57: 2  # Watcher Class Scout
+        59: 4  # Small Transport
+        65: 1  # Topez Class Gunboat
+        71: 7  # Ru25 Gunboat
+        77: 45  # Pl21 Probe
+        87: 143  # Falcon Class Escort
+        93: 3  # Armored Transport
+        95: 9  # Little Joe Class Escort
+        98: 4  # Taurus Class Scout
+        1073: 16  # Mig Class Transport
+    byRace:
+      1:  # The Solar Federation
+        true_freighter:
+          16: 6  # Medium Deep Space Freighter
+          17: 14  # Large Deep Space Freighter
+          18: 7  # Super Transport Freighter
+        alchemy_ship:
+          104: 13  # Neutronic Refinery Ship
+          105: 24  # Merlin Class Alchemy Ship
+        carrier:
+          19: 29  # Kittyhawk Class Carrier
+        battleship:
+          13: 61  # Missouri Class Battleship
+          20: 169  # Nova Class Super-dreadnought
+        torpedo_ship:
+          2: 10  # Nocturne Class Destroyer
+          4: 2  # Vendetta Class Frigate
+          5: 14  # Nebula Class Cruiser
+          6: 10  # Banshee Class Destroyer
+          7: 49  # Loki Class Destroyer
+          10: 7  # Arkham Class Frigate
+          11: 29  # Thor Class Frigate
+          12: 23  # Diplomacy Class Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          1: 5  # Outrider Class Scout
+          3: 17  # Bohemian Class Survey Ship
+          8: 13  # Eros Class Research Vessel
+      2:  # The Lizard Alliance
+        true_freighter:
+          14: 20  # Neutronic Fuel Carrier
+          15: 10  # Small Deep Space Freighter
+          16: 6  # Medium Deep Space Freighter
+          17: 23  # Large Deep Space Freighter
+          18: 1  # Super Transport Freighter
+        alchemy_ship:
+          104: 13  # Neutronic Refinery Ship
+          105: 20  # Merlin Class Alchemy Ship
+        carrier:
+          49: 99  # Madonnzila Class Carrier
+        battleship:
+          23: 538  # T-Rex Class Battleship
+        torpedo_ship:
+          4: 3  # Vendetta Class Frigate
+          7: 126  # Loki Class Destroyer
+          22: 274  # Lizard Class Cruiser
+          25: 1  # Saurian Class Light Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          8: 61  # Eros Class Research Vessel
+          21: 46  # Reptile Class Destroyer
+          24: 36  # Serpent Class Escort
+      3:  # The Empire of the Birds
+        true_freighter:
+          14: 19  # Neutronic Fuel Carrier
+          15: 9  # Small Deep Space Freighter
+          16: 3  # Medium Deep Space Freighter
+          17: 19  # Large Deep Space Freighter
+          18: 6  # Super Transport Freighter
+        alchemy_ship:
+          104: 21  # Neutronic Refinery Ship
+          105: 28  # Merlin Class Alchemy Ship
+        carrier:
+          30: 1  # Valiant Wind Class Carrier
+          47: 1  # Red Wind Class Carrier
+        battleship:
+          29: 621  # Dark Wing Class Battleship
+        torpedo_ship:
+          26: 9  # White Falcon Class Cruiser
+          28: 5  # Fearless Wing Cruiser
+          31: 217  # Resolute Class Battlecruiser
+          32: 16  # Bright Heart Class Destroyer
+          33: 15  # Deth Specula Class Frigate
+          106: 12  # Enlighten Class Research Vessel
+        beam_ship:  # resolve_inference_hull_category() label
+          27: 51  # Swift Heart Class Scout
+      4:  # The Hordes of Fury
+        true_freighter:
+          14: 18  # Neutronic Fuel Carrier
+          15: 13  # Small Deep Space Freighter
+          16: 30  # Medium Deep Space Freighter
+          17: 28  # Large Deep Space Freighter
+          18: 6  # Super Transport Freighter
+        alchemy_ship:
+          104: 19  # Neutronic Refinery Ship
+          105: 14  # Merlin Class Alchemy Ship
+        carrier:
+          30: 8  # Valiant Wind Class Carrier
+        battleship:
+          35: 489  # Victorious Class Battleship
+          37: 75  # Ill Wind Class Battlecruiser
+        torpedo_ship:
+          33: 46  # Deth Specula Class Frigate
+          36: 151  # D7 Coldpain Class Cruiser
+          38: 20  # D3 Thorn Class Destroyer
+        beam_ship:  # resolve_inference_hull_category() label
+          39: 479  # D19b Nefarious Class Destroyer
+          40: 2  # Little Pest Class Escort
+          41: 45  # Saber Class Frigate
+          59: 2  # Small Transport
+      5:  # The Privateer Bands
+        true_freighter:
+          14: 5  # Neutronic Fuel Carrier
+          15: 20  # Small Deep Space Freighter
+          16: 14  # Medium Deep Space Freighter
+          17: 10  # Large Deep Space Freighter
+          18: 4  # Super Transport Freighter
+        alchemy_ship:
+          104: 15  # Neutronic Refinery Ship
+          105: 39  # Merlin Class Alchemy Ship
+        carrier:
+          47: 3  # Red Wind Class Carrier
+          50: 60  # Bloodfang Class Carrier
+        torpedo_ship:
+          38: 11  # D3 Thorn Class Destroyer
+          42: 45  # Lady Royale Class Cruiser
+          45: 5  # Br5 Kaye Class Torpedo Boat
+          46: 884  # Meteor Class Blockade Runner
+          48: 1  # Skyfire Class Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          1: 10  # Outrider Class Scout
+          34: 3  # D7a Painmaker Class Cruiser
+          43: 23  # Dwarfstar Class Transport
+          44: 61  # Br4 Class Gunship
+      6:  # The Cyborg
+        true_freighter:
+          15: 1  # Small Deep Space Freighter
+          16: 10  # Medium Deep Space Freighter
+          17: 14  # Large Deep Space Freighter
+          18: 6  # Super Transport Freighter
+        alchemy_ship:
+          104: 4  # Neutronic Refinery Ship
+          105: 16  # Merlin Class Alchemy Ship
+        carrier:
+          52: 148  # Biocide Class Carrier
+          85: 3  # Iron Slave Class Baseship
+        battleship:
+          53: 69  # Annihilation Class Battleship
+        torpedo_ship:
+          56: 175  # Firecloud Class Cruiser
+          58: 1  # Quietus Class Cruiser
+        beam_ship:  # resolve_inference_hull_category() label
+          51: 20  # B200 Class Probe
+          54: 4  # B41 Explorer
+          55: 9  # B222 Destroyer
+          57: 2  # Watcher Class Scout
+      7:  # The Crystal Confederation
+        true_freighter:
+          14: 21  # Neutronic Fuel Carrier
+          15: 17  # Small Deep Space Freighter
+          16: 16  # Medium Deep Space Freighter
+          17: 16  # Large Deep Space Freighter
+          18: 4  # Super Transport Freighter
+        alchemy_ship:
+          104: 13  # Neutronic Refinery Ship
+          105: 24  # Merlin Class Alchemy Ship
+        carrier:
+          67: 62  # Crystal Thunder Class Carrier
+        battleship:
+          63: 202  # Diamond Flame Class Battleship
+        torpedo_ship:
+          60: 91  # Ruby Class Light Cruiser
+          61: 178  # Emerald Class Battlecruiser
+          62: 35  # Sky Garnet Class Destroyer
+          64: 25  # Onyx Class Frigate
+          66: 27  # Opal Class Torpedo Boat
+        beam_ship:  # resolve_inference_hull_category() label
+          59: 2  # Small Transport
+          65: 1  # Topez Class Gunboat
+      8:  # The Evil Empire
+        true_freighter:
+          14: 13  # Neutronic Fuel Carrier
+          15: 21  # Small Deep Space Freighter
+          16: 10  # Medium Deep Space Freighter
+          17: 20  # Large Deep Space Freighter
+          18: 16  # Super Transport Freighter
+        alchemy_ship:
+          104: 18  # Neutronic Refinery Ship
+          105: 28  # Merlin Class Alchemy Ship
+        carrier:
+          68: 17  # Moscow Class Star Escort
+          69: 50  # Super Star Destroyer
+          70: 207  # Gorbie Class Battlecarrier
+          72: 15  # H-ross Class Light Carrier
+          74: 16  # Super Star Cruiser
+          76: 8  # Super Star Carrier
+          1074: 12  # Super Star Cruiser II
+        torpedo_ship:
+          75: 83  # Super Star Frigate
+        beam_ship:  # resolve_inference_hull_category() label
+          71: 7  # Ru25 Gunboat
+          77: 45  # Pl21 Probe
+          1073: 16  # Mig Class Transport
+      9:  # The Robotic Imperium
+        true_freighter:
+          15: 13  # Small Deep Space Freighter
+          16: 17  # Medium Deep Space Freighter
+          17: 22  # Large Deep Space Freighter
+          18: 14  # Super Transport Freighter
+        alchemy_ship:
+          104: 22  # Neutronic Refinery Ship
+          105: 30  # Merlin Class Alchemy Ship
+        carrier:
+          78: 49  # Instrumentality Class Baseship
+          79: 324  # Golem Class Baseship
+          80: 48  # Automa Class Baseship
+          82: 57  # Q Tanker
+          83: 1  # Cybernaut Class Baseship
+          84: 1  # Pawn Class Baseship
+          85: 3  # Iron Slave Class Baseship
+        torpedo_ship:
+          81: 158  # Cat's Paw Class Destroyer
+      10:  # The Rebel Confederation
+        true_freighter:
+          14: 11  # Neutronic Fuel Carrier
+          15: 11  # Small Deep Space Freighter
+          16: 3  # Medium Deep Space Freighter
+          17: 19  # Large Deep Space Freighter
+          18: 6  # Super Transport Freighter
+        alchemy_ship:
+          104: 9  # Neutronic Refinery Ship
+          105: 17  # Merlin Class Alchemy Ship
+        carrier:
+          92: 31  # Patriot Class Light Carrier
+          94: 300  # Rush Class Heavy Carrier
+          100: 9  # Sagittarius Class Transport
+          101: 15  # Gemini Class Transport
+        torpedo_ship:
+          86: 80  # Tranquility Class Cruiser
+          88: 18  # Gaurdian Class Destroyer
+          89: 47  # Iron Lady Class Frigate
+          103: 19  # Cygnus Class Destroyer
+          1090: 7  # Sage Class Repair Ship
+        beam_ship:  # resolve_inference_hull_category() label
+          87: 143  # Falcon Class Escort
+          93: 3  # Armored Transport
+          98: 1  # Taurus Class Scout
+      11:  # The Missing Colonies of Man
+        true_freighter:
+          14: 1  # Neutronic Fuel Carrier
+          15: 34  # Small Deep Space Freighter
+          16: 17  # Medium Deep Space Freighter
+          17: 9  # Large Deep Space Freighter
+          18: 14  # Super Transport Freighter
+        alchemy_ship:
+          97: 2  # Aries Class Transport
+          105: 41  # Merlin Class Alchemy Ship
+        carrier:
+          92: 24  # Patriot Class Light Carrier
+          99: 399  # Virgo Class Battlestar
+          100: 7  # Sagittarius Class Transport
+          101: 33  # Gemini Class Transport
+          102: 1  # Scorpius Class Light Carrier
+          1102: 9  # Scorpius Class Carrier
+        torpedo_ship:
+          42: 29  # Lady Royale Class Cruiser
+          86: 24  # Tranquility Class Cruiser
+          89: 9  # Iron Lady Class Frigate
+          96: 204  # Cobol Class Research Cruiser
+          103: 24  # Cygnus Class Destroyer
+        beam_ship:  # resolve_inference_hull_category() label
+          95: 9  # Little Joe Class Escort
+          98: 3  # Taurus Class Scout
 
 components:
   # Component conditional priors keyed by inference hull category (race-agnostic in v1).
@@ -770,14 +866,14 @@ components:
         9: 80  # Heavy Disruptor
         10: 109  # Heavy Phaser
       torpedoes:
-        1: 121  # Mark 1c Photon
-        2: 27  # Light Proton+
-        3: 7  # Mark 2c Photon
+        1: 121  # Mark 1 Photon
+        2: 27  # Proton Torp
+        3: 7  # Mark 2 Photon
         4: 66  # Gamma Bomb
-        5: 103  # Mark 3c Photon
+        5: 103  # Mark 3 Photon
         6: 1442  # Mark 4 Photon
-        7: 170  # Heavy Proton+
-        8: 184  # Mark 6c Photon
+        7: 170  # Mark 5 Photon
+        8: 184  # Mark 6 Photon
         9: 996  # Mark 7 Photon
         10: 366  # Mark 8 Photon
         11: 66  # Quantum Torp
@@ -807,14 +903,14 @@ components:
         9: 43  # Heavy Disruptor
         10: 46  # Heavy Phaser
       torpedoes:
-        1: 266  # Mark 1c Photon
-        2: 98  # Light Proton+
-        3: 8  # Mark 2c Photon
+        1: 266  # Mark 1 Photon
+        2: 98  # Proton Torp
+        3: 8  # Mark 2 Photon
         4: 138  # Gamma Bomb
-        5: 87  # Mark 3c Photon
+        5: 87  # Mark 3 Photon
         6: 2271  # Mark 4 Photon
-        7: 178  # Heavy Proton+
-        8: 211  # Mark 6c Photon
+        7: 178  # Mark 5 Photon
+        8: 211  # Mark 6 Photon
         9: 746  # Mark 7 Photon
         10: 172  # Mark 8 Photon
         11: 9  # Quantum Torp
@@ -937,14 +1033,14 @@ components:
         9: 288  # Heavy Disruptor
         10: 880  # Heavy Phaser
       torpedoes:
-        1: 69  # Mark 1c Photon
-        2: 4  # Light Proton+
-        3: 1  # Mark 2c Photon
+        1: 69  # Mark 1 Photon
+        2: 4  # Proton Torp
+        3: 1  # Mark 2 Photon
         4: 8  # Gamma Bomb
-        5: 8  # Mark 3c Photon
+        5: 8  # Mark 3 Photon
         6: 217  # Mark 4 Photon
-        7: 37  # Heavy Proton+
-        8: 78  # Mark 6c Photon
+        7: 37  # Mark 5 Photon
+        8: 78  # Mark 6 Photon
         9: 1023  # Mark 7 Photon
         10: 1629  # Mark 8 Photon
         11: 171  # Quantum Torp
@@ -974,14 +1070,14 @@ components:
         9: 222  # Heavy Disruptor
         10: 498  # Heavy Phaser
       torpedoes:
-        1: 67  # Mark 1c Photon
-        2: 29  # Light Proton+
-        3: 2  # Mark 2c Photon
+        1: 67  # Mark 1 Photon
+        2: 29  # Proton Torp
+        3: 2  # Mark 2 Photon
         4: 21  # Gamma Bomb
-        5: 10  # Mark 3c Photon
+        5: 10  # Mark 3 Photon
         6: 445  # Mark 4 Photon
-        7: 49  # Heavy Proton+
-        8: 90  # Mark 6c Photon
+        7: 49  # Mark 5 Photon
+        8: 90  # Mark 6 Photon
         9: 885  # Mark 7 Photon
         10: 616  # Mark 8 Photon
         11: 23  # Quantum Torp
@@ -1439,7 +1535,7 @@ aggregates:
     ship_torps_loaded_1:
       histogram:
         0: 20416  # none-bin occurrence pseudo-count (count == 0)
-        1: 3  # Mark 1c Photon load magnitudes
+        1: 3  # Mark 1 Photon load magnitudes
         4: 1
         8: 1
         10: 4
@@ -1571,7 +1667,7 @@ aggregates:
     ship_torps_loaded_2:
       histogram:
         0: 20401  # none-bin occurrence pseudo-count (count == 0)
-        1: 1  # Light Proton+ load magnitudes
+        1: 1  # Proton Torp load magnitudes
         2: 4
         3: 2
         5: 2
@@ -1594,7 +1690,7 @@ aggregates:
     ship_torps_loaded_3:
       histogram:
         0: 20428  # none-bin occurrence pseudo-count (count == 0)
-        4: 2  # Mark 2c Photon load magnitudes
+        4: 2  # Mark 2 Photon load magnitudes
         40: 3
         60: 1
         101: 1
@@ -1642,7 +1738,7 @@ aggregates:
     ship_torps_loaded_5:
       histogram:
         0: 20350  # none-bin occurrence pseudo-count (count == 0)
-        1: 3  # Mark 3c Photon load magnitudes
+        1: 3  # Mark 3 Photon load magnitudes
         2: 1
         3: 3
         4: 3
@@ -1817,7 +1913,7 @@ aggregates:
     ship_torps_loaded_7:
       histogram:
         0: 20160  # none-bin occurrence pseudo-count (count == 0)
-        1: 10  # Heavy Proton+ load magnitudes
+        1: 10  # Mark 5 Photon load magnitudes
         2: 16
         3: 6
         4: 11
@@ -1889,7 +1985,7 @@ aggregates:
     ship_torps_loaded_8:
       histogram:
         0: 20200  # none-bin occurrence pseudo-count (count == 0)
-        1: 15  # Mark 6c Photon load magnitudes
+        1: 15  # Mark 6 Photon load magnitudes
         2: 10
         3: 11
         4: 7
@@ -2943,7 +3039,7 @@ aggregates:
     ship_torps_loaded_1:
       histogram:
         0: 19595  # none-bin occurrence pseudo-count (count == 0)
-        1: 1  # Mark 1c Photon load magnitudes
+        1: 1  # Mark 1 Photon load magnitudes
         2: 6
         3: 1
         4: 1
@@ -3338,7 +3434,7 @@ aggregates:
     ship_torps_loaded_2:
       histogram:
         0: 19603  # none-bin occurrence pseudo-count (count == 0)
-        1: 2  # Light Proton+ load magnitudes
+        1: 2  # Proton Torp load magnitudes
         2: 1
         4: 2
         6: 1
@@ -3364,7 +3460,7 @@ aggregates:
     ship_torps_loaded_3:
       histogram:
         0: 19632  # none-bin occurrence pseudo-count (count == 0)
-        1: 1  # Mark 2c Photon load magnitudes
+        1: 1  # Mark 2 Photon load magnitudes
         3: 1
         5: 1
         8: 1
@@ -3425,7 +3521,7 @@ aggregates:
     ship_torps_loaded_5:
       histogram:
         0: 19428  # none-bin occurrence pseudo-count (count == 0)
-        1: 7  # Mark 3c Photon load magnitudes
+        1: 7  # Mark 3 Photon load magnitudes
         2: 4
         3: 6
         4: 8
@@ -3757,7 +3853,7 @@ aggregates:
     ship_torps_loaded_7:
       histogram:
         0: 19106  # none-bin occurrence pseudo-count (count == 0)
-        1: 14  # Heavy Proton+ load magnitudes
+        1: 14  # Mark 5 Photon load magnitudes
         2: 17
         3: 23
         4: 17
@@ -3875,7 +3971,7 @@ aggregates:
     ship_torps_loaded_8:
       histogram:
         0: 18936  # none-bin occurrence pseudo-count (count == 0)
-        1: 14  # Mark 6c Photon load magnitudes
+        1: 14  # Mark 6 Photon load magnitudes
         2: 18
         3: 42
         4: 40

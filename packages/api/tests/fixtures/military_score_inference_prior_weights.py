@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AGGREGATE_ACTION_SPECS,
+    aggregate_bin_bounds_for_spec,
     lookup_aggregate_action_spec,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -15,7 +16,8 @@ from api.analytics.military_score_inference.models import (
     probability_buckets_from_bin_bounds,
 )
 from api.analytics.military_score_inference.prior_weights_catalog import (
-    CategoryComponentLogTables,
+    CategoryHullLogTables,
+    CategoryLogWeightTable,
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
     ResolvedComponentCountTables,
@@ -62,14 +64,17 @@ def probability_buckets_for_test_action(
     if spec is None:
         raise ValueError(f"action {action_id!r} has no solver bin bounds")
     weights = marginal_weights or STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS[action_id]
-    return probability_buckets_from_bin_bounds(spec.bin_bounds, weights)
+    return probability_buckets_from_bin_bounds(
+        aggregate_bin_bounds_for_spec(spec),
+        weights,
+    )
 
 
 def complete_test_aggregate_bucket_weights() -> dict[str, tuple[int, ...]]:
     weights = dict(STANDARD_TEST_HISTOGRAM_MARGINAL_WEIGHTS)
     for action_id, spec in AGGREGATE_ACTION_SPECS.items():
         if action_id not in weights:
-            active = tuple(10 for _ in spec.bin_bounds[1:])
+            active = tuple(10 for _ in aggregate_bin_bounds_for_spec(spec)[1:])
             weights[action_id] = _with_none_bin_weight(active)
     return weights
 
@@ -156,13 +161,18 @@ def _neutral_component_table_shell() -> ResolvedComponentCountTables:
     )
 
 
-def _neutral_component_tables() -> CategoryComponentLogTables:
+def _neutral_component_tables():
     return {category: _neutral_component_table_shell() for category in INFERENCE_HULL_CATEGORIES}
+
+
+def _neutral_category_hull_tables() -> CategoryHullLogTables:
+    return {category: dict.fromkeys(range(1, 101), 0) for category in INFERENCE_HULL_CATEGORIES}
 
 
 def minimal_prior_catalog(
     *,
-    hull_log_weights: dict[int, int] | None = None,
+    category_log_weights: CategoryLogWeightTable | None = None,
+    hull_log_weights_by_category: CategoryHullLogTables | None = None,
     combo_log_overrides: dict[str, int] | None = None,
     hull_log_overrides: dict[int, int] | None = None,
     generic_freighter_log_weight: int | None = 0,
@@ -172,14 +182,21 @@ def minimal_prior_catalog(
         diagnostics=PriorWeightsDiagnostics(
             category_id="standard",
             asset_path="test",
-            asset_version=1,
+            asset_version=4,
             game_category_rules_version=2,
             fell_back_to_standard=False,
             ship_limit_band="before_ship_limit",
             race_id_used=None,
         ),
-        _hull_log_weights=(
-            dict.fromkeys(range(1, 101), 0) if hull_log_weights is None else hull_log_weights
+        _category_log_weights=(
+            dict.fromkeys(INFERENCE_HULL_CATEGORIES, 0)
+            if category_log_weights is None
+            else category_log_weights
+        ),
+        _hull_log_weights_by_category=(
+            _neutral_category_hull_tables()
+            if hull_log_weights_by_category is None
+            else hull_log_weights_by_category
         ),
         _component_tables=_neutral_component_tables(),
         _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights

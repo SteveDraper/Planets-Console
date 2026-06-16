@@ -1,6 +1,4 @@
-# Inference build prior for the "standard" game category (hand-seeded pseudo-counts).
-# TEST-ONLY fixture: copied from the original production hand-seed for unit tests.
-# Production assets live under assets/analytics/scores/ and are populated by the prior miner.
+# Inference build prior for the "standard" game category (mined pseudo-counts).
 # Counts are un-normalized; Core converts each table to log-probability integer weights
 # at catalog build (Laplace smoothing, alpha=1). See design-military-score-inference-build-priors.md.
 #
@@ -11,100 +9,115 @@
 # key holds the none-bin pseudo-count; it was computed via none_bin_pseudo_count() so the gap to
 # the most likely active bin reproduces the legacy parsimony penalty (LEGACY_PARSIMONY_OCCURRENCE_PENALTY).
 # There is no separate `counts` shape: every aggregate, including fighter transfers, is a histogram.
+#
+# The prior miner substitutes standard and fills counts when writing a new category asset.
 
-version: 3
+version: 4
 category: standard  # must match filename stem prior_weights_{category}.yaml
 gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
 
 hulls:
-  # Inference ship-limit band: tables split on whether the player is before/after ship limit.
+  # Inference ship-limit band: P(hull|category) pseudo-counts keyed by inference hull category.
   before_ship_limit:
     global:
-      "*": 50  # default pseudo-count for any other buildable hull id
-      15: 220  # Small Deep Space Freighter; collapsed into the solver generic freighter combo
-      24: 450  # Serpent Class Escort
-      71: 140  # Swift Wind Class Carrier
-      44: 90  # Br4 Class Gunship
-      27: 60  # Swift Heart Class Scout
+      true_freighter:
+        '*': 50  # default pseudo-count for any other buildable hull id
+        15: 220  # Small Deep Space Freighter
+      beam_ship:  # resolve_inference_hull_category() label
+        '*': 50  # default pseudo-count for any other buildable hull id
+        24: 450  # Serpent Class Escort
+        27: 60  # Swift Heart Class Scout
+        44: 90  # Br4 Class Gunship
+        71: 140  # Ru25 Gunboat
     byRace:
       2:  # The Lizard Alliance
-        24: 620  # Serpent Class Escort
+        beam_ship:  # resolve_inference_hull_category() label
+          24: 620  # Serpent Class Escort
   after_ship_limit:
     global:
-      "*": 40
-      15: 180  # Small Deep Space Freighter; collapsed into the solver generic freighter combo
-      24: 320  # Serpent Class Escort
-      71: 200  # Swift Wind Class Carrier
-      44: 70  # Br4 Class Gunship
-      27: 50  # Swift Heart Class Scout
+      true_freighter:
+        '*': 40  # default pseudo-count for any other buildable hull id
+        15: 180  # Small Deep Space Freighter
+      beam_ship:  # resolve_inference_hull_category() label
+        '*': 40  # default pseudo-count for any other buildable hull id
+        24: 320  # Serpent Class Escort
+        27: 50  # Swift Heart Class Scout
+        44: 70  # Br4 Class Gunship
+        71: 200  # Ru25 Gunboat
 
 components:
   # Component conditional priors keyed by inference hull category (race-agnostic in v1).
   before_ship_limit:
+    carrier:
+      engines:
+        '*': 15
+        1: 200  # StarDrive 1
+        7: 25  # Quantam Drive 7
+      slotFill:
+        full: 180  # all hull weapon slots filled
+        partial: 20
+    torpedo_ship:
+      engines:
+        '*': 20
+        1: 260  # StarDrive 1
+        5: 45  # Nova Drive 5
+      torpedoes:
+        '*': 12
+        1: 300  # Mark 1 Photon
+        8: 25  # Mark 6 Photon
+      slotFill:
+        full: 220  # all hull weapon slots filled
+        partial: 12
     beam_ship:  # resolve_inference_hull_category() label
       engines:
-        "*": 25
+        '*': 25
         1: 320  # StarDrive 1
-        5: 40  # StarDrive 5
+        5: 40  # Nova Drive 5
       beams:
-        "*": 10
+        '*': 10
         1: 280  # Laser
         3: 35  # Plasma Bolt
       slotFill:
         full: 240  # all hull weapon slots filled
         partial: 15
-    carrier:
-      engines:
-        "*": 15
-        1: 200  # StarDrive 1
-        7: 25  # StarDrive 7
-      slotFill:
-        full: 180
-        partial: 20
-    torpedo_ship:
-      engines:
-        "*": 20
-        1: 260  # StarDrive 1
-        5: 45  # StarDrive 5
-      torpedoes:
-        "*": 12
-        1: 300  # Mark 1 Photon
-        8: 25  # Mark 8 Phase
-      slotFill:
-        full: 220
-        partial: 12
   after_ship_limit:
-    beam_ship:
-      engines:
-        "*": 20
-        1: 250  # StarDrive 1
-        5: 35  # StarDrive 5
-      beams:
-        "*": 8
-        1: 220  # Laser
-      slotFill:
-        full: 200
-        partial: 18
     carrier:
       engines:
-        "*": 12
+        '*': 12
         1: 170  # StarDrive 1
       slotFill:
-        full: 160
+        full: 160  # all hull weapon slots filled
         partial: 22
     torpedo_ship:
       engines:
-        "*": 15
+        '*': 15
         1: 210  # StarDrive 1
       torpedoes:
-        "*": 10
+        '*': 10
         1: 260  # Mark 1 Photon
       slotFill:
-        full: 190
+        full: 190  # all hull weapon slots filled
         partial: 14
+    beam_ship:  # resolve_inference_hull_category() label
+      engines:
+        '*': 20
+        1: 250  # StarDrive 1
+        5: 35  # Nova Drive 5
+      beams:
+        '*': 8
+        1: 220  # Laser
+      slotFill:
+        full: 200  # all hull weapon slots filled
+        partial: 18
 
 aggregates:
   before_ship_limit:
+    fighters_ship_to_starbase:
+      histogram:
+        {0: 58, 1: 35}  # occurrence-only: none bin + single active band
+    fighters_starbase_to_ship:
+      histogram:
+        {0: 108, 1: 65}  # occurrence-only: none bin + single active band
     planet_defense_posts_added_total:
       histogram:
         0: 198  # none-bin occurrence pseudo-count (count == 0)
@@ -112,132 +125,194 @@ aggregates:
         15: 80
         40: 20
         90: 5
+    ship_fighters_added_total:
+      histogram:
+        0: 141  # none-bin occurrence pseudo-count (count == 0)
+        10: 85  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
+        30: 55
+        80: 12
+        200: 3
+    ship_torps_loaded_1:
+      histogram:
+        0: 133  # none-bin occurrence pseudo-count (count == 0)
+        10: 80  # Mark 1 Photon load magnitudes
+        50: 45
+        120: 8
+    ship_torps_loaded_10:
+      histogram:
+        0: 93  # none-bin occurrence pseudo-count (count == 0)
+        10: 56  # Mark 8 Photon load magnitudes
+        50: 26
+        120: 3
+    ship_torps_loaded_11:
+      histogram:
+        0: 90  # none-bin occurrence pseudo-count (count == 0)
+        10: 54  # Quantum Torp load magnitudes
+        50: 24
+        120: 2
+    ship_torps_loaded_2:
+      histogram:
+        0: 124  # none-bin occurrence pseudo-count (count == 0)
+        10: 75  # Proton Torp load magnitudes
+        50: 42
+        120: 7
+    ship_torps_loaded_3:
+      histogram:
+        0: 116  # none-bin occurrence pseudo-count (count == 0)
+        10: 70  # Mark 2 Photon load magnitudes
+        50: 40
+        120: 6
+    ship_torps_loaded_4:
+      histogram:
+        0: 113  # none-bin occurrence pseudo-count (count == 0)
+        10: 68  # Gamma Bomb load magnitudes
+        50: 38
+        120: 6
+    ship_torps_loaded_5:
+      histogram:
+        0: 109  # none-bin occurrence pseudo-count (count == 0)
+        10: 66  # Mark 3 Photon load magnitudes
+        50: 36
+        120: 5
+    ship_torps_loaded_6:
+      histogram:
+        0: 106  # none-bin occurrence pseudo-count (count == 0)
+        10: 64  # Mark 4 Photon load magnitudes
+        50: 34
+        120: 5
+    ship_torps_loaded_7:
+      histogram:
+        0: 103  # none-bin occurrence pseudo-count (count == 0)
+        10: 62  # Mark 5 Photon load magnitudes
+        50: 32
+        120: 4
+    ship_torps_loaded_8:
+      histogram:
+        0: 100  # none-bin occurrence pseudo-count (count == 0)
+        10: 60  # Mark 6 Photon load magnitudes
+        50: 30
+        120: 4
+    ship_torps_loaded_9:
+      histogram:
+        0: 96  # none-bin occurrence pseudo-count (count == 0)
+        10: 58  # Mark 7 Photon load magnitudes
+        50: 28
+        120: 3
     starbase_defense_posts_added_total:
       histogram:
-        0: 166
-        5: 100
+        0: 166  # none-bin occurrence pseudo-count (count == 0)
+        5: 100  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
         15: 70
         40: 18
         90: 4
     starbase_fighters_added_total:
       histogram:
-        0: 149
-        10: 90
+        0: 149  # none-bin occurrence pseudo-count (count == 0)
+        10: 90  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
         30: 60
         80: 15
         150: 4
-    ship_fighters_added_total:
-      histogram:
-        0: 141
-        10: 85
-        30: 55
-        80: 12
-        200: 3
-    fighters_starbase_to_ship:
-      histogram: {0: 108, 1: 65}  # occurrence-only: none bin + single active band
-    fighters_ship_to_starbase:
-      histogram: {0: 58, 1: 35}
-    ship_torps_loaded_1:
-      histogram:
-        0: 133
-        10: 80  # Mark 1 Photon load magnitudes
-        50: 45
-        120: 8
-    ship_torps_loaded_2:
-      histogram:
-        0: 124
-        10: 75
-        50: 42
-        120: 7
-    ship_torps_loaded_3:
-      histogram:
-        0: 116
-        10: 70
-        50: 40
-        120: 6
-    ship_torps_loaded_4:
-      histogram: {0: 113, 10: 68, 50: 38, 120: 6}
-    ship_torps_loaded_5:
-      histogram: {0: 109, 10: 66, 50: 36, 120: 5}
-    ship_torps_loaded_6:
-      histogram: {0: 106, 10: 64, 50: 34, 120: 5}
-    ship_torps_loaded_7:
-      histogram: {0: 103, 10: 62, 50: 32, 120: 4}
-    ship_torps_loaded_8:
-      histogram: {0: 100, 10: 60, 50: 30, 120: 4}
-    ship_torps_loaded_9:
-      histogram: {0: 96, 10: 58, 50: 28, 120: 3}
-    ship_torps_loaded_10:
-      histogram: {0: 93, 10: 56, 50: 26, 120: 3}
-    ship_torps_loaded_11:
-      histogram: {0: 90, 10: 54, 50: 24, 120: 2}
   after_ship_limit:
+    fighters_ship_to_starbase:
+      histogram:
+        {0: 50, 1: 30}  # occurrence-only: none bin + single active band
+    fighters_starbase_to_ship:
+      histogram:
+        {0: 91, 1: 55}  # occurrence-only: none bin + single active band
     planet_defense_posts_added_total:
       histogram:
-        0: 149
-        5: 90
+        0: 149  # none-bin occurrence pseudo-count (count == 0)
+        5: 90  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
         15: 65
         40: 16
         90: 3
+    ship_fighters_added_total:
+      histogram:
+        0: 116  # none-bin occurrence pseudo-count (count == 0)
+        10: 70  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
+        30: 48
+        80: 10
+        200: 2
+    ship_torps_loaded_1:
+      histogram:
+        0: 116  # none-bin occurrence pseudo-count (count == 0)
+        10: 70  # Mark 1 Photon load magnitudes
+        50: 40
+        120: 6
+    ship_torps_loaded_10:
+      histogram:
+        0: 76  # none-bin occurrence pseudo-count (count == 0)
+        10: 46  # Mark 8 Photon load magnitudes
+        50: 21
+        120: 1
+    ship_torps_loaded_11:
+      histogram:
+        0: 73  # none-bin occurrence pseudo-count (count == 0)
+        10: 44  # Quantum Torp load magnitudes
+        50: 19
+        120: 1
+    ship_torps_loaded_2:
+      histogram:
+        0: 108  # none-bin occurrence pseudo-count (count == 0)
+        10: 65  # Proton Torp load magnitudes
+        50: 38
+        120: 5
+    ship_torps_loaded_3:
+      histogram:
+        0: 100  # none-bin occurrence pseudo-count (count == 0)
+        10: 60  # Mark 2 Photon load magnitudes
+        50: 35
+        120: 4
+    ship_torps_loaded_4:
+      histogram:
+        0: 96  # none-bin occurrence pseudo-count (count == 0)
+        10: 58  # Gamma Bomb load magnitudes
+        50: 33
+        120: 4
+    ship_torps_loaded_5:
+      histogram:
+        0: 93  # none-bin occurrence pseudo-count (count == 0)
+        10: 56  # Mark 3 Photon load magnitudes
+        50: 31
+        120: 3
+    ship_torps_loaded_6:
+      histogram:
+        0: 90  # none-bin occurrence pseudo-count (count == 0)
+        10: 54  # Mark 4 Photon load magnitudes
+        50: 29
+        120: 3
+    ship_torps_loaded_7:
+      histogram:
+        0: 86  # none-bin occurrence pseudo-count (count == 0)
+        10: 52  # Mark 5 Photon load magnitudes
+        50: 27
+        120: 2
+    ship_torps_loaded_8:
+      histogram:
+        0: 83  # none-bin occurrence pseudo-count (count == 0)
+        10: 50  # Mark 6 Photon load magnitudes
+        50: 25
+        120: 2
+    ship_torps_loaded_9:
+      histogram:
+        0: 80  # none-bin occurrence pseudo-count (count == 0)
+        10: 48  # Mark 7 Photon load magnitudes
+        50: 23
+        120: 2
     starbase_defense_posts_added_total:
       histogram:
-        0: 141
-        5: 85
+        0: 141  # none-bin occurrence pseudo-count (count == 0)
+        5: 85  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
         15: 60
         40: 14
         90: 3
     starbase_fighters_added_total:
       histogram:
-        0: 124
-        10: 75
+        0: 124  # none-bin occurrence pseudo-count (count == 0)
+        10: 75  # magnitude (discrete total) -> pseudo-count; rolled into solver buckets at load
         30: 50
         80: 12
         150: 3
-    ship_fighters_added_total:
-      histogram:
-        0: 116
-        10: 70
-        30: 48
-        80: 10
-        200: 2
-    fighters_starbase_to_ship:
-      histogram: {0: 91, 1: 55}
-    fighters_ship_to_starbase:
-      histogram: {0: 50, 1: 30}
-    ship_torps_loaded_1:
-      histogram:
-        0: 116
-        10: 70
-        50: 40
-        120: 6
-    ship_torps_loaded_2:
-      histogram:
-        0: 108
-        10: 65
-        50: 38
-        120: 5
-    ship_torps_loaded_3:
-      histogram:
-        0: 100
-        10: 60
-        50: 35
-        120: 4
-    ship_torps_loaded_4:
-      histogram: {0: 96, 10: 58, 50: 33, 120: 4}
-    ship_torps_loaded_5:
-      histogram: {0: 93, 10: 56, 50: 31, 120: 3}
-    ship_torps_loaded_6:
-      histogram: {0: 90, 10: 54, 50: 29, 120: 3}
-    ship_torps_loaded_7:
-      histogram: {0: 86, 10: 52, 50: 27, 120: 2}
-    ship_torps_loaded_8:
-      histogram: {0: 83, 10: 50, 50: 25, 120: 2}
-    ship_torps_loaded_9:
-      histogram: {0: 80, 10: 48, 50: 23, 120: 2}
-    ship_torps_loaded_10:
-      histogram: {0: 76, 10: 46, 50: 21, 120: 1}
-    ship_torps_loaded_11:
-      histogram: {0: 73, 10: 44, 50: 19, 120: 1}
 
 overrides:
   combos: {}  # combo_id -> pseudo-count (optional sparse corrections; no wildcard)

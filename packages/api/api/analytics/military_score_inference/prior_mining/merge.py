@@ -117,10 +117,12 @@ def _merge_hull_tables(
 ) -> dict:
     merged = _deep_copy_hull_tables(asset_tables)
     for band in SHIP_LIMIT_BANDS:
-        for race_key, hull_table in mined_tables.get(band, {}).items():
-            target = merged[band].setdefault(race_key, {})
-            for hull_id, count in hull_table.items():
-                target[hull_id] = target.get(hull_id, 0.0) + count
+        for race_key, category_tables in mined_tables.get(band, {}).items():
+            target_race = merged[band].setdefault(race_key, {})
+            for category, hull_table in category_tables.items():
+                target_category = target_race.setdefault(category, {})
+                for hull_id, count in hull_table.items():
+                    target_category[hull_id] = target_category.get(hull_id, 0.0) + count
     return merged
 
 
@@ -173,7 +175,10 @@ def _merge_aggregate_tables(asset_tables: dict, mined_tables: dict) -> dict:
 
 def _deep_copy_hull_tables(tables: dict) -> dict:
     return {
-        band: {race_key: dict(hull_table) for race_key, hull_table in band_tables.items()}
+        band: {
+            race_key: {category: dict(hull_table) for category, hull_table in race_tables.items()}
+            for race_key, race_tables in band_tables.items()
+        }
         for band, band_tables in tables.items()
     }
 
@@ -196,13 +201,23 @@ def _serialize_hull_tables(tables: dict) -> dict[str, Any]:
     serialized: dict[str, Any] = {}
     for band in SHIP_LIMIT_BANDS:
         band_tables = tables[band]
-        global_counts = dict(band_tables.get("global", {}))
-        by_race: dict[int, dict[int, float]] = {}
-        for race_key, hull_table in band_tables.items():
+        global_by_category = {
+            category: dict(hull_table)
+            for category, hull_table in band_tables.get("global", {}).items()
+            if hull_table
+        }
+        by_race: dict[int, dict[str, dict[int, float]]] = {}
+        for race_key, race_tables in band_tables.items():
             if race_key == "global":
                 continue
-            by_race[int(race_key)] = dict(hull_table)
-        band_payload: dict[str, Any] = {"global": global_counts}
+            race_payload = {
+                category: dict(hull_table)
+                for category, hull_table in race_tables.items()
+                if hull_table
+            }
+            if race_payload:
+                by_race[int(race_key)] = race_payload
+        band_payload: dict[str, Any] = {"global": global_by_category or {}}
         if by_race:
             band_payload["byRace"] = by_race
         serialized[band] = band_payload
@@ -248,7 +263,8 @@ def accumulation_mining_report_sections(accumulation: PriorMiningAccumulation) -
     """Shape mined counts for the JSON miner report (matches asset histogram layout)."""
     total_ship_builds = 0.0
     for band_tables in accumulation.hull_counts.values():
-        total_ship_builds += sum(band_tables.get("global", {}).values())
+        for category_tables in band_tables.get("global", {}).values():
+            total_ship_builds += sum(category_tables.values())
     return {
         "total_ship_builds": int(total_ship_builds),
         "hulls": _serialize_hull_tables(accumulation.hull_counts),
