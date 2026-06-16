@@ -83,6 +83,15 @@ class LoadedCorpusCase:
     expect_coverage: bool
 
 
+@dataclass(frozen=True)
+class _LoadedCasePipelineContext:
+    extraction: object
+    negative_defense_gt: bool
+    observation: InferenceObservation
+    catalog: ActionCatalog
+    coverage_passed: bool
+
+
 def _manifest_scoreboard_turn_loader(
     case: ManifestCase,
     *,
@@ -357,6 +366,74 @@ def run_loaded_case(
     case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusCaseResult:
     """Ground truth, coverage, and Tier 1 on one observation and catalog build."""
+    pipeline = _build_loaded_case_pipeline_context(
+        loaded,
+        ground_truth_prior_turn=ground_truth_prior_turn,
+        ground_truth_score_turn=ground_truth_score_turn,
+        load_scoreboard_turn=load_scoreboard_turn,
+        enable_tier2=enable_tier2,
+        tier2_other_prior_turns=tier2_other_prior_turns,
+        tier2_other_score_turns=tier2_other_score_turns,
+    )
+    if isinstance(pipeline, CorpusCaseResult):
+        return pipeline
+
+    tier1_result, inference_payload = _run_tier1_for_loaded_case(
+        case_id=loaded.case_id,
+        score_turn=loaded.score_turn,
+        score=loaded.score,
+        complexity=loaded.complexity,
+        complexity_reasons=loaded.complexity_reasons,
+        expected_status=loaded.expected_status,
+        ground_truth_available=pipeline.extraction.available,
+        observation=pipeline.observation,
+        catalog=pipeline.catalog,
+        load_scoreboard_turn=load_scoreboard_turn,
+        case_time_limit_seconds=case_time_limit_seconds,
+    )
+    if tier1_result.outcome != CaseOutcome.PASSED:
+        return tier1_result
+
+    if pipeline.negative_defense_gt:
+        return CorpusCaseResult(
+            case_id=loaded.case_id,
+            outcome=CaseOutcome.SKIPPED_PENDING_SOLVER,
+            status=tier1_result.status,
+            solution_count=tier1_result.solution_count,
+            complexity=loaded.complexity,
+            complexity_reasons=loaded.complexity_reasons,
+            ground_truth_available=True,
+            skip_reason="negative_defense_gt_pending_solver",
+            elapsed_seconds=tier1_result.elapsed_seconds,
+        )
+
+    if not (
+        pipeline.extraction.available
+        and pipeline.coverage_passed
+        and tier1_result.status == STATUS_EXACT
+        and inference_payload is not None
+    ):
+        return tier1_result
+
+    return _apply_ranking_check(
+        tier1_result,
+        ground_truth=pipeline.extraction.ground_truth,
+        inference_payload=inference_payload,
+        top_k=top_k,
+        hard_ranking=hard_ranking,
+    )
+
+
+def _build_loaded_case_pipeline_context(
+    loaded: LoadedCorpusCase,
+    *,
+    ground_truth_prior_turn: TurnInfo,
+    ground_truth_score_turn: TurnInfo,
+    load_scoreboard_turn,
+    enable_tier2: bool,
+    tier2_other_prior_turns: tuple[TurnInfo, ...],
+    tier2_other_score_turns: tuple[TurnInfo, ...],
+) -> _LoadedCasePipelineContext | CorpusCaseResult:
     extraction = extract_ground_truth_v1(
         prior_turn=ground_truth_prior_turn,
         score_turn=ground_truth_score_turn,
@@ -382,93 +459,49 @@ def run_loaded_case(
         catalog_turn = loaded.score_turn
 
     catalog = build_action_catalog_from_turn(observation, catalog_turn)
-    if negative_defense_gt:
-        tier1_result, _inference_payload = _run_tier1_for_loaded_case(
-            case_id=loaded.case_id,
-            score_turn=loaded.score_turn,
-            score=loaded.score,
-            complexity=loaded.complexity,
-            complexity_reasons=loaded.complexity_reasons,
-            expected_status=loaded.expected_status,
-            ground_truth_available=True,
-            observation=observation,
-            catalog=catalog,
-            load_scoreboard_turn=load_scoreboard_turn,
-            case_time_limit_seconds=case_time_limit_seconds,
-        )
-        if tier1_result.outcome != CaseOutcome.PASSED:
-            return tier1_result
-        return CorpusCaseResult(
-            case_id=loaded.case_id,
-            outcome=CaseOutcome.SKIPPED_PENDING_SOLVER,
-            status=tier1_result.status,
-            solution_count=tier1_result.solution_count,
-            complexity=loaded.complexity,
-            complexity_reasons=loaded.complexity_reasons,
-            ground_truth_available=True,
-            skip_reason="negative_defense_gt_pending_solver",
-            elapsed_seconds=tier1_result.elapsed_seconds,
-        )
-
-    skip_coverage = (
-        extraction.available
-        and resolved is None
-        and needs_accelerated_backfill(loaded.score_turn.settings.turn, loaded.score_turn.settings)
-    )
-    coverage_block = (
-        None
-        if skip_coverage
-        else resolve_coverage_for_case(
+    coverage_passed = True
+    if not negative_defense_gt:
+        coverage_failure = _validate_coverage_for_loaded_case(
+            loaded,
             extraction=extraction,
-            ground_truth=extraction.ground_truth,
-            catalog=catalog,
-            complexity_reasons=loaded.complexity_reasons,
+            resolved=resolved,
             observation=observation,
-            score_turn=catalog_turn,
+            catalog=catalog,
+            catalog_turn=catalog_turn,
         )
-    )
+        if coverage_failure is not None:
+            return coverage_failure
 
-    if loaded.expect_coverage:
-        if not extraction.available:
-            return CorpusCaseResult(
-                case_id=loaded.case_id,
-                outcome=CaseOutcome.FAILED,
-                complexity=loaded.complexity,
+        skip_coverage = (
+            extraction.available
+            and resolved is None
+            and needs_accelerated_backfill(loaded.score_turn.settings.turn, loaded.score_turn.settings)
+        )
+        coverage_block = (
+            None
+            if skip_coverage
+            else resolve_coverage_for_case(
+                extraction=extraction,
+                ground_truth=extraction.ground_truth,
+                catalog=catalog,
                 complexity_reasons=loaded.complexity_reasons,
-                ground_truth_available=False,
-                coverage_reason=COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
-                failure_message=(
-                    "expectCoverage requires ground truth in search space; "
-                    "groundTruthAvailable is false"
-                ),
+                observation=observation,
+                score_turn=catalog_turn,
             )
+        )
+
         if coverage_block is not None and not coverage_block.in_search_space:
             return CorpusCaseResult(
                 case_id=loaded.case_id,
-                outcome=CaseOutcome.FAILED,
+                outcome=CaseOutcome.OUT_OF_SEARCH_SPACE,
                 complexity=loaded.complexity,
                 complexity_reasons=loaded.complexity_reasons,
-                ground_truth_available=True,
+                ground_truth_available=extraction.available,
                 coverage_reason=coverage_block.coverage_reason,
-                failure_message=(
-                    f"expectCoverage requires in-search-space catalog coverage; "
-                    f"got {coverage_block.coverage_reason!r}"
-                ),
             )
+        coverage_passed = coverage_block is None or coverage_block.in_search_space
 
-    if coverage_block is not None and not coverage_block.in_search_space:
-        return CorpusCaseResult(
-            case_id=loaded.case_id,
-            outcome=CaseOutcome.OUT_OF_SEARCH_SPACE,
-            complexity=loaded.complexity,
-            complexity_reasons=loaded.complexity_reasons,
-            ground_truth_available=extraction.available,
-            coverage_reason=coverage_block.coverage_reason,
-        )
-
-    coverage_passed = coverage_block is None or coverage_block.in_search_space
-
-    if enable_tier2 and extraction.available:
+    if enable_tier2 and extraction.available and not negative_defense_gt:
         tier2_failure = verify_tier2_compatibility(
             ground_truth=extraction.ground_truth,
             prior_turn=ground_truth_prior_turn,
@@ -490,36 +523,69 @@ def run_loaded_case(
                 failure_message=tier2_failure,
             )
 
-    tier1_result, inference_payload = _run_tier1_for_loaded_case(
-        case_id=loaded.case_id,
-        score_turn=loaded.score_turn,
-        score=loaded.score,
-        complexity=loaded.complexity,
-        complexity_reasons=loaded.complexity_reasons,
-        expected_status=loaded.expected_status,
-        ground_truth_available=extraction.available,
+    return _LoadedCasePipelineContext(
+        extraction=extraction,
+        negative_defense_gt=negative_defense_gt,
         observation=observation,
         catalog=catalog,
-        load_scoreboard_turn=load_scoreboard_turn,
-        case_time_limit_seconds=case_time_limit_seconds,
+        coverage_passed=coverage_passed,
     )
-    if tier1_result.outcome != CaseOutcome.PASSED:
-        return tier1_result
 
-    if not (
-        extraction.available
-        and coverage_passed
-        and tier1_result.status == STATUS_EXACT
-        and inference_payload is not None
-    ):
-        return tier1_result
 
-    return _apply_ranking_check(
-        tier1_result,
+def _validate_coverage_for_loaded_case(
+    loaded: LoadedCorpusCase,
+    *,
+    extraction,
+    resolved,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    catalog_turn: TurnInfo,
+) -> CorpusCaseResult | None:
+    if not loaded.expect_coverage:
+        return None
+    if not extraction.available:
+        return CorpusCaseResult(
+            case_id=loaded.case_id,
+            outcome=CaseOutcome.FAILED,
+            complexity=loaded.complexity,
+            complexity_reasons=loaded.complexity_reasons,
+            ground_truth_available=False,
+            coverage_reason=COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
+            failure_message=(
+                "expectCoverage requires ground truth in search space; "
+                "groundTruthAvailable is false"
+            ),
+        )
+
+    skip_coverage = (
+        resolved is None
+        and needs_accelerated_backfill(loaded.score_turn.settings.turn, loaded.score_turn.settings)
+    )
+    if skip_coverage:
+        return None
+
+    coverage_block = resolve_coverage_for_case(
+        extraction=extraction,
         ground_truth=extraction.ground_truth,
-        inference_payload=inference_payload,
-        top_k=top_k,
-        hard_ranking=hard_ranking,
+        catalog=catalog,
+        complexity_reasons=loaded.complexity_reasons,
+        observation=observation,
+        score_turn=catalog_turn,
+    )
+    if coverage_block is None or coverage_block.in_search_space:
+        return None
+
+    return CorpusCaseResult(
+        case_id=loaded.case_id,
+        outcome=CaseOutcome.FAILED,
+        complexity=loaded.complexity,
+        complexity_reasons=loaded.complexity_reasons,
+        ground_truth_available=True,
+        coverage_reason=coverage_block.coverage_reason,
+        failure_message=(
+            f"expectCoverage requires in-search-space catalog coverage; "
+            f"got {coverage_block.coverage_reason!r}"
+        ),
     )
 
 
