@@ -334,17 +334,11 @@ def validate_tier_policy_steps(steps: tuple[InferenceTierPolicyStep, ...]) -> No
 
 
 def _required_aggregate_probability_bin_keys() -> frozenset[str]:
-    from api.analytics.military_score_inference.aggregate_action_registry import (
-        AGGREGATE_REGISTRY,
-        FixedAggregateRegistryEntry,
-    )
+    from api.analytics.military_score_inference.aggregate_action_registry import AGGREGATE_REGISTRY
 
     keys: set[str] = set()
     for entry in AGGREGATE_REGISTRY:
-        if isinstance(entry, FixedAggregateRegistryEntry):
-            keys.add(entry.spec.bin_bounds_key)
-        else:
-            keys.add(entry.spec.bin_bounds_key)
+        keys.add(entry.spec.bin_bounds_key)
     return frozenset(keys)
 
 
@@ -487,14 +481,12 @@ def resolve_tier_policies(
 ) -> tuple[InferenceTierPolicyStep, ...]:
     """Load and validate the static tier policy ladder.
 
-    When ``overlay`` is ``None``, returns YAML steps only. Overlay merge semantics are
-    implemented in #78; non-``None`` overlays are accepted but not applied yet.
+    Returns YAML steps from ``base_path`` (or the default asset). The ``overlay`` parameter
+    is reserved for #78 merge semantics; it is accepted but not applied yet.
     """
+    del overlay
     policy_path = default_tier_policy_path() if base_path is None else base_path
-    steps = parse_tier_policy_steps(load_tier_policy_document(policy_path))
-    if overlay is not None:
-        return steps
-    return steps
+    return parse_tier_policy_steps(load_tier_policy_document(policy_path))
 
 
 def compute_aggregate_admission_caps(
