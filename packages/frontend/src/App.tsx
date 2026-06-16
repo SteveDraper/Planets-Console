@@ -142,6 +142,17 @@ function ConsoleShell() {
     return unsub
   }, [])
 
+  const [scoresPreferencesHydrated, setScoresPreferencesHydrated] = useState(() =>
+    useScoresTablePreferencesStore.persist.hasHydrated()
+  )
+  useEffect(() => {
+    const unsub = useScoresTablePreferencesStore.persist.onFinishHydration(() => {
+      setScoresPreferencesHydrated(true)
+    })
+    setScoresPreferencesHydrated(useScoresTablePreferencesStore.persist.hasHydrated())
+    return unsub
+  }, [])
+
   const trimmedLoginName = loginName?.trim() ?? ''
 
   const { data: initialGameBootstrap, isError: initialGameInfoIsError, error: initialGameInfoError } =
@@ -269,6 +280,7 @@ function ConsoleShell() {
   const globalInferencePauseEnabled =
     viewMode === 'tabular' &&
     enabledIds.has('scores') &&
+    scoresPreferencesHydrated &&
     scoresTableParams.includeBuildInference &&
     turnDataReady &&
     analyticScope != null
@@ -345,6 +357,7 @@ function ConsoleShell() {
             turnBlockedNoLogin={turnBlockedNoLogin}
             connectionsMapParams={connectionsMapParams}
             scoresTableParams={scoresTableParams}
+            scoresPreferencesHydrated={scoresPreferencesHydrated}
             globalInferencePause={globalInferencePause}
             futureTurnOffset={futureTurnOffset}
             onMapZoomChange={handleMapZoomChange}
