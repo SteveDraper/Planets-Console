@@ -51,8 +51,6 @@ class AggregateCatalogCaps:
     max_fighter_transfers: int = 50
 
 
-FIGHTER_TRANSFERS_PER_DIRECTION_ALLOWLIST_KEY = "fighter_transfers_per_direction"
-
 CatalogConfigCap = Callable[[AggregateCatalogCaps], int]
 
 
