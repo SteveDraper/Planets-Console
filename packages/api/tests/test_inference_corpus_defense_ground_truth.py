@@ -164,7 +164,7 @@ def test_harness_skips_coverage_and_ranking_for_negative_defense_gt():
     negative_gt = (("planet_defense_posts_added_total", -5),)
 
     with patch(
-        "tests.inference_corpus.run.extract_ground_truth_v1",
+        "tests.inference_corpus.pipeline_preflight.extract_ground_truth_v1",
         return_value=GroundTruthExtraction(available=True, ground_truth=negative_gt),
     ):
         result = run_manifest_case(host1)

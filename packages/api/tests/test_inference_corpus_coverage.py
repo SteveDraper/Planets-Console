@@ -212,7 +212,7 @@ def test_expect_coverage_fails_without_solver_when_ground_truth_unavailable():
     )
     with (
         patch(
-            "tests.inference_corpus.run.extract_ground_truth_v1",
+            "tests.inference_corpus.pipeline_preflight.extract_ground_truth_v1",
             return_value=unavailable_extraction,
         ),
         patch("tests.inference_corpus.run.run_inference_with_artifacts") as run_inference,
@@ -233,7 +233,7 @@ def test_available_ground_truth_action_not_in_catalog_out_of_search_without_expe
     )
     with (
         patch(
-            "tests.inference_corpus.run.extract_ground_truth_v1",
+            "tests.inference_corpus.pipeline_preflight.extract_ground_truth_v1",
             return_value=forced_extraction,
         ),
         patch("tests.inference_corpus.run.run_inference_with_artifacts") as run_inference,
