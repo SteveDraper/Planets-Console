@@ -257,7 +257,6 @@ def run_discovered_case(
         case.host_turn,
     )
 
-    score_turn_number = case.host_turn + 1
     other_perspectives = [
         perspective
         for perspective in list_perspectives_with_turn_pair(
