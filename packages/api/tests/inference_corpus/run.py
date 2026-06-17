@@ -434,4 +434,3 @@ def _complexity_skip_reason(
     if case_level > cap_level:
         return f"above_max_complexity:{complexity}>{max_complexity}"
     return None
-
