@@ -13,6 +13,9 @@ if _api_root_str in sys.path:
 sys.path.insert(0, _api_root_str)
 
 import typer  # noqa: E402
+from api.analytics.military_score_inference.actions import (  # noqa: E402
+    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+)
 from api.services.store_service import StoreService  # noqa: E402
 from tests.inference_corpus.complexity import parse_max_complexity  # noqa: E402
 from tests.inference_corpus.discover_list import (  # noqa: E402
@@ -94,7 +97,20 @@ def run_command(
     top_k: int = typer.Option(
         3,
         "--top-k",
-        help="Reserved for ground-truth ranking checks (#65); accepted for CLI stability.",
+        min=1,
+        help="Top-K window for ground-truth ranking checks (default 3).",
+    ),
+    tier: int = typer.Option(
+        1,
+        "--tier",
+        min=1,
+        max=2,
+        help="Enable Tier 2 ship-level GT re-verification when set to 2.",
+    ),
+    fail_on_ranking_miss: bool = typer.Option(
+        False,
+        "--fail-on-ranking-miss",
+        help="Exit 1 on ranking_miss (soft by default for probe runs).",
     ),
     stop_after_failures: int | None = typer.Option(
         None,
@@ -114,6 +130,15 @@ def run_command(
             "between cases). Use 0 for no limit."
         ),
     ),
+    case_time_limit_seconds: float | None = typer.Option(
+        None,
+        "--case-time-limit-seconds",
+        min=0,
+        help=(
+            "Per-case inference ladder time budget in seconds. Omit for the default "
+            f"({DEFAULT_INFERENCE_TIME_LIMIT_SECONDS:g}s). Use 0 for no per-case limit."
+        ),
+    ),
     workers: int = typer.Option(
         1,
         "--workers",
@@ -130,8 +155,6 @@ def run_command(
     if ctx.invoked_subcommand is not None:
         return
 
-    del top_k  # wired in #65
-
     try:
         complexity_cap = parse_max_complexity(max_complexity)
     except ValueError as exc:
@@ -142,6 +165,14 @@ def run_command(
 
     if game_id is not None:
         _warn_missing_game_info(storage_root, game_id)
+
+    resolved_case_time_limit = (
+        DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
+        if case_time_limit_seconds is None
+        else None
+        if case_time_limit_seconds == 0
+        else case_time_limit_seconds
+    )
 
     report = run_local_corpus(
         store=store,
@@ -158,6 +189,10 @@ def run_command(
         ),
         workers=workers,
         storage_root=storage_root,
+        top_k=top_k,
+        enable_tier2=tier >= 2,
+        fail_on_ranking_miss=fail_on_ranking_miss,
+        case_time_limit_seconds=resolved_case_time_limit,
     )
 
     if json_output:

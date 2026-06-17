@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
+    SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
     AggregateActionSlot,
+    aggregate_bin_bounds_for_spec,
+    is_torp_load_action_id,
     iter_aggregate_action_slots,
 )
 from api.analytics.military_score_inference.hull_category import (
@@ -45,6 +48,10 @@ from api.analytics.military_score_inference.prior_weights_laplace import (
     implicit_uniform_component_counts,
     none_bin_pseudo_count,
 )
+from api.analytics.military_score_inference.tier_policy import aggregate_bin_bounds_for_key
+from api.analytics.military_score_inference.torp_load_prior_pooling import (
+    any_torp_load_histogram_for_band,
+)
 from api.concepts.game_category import GameCategory
 from api.models.game import GameSettings
 
@@ -72,22 +79,60 @@ def _histogram_bucket_counts(
     return bucket_counts
 
 
-def _resolve_hull_log_weights(
+def _merged_category_hull_counts(
     asset: PriorWeightsAsset,
     *,
     band: ShipLimitBand,
     race_id: int | None,
+    category: InferenceHullCategory,
+) -> IntCountTableInput:
+    band_tables = asset.hulls.get(band, {})
+    merged_counts = dict(band_tables.get("global", {}).get(category, {}))
+    if race_id is not None:
+        merged_counts.update(band_tables.get(str(race_id), {}).get(category, {}))
+    return merged_counts
+
+
+def _category_build_totals(
+    asset: PriorWeightsAsset,
+    *,
+    band: ShipLimitBand,
+) -> dict[InferenceHullCategory, float]:
+    """Total mined builds per inference hull category for P(category)."""
+    totals: dict[InferenceHullCategory, float] = {}
+    global_hulls = asset.hulls.get(band, {}).get("global", {})
+    for category in INFERENCE_HULL_CATEGORIES:
+        hull_total = float(sum(global_hulls.get(category, {}).values()))
+        if hull_total > 0:
+            totals[category] = hull_total
+            continue
+        component_tables = asset.components.get(band, {}).get(category)
+        if component_tables is not None and component_tables.engines:
+            totals[category] = float(sum(component_tables.engines.values()))
+    return totals
+
+
+def _resolve_category_log_weights(
+    asset: PriorWeightsAsset,
+    *,
+    band: ShipLimitBand,
+    scale: int,
+) -> dict[InferenceHullCategory, int]:
+    category_totals = _category_build_totals(asset, band=band)
+    if not category_totals:
+        return {}
+    return counts_to_log_weights(finalize_counts_for_laplace(category_totals), scale=scale)
+
+
+def _resolve_single_category_hull_log_weights(
+    merged_counts: IntCountTableInput,
+    *,
+    band: ShipLimitBand,
+    category: InferenceHullCategory,
     buildable_hull_ids: frozenset[int],
     generic_freighter_hull_ids: frozenset[int],
     scale: int,
 ) -> tuple[dict[int, int], int | None]:
-    band_tables = asset.hulls.get(band, {})
-    global_counts = band_tables.get("global", {})
-    race_counts: IntCountTableInput = {}
-    if race_id is not None:
-        race_counts = band_tables.get(str(race_id), {})
-    merged_counts = dict(global_counts)
-    merged_counts.update(race_counts)
     had_wildcard = WILDCARD_COUNT_KEY in merged_counts
     expanded = expand_wildcard_counts(
         merged_counts,
@@ -97,7 +142,9 @@ def _resolve_hull_log_weights(
         if not buildable_hull_ids:
             expanded = {}
         else:
-            raise ValueError(f"hulls.{band}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
+            raise ValueError(
+                f"hulls.{band}.{category}: unresolved {WILDCARD_COUNT_KEY!r} after expansion"
+            )
     else:
         expanded = {
             hull_id: count
@@ -112,7 +159,7 @@ def _resolve_hull_log_weights(
         hull_id for hull_id in expanded if isinstance(hull_id, int)
     )
     generic_freighter_log_weight = None
-    if freighter_hull_ids:
+    if category == "true_freighter" and freighter_hull_ids:
         freighter_count = sum(expanded[hull_id] for hull_id in freighter_hull_ids)
         solver_counts: dict[int | str, float] = {
             hull_id: count
@@ -131,6 +178,39 @@ def _resolve_hull_log_weights(
     return counts_to_log_weights(finalize_counts_for_laplace(expanded), scale=scale), None
 
 
+def _resolve_hull_log_weights_by_category(
+    asset: PriorWeightsAsset,
+    *,
+    band: ShipLimitBand,
+    race_id: int | None,
+    buildable_hull_ids: frozenset[int],
+    generic_freighter_hull_ids: frozenset[int],
+    scale: int,
+) -> tuple[dict[InferenceHullCategory, dict[int, int]], int | None]:
+    hull_log_weights_by_category: dict[InferenceHullCategory, dict[int, int]] = {}
+    generic_freighter_log_weight: int | None = None
+    for category in INFERENCE_HULL_CATEGORIES:
+        merged_counts = _merged_category_hull_counts(
+            asset,
+            band=band,
+            race_id=race_id,
+            category=category,
+        )
+        category_weights, category_freighter_weight = _resolve_single_category_hull_log_weights(
+            merged_counts,
+            band=band,
+            category=category,
+            buildable_hull_ids=buildable_hull_ids,
+            generic_freighter_hull_ids=generic_freighter_hull_ids,
+            scale=scale,
+        )
+        if category_weights:
+            hull_log_weights_by_category[category] = category_weights
+        if category_freighter_weight is not None:
+            generic_freighter_log_weight = category_freighter_weight
+    return hull_log_weights_by_category, generic_freighter_log_weight
+
+
 def _resolve_component_log_table(
     counts: IntCountTableInput,
     *,
@@ -138,12 +218,20 @@ def _resolve_component_log_table(
     field_name: str,
     scale: int,
 ) -> IntLogWeightTable:
+    had_wildcard = WILDCARD_COUNT_KEY in counts
     expanded = expand_wildcard_counts(
         counts,
         universe=universe,
     )
     if WILDCARD_COUNT_KEY in expanded:
         raise ValueError(f"{field_name}: unresolved {WILDCARD_COUNT_KEY!r} after expansion")
+    expanded = {
+        key: count for key, count in expanded.items() if isinstance(key, int) and key in universe
+    }
+    if not had_wildcard:
+        for component_id in universe:
+            if component_id not in expanded:
+                expanded[component_id] = IMPLICIT_UNIFORM_PSEUDO_COUNT
     return counts_to_log_weights(finalize_counts_for_laplace(expanded), scale=scale)
 
 
@@ -277,7 +365,7 @@ def _resolve_slot_histogram_bucket_weights(
     band: ShipLimitBand,
     scale: int,
 ) -> tuple[int, ...]:
-    bin_bounds = slot.spec.bin_bounds
+    bin_bounds = aggregate_bin_bounds_for_spec(slot.spec)
     aggregate = lookup_slot_aggregate_prior(
         band_tables,
         band=band,
@@ -289,6 +377,24 @@ def _resolve_slot_histogram_bucket_weights(
     return _resolve_histogram_aggregate_weights(aggregate, bin_bounds, scale=scale)
 
 
+def _resolve_any_torp_load_bucket_weights(
+    band_tables: dict[str, HistogramAggregate],
+    *,
+    eligible_torp_ids: frozenset[int],
+    scale: int,
+) -> tuple[int, ...]:
+    torp_bin_bounds = aggregate_bin_bounds_for_key(SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY)
+    try:
+        histogram = any_torp_load_histogram_for_band(band_tables, eligible_torp_ids)
+    except ValueError:
+        return _implicit_uniform_histogram_bucket_weights(torp_bin_bounds, scale=scale)
+    return _resolve_histogram_aggregate_weights(
+        histogram,
+        torp_bin_bounds,
+        scale=scale,
+    )
+
+
 def _resolve_aggregate_priors(
     asset: PriorWeightsAsset,
     *,
@@ -298,8 +404,18 @@ def _resolve_aggregate_priors(
 ) -> dict[str, tuple[int, ...]]:
     bucket_weights: dict[str, tuple[int, ...]] = {}
     band_tables = asset.aggregates.get(band, {})
+    any_torp_bucket_weights: tuple[int, ...] | None = None
 
     for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
+        if is_torp_load_action_id(slot.action_id):
+            if any_torp_bucket_weights is None:
+                any_torp_bucket_weights = _resolve_any_torp_load_bucket_weights(
+                    band_tables,
+                    eligible_torp_ids=eligible_torp_ids,
+                    scale=scale,
+                )
+            bucket_weights[slot.action_id] = any_torp_bucket_weights
+            continue
         bucket_weights[slot.action_id] = _resolve_slot_histogram_bucket_weights(
             slot,
             band_tables,
@@ -337,13 +453,16 @@ def resolve_prior_weights_catalog(
     )
     band = ship_limit_band_key(observation)
 
-    hull_log_weights, generic_freighter_log_weight = _resolve_hull_log_weights(
-        asset,
-        band=band,
-        race_id=race_id,
-        buildable_hull_ids=buildable_hull_ids,
-        generic_freighter_hull_ids=generic_freighter_hull_ids,
-        scale=scale,
+    category_log_weights = _resolve_category_log_weights(asset, band=band, scale=scale)
+    hull_log_weights_by_category, generic_freighter_log_weight = (
+        _resolve_hull_log_weights_by_category(
+            asset,
+            band=band,
+            race_id=race_id,
+            buildable_hull_ids=buildable_hull_ids,
+            generic_freighter_hull_ids=generic_freighter_hull_ids,
+            scale=scale,
+        )
     )
     component_tables = _resolve_component_tables(
         asset,
@@ -375,7 +494,8 @@ def resolve_prior_weights_catalog(
 
     return PriorWeightsCatalog(
         diagnostics=diagnostics,
-        _hull_log_weights=hull_log_weights,
+        _category_log_weights=category_log_weights,
+        _hull_log_weights_by_category=hull_log_weights_by_category,
         _component_tables=component_tables,
         _aggregate_bucket_marginal_weights=aggregate_bucket_weights,
         _combo_log_overrides=combo_log_overrides,

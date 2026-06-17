@@ -9,12 +9,13 @@ from tests.inference_corpus.run import run_manifest_case
 
 def test_load_fixed_manifest_has_seed_cases():
     _, cases = load_manifest()
-    assert len(cases) == 2
+    assert len(cases) == 3
     host2 = next(case for case in cases if case.id == "628580-p1-host2")
     assert host2.host_turn == 2
     assert host2.complexity == "minimal"
     assert host2.expected_status == "exact"
     assert host2.expect_coverage is False
+    assert host2.require_top_k is True
     host51 = next(case for case in cases if case.id == "628580-p1-host51")
     assert host51.expect_coverage is True
 

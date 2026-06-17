@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AGGREGATE_ACTION_SPECS,
     SHIP_TORPS_LOADED_ACTION_PREFIX,
+    SHIP_TORPS_LOADED_ANY_PRIOR_KEY,
 )
 from api.analytics.military_score_inference.hull_category import (
     resolve_inference_hull_category,
@@ -245,15 +246,19 @@ def _aggregate_histogram_deltas(
     )
 
     torp_ids = {torp.id for torp in prior_turn.torpedos} | {torp.id for torp in score_turn.torpedos}
+    torp_load_deltas: list[int] = []
     for torp_id in sorted(torp_ids):
         action_id = f"{SHIP_TORPS_LOADED_ACTION_PREFIX}{torp_id}"
-        deltas[action_id] = torpedo_load_delta_for_type(
+        delta = torpedo_load_delta_for_type(
             prior_turn,
             score_turn,
             player_id,
             torp_id,
             exclude_ship_ids=exclude_ship_ids,
         )
+        deltas[action_id] = delta
+        torp_load_deltas.append(delta)
+    deltas[SHIP_TORPS_LOADED_ANY_PRIOR_KEY] = sum(torp_load_deltas)
 
     transfer = fighter_transfer_counts(prior_turn, score_turn, player_id)
     for action_id in ("fighters_starbase_to_ship", "fighters_ship_to_starbase"):

@@ -19,7 +19,7 @@ InferenceHullCategory = Literal[
 
 INFERENCE_HULL_CATEGORIES: tuple[InferenceHullCategory, ...] = get_args(InferenceHullCategory)
 
-BATTLESHIP_MASS_THRESHOLD = 150
+BATTLESHIP_MASS_THRESHOLD = 200
 
 HULL_CATEGORY_OVERRIDES: dict[int, InferenceHullCategory] = {}
 

@@ -35,7 +35,7 @@ def _catalog_from_turn_fixture(relative_path: str):
 def test_merge_accumulation_adds_counts_and_contributing_game_ids(tmp_path: Path):
     source = HAND_SEEDED_STANDARD_PRIOR_PATH
     asset = load_prior_weights_asset(source)
-    before_hull = asset.hulls["before_ship_limit"]["global"].get(13, 0)
+    before_hull = asset.hulls["before_ship_limit"]["global"].get("battleship", {}).get(13, 0)
 
     accumulation = PriorMiningAccumulation()
     accumulation.add_ship_build(
@@ -62,7 +62,7 @@ def test_merge_accumulation_adds_counts_and_contributing_game_ids(tmp_path: Path
         provenance_game_ids=(999001,),
     )
     assert merged.contributing_game_ids[-1] == 999001
-    assert merged.hulls["before_ship_limit"]["global"][13] == before_hull + 1
+    assert merged.hulls["before_ship_limit"]["global"]["battleship"][13] == before_hull + 1
     histogram = merged.aggregates["before_ship_limit"]["planet_defense_posts_added_total"].histogram
     assert histogram[0] >= 1
     assert histogram[5] >= 1
@@ -80,7 +80,7 @@ def test_merge_accumulation_adds_counts_and_contributing_game_ids(tmp_path: Path
 def test_merge_accumulation_appends_rejected_game_ids_to_provenance(tmp_path: Path):
     source = HAND_SEEDED_STANDARD_PRIOR_PATH
     asset = load_prior_weights_asset(source)
-    before_hull = asset.hulls["before_ship_limit"]["global"].get(13, 0)
+    before_hull = asset.hulls["before_ship_limit"]["global"].get("battleship", {}).get(13, 0)
 
     merged = merge_accumulation_into_asset(
         asset,
@@ -88,7 +88,9 @@ def test_merge_accumulation_appends_rejected_game_ids_to_provenance(tmp_path: Pa
         provenance_game_ids=(888002,),
     )
     assert 888002 in merged.contributing_game_ids
-    assert merged.hulls["before_ship_limit"]["global"].get(13, 0) == before_hull
+    assert (
+        merged.hulls["before_ship_limit"]["global"].get("battleship", {}).get(13, 0) == before_hull
+    )
 
     output_path = tmp_path / "prior_weights_standard.yaml"
     write_prior_weights_asset(
@@ -142,7 +144,7 @@ def test_merge_accumulation_into_report_merges_ship_and_histogram_sections():
     merge_accumulation_into_report(report, accumulation)
 
     assert report.ship_builds["total_ship_builds"] == 1
-    assert report.ship_builds["hulls"]["before_ship_limit"]["global"][13] == 1
+    assert report.ship_builds["hulls"]["before_ship_limit"]["global"]["battleship"][13] == 1
     histogram = report.aggregate_histograms["before_ship_limit"][
         "planet_defense_posts_added_total"
     ]["histogram"]

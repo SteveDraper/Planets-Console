@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 import yaml
 
+from api.analytics.military_score_inference.models import ProbabilityBinBounds
 from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
@@ -114,6 +115,11 @@ class InferenceTierPolicyStep:
             "alpha": self.alpha,
             "maxSeeds": self.max_seeds,
         }
+
+
+@dataclass(frozen=True)
+class SolverThresholds:
+    ship_only_exact_early_stop_min_plausibility: int
 
 
 def default_tier_policy_path() -> Path:
@@ -327,6 +333,137 @@ def validate_tier_policy_steps(steps: tuple[InferenceTierPolicyStep, ...]) -> No
                 )
 
 
+def _required_aggregate_probability_bin_keys() -> frozenset[str]:
+    from api.analytics.military_score_inference.aggregate_action_registry import AGGREGATE_REGISTRY
+
+    keys: set[str] = set()
+    for entry in AGGREGATE_REGISTRY:
+        keys.add(entry.spec.bin_bounds_key)
+    return frozenset(keys)
+
+
+def validate_aggregate_probability_bins(
+    bins: dict[str, tuple[ProbabilityBinBounds, ...]],
+) -> None:
+    required = _required_aggregate_probability_bin_keys()
+    missing = sorted(required - bins.keys())
+    if missing:
+        raise ValueError(
+            "tier policy aggregateProbabilityBins missing required keys: " + ", ".join(missing)
+        )
+
+
+def parse_aggregate_probability_bins(
+    document: dict[str, Any],
+) -> dict[str, tuple[ProbabilityBinBounds, ...]]:
+    raw_bins = document.get("aggregateProbabilityBins")
+    if not isinstance(raw_bins, dict) or not raw_bins:
+        raise ValueError("tier policy must contain a non-empty aggregateProbabilityBins mapping")
+    parsed: dict[str, tuple[ProbabilityBinBounds, ...]] = {}
+    for key, raw_bounds in raw_bins.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("aggregateProbabilityBins keys must be non-empty strings")
+        if not isinstance(raw_bounds, list) or not raw_bounds:
+            raise ValueError(f"aggregateProbabilityBins.{key} must be a non-empty list")
+        bounds: list[ProbabilityBinBounds] = []
+        for index, raw_bound in enumerate(raw_bounds):
+            if not isinstance(raw_bound, dict):
+                raise ValueError(f"aggregateProbabilityBins.{key}[{index}] must be a mapping")
+            label = raw_bound.get("label")
+            lower_count = raw_bound.get("lowerCount")
+            upper_count = raw_bound.get("upperCount")
+            if not isinstance(label, str) or not label:
+                raise ValueError(
+                    f"aggregateProbabilityBins.{key}[{index}].label must be a non-empty string"
+                )
+            if not isinstance(lower_count, int) or not isinstance(upper_count, int):
+                raise ValueError(
+                    f"aggregateProbabilityBins.{key}[{index}] lowerCount and upperCount "
+                    "must be integers"
+                )
+            if lower_count < 0 or upper_count < lower_count:
+                raise ValueError(
+                    f"aggregateProbabilityBins.{key}[{index}] requires "
+                    "0 <= lowerCount <= upperCount"
+                )
+            bounds.append(
+                ProbabilityBinBounds(
+                    label=label,
+                    lower_count=lower_count,
+                    upper_count=upper_count,
+                )
+            )
+        if bounds[0].lower_count != 0 or bounds[0].upper_count != 0:
+            raise ValueError(f"aggregateProbabilityBins.{key} must start with a none bin [0, 0]")
+        for index in range(1, len(bounds)):
+            prior = bounds[index - 1]
+            current = bounds[index]
+            if current.lower_count <= prior.upper_count:
+                raise ValueError(
+                    f"aggregateProbabilityBins.{key} bins must have strictly increasing ranges"
+                )
+        parsed[key] = tuple(bounds)
+    validate_aggregate_probability_bins(parsed)
+    return parsed
+
+
+_default_aggregate_probability_bins: dict[str, tuple[ProbabilityBinBounds, ...]] | None = None
+
+
+def resolve_aggregate_probability_bins(
+    base_path: Path | None = None,
+) -> dict[str, tuple[ProbabilityBinBounds, ...]]:
+    """Load aggregate ranking bin geometry from tier_policy.yaml."""
+    global _default_aggregate_probability_bins
+    if base_path is None and _default_aggregate_probability_bins is not None:
+        return _default_aggregate_probability_bins
+    policy_path = default_tier_policy_path() if base_path is None else base_path
+    parsed = parse_aggregate_probability_bins(load_tier_policy_document(policy_path))
+    if base_path is None:
+        _default_aggregate_probability_bins = parsed
+    return parsed
+
+
+def aggregate_bin_bounds_for_key(
+    key: str,
+    *,
+    base_path: Path | None = None,
+) -> tuple[ProbabilityBinBounds, ...]:
+    bins = resolve_aggregate_probability_bins(base_path)
+    bounds = bins.get(key)
+    if bounds is None:
+        raise ValueError(f"tier policy aggregateProbabilityBins missing key {key!r}")
+    return bounds
+
+
+def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
+    raw_thresholds = document.get("solverThresholds")
+    if not isinstance(raw_thresholds, dict):
+        raise ValueError("tier policy must contain solverThresholds mapping")
+    ship_only_threshold = raw_thresholds.get("shipOnlyExactEarlyStopMinPlausibility")
+    if not isinstance(ship_only_threshold, int):
+        raise ValueError(
+            "tier policy solverThresholds.shipOnlyExactEarlyStopMinPlausibility must be an int"
+        )
+    return SolverThresholds(
+        ship_only_exact_early_stop_min_plausibility=ship_only_threshold,
+    )
+
+
+_default_solver_thresholds: SolverThresholds | None = None
+
+
+def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds:
+    global _default_solver_thresholds
+    if base_path is None and _default_solver_thresholds is not None:
+        return _default_solver_thresholds
+    policy_path = default_tier_policy_path() if base_path is None else base_path
+    parsed = parse_solver_thresholds(load_tier_policy_document(policy_path))
+    if base_path is None:
+        _default_solver_thresholds = parsed
+    return parsed
+
+
 def parse_tier_policy_steps(document: dict[str, Any]) -> tuple[InferenceTierPolicyStep, ...]:
     raw_steps = document.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
@@ -344,14 +481,12 @@ def resolve_tier_policies(
 ) -> tuple[InferenceTierPolicyStep, ...]:
     """Load and validate the static tier policy ladder.
 
-    When ``overlay`` is ``None``, returns YAML steps only. Overlay merge semantics are
-    implemented in #78; non-``None`` overlays are accepted but not applied yet.
+    Returns YAML steps from ``base_path`` (or the default asset). The ``overlay`` parameter
+    is reserved for #78 merge semantics; it is accepted but not applied yet.
     """
+    del overlay
     policy_path = default_tier_policy_path() if base_path is None else base_path
-    steps = parse_tier_policy_steps(load_tier_policy_document(policy_path))
-    if overlay is not None:
-        return steps
-    return steps
+    return parse_tier_policy_steps(load_tier_policy_document(policy_path))
 
 
 def compute_aggregate_admission_caps(

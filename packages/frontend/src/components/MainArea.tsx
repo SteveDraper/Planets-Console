@@ -93,6 +93,8 @@ type MainAreaProps = {
   connectionsMapParams: ConnectionsMapParams
   /** Parameters for the Scores table analytic (refetch when these change). */
   scoresTableParams: ScoresTableParams
+  /** When false, scores table and inference queries wait for persisted preferences. */
+  scoresPreferencesHydrated: boolean
   globalInferencePause: UseGlobalInferencePauseResult
   /** Turns beyond latest stored game turn for ion storm prediction. */
   futureTurnOffset: number
@@ -319,6 +321,7 @@ export function MainArea({
   turnBlockedNoLogin,
   connectionsMapParams,
   scoresTableParams,
+  scoresPreferencesHydrated,
   globalInferencePause,
   futureTurnOffset,
   onMapZoomChange,
@@ -370,7 +373,9 @@ export function MainArea({
             <TableTile
               analyticId={id}
               analyticScope={analyticScope}
-              fetchEnabled={analyticFetchEnabled}
+              fetchEnabled={
+                analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
+              }
               scoresTableParams={scoresTableParams}
               globalInferencePause={globalInferencePause}
             />

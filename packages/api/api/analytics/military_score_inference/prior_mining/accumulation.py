@@ -21,8 +21,12 @@ class AggregateActionTally:
     positive: int = 0
 
 
-def _nested_hull_counts() -> dict[str, dict[int, float]]:
+def _nested_category_hull_counts() -> dict[str, dict[int, float]]:
     return defaultdict(lambda: defaultdict(float))
+
+
+def _nested_race_category_hull_counts() -> dict[str, dict[str, dict[int, float]]]:
+    return defaultdict(_nested_category_hull_counts)
 
 
 def _nested_component_counts() -> dict[str, dict[str, dict[str | int, float]]]:
@@ -35,8 +39,8 @@ def _nested_aggregate_histograms() -> dict[str, dict[int, float]]:
 
 @dataclass
 class PriorMiningAccumulation:
-    hull_counts: dict[ShipLimitBand, dict[str, dict[int, float]]] = field(
-        default_factory=lambda: defaultdict(_nested_hull_counts)
+    hull_counts: dict[ShipLimitBand, dict[str, dict[str, dict[int, float]]]] = field(
+        default_factory=lambda: defaultdict(_nested_race_category_hull_counts)
     )
     component_counts: dict[ShipLimitBand, dict[str, dict[str, dict[str | int, float]]]] = field(
         default_factory=lambda: defaultdict(_nested_component_counts)
@@ -61,10 +65,10 @@ class PriorMiningAccumulation:
     def add_ship_build(self, observation: ShipBuildObservation) -> None:
         band = observation.ship_limit_band
         race_key = str(observation.race_id)
-        self.hull_counts[band]["global"][observation.hull_id] += 1
-        self.hull_counts[band][race_key][observation.hull_id] += 1
-
         category: InferenceHullCategory = observation.hull_category  # type: ignore[assignment]
+        self.hull_counts[band]["global"][category][observation.hull_id] += 1
+        self.hull_counts[band][race_key][category][observation.hull_id] += 1
+
         category_tables = self.component_counts[band][category]
         engines = category_tables.setdefault("engines", defaultdict(float))
         beams = category_tables.setdefault("beams", defaultdict(float))
@@ -93,9 +97,11 @@ class PriorMiningAccumulation:
 
     def merge(self, other: PriorMiningAccumulation) -> None:
         for band, race_tables in other.hull_counts.items():
-            for race_key, hull_table in race_tables.items():
-                for hull_id, count in hull_table.items():
-                    self.hull_counts[band][race_key][hull_id] += count
+            for race_key, category_tables in race_tables.items():
+                for category, hull_table in category_tables.items():
+                    target = self.hull_counts[band][race_key][category]
+                    for hull_id, count in hull_table.items():
+                        target[hull_id] += count
 
         for band, categories in other.component_counts.items():
             for category, tables in categories.items():

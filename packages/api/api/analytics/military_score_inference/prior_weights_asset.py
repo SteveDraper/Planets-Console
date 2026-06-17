@@ -11,6 +11,7 @@ import yaml
 
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSpec,
+    is_pooled_torp_load_prior_key,
     iter_aggregate_action_slots,
     lookup_aggregate_action_spec,
 )
@@ -27,6 +28,9 @@ ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
 SHIP_LIMIT_BANDS: tuple[ShipLimitBand, ...] = ("before_ship_limit", "after_ship_limit")
 
 COMPONENT_TABLE_NAMES = ("engines", "beams", "torpedoes")
+
+CategoryHullCountTables: TypeAlias = dict[InferenceHullCategory, dict[int, float]]
+RaceHullTables: TypeAlias = dict[str, CategoryHullCountTables]
 
 WildcardCountKey = Literal["*"]
 IntComponentTableName = Literal["engines", "beams", "torpedoes"]
@@ -174,7 +178,7 @@ class PriorWeightsAsset:
     version: int
     category: str
     game_category_rules_version: int
-    hulls: dict[ShipLimitBand, dict[str, dict[int, float]]]
+    hulls: dict[ShipLimitBand, RaceHullTables]
     components: dict[ShipLimitBand, dict[InferenceHullCategory, ComponentCountTables]]
     aggregates: dict[ShipLimitBand, dict[str, HistogramAggregate]]
     combo_overrides: dict[str, float] = field(default_factory=dict)
@@ -182,15 +186,58 @@ class PriorWeightsAsset:
     contributing_game_ids: tuple[int, ...] = ()
 
 
+def _is_legacy_flat_hull_counts(global_raw: dict[object, object]) -> bool:
+    """True when ``global`` maps hull ids to counts (asset version < 4)."""
+    for _key, value in global_raw.items():
+        if isinstance(value, (int, float)):
+            return True
+        if isinstance(value, dict):
+            return False
+    return False
+
+
+def _parse_category_hull_tables(
+    raw: object,
+    *,
+    field_name: str,
+) -> CategoryHullCountTables:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} must be a mapping")
+    parsed: CategoryHullCountTables = {}
+    for category_key, category_raw in raw.items():
+        if not isinstance(category_key, str):
+            raise ValueError(f"{field_name} keys must be strings")
+        if category_key not in INFERENCE_HULL_CATEGORIES:
+            allowed = ", ".join(INFERENCE_HULL_CATEGORIES)
+            raise ValueError(
+                f"{field_name}.{category_key!r} is not a valid inference hull category; "
+                f"expected one of: {allowed}"
+            )
+        parsed[category_key] = _parse_int_keyed_counts(
+            category_raw,
+            field_name=f"{field_name}.{category_key}",
+        )
+    return parsed
+
+
 def _parse_band_hull_tables(
     band_raw: object,
     band: ShipLimitBand,
-) -> dict[str, dict[int, float]]:
-    global_counts = _parse_int_keyed_counts(
-        band_raw.get("global", {}),
-        field_name=f"hulls.{band}.global",
-    )
-    by_race: dict[str, dict[int, float]] = {"global": global_counts}
+) -> RaceHullTables:
+    if not isinstance(band_raw, dict):
+        raise ValueError(f"hulls.{band} must be a mapping")
+    global_raw = band_raw.get("global", {})
+    if not isinstance(global_raw, dict):
+        raise ValueError(f"hulls.{band}.global must be a mapping")
+    if _is_legacy_flat_hull_counts(global_raw):
+        raise ValueError(
+            f"hulls.{band}.global uses legacy unconditional hull counts; "
+            "migrate assets to version 4 category-keyed hull tables "
+            "(scripts/migrate_prior_hull_tables_to_category.py)"
+        )
+    by_race: RaceHullTables = {
+        "global": _parse_category_hull_tables(global_raw, field_name=f"hulls.{band}.global"),
+    }
     race_raw = band_raw.get("byRace", {})
     if race_raw is not None:
         if not isinstance(race_raw, dict):
@@ -198,14 +245,14 @@ def _parse_band_hull_tables(
         for race_id, race_counts in race_raw.items():
             if not isinstance(race_id, int):
                 raise ValueError(f"hulls.{band}.byRace keys must be integers")
-            by_race[str(race_id)] = _parse_int_keyed_counts(
+            by_race[str(race_id)] = _parse_category_hull_tables(
                 race_counts,
                 field_name=f"hulls.{band}.byRace[{race_id}]",
             )
     return by_race
 
 
-def _parse_hull_tables(raw: object) -> dict[ShipLimitBand, dict[str, dict[int, float]]]:
+def _parse_hull_tables(raw: object) -> dict[ShipLimitBand, RaceHullTables]:
     return _parse_ship_limit_bands(
         raw,
         section_name="hulls",
@@ -282,7 +329,10 @@ def _parse_band_aggregate_tables(
             raise ValueError(f"aggregates.{band}.{action_id} must be a mapping")
         if "histogram" not in action_raw:
             raise ValueError(f"aggregates.{band}.{action_id} must include a histogram")
-        if lookup_aggregate_action_spec(action_id) is None:
+        if (
+            not is_pooled_torp_load_prior_key(action_id)
+            and lookup_aggregate_action_spec(action_id) is None
+        ):
             raise ValueError(f"aggregates.{band}.{action_id!r} is not a known aggregate action")
         # Histogram keys are non-negative magnitude counts; an optional 0 key carries
         # the occurrence (count == 0) pseudo-count routed into the leading none bin.
@@ -347,8 +397,8 @@ def parse_prior_weights_document(
     require_complete_aggregates: bool = True,
 ) -> PriorWeightsAsset:
     version = document.get("version")
-    if not isinstance(version, int) or version < 1:
-        raise ValueError("prior weights version must be a positive integer")
+    if not isinstance(version, int) or version < 4:
+        raise ValueError("prior weights version must be an integer >= 4")
 
     category = document.get("category")
     if not isinstance(category, str) or not category:
@@ -439,7 +489,7 @@ def load_prior_weights_asset(
 def create_empty_prior_weights_asset(category: GameCategory) -> PriorWeightsAsset:
     """Return a merge-ready prior asset with no counts (for first-time category mining)."""
     return PriorWeightsAsset(
-        version=3,
+        version=4,
         category=category.value,
         game_category_rules_version=GAME_CATEGORY_RULES_VERSION,
         hulls={band: {"global": {}} for band in SHIP_LIMIT_BANDS},

@@ -27,7 +27,7 @@ def _complete_aggregates_band() -> dict[str, object]:
 def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
     complete_band = _complete_aggregates_band()
     document: dict[str, object] = {
-        "version": 3,
+        "version": 4,
         "category": "standard",
         "gameCategoryRulesVersion": 2,
         "hulls": {
@@ -55,8 +55,8 @@ def test_hand_seeded_standard_prior_fixture_loads():
     assert not fell_back
     assert path == HAND_SEEDED_STANDARD_PRIOR_PATH
     assert asset.category == GameCategory.STANDARD
-    assert asset.version == 3
-    assert asset.hulls["before_ship_limit"]["global"][WILDCARD_COUNT_KEY] == 50
+    assert asset.version == 4
+    assert asset.hulls["before_ship_limit"]["global"]["beam_ship"][WILDCARD_COUNT_KEY] == 50
 
 
 def test_production_standard_prior_asset_loads():
@@ -64,7 +64,7 @@ def test_production_standard_prior_asset_loads():
     assert not fell_back
     assert path.name == "prior_weights_standard.yaml"
     assert asset.category == GameCategory.STANDARD
-    assert asset.version == 3
+    assert asset.version == 4
 
 
 def test_missing_category_falls_back_to_standard(tmp_path: Path):
@@ -214,7 +214,7 @@ def test_component_tables_reject_unknown_hull_category():
     with pytest.raises(ValueError, match="not a valid inference hull category"):
         parse_prior_weights_document(
             {
-                "version": 2,
+                "version": 4,
                 "category": "standard",
                 "gameCategoryRulesVersion": 2,
                 "hulls": {
@@ -237,7 +237,7 @@ def test_slotfill_rejects_wildcard_key():
     with pytest.raises(ValueError, match="does not allow '\\*'"):
         parse_prior_weights_document(
             {
-                "version": 2,
+                "version": 4,
                 "category": "standard",
                 "gameCategoryRulesVersion": 2,
                 "hulls": {

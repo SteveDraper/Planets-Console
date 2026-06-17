@@ -57,6 +57,13 @@ const sampleAnalytics: AnalyticItem[] = [
     type: 'selectable',
   },
   {
+    id: 'scores',
+    name: 'Scores',
+    supportsTable: true,
+    supportsMap: false,
+    type: 'selectable',
+  },
+  {
     id: 'stellar-cartography',
     name: 'Stellar Cartography',
     supportsTable: false,
@@ -112,6 +119,7 @@ function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
     turnBlockedNoLogin: false,
     connectionsMapParams: defaultConnectionsParams,
     scoresTableParams: defaultScoresTableParams,
+    scoresPreferencesHydrated: true,
     globalInferencePause: idleGlobalInferencePause,
     futureTurnOffset: 0,
     onMapZoomChange: vi.fn(),
@@ -229,5 +237,25 @@ describe('MainArea tabular analytic sections', () => {
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(await screen.findByText('B')).toBeInTheDocument()
+  })
+
+  it('does not fetch scores table until preferences are hydrated', async () => {
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'scores',
+      columns: ['Player'],
+      rows: [['Alice']],
+    })
+
+    render(
+      <MainArea
+        {...defaultMainAreaProps('tabular')}
+        enabledAnalyticIds={['scores']}
+        scoresPreferencesHydrated={false}
+      />,
+      { wrapper: createWrapper() }
+    )
+
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    expect(fetchAnalyticTable).not.toHaveBeenCalled()
   })
 })

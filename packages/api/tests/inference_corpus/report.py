@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
 from api.services.game_service import GameService
 from api.services.store_service import StoreService
 from api.services.turn_load_service import TurnLoadService
@@ -28,6 +29,9 @@ def run_fixed_corpus(
     manifest_path: Path | None = None,
     max_complexity: ComplexityLevel = "heavy",
     include_adjunct: bool = False,
+    top_k: int = 3,
+    fail_on_ranking_miss: bool = False,
+    case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusReport:
     """Run every case listed in the fixed corpus manifest."""
     _, cases = load_manifest(manifest_path or DEFAULT_MANIFEST_PATH)
@@ -38,6 +42,9 @@ def run_fixed_corpus(
                 case,
                 max_complexity=max_complexity,
                 include_adjunct=include_adjunct,
+                top_k=top_k,
+                fail_on_ranking_miss=fail_on_ranking_miss,
+                case_time_limit_seconds=case_time_limit_seconds,
             )
         )
     return report
@@ -65,6 +72,10 @@ def run_local_corpus(
     probe_time_limit_seconds: float | None = None,
     workers: int = 1,
     storage_root: Path | None = None,
+    top_k: int = 3,
+    enable_tier2: bool = False,
+    fail_on_ranking_miss: bool = False,
+    case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusReport:
     """Discover and run inference corpus cases from the file storage backend."""
     if workers < 1:
@@ -95,6 +106,10 @@ def run_local_corpus(
             include_adjunct=include_adjunct,
             stop_after_failures=stop_after_failures,
             probe_time_limit_seconds=probe_time_limit_seconds,
+            top_k=top_k,
+            enable_tier2=enable_tier2,
+            fail_on_ranking_miss=fail_on_ranking_miss,
+            case_time_limit_seconds=case_time_limit_seconds,
         )
         return report
 
@@ -113,6 +128,10 @@ def run_local_corpus(
             probe_time_limit_seconds=probe_time_limit_seconds,
             workers=workers,
             num_search_workers=search_workers,
+            top_k=top_k,
+            enable_tier2=enable_tier2,
+            fail_on_ranking_miss=fail_on_ranking_miss,
+            case_time_limit_seconds=case_time_limit_seconds,
         )
     return report
 
@@ -163,6 +182,10 @@ def _run_cases_sequential(
     include_adjunct: bool,
     stop_after_failures: int | None,
     probe_time_limit_seconds: float | None,
+    top_k: int,
+    enable_tier2: bool,
+    fail_on_ranking_miss: bool,
+    case_time_limit_seconds: float | None,
 ) -> None:
     for case in cases:
         if _probe_time_limit_reached(started_at, probe_time_limit_seconds):
@@ -177,6 +200,10 @@ def _run_cases_sequential(
                 store=store,
                 max_complexity=max_complexity,
                 include_adjunct=include_adjunct,
+                top_k=top_k,
+                enable_tier2=enable_tier2,
+                fail_on_ranking_miss=fail_on_ranking_miss,
+                case_time_limit_seconds=case_time_limit_seconds,
             )
         )
         if _should_stop_after_failures(report.results, stop_after_failures):
@@ -197,6 +224,10 @@ def _run_cases_in_process_pool(
     probe_time_limit_seconds: float | None,
     workers: int,
     num_search_workers: int | None,
+    top_k: int,
+    enable_tier2: bool,
+    fail_on_ranking_miss: bool,
+    case_time_limit_seconds: float | None,
 ) -> None:
     index = 0
     while index < len(cases):
@@ -212,6 +243,10 @@ def _run_cases_in_process_pool(
                 max_complexity=max_complexity,
                 include_adjunct=include_adjunct,
                 num_search_workers=num_search_workers,
+                top_k=top_k,
+                enable_tier2=enable_tier2,
+                fail_on_ranking_miss=fail_on_ranking_miss,
+                case_time_limit_seconds=case_time_limit_seconds,
             )
             for case in batch
         ]
@@ -248,6 +283,12 @@ def case_result_to_dict(result: CorpusCaseResult) -> dict[str, object]:
         payload["skipReason"] = result.skip_reason
     if result.failure_message is not None:
         payload["failureMessage"] = result.failure_message
+    if result.elapsed_seconds is not None:
+        payload["elapsedSeconds"] = round(result.elapsed_seconds, 3)
+    if result.ground_truth_rank is not None:
+        payload["groundTruthRank"] = result.ground_truth_rank
+    if result.top_k is not None:
+        payload["topK"] = result.top_k
     return payload
 
 

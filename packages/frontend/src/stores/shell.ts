@@ -1,6 +1,14 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
+import { createLocalStorageOrMemoryStateStorage } from '../lib/browserPersistStorage'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
+
+const shellPersistStorage = createLocalStorageOrMemoryStateStorage()
+
+export const SHELL_STORAGE_KEY = 'planets-console-shell'
+
+export type ShellViewMode = 'tabular' | 'map'
 
 /** Snapshot from the last successful game-info refresh (turn cap and player order). */
 export type GameInfoShellContext = {
@@ -27,9 +35,11 @@ type ShellState = {
   storageOnlyLoad: boolean
   /** Perspective slots with stored turn data for the current storage-only session. */
   storageAvailablePerspectives: number[] | null
+  viewMode: ShellViewMode
   setSelectedTurn: (turn: number | null) => void
   setPerspectiveOverrideName: (name: string | null) => void
   resetPerspectiveOverride: () => void
+  setViewMode: (mode: ShellViewMode) => void
   setStorageAvailablePerspectives: (perspectives: number[] | null) => void
   clearStorageOnlyLoad: () => void
   /** Apply game-info refresh success: updates context, turn, and override rules. */
@@ -48,79 +58,96 @@ export type ApplyGameInfoRefreshOptions = {
   selectableTurnMax?: number | null
 }
 
-export const useShellStore = create<ShellState>((set, get) => ({
-  selectedGameId: null,
-  gameInfoContext: null,
-  selectedTurn: null,
-  perspectiveOverrideName: null,
-  lastShellGameId: null,
-  storageOnlyLoad: false,
-  storageAvailablePerspectives: null,
-  setSelectedTurn: (turn) => set({ selectedTurn: turn }),
-  setPerspectiveOverrideName: (name) => set({ perspectiveOverrideName: name }),
-  resetPerspectiveOverride: () => set({ perspectiveOverrideName: null }),
-  setStorageAvailablePerspectives: (perspectives) =>
-    set({ storageAvailablePerspectives: perspectives }),
-  clearStorageOnlyLoad: () =>
-    set({ storageOnlyLoad: false, storageAvailablePerspectives: null }),
-  applyGameInfoRefresh: (gameId, ctx, options) => {
-    const prevGameId = get().lastShellGameId
-    const latestTurn = ctx.turn
-    const overrideFromOptions = options?.perspectiveOverrideName
+export const useShellStore = create<ShellState>()(
+  persist(
+    (set, get) => ({
+      selectedGameId: null,
+      gameInfoContext: null,
+      selectedTurn: null,
+      perspectiveOverrideName: null,
+      lastShellGameId: null,
+      storageOnlyLoad: false,
+      storageAvailablePerspectives: null,
+      viewMode: 'map',
+      setSelectedTurn: (turn) => set({ selectedTurn: turn }),
+      setPerspectiveOverrideName: (name) => set({ perspectiveOverrideName: name }),
+      resetPerspectiveOverride: () => set({ perspectiveOverrideName: null }),
+      setViewMode: (viewMode) => set({ viewMode }),
+      setStorageAvailablePerspectives: (perspectives) =>
+        set({ storageAvailablePerspectives: perspectives }),
+      clearStorageOnlyLoad: () =>
+        set({ storageOnlyLoad: false, storageAvailablePerspectives: null }),
+      applyGameInfoRefresh: (gameId, ctx, options) => {
+        const prevGameId = get().lastShellGameId
+        const latestTurn = ctx.turn
+        const overrideFromOptions = options?.perspectiveOverrideName
 
-    if (prevGameId !== gameId) {
-      set({ perspectiveOverrideName: overrideFromOptions ?? null })
-    } else if (overrideFromOptions !== undefined) {
-      set({ perspectiveOverrideName: overrideFromOptions })
-    } else {
-      const names = new Set(ctx.perspectives.map((p) => p.name))
-      set((s) => ({
-        perspectiveOverrideName:
-          s.perspectiveOverrideName != null && names.has(s.perspectiveOverrideName)
-            ? s.perspectiveOverrideName
+        if (prevGameId !== gameId) {
+          set({ perspectiveOverrideName: overrideFromOptions ?? null })
+        } else if (overrideFromOptions !== undefined) {
+          set({ perspectiveOverrideName: overrideFromOptions })
+        } else {
+          const names = new Set(ctx.perspectives.map((p) => p.name))
+          set((s) => ({
+            perspectiveOverrideName:
+              s.perspectiveOverrideName != null && names.has(s.perspectiveOverrideName)
+                ? s.perspectiveOverrideName
+                : null,
+          }))
+        }
+
+        const rawCap =
+          latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1
+            ? null
+            : Math.floor(latestTurn)
+        const optionCap = options?.selectableTurnMax
+        const turnCap =
+          rawCap == null
+            ? null
+            : optionCap != null && Number.isFinite(optionCap)
+              ? Math.min(rawCap, Math.floor(optionCap))
+              : rawCap
+
+        let nextTurn: number | null
+        if (turnCap == null || turnCap < 1) {
+          nextTurn = null
+        } else if (prevGameId !== gameId) {
+          nextTurn = turnCap
+        } else {
+          const t = get().selectedTurn
+          if (t == null) {
+            nextTurn = turnCap
+          } else if (t > turnCap) {
+            nextTurn = t
+          } else {
+            nextTurn = Math.min(Math.max(1, t), turnCap)
+          }
+        }
+
+        const storageOnlyLoad = options?.storageOnlyLoad ?? false
+
+        set({
+          selectedGameId: gameId,
+          gameInfoContext: ctx,
+          selectedTurn: nextTurn,
+          lastShellGameId: gameId,
+          storageOnlyLoad,
+          storageAvailablePerspectives: storageOnlyLoad
+            ? (options?.storageAvailablePerspectives ?? null)
             : null,
-      }))
+        })
+      },
+    }),
+    {
+      name: SHELL_STORAGE_KEY,
+      storage: createJSONStorage(() => shellPersistStorage),
+      partialize: (state) => ({
+        selectedGameId: state.selectedGameId,
+        selectedTurn: state.selectedTurn,
+        perspectiveOverrideName: state.perspectiveOverrideName,
+        lastShellGameId: state.lastShellGameId,
+        viewMode: state.viewMode,
+      }),
     }
-
-    const rawCap =
-      latestTurn == null || !Number.isFinite(latestTurn) || latestTurn < 1
-        ? null
-        : Math.floor(latestTurn)
-    const optionCap = options?.selectableTurnMax
-    const turnCap =
-      rawCap == null
-        ? null
-        : optionCap != null && Number.isFinite(optionCap)
-          ? Math.min(rawCap, Math.floor(optionCap))
-          : rawCap
-
-    let nextTurn: number | null
-    if (turnCap == null || turnCap < 1) {
-      nextTurn = null
-    } else if (prevGameId !== gameId) {
-      nextTurn = turnCap
-    } else {
-      const t = get().selectedTurn
-      if (t == null) {
-        nextTurn = turnCap
-      } else if (t > turnCap) {
-        nextTurn = t
-      } else {
-        nextTurn = Math.min(Math.max(1, t), turnCap)
-      }
-    }
-
-    const storageOnlyLoad = options?.storageOnlyLoad ?? false
-
-    set({
-      selectedGameId: gameId,
-      gameInfoContext: ctx,
-      selectedTurn: nextTurn,
-      lastShellGameId: gameId,
-      storageOnlyLoad,
-      storageAvailablePerspectives: storageOnlyLoad
-        ? (options?.storageAvailablePerspectives ?? null)
-        : null,
-    })
-  },
-}))
+  )
+)

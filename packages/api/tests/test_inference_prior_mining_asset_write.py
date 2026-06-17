@@ -74,7 +74,7 @@ def test_merge_and_write_bootstraps_missing_category_file(tmp_path: Path):
     assert output_path.is_file()
 
     reloaded = load_prior_weights_asset(output_path, require_complete_aggregates=False)
-    assert reloaded.hulls["before_ship_limit"]["global"][24] == 1
+    assert reloaded.hulls["before_ship_limit"]["global"]["beam_ship"][24] == 1
     assert 671041 in reloaded.contributing_game_ids
 
     text = output_path.read_text(encoding="utf-8")

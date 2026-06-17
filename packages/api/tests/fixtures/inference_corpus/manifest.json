@@ -3,6 +3,22 @@
   "gameInfoPath": "628580/info.json",
   "cases": [
     {
+      "id": "628580-p1-host1",
+      "gameId": 628580,
+      "perspective": 1,
+      "hostTurn": 1,
+      "playerId": null,
+      "priorTurnPath": "628580/1/turns/1.json",
+      "scoreTurnPath": "628580/1/turns/2.json",
+      "complexity": "minimal",
+      "tier": 1,
+      "expectedStatus": "exact",
+      "requireTopK": true,
+      "expectCoverage": false,
+      "requiredPerspectives": [],
+      "notes": "Accelerated host turn 1; freighter + 10 planet defense posts via builtdefense (#73)."
+    },
+    {
       "id": "628580-p1-host2",
       "gameId": 628580,
       "perspective": 1,
@@ -13,7 +29,7 @@
       "complexity": "minimal",
       "tier": 1,
       "expectedStatus": "exact",
-      "requireTopK": false,
+      "requireTopK": true,
       "expectCoverage": false,
       "requiredPerspectives": [],
       "notes": "Perspective 1 (dead); host turn 2 Missouri build; strict ground truth is Missouri combo (turn-pair scope; Tier 1 inference uses cumulative accel observation on turn 3)."

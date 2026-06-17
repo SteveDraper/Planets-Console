@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 from api.analytics.military_score_inference.aggregate_action_registry import (
-    PLANET_DEFENSE_POST_BIN_BOUNDS,
-    SHIP_TORPEDO_BIN_BOUNDS,
+    aggregate_bin_bounds_for_action,
+    aggregate_bin_bounds_for_spec,
     iter_aggregate_action_slots,
 )
 from api.analytics.military_score_inference.hull_category import INFERENCE_HULL_CATEGORIES
@@ -21,10 +21,8 @@ from api.analytics.military_score_inference.prior_weights_catalog import (
     ResolvedComponentCountTables,
 )
 from api.analytics.military_score_inference.prior_weights_laplace import (
-    IMPLICIT_UNIFORM_PSEUDO_COUNT,
     LEGACY_PARSIMONY_OCCURRENCE_PENALTY,
     counts_to_log_weights,
-    none_bin_pseudo_count,
 )
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
@@ -53,8 +51,8 @@ def test_sparse_hull_table_assigns_implicit_uniform_to_unlisted_buildable_hulls(
 
     document = _minimal_prior_weights_document(
         hulls={
-            "before_ship_limit": {"global": {24: 450}},
-            "after_ship_limit": {"global": {24: 450}},
+            "before_ship_limit": {"global": {"beam_ship": {24: 450}}},
+            "after_ship_limit": {"global": {"beam_ship": {24: 450}}},
         },
     )
     asset_path = tmp_path / "prior_weights_standard.yaml"
@@ -70,7 +68,9 @@ def test_sparse_hull_table_assigns_implicit_uniform_to_unlisted_buildable_hulls(
         base_dir=tmp_path,
     )
 
-    assert catalog.hull_marginal_log_weight(24) > catalog.hull_marginal_log_weight(99)
+    hull_24 = catalog.hull_marginal_log_weight(24, hull_category="beam_ship")
+    hull_99 = catalog.hull_marginal_log_weight(99, hull_category="beam_ship")
+    assert hull_24 > hull_99
 
 
 def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
@@ -83,8 +83,10 @@ def test_wildcard_expands_unlisted_buildable_hull(sample_turn):
         eligible_torp_ids=frozenset({1, 8}),
         base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
-    assert catalog.hull_marginal_log_weight(99, default_weight=-1) != -1
-    assert catalog.hull_marginal_log_weight(24) > catalog.hull_marginal_log_weight(99)
+    assert catalog.hull_marginal_log_weight(99, hull_category="beam_ship", default_weight=-1) != -1
+    hull_24 = catalog.hull_marginal_log_weight(24, hull_category="beam_ship")
+    hull_99 = catalog.hull_marginal_log_weight(99, hull_category="beam_ship")
+    assert hull_24 > hull_99
 
 
 def test_true_freighter_hull_counts_collapse_to_generic_solver_combo(sample_turn):
@@ -98,18 +100,17 @@ def test_true_freighter_hull_counts_collapse_to_generic_solver_combo(sample_turn
         eligible_torp_ids=frozenset({1}),
         base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
-    expected_weights = counts_to_log_weights(
-        {24: 450.0, "generic_freighter": 220.0},
-        scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
+    assert catalog.category_marginal_log_weight("true_freighter") == -179
+    assert catalog.hull_marginal_log_weight(24, hull_category="beam_ship") == -11
+    assert (
+        catalog.hull_marginal_log_weight(15, hull_category="true_freighter", default_weight=-1)
+        == -1
     )
-
-    assert catalog.hull_marginal_log_weight(24) == expected_weights[24]
-    assert catalog.hull_marginal_log_weight(15, default_weight=-1) == -1
     assert (
         catalog.freighter_probability_weight(
             combo_id=GENERIC_FREIGHTER_COMBO_ID,
         )
-        == expected_weights["generic_freighter"]
+        == -200
     )
 
 
@@ -240,7 +241,7 @@ def test_resolve_prior_weights_catalog_rejects_all_empty_eligibility_universes(s
         )
 
 
-def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
+def test_missing_torpedo_type_uses_pooled_any_torp_histogram(sample_turn):
     catalog = resolve_prior_weights_catalog(
         _observation(),
         replace(sample_turn.settings, endturn=100, shiplimit=200),
@@ -250,37 +251,19 @@ def test_missing_torpedo_histogram_uses_uniform_distribution(sample_turn):
         eligible_torp_ids=frozenset({1, 12}),
         base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
     )
-    # The implicit-uniform path seeds active bins uniformly and the leading none bin
-    # via none_bin_pseudo_count, so the missing table keeps the occurrence cost.
-    implicit_counts = {0: none_bin_pseudo_count(IMPLICIT_UNIFORM_PSEUDO_COUNT)}
-    for index in range(1, len(SHIP_TORPEDO_BIN_BOUNDS)):
-        implicit_counts[index] = IMPLICIT_UNIFORM_PSEUDO_COUNT
-    expected_implicit_log_weights = counts_to_log_weights(
-        implicit_counts,
-        scale=INFERENCE_PROBABILITY_WEIGHT_SCALE,
-    )
-    expected_implicit_weights = tuple(
-        expected_implicit_log_weights[index] for index in range(len(SHIP_TORPEDO_BIN_BOUNDS))
-    )
-    asset_buckets = catalog.probability_buckets_for_action(
+    mk1_buckets = catalog.probability_buckets_for_action(
         "ship_torps_loaded_1",
-        SHIP_TORPEDO_BIN_BOUNDS,
+        aggregate_bin_bounds_for_action("ship_torps_loaded_1"),
     )
-    implicit_buckets = catalog.probability_buckets_for_action(
+    mk12_buckets = catalog.probability_buckets_for_action(
         "ship_torps_loaded_12",
-        SHIP_TORPEDO_BIN_BOUNDS,
+        aggregate_bin_bounds_for_action("ship_torps_loaded_12"),
     )
 
-    asset_marginals = tuple(bucket.marginal_weight for bucket in asset_buckets)
-    implicit_marginals = tuple(bucket.marginal_weight for bucket in implicit_buckets)
+    mk1_marginals = tuple(bucket.marginal_weight for bucket in mk1_buckets)
+    mk12_marginals = tuple(bucket.marginal_weight for bucket in mk12_buckets)
 
-    assert implicit_marginals == expected_implicit_weights
-    # The none bin is the most likely outcome; the active bins are equal and lower.
-    assert implicit_marginals[0] == max(implicit_marginals)
-    assert len(set(implicit_marginals[1:])) == 1
-    # The gap from the none bin to the active bins reproduces the legacy occurrence cost.
-    assert implicit_marginals[0] - implicit_marginals[1] == LEGACY_PARSIMONY_OCCURRENCE_PENALTY
-    assert asset_marginals != implicit_marginals
+    assert mk1_marginals == mk12_marginals
 
 
 def test_none_bin_seed_reproduces_legacy_parsimony_penalty(sample_turn):
@@ -296,7 +279,7 @@ def test_none_bin_seed_reproduces_legacy_parsimony_penalty(sample_turn):
     )
     buckets = catalog.probability_buckets_for_action(
         "planet_defense_posts_added_total",
-        PLANET_DEFENSE_POST_BIN_BOUNDS,
+        aggregate_bin_bounds_for_action("planet_defense_posts_added_total"),
     )
     weights = [bucket.marginal_weight for bucket in buckets]
     none_weight = weights[0]
@@ -333,7 +316,10 @@ def test_standard_asset_occurrence_bins_reproduce_legacy_penalty_for_every_aggre
             histogram = asset.aggregates[band][slot.action_id].histogram
             assert 0 in histogram
 
-            buckets = catalog.probability_buckets_for_action(slot.action_id, slot.spec.bin_bounds)
+            buckets = catalog.probability_buckets_for_action(
+                slot.action_id,
+                aggregate_bin_bounds_for_spec(slot.spec),
+            )
             weights = [bucket.marginal_weight for bucket in buckets]
             none_weight = weights[0]
             best_active_weight = max(weights[1:])
@@ -345,7 +331,7 @@ def test_standard_asset_occurrence_bins_reproduce_legacy_penalty_for_every_aggre
 
 
 def test_combo_probability_weight_rejects_missing_hull_prior():
-    catalog = minimal_prior_catalog(hull_log_weights={})
+    catalog = minimal_prior_catalog(hull_log_weights_by_category={"beam_ship": {}})
     hull = beam_ship_hull()
 
     with pytest.raises(ValueError, match="missing hull marginal weight"):
@@ -361,7 +347,9 @@ def test_combo_probability_weight_rejects_missing_hull_prior():
 
 
 def test_combo_probability_weight_rejects_missing_component_prior():
-    catalog = minimal_prior_catalog(hull_log_weights={24: 0})
+    catalog = minimal_prior_catalog(
+        hull_log_weights_by_category={"beam_ship": {24: 0}},
+    )
     component_tables = {
         category: ResolvedComponentCountTables(
             engines={},

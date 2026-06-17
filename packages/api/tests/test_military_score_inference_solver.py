@@ -417,7 +417,7 @@ def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100(
     # Active bins now sit below the none max-weight bin by the occurrence cost; the
     # spacing between the modest and extreme bins (95) is preserved.
     assert result_ten.solutions[0].objective_value == -50
-    assert result_hundred.solutions[0].objective_value == -145
+    assert result_hundred.solutions[0].objective_value == -149
 
 
 def test_bucketed_action_satisfies_exact_score_constraint():
@@ -449,7 +449,7 @@ def test_bucket_variables_respect_configured_count_ranges():
     )
 
     active_bins = result.diagnostics["rankingBinIndicatorsByActionId"]["planet_defense_posts"]
-    assert active_bins == (0, 0, 0, 1)
+    assert active_bins == (0, 0, 0, 0, 1)
 
 
 def test_solver_diagnostics_include_build_time_ranking_metadata():

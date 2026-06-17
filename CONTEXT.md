@@ -538,12 +538,36 @@ Test-harness code (not shipped in the Core REST API package) that performs disco
 _Avoid_: inference integration test (implementation name)
 
 **Ground truth explanation**:
-The feasible action multiset inferred from inventory change between the paired turns for the case **Player** (exact by construction when adjunct effects are absent or fully visible). Used for Tier 2 compatibility checks and for **top-K ranking** checks against solver output.
+The feasible action multiset inferred from inventory change between the paired turns for the case **Player** (exact by construction when adjunct effects are absent or fully visible). Used for **Tier 2 compatibility check** and for **top-K ranking** checks against solver output.
 _Avoid_: true build (implies uniqueness)
 
+**Structure build counter** (`builtdefense`):
+Per-turn defense-post build count on a planet or starbase turn snapshot (`builtdefense` field). Resets across turn boundaries. For planetary defense **ground truth explanation**, sum on prior-turn owned planets is the authoritative build signal for that host turn -- not positive `Δdefense` on continuously owned planets (any scored build appears there).
+_Avoid_: builtdefense drain (pairwise delta -- not the primary signal)
+
+**Planet capture defense transfer**:
+Defense posts credited or debited when planet ownership changes between the prior and score snapshots of a host-turn pair. Gained planets contribute standing `defense` on the score turn; lost planets debit prior `defense`. Distinct from **structure build counter** builds on continuously owned planets.
+_Avoid_: Δdefense on owner totals (masks capture)
+
+**Defense post ground truth (net)**:
+Planet or starbase defense-post contribution for one host-turn pair: sum of **structure build counter** totals on prior-owned bodies, plus capture gains, minus capture losses (same three-component rule on starbase fields). May be **negative** when losses exceed builds. **Ground truth explanation** records the net faithfully (no clamping). When any defense-post aggregate count is negative, the **inference corpus runner** skips catalog coverage, **inference top-K ranking check**, and Tier 1 with skip reason `negative_defense_gt_pending_solver` while `groundTruthAvailable` stays true. Solver support for negative defense-post counts is a follow-on.
+_Avoid_: clamping net defense to zero in extraction; `out_of_search_space` for known-good negative GT
+
+**Tier 2 compatibility check**:
+Independent ship-level re-verification that the **ground truth explanation** is consistent with **multi-perspective ground truth** inventory (when enabled). Enabled by manifest `tier: 2` or CLI `--tier 2`. Runs after catalog coverage, before the solver. Contradiction yields outcome `failed` (not `ranking_miss`). Skipped when **ground truth explanation** is unavailable.
+_Avoid_: solver compatibility (Tier 2 does not compare to top solution)
+
 **Inference top-K ranking check**:
-Whether the **ground truth explanation** appears among the solver's top *K* ranked solutions (default *K* = 3). A miss means constraints are satisfied but likelihood ordering may be wrong -- reported as an investigation signal, not necessarily a hard failure unless promoted in the fixed corpus.
+Whether the **ground truth explanation** appears among the solver's top *K* ranked solutions (default *K* = 3). A miss yields outcome `ranking_miss` -- constraints satisfied but ordering may be wrong. Distinct from Tier 1 `failed` and from **out of search space**. On miss, per-case JSON may include `groundTruthRank` (1-based index in the full held list, or null when the GT multiset appears in no returned solution) and `topK`.
 _Avoid_: best solution match (implies rank 1 only)
+
+**Hard ranking policy**:
+Manifest `requireTopK: true` or CLI `--fail-on-ranking-miss`. A **ranking_miss** under hard policy fails the run (exit code 1) while keeping outcome `ranking_miss` -- not reclassified as `failed`. Complexity-based auto-harden (`heavy` and above) is deferred; only explicit manifest or CLI flags harden in v1.
+_Avoid_: hard fail (ambiguous with Tier 1 failure)
+
+**Inference corpus case skip (pending solver)**:
+Corpus outcome `skipped_pending_solver` when **ground truth explanation** is available but must not be compared to the solver yet (e.g. negative **defense post ground truth (net)** before the catalog admits negative defense-post counts). Sets `skip_reason` (e.g. `negative_defense_gt_pending_solver`); does not run Tier 1; not `failed` or **out of search space**.
+_Avoid_: `passed` with only a skip_reason (hides the bucket), clamping GT to force coverage
 
 **Catalog coverage** (inference):
 Whether the **ground truth explanation** can be expressed using the solver's candidate **action catalog** for that turn (aggregate actions and ship-build combos, within bounds). If not, the case is **out of search space** -- a distinct outcome from solver failure; the runner should not treat `no_exact_solution` as a solver regression on that row.

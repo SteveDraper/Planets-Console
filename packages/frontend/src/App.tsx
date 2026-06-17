@@ -1,10 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  buildGameInfoShellContext,
-  getLatestTurnFromGameInfo,
-  selectableTurnMaxForShell,
-} from './lib/gameInfoShell'
-import { loadGameFromStorage } from './lib/loadGameFromStorage'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { Header } from './components/Header'
 import { ShellErrorBar, type ShellErrorItem } from './components/ShellErrorBar'
@@ -14,20 +8,24 @@ import { MainArea } from './components/MainArea'
 import {
   fetchAnalytics,
   fetchShellBootstrap,
-  fetchStoredGameInfo,
   type ConnectionsMapParams,
-  type ScoresTableParams,
 } from './api/bff'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
+import { useScoresTablePreferencesStore } from './stores/scoresTablePreferences'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
+import {
+  applyShellGameBootstrapResult,
+  fetchShellGameBootstrap,
+} from './shell/shellGameBootstrap'
 import { useShellContext, useShellGameSelection } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
 import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
+import { usePersistStoreHydrated } from './lib/usePersistStoreHydrated'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,7 +37,8 @@ const queryClient = new QueryClient({
 
 function ConsoleShell() {
   const loginName = useSessionStore((s) => s.name)
-  const [viewMode, setViewMode] = useState<'tabular' | 'map'>('map')
+  const viewMode = useShellStore((s) => s.viewMode)
+  const setViewMode = useShellStore((s) => s.setViewMode)
   /** React Flow zoom (same as mousewheel); 1 = 100% on slider. Updated by MapGraph. */
   const [mapZoom, setMapZoom] = useState(1)
   const setMapZoomFromSlider = useRef<(z: number) => void | undefined>(undefined)
@@ -53,9 +52,8 @@ function ConsoleShell() {
     /** 2+ includes full static table (1- and 3-pair host rows); 1 is 1-pair rows only. */
     flareDepth: 2,
   })
-  const [scoresTableParams, setScoresTableParams] = useState<ScoresTableParams>({
-    includeBuildInference: false,
-  })
+  const scoresTableParams = useScoresTablePreferencesStore((s) => s.scoresTableParams)
+  const setScoresTableParams = useScoresTablePreferencesStore((s) => s.setScoresTableParams)
   const [shellErrors, setShellErrors] = useState<ShellErrorItem[]>([])
 
   const addShellError = useCallback((message: string) => {
@@ -68,7 +66,6 @@ function ConsoleShell() {
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
-  const applyGameInfoRefresh = useShellStore((s) => s.applyGameInfoRefresh)
   const resetPerspectiveOverride = useShellStore((s) => s.resetPerspectiveOverride)
   const clearStorageOnlyLoad = useShellStore((s) => s.clearStorageOnlyLoad)
 
@@ -99,10 +96,25 @@ function ConsoleShell() {
     handleLoadAllTurns,
   } = useShellGameSelection({ reportShellError: addShellError })
 
+  const prevLoginNameRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
-    resetPerspectiveOverride()
-    if (loginName?.trim()) {
-      clearStorageOnlyLoad()
+    const trimmed = loginName?.trim() ?? ''
+    const prev = prevLoginNameRef.current
+    prevLoginNameRef.current = loginName ?? null
+
+    if (prev === undefined) {
+      if (trimmed) {
+        clearStorageOnlyLoad()
+      }
+      return
+    }
+
+    const prevTrimmed = prev?.trim() ?? ''
+    if (trimmed !== prevTrimmed) {
+      resetPerspectiveOverride()
+      if (trimmed) {
+        clearStorageOnlyLoad()
+      }
     }
   }, [loginName, resetPerspectiveOverride, clearStorageOnlyLoad])
 
@@ -120,24 +132,16 @@ function ConsoleShell() {
     return t.length > 0 ? t : null
   }, [shellBootstrap?.showInitialGame])
 
+  const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
+  const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)
+
+  const trimmedLoginName = loginName?.trim() ?? ''
+
   const { data: initialGameBootstrap, isError: initialGameInfoIsError, error: initialGameInfoError } =
     useQuery({
-      queryKey: ['bff', 'games', configuredInitialGameId, 'bootstrap', loginName?.trim() ?? ''],
-      queryFn: async () => {
-        const gameId = configuredInitialGameId!
-        const trimmedLogin = loginName?.trim() ?? ''
-        if (trimmedLogin) {
-          return {
-            kind: 'stored-info' as const,
-            data: await fetchStoredGameInfo(gameId),
-          }
-        }
-        return {
-          kind: 'storage-only' as const,
-          data: await loadGameFromStorage(gameId),
-        }
-      },
-      enabled: Boolean(configuredInitialGameId) && selectedGameId === null,
+      queryKey: ['bff', 'games', configuredInitialGameId, 'bootstrap', trimmedLoginName],
+      queryFn: () => fetchShellGameBootstrap(configuredInitialGameId!, trimmedLoginName),
+      enabled: shellStoreHydrated && Boolean(configuredInitialGameId) && selectedGameId === null,
       staleTime: Infinity,
       refetchOnWindowFocus: false,
       retry: false,
@@ -146,25 +150,49 @@ function ConsoleShell() {
   useEffect(() => {
     if (!initialGameBootstrap || !configuredInitialGameId) return
     if (useShellStore.getState().selectedGameId != null) return
-    if (initialGameBootstrap.kind === 'storage-only') {
-      const loaded = initialGameBootstrap.data
-      applyGameInfoRefresh(
-        configuredInitialGameId,
-        buildGameInfoShellContext(loaded.gameInfo),
-        {
-          storageOnlyLoad: true,
-          storageAvailablePerspectives: loaded.storedPerspectives,
-          perspectiveOverrideName: loaded.defaultViewpointName,
-        }
-      )
+    applyShellGameBootstrapResult(configuredInitialGameId, initialGameBootstrap, {
+      storageOnlyUseDefaultViewpoint: true,
+    })
+  }, [initialGameBootstrap, configuredInitialGameId])
+
+  const needsPersistedGameRestore = Boolean(selectedGameId) && gameInfoContext == null
+
+  const {
+    data: restoredGameBootstrap,
+    isError: restoredGameInfoIsError,
+    error: restoredGameInfoError,
+  } = useQuery({
+    queryKey: ['bff', 'games', selectedGameId, 'restore', trimmedLoginName],
+    queryFn: () => fetchShellGameBootstrap(selectedGameId!, trimmedLoginName),
+    enabled: shellStoreHydrated && needsPersistedGameRestore,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (!restoredGameBootstrap || !selectedGameId) return
+    if (useShellStore.getState().gameInfoContext != null) return
+    applyShellGameBootstrapResult(selectedGameId, restoredGameBootstrap)
+  }, [restoredGameBootstrap, selectedGameId])
+
+  const restoredGameBootstrapFailureSeen = useRef(false)
+  useEffect(() => {
+    if (!restoredGameInfoIsError || !selectedGameId) {
+      restoredGameBootstrapFailureSeen.current = false
       return
     }
-    const data = initialGameBootstrap.data
-    const latestTurn = getLatestTurnFromGameInfo(data)
-    applyGameInfoRefresh(configuredInitialGameId, buildGameInfoShellContext(data), {
-      selectableTurnMax: selectableTurnMaxForShell(latestTurn),
-    })
-  }, [initialGameBootstrap, configuredInitialGameId, applyGameInfoRefresh])
+    if (!restoredGameBootstrapFailureSeen.current) {
+      restoredGameBootstrapFailureSeen.current = true
+      const message =
+        restoredGameInfoError instanceof Error
+          ? restoredGameInfoError.message
+          : 'Failed to restore selected game from storage'
+      queueMicrotask(() => {
+        addShellError(message)
+      })
+    }
+  }, [restoredGameInfoIsError, restoredGameInfoError, selectedGameId, addShellError])
 
   const initialGameBootstrapFailureSeen = useRef(false)
   useEffect(() => {
@@ -234,6 +262,7 @@ function ConsoleShell() {
   const globalInferencePauseEnabled =
     viewMode === 'tabular' &&
     enabledIds.has('scores') &&
+    scoresPreferencesHydrated &&
     scoresTableParams.includeBuildInference &&
     turnDataReady &&
     analyticScope != null
@@ -310,6 +339,7 @@ function ConsoleShell() {
             turnBlockedNoLogin={turnBlockedNoLogin}
             connectionsMapParams={connectionsMapParams}
             scoresTableParams={scoresTableParams}
+            scoresPreferencesHydrated={scoresPreferencesHydrated}
             globalInferencePause={globalInferencePause}
             futureTurnOffset={futureTurnOffset}
             onMapZoomChange={handleMapZoomChange}

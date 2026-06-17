@@ -7,6 +7,7 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregatePriorFields,
     FixedAggregateSlot,
     TemplateAggregateSlot,
+    aggregate_bin_bounds_for_spec,
     iter_aggregate_action_slots,
     resolved_aggregate_cap,
 )
@@ -68,7 +69,10 @@ def _probability_buckets_for_aggregate_action(
     prior_fields: AggregatePriorFields,
     prior_catalog: PriorWeightsCatalog,
 ) -> tuple[ProbabilityBucket, ...]:
-    return prior_catalog.probability_buckets_for_action(action_id, prior_fields.bin_bounds)
+    return prior_catalog.probability_buckets_for_action(
+        action_id,
+        aggregate_bin_bounds_for_spec(prior_fields),
+    )
 
 
 def _append_aggregate_action(

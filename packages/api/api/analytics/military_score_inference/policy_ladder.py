@@ -149,7 +149,7 @@ def solve_with_policy_ladder(
     *,
     policy_path: Path | None = None,
     max_solutions: int | None = None,
-    time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+    time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
