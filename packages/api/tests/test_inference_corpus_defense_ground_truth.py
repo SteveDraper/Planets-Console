@@ -16,9 +16,9 @@ from tests.inference_corpus.case_helpers import score_for_player
 from tests.inference_corpus.complexity import classify_complexity, merge_turn_inventories
 from tests.inference_corpus.fixtures import FIXTURES_ROOT, load_turn_fixture
 from tests.inference_corpus.ground_truth import (
+    NEGATIVE_DEFENSE_GT_PENDING_SOLVER,
     DefenseGroundTruthPolicy,
     GroundTruthExtraction,
-    NEGATIVE_DEFENSE_GT_PENDING_SOLVER,
     extract_ground_truth_v1,
 )
 from tests.inference_corpus.manifest import load_manifest
