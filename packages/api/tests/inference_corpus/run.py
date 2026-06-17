@@ -1,18 +1,10 @@
 """Run one inference corpus case through the production inference API."""
 
-import time
-from dataclasses import replace
 from pathlib import Path
 
-from api.analytics.military_score_inference.actions import (
-    DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
-    ActionCatalog,
-)
-from api.analytics.military_score_inference.analytic import run_inference_with_artifacts
-from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_TIME_LIMITED
+from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
+from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.models.game import TurnInfo
-from api.models.player import Score
 from api.services.game_service import GameService
 from api.services.store_service import StoreService
 from api.services.turn_load_service import TurnLoadService
@@ -42,14 +34,12 @@ from tests.inference_corpus.pipeline_preflight import (
     LoadedCorpusCase,
     build_loaded_case_pipeline_context,
 )
+from tests.inference_corpus.pipeline_tier1 import _run_tier1_for_loaded_case
 from tests.inference_corpus.storage_loader import (
     load_ground_truth_turn_snapshots,
     resolve_player_id_for_case,
 )
-from tests.inference_corpus.verify import (
-    check_ground_truth_in_top_k,
-    verify_top_solution_hard_equalities,
-)
+from tests.inference_corpus.verify import check_ground_truth_in_top_k
 
 DEFAULT_MAX_COMPLEXITY: ComplexityLevel = "heavy"
 DEFAULT_TOP_K = 3
@@ -341,7 +331,7 @@ def run_loaded_case(
     if isinstance(pipeline, CorpusCaseResult):
         return pipeline
 
-    tier1_result, inference_payload = _run_tier1_for_loaded_case(
+    tier1 = _run_tier1_for_loaded_case(
         case_id=loaded.case_id,
         score_turn=loaded.score_turn,
         score=loaded.score,
@@ -354,150 +344,36 @@ def run_loaded_case(
         load_scoreboard_turn=load_scoreboard_turn,
         case_time_limit_seconds=case_time_limit_seconds,
     )
-    if tier1_result.outcome != CaseOutcome.PASSED:
-        return tier1_result
+    if tier1.result.outcome != CaseOutcome.PASSED:
+        return tier1.result
 
     if pipeline.negative_defense_gt:
         return CorpusCaseResult(
             case_id=loaded.case_id,
             outcome=CaseOutcome.SKIPPED_PENDING_SOLVER,
-            status=tier1_result.status,
-            solution_count=tier1_result.solution_count,
+            status=tier1.result.status,
+            solution_count=tier1.result.solution_count,
             complexity=loaded.complexity,
             complexity_reasons=loaded.complexity_reasons,
             ground_truth_available=True,
             skip_reason="negative_defense_gt_pending_solver",
-            elapsed_seconds=tier1_result.elapsed_seconds,
+            elapsed_seconds=tier1.result.elapsed_seconds,
         )
 
     if not (
         pipeline.extraction.available
         and pipeline.coverage_passed
-        and tier1_result.status == STATUS_EXACT
-        and inference_payload is not None
+        and tier1.result.status == STATUS_EXACT
+        and tier1.inference_payload is not None
     ):
-        return tier1_result
+        return tier1.result
 
     return _apply_ranking_check(
-        tier1_result,
+        tier1.result,
         ground_truth=pipeline.extraction.ground_truth,
-        inference_payload=inference_payload,
+        inference_payload=tier1.inference_payload,
         top_k=top_k,
         hard_ranking=hard_ranking,
-    )
-
-
-def _corpus_result_with_elapsed(
-    result: CorpusCaseResult,
-    elapsed_seconds: float,
-) -> CorpusCaseResult:
-    return replace(result, elapsed_seconds=elapsed_seconds)
-
-
-def _run_tier1_for_loaded_case(
-    *,
-    case_id: str,
-    score_turn: TurnInfo,
-    score: Score,
-    complexity: ComplexityLevel | None,
-    complexity_reasons: tuple[str, ...],
-    expected_status: str,
-    ground_truth_available: bool | None = None,
-    observation: InferenceObservation,
-    catalog: ActionCatalog,
-    load_scoreboard_turn=None,
-    case_time_limit_seconds: float | None = None,
-) -> tuple[CorpusCaseResult, dict[str, object] | None]:
-    started_at = time.monotonic()
-    inference, inference_observation, solve_catalog = run_inference_with_artifacts(
-        score,
-        score_turn,
-        load_scoreboard_turn=load_scoreboard_turn,
-        time_limit_seconds=case_time_limit_seconds,
-    )
-    elapsed_seconds = time.monotonic() - started_at
-    status = inference.get("status")
-    if not isinstance(status, str):
-        return (
-            _corpus_result_with_elapsed(
-                CorpusCaseResult(
-                    case_id=case_id,
-                    outcome=CaseOutcome.FAILED,
-                    failure_message="inference payload missing status",
-                    complexity=complexity,
-                    complexity_reasons=complexity_reasons,
-                    ground_truth_available=ground_truth_available,
-                ),
-                elapsed_seconds,
-            ),
-            None,
-        )
-
-    solution_count_raw = inference.get("solutionCount", 0)
-    solution_count = solution_count_raw if isinstance(solution_count_raw, int) else 0
-
-    status_failure = _tier1_status_failure(
-        expected_status=expected_status,
-        complexity=complexity,
-        status=status,
-        solution_count=solution_count,
-    )
-    if status_failure is not None:
-        return (
-            _corpus_result_with_elapsed(
-                CorpusCaseResult(
-                    case_id=case_id,
-                    outcome=CaseOutcome.FAILED,
-                    status=status,
-                    solution_count=solution_count,
-                    complexity=complexity,
-                    complexity_reasons=complexity_reasons,
-                    ground_truth_available=ground_truth_available,
-                    failure_message=status_failure,
-                ),
-                elapsed_seconds,
-            ),
-            None,
-        )
-
-    if status in {STATUS_EXACT, STATUS_TIME_LIMITED} and solution_count >= 1:
-        verify_failure = verify_top_solution_hard_equalities(
-            observation=inference_observation,
-            catalog=solve_catalog if solve_catalog is not None else catalog,
-            inference_payload=inference,
-        )
-        if verify_failure is not None:
-            return (
-                _corpus_result_with_elapsed(
-                    CorpusCaseResult(
-                        case_id=case_id,
-                        outcome=CaseOutcome.FAILED,
-                        status=status,
-                        solution_count=solution_count,
-                        complexity=complexity,
-                        complexity_reasons=complexity_reasons,
-                        ground_truth_available=ground_truth_available,
-                        failure_message=verify_failure,
-                    ),
-                    elapsed_seconds,
-                ),
-                None,
-            )
-
-    return (
-        _corpus_result_with_elapsed(
-            CorpusCaseResult(
-                case_id=case_id,
-                outcome=CaseOutcome.PASSED,
-                status=status,
-                solution_count=solution_count,
-                complexity=complexity,
-                complexity_reasons=complexity_reasons,
-                ground_truth_available=ground_truth_available,
-            ),
-            elapsed_seconds,
-        ),
-        inference,
     )
 
 
@@ -559,25 +435,3 @@ def _complexity_skip_reason(
         return f"above_max_complexity:{complexity}>{max_complexity}"
     return None
 
-
-def _tier1_status_failure(
-    *,
-    expected_status: str,
-    complexity: ComplexityLevel | None,
-    status: str,
-    solution_count: int,
-) -> str | None:
-    if status == expected_status:
-        if expected_status == "exact" and solution_count < 1:
-            return "expected at least one solution for exact status"
-        return None
-
-    if (
-        complexity == "heavy"
-        and expected_status == "exact"
-        and status == STATUS_TIME_LIMITED
-        and solution_count >= 1
-    ):
-        return None
-
-    return f"status {status!r} != expected {expected_status!r} (solutions={solution_count})"

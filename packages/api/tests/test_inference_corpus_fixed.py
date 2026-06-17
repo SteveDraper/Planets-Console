@@ -50,11 +50,11 @@ def test_hard_ranking_miss_fails_fixed_corpus_exit_code():
 
     with (
         patch(
-            "tests.inference_corpus.run.run_inference_with_artifacts",
+            "tests.inference_corpus.pipeline_tier1.run_inference_with_artifacts",
             return_value=(wrong_gt_solution, None, None),
         ),
         patch(
-            "tests.inference_corpus.run.verify_top_solution_hard_equalities",
+            "tests.inference_corpus.pipeline_tier1.verify_top_solution_hard_equalities",
             return_value=None,
         ),
     ):
