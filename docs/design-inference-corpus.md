@@ -373,7 +373,7 @@ When inventory shows activity on **existing** ships, planets, or starbases, map 
 
 Do **not** use `Δdefense` on continuously owned bodies (Rule A: scored builds appear in prior `builtdefense`). Net is `built + capture_gain + capture_loss` with **no clamping**; negative values are valid ground truth.
 
-When any defense aggregate count in extracted ground truth is `< 0`, the harness sets `groundTruthAvailable: true`, outcome `skipped_pending_solver`, `skip_reason: negative_defense_gt_pending_solver`, skips catalog coverage and ranking, and still runs Tier 1. Solver support for negative defense counts is tracked separately.
+When any defense aggregate count in extracted ground truth is `< 0`, the harness sets `groundTruthAvailable: true`, outcome `skipped_pending_solver`, `skip_reason: negative_defense_gt_pending_solver`, skips catalog coverage, ranking, and Tier 1 (short-circuit before the solver). Solver support for negative defense counts is tracked separately.
 
 If a new ship cannot be mapped to a combo id, set `groundTruthAvailable: false`. An empty inventory delta yields an empty ground-truth multiset (still available).
 

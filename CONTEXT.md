@@ -550,7 +550,7 @@ Defense posts credited or debited when planet ownership changes between the prio
 _Avoid_: Δdefense on owner totals (masks capture)
 
 **Defense post ground truth (net)**:
-Planet or starbase defense-post contribution for one host-turn pair: sum of **structure build counter** totals on prior-owned bodies, plus capture gains, minus capture losses (same three-component rule on starbase fields). May be **negative** when losses exceed builds. **Ground truth explanation** records the net faithfully (no clamping). When any defense-post aggregate count is negative, the **inference corpus runner** skips catalog coverage and **inference top-K ranking check** with skip reason `negative_defense_gt_pending_solver` while `groundTruthAvailable` stays true; Tier 1 may still run. Solver support for negative defense-post counts is a follow-on.
+Planet or starbase defense-post contribution for one host-turn pair: sum of **structure build counter** totals on prior-owned bodies, plus capture gains, minus capture losses (same three-component rule on starbase fields). May be **negative** when losses exceed builds. **Ground truth explanation** records the net faithfully (no clamping). When any defense-post aggregate count is negative, the **inference corpus runner** skips catalog coverage, **inference top-K ranking check**, and Tier 1 with skip reason `negative_defense_gt_pending_solver` while `groundTruthAvailable` stays true. Solver support for negative defense-post counts is a follow-on.
 _Avoid_: clamping net defense to zero in extraction; `out_of_search_space` for known-good negative GT
 
 **Tier 2 compatibility check**:
@@ -566,7 +566,7 @@ Manifest `requireTopK: true` or CLI `--fail-on-ranking-miss`. A **ranking_miss**
 _Avoid_: hard fail (ambiguous with Tier 1 failure)
 
 **Inference corpus case skip (pending solver)**:
-Corpus outcome `skipped_pending_solver` when **ground truth explanation** is available but must not be compared to the solver yet (e.g. negative **defense post ground truth (net)** before the catalog admits negative defense-post counts). Sets `skip_reason` (e.g. `negative_defense_gt_pending_solver`); Tier 1 may still run; not `failed` or **out of search space**.
+Corpus outcome `skipped_pending_solver` when **ground truth explanation** is available but must not be compared to the solver yet (e.g. negative **defense post ground truth (net)** before the catalog admits negative defense-post counts). Sets `skip_reason` (e.g. `negative_defense_gt_pending_solver`); does not run Tier 1; not `failed` or **out of search space**.
 _Avoid_: `passed` with only a skip_reason (hides the bucket), clamping GT to force coverage
 
 **Catalog coverage** (inference):
