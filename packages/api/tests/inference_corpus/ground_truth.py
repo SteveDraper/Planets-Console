@@ -1,7 +1,7 @@
 """Ground truth explanation extraction for inference corpus cases (v1)."""
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
@@ -74,12 +74,9 @@ class GroundTruthExtraction:
     available: bool
     ground_truth: GroundTruth = ()
     unavailable_reason: str | None = None
-
-    @property
-    def defense_policy(self) -> DefenseGroundTruthPolicy:
-        if not self.available:
-            return DefenseGroundTruthPolicy.disabled()
-        return DefenseGroundTruthPolicy.from_ground_truth(self.ground_truth)
+    defense_policy: DefenseGroundTruthPolicy = field(
+        default_factory=DefenseGroundTruthPolicy.disabled
+    )
 
 
 def load_ground_truth_turn_snapshots(
@@ -145,6 +142,7 @@ def extract_ground_truth_v1(
         return GroundTruthExtraction(
             available=False,
             unavailable_reason="complexity_out_of_scope",
+            defense_policy=DefenseGroundTruthPolicy.disabled(),
         )
 
     ship_build_ids = _extract_ship_build_combo_ids(prior_turn, score_turn, player_id)
@@ -152,6 +150,7 @@ def extract_ground_truth_v1(
         return GroundTruthExtraction(
             available=False,
             unavailable_reason="ship_build_combo_unmapped",
+            defense_policy=DefenseGroundTruthPolicy.disabled(),
         )
 
     new_ships = new_owned_ships(prior_turn, score_turn, player_id)
@@ -169,7 +168,12 @@ def extract_ground_truth_v1(
             exclude_ship_ids=new_ship_ids,
         )
     )
-    return GroundTruthExtraction(available=True, ground_truth=_sorted_multiset(multiset))
+    ground_truth = _sorted_multiset(multiset)
+    return GroundTruthExtraction(
+        available=True,
+        ground_truth=ground_truth,
+        defense_policy=DefenseGroundTruthPolicy.from_ground_truth(ground_truth),
+    )
 
 
 def format_ground_truth_summary(

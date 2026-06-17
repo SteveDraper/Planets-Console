@@ -25,6 +25,7 @@ from tests.inference_corpus.catalog_coverage import (
 )
 from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.inference_corpus.ground_truth import (
+    DefenseGroundTruthPolicy,
     GroundTruthExtraction,
     extract_ground_truth_v1,
     format_ground_truth_summary,
@@ -229,9 +230,11 @@ def test_available_ground_truth_action_not_in_catalog_out_of_search_without_expe
     _, cases = load_manifest()
     host51 = next(case for case in cases if case.id == "628580-p1-host51")
     no_expect_coverage = host51.__class__(**{**host51.__dict__, "expect_coverage": False})
+    forced_ground_truth = (("missing_action", 1),)
     forced_extraction = GroundTruthExtraction(
         available=True,
-        ground_truth=(("missing_action", 1),),
+        ground_truth=forced_ground_truth,
+        defense_policy=DefenseGroundTruthPolicy.from_ground_truth(forced_ground_truth),
     )
     with (
         patch(
