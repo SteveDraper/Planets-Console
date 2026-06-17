@@ -79,6 +79,20 @@ class CorpusCaseResult:
     elapsed_seconds: float | None = None
 
 
+def _format_elapsed_suffix(elapsed_seconds: float | None) -> str:
+    if elapsed_seconds is None:
+        return ""
+    return f" elapsed={elapsed_seconds:.2f}s"
+
+
+def _format_ranking_miss_line(result: CorpusCaseResult, *, prefix: str) -> str:
+    return (
+        f"  {prefix} {result.case_id}: {result.failure_message} "
+        f"(rank={result.ground_truth_rank}, topK={result.top_k})"
+        f"{_format_elapsed_suffix(result.elapsed_seconds)}"
+    )
+
+
 @dataclass
 class CorpusReport:
     results: list[CorpusCaseResult] = field(default_factory=list)
@@ -143,37 +157,19 @@ class CorpusReport:
                 f"(n={len(elapsed)})"
             )
         for result in self.hard_failures:
-            elapsed_suffix = (
-                f" elapsed={result.elapsed_seconds:.2f}s"
-                if result.elapsed_seconds is not None
-                else ""
-            )
-            lines.append(f"  FAIL {result.case_id}: {result.failure_message}{elapsed_suffix}")
-        for result in self.hard_ranking_misses:
-            elapsed_suffix = (
-                f" elapsed={result.elapsed_seconds:.2f}s"
-                if result.elapsed_seconds is not None
-                else ""
-            )
             lines.append(
-                f"  RANKING_MISS {result.case_id}: {result.failure_message} "
-                f"(rank={result.ground_truth_rank}, topK={result.top_k}){elapsed_suffix}"
+                f"  FAIL {result.case_id}: {result.failure_message}"
+                f"{_format_elapsed_suffix(result.elapsed_seconds)}"
             )
+        for result in self.hard_ranking_misses:
+            lines.append(_format_ranking_miss_line(result, prefix="RANKING_MISS"))
         ranking_misses = [
             result
             for result in self.results
             if result.outcome == CaseOutcome.RANKING_MISS and not result.hard_ranking_miss
         ]
         for result in ranking_misses:
-            elapsed_suffix = (
-                f" elapsed={result.elapsed_seconds:.2f}s"
-                if result.elapsed_seconds is not None
-                else ""
-            )
-            lines.append(
-                f"  ranking_miss {result.case_id}: {result.failure_message} "
-                f"(rank={result.ground_truth_rank}, topK={result.top_k}){elapsed_suffix}"
-            )
+            lines.append(_format_ranking_miss_line(result, prefix="ranking_miss"))
         if self.stopped_early and self.stop_reason is not None:
             lines.append(f"  stopped_early={self.stop_reason}")
         return lines
