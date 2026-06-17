@@ -15,7 +15,6 @@ from tests.inference_corpus.discovery import discover_cases
 from tests.inference_corpus.manifest import DEFAULT_MANIFEST_PATH, load_manifest
 from tests.inference_corpus.models import (
     INFERENCE_FAILURE_OUTCOMES,
-    CaseOutcome,
     ComplexityLevel,
     CorpusCaseResult,
     CorpusReport,
@@ -286,13 +285,9 @@ def case_result_to_dict(result: CorpusCaseResult) -> dict[str, object]:
         payload["failureMessage"] = result.failure_message
     if result.elapsed_seconds is not None:
         payload["elapsedSeconds"] = round(result.elapsed_seconds, 3)
-    if result.outcome == CaseOutcome.RANKING_MISS:
+    if result.ground_truth_rank is not None:
         payload["groundTruthRank"] = result.ground_truth_rank
-        if result.top_k is not None:
-            payload["topK"] = result.top_k
-    elif result.ground_truth_rank is not None:
-        payload["groundTruthRank"] = result.ground_truth_rank
-    elif result.top_k is not None:
+    if result.top_k is not None:
         payload["topK"] = result.top_k
     return payload
 
