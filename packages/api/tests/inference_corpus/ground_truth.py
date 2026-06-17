@@ -65,9 +65,7 @@ class DefenseGroundTruthPolicy:
         return DefenseGroundTruthPolicy(
             negative_defense_in_multiset=negative,
             skip_coverage_and_ranking=negative,
-            pending_solver_skip_reason=(
-                NEGATIVE_DEFENSE_GT_PENDING_SOLVER if negative else None
-            ),
+            pending_solver_skip_reason=(NEGATIVE_DEFENSE_GT_PENDING_SOLVER if negative else None),
         )
 
 
@@ -290,8 +288,7 @@ def format_unavailable_ground_truth(
 
 def _ground_truth_has_negative_defense_aggregate(ground_truth: GroundTruth) -> bool:
     return any(
-        action_id in DEFENSE_AGGREGATE_ACTION_IDS and count < 0
-        for action_id, count in ground_truth
+        action_id in DEFENSE_AGGREGATE_ACTION_IDS and count < 0 for action_id, count in ground_truth
     )
 
 
