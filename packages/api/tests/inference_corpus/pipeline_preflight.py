@@ -3,7 +3,10 @@
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
-from api.analytics.military_score_inference.actions import ActionCatalog, build_action_catalog_from_turn
+from api.analytics.military_score_inference.actions import (
+    ActionCatalog,
+    build_action_catalog_from_turn,
+)
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_target import (
     resolve_inference_target_for_host_turn,
@@ -18,6 +21,7 @@ from tests.inference_corpus.catalog_coverage import (
     resolve_coverage_for_case,
 )
 from tests.inference_corpus.ground_truth import (
+    GroundTruthExtraction,
     defense_aggregate_counts_negative,
     extract_ground_truth_v1,
 )
@@ -42,7 +46,7 @@ class LoadedCorpusCase:
 
 @dataclass(frozen=True)
 class LoadedCasePipelineContext:
-    extraction: object
+    extraction: GroundTruthExtraction
     negative_defense_gt: bool
     observation: InferenceObservation
     catalog: ActionCatalog
@@ -164,7 +168,7 @@ def build_loaded_case_pipeline_context(
 def _validate_coverage_for_loaded_case(
     loaded: LoadedCorpusCase,
     *,
-    extraction,
+    extraction: GroundTruthExtraction,
     resolved,
     observation: InferenceObservation,
     catalog: ActionCatalog,
