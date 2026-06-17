@@ -330,6 +330,17 @@ def run_loaded_case(
     if isinstance(pipeline, CorpusCaseResult):
         return pipeline
 
+    pending_solver_skip_reason = pipeline.extraction.defense_policy.pending_solver_skip_reason
+    if pending_solver_skip_reason is not None:
+        return CorpusCaseResult(
+            case_id=loaded.case_id,
+            outcome=CaseOutcome.SKIPPED_PENDING_SOLVER,
+            complexity=loaded.complexity,
+            complexity_reasons=loaded.complexity_reasons,
+            ground_truth_available=pipeline.extraction.available,
+            skip_reason=pending_solver_skip_reason,
+        )
+
     tier1 = _run_tier1_for_loaded_case(
         case_id=loaded.case_id,
         score_turn=loaded.score_turn,
@@ -345,20 +356,6 @@ def run_loaded_case(
     )
     if tier1.result.outcome != CaseOutcome.PASSED:
         return tier1.result
-
-    pending_solver_skip_reason = pipeline.extraction.defense_policy.pending_solver_skip_reason
-    if pending_solver_skip_reason is not None:
-        return CorpusCaseResult(
-            case_id=loaded.case_id,
-            outcome=CaseOutcome.SKIPPED_PENDING_SOLVER,
-            status=tier1.result.status,
-            solution_count=tier1.result.solution_count,
-            complexity=loaded.complexity,
-            complexity_reasons=loaded.complexity_reasons,
-            ground_truth_available=True,
-            skip_reason=pending_solver_skip_reason,
-            elapsed_seconds=tier1.result.elapsed_seconds,
-        )
 
     if not (
         pipeline.extraction.available
