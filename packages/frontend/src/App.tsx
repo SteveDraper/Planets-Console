@@ -25,6 +25,7 @@ import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
 import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
+import { usePersistStoreHydrated } from './lib/usePersistStoreHydrated'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -131,27 +132,8 @@ function ConsoleShell() {
     return t.length > 0 ? t : null
   }, [shellBootstrap?.showInitialGame])
 
-  const [shellStoreHydrated, setShellStoreHydrated] = useState(() =>
-    useShellStore.persist.hasHydrated()
-  )
-  useEffect(() => {
-    const unsub = useShellStore.persist.onFinishHydration(() => {
-      setShellStoreHydrated(true)
-    })
-    setShellStoreHydrated(useShellStore.persist.hasHydrated())
-    return unsub
-  }, [])
-
-  const [scoresPreferencesHydrated, setScoresPreferencesHydrated] = useState(() =>
-    useScoresTablePreferencesStore.persist.hasHydrated()
-  )
-  useEffect(() => {
-    const unsub = useScoresTablePreferencesStore.persist.onFinishHydration(() => {
-      setScoresPreferencesHydrated(true)
-    })
-    setScoresPreferencesHydrated(useScoresTablePreferencesStore.persist.hasHydrated())
-    return unsub
-  }, [])
+  const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
+  const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)
 
   const trimmedLoginName = loginName?.trim() ?? ''
 
