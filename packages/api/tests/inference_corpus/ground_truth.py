@@ -44,11 +44,44 @@ DEFENSE_AGGREGATE_ACTION_IDS = frozenset(
 )
 
 
+NEGATIVE_DEFENSE_GT_PENDING_SOLVER = "negative_defense_gt_pending_solver"
+
+
+@dataclass(frozen=True)
+class DefenseGroundTruthPolicy:
+    """Canonical negative-defense semantics for extracted ground truth (#73)."""
+
+    negative_defense_in_multiset: bool
+    skip_coverage_and_ranking: bool
+    pending_solver_skip_reason: str | None
+
+    @staticmethod
+    def disabled() -> DefenseGroundTruthPolicy:
+        return DefenseGroundTruthPolicy(False, False, None)
+
+    @staticmethod
+    def from_ground_truth(ground_truth: GroundTruth) -> DefenseGroundTruthPolicy:
+        negative = _ground_truth_has_negative_defense_aggregate(ground_truth)
+        return DefenseGroundTruthPolicy(
+            negative_defense_in_multiset=negative,
+            skip_coverage_and_ranking=negative,
+            pending_solver_skip_reason=(
+                NEGATIVE_DEFENSE_GT_PENDING_SOLVER if negative else None
+            ),
+        )
+
+
 @dataclass(frozen=True)
 class GroundTruthExtraction:
     available: bool
     ground_truth: GroundTruth = ()
     unavailable_reason: str | None = None
+
+    @property
+    def defense_policy(self) -> DefenseGroundTruthPolicy:
+        if not self.available:
+            return DefenseGroundTruthPolicy.disabled()
+        return DefenseGroundTruthPolicy.from_ground_truth(self.ground_truth)
 
 
 def load_ground_truth_turn_snapshots(
@@ -88,13 +121,6 @@ def extract_ground_truth_for_player(
         player_id=player_id,
         score=score,
         complexity=complexity,
-    )
-
-
-def defense_aggregate_counts_negative(ground_truth: GroundTruth) -> bool:
-    """True when extracted GT includes a negative defense aggregate count."""
-    return any(
-        action_id in DEFENSE_AGGREGATE_ACTION_IDS and count < 0 for action_id, count in ground_truth
     )
 
 
@@ -262,13 +288,25 @@ def format_unavailable_ground_truth(
     return f"{activity} (strict ground truth unavailable: {reason})"
 
 
+def _ground_truth_has_negative_defense_aggregate(ground_truth: GroundTruth) -> bool:
+    return any(
+        action_id in DEFENSE_AGGREGATE_ACTION_IDS and count < 0
+        for action_id, count in ground_truth
+    )
+
+
+def _multiset_entry_retained(action_id: str, count: int) -> bool:
+    if count > 0:
+        return True
+    return count != 0 and action_id in DEFENSE_AGGREGATE_ACTION_IDS
+
+
 def _sorted_multiset(counter: Counter[str]) -> GroundTruth:
-    items: list[tuple[str, int]] = []
-    for action_id, count in counter.items():
-        if count > 0:
-            items.append((action_id, count))
-        elif count != 0 and action_id in DEFENSE_AGGREGATE_ACTION_IDS:
-            items.append((action_id, count))
+    items = [
+        (action_id, count)
+        for action_id, count in counter.items()
+        if _multiset_entry_retained(action_id, count)
+    ]
     return tuple(sorted(items))
 
 

@@ -16,8 +16,9 @@ from tests.inference_corpus.case_helpers import score_for_player
 from tests.inference_corpus.complexity import classify_complexity, merge_turn_inventories
 from tests.inference_corpus.fixtures import FIXTURES_ROOT, load_turn_fixture
 from tests.inference_corpus.ground_truth import (
+    DefenseGroundTruthPolicy,
     GroundTruthExtraction,
-    defense_aggregate_counts_negative,
+    NEGATIVE_DEFENSE_GT_PENDING_SOLVER,
     extract_ground_truth_v1,
 )
 from tests.inference_corpus.manifest import load_manifest
@@ -76,7 +77,7 @@ def test_extract_ground_truth_host1_includes_freighter_and_planet_defense():
         (GENERIC_FREIGHTER_COMBO_ID, 1),
         ("planet_defense_posts_added_total", 10),
     )
-    assert defense_aggregate_counts_negative(extraction.ground_truth) is False
+    assert extraction.defense_policy.negative_defense_in_multiset is False
 
 
 def test_planet_defense_capture_gain_and_loss():
@@ -154,8 +155,16 @@ def test_starbase_defense_three_component_net():
 
 
 def test_negative_defense_gt_detected_in_multiset():
-    assert defense_aggregate_counts_negative((("planet_defense_posts_added_total", -1),)) is True
-    assert defense_aggregate_counts_negative((("planet_defense_posts_added_total", 10),)) is False
+    negative_policy = DefenseGroundTruthPolicy.from_ground_truth(
+        (("planet_defense_posts_added_total", -1),)
+    )
+    positive_policy = DefenseGroundTruthPolicy.from_ground_truth(
+        (("planet_defense_posts_added_total", 10),)
+    )
+    assert negative_policy.negative_defense_in_multiset is True
+    assert negative_policy.skip_coverage_and_ranking is True
+    assert negative_policy.pending_solver_skip_reason == NEGATIVE_DEFENSE_GT_PENDING_SOLVER
+    assert positive_policy.negative_defense_in_multiset is False
 
 
 def test_harness_skips_coverage_and_ranking_for_negative_defense_gt():
@@ -170,7 +179,7 @@ def test_harness_skips_coverage_and_ranking_for_negative_defense_gt():
         result = run_manifest_case(host1)
 
     assert result.outcome == CaseOutcome.SKIPPED_PENDING_SOLVER
-    assert result.skip_reason == "negative_defense_gt_pending_solver"
+    assert result.skip_reason == NEGATIVE_DEFENSE_GT_PENDING_SOLVER
     assert result.ground_truth_available is True
 
 

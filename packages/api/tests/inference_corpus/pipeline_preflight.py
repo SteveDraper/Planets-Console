@@ -20,11 +20,7 @@ from tests.inference_corpus.catalog_coverage import (
     CatalogCoverageResult,
     resolve_coverage_for_case,
 )
-from tests.inference_corpus.ground_truth import (
-    GroundTruthExtraction,
-    defense_aggregate_counts_negative,
-    extract_ground_truth_v1,
-)
+from tests.inference_corpus.ground_truth import GroundTruthExtraction, extract_ground_truth_v1
 from tests.inference_corpus.models import CaseOutcome, ComplexityLevel, CorpusCaseResult
 from tests.inference_corpus.tier2 import verify_tier2_compatibility
 
@@ -47,7 +43,6 @@ class LoadedCorpusCase:
 @dataclass(frozen=True)
 class LoadedCasePipelineContext:
     extraction: GroundTruthExtraction
-    negative_defense_gt: bool
     observation: InferenceObservation
     catalog: ActionCatalog
     coverage_passed: bool
@@ -70,9 +65,7 @@ def build_loaded_case_pipeline_context(
         score=loaded.score,
         complexity=loaded.complexity,
     )
-    negative_defense_gt = extraction.available and defense_aggregate_counts_negative(
-        extraction.ground_truth
-    )
+    defense_policy = extraction.defense_policy
     host_turn = loaded.score_turn.settings.turn - 1
     resolved = resolve_inference_target_for_host_turn(
         loaded.score,
@@ -90,7 +83,7 @@ def build_loaded_case_pipeline_context(
     catalog = build_action_catalog_from_turn(observation, catalog_turn)
     coverage_passed = True
     coverage_block: CatalogCoverageResult | None = None
-    if not negative_defense_gt:
+    if not defense_policy.skip_coverage_and_ranking:
         coverage_failure = _validate_coverage_for_loaded_case(
             loaded,
             extraction=extraction,
@@ -134,7 +127,7 @@ def build_loaded_case_pipeline_context(
             )
         coverage_passed = coverage_block is None or coverage_block.in_search_space
 
-    if enable_tier2 and extraction.available and not negative_defense_gt:
+    if enable_tier2 and extraction.available and not defense_policy.skip_coverage_and_ranking:
         tier2_failure = verify_tier2_compatibility(
             ground_truth=extraction.ground_truth,
             prior_turn=ground_truth_prior_turn,
@@ -158,7 +151,6 @@ def build_loaded_case_pipeline_context(
 
     return LoadedCasePipelineContext(
         extraction=extraction,
-        negative_defense_gt=negative_defense_gt,
         observation=observation,
         catalog=catalog,
         coverage_passed=coverage_passed,
