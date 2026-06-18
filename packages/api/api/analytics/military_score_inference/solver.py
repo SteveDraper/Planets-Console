@@ -36,6 +36,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
 )
+from api.concepts.races import is_horwasp
 
 STATUS_EXACT = "exact"
 STATUS_INVALID_PROBLEM = "invalid_problem"
@@ -477,6 +478,13 @@ def solve_inference_problem(
             status=STATUS_INVALID_PROBLEM,
             solutions=(),
             diagnostics={"reason": validation_error},
+        )
+
+    if problem.race_id is not None and is_horwasp(problem.race_id):
+        return InferenceResult(
+            status=STATUS_NO_EXACT_SOLUTION,
+            solutions=(),
+            diagnostics={"reason": "horwasp_unsupported"},
         )
 
     if not _problem_has_catalog_entries(problem):

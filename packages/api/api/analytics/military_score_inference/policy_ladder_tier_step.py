@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.actions import (
     build_inference_problem,
 )
 from api.analytics.military_score_inference.component_eligibility import (
+    player_by_id,
     turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.constraints import (
@@ -141,6 +142,7 @@ def _solve_catalog(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     *,
+    race_id: int | None = None,
     max_solutions: int,
     time_limit_seconds: float,
     military_score_alpha: int = 0,
@@ -152,6 +154,7 @@ def _solve_catalog(
     problem = build_inference_problem(
         observation,
         catalog,
+        race_id=race_id,
         max_solutions=max_solutions,
         time_limit_seconds=time_limit_seconds,
         military_score_alpha=military_score_alpha,
@@ -173,6 +176,7 @@ def _solve_seed_progression(
     catalog: ActionCatalog,
     seed: InferenceSolution,
     *,
+    race_id: int | None = None,
     max_solutions: int,
     time_limit_seconds: float,
     cancel_token: InferenceCancelToken | None = None,
@@ -191,6 +195,7 @@ def _solve_seed_progression(
         result, problem = _solve_catalog(
             observation,
             catalog,
+            race_id=race_id,
             max_solutions=remaining_slots,
             time_limit_seconds=time_limit_seconds,
             fixed_combo_counts=fixed_counts,
@@ -209,6 +214,7 @@ def _solve_seed_progression(
     result, problem = _solve_catalog(
         observation,
         catalog,
+        race_id=race_id,
         max_solutions=remaining_slots,
         time_limit_seconds=time_limit_seconds,
         cancel_token=cancel_token,
@@ -334,6 +340,7 @@ def run_policy_ladder_tier_step(
     step_index = state.next_step_index
     policy_step = state.policy_steps[step_index]
     state.policy_steps_attempted.append(policy_step.id)
+    player_race_id = player_by_id(turn, observation.player_id).raceid
     catalog = build_action_catalog_from_turn(
         observation,
         turn,
@@ -374,6 +381,7 @@ def run_policy_ladder_tier_step(
             observation,
             catalog,
             seed,
+            race_id=player_race_id,
             max_solutions=catalog_solve_max,
             time_limit_seconds=run.remaining_seconds(),
             cancel_token=cancel_token,
@@ -402,6 +410,7 @@ def run_policy_ladder_tier_step(
     exact_result, problem = _solve_catalog(
         observation,
         catalog,
+        race_id=player_race_id,
         max_solutions=catalog_solve_max,
         time_limit_seconds=run.remaining_seconds(),
         cancel_token=cancel_token,
@@ -427,6 +436,7 @@ def run_policy_ladder_tier_step(
             band_result, band_problem = _solve_catalog(
                 observation,
                 catalog,
+                race_id=player_race_id,
                 max_solutions=policy_step.max_seeds,
                 time_limit_seconds=run.remaining_seconds(),
                 military_score_alpha=policy_step.alpha,

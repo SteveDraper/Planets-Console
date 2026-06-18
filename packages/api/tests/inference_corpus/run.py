@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
+from api.analytics.military_score_inference.component_eligibility import player_by_id
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.concepts.races import is_horwasp
 from api.models.game import TurnInfo
 from api.services.game_service import GameService
 from api.services.store_service import StoreService
@@ -43,6 +45,27 @@ from tests.inference_corpus.verify import check_ground_truth_in_top_k
 
 DEFAULT_MAX_COMPLEXITY: ComplexityLevel = "heavy"
 DEFAULT_TOP_K = 3
+HORWASP_SKIP_REASON = "horwasp_unsupported"
+
+
+def _unsupported_race_skip_result(
+    *,
+    case_id: str,
+    score_turn: TurnInfo,
+    player_id: int,
+    complexity: ComplexityLevel | None = None,
+    complexity_reasons: tuple[str, ...] = (),
+) -> CorpusCaseResult | None:
+    player = player_by_id(score_turn, player_id)
+    if not is_horwasp(player.raceid):
+        return None
+    return CorpusCaseResult(
+        case_id=case_id,
+        outcome=CaseOutcome.SKIPPED_UNSUPPORTED_RACE,
+        complexity=complexity,
+        complexity_reasons=complexity_reasons,
+        skip_reason=HORWASP_SKIP_REASON,
+    )
 
 
 def _manifest_scoreboard_turn_loader(
@@ -112,6 +135,15 @@ def run_manifest_case(
             outcome=CaseOutcome.FAILED,
             failure_message=str(exc),
         )
+
+    unsupported_race = _unsupported_race_skip_result(
+        case_id=case.id,
+        score_turn=score_turn,
+        player_id=player_id,
+        complexity=case.complexity,
+    )
+    if unsupported_race is not None:
+        return unsupported_race
 
     merged = merge_turn_inventories(
         case_perspective_prior=prior_turn,
@@ -204,6 +236,14 @@ def run_discovered_case(
             outcome=CaseOutcome.FAILED,
             failure_message=str(exc),
         )
+
+    unsupported_race = _unsupported_race_skip_result(
+        case_id=case.id,
+        score_turn=score_turn,
+        player_id=player_id,
+    )
+    if unsupported_race is not None:
+        return unsupported_race
 
     merged = merged_inventory_for_case(
         case,

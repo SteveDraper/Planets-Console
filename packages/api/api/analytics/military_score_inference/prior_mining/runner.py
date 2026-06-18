@@ -445,12 +445,14 @@ def _process_prepared_game(
         extraction_pool=extraction_pool,
     )
     report.adjunct_skips += extraction_summary.adjunct_skips
+    report.horwasp_skips += extraction_summary.horwasp_skips
     report.ship_build_validation_drops += extraction_summary.ship_build_validation_drops
     LOGGER.info(
-        "game %s: extraction finished (%s ok, %s adjunct skips, %s errors)",
+        "game %s: extraction finished (%s ok, %s adjunct skips, %s horwasp skips, %s errors)",
         game_id,
         extraction_summary.units_ok,
         extraction_summary.adjunct_skips,
+        extraction_summary.horwasp_skips,
         extraction_summary.extraction_errors,
     )
     return True

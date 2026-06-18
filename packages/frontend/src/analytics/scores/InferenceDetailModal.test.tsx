@@ -82,7 +82,7 @@ describe('InferenceDetailModal', () => {
     expect(screen.queryByText(/Priority points are diagnostic only/)).toBeNull()
     expect(screen.queryByText(/Change columns were missing/)).toBeNull()
     expect(screen.getByText('Solution 1 · Plausibility 999')).toBeInTheDocument()
-    expect(screen.getByText('Planet defense post')).toBeInTheDocument()
+    expect(screen.getByText('Planet defense post (2)')).toBeInTheDocument()
     expect(screen.getByText('Explained military change')).toBeInTheDocument()
     expect(screen.getByText('Observed military change')).toBeInTheDocument()
     expect(screen.queryByText('Best: two defense posts')).toBeNull()

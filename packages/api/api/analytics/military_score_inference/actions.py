@@ -105,6 +105,7 @@ def build_inference_problem(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     *,
+    race_id: int | None = None,
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     military_score_alpha: int = 0,
@@ -122,6 +123,7 @@ def build_inference_problem(
     return InferenceProblem(
         observation=observation,
         aggregate_actions=aggregate_actions,
+        race_id=race_id,
         ship_build_combos=ship_build_combos,
         policy_step_id=catalog.policy_step_id,
         policy_step_index=catalog.policy_step_index,
