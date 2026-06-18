@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -24,6 +25,7 @@ from api.analytics.military_score_inference.prior_mining.extraction_worker impor
     extract_extraction_work_unit,
 )
 from api.analytics.military_score_inference.prior_mining.report import PriorMiningReport
+from api.concepts.races import HORWASP_RACE_ID
 from api.serialization.game import game_info_from_json
 
 from tests.inference_corpus.fixtures import load_turn_fixture
@@ -47,6 +49,40 @@ def _mock_turn_load_for_host_turn_2() -> MagicMock:
     turn_load.list_stored_turn_numbers.return_value = [2, 3]
     turn_load.list_stored_turn_perspectives.return_value = [1]
     return turn_load
+
+
+def test_enumerate_extraction_work_units_skips_horwasp_players() -> None:
+    game_info = _load_game_info()
+    horwasp_player_id = 2
+    game_info = replace(
+        game_info,
+        players=[
+            replace(player, raceid=HORWASP_RACE_ID) if player.id == horwasp_player_id else player
+            for player in game_info.players
+        ],
+    )
+    turn_load = MagicMock()
+    turn_load.list_stored_turn_numbers.return_value = [2, 3]
+
+    units = enumerate_extraction_work_units(game_info, 628580, turn_load)
+
+    assert all(unit.player_id != horwasp_player_id for unit in units)
+
+
+def test_extract_extraction_work_unit_skips_horwasp_race() -> None:
+    unit = ExtractionWorkUnit(
+        game_id=628580,
+        player_id=2,
+        perspective=2,
+        host_turn=2,
+        race_id=HORWASP_RACE_ID,
+    )
+    result = extract_extraction_work_unit(
+        turn_load=_mock_turn_load_for_host_turn_2(),
+        unit=unit,
+    )
+    assert result.outcome == "skip"
+    assert result.skip_reason == ExtractionSkipReason.HORWASP
 
 
 def test_enumerate_extraction_work_units_respects_stored_turn_pairs() -> None:
@@ -79,6 +115,7 @@ def test_extract_extraction_work_unit_returns_row_for_fixture() -> None:
     if result.outcome == "skip":
         assert result.skip_reason in {
             ExtractionSkipReason.ADJUNCT,
+            ExtractionSkipReason.HORWASP,
             ExtractionSkipReason.MISSING_SCORE,
         }
     else:

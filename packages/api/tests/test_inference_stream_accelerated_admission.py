@@ -151,6 +151,7 @@ def test_run_inference_tier_job_does_not_emit_on_admission_for_accel_window_segm
         _observation,
         _catalog,
         *,
+        race_id=None,
         max_solutions,
         time_limit_seconds,
         military_score_alpha=0,
@@ -159,7 +160,7 @@ def test_run_inference_tier_job_does_not_emit_on_admission_for_accel_window_segm
         cancel_token=None,
         on_solution=None,
     ):
-        del max_solutions, time_limit_seconds, military_score_alpha
+        del race_id, max_solutions, time_limit_seconds, military_score_alpha
         del fixed_combo_counts, combo_count_neighborhood, cancel_token
         if on_solution is not None:
             on_solution(solution)
@@ -227,6 +228,7 @@ def test_run_inference_tier_job_emits_on_admission_for_reported_host_turn_segmen
         _observation,
         _catalog,
         *,
+        race_id=None,
         max_solutions,
         time_limit_seconds,
         military_score_alpha=0,
@@ -235,7 +237,7 @@ def test_run_inference_tier_job_emits_on_admission_for_reported_host_turn_segmen
         cancel_token=None,
         on_solution=None,
     ):
-        del max_solutions, time_limit_seconds, military_score_alpha
+        del race_id, max_solutions, time_limit_seconds, military_score_alpha
         del fixed_combo_counts, combo_count_neighborhood, cancel_token
         if on_solution is not None:
             on_solution(solution)

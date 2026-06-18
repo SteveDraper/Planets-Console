@@ -217,6 +217,27 @@ def test_solve_infeasible_problem_returns_no_exact_solution():
     assert result.solutions == ()
 
 
+def test_solve_horwasp_player_returns_no_exact_solution_without_solving():
+    build_warship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=400,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=1,
+    )
+    problem = InferenceProblem(
+        observation=_observation(military_delta_2x=400, warship_delta=1),
+        aggregate_actions=(build_warship,),
+        race_id=12,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.solutions == ()
+    assert result.diagnostics.get("reason") == "horwasp_unsupported"
+
+
 def test_solve_invalid_problem_with_bad_action_bounds():
     invalid_action = CandidateAction(
         id="planet_defense_posts",

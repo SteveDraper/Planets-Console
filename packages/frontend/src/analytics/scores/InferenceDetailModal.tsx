@@ -13,7 +13,10 @@ import {
 import { InferenceSolutionLineIcon } from './inferenceSolutionLineIcon'
 import { readInferenceRunSummary } from './inferenceRunSummary'
 import { isRecord } from './scoresWireParsers'
-import { sortSolutionLineItemsForDisplay } from './solutionLineItemDisplayOrder'
+import {
+  formatSolutionLineItemLabel,
+  sortSolutionLineItemsForDisplay,
+} from './solutionLineItemDisplayOrder'
 
 type InferenceDetailModalProps = {
   isOpen: boolean
@@ -50,7 +53,7 @@ function SolutionActionTable({
               <td className="py-1 pr-2 align-middle">
                 <InferenceSolutionLineIcon line={line} shipBuilds={solution.shipBuilds} />
               </td>
-              <td className="py-1 pr-2">{line.label}</td>
+              <td className="py-1 pr-2">{formatSolutionLineItemLabel(line)}</td>
               <td className="py-1 tabular-nums">
                 {formatSignedDelta(line.militaryChangeSubtotal)}
               </td>

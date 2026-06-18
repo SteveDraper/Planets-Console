@@ -6,8 +6,10 @@ import {
   failureDetail,
   initialRowStreamState,
   pendingDetail,
+  playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  stableAnalyticScopeKey,
   stablePlayerIdsKey,
   type RowStreamState,
 } from './inferenceRowStreamState'
@@ -29,22 +31,34 @@ export function useScoresInferenceByRow(
   options: UseScoresInferenceByRowOptions = {}
 ): UseScoresInferenceByRowResult {
   const { onGlobalPauseChange } = options
-  const stubs =
-    enabled && tableData?.inferenceByRow != null ? tableData.inferenceByRow : []
-  const playerIds = stubs
-    .map((stub) => stub.playerId)
-    .filter((id): id is number => typeof id === 'number')
-  const playerIdsKey = useMemo(() => stablePlayerIdsKey(playerIds), [playerIds])
+  const inferenceByRowStubs = tableData?.inferenceByRow
   const [refreshToken, setRefreshToken] = useState(0)
   const refreshInference = useCallback(() => {
     setRefreshToken((value) => value + 1)
   }, [])
+  const playerIdsKey = useMemo(() => {
+    if (!enabled || inferenceByRowStubs == null) {
+      return ''
+    }
+    const playerIds = inferenceByRowStubs
+      .map((stub) => stub.playerId)
+      .filter((id): id is number => typeof id === 'number')
+    return stablePlayerIdsKey(playerIds)
+  }, [enabled, inferenceByRowStubs])
+  const scopeKey = scope != null ? stableAnalyticScopeKey(scope) : null
+  const connectionKey =
+    enabled && scopeKey != null && playerIdsKey.length > 0
+      ? `${scopeKey}:${playerIdsKey}:${refreshToken}`
+      : null
 
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<
     Map<number, ScoresInferenceRowDetail>
   >(new Map())
   const tableAbortControllerRef = useRef<AbortController | null>(null)
   const rowStreamStateRef = useRef<Map<number, RowStreamState>>(new Map())
+  const connectionKeyRef = useRef<string | null>(null)
+  const scopeRef = useRef(scope)
+  scopeRef.current = scope
 
   const publishPlayerState = useCallback((playerId: number) => {
     const state = rowStreamStateRef.current.get(playerId)
@@ -98,35 +112,51 @@ export function useScoresInferenceByRow(
     },
     [applyGlobalPauseEvent, applyStreamEvent]
   )
+  const handleTableStreamEventRef = useRef(handleTableStreamEvent)
+  handleTableStreamEventRef.current = handleTableStreamEvent
+  const onGlobalPauseChangeRef = useRef(onGlobalPauseChange)
+  onGlobalPauseChangeRef.current = onGlobalPauseChange
 
   useEffect(() => {
-    if (!enabled || scope == null || playerIds.length === 0) {
+    if (connectionKey == null) {
+      connectionKeyRef.current = null
       setDetailsByPlayerId(new Map())
       rowStreamStateRef.current = new Map()
-      onGlobalPauseChange?.(false)
+      onGlobalPauseChangeRef.current?.(false)
       return
     }
 
+    const activeScope = scopeRef.current
+    if (activeScope == null) {
+      return
+    }
+
+    const isNewConnection = connectionKeyRef.current !== connectionKey
+    connectionKeyRef.current = connectionKey
+    const playerIds = playerIdsFromStableKey(playerIdsKey)
+
     tableAbortControllerRef.current?.abort()
 
-    const initialStates = new Map<number, RowStreamState>()
-    for (const playerId of playerIds) {
-      initialStates.set(playerId, initialRowStreamState())
-    }
-    rowStreamStateRef.current = initialStates
+    if (isNewConnection) {
+      const initialStates = new Map<number, RowStreamState>()
+      for (const playerId of playerIds) {
+        initialStates.set(playerId, initialRowStreamState())
+      }
+      rowStreamStateRef.current = initialStates
 
-    const initialDetails = new Map<number, ScoresInferenceRowDetail>()
-    for (const playerId of playerIds) {
-      initialDetails.set(playerId, pendingDetail(playerId))
+      const initialDetails = new Map<number, ScoresInferenceRowDetail>()
+      for (const playerId of playerIds) {
+        initialDetails.set(playerId, pendingDetail(playerId))
+      }
+      setDetailsByPlayerId(initialDetails)
     }
-    setDetailsByPlayerId(initialDetails)
 
     const controller = new AbortController()
     tableAbortControllerRef.current = controller
 
-    void connectTableInferenceStream(scope, playerIds, {
+    void connectTableInferenceStream(activeScope, playerIds, {
       signal: controller.signal,
-      onEvent: handleTableStreamEvent,
+      onEvent: (event) => handleTableStreamEventRef.current(event),
     })
       .then((result) => {
         if (controller.signal.aborted || result !== 'conflict_exhausted') {
@@ -150,33 +180,33 @@ export function useScoresInferenceByRow(
         })
       })
       .catch((error) => {
-      if (controller.signal.aborted) {
-        return
-      }
-      setDetailsByPlayerId((previous) => {
-        const next = new Map(previous)
-        for (const playerId of playerIds) {
-          if (next.get(playerId)?.isComplete) {
-            continue
-          }
-          next.set(playerId, failureDetail(playerId, errorDetailFromUnknown(error)))
+        if (controller.signal.aborted) {
+          return
         }
-        return next
+        setDetailsByPlayerId((previous) => {
+          const next = new Map(previous)
+          for (const playerId of playerIds) {
+            if (next.get(playerId)?.isComplete) {
+              continue
+            }
+            next.set(playerId, failureDetail(playerId, errorDetailFromUnknown(error)))
+          }
+          return next
+        })
       })
-    })
 
     return () => {
       controller.abort()
       tableAbortControllerRef.current = null
-      onGlobalPauseChange?.(false)
+      onGlobalPauseChangeRef.current?.(false)
     }
-  }, [enabled, scope, playerIdsKey, refreshToken, handleTableStreamEvent, onGlobalPauseChange])
+  }, [connectionKey, playerIdsKey])
 
   if (!enabled || tableData?.inferenceByRow == null) {
     return { inferenceByRow: undefined, refreshInference }
   }
 
-  const inferenceByRow = stubs.map((stub, rowIndex) => {
+  const inferenceByRow = tableData.inferenceByRow.map((stub, rowIndex) => {
     const playerId = stub.playerId
     if (typeof playerId !== 'number') {
       return failureDetail(-(rowIndex + 1), 'Missing player id for build inference')

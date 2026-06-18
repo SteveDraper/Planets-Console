@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.actions import (
 )
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
+    player_by_id,
 )
 from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
@@ -272,8 +273,13 @@ def _run_policy_ladder_inference(
 def _run_corpus_prebuilt_inference(
     resolved_observation: InferenceObservation,
     catalog: ActionCatalog,
+    *,
+    turn: TurnInfo | None = None,
 ) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
-    problem = build_inference_problem(resolved_observation, catalog)
+    race_id = (
+        player_by_id(turn, resolved_observation.player_id).raceid if turn is not None else None
+    )
+    problem = build_inference_problem(resolved_observation, catalog, race_id=race_id)
     result = solve_inference_problem(problem)
     return result, catalog, problem, [catalog.policy_step_id], []
 
@@ -337,7 +343,7 @@ def _run_solver_inference_path(
             assert path == InferencePath.CORPUS_PREBUILT
             assert solve_catalog is not None
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
-                _run_corpus_prebuilt_inference(resolved_observation, solve_catalog)
+                _run_corpus_prebuilt_inference(resolved_observation, solve_catalog, turn=turn)
             )
         if solve_catalog is None or problem is None:
             return (

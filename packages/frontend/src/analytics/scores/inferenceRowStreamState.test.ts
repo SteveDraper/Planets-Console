@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   initialRowStreamState,
+  playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  stableAnalyticScopeKey,
   stablePlayerIdsKey,
 } from './inferenceRowStreamState'
 
@@ -10,6 +12,21 @@ describe('stablePlayerIdsKey', () => {
   it('sorts ids so order changes do not alter the key', () => {
     expect(stablePlayerIdsKey([9, 8])).toBe('8,9')
     expect(stablePlayerIdsKey([8, 9])).toBe('8,9')
+  })
+})
+
+describe('stableAnalyticScopeKey', () => {
+  it('keys scope by game, turn, and perspective', () => {
+    expect(
+      stableAnalyticScopeKey({ gameId: '628580', turn: 111, perspective: 1 })
+    ).toBe('628580:111:1')
+  })
+})
+
+describe('playerIdsFromStableKey', () => {
+  it('round-trips sorted player ids', () => {
+    expect(playerIdsFromStableKey('8,9')).toEqual([8, 9])
+    expect(playerIdsFromStableKey('')).toEqual([])
   })
 })
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
+from api.concepts.races import is_horwasp
 from api.models.game import GameInfo
 from api.services.game_service import GameService
 from api.services.player_elimination import is_eliminated_at_turn, last_meaningful_turn
@@ -36,6 +37,7 @@ class ExtractionRunSummary:
     units_enqueued: int = 0
     units_ok: int = 0
     adjunct_skips: int = 0
+    horwasp_skips: int = 0
     ship_build_validation_drops: int = 0
     extraction_errors: int = 0
 
@@ -84,6 +86,8 @@ def enumerate_extraction_work_units(
 
     for player in game_info.players:
         player_id = player.id
+        if is_horwasp(player.raceid):
+            continue
         perspective = GameService.perspective_for_player_id(game_info, player_id, game_id)
         last_turn = last_meaningful_turn(player, latest_turn)
         if last_turn < 2:
@@ -222,6 +226,8 @@ def _apply_extraction_row_result(
     if result.outcome == "skip":
         if result.skip_reason == ExtractionSkipReason.ADJUNCT:
             summary.adjunct_skips += 1
+        elif result.skip_reason == ExtractionSkipReason.HORWASP:
+            summary.horwasp_skips += 1
         return
 
     if result.outcome == "error":

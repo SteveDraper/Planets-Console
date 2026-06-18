@@ -123,6 +123,7 @@ class ShipBuildCombo:
 class InferenceProblem:
     observation: InferenceObservation
     aggregate_actions: tuple[CandidateAction, ...]
+    race_id: int | None = None
     ship_build_combos: tuple[ShipBuildCombo, ...] = ()
     policy_step_id: str = ""
     policy_step_index: int = 0

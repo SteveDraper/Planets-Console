@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from api.analytics.military_score_inference.inference_corpus_complexity import classify_complexity
+from api.concepts.races import is_horwasp
 from api.services.turn_load_service import TurnLoadService
 
 from .component_name_catalog import ComponentNameCatalog, ComponentNameCatalogBuilder
@@ -25,6 +26,7 @@ _worker_turn_load: TurnLoadService | None = None
 
 class ExtractionSkipReason(Enum):
     ADJUNCT = "adjunct"
+    HORWASP = "horwasp"
     MISSING_SCORE = "missing_score"
 
 
@@ -83,6 +85,13 @@ def extract_extraction_work_unit(
     turn_cache: MiningTurnCache | None = None,
 ) -> ExtractionRowResult:
     """Extract one (game, player, host_turn) unit from stored turns."""
+    if is_horwasp(unit.race_id):
+        return ExtractionRowResult(
+            unit=unit,
+            outcome="skip",
+            skip_reason=ExtractionSkipReason.HORWASP,
+        )
+
     cache = turn_cache if turn_cache is not None else MiningTurnCache(turn_load)
     name_builder = ComponentNameCatalogBuilder()
     score_turn_number = unit.host_turn + 1

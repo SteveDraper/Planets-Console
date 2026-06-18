@@ -52,6 +52,7 @@ class PriorMiningReport:
     games_skipped_incomplete_loadall: int = 0
     incomplete_loadall_details: list[IncompleteLoadAllDetail] = field(default_factory=list)
     adjunct_skips: int = 0
+    horwasp_skips: int = 0
     ship_build_validation_drops: int = 0
     extraction_errors: list[ExtractionErrorDetail] = field(default_factory=list)
     game_mining_errors: list[GameMiningErrorDetail] = field(default_factory=list)
@@ -85,6 +86,7 @@ class PriorMiningReport:
                 asdict(detail) for detail in self.incomplete_loadall_details
             ],
             "adjunct_skips": self.adjunct_skips,
+            "horwasp_skips": self.horwasp_skips,
             "ship_build_validation_drops": self.ship_build_validation_drops,
             "extraction_errors": [asdict(error) for error in self.extraction_errors],
             "game_mining_errors": [asdict(error) for error in self.game_mining_errors],

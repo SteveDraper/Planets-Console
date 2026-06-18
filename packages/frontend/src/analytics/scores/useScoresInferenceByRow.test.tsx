@@ -233,6 +233,51 @@ describe('useScoresInferenceByRow', () => {
     expect(onGlobalPauseChange).toHaveBeenCalledWith(false)
   })
 
+  it('does not reconnect when scope object identity changes but values stay the same', async () => {
+    let streamCallCount = 0
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, { signal, onEvent }) => {
+        streamCallCount += 1
+        onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [
+            {
+              objectiveValue: 10,
+              actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+            },
+          ],
+        })
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => {
+            resolve()
+          })
+        })
+      }
+    )
+
+    const { result, rerender } = renderHook(
+      ({ activeScope }) => useScoresInferenceByRow(tableData, activeScope, true),
+      {
+        initialProps: {
+          activeScope: { ...scope },
+        },
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.solutionCount).toBe(1)
+    })
+    expect(streamCallCount).toBe(1)
+
+    rerender({ activeScope: { ...scope } })
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.solutionCount).toBe(1)
+    })
+    expect(streamCallCount).toBe(1)
+  })
+
   it('refreshInference restarts the table stream and applies new row results', async () => {
     let streamCallCount = 0
     let releaseSecondStream: (() => void) | null = null
