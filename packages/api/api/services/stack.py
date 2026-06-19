@@ -1,6 +1,6 @@
 """Construct the default Core service dependency graph for a storage backend."""
 
-from api.analytics.military_score_inference.inference_scheduler import set_row_complete_listener
+from api.analytics.military_score_inference.inference_scheduler import get_inference_row_scheduler
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -39,7 +39,7 @@ def build_service_stack(
         inference_persistence=inference_persistence,
         inference_invalidation=inference_invalidation,
     )
-    set_row_complete_listener(inference_persistence.persist_row_complete)
+    get_inference_row_scheduler(on_row_complete=inference_persistence.persist_row_complete)
     return games, turns, load_all, concepts, analytics
 
 

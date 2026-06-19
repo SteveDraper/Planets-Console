@@ -13,7 +13,6 @@ from api.analytics.military_score_inference.inference_row_runner import (
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
-    set_row_complete_listener,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
@@ -58,9 +57,11 @@ def _wait_until(predicate, *, timeout_seconds: float = 2.0) -> None:
 def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monkeypatch):
     """A zombie worker must not persist or resurrect a row run cancelled mid-tier."""
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    set_row_complete_listener(persistence.persist_row_complete)
+    scheduler = InferenceRowScheduler(
+        worker_count=1,
+        on_row_complete=persistence.persist_row_complete,
+    )
     try:
         scope = InferenceStreamScope(
             game_id=628580,
@@ -147,4 +148,4 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         assert run_id not in scheduler._runs
         assert all(job.session.run_id != run_id for job in scheduler._work_queue)
     finally:
-        set_row_complete_listener(None)
+        reset_inference_row_scheduler_for_tests()

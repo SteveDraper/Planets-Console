@@ -40,14 +40,7 @@ _TierJob = TierJob
 _Sentinel = object()
 _Job = TierJob | object
 
-_row_complete_listener: Callable[[InferenceRowStreamSession, RowComplete], None] | None = None
-
-
-def set_row_complete_listener(
-    listener: Callable[[InferenceRowStreamSession, RowComplete], None] | None,
-) -> None:
-    global _row_complete_listener
-    _row_complete_listener = listener
+OnRowCompleteCallback = Callable[[InferenceRowStreamSession, RowComplete], None]
 
 
 def _configured_worker_count() -> int:
@@ -60,7 +53,13 @@ def _configured_worker_count() -> int:
 class InferenceRowScheduler:
     """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
 
-    def __init__(self, worker_count: int = _DEFAULT_WORKER_COUNT) -> None:
+    def __init__(
+        self,
+        worker_count: int = _DEFAULT_WORKER_COUNT,
+        *,
+        on_row_complete: OnRowCompleteCallback | None = None,
+    ) -> None:
+        self._on_row_complete = on_row_complete
         self._work_queue: deque[TierJob] = deque()
         self._runs: dict[str, RowRun] = {}
         self._lock = threading.Lock()
@@ -371,8 +370,8 @@ class InferenceRowScheduler:
         )
 
     def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
-        if _row_complete_listener is not None:
-            _row_complete_listener(session, event)
+        if self._on_row_complete is not None:
+            self._on_row_complete(session, event)
         session.event_queue.put(event)
         self.unregister_session(session.run_id)
 
@@ -442,11 +441,17 @@ _scheduler: InferenceRowScheduler | None = None
 _scheduler_lock = threading.Lock()
 
 
-def get_inference_row_scheduler() -> InferenceRowScheduler:
+def get_inference_row_scheduler(
+    *,
+    on_row_complete: OnRowCompleteCallback | None = None,
+) -> InferenceRowScheduler:
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
-            _scheduler = InferenceRowScheduler(worker_count=_configured_worker_count())
+            _scheduler = InferenceRowScheduler(
+                worker_count=_configured_worker_count(),
+                on_row_complete=on_row_complete,
+            )
         return _scheduler
 
 
