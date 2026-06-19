@@ -62,10 +62,11 @@ def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> boo
     if stream is None:
         return False
     with stream.lock:
-        old_row = stream.scheduled_rows.pop(player_id, None)
+        old_row = stream.scheduled_rows.get(player_id)
         if old_row is not None:
-            stream.finished_run_ids.discard(old_row.session.run_id)
             stream.cancel_row(player_id)
+            stream.finished_run_ids.discard(old_row.session.run_id)
+        stream.scheduled_rows.pop(player_id, None)
         scheduled = stream.schedule_row(player_id)
         if scheduled is None:
             return False

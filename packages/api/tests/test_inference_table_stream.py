@@ -52,15 +52,14 @@ def _wire_complete_event(*, summary: str) -> dict[str, object]:
 
 def test_table_stream_emits_global_pause_snapshot_on_connect(sample_turn):
     reset_inference_row_scheduler_for_tests()
-    events = list(
-        iter_scores_table_inference_events(
-            sample_turn,
-            (),
-            game_id=628580,
-            perspective=1,
-        )
+    stream = iter_scores_table_inference_events(
+        sample_turn,
+        (),
+        game_id=628580,
+        perspective=1,
     )
-    assert events[0] == {"type": "globalPause", "paused": False}
+    assert next(stream) == {"type": "globalPause", "paused": False}
+    stream.close()
 
 
 def test_table_stream_reconnect_preempts_in_flight_stream(sample_turn):

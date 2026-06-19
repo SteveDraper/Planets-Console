@@ -201,7 +201,12 @@ def iter_multiplexed_inference_events(
     session_provider: Callable[[], tuple[ScheduledInferenceRow, ...]] | None = None,
     wake_event: threading.Event | None = None,
 ) -> Iterator[dict[str, object]]:
-    """Round-robin blocking reads across row event queues until all rows finish."""
+    """Round-robin blocking reads across row event queues until rows finish.
+
+    When ``is_stream_active`` is provided, keep waiting (including on ``wake_event``)
+    while the table stream remains active so in-place row reschedule can enqueue work
+    after every row has already reached a terminal event.
+    """
     finished = finished_run_ids if finished_run_ids is not None else set()
 
     def active_sessions() -> tuple[ScheduledInferenceRow, ...]:
@@ -209,23 +214,31 @@ def iter_multiplexed_inference_events(
             return session_provider()
         return sessions
 
-    pending_run_ids = {
-        row.session.run_id for row in active_sessions() if row.session.run_id not in finished
-    }
+    def refresh_pending_run_ids() -> set[str]:
+        return {
+            row.session.run_id for row in active_sessions() if row.session.run_id not in finished
+        }
+
+    pending_run_ids = refresh_pending_run_ids()
     cursor = 0
-    while pending_run_ids:
+
+    def should_continue() -> bool:
+        if is_stream_active is not None:
+            return is_stream_active()
+        return bool(pending_run_ids)
+
+    while should_continue():
         if is_stream_active is not None and not is_stream_active():
             return
-        active_rows = list(active_sessions())
-        if not active_rows:
+        if not pending_run_ids:
             if wake_event is not None:
                 wake_event.wait(timeout=_MULTiplexWaitSeconds)
-                wake_event.clear()
-                pending_run_ids = {
-                    row.session.run_id
-                    for row in active_sessions()
-                    if row.session.run_id not in finished
-                }
+                if wake_event.is_set():
+                    wake_event.clear()
+                pending_run_ids = refresh_pending_run_ids()
+            continue
+        active_rows = list(active_sessions())
+        if not active_rows:
             continue
         row = active_rows[cursor % len(active_rows)]
         cursor += 1
@@ -236,11 +249,7 @@ def iter_multiplexed_inference_events(
         except queue.Empty:
             if wake_event is not None and wake_event.is_set():
                 wake_event.clear()
-                pending_run_ids = {
-                    row.session.run_id
-                    for row in active_sessions()
-                    if row.session.run_id not in finished
-                }
+                pending_run_ids = refresh_pending_run_ids()
             continue
         for event in row_domain_event_to_wire_events(row, domain_event):
             if event.get("type") in ("complete", "error"):
@@ -369,21 +378,22 @@ def iter_scores_table_inference_events(
                 finished_run_ids=finished_run_ids,
             )
 
-        try:
-            yield from iter_multiplexed_inference_events(
-                current_scheduled_rows(),
-                tag_player_id=True,
-                finished_run_ids=finished_run_ids,
-                is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
-                session_provider=current_scheduled_rows,
-                wake_event=wake_multiplex,
-            )
-        finally:
-            cleanup_inference_stream_sessions(
-                scheduler,
-                stream_scope,
-                tuple(row.session for row in current_scheduled_rows()),
-                stream_token=stream_token,
-            )
+        if player_ids:
+            try:
+                yield from iter_multiplexed_inference_events(
+                    current_scheduled_rows(),
+                    tag_player_id=True,
+                    finished_run_ids=finished_run_ids,
+                    is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
+                    session_provider=current_scheduled_rows,
+                    wake_event=wake_multiplex,
+                )
+            finally:
+                cleanup_inference_stream_sessions(
+                    scheduler,
+                    stream_scope,
+                    tuple(row.session for row in current_scheduled_rows()),
+                    stream_token=stream_token,
+                )
     finally:
         detach_inference_table_stream(stream_token)

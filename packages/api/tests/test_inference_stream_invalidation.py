@@ -21,9 +21,12 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     ActiveInferenceTableStream,
+    _active_stream_for_scope,
     attach_inference_table_stream,
     reset_inference_table_stream_registry_for_tests,
 )
+from api.analytics.military_score_inference.models import InferenceResult
+from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -323,4 +326,157 @@ def test_mask_change_integration_via_table_stream_generator_case_3(
     assert after[other_player_id] == before[other_player_id]
     assert persistence.get_row(628580, 1, turn_number, target_player_id) is None
 
+    thread.join(timeout=2.0)
+
+
+def _seed_cached_rows(
+    persistence: InferenceRowPersistenceService,
+    *,
+    turn_number: int,
+    player_ids: tuple[int, ...],
+) -> None:
+    for player_id in player_ids:
+        persistence.put_row(
+            628580,
+            1,
+            turn_number,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary=f"cached-{player_id}",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+        )
+
+
+def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integration(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """After every row replays from cache, mask change still reschedules on the open stream."""
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    turn_number = sample_turn.settings.turn
+    persistence = InferenceRowPersistenceService(memory_backend)
+    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    _seed_cached_rows(persistence, turn_number=turn_number, player_ids=player_ids)
+
+    stream = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+    )
+    events: list[dict[str, object]] = []
+    stream_closed = threading.Event()
+    scope = _stream_scope(sample_turn)
+
+    def consume_stream() -> None:
+        try:
+            for event in stream:
+                events.append(event)
+        finally:
+            stream.close()
+            stream_closed.set()
+
+    thread = threading.Thread(target=consume_stream, daemon=True)
+    thread.start()
+
+    _wait_until(
+        lambda: sum(1 for event in events if event.get("type") == "complete") >= len(player_ids)
+    )
+    assert len(scheduler._runs) == 0
+    assert not stream_closed.is_set()
+    assert _active_stream_for_scope(scope) is not None
+
+    target_player_id, other_player_id = player_ids
+    invalidation.on_hull_mask_changed(628580, 1, turn_number, target_player_id)
+
+    _wait_until(lambda: target_player_id in _run_ids_for_players(scheduler, player_ids))
+    assert other_player_id not in _run_ids_for_players(scheduler, (other_player_id,))
+    assert persistence.get_row(628580, 1, turn_number, target_player_id) is None
+
+    rescheduled_run = scheduler._runs[_run_ids_for_players(scheduler, player_ids)[target_player_id]]
+    rescheduled_run.session.event_queue.put(
+        row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+            summary="after mask on cached row",
+        )
+    )
+
+    _wait_until(
+        lambda: any(
+            event.get("type") == "complete"
+            and event.get("playerId") == target_player_id
+            and event.get("summary") == "after mask on cached row"
+            for event in events
+        )
+    )
+    cached_other_events = [
+        event
+        for event in events
+        if event.get("type") == "complete"
+        and event.get("playerId") == other_player_id
+        and event.get("summary") == f"cached-{other_player_id}"
+    ]
+    assert len(cached_other_events) == 1
+
+    scheduler.begin_scope(scope)
+    thread.join(timeout=2.0)
+
+
+def test_all_cached_replay_keeps_stream_open_for_recompute_cases_1_and_2_integration(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """After every row replays from cache, recompute reschedules all rows on the open stream."""
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    turn_number = sample_turn.settings.turn
+    persistence = InferenceRowPersistenceService(memory_backend)
+    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    _seed_cached_rows(persistence, turn_number=turn_number, player_ids=player_ids)
+
+    stream = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+    )
+    scope = _stream_scope(sample_turn)
+    events: list[dict[str, object]] = []
+    stream_closed = threading.Event()
+
+    def consume_stream() -> None:
+        try:
+            for event in stream:
+                events.append(event)
+        finally:
+            stream.close()
+            stream_closed.set()
+
+    thread = threading.Thread(target=consume_stream, daemon=True)
+    thread.start()
+
+    _wait_until(
+        lambda: sum(1 for event in events if event.get("type") == "complete") >= len(player_ids)
+    )
+    assert not stream_closed.is_set()
+    assert _active_stream_for_scope(scope) is not None
+
+    invalidation.recompute_host_turn(628580, 1, turn_number)
+
+    _wait_until(lambda: len(_run_ids_for_players(scheduler, player_ids)) == len(player_ids))
+    for player_id in player_ids:
+        assert persistence.get_row(628580, 1, turn_number, player_id) is None
+
+    scheduler.begin_scope(scope)
     thread.join(timeout=2.0)

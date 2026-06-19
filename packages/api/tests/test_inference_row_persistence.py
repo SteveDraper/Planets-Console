@@ -106,15 +106,15 @@ def test_stream_replays_persisted_row_without_scheduler_work(sample_turn, persis
         ),
     )
     scheduler = get_inference_row_scheduler()
-    events = list(
-        iter_scores_table_inference_events(
-            sample_turn,
-            (player_id,),
-            game_id=628580,
-            perspective=1,
-            persistence=persistence,
-        )
+    stream = iter_scores_table_inference_events(
+        sample_turn,
+        (player_id,),
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
     )
+    events = [next(stream), next(stream)]
+    stream.close()
     assert events[0] == {"type": "globalPause", "paused": False}
     assert events[1]["type"] == "complete"
     assert events[1]["playerId"] == player_id
