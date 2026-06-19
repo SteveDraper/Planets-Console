@@ -11,37 +11,19 @@ from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
 from api.storage import StorageBackend, get_storage
 
-_service_stack_cache: (
-    tuple[
-        GameService,
-        TurnLoadService,
-        LoadAllTurnsService,
-        TurnConceptService,
-        TurnAnalyticService,
-    ]
-    | None
-) = None
-
-
-def clear_service_stack_cache() -> None:
-    """Drop cached service graph (tests after storage reset)."""
-    global _service_stack_cache
-    _service_stack_cache = None
-
-
-def _service_stack(
-    storage: StorageBackend,
-) -> tuple[
+ServiceStack = tuple[
     GameService,
     TurnLoadService,
     LoadAllTurnsService,
     TurnConceptService,
     TurnAnalyticService,
-]:
-    global _service_stack_cache
-    if _service_stack_cache is None:
-        _service_stack_cache = build_service_stack(storage)
-    return _service_stack_cache
+]
+
+
+def get_service_stack(
+    storage: StorageBackend = Depends(get_storage),
+) -> ServiceStack:
+    return build_service_stack(storage)
 
 
 def get_credential_service(
@@ -51,32 +33,30 @@ def get_credential_service(
 
 
 def get_game_service(
-    storage: StorageBackend = Depends(get_storage),
-    credentials: CredentialService = Depends(get_credential_service),
+    stack: ServiceStack = Depends(get_service_stack),
 ) -> GameService:
-    _ = credentials
-    return _service_stack(storage)[0]
+    return stack[0]
 
 
 def get_turn_load_service(
-    storage: StorageBackend = Depends(get_storage),
+    stack: ServiceStack = Depends(get_service_stack),
 ) -> TurnLoadService:
-    return _service_stack(storage)[1]
+    return stack[1]
 
 
 def get_load_all_turns_service(
-    storage: StorageBackend = Depends(get_storage),
+    stack: ServiceStack = Depends(get_service_stack),
 ) -> LoadAllTurnsService:
-    return _service_stack(storage)[2]
+    return stack[2]
 
 
 def get_turn_concept_service(
-    storage: StorageBackend = Depends(get_storage),
+    stack: ServiceStack = Depends(get_service_stack),
 ) -> TurnConceptService:
-    return _service_stack(storage)[3]
+    return stack[3]
 
 
 def get_turn_analytic_service(
-    storage: StorageBackend = Depends(get_storage),
+    stack: ServiceStack = Depends(get_service_stack),
 ) -> TurnAnalyticService:
-    return _service_stack(storage)[4]
+    return stack[4]
