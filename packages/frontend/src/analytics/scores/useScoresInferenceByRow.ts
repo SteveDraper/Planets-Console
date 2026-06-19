@@ -165,7 +165,7 @@ export function useScoresInferenceByRow(
               playerId,
               failureDetail(
                 playerId,
-                'Build inference could not reconnect after updating the hull catalog.'
+                'Build inference could not reconnect to the table stream.'
               )
             )
           }

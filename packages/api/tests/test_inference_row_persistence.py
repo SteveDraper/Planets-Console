@@ -13,7 +13,9 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
+    reschedule_inference_row,
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
@@ -184,9 +186,6 @@ def test_turn_store_invalidates_inference_persistence(memory_backend):
 
 
 def test_reschedule_without_active_stream_is_noop():
-    reset_inference_row_scheduler_for_tests()
-    from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-
-    scheduler = get_inference_row_scheduler()
+    reset_inference_table_stream_registry_for_tests()
     scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=111)
-    assert scheduler.reschedule_row(scope, 8) is False
+    assert reschedule_inference_row(scope, 8) is False

@@ -317,7 +317,11 @@ def cleanup_inference_stream_sessions(
     *,
     stream_token: str,
 ) -> None:
-    """Tear down row runs when the table stream ends; always recalculate on reconnect."""
+    """Tear down row runs when the table stream ends.
+
+    A later reconnect replays persisted complete rows from cache and schedules
+    any rows that were still in progress or invalidated.
+    """
     if sessions:
         scheduler.end_inference_stream(scope, sessions, stream_token=stream_token)
 

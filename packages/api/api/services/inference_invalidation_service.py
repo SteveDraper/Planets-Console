@@ -7,6 +7,10 @@ from api.analytics.military_score_inference.inference_scheduler import (
     get_inference_row_scheduler,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    reschedule_all_inference_rows,
+    reschedule_inference_row,
+)
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
@@ -37,9 +41,8 @@ class InferenceInvalidationService:
             perspective,
             turn_number,
         )
-        scheduler = self._scheduler_instance()
         for host_turn in cleared_host_turns:
-            scheduler.reschedule_all_rows(self._scope(game_id, perspective, host_turn))
+            reschedule_all_inference_rows(self._scope(game_id, perspective, host_turn))
 
     def on_hull_mask_changed(
         self,
@@ -49,7 +52,7 @@ class InferenceInvalidationService:
         player_id: int,
     ) -> None:
         self._persistence.delete_row(game_id, perspective, host_turn, player_id)
-        self._scheduler_instance().reschedule_row(
+        reschedule_inference_row(
             self._scope(game_id, perspective, host_turn),
             player_id,
         )
@@ -64,4 +67,4 @@ class InferenceInvalidationService:
         scope = self._scope(game_id, perspective, host_turn)
         scheduler = self._scheduler_instance()
         scheduler.clear_global_pause_for_scope(scope)
-        scheduler.reschedule_all_rows(scope, force_schedule=True)
+        reschedule_all_inference_rows(scope, force_schedule=True)
