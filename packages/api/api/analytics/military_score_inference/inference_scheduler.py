@@ -369,11 +369,22 @@ class InferenceRowScheduler:
             )
         )
 
+    def _try_claim_run_for_finalize(self, session: InferenceRowStreamSession) -> bool:
+        with self._condition:
+            if session.cancel_token.is_cancelled():
+                return False
+            run = self._runs.pop(session.run_id, None)
+            if run is None:
+                return False
+            run.clear_held()
+            return True
+
     def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
+        if not self._try_claim_run_for_finalize(session):
+            return
         if self._on_row_complete is not None:
             self._on_row_complete(session, event)
         session.event_queue.put(event)
-        self.unregister_session(session.run_id)
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run and purge its queued tier jobs."""
@@ -407,15 +418,23 @@ class InferenceRowScheduler:
             ),
         )
         outcome = run_inference_tier_job(run, callbacks)
-        if session.cancel_token.is_cancelled() or self._runs.get(session.run_id) is None:
-            return
-        if outcome.next_ladder_state is not None:
-            run.ladder_state = outcome.next_ladder_state
-        if outcome.enqueue_continuation:
-            self._enqueue_continuation(session)
-            return
         if outcome.row_complete is not None:
             self._emit_row_complete(session, outcome.row_complete)
+            return
+        with self._condition:
+            if session.cancel_token.is_cancelled():
+                return
+            active_run = self._runs.get(session.run_id)
+            if active_run is None:
+                return
+            if outcome.next_ladder_state is not None:
+                active_run.ladder_state = outcome.next_ladder_state
+            if outcome.enqueue_continuation:
+                if self._globally_paused:
+                    active_run.hold_job(TierJob(session=session, is_continuation=True))
+                else:
+                    self._work_queue.append(TierJob(session=session, is_continuation=True))
+                self._condition.notify_all()
 
 
 _scheduler: InferenceRowScheduler | None = None
