@@ -124,9 +124,7 @@ class InferenceTableStreamController:
         if isinstance(admission, CachedCompleteRowAdmission):
             if admission.event is not None:
                 return RowAdmissionDispatch(
-                    wire_events=(
-                        tag_inference_stream_event(admission.event, player_id=player_id),
-                    ),
+                    wire_events=(tag_inference_stream_event(admission.event, player_id=player_id),),
                 )
             return RowAdmissionDispatch()
         scheduled = self.schedule_player_row(player_id)
