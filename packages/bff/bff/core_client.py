@@ -342,6 +342,20 @@ class CoreClient:
             )
         )
 
+    def recompute_scores_inference(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        return self._invoke(
+            lambda: self._analytics.recompute_scores_inference(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
 
 _core_client_singleton: CoreClient | None = None
 

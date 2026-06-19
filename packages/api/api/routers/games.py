@@ -258,6 +258,21 @@ def delete_inference_global_pause(
     )
 
 
+@router.post("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference/recompute")
+def post_scores_inference_recompute(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict[str, object]:
+    """Clear host-turn inference persistence and reschedule all scoreboard rows."""
+    return analytics.recompute_scores_inference(
+        game_id,
+        perspective,
+        turn_number,
+    )
+
+
 @router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}")
 def get_turn_analytics(
     game_id: int,

@@ -48,6 +48,12 @@ def test_resolve_breakpoint_perspective_analytic_persistence():
     assert suffix == "evidence"
 
 
+def test_resolve_breakpoint_turn_scoped_scores_inference_row():
+    bp, suffix = resolve_breakpoint("games/628580/1/turns/111/analytics/scores/inference_rows/8")
+    assert bp == "games/628580/1/turns/111/analytics/scores"
+    assert suffix == "inference_rows/8"
+
+
 def test_resolve_breakpoint_unregistered_raises():
     with pytest.raises(ValidationError, match="Unregistered"):
         resolve_breakpoint("unknown/path")

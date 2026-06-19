@@ -146,7 +146,12 @@ export function reduceRowStreamState(
 
   if (event.type === 'progress') {
     if (state.isComplete) {
-      return state
+      return {
+        ...initialRowStreamState(),
+        summary: event.policyStepId
+          ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
+          : 'Build inference in progress',
+      }
     }
     return {
       ...state,
@@ -157,6 +162,12 @@ export function reduceRowStreamState(
   }
 
   if (event.type === 'solution') {
+    if (state.isComplete) {
+      return {
+        ...initialRowStreamState(),
+        heldSolutions: streamSolutionsToRowSolutions(event.solutions),
+      }
+    }
     return {
       ...state,
       heldSolutions: streamSolutionsToRowSolutions(event.solutions),

@@ -1,5 +1,7 @@
 """Turn document reads, enumeration, and Planets.nu ensure."""
 
+from collections.abc import Callable
+
 from dacite.exceptions import DaciteError, MissingValueError
 
 from api.errors import (
@@ -29,10 +31,13 @@ class TurnLoadService:
         storage: StorageBackend,
         credentials: CredentialService,
         games: GameService,
+        *,
+        on_turn_stored: Callable[[int, int, int], None] | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials
         self._games = games
+        self._on_turn_stored = on_turn_stored
         self._settings_defaults_by_game: dict[int, dict | None] = {}
 
     @staticmethod
@@ -150,6 +155,17 @@ class TurnLoadService:
                 f"requested turn ({turn_number})."
             )
 
+    def _store_turn_rst(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        rst: dict,
+    ) -> None:
+        self._storage.put(self.turn_store_key(game_id, perspective, turn_number), rst)
+        if self._on_turn_stored is not None:
+            self._on_turn_stored(game_id, perspective, turn_number)
+
     def store_archive_turn_if_missing(
         self,
         game_id: int,
@@ -164,10 +180,7 @@ class TurnLoadService:
             return False
         turn = self.deserialize_archive_turn_rst(game_id, archive_turn.rst)
         self._validate_archive_turn_matches_file(game_id, perspective, turn_number, turn)
-        self._storage.put(
-            self.turn_store_key(game_id, perspective, turn_number),
-            archive_turn.rst,
-        )
+        self._store_turn_rst(game_id, perspective, turn_number, archive_turn.rst)
         return True
 
     def list_stored_turn_perspectives(self, game_id: int, turn_number: int) -> list[int]:
@@ -327,7 +340,7 @@ class TurnLoadService:
 
         self._validate_turn_loaded_matches_request(game_id, turn_number, turn)
 
-        self._storage.put(store_key, rst)
+        self._store_turn_rst(game_id, perspective, turn_number, rst)
         return turn
 
     def list_stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:

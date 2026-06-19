@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import queue
+import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from typing import Literal
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -31,6 +33,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.models.game import Score, TurnInfo
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.transport.inference_stream import inference_complete_event, inference_global_pause_event
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
@@ -52,6 +55,60 @@ def row_domain_event_to_wire_events(
 class ScheduledInferenceRow:
     player_id: int
     session: InferenceRowStreamSession
+
+
+@dataclass(frozen=True)
+class ImmediateRowAdmission:
+    kind: Literal["immediate"] = "immediate"
+    events: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class CachedCompleteRowAdmission:
+    kind: Literal["cached"] = "cached"
+    event: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class ScheduleRowAdmission:
+    kind: Literal["schedule"] = "schedule"
+
+
+RowStreamAdmission = ImmediateRowAdmission | CachedCompleteRowAdmission | ScheduleRowAdmission
+
+
+def resolve_row_stream_admission(
+    turn: TurnInfo,
+    player_id: int,
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    persistence: InferenceRowPersistenceService | None = None,
+    force_schedule: bool = False,
+) -> RowStreamAdmission:
+    """Decide whether a table-stream row is immediate, cached-complete, or tier-scheduled."""
+    if not force_schedule:
+        immediate = immediate_row_inference_events(
+            turn,
+            player_id,
+            load_scoreboard_turn=load_scoreboard_turn,
+        )
+        if immediate is not None:
+            return ImmediateRowAdmission(events=immediate)
+
+        if persistence is not None:
+            cached = persistence.wire_complete_for_row(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+            if cached is not None:
+                return CachedCompleteRowAdmission(event=cached)
+
+    return ScheduleRowAdmission()
 
 
 def tag_inference_stream_event(
@@ -191,15 +248,52 @@ def iter_multiplexed_inference_events(
     tag_player_id: bool,
     finished_run_ids: set[str] | None = None,
     is_stream_active: Callable[[], bool] | None = None,
+    session_provider: Callable[[], tuple[ScheduledInferenceRow, ...]] | None = None,
+    pending_events_provider: Callable[[], list[dict[str, object]]] | None = None,
+    wake_event: threading.Event | None = None,
 ) -> Iterator[dict[str, object]]:
-    """Round-robin blocking reads across row event queues until all rows finish."""
+    """Round-robin blocking reads across row event queues until rows finish.
+
+    When ``is_stream_active`` is provided, keep waiting (including on ``wake_event``)
+    while the table stream remains active so in-place row reschedule can enqueue work
+    after every row has already reached a terminal event.
+    """
     finished = finished_run_ids if finished_run_ids is not None else set()
-    pending_run_ids = {row.session.run_id for row in sessions if row.session.run_id not in finished}
-    active_rows = list(sessions)
+
+    def active_sessions() -> tuple[ScheduledInferenceRow, ...]:
+        if session_provider is not None:
+            return session_provider()
+        return sessions
+
+    def refresh_pending_run_ids() -> set[str]:
+        return {
+            row.session.run_id for row in active_sessions() if row.session.run_id not in finished
+        }
+
+    pending_run_ids = refresh_pending_run_ids()
     cursor = 0
-    while pending_run_ids and active_rows:
+
+    def should_continue() -> bool:
+        if is_stream_active is not None:
+            return is_stream_active()
+        return bool(pending_run_ids)
+
+    while should_continue():
         if is_stream_active is not None and not is_stream_active():
             return
+        if pending_events_provider is not None:
+            for event in pending_events_provider():
+                yield event
+        if not pending_run_ids:
+            if wake_event is not None:
+                wake_event.wait(timeout=_MULTiplexWaitSeconds)
+                if wake_event.is_set():
+                    wake_event.clear()
+                pending_run_ids = refresh_pending_run_ids()
+            continue
+        active_rows = list(active_sessions())
+        if not active_rows:
+            continue
         row = active_rows[cursor % len(active_rows)]
         cursor += 1
         if row.session.run_id not in pending_run_ids:
@@ -207,6 +301,9 @@ def iter_multiplexed_inference_events(
         try:
             domain_event = row.session.event_queue.get(timeout=_MULTiplexWaitSeconds)
         except queue.Empty:
+            if wake_event is not None and wake_event.is_set():
+                wake_event.clear()
+                pending_run_ids = refresh_pending_run_ids()
             continue
         for event in row_domain_event_to_wire_events(row, domain_event):
             if event.get("type") in ("complete", "error"):
@@ -224,7 +321,11 @@ def cleanup_inference_stream_sessions(
     *,
     stream_token: str,
 ) -> None:
-    """Tear down row runs when the table stream ends; always recalculate on reconnect."""
+    """Tear down row runs when the table stream ends.
+
+    A later reconnect replays persisted complete rows from cache and schedules
+    any rows that were still in progress or invalidated.
+    """
     if sessions:
         scheduler.end_inference_stream(scope, sessions, stream_token=stream_token)
 
@@ -236,72 +337,79 @@ def iter_scores_table_inference_events(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
+    persistence: InferenceRowPersistenceService | None = None,
+    scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged inference events for all scoreboard rows on one NDJSON stream."""
+    from api.analytics.military_score_inference.inference_table_stream_controller import (
+        InferenceTableStreamController,
+    )
+
     turn_number = turn.settings.turn
     stream_scope = InferenceStreamScope(
         game_id=game_id,
         perspective=perspective,
         turn_number=turn_number,
     )
-    scheduler = get_inference_row_scheduler()
+    scheduler = scheduler or get_inference_row_scheduler()
     stream_token = scheduler.begin_scope(stream_scope)
     pause_status = scheduler.global_pause_status(stream_scope)
     yield inference_global_pause_event(paused=bool(pause_status.get("paused")))
 
-    scheduled_rows: list[ScheduledInferenceRow] = []
-    finished_run_ids: set[str] = set()
-    for player_id in player_ids:
-        if not scheduler.owns_table_stream(stream_token):
-            return
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=turn,
+        player_ids=player_ids,
+        scheduler=scheduler,
+        game_id=game_id,
+        perspective=perspective,
+        load_scoreboard_turn=load_scoreboard_turn,
+        reload_host_turn=reload_host_turn,
+        resolve_mask_for_player=resolve_mask_for_player,
+        persistence=persistence,
+    )
+    controller.attach()
 
-        immediate = immediate_row_inference_events(
-            turn,
-            player_id,
-            load_scoreboard_turn=load_scoreboard_turn,
-        )
-        if immediate is not None:
-            for event in immediate:
-                yield tag_inference_stream_event(event, player_id=player_id)
-            continue
-
-        score = next(row for row in turn.scores if row.ownerid == player_id)
-        resolved_mask = (
-            resolve_mask_for_player(player_id) if resolve_mask_for_player is not None else None
-        )
-        scheduled_row = schedule_inference_row(
-            scheduler,
-            score=score,
-            turn=turn,
-            player_id=player_id,
-            game_id=game_id,
-            perspective=perspective,
-            load_scoreboard_turn=load_scoreboard_turn,
-            resolved_mask=resolved_mask,
-            stream_token=stream_token,
-        )
-        if scheduled_row is None:
-            return
-        scheduled_rows.append(scheduled_row)
-        yield from drain_available_multiplex_events(
-            tuple(scheduled_rows),
-            tag_player_id=True,
-            finished_run_ids=finished_run_ids,
-        )
-
-    sessions = tuple(scheduled_rows)
     try:
-        yield from iter_multiplexed_inference_events(
-            sessions,
-            tag_player_id=True,
-            finished_run_ids=finished_run_ids,
-            is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
-        )
+        for player_id in player_ids:
+            if not scheduler.owns_table_stream(stream_token):
+                return
+
+            admission = controller.resolve_row_admission(player_id)
+            dispatch = controller.dispatch_row_admission(player_id, admission)
+            if dispatch.schedule_failed:
+                return
+
+            yield from dispatch.wire_events
+
+            if dispatch.scheduled_row is not None:
+                controller.register_scheduled_row(player_id, dispatch.scheduled_row)
+                yield from drain_available_multiplex_events(
+                    controller.current_scheduled_rows(),
+                    tag_player_id=True,
+                    finished_run_ids=controller.finished_run_ids,
+                )
+
+        if player_ids:
+            try:
+                yield from iter_multiplexed_inference_events(
+                    controller.current_scheduled_rows(),
+                    tag_player_id=True,
+                    finished_run_ids=controller.finished_run_ids,
+                    is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
+                    session_provider=controller.current_scheduled_rows,
+                    pending_events_provider=controller.drain_pending_wire_events,
+                    wake_event=controller.wake_multiplex,
+                )
+            finally:
+                cleanup_inference_stream_sessions(
+                    scheduler,
+                    stream_scope,
+                    tuple(row.session for row in controller.current_scheduled_rows()),
+                    stream_token=stream_token,
+                )
     finally:
-        cleanup_inference_stream_sessions(
-            scheduler,
-            stream_scope,
-            tuple(row.session for row in sessions),
-            stream_token=stream_token,
-        )
+        controller.detach()

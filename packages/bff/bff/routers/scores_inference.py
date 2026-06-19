@@ -201,3 +201,17 @@ def delete_scores_inference_global_pause(
         perspective,
         turn,
     )
+
+
+@router.post("/inference/recompute")
+def post_scores_inference_recompute(
+    game_id: int = Query(..., alias="gameId"),
+    turn: int = Query(..., ge=1),
+    perspective: int = Query(..., ge=0),
+):
+    """Clear host-turn inference persistence and reschedule all scoreboard rows."""
+    return get_core_client().recompute_scores_inference(
+        game_id,
+        perspective,
+        turn,
+    )

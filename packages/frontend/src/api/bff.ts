@@ -793,6 +793,19 @@ export async function resumeInferenceGlobally(
   return r.json()
 }
 
+export async function fetchScoresInferenceRecompute(
+  scope: AnalyticShellScope
+): Promise<InferenceGlobalPauseStatus> {
+  const path = '/bff/analytics/scores/inference/recompute'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
+  if (!r.ok) {
+    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+  }
+  return r.json()
+}
+
 export async function fetchScoresTableInferenceStream(
   scope: AnalyticShellScope,
   playerIds: number[],

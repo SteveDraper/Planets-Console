@@ -16,7 +16,6 @@ type HullCatalogMaskDialogProps = {
   scope: AnalyticShellScope
   playerId: number
   racePlayer: string
-  onSaved: () => void
 }
 
 function enabledHullIdsFromCatalog(
@@ -31,7 +30,6 @@ export function HullCatalogMaskDialog({
   scope,
   playerId,
   racePlayer,
-  onSaved,
 }: HullCatalogMaskDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
@@ -113,7 +111,6 @@ export function HullCatalogMaskDialog({
       const response = await resetInferenceHullCatalogMask(scope, playerId)
       setPayload(response)
       setDraftEnabled(new Set(enabledHullIdsFromCatalog(response.masterCatalog)))
-      onSaved()
       handleClose()
     } catch (resetError) {
       setError(errorDetailFromUnknown(resetError))
@@ -129,7 +126,6 @@ export function HullCatalogMaskDialog({
       const response = await putInferenceHullCatalogMask(scope, playerId, [...draftEnabled].sort())
       setPayload(response)
       setDraftEnabled(new Set(enabledHullIdsFromCatalog(response.masterCatalog)))
-      onSaved()
       handleClose()
     } catch (saveError) {
       setError(errorDetailFromUnknown(saveError))

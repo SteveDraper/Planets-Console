@@ -6,6 +6,7 @@ import os
 import threading
 import uuid
 from collections import deque
+from collections.abc import Callable
 
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
@@ -39,6 +40,8 @@ _TierJob = TierJob
 _Sentinel = object()
 _Job = TierJob | object
 
+OnRowCompleteCallback = Callable[[InferenceRowStreamSession, RowComplete], None]
+
 
 def _configured_worker_count() -> int:
     raw = os.environ.get("MILITARY_SCORE_INFERENCE_SCHEDULER_WORKERS")
@@ -50,7 +53,13 @@ def _configured_worker_count() -> int:
 class InferenceRowScheduler:
     """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
 
-    def __init__(self, worker_count: int = _DEFAULT_WORKER_COUNT) -> None:
+    def __init__(
+        self,
+        worker_count: int = _DEFAULT_WORKER_COUNT,
+        *,
+        on_row_complete: OnRowCompleteCallback | None = None,
+    ) -> None:
+        self._on_row_complete = on_row_complete
         self._work_queue: deque[TierJob] = deque()
         self._runs: dict[str, RowRun] = {}
         self._lock = threading.Lock()
@@ -360,9 +369,39 @@ class InferenceRowScheduler:
             )
         )
 
+    def _try_claim_run_for_finalize(self, session: InferenceRowStreamSession) -> bool:
+        with self._condition:
+            if session.cancel_token.is_cancelled():
+                return False
+            run = self._runs.pop(session.run_id, None)
+            if run is None:
+                return False
+            run.clear_held()
+            return True
+
     def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
+        if not self._try_claim_run_for_finalize(session):
+            return
+        if self._on_row_complete is not None:
+            self._on_row_complete(session, event)
         session.event_queue.put(event)
-        self.unregister_session(session.run_id)
+
+    def cancel_row_run(self, run_id: str) -> None:
+        """Cancel one row run and purge its queued tier jobs."""
+        with self._condition:
+            run = self._runs.get(run_id)
+            if run is not None:
+                run.session.cancel_token.cancel()
+            self._purge_queued_jobs_for_run_locked(run_id)
+            self._runs.pop(run_id, None)
+            self._condition.notify_all()
+
+    def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
+        with self._condition:
+            if self._active_scope == scope:
+                self._clear_global_pause_for_active_scope_locked(scope)
+                self._broadcast_global_pause_locked(paused=False)
+                self._condition.notify_all()
 
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
         run = self._runs.get(session.run_id)
@@ -379,24 +418,47 @@ class InferenceRowScheduler:
             ),
         )
         outcome = run_inference_tier_job(run, callbacks)
-        if outcome.next_ladder_state is not None:
-            run.ladder_state = outcome.next_ladder_state
-        if outcome.enqueue_continuation:
-            self._enqueue_continuation(session)
-            return
         if outcome.row_complete is not None:
             self._emit_row_complete(session, outcome.row_complete)
+            return
+        with self._condition:
+            if session.cancel_token.is_cancelled():
+                return
+            active_run = self._runs.get(session.run_id)
+            if active_run is None:
+                return
+            if outcome.next_ladder_state is not None:
+                active_run.ladder_state = outcome.next_ladder_state
+            if outcome.enqueue_continuation:
+                if self._globally_paused:
+                    active_run.hold_job(TierJob(session=session, is_continuation=True))
+                else:
+                    self._work_queue.append(TierJob(session=session, is_continuation=True))
+                self._condition.notify_all()
+
+
+def create_inference_row_scheduler(
+    *,
+    on_row_complete: OnRowCompleteCallback | None = None,
+) -> InferenceRowScheduler:
+    return InferenceRowScheduler(
+        worker_count=_configured_worker_count(),
+        on_row_complete=on_row_complete,
+    )
 
 
 _scheduler: InferenceRowScheduler | None = None
 _scheduler_lock = threading.Lock()
 
 
-def get_inference_row_scheduler() -> InferenceRowScheduler:
+def get_inference_row_scheduler(
+    *,
+    on_row_complete: OnRowCompleteCallback | None = None,
+) -> InferenceRowScheduler:
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
-            _scheduler = InferenceRowScheduler(worker_count=_configured_worker_count())
+            _scheduler = create_inference_row_scheduler(on_row_complete=on_row_complete)
         return _scheduler
 
 

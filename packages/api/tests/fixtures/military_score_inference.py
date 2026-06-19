@@ -1,6 +1,7 @@
 """Shared fixtures and helpers for military score inference tests."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,14 @@ def _observation(
 def sample_turn():
     with open(ASSETS_DIR / "turn_sample.json") as handle:
         return turn_info_from_json(json.load(handle))
+
+
+@pytest.fixture
+def first_turn(sample_turn):
+    return replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+    )
 
 
 @pytest.fixture
