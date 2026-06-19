@@ -378,24 +378,19 @@ def iter_scores_table_inference_events(
                 return
 
             admission = controller.resolve_row_admission(player_id)
-            if isinstance(admission, ImmediateRowAdmission):
-                for event in admission.events:
-                    yield tag_inference_stream_event(event, player_id=player_id)
-                continue
-            if isinstance(admission, CachedCompleteRowAdmission):
-                assert admission.event is not None
-                yield tag_inference_stream_event(admission.event, player_id=player_id)
-                continue
-
-            scheduled_row = controller.schedule_player_row(player_id)
-            if scheduled_row is None:
+            dispatch = controller.dispatch_row_admission(player_id, admission)
+            if dispatch.schedule_failed:
                 return
-            controller.register_scheduled_row(player_id, scheduled_row)
-            yield from drain_available_multiplex_events(
-                controller.current_scheduled_rows(),
-                tag_player_id=True,
-                finished_run_ids=controller.finished_run_ids,
-            )
+
+            yield from dispatch.wire_events
+
+            if dispatch.scheduled_row is not None:
+                controller.register_scheduled_row(player_id, dispatch.scheduled_row)
+                yield from drain_available_multiplex_events(
+                    controller.current_scheduled_rows(),
+                    tag_player_id=True,
+                    finished_run_ids=controller.finished_run_ids,
+                )
 
         if player_ids:
             try:

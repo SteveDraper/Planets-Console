@@ -26,6 +26,13 @@ from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
+@dataclass(frozen=True)
+class RowAdmissionDispatch:
+    wire_events: tuple[dict[str, object], ...] = ()
+    scheduled_row: ScheduledInferenceRow | None = None
+    schedule_failed: bool = False
+
+
 @dataclass
 class InferenceTableStreamController:
     scope: InferenceStreamScope
@@ -102,23 +109,40 @@ class InferenceTableStreamController:
             self.pending_wire_events = []
             return pending
 
-    def _register_admitted_schedule(self, player_id: int, admission: RowStreamAdmission) -> bool:
+    def dispatch_row_admission(
+        self,
+        player_id: int,
+        admission: RowStreamAdmission,
+    ) -> RowAdmissionDispatch:
         if isinstance(admission, ImmediateRowAdmission):
-            self.pending_wire_events.extend(
-                tag_inference_stream_event(event, player_id=player_id) for event in admission.events
+            return RowAdmissionDispatch(
+                wire_events=tuple(
+                    tag_inference_stream_event(event, player_id=player_id)
+                    for event in admission.events
+                ),
             )
-            return True
         if isinstance(admission, CachedCompleteRowAdmission):
             if admission.event is not None:
-                self.pending_wire_events.append(
-                    tag_inference_stream_event(admission.event, player_id=player_id)
+                return RowAdmissionDispatch(
+                    wire_events=(
+                        tag_inference_stream_event(admission.event, player_id=player_id),
+                    ),
                 )
-            return True
+            return RowAdmissionDispatch()
         scheduled = self.schedule_player_row(player_id)
         if scheduled is None:
+            return RowAdmissionDispatch(schedule_failed=True)
+        return RowAdmissionDispatch(scheduled_row=scheduled)
+
+    def _register_admitted_schedule(self, player_id: int, admission: RowStreamAdmission) -> bool:
+        dispatch = self.dispatch_row_admission(player_id, admission)
+        if dispatch.schedule_failed:
             return False
-        self.scheduled_rows[player_id] = scheduled
-        self.finished_run_ids.discard(scheduled.session.run_id)
+        if dispatch.wire_events:
+            self.pending_wire_events.extend(dispatch.wire_events)
+        if dispatch.scheduled_row is not None:
+            self.scheduled_rows[player_id] = dispatch.scheduled_row
+            self.finished_run_ids.discard(dispatch.scheduled_row.session.run_id)
         return True
 
     def _refresh_host_turn(self) -> None:
