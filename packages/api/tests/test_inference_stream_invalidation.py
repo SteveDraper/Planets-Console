@@ -19,10 +19,11 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_table_stream_controller import (
+    InferenceTableStreamController,
+)
 from api.analytics.military_score_inference.inference_table_stream_registry import (
-    ActiveInferenceTableStream,
-    _active_stream_for_scope,
-    attach_inference_table_stream,
+    controller_for_scope,
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.models import InferenceResult
@@ -97,51 +98,40 @@ def _attach_active_table_stream(
     sample_turn,
     scheduler: InferenceRowScheduler,
     player_ids: tuple[int, ...],
-) -> tuple[ActiveInferenceTableStream, dict[int, ScheduledInferenceRow], set[str], threading.Event]:
+) -> tuple[
+    InferenceTableStreamController,
+    dict[int, ScheduledInferenceRow],
+    set[str],
+    threading.Event,
+]:
     scope = _stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
-    scheduled_rows: dict[int, ScheduledInferenceRow] = {}
-    finished_run_ids: set[str] = set()
-    stream_lock = threading.Lock()
-    wake_multiplex = threading.Event()
+    controller = InferenceTableStreamController(
+        scope=scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=player_ids,
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+    )
 
-    def schedule_player_row(player_id: int) -> ScheduledInferenceRow | None:
-        if player_id not in player_ids:
-            return None
-        return _schedule_player_row(
+    for player_id in player_ids:
+        scheduled = _schedule_player_row(
             scheduler,
             sample_turn,
             player_id=player_id,
             stream_token=stream_token,
         )
+        controller.register_scheduled_row(player_id, scheduled)
 
-    def cancel_player_row(player_id: int) -> None:
-        row = scheduled_rows.get(player_id)
-        if row is not None:
-            scheduler.cancel_row_run(row.session.run_id)
-            return
-        for run_id, run in list(scheduler._runs.items()):
-            if run.session.player_id == player_id:
-                scheduler.cancel_row_run(run_id)
-                return
-
-    for player_id in player_ids:
-        scheduled_rows[player_id] = schedule_player_row(player_id)
-
-    active_stream = ActiveInferenceTableStream(
-        scope=scope,
-        stream_token=stream_token,
-        turn=sample_turn,
-        player_ids=player_ids,
-        scheduled_rows=scheduled_rows,
-        finished_run_ids=finished_run_ids,
-        schedule_row=schedule_player_row,
-        cancel_row=cancel_player_row,
-        wake_multiplex=wake_multiplex.set,
-        lock=stream_lock,
+    controller.attach()
+    return (
+        controller,
+        controller.scheduled_rows,
+        controller.finished_run_ids,
+        controller.wake_multiplex,
     )
-    attach_inference_table_stream(active_stream)
-    return active_stream, scheduled_rows, finished_run_ids, wake_multiplex
 
 
 def _run_ids_for_players(
@@ -392,7 +382,7 @@ def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integr
     )
     assert len(scheduler._runs) == 0
     assert not stream_closed.is_set()
-    assert _active_stream_for_scope(scope) is not None
+    assert controller_for_scope(scope) is not None
 
     target_player_id, other_player_id = player_ids
     invalidation.on_hull_mask_changed(628580, 1, turn_number, target_player_id)
@@ -470,7 +460,7 @@ def test_all_cached_replay_keeps_stream_open_for_recompute_cases_1_and_2_integra
         lambda: sum(1 for event in events if event.get("type") == "complete") >= len(player_ids)
     )
     assert not stream_closed.is_set()
-    assert _active_stream_for_scope(scope) is not None
+    assert controller_for_scope(scope) is not None
 
     invalidation.recompute_host_turn(628580, 1, turn_number)
 

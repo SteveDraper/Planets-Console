@@ -1,100 +1,55 @@
-"""Registry for the active scores inference table stream (in-place reschedule)."""
+"""Registry for active scores inference table streams (in-place reschedule)."""
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
-    from api.analytics.military_score_inference.inference_stream_rows import ScheduledInferenceRow
-
-
-class TableStreamRowScheduler(Protocol):
-    def schedule_row(self, player_id: int) -> ScheduledInferenceRow | None: ...
-
-
-@dataclass
-class ActiveInferenceTableStream:
-    scope: InferenceStreamScope
-    stream_token: str
-    turn: TurnInfo
-    player_ids: tuple[int, ...]
-    scheduled_rows: dict[int, ScheduledInferenceRow]
-    finished_run_ids: set[str]
-    schedule_row: Callable[[int], ScheduledInferenceRow | None]
-    cancel_row: Callable[[int], None]
-    wake_multiplex: Callable[[], None]
-    lock: threading.Lock = field(default_factory=threading.Lock)
-
+    from api.analytics.military_score_inference.inference_table_stream_controller import (
+        InferenceTableStreamController,
+    )
 
 _registry_lock = threading.Lock()
-_active_stream: ActiveInferenceTableStream | None = None
+_active_controllers: dict[InferenceStreamScope, InferenceTableStreamController] = {}
 
 
-def attach_inference_table_stream(stream: ActiveInferenceTableStream) -> None:
-    global _active_stream
+def attach_inference_table_stream(controller: InferenceTableStreamController) -> None:
     with _registry_lock:
-        _active_stream = stream
+        _active_controllers[controller.scope] = controller
 
 
 def detach_inference_table_stream(stream_token: str) -> None:
-    global _active_stream
     with _registry_lock:
-        if _active_stream is not None and _active_stream.stream_token == stream_token:
-            _active_stream = None
+        for scope, controller in list(_active_controllers.items()):
+            if controller.stream_token == stream_token:
+                del _active_controllers[scope]
+                return
 
 
-def _active_stream_for_scope(scope: InferenceStreamScope) -> ActiveInferenceTableStream | None:
+def controller_for_scope(scope: InferenceStreamScope) -> InferenceTableStreamController | None:
     with _registry_lock:
-        if _active_stream is None or _active_stream.scope != scope:
-            return None
-        return _active_stream
+        return _active_controllers.get(scope)
 
 
 def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> bool:
     """Cancel and reschedule one row on the open table stream for ``scope``."""
-    stream = _active_stream_for_scope(scope)
-    if stream is None:
+    controller = controller_for_scope(scope)
+    if controller is None:
         return False
-    with stream.lock:
-        old_row = stream.scheduled_rows.get(player_id)
-        if old_row is not None:
-            stream.cancel_row(player_id)
-            stream.finished_run_ids.discard(old_row.session.run_id)
-        stream.scheduled_rows.pop(player_id, None)
-        scheduled = stream.schedule_row(player_id)
-        if scheduled is None:
-            return False
-        stream.scheduled_rows[player_id] = scheduled
-        stream.finished_run_ids.discard(scheduled.session.run_id)
-    stream.wake_multiplex()
-    return True
+    return controller.reschedule_row(player_id)
 
 
 def reschedule_all_inference_rows(scope: InferenceStreamScope) -> bool:
     """Cancel and reschedule every row on the open table stream for ``scope``."""
-    stream = _active_stream_for_scope(scope)
-    if stream is None:
+    controller = controller_for_scope(scope)
+    if controller is None:
         return False
-    with stream.lock:
-        for player_id in stream.player_ids:
-            stream.cancel_row(player_id)
-        stream.finished_run_ids.clear()
-        stream.scheduled_rows.clear()
-        for player_id in stream.player_ids:
-            scheduled = stream.schedule_row(player_id)
-            if scheduled is not None:
-                stream.scheduled_rows[player_id] = scheduled
-    stream.wake_multiplex()
-    return True
+    return controller.reschedule_all_rows()
 
 
 def reset_inference_table_stream_registry_for_tests() -> None:
-    global _active_stream
     with _registry_lock:
-        _active_stream = None
+        _active_controllers.clear()
