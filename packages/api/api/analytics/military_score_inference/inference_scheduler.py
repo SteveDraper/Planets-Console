@@ -393,12 +393,17 @@ class InferenceRowScheduler:
 
         return reschedule_inference_row(scope, player_id)
 
-    def reschedule_all_rows(self, scope: InferenceStreamScope) -> bool:
+    def reschedule_all_rows(
+        self,
+        scope: InferenceStreamScope,
+        *,
+        force_schedule: bool = False,
+    ) -> bool:
         from api.analytics.military_score_inference.inference_table_stream_registry import (
             reschedule_all_inference_rows,
         )
 
-        return reschedule_all_inference_rows(scope)
+        return reschedule_all_inference_rows(scope, force_schedule=force_schedule)
 
     def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
         with self._condition:

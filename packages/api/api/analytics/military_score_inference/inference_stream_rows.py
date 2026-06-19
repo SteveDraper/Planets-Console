@@ -6,6 +6,7 @@ import queue
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from typing import Literal
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -54,6 +55,60 @@ def row_domain_event_to_wire_events(
 class ScheduledInferenceRow:
     player_id: int
     session: InferenceRowStreamSession
+
+
+@dataclass(frozen=True)
+class ImmediateRowAdmission:
+    kind: Literal["immediate"] = "immediate"
+    events: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class CachedCompleteRowAdmission:
+    kind: Literal["cached"] = "cached"
+    event: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class ScheduleRowAdmission:
+    kind: Literal["schedule"] = "schedule"
+
+
+RowStreamAdmission = ImmediateRowAdmission | CachedCompleteRowAdmission | ScheduleRowAdmission
+
+
+def resolve_row_stream_admission(
+    turn: TurnInfo,
+    player_id: int,
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    persistence: InferenceRowPersistenceService | None = None,
+    force_schedule: bool = False,
+) -> RowStreamAdmission:
+    """Decide whether a table-stream row is immediate, cached-complete, or tier-scheduled."""
+    if not force_schedule:
+        immediate = immediate_row_inference_events(
+            turn,
+            player_id,
+            load_scoreboard_turn=load_scoreboard_turn,
+        )
+        if immediate is not None:
+            return ImmediateRowAdmission(events=immediate)
+
+        if persistence is not None:
+            cached = persistence.wire_complete_for_row(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+            )
+            if cached is not None:
+                return CachedCompleteRowAdmission(event=cached)
+
+    return ScheduleRowAdmission()
 
 
 def tag_inference_stream_event(
@@ -303,6 +358,7 @@ def iter_scores_table_inference_events(
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
         resolve_mask_for_player=resolve_mask_for_player,
+        persistence=persistence,
     )
     controller.attach()
 
@@ -311,26 +367,15 @@ def iter_scores_table_inference_events(
             if not scheduler.owns_table_stream(stream_token):
                 return
 
-            immediate = immediate_row_inference_events(
-                turn,
-                player_id,
-                load_scoreboard_turn=load_scoreboard_turn,
-            )
-            if immediate is not None:
-                for event in immediate:
+            admission = controller.resolve_row_admission(player_id)
+            if isinstance(admission, ImmediateRowAdmission):
+                for event in admission.events:
                     yield tag_inference_stream_event(event, player_id=player_id)
                 continue
-
-            if persistence is not None:
-                cached = persistence.wire_complete_for_row(
-                    game_id,
-                    perspective,
-                    turn_number,
-                    player_id,
-                )
-                if cached is not None:
-                    yield tag_inference_stream_event(cached, player_id=player_id)
-                    continue
+            if isinstance(admission, CachedCompleteRowAdmission):
+                assert admission.event is not None
+                yield tag_inference_stream_event(admission.event, player_id=player_id)
+                continue
 
             scheduled_row = controller.schedule_player_row(player_id)
             if scheduled_row is None:

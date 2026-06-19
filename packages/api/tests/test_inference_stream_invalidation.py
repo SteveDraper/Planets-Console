@@ -470,3 +470,92 @@ def test_all_cached_replay_keeps_stream_open_for_recompute_cases_1_and_2_integra
 
     scheduler.begin_scope(scope)
     thread.join(timeout=2.0)
+
+
+def test_turn_invalidation_reschedule_skips_immediate_path_players(
+    first_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Turn invalidation full reschedule must not enqueue tier jobs for immediate-path rows."""
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_ids = tuple(row.ownerid for row in first_turn.scores[:2])
+    turn_number = first_turn.settings.turn
+    persistence = InferenceRowPersistenceService(memory_backend)
+    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+
+    stream = iter_scores_table_inference_events(
+        first_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+    )
+    events: list[dict[str, object]] = []
+
+    def consume_stream() -> None:
+        try:
+            for event in stream:
+                events.append(event)
+        finally:
+            stream.close()
+
+    thread = threading.Thread(target=consume_stream, daemon=True)
+    thread.start()
+    _wait_until(
+        lambda: sum(1 for event in events if event.get("type") == "complete") >= len(player_ids)
+    )
+    assert len(_run_ids_for_players(scheduler, player_ids)) == 0
+
+    _seed_cached_rows(persistence, turn_number=turn_number, player_ids=player_ids)
+    invalidation.on_turn_stored(628580, 1, turn_number)
+
+    _wait_until(lambda: controller_for_scope(_stream_scope(first_turn)) is not None)
+    assert len(_run_ids_for_players(scheduler, player_ids)) == 0
+
+    scheduler.begin_scope(_stream_scope(first_turn))
+    thread.join(timeout=2.0)
+
+
+def test_recompute_force_schedules_immediate_path_players(
+    first_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Explicit recompute must enqueue tier jobs even for immediate-path rows."""
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_ids = tuple(row.ownerid for row in first_turn.scores[:2])
+    turn_number = first_turn.settings.turn
+
+    stream = iter_scores_table_inference_events(
+        first_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+    )
+    events: list[dict[str, object]] = []
+
+    def consume_stream() -> None:
+        try:
+            for event in stream:
+                events.append(event)
+        finally:
+            stream.close()
+
+    thread = threading.Thread(target=consume_stream, daemon=True)
+    thread.start()
+    _wait_until(
+        lambda: sum(1 for event in events if event.get("type") == "complete") >= len(player_ids)
+    )
+    assert len(_run_ids_for_players(scheduler, player_ids)) == 0
+
+    persistence = InferenceRowPersistenceService(memory_backend)
+    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    invalidation.recompute_host_turn(628580, 1, turn_number)
+
+    _wait_until(lambda: len(_run_ids_for_players(scheduler, player_ids)) == len(player_ids))
+
+    scheduler.begin_scope(_stream_scope(first_turn))
+    thread.join(timeout=2.0)

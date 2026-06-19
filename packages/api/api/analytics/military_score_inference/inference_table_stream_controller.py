@@ -9,7 +9,10 @@ from dataclasses import dataclass, field
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
+    RowStreamAdmission,
     ScheduledInferenceRow,
+    ScheduleRowAdmission,
+    resolve_row_stream_admission,
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -18,6 +21,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     detach_inference_table_stream,
 )
 from api.models.game import TurnInfo
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
 @dataclass
@@ -31,10 +35,28 @@ class InferenceTableStreamController:
     perspective: int
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None
+    persistence: InferenceRowPersistenceService | None = None
     scheduled_rows: dict[int, ScheduledInferenceRow] = field(default_factory=dict)
     finished_run_ids: set[str] = field(default_factory=set)
     stream_lock: threading.Lock = field(default_factory=threading.Lock)
     wake_multiplex: threading.Event = field(default_factory=threading.Event)
+
+    def resolve_row_admission(
+        self,
+        player_id: int,
+        *,
+        force_schedule: bool = False,
+    ) -> RowStreamAdmission:
+        return resolve_row_stream_admission(
+            self.turn,
+            player_id,
+            game_id=self.game_id,
+            perspective=self.perspective,
+            turn_number=self.turn.settings.turn,
+            load_scoreboard_turn=self.load_scoreboard_turn,
+            persistence=self.persistence,
+            force_schedule=force_schedule,
+        )
 
     def schedule_player_row(self, player_id: int) -> ScheduledInferenceRow | None:
         score = next((row for row in self.turn.scores if row.ownerid == player_id), None)
@@ -70,6 +92,16 @@ class InferenceTableStreamController:
         with self.stream_lock:
             self.scheduled_rows[player_id] = row
 
+    def _register_admitted_schedule(self, player_id: int, admission: RowStreamAdmission) -> bool:
+        if not isinstance(admission, ScheduleRowAdmission):
+            return True
+        scheduled = self.schedule_player_row(player_id)
+        if scheduled is None:
+            return False
+        self.scheduled_rows[player_id] = scheduled
+        self.finished_run_ids.discard(scheduled.session.run_id)
+        return True
+
     def reschedule_row(self, player_id: int) -> bool:
         with self.stream_lock:
             old_row = self.scheduled_rows.get(player_id)
@@ -77,24 +109,25 @@ class InferenceTableStreamController:
                 self.cancel_player_row(player_id)
                 self.finished_run_ids.discard(old_row.session.run_id)
             self.scheduled_rows.pop(player_id, None)
-            scheduled = self.schedule_player_row(player_id)
-            if scheduled is None:
+            admission = self.resolve_row_admission(player_id)
+            if not self._register_admitted_schedule(player_id, admission):
                 return False
-            self.scheduled_rows[player_id] = scheduled
-            self.finished_run_ids.discard(scheduled.session.run_id)
         self.wake_multiplex.set()
         return True
 
-    def reschedule_all_rows(self) -> bool:
+    def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         with self.stream_lock:
             for player_id in self.player_ids:
                 self.cancel_player_row(player_id)
             self.finished_run_ids.clear()
             self.scheduled_rows.clear()
             for player_id in self.player_ids:
-                scheduled = self.schedule_player_row(player_id)
-                if scheduled is not None:
-                    self.scheduled_rows[player_id] = scheduled
+                admission = self.resolve_row_admission(
+                    player_id,
+                    force_schedule=force_schedule,
+                )
+                if not self._register_admitted_schedule(player_id, admission):
+                    return False
         self.wake_multiplex.set()
         return True
 

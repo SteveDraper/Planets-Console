@@ -42,12 +42,16 @@ def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> boo
     return controller.reschedule_row(player_id)
 
 
-def reschedule_all_inference_rows(scope: InferenceStreamScope) -> bool:
+def reschedule_all_inference_rows(
+    scope: InferenceStreamScope,
+    *,
+    force_schedule: bool = False,
+) -> bool:
     """Cancel and reschedule every row on the open table stream for ``scope``."""
     controller = controller_for_scope(scope)
     if controller is None:
         return False
-    return controller.reschedule_all_rows()
+    return controller.reschedule_all_rows(force_schedule=force_schedule)
 
 
 def reset_inference_table_stream_registry_for_tests() -> None:
