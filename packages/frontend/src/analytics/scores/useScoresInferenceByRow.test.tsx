@@ -2,7 +2,86 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { AnalyticShellScope, TableDataResponse } from '../../api/bff'
 import * as bff from '../../api/bff'
+import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { useScoresInferenceByRow } from './useScoresInferenceByRow'
+
+type StreamHandlers = Parameters<typeof bff.fetchScoresTableInferenceStream>[2]
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function longLivedTableStream(
+  emitPhases: Array<(handlers: StreamHandlers) => void | Promise<void>>
+): () => number {
+  let streamCallCount = 0
+
+  vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+    async (_scope, _playerIds, handlers) => {
+      streamCallCount += 1
+      for (const emitPhase of emitPhases) {
+        await emitPhase(handlers)
+        await delay(0)
+      }
+      await new Promise<void>((resolve) => {
+        handlers.signal?.addEventListener('abort', () => {
+          resolve()
+        })
+      })
+    }
+  )
+
+  return () => streamCallCount
+}
+
+function emitComplete(
+  onEvent: StreamHandlers['onEvent'],
+  playerId: number,
+  summary: string
+): void {
+  onEvent({
+    type: 'complete',
+    playerId,
+    status: 'exact',
+    summary,
+    solutionCount: 1,
+    isComplete: true,
+  })
+}
+
+function emitSolution(onEvent: StreamHandlers['onEvent'], playerId: number): void {
+  onEvent({
+    type: 'solution',
+    playerId,
+    solutions: [
+      {
+        objectiveValue: 10,
+        actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+      },
+    ],
+  })
+}
+
+function emitProgress(
+  onEvent: StreamHandlers['onEvent'],
+  playerId: number,
+  policyStepId = 'tier_1'
+): void {
+  onEvent({
+    type: 'progress',
+    playerId,
+    policyStepId,
+  })
+}
+
+function emitGlobalPause(
+  onEvent: StreamHandlers['onEvent'],
+  paused: boolean
+): void {
+  onEvent({ type: 'globalPause', paused } satisfies InferenceStreamEvent)
+}
 
 const scope: AnalyticShellScope = {
   gameId: '628580',
@@ -278,49 +357,146 @@ describe('useScoresInferenceByRow', () => {
     expect(streamCallCount).toBe(1)
   })
 
-  it('mask save does not restart the table stream; only the edited row updates via stream events', async () => {
-    let streamCallCount = 0
+  describe('in-place table stream user scenarios', () => {
+    it('UI refresh after all scores completed: recompute updates all rows on the same stream', async () => {
+      const getStreamCallCount = longLivedTableStream([
+        ({ onEvent }) => {
+          emitComplete(onEvent, 8, 'Player 8 before recompute')
+          emitComplete(onEvent, 9, 'Player 9 before recompute')
+        },
+        async ({ onEvent }) => {
+          emitProgress(onEvent, 8)
+          emitProgress(onEvent, 9)
+          emitComplete(onEvent, 8, 'Player 8 after recompute')
+          emitComplete(onEvent, 9, 'Player 9 after recompute')
+        },
+      ])
 
-    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
-      async (_scope, _playerIds, { onEvent }) => {
-        streamCallCount += 1
-        onEvent({
-          type: 'complete',
-          playerId: 8,
-          status: 'exact',
-          summary: 'Player 8 before mask save',
-          solutionCount: 1,
-          isComplete: true,
-        })
-        onEvent({
-          type: 'complete',
-          playerId: 9,
-          status: 'exact',
-          summary: 'Player 9 unchanged',
-          solutionCount: 1,
-          isComplete: true,
-        })
-        onEvent({
-          type: 'progress',
-          playerId: 8,
-          policyStepId: 'tier_1',
-        })
-        onEvent({
-          type: 'complete',
-          playerId: 8,
-          status: 'exact',
-          summary: 'Player 8 after mask save',
-          solutionCount: 1,
-          isComplete: true,
-        })
-      }
-    )
+      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
 
-    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after recompute')
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 after recompute')
+      })
+      expect(getStreamCallCount()).toBe(1)
+    })
 
-    await waitFor(() => {
-      expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after mask save')
-      expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 unchanged')
+    it('UI refresh while some scores still computing: recompute updates via same stream', async () => {
+      const getStreamCallCount = longLivedTableStream([
+        ({ onEvent }) => {
+          emitComplete(onEvent, 8, 'Player 8 before recompute')
+          emitSolution(onEvent, 9)
+        },
+        async ({ onEvent }) => {
+          emitProgress(onEvent, 8)
+          emitComplete(onEvent, 8, 'Player 8 after recompute')
+          emitProgress(onEvent, 9, 'tier_2')
+        },
+      ])
+
+      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after recompute')
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Searching (tier 2)')
+        expect(result.current.inferenceByRow?.[1]?.isComplete).toBe(false)
+      })
+      expect(getStreamCallCount()).toBe(1)
+    })
+
+    it('mask change on player still computing: only the in-flight row resets on the same stream', async () => {
+      const getStreamCallCount = longLivedTableStream([
+        ({ onEvent }) => {
+          emitSolution(onEvent, 8)
+          emitComplete(onEvent, 9, 'Player 9 unchanged')
+        },
+        async ({ onEvent }) => {
+          emitProgress(onEvent, 8)
+          emitComplete(onEvent, 8, 'Player 8 after mask save')
+        },
+      ])
+
+      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after mask save')
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 unchanged')
+      })
+      expect(getStreamCallCount()).toBe(1)
+    })
+
+    it('mask change after score inference completed: only the edited row resets on the same stream', async () => {
+      const getStreamCallCount = longLivedTableStream([
+        ({ onEvent }) => {
+          emitComplete(onEvent, 8, 'Player 8 before mask save')
+          emitComplete(onEvent, 9, 'Player 9 unchanged')
+        },
+        async ({ onEvent }) => {
+          emitProgress(onEvent, 8)
+          emitComplete(onEvent, 8, 'Player 8 after mask save')
+        },
+      ])
+
+      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after mask save')
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 unchanged')
+      })
+      expect(getStreamCallCount()).toBe(1)
+    })
+
+    it('UI pause and resume: integrated row state on the table stream', async () => {
+      let streamCallCount = 0
+      let releasePausePhase: (() => void) | undefined
+      let releaseResumePhase: (() => void) | undefined
+      const pausePhaseReady = new Promise<void>((resolve) => {
+        releasePausePhase = resolve
+      })
+      const resumePhaseReady = new Promise<void>((resolve) => {
+        releaseResumePhase = resolve
+      })
+
+      vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+        async (_scope, _playerIds, handlers) => {
+          streamCallCount += 1
+          emitComplete(handlers.onEvent, 9, 'Player 9 complete')
+
+          await pausePhaseReady
+          emitGlobalPause(handlers.onEvent, true)
+
+          await resumePhaseReady
+          emitGlobalPause(handlers.onEvent, false)
+
+          await new Promise<void>((resolve) => {
+            handlers.signal?.addEventListener('abort', () => {
+              resolve()
+            })
+          })
+        }
+      )
+
+      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')
+        expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('success')
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 complete')
+      })
+
+      releasePausePhase!()
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('paused')
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Build inference paused')
+        expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('success')
+      })
+
+      releaseResumePhase!()
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Build inference in progress')
+        expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('success')
+      })
       expect(streamCallCount).toBe(1)
     })
   })
