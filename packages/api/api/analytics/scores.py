@@ -16,6 +16,7 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
 def _score_row(
@@ -110,6 +111,7 @@ def iter_scores_table_inference_stream(
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
+    persistence: InferenceRowPersistenceService | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for all scoreboard rows on one stream."""
     yield from iter_scores_table_inference_events(
@@ -119,6 +121,7 @@ def iter_scores_table_inference_stream(
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
         resolve_mask_for_player=resolve_mask_for_player,
+        persistence=persistence,
     )
 
 

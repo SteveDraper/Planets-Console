@@ -7,6 +7,8 @@ from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError
 from api.models.game import TurnInfo
 from api.services.inference_hull_catalog_service import InferenceHullCatalogService
+from api.services.inference_invalidation_service import InferenceInvalidationService
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
 from api.transport.connections_options import FlareConnectionMode
@@ -21,16 +23,26 @@ class TurnAnalyticService:
         hull_catalog_masks: InferenceHullCatalogService | None = None,
         *,
         storage: StorageBackend | None = None,
+        inference_persistence: InferenceRowPersistenceService | None = None,
+        inference_invalidation: InferenceInvalidationService | None = None,
     ) -> None:
         self._turns = turns
+        if storage is None:
+            from api.storage import get_storage
+
+            storage = get_storage()
         if hull_catalog_masks is not None:
             self._hull_catalog_masks = hull_catalog_masks
         else:
-            if storage is None:
-                from api.storage import get_storage
-
-                storage = get_storage()
             self._hull_catalog_masks = InferenceHullCatalogService(storage, turns)
+        if inference_persistence is not None:
+            self._inference_persistence = inference_persistence
+        else:
+            self._inference_persistence = InferenceRowPersistenceService(storage)
+        if inference_invalidation is not None:
+            self._inference_invalidation = inference_invalidation
+        else:
+            self._inference_invalidation = InferenceInvalidationService(self._inference_persistence)
 
     def _load_scoreboard_turn(
         self,
@@ -125,6 +137,7 @@ class TurnAnalyticService:
             perspective=perspective,
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
             resolve_mask_for_player=resolve_mask_for_player,
+            persistence=self._inference_persistence,
         )
 
     def _inference_scheduler_scope(
@@ -208,13 +221,20 @@ class TurnAnalyticService:
         player_id: int,
         enabled_hull_ids: list[int],
     ) -> dict[str, object]:
-        return self._hull_catalog_masks.put_user_mask(
+        payload = self._hull_catalog_masks.put_user_mask(
             game_id,
             perspective,
             turn_number,
             player_id,
             enabled_hull_ids,
         )
+        self._inference_invalidation.on_hull_mask_changed(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
+        return payload
 
     def reset_inference_hull_catalog_mask(
         self,
@@ -223,9 +243,34 @@ class TurnAnalyticService:
         turn_number: int,
         player_id: int,
     ) -> dict[str, object]:
-        return self._hull_catalog_masks.reset_user_mask(
+        payload = self._hull_catalog_masks.reset_user_mask(
             game_id,
             perspective,
             turn_number,
             player_id,
         )
+        self._inference_invalidation.on_hull_mask_changed(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
+        return payload
+
+    def recompute_scores_inference(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict[str, object]:
+        self._inference_invalidation.recompute_host_turn(
+            game_id,
+            perspective,
+            turn_number,
+        )
+        scope, scheduler = self._inference_scheduler_scope(
+            game_id,
+            perspective,
+            turn_number,
+        )
+        return scheduler.global_pause_status(scope)

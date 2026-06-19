@@ -100,6 +100,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/scores/inference/recompute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Scores Inference Recompute
+         * @description Clear host-turn inference persistence and reschedule all scoreboard rows.
+         */
+        post: operations["post_scores_inference_recompute_analytics_scores_inference_recompute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics": {
         parameters: {
             query?: never;
@@ -452,6 +472,39 @@ export interface operations {
         };
     };
     delete_scores_inference_global_pause_analytics_scores_inference_global_pause_delete: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_scores_inference_recompute_analytics_scores_inference_recompute_post: {
         parameters: {
             query: {
                 gameId: number;

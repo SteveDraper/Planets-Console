@@ -6,6 +6,7 @@ import type {
   ScoresTableWithInferenceData,
 } from '../../api/bff'
 import { GlobalInferencePauseControl } from './GlobalInferencePauseControl'
+import { InferenceRecomputeControl } from './InferenceRecomputeControl'
 import { HullCatalogMaskDialog } from './HullCatalogMaskDialog'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
@@ -25,7 +26,6 @@ import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
   analyticScope: AnalyticShellScope
-  onHullCatalogSaved?: () => void
   isGloballyPaused?: boolean
   globalInferencePause?: UseGlobalInferencePauseResult
 }
@@ -123,7 +123,6 @@ function InferenceStatusCell({
 export function ScoresTableView({
   data,
   analyticScope,
-  onHullCatalogSaved,
   isGloballyPaused = false,
   globalInferencePause,
 }: ScoresTableViewProps) {
@@ -162,6 +161,7 @@ export function ScoresTableView({
                     <span className="inline-flex items-center gap-1.5">
                       <span>{column}</span>
                       <GlobalInferencePauseControl globalInferencePause={globalInferencePause} />
+                      <InferenceRecomputeControl scope={analyticScope} />
                     </span>
                   ) : (
                     column
@@ -211,9 +211,6 @@ export function ScoresTableView({
           scope={analyticScope}
           playerId={hullCatalogPlayerId}
           racePlayer={hullCatalogRacePlayer}
-          onSaved={() => {
-            onHullCatalogSaved?.()
-          }}
         />
       ) : null}
     </>

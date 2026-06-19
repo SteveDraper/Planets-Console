@@ -278,31 +278,32 @@ describe('useScoresInferenceByRow', () => {
     expect(streamCallCount).toBe(1)
   })
 
-  it('refreshInference restarts the table stream and applies new row results', async () => {
+  it('mask save does not restart the table stream; only the edited row updates via stream events', async () => {
     let streamCallCount = 0
-    let releaseSecondStream: (() => void) | null = null
 
     vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
-      async (_scope, _playerIds, { signal, onEvent }) => {
+      async (_scope, _playerIds, { onEvent }) => {
         streamCallCount += 1
-        if (streamCallCount === 1) {
-          onEvent({
-            type: 'complete',
-            playerId: 8,
-            status: 'exact',
-            summary: 'Player 8 before mask save',
-            solutionCount: 1,
-            isComplete: true,
-          })
-          await new Promise<void>((resolve) => {
-            signal?.addEventListener('abort', () => {
-              resolve()
-            })
-          })
-          return
-        }
-        await new Promise<void>((resolve) => {
-          releaseSecondStream = resolve
+        onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'Player 8 before mask save',
+          solutionCount: 1,
+          isComplete: true,
+        })
+        onEvent({
+          type: 'complete',
+          playerId: 9,
+          status: 'exact',
+          summary: 'Player 9 unchanged',
+          solutionCount: 1,
+          isComplete: true,
+        })
+        onEvent({
+          type: 'progress',
+          playerId: 8,
+          policyStepId: 'tier_1',
         })
         onEvent({
           type: 'complete',
@@ -312,38 +313,15 @@ describe('useScoresInferenceByRow', () => {
           solutionCount: 1,
           isComplete: true,
         })
-        onEvent({
-          type: 'complete',
-          playerId: 9,
-          status: 'exact',
-          summary: 'Player 9 after mask save',
-          solutionCount: 1,
-          isComplete: true,
-        })
       }
     )
 
     const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
 
     await waitFor(() => {
-      expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 before mask save')
-    })
-
-    result.current.refreshInference()
-
-    await waitFor(() => {
-      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')
-      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('pending')
-      expect(streamCallCount).toBe(2)
-    })
-
-    releaseSecondStream!()
-
-    await waitFor(() => {
       expect(result.current.inferenceByRow?.[0]?.summary).toBe('Player 8 after mask save')
-      expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 after mask save')
-      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('success')
-      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('success')
+      expect(result.current.inferenceByRow?.[1]?.summary).toBe('Player 9 unchanged')
+      expect(streamCallCount).toBe(1)
     })
   })
 })

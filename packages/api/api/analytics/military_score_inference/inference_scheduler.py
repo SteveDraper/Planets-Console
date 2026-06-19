@@ -6,6 +6,7 @@ import os
 import threading
 import uuid
 from collections import deque
+from collections.abc import Callable
 
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
@@ -38,6 +39,15 @@ _TierJob = TierJob
 
 _Sentinel = object()
 _Job = TierJob | object
+
+_row_complete_listener: Callable[[InferenceRowStreamSession, RowComplete], None] | None = None
+
+
+def set_row_complete_listener(
+    listener: Callable[[InferenceRowStreamSession, RowComplete], None] | None,
+) -> None:
+    global _row_complete_listener
+    _row_complete_listener = listener
 
 
 def _configured_worker_count() -> int:
@@ -361,8 +371,41 @@ class InferenceRowScheduler:
         )
 
     def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
+        if _row_complete_listener is not None:
+            _row_complete_listener(session, event)
         session.event_queue.put(event)
         self.unregister_session(session.run_id)
+
+    def cancel_row_run(self, run_id: str) -> None:
+        """Cancel one row run and purge its queued tier jobs."""
+        with self._condition:
+            run = self._runs.get(run_id)
+            if run is not None:
+                run.session.cancel_token.cancel()
+            self._purge_queued_jobs_for_run_locked(run_id)
+            self._runs.pop(run_id, None)
+            self._condition.notify_all()
+
+    def reschedule_row(self, scope: InferenceStreamScope, player_id: int) -> bool:
+        from api.analytics.military_score_inference.inference_table_stream_registry import (
+            reschedule_inference_row,
+        )
+
+        return reschedule_inference_row(scope, player_id)
+
+    def reschedule_all_rows(self, scope: InferenceStreamScope) -> bool:
+        from api.analytics.military_score_inference.inference_table_stream_registry import (
+            reschedule_all_inference_rows,
+        )
+
+        return reschedule_all_inference_rows(scope)
+
+    def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
+        with self._condition:
+            if self._active_scope == scope:
+                self._clear_global_pause_for_active_scope_locked(scope)
+                self._broadcast_global_pause_locked(paused=False)
+                self._condition.notify_all()
 
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
         run = self._runs.get(session.run_id)

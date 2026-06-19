@@ -15,6 +15,7 @@ BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "analytics", "*"),
     ("games", "*", "*", "analytics", "*"),
     ("games", "*", "*", "turns", "*"),
+    ("games", "*", "*", "turns", "*", "analytics", "*"),
     ("credentials", "accounts", "*"),
 )
 

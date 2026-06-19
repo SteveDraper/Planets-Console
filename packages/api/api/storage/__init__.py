@@ -51,3 +51,16 @@ def clear_backend_cache() -> None:
     """Clear the cached backend (for tests after config change)."""
     global _backend_cache
     _backend_cache = None
+    from api.analytics.military_score_inference.inference_scheduler import (
+        reset_inference_row_scheduler_for_tests,
+        set_row_complete_listener,
+    )
+    from api.analytics.military_score_inference.inference_table_stream_registry import (
+        reset_inference_table_stream_registry_for_tests,
+    )
+    from api.services.deps import clear_service_stack_cache
+
+    clear_service_stack_cache()
+    reset_inference_row_scheduler_for_tests()
+    reset_inference_table_stream_registry_for_tests()
+    set_row_complete_listener(None)

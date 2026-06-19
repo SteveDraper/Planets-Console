@@ -21,7 +21,6 @@ export type UseScoresInferenceByRowOptions = {
 
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
-  refreshInference: () => void
 }
 
 export function useScoresInferenceByRow(
@@ -32,10 +31,6 @@ export function useScoresInferenceByRow(
 ): UseScoresInferenceByRowResult {
   const { onGlobalPauseChange } = options
   const inferenceByRowStubs = tableData?.inferenceByRow
-  const [refreshToken, setRefreshToken] = useState(0)
-  const refreshInference = useCallback(() => {
-    setRefreshToken((value) => value + 1)
-  }, [])
   const playerIdsKey = useMemo(() => {
     if (!enabled || inferenceByRowStubs == null) {
       return ''
@@ -47,9 +42,7 @@ export function useScoresInferenceByRow(
   }, [enabled, inferenceByRowStubs])
   const scopeKey = scope != null ? stableAnalyticScopeKey(scope) : null
   const connectionKey =
-    enabled && scopeKey != null && playerIdsKey.length > 0
-      ? `${scopeKey}:${playerIdsKey}:${refreshToken}`
-      : null
+    enabled && scopeKey != null && playerIdsKey.length > 0 ? `${scopeKey}:${playerIdsKey}` : null
 
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<
     Map<number, ScoresInferenceRowDetail>
@@ -203,7 +196,7 @@ export function useScoresInferenceByRow(
   }, [connectionKey, playerIdsKey])
 
   if (!enabled || tableData?.inferenceByRow == null) {
-    return { inferenceByRow: undefined, refreshInference }
+    return { inferenceByRow: undefined }
   }
 
   const inferenceByRow = tableData.inferenceByRow.map((stub, rowIndex) => {
@@ -214,5 +207,5 @@ export function useScoresInferenceByRow(
     return detailsByPlayerId.get(playerId) ?? pendingDetail(playerId)
   })
 
-  return { inferenceByRow, refreshInference }
+  return { inferenceByRow }
 }
