@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,9 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.models.game import TurnInfo
 from api.serialization.inference_row_persistence import PersistedInferenceRow
+from api.serialization.turn import turn_info_from_json, turn_info_to_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -156,6 +159,59 @@ def _wait_until(
             return
         time.sleep(0.01)
     raise AssertionError("condition not met before timeout")
+
+
+def _turn_store_key(*, game_id: int, perspective: int, turn_number: int) -> str:
+    return f"games/{game_id}/{perspective}/turns/{turn_number}"
+
+
+def _put_turn_in_storage(
+    backend: MemoryAssetBackend,
+    turn: TurnInfo,
+    *,
+    game_id: int = 628580,
+    perspective: int = 1,
+) -> None:
+    backend.put(
+        _turn_store_key(game_id=game_id, perspective=perspective, turn_number=turn.settings.turn),
+        turn_info_to_json(turn),
+    )
+
+
+def _reload_host_turn_from_storage(
+    backend: MemoryAssetBackend,
+    *,
+    game_id: int = 628580,
+    perspective: int = 1,
+    turn_number: int,
+) -> Callable[[], TurnInfo]:
+    def reload_host_turn() -> TurnInfo:
+        data = backend.get(_turn_store_key(game_id=game_id, perspective=perspective, turn_number=turn_number))
+        return turn_info_from_json(data)
+
+    return reload_host_turn
+
+
+def _turn_with_player_militarychange(
+    turn: TurnInfo,
+    player_id: int,
+    militarychange: int,
+) -> TurnInfo:
+    scores = [
+        replace(score, militarychange=militarychange) if score.ownerid == player_id else score
+        for score in turn.scores
+    ]
+    return replace(turn, scores=scores)
+
+
+def _observation_for_player(
+    scheduler: InferenceRowScheduler,
+    player_id: int,
+) -> object | None:
+    for run in scheduler._runs.values():
+        if run.session.player_id == player_id:
+            return run.session.observation
+    return None
 
 
 def test_mask_change_reschedules_in_flight_row_while_table_stream_active_case_3(
@@ -515,6 +571,75 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
     assert len(_run_ids_for_players(scheduler, player_ids)) == 0
 
     scheduler.begin_scope(_stream_scope(first_turn))
+    thread.join(timeout=2.0)
+
+
+def test_turn_stored_reschedule_uses_refreshed_host_turn(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Turn invalidation reschedule must rebuild observations from storage, not stream-open snapshot."""
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    turn_number = sample_turn.settings.turn
+    target_player_id = player_ids[0]
+    target_score = next(row for row in sample_turn.scores if row.ownerid == target_player_id)
+    original_militarychange = target_score.militarychange
+    updated_militarychange = original_militarychange + 7777
+
+    _put_turn_in_storage(memory_backend, sample_turn)
+    reload_host_turn = _reload_host_turn_from_storage(
+        memory_backend,
+        turn_number=turn_number,
+    )
+    persistence = InferenceRowPersistenceService(memory_backend)
+    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+
+    stream = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        reload_host_turn=reload_host_turn,
+        persistence=persistence,
+    )
+
+    def consume_stream() -> None:
+        try:
+            for _event in stream:
+                pass
+        finally:
+            stream.close()
+
+    thread = threading.Thread(target=consume_stream, daemon=True)
+    thread.start()
+    _wait_until(lambda: len(_run_ids_for_players(scheduler, player_ids)) == len(player_ids))
+
+    before_run_id = _run_ids_for_players(scheduler, (target_player_id,))[target_player_id]
+    before_observation = _observation_for_player(scheduler, target_player_id)
+    assert before_observation is not None
+    assert before_observation.military_delta_2x == 2 * original_militarychange
+
+    updated_turn = _turn_with_player_militarychange(
+        sample_turn,
+        target_player_id,
+        updated_militarychange,
+    )
+    _put_turn_in_storage(memory_backend, updated_turn)
+    invalidation.on_turn_stored(628580, 1, turn_number)
+
+    _wait_until(
+        lambda: _run_ids_for_players(scheduler, (target_player_id,)).get(target_player_id)
+        != before_run_id
+    )
+    after_observation = _observation_for_player(scheduler, target_player_id)
+    assert after_observation is not None
+    assert after_observation.military_delta_2x == 2 * updated_militarychange
+    assert after_observation.military_delta_2x != before_observation.military_delta_2x
+
+    scheduler.begin_scope(_stream_scope(sample_turn))
     thread.join(timeout=2.0)
 
 

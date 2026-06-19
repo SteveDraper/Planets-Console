@@ -130,12 +130,16 @@ class TurnAnalyticService:
                 player_id,
             )
 
+        def reload_host_turn() -> TurnInfo:
+            return self._turns.get_turn_info(game_id, perspective, turn_number)
+
         return iter_scores_table_inference_stream(
             turn,
             player_ids,
             game_id=game_id,
             perspective=perspective,
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
+            reload_host_turn=reload_host_turn,
             resolve_mask_for_player=resolve_mask_for_player,
             persistence=self._inference_persistence,
         )

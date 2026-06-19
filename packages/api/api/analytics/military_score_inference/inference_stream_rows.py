@@ -333,6 +333,7 @@ def iter_scores_table_inference_events(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
+    reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -361,6 +362,7 @@ def iter_scores_table_inference_events(
         game_id=game_id,
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
+        reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
         persistence=persistence,
     )

@@ -34,6 +34,7 @@ class InferenceTableStreamController:
     game_id: int
     perspective: int
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
+    reload_host_turn: Callable[[], TurnInfo] | None = None
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None
     persistence: InferenceRowPersistenceService | None = None
     scheduled_rows: dict[int, ScheduledInferenceRow] = field(default_factory=dict)
@@ -102,8 +103,13 @@ class InferenceTableStreamController:
         self.finished_run_ids.discard(scheduled.session.run_id)
         return True
 
+    def _refresh_host_turn(self) -> None:
+        if self.reload_host_turn is not None:
+            self.turn = self.reload_host_turn()
+
     def reschedule_row(self, player_id: int) -> bool:
         with self.stream_lock:
+            self._refresh_host_turn()
             old_row = self.scheduled_rows.get(player_id)
             if old_row is not None:
                 self.cancel_player_row(player_id)
@@ -117,6 +123,7 @@ class InferenceTableStreamController:
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         with self.stream_lock:
+            self._refresh_host_turn()
             for player_id in self.player_ids:
                 self.cancel_player_row(player_id)
             self.finished_run_ids.clear()
