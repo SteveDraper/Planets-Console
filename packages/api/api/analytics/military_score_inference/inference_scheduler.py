@@ -437,6 +437,16 @@ class InferenceRowScheduler:
                 self._condition.notify_all()
 
 
+def create_inference_row_scheduler(
+    *,
+    on_row_complete: OnRowCompleteCallback | None = None,
+) -> InferenceRowScheduler:
+    return InferenceRowScheduler(
+        worker_count=_configured_worker_count(),
+        on_row_complete=on_row_complete,
+    )
+
+
 _scheduler: InferenceRowScheduler | None = None
 _scheduler_lock = threading.Lock()
 
@@ -448,10 +458,7 @@ def get_inference_row_scheduler(
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
-            _scheduler = InferenceRowScheduler(
-                worker_count=_configured_worker_count(),
-                on_row_complete=on_row_complete,
-            )
+            _scheduler = create_inference_row_scheduler(on_row_complete=on_row_complete)
         return _scheduler
 
 

@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
+from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError
 from api.models.game import TurnInfo
@@ -25,6 +26,7 @@ class TurnAnalyticService:
         storage: StorageBackend | None = None,
         inference_persistence: InferenceRowPersistenceService | None = None,
         inference_invalidation: InferenceInvalidationService | None = None,
+        inference_scheduler: InferenceRowScheduler | None = None,
     ) -> None:
         self._turns = turns
         if storage is None:
@@ -43,6 +45,7 @@ class TurnAnalyticService:
             self._inference_invalidation = inference_invalidation
         else:
             self._inference_invalidation = InferenceInvalidationService(self._inference_persistence)
+        self._inference_scheduler = inference_scheduler
 
     def _load_scoreboard_turn(
         self,
@@ -142,7 +145,17 @@ class TurnAnalyticService:
             reload_host_turn=reload_host_turn,
             resolve_mask_for_player=resolve_mask_for_player,
             persistence=self._inference_persistence,
+            scheduler=self._inference_scheduler_instance(),
         )
+
+    def _inference_scheduler_instance(self) -> InferenceRowScheduler:
+        if self._inference_scheduler is not None:
+            return self._inference_scheduler
+        from api.analytics.military_score_inference.inference_scheduler import (
+            get_inference_row_scheduler,
+        )
+
+        return get_inference_row_scheduler()
 
     def _inference_scheduler_scope(
         self,
@@ -150,9 +163,6 @@ class TurnAnalyticService:
         perspective: int,
         turn_number: int,
     ):
-        from api.analytics.military_score_inference.inference_scheduler import (
-            get_inference_row_scheduler,
-        )
         from api.analytics.military_score_inference.inference_stream_scope import (
             InferenceStreamScope,
         )
@@ -162,7 +172,7 @@ class TurnAnalyticService:
             perspective=perspective,
             turn_number=turn_number,
         )
-        return scope, get_inference_row_scheduler()
+        return scope, self._inference_scheduler_instance()
 
     def get_inference_global_pause_status(
         self,

@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.analytic import (
     run_inference_with_artifacts,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
@@ -113,6 +114,7 @@ def iter_scores_table_inference_stream(
     reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
+    scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for all scoreboard rows on one stream."""
     yield from iter_scores_table_inference_events(
@@ -124,6 +126,7 @@ def iter_scores_table_inference_stream(
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
         persistence=persistence,
+        scheduler=scheduler,
     )
 
 

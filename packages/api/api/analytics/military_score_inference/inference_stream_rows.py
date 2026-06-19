@@ -340,6 +340,7 @@ def iter_scores_table_inference_events(
     reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
+    scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged inference events for all scoreboard rows on one NDJSON stream."""
     from api.analytics.military_score_inference.inference_table_stream_controller import (
@@ -352,7 +353,7 @@ def iter_scores_table_inference_events(
         perspective=perspective,
         turn_number=turn_number,
     )
-    scheduler = get_inference_row_scheduler()
+    scheduler = scheduler or get_inference_row_scheduler()
     stream_token = scheduler.begin_scope(stream_scope)
     pause_status = scheduler.global_pause_status(stream_scope)
     yield inference_global_pause_event(paused=bool(pause_status.get("paused")))
