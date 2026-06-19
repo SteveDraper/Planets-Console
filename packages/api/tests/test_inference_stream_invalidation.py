@@ -314,8 +314,10 @@ def test_mask_change_integration_via_table_stream_generator_case_3(
     invalidation.on_hull_mask_changed(628580, 1, turn_number, target_player_id)
 
     _wait_until(
-        lambda: _run_ids_for_players(scheduler, player_ids).get(target_player_id)
-        != before[target_player_id]
+        lambda: (
+            _run_ids_for_players(scheduler, player_ids).get(target_player_id)
+            != before[target_player_id]
+        )
     )
     after = _run_ids_for_players(scheduler, player_ids)
     assert after[other_player_id] == before[other_player_id]
