@@ -249,6 +249,7 @@ def iter_multiplexed_inference_events(
     finished_run_ids: set[str] | None = None,
     is_stream_active: Callable[[], bool] | None = None,
     session_provider: Callable[[], tuple[ScheduledInferenceRow, ...]] | None = None,
+    pending_events_provider: Callable[[], list[dict[str, object]]] | None = None,
     wake_event: threading.Event | None = None,
 ) -> Iterator[dict[str, object]]:
     """Round-robin blocking reads across row event queues until rows finish.
@@ -280,6 +281,9 @@ def iter_multiplexed_inference_events(
     while should_continue():
         if is_stream_active is not None and not is_stream_active():
             return
+        if pending_events_provider is not None:
+            for event in pending_events_provider():
+                yield event
         if not pending_run_ids:
             if wake_event is not None:
                 wake_event.wait(timeout=_MULTiplexWaitSeconds)
@@ -401,6 +405,7 @@ def iter_scores_table_inference_events(
                     finished_run_ids=controller.finished_run_ids,
                     is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
                     session_provider=controller.current_scheduled_rows,
+                    pending_events_provider=controller.drain_pending_wire_events,
                     wake_event=controller.wake_multiplex,
                 )
             finally:

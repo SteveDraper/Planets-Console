@@ -9,11 +9,13 @@ from dataclasses import dataclass, field
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
+    CachedCompleteRowAdmission,
+    ImmediateRowAdmission,
     RowStreamAdmission,
     ScheduledInferenceRow,
-    ScheduleRowAdmission,
     resolve_row_stream_admission,
     schedule_inference_row,
+    tag_inference_stream_event,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
@@ -38,6 +40,7 @@ class InferenceTableStreamController:
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None
     persistence: InferenceRowPersistenceService | None = None
     scheduled_rows: dict[int, ScheduledInferenceRow] = field(default_factory=dict)
+    pending_wire_events: list[dict[str, object]] = field(default_factory=list)
     finished_run_ids: set[str] = field(default_factory=set)
     stream_lock: threading.Lock = field(default_factory=threading.Lock)
     wake_multiplex: threading.Event = field(default_factory=threading.Event)
@@ -93,8 +96,23 @@ class InferenceTableStreamController:
         with self.stream_lock:
             self.scheduled_rows[player_id] = row
 
+    def drain_pending_wire_events(self) -> list[dict[str, object]]:
+        with self.stream_lock:
+            pending = self.pending_wire_events
+            self.pending_wire_events = []
+            return pending
+
     def _register_admitted_schedule(self, player_id: int, admission: RowStreamAdmission) -> bool:
-        if not isinstance(admission, ScheduleRowAdmission):
+        if isinstance(admission, ImmediateRowAdmission):
+            self.pending_wire_events.extend(
+                tag_inference_stream_event(event, player_id=player_id) for event in admission.events
+            )
+            return True
+        if isinstance(admission, CachedCompleteRowAdmission):
+            if admission.event is not None:
+                self.pending_wire_events.append(
+                    tag_inference_stream_event(admission.event, player_id=player_id)
+                )
             return True
         scheduled = self.schedule_player_row(player_id)
         if scheduled is None:

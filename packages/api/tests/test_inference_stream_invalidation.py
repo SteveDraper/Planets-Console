@@ -186,7 +186,12 @@ def _reload_host_turn_from_storage(
     turn_number: int,
 ) -> Callable[[], TurnInfo]:
     def reload_host_turn() -> TurnInfo:
-        data = backend.get(_turn_store_key(game_id=game_id, perspective=perspective, turn_number=turn_number))
+        store_key = _turn_store_key(
+            game_id=game_id,
+            perspective=perspective,
+            turn_number=turn_number,
+        )
+        data = backend.get(store_key)
         return turn_info_from_json(data)
 
     return reload_host_turn
@@ -569,6 +574,16 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
 
     _wait_until(lambda: controller_for_scope(_stream_scope(first_turn)) is not None)
     assert len(_run_ids_for_players(scheduler, player_ids)) == 0
+    _wait_until(
+        lambda: sum(1 for event in events if event.get("type") == "complete") >= 2 * len(player_ids)
+    )
+    for player_id in player_ids:
+        post_invalidation_completes = [
+            event
+            for event in events
+            if event.get("type") == "complete" and event.get("playerId") == player_id
+        ]
+        assert len(post_invalidation_completes) == 2
 
     scheduler.begin_scope(_stream_scope(first_turn))
     thread.join(timeout=2.0)
@@ -579,7 +594,7 @@ def test_turn_stored_reschedule_uses_refreshed_host_turn(
     monkeypatch,
     memory_backend,
 ):
-    """Turn invalidation reschedule must rebuild observations from storage, not stream-open snapshot."""
+    """Reschedule after turn invalidation must use refreshed host turn from storage."""
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
@@ -631,8 +646,10 @@ def test_turn_stored_reschedule_uses_refreshed_host_turn(
     invalidation.on_turn_stored(628580, 1, turn_number)
 
     _wait_until(
-        lambda: _run_ids_for_players(scheduler, (target_player_id,)).get(target_player_id)
-        != before_run_id
+        lambda: (
+            _run_ids_for_players(scheduler, (target_player_id,)).get(target_player_id)
+            != before_run_id
+        )
     )
     after_observation = _observation_for_player(scheduler, target_player_id)
     assert after_observation is not None
