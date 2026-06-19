@@ -422,6 +422,8 @@ class InferenceRowScheduler:
             ),
         )
         outcome = run_inference_tier_job(run, callbacks)
+        if session.cancel_token.is_cancelled() or self._runs.get(session.run_id) is None:
+            return
         if outcome.next_ladder_state is not None:
             run.ladder_state = outcome.next_ladder_state
         if outcome.enqueue_continuation:
