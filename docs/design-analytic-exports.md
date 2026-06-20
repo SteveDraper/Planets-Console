@@ -100,13 +100,15 @@ Dry-run before expensive work:
 2. Check persistence and scheduler status at each step (no CP-SAT, no full materialization).
 3. Return missing steps `{ analytic_id, turn, player_id, status }` for confirm UI and progress denominator.
 
-**#108 skeleton:** the in-process probe walk does not yet call provider
-`is_persisted` hooks or check scheduler status. Every visited scope is treated
-as missing with `status: "not_persisted"` only. Satisfied, in-progress, and
-baseline steps are omitted from `missing_steps` rather than returned with
-`persisted`, `in_progress`, or `baseline`. Full status discrimination is
-planned for [#109](https://github.com/SteveDraper/Planets-Console/issues/109)
-BFF export ensure orchestration.
+**#108 skeleton:** the in-process probe walk calls provider `is_persisted`
+hooks and `is_scope_ensured` on the query context to **omit** already-satisfied
+scopes from the walk. Baseline scopes are also skipped. It does not yet check
+scheduler status. Steps that need work appear in `missing_steps` with
+`status: "not_persisted"` only -- satisfied, in-progress, and baseline scopes
+are omitted rather than returned with `persisted`, `in_progress`, or
+`baseline`. Full status discrimination is planned for
+[#109](https://github.com/SteveDraper/Planets-Console/issues/109) BFF export
+ensure orchestration.
 
 When `totalMissing` exceeds a tunable threshold, inline ensure is blocked; the SPA calls BFF orchestration to start a background job.
 
