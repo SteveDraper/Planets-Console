@@ -12,12 +12,24 @@ from tests.fixtures.export_framework.cycle_exports import (
     CYCLE_A_EXPORT_CATALOG,
     CYCLE_B_EXPORT_CATALOG,
 )
+from tests.fixtures.export_framework.diamond_exports import (
+    BRANCH_B_EXPORT_CATALOG,
+    BRANCH_C_EXPORT_CATALOG,
+    ROOT_EXPORT_CATALOG,
+    SHARED_EXPORT_CATALOG,
+)
 from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
 
 FIXTURE_EXPORT_REGISTRY = merge_export_registry(ALPHA_EXPORT_CATALOG, BETA_EXPORT_CATALOG)
 CYCLE_FIXTURE_EXPORT_REGISTRY = merge_export_registry(
     CYCLE_A_EXPORT_CATALOG,
     CYCLE_B_EXPORT_CATALOG,
+)
+DIAMOND_FIXTURE_EXPORT_REGISTRY = merge_export_registry(
+    ROOT_EXPORT_CATALOG,
+    BRANCH_B_EXPORT_CATALOG,
+    BRANCH_C_EXPORT_CATALOG,
+    SHARED_EXPORT_CATALOG,
 )
 
 
@@ -39,6 +51,28 @@ def make_fixture_query_context(
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_registry=FIXTURE_EXPORT_REGISTRY,
+        enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
+    )
+
+
+def make_diamond_fixture_query_context(
+    turn: TurnInfo,
+    *,
+    stored_turns: dict[int, TurnInfo] | None = None,
+    enforce_inline_ensure_threshold: bool = True,
+) -> AnalyticQueryContext:
+    """Build a query context with diamond ensure-dependency fixture catalogs."""
+    FIXTURE_EXPORT_STATE.reset()
+    turns = stored_turns or {turn.settings.turn: turn}
+
+    def load_turn(turn_number: int) -> TurnInfo | None:
+        return turns.get(turn_number)
+
+    return make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
     )
 

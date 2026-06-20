@@ -14,6 +14,7 @@ from tests.fixtures.export_framework.harness import (
     build_stored_turn_chain,
     first_player_id,
     make_cycle_fixture_query_context,
+    make_diamond_fixture_query_context,
     make_fixture_query_context,
 )
 
@@ -207,6 +208,40 @@ def test_ensure_graph_cycle_raises(sample_turn):
             ["$.payload.label"],
             ExportScopeOverrides(turn=2, player_id=player_id),
         )
+
+
+def test_diamond_dag_ensures_shared_dependency_once(sample_turn):
+    from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
+
+    player_id = first_player_id(sample_turn)
+    stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    ctx = make_diamond_fixture_query_context(sample_turn, stored_turns=stored_turns)
+
+    probe = ctx.probe(
+        "export-test-diamond-root",
+        ExportScopeOverrides(turn=2, player_id=player_id),
+    )
+
+    assert probe.status == "ok"
+    shared_missing_steps = [
+        step for step in probe.missing_steps if step.analytic_id == "export-test-diamond-shared"
+    ]
+    assert len(shared_missing_steps) == 1
+    assert probe.total_missing == 4
+
+    result = ctx.query(
+        "export-test-diamond-root",
+        ["$.payload.label"],
+        ExportScopeOverrides(turn=2, player_id=player_id),
+    )
+
+    assert result.status == "ok"
+    shared_ensure_calls = [
+        (analytic_id, scope)
+        for analytic_id, scope in FIXTURE_EXPORT_STATE.ensure_calls
+        if analytic_id == "export-test-diamond-shared"
+    ]
+    assert len(shared_ensure_calls) == 1
 
 
 def test_probe_ensure_graph_cycle_returns_unavailable(sample_turn):

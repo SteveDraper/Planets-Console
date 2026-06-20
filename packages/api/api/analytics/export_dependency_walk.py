@@ -35,6 +35,8 @@ def walk_dependency_tree(
     visiting: set[tuple[str, ExportScope]],
 ) -> DependencyWalkResult:
     result = DependencyWalkResult()
+    seen_pending: set[tuple[str, ExportScope]] = set()
+    seen_missing: set[tuple[str, int, int | None]] = set()
     visit_key = (analytic_id, scope)
     if visit_key in visiting:
         raise ExportCycleDetectedError(
@@ -73,8 +75,16 @@ def walk_dependency_tree(
                 result.turn_unavailable = nested.turn_unavailable
                 return result
 
-            result.missing_steps.extend(nested.missing_steps)
-            result.pending_ensure.extend(nested.pending_ensure)
+            _extend_unique_missing_steps(
+                result.missing_steps,
+                nested.missing_steps,
+                seen_missing,
+            )
+            _extend_unique_pending_ensure(
+                result.pending_ensure,
+                nested.pending_ensure,
+                seen_pending,
+            )
 
         result.missing_steps.append(
             EnsureMissingStep(
@@ -82,12 +92,59 @@ def walk_dependency_tree(
                 turn=scope.turn,
                 player_id=scope.player_id,
                 status="not_persisted",
-            )
+            ),
         )
         result.pending_ensure.append((analytic_id, scope, catalog))
         return result
     finally:
         visiting.discard(visit_key)
+
+
+def _missing_step_key(step: EnsureMissingStep) -> tuple[str, int, int | None]:
+    return (step.analytic_id, step.turn, step.player_id)
+
+
+def _extend_unique_missing_steps(
+    target: list[EnsureMissingStep],
+    source: list[EnsureMissingStep],
+    seen: set[tuple[str, int, int | None]],
+) -> None:
+    for step in source:
+        _append_unique_missing_step(target, step, seen)
+
+
+def _append_unique_missing_step(
+    target: list[EnsureMissingStep],
+    step: EnsureMissingStep,
+    seen: set[tuple[str, int, int | None]],
+) -> None:
+    key = _missing_step_key(step)
+    if key in seen:
+        return
+    seen.add(key)
+    target.append(step)
+
+
+def _extend_unique_pending_ensure(
+    target: list[tuple[str, ExportScope, AnalyticExportCatalog]],
+    source: list[tuple[str, ExportScope, AnalyticExportCatalog]],
+    seen: set[tuple[str, ExportScope]],
+) -> None:
+    for item in source:
+        _append_unique_pending_ensure(target, item, seen)
+
+
+def _append_unique_pending_ensure(
+    target: list[tuple[str, ExportScope, AnalyticExportCatalog]],
+    item: tuple[str, ExportScope, AnalyticExportCatalog],
+    seen: set[tuple[str, ExportScope]],
+) -> None:
+    analytic_id, scope, _catalog = item
+    key = (analytic_id, scope)
+    if key in seen:
+        return
+    seen.add(key)
+    target.append(item)
 
 
 def dependency_scope_for(
