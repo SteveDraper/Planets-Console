@@ -15,15 +15,6 @@ def validate_export_catalogs(
     role: str,
 ) -> dict[str, AnalyticExportCatalog]:
     """Validate export catalogs against the turn analytic catalog and ensure wiring."""
-    return _validate_export_registry(catalogs, catalog_ids=catalog_ids, role=role)
-
-
-def _validate_export_registry(
-    catalogs: tuple[AnalyticExportCatalog, ...],
-    *,
-    catalog_ids: set[str],
-    role: str,
-) -> dict[str, AnalyticExportCatalog]:
     by_id: dict[str, AnalyticExportCatalog] = {}
     for export_catalog in catalogs:
         analytic_id = export_catalog.analytic_id
@@ -45,7 +36,7 @@ def _validate_export_registry(
 
 _CATALOG_IDS = {entry.id for entry in TURN_ANALYTIC_CATALOG}
 
-EXPORT_REGISTRY: dict[str, AnalyticExportCatalog] = _validate_export_registry(
+EXPORT_REGISTRY: dict[str, AnalyticExportCatalog] = validate_export_catalogs(
     tuple(registration.export_catalog for registration in TURN_ANALYTIC_REGISTRATIONS),
     catalog_ids=_CATALOG_IDS,
     role="production",
