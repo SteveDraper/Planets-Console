@@ -16,6 +16,7 @@ from api.analytics.export_types import (
     ExportQueryResult,
     ExportScope,
     ExportScopeOverrides,
+    ExportScopeOverridesMapping,
     PathResult,
     ResolutionKey,
     UnavailableReason,
@@ -78,15 +79,13 @@ class AnalyticQueryContext:
     def probe(
         self,
         analytic_id: str,
-        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None = None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
     ) -> ExportProbeResult:
         """Dry-run ensure dependencies without materialization."""
         plan = self._plan_ensure_walk(
             analytic_id,
             scope_overrides,
-            pre_walk_unavailable=lambda prep: self._requested_turn_unavailable_reason(
-                prep.scope
-            ),
+            pre_walk_unavailable=lambda prep: self._requested_turn_unavailable_reason(prep.scope),
             catch_ensure_cycle=True,
         )
         if not isinstance(plan, PlannedEnsureWalk):
@@ -104,7 +103,7 @@ class AnalyticQueryContext:
         self,
         analytic_id: str,
         paths: list[str] | tuple[str, ...],
-        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None = None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
         *,
         force_inline_ensure: bool = False,
     ) -> ExportQueryResult:
@@ -151,11 +150,7 @@ class AnalyticQueryContext:
             self._memo[resolution_key] = result
             return result
 
-        if (
-            plan.blocked_inline
-            and not force_inline_ensure
-            and self.enforce_inline_ensure_threshold
-        ):
+        if plan.blocked_inline and not force_inline_ensure and self.enforce_inline_ensure_threshold:
             return self._unavailable("ensure_blocked")
 
         walk_result = plan.walk_result
@@ -175,7 +170,7 @@ class AnalyticQueryContext:
     def _plan_ensure_walk(
         self,
         analytic_id: str,
-        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None,
         *,
         prep: PreparedExportRequest | None = None,
         pre_walk_unavailable: Callable[[PreparedExportRequest], UnavailableReason | None],
@@ -229,7 +224,7 @@ class AnalyticQueryContext:
     def _prepare_export_request(
         self,
         analytic_id: str,
-        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None,
     ) -> PreparedExportRequest | UnavailableReason:
         catalog = self._catalog_or_none(analytic_id)
         if catalog is None:
@@ -244,7 +239,7 @@ class AnalyticQueryContext:
 
     def _resolve_scope(
         self,
-        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None,
     ) -> ExportScope:
         overrides = self._coerce_overrides(scope_overrides)
         return ExportScope(
@@ -256,15 +251,15 @@ class AnalyticQueryContext:
 
     @staticmethod
     def _coerce_overrides(
-        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None,
     ) -> ExportScopeOverrides:
         if scope_overrides is None:
             return ExportScopeOverrides()
         if isinstance(scope_overrides, ExportScopeOverrides):
             return scope_overrides
         return ExportScopeOverrides(
-            turn=scope_overrides.get("turn"),  # type: ignore[arg-type]
-            player_id=scope_overrides.get("player_id"),  # type: ignore[arg-type]
+            turn=scope_overrides.get("turn"),
+            player_id=scope_overrides.get("player_id"),
         )
 
     def _requested_turn_unavailable_reason(

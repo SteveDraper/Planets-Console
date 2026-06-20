@@ -10,8 +10,8 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
 from api.analytics.exports.registry import (
     EXPORT_REGISTRY,
-    _validate_export_registry,
     merge_export_registry,
+    validate_export_catalogs,
 )
 from api.serialization.turn import turn_info_from_json
 
@@ -59,7 +59,7 @@ def _non_empty_export_catalog(
     )
 
 
-def test_validate_export_registry_rejects_missing_ensure_dependency_target():
+def test_validate_export_catalogs_rejects_missing_ensure_dependency_target():
     provider = _non_empty_export_catalog(
         "provider",
         ensure_dependencies=(EnsureDependency(analytic_id="missing-dep"),),
@@ -67,14 +67,14 @@ def test_validate_export_registry_rejects_missing_ensure_dependency_target():
     placeholder = AnalyticExportCatalog(analytic_id="placeholder", is_empty=True)
 
     with pytest.raises(RuntimeError, match="missing analytic_id 'missing-dep'"):
-        _validate_export_registry(
+        validate_export_catalogs(
             (provider, placeholder),
             catalog_ids={"provider", "placeholder"},
             role="test",
         )
 
 
-def test_validate_export_registry_rejects_empty_ensure_dependency_target():
+def test_validate_export_catalogs_rejects_empty_ensure_dependency_target():
     provider = _non_empty_export_catalog(
         "provider",
         ensure_dependencies=(EnsureDependency(analytic_id="empty-dep"),),
@@ -82,14 +82,14 @@ def test_validate_export_registry_rejects_empty_ensure_dependency_target():
     empty_dep = AnalyticExportCatalog(analytic_id="empty-dep", is_empty=True)
 
     with pytest.raises(RuntimeError, match="empty catalog 'empty-dep'"):
-        _validate_export_registry(
+        validate_export_catalogs(
             (provider, empty_dep),
             catalog_ids={"provider", "empty-dep"},
             role="test",
         )
 
 
-def test_validate_export_registry_rejects_missing_ensure_export_with_dependencies():
+def test_validate_export_catalogs_rejects_missing_ensure_export_with_dependencies():
     dep = _non_empty_export_catalog("valid-dep")
     provider = _non_empty_export_catalog(
         "provider",
@@ -98,7 +98,7 @@ def test_validate_export_registry_rejects_missing_ensure_export_with_dependencie
     )
 
     with pytest.raises(RuntimeError, match="no ensure_export"):
-        _validate_export_registry(
+        validate_export_catalogs(
             (provider, dep),
             catalog_ids={"provider", "valid-dep"},
             role="test",

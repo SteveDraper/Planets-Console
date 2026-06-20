@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 UnavailableReason = Literal[
     "turn_not_stored",
@@ -53,6 +53,13 @@ class ExportScopeOverrides:
 
     turn: int | None = None
     player_id: int | None = None
+
+
+class ExportScopeOverridesMapping(TypedDict, total=False):
+    """Dict-shaped partial scope overrides accepted by export probe/query."""
+
+    turn: int
+    player_id: int | None
 
 
 @dataclass(frozen=True)

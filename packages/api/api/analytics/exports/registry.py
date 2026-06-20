@@ -8,6 +8,16 @@ from api.analytics.exports.ensure_validation import validate_ensure_dependency_t
 from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
 
+def validate_export_catalogs(
+    catalogs: tuple[AnalyticExportCatalog, ...],
+    *,
+    catalog_ids: set[str],
+    role: str,
+) -> dict[str, AnalyticExportCatalog]:
+    """Validate export catalogs against the turn analytic catalog and ensure wiring."""
+    return _validate_export_registry(catalogs, catalog_ids=catalog_ids, role=role)
+
+
 def _validate_export_registry(
     catalogs: tuple[AnalyticExportCatalog, ...],
     *,
