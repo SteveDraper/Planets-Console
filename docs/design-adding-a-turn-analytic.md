@@ -27,6 +27,7 @@ Add `packages/api/api/analytics/<id>.py`:
 ```python
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.registration import TurnAnalyticRegistration
 
 ANALYTIC_ID = "my-analytic"
@@ -40,6 +41,7 @@ def compute_my_analytic(ctx: AnalyticComputeContext) -> dict:
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_my_analytic,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),  # or EXPORT_CATALOG from exports.py
 )
 ```
 
@@ -72,11 +74,28 @@ TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
 
 ### 2.3 Core -- exports (required)
 
-Every turn analytic registers an export catalog (may be **empty**). See [design-analytic-exports.md](design-analytic-exports.md) for the full mechanism (issue **#93**).
+Every turn analytic wires an export catalog on its **`TurnAnalyticRegistration`** (may be **empty**). See [design-analytic-exports.md](design-analytic-exports.md) for the full mechanism (issue **#93**).
 
-Add `packages/api/api/analytics/<id>/exports.py` (or `exports.py` beside a single-file analytic):
+**`EXPORT_REGISTRY`** in `exports/registry.py` is derived automatically from `TURN_ANALYTIC_REGISTRATIONS` at import. **Do not** register catalogs manually in `exports/registry.py`.
+
+**Empty catalog** (nothing queryable yet) -- set inline on registration; no stub `exports.py` required:
 
 ```python
+from api.analytics.exports.empty import empty_export_catalog_for
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_my_analytic,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),
+)
+```
+
+**Non-empty catalog** -- add `packages/api/api/analytics/<id>/exports.py`, build an **`AnalyticExportCatalog`**, and pass it on registration:
+
+```python
+from api.analytics.export_types import EnsureDependency, PathPrefixScopeRule
+from api.analytics.exports.catalog import AnalyticExportCatalog
+
 EXPORT_VALUE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -85,50 +104,56 @@ EXPORT_VALUE_SCHEMA = {
     },
 }
 
-PATH_PREFIX_SCOPE_RULES = [
-    # e.g. {"prefix": "$.solution", "requires": ["player_id"]},
-]
+PATH_PREFIX_SCOPE_RULES = (
+    # e.g. PathPrefixScopeRule(prefix="$.solution", requires=("player_id",)),
+)
 
 ENSURE_DEPENDENCIES = (
     # Provider-declared upstream ensures (probe + ensure unwind follow these edges).
     # e.g. EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
 )
 
-def ensure_export(scope, ctx) -> None:
+def ensure_export(ctx, scope) -> None:
     """Idempotent: persist/scheduler attach/sync ensure for this scope before materialize."""
     ...
 
-def materialize_export_tree(scope, ctx) -> dict:
+def materialize_export_tree(ctx, scope) -> dict:
     ...
 
-EXPORT_CATALOG = {
-    "schema": EXPORT_VALUE_SCHEMA,
-    "path_prefix_scope_rules": PATH_PREFIX_SCOPE_RULES,
-    "ensure_dependencies": ENSURE_DEPENDENCIES,
-    "ensure": ensure_export,
-    "materialize": materialize_export_tree,
-}
+EXPORT_CATALOG = AnalyticExportCatalog(
+    analytic_id=ANALYTIC_ID,
+    value_schema=EXPORT_VALUE_SCHEMA,
+    path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
+    ensure_dependencies=ENSURE_DEPENDENCIES,
+    ensure_export=ensure_export,
+    materialize_export_tree=materialize_export_tree,
+)
 ```
 
-Register in `packages/api/api/analytics/exports/registry.py`. Import-time validation: every `TURN_ANALYTIC_CATALOG` id has an entry (use `EmptyExportCatalog` when nothing is queryable yet).
+Then in `<id>.py`:
+
+```python
+from api.analytics.my_analytic.exports import EXPORT_CATALOG
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_my_analytic,
+    export_catalog=EXPORT_CATALOG,
+)
+```
+
+Import-time validation: every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration; `EXPORT_REGISTRY` raises if they are out of sync.
 
 Guidelines:
 
 - **One schema tree** per analytic; scope is on the query, not separate root shapes.
 - **JSONPath** selectors (`$.solution.ships[0]`); document array ordering in the catalog.
-- **`ENSURE_DEPENDENCIES`:** declared by the **provider** (upstream requirements). Do not reference analytics that are not yet in `TURN_ANALYTIC_CATALOG` until they register.
+- **`ensure_dependencies`:** declared by the **provider** (upstream requirements). Do not reference analytics that are not yet in `TURN_ANALYTIC_CATALOG` until they register.
 - **`ctx.query(...)`** runs ensure then materialize (not read-only). Large missing-step probes use BFF **export ensure orchestration** (background job), not blocking HTTP.
 - **Concept-shim:** delegate to `api/concepts/` inside `materialize_export_tree` (Connections pattern).
 - Table/map handlers should call the same materializer (or shared helpers) where the tree is the source of truth.
 - Consumers query only via **`AnalyticQueryContext`** passed into handlers -- not direct imports of other analytics.
 - **`$.meta.searchStatus`:** use generic lifecycle values (`not_started`, `in_progress`, `paused`, `stopped`, `complete`); warn downstream consumers when not `complete`.
-
-Empty catalog example:
-
-```python
-from api.analytics.exports.empty import EMPTY_EXPORT_CATALOG
-EXPORT_CATALOG = EMPTY_EXPORT_CATALOG
-```
 
 ### 2.4 Core tests
 
@@ -301,7 +326,7 @@ Use this before opening a PR:
 
 - [ ] **Core:** module with `TurnAnalyticRegistration` (`catalog_entry` + ctx-first `compute` handler) appended to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` + unit tests
 - [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG` (`catalog.py`)
-- [ ] **Core exports:** `exports.py` + export registry entry (empty allowed) + export tests when non-empty
+- [ ] **Core exports:** `export_catalog` on `TurnAnalyticRegistration` (`empty_export_catalog_for` or `exports.py` + `AnalyticExportCatalog`; empty allowed) + export tests when non-empty
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
 - [ ] **BFF:** unit/integration tests for dispatch and HTTP shape
@@ -317,7 +342,7 @@ Use this before opening a PR:
 
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
-| Export registry missing for catalog id | Startup `RuntimeError` | Add `exports.py` (or `EMPTY_EXPORT_CATALOG`) + registry entry |
+| Export catalog missing for catalog id | Startup `RuntimeError` | Set `export_catalog=empty_export_catalog_for(ANALYTIC_ID)` on registration, or wire `EXPORT_CATALOG` from `exports.py` |
 | Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add BFF module + `_BFF_DESCRIPTORS_BY_ID` entry |
 | BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Append `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |

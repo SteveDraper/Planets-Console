@@ -54,8 +54,8 @@ ctx.query(analytic_id, paths, scope)
 | Piece | Location |
 |-------|----------|
 | **AnalyticQueryContext** | `api/analytics/export_context.py` |
-| **Analytic export registry** | `api/analytics/exports/registry.py` |
-| Per-analytic catalog + materializer | `api/analytics/<id>/exports.py` |
+| **Analytic export registry** | `api/analytics/exports/registry.py` -- **`EXPORT_REGISTRY` derived at import** from each `TurnAnalyticRegistration.export_catalog` in `TURN_ANALYTIC_REGISTRATIONS` (do not register catalogs manually here) |
+| Per-analytic catalog + materializer | Wired on **`TurnAnalyticRegistration.export_catalog`**; non-empty implementations may live in `api/analytics/<id>/exports.py` |
 | JSONPath engine | shared helper (e.g. `jsonpath-ng`) |
 | **BFF export ensure orchestration** | `packages/bff/bff/routers/export_ensure.py` (probe + background job stream) |
 
@@ -284,25 +284,35 @@ Export queries ignore SPA sidebar enablement (**client preference** in localStor
 
 ## Author registration
 
-Fourth touch point (required; empty catalog allowed):
+Fourth touch point (required; empty catalog allowed): set **`export_catalog`** on the analytic's **`TurnAnalyticRegistration`** in `packages/api/api/analytics/<id>.py`. **`EXPORT_REGISTRY`** in `exports/registry.py` is built automatically from those registrations -- **do not** add manual entries there.
 
+```python
+from api.analytics.exports.empty import empty_export_catalog_for
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_my_analytic,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),  # or a real AnalyticExportCatalog
+)
 ```
-packages/api/api/analytics/<id>/exports.py
-```
 
-Each file exports:
+| Catalog state | Author action |
+|---------------|---------------|
+| **Empty (no queryable exports yet)** | `export_catalog=empty_export_catalog_for(ANALYTIC_ID)` inline on registration (no stub `exports.py` required) |
+| **Non-empty** | Define catalog in `packages/api/api/analytics/<id>/exports.py`, import `EXPORT_CATALOG`, pass `export_catalog=EXPORT_CATALOG` on registration |
 
-| Symbol | Purpose |
-|--------|---------|
-| **`EXPORT_VALUE_SCHEMA`** | JSON Schema dict for the one tree |
-| **`PATH_PREFIX_SCOPE_RULES`** | Scope validation by path prefix |
-| **`ORDERING_SEMANTICS`** | Documented array ordering for index paths |
-| **`ENSURE_DEPENDENCIES`** | Provider-declared upstream ensure edges |
-| **`ensure_export(scope, ctx)`** | Idempotent ensure for this analytic's scope (optional if materialize-only) |
-| **`materialize_export_tree(scope, ctx) -> dict`** | Build tree after ensure (memoized on ctx) |
-| **`EXPORT_CATALOG`** | Bundle registered in **`export_registry.py`** |
+Non-empty `exports.py` modules typically export an **`AnalyticExportCatalog`** (or build one inline) with:
 
-Import-time validation: every `TURN_ANALYTIC_CATALOG` id has an export registry entry.
+| Field / hook | Purpose |
+|--------------|---------|
+| **`value_schema`** | JSON Schema dict for the one tree |
+| **`path_prefix_scope_rules`** | Scope validation by path prefix |
+| **`ordering_semantics`** | Documented array ordering for index paths |
+| **`ensure_dependencies`** | Provider-declared upstream ensure edges |
+| **`ensure_export(ctx, scope)`** | Idempotent ensure for this analytic's scope (optional if materialize-only) |
+| **`materialize_export_tree(ctx, scope) -> dict`** | Build tree after ensure (memoized on ctx) |
+
+Import-time validation: every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration; `EXPORT_REGISTRY` raises if production catalog and registrations are out of sync.
 
 See [Adding a turn analytic -- Core exports](design-adding-a-turn-analytic.md#23-core--exports-required).
 
@@ -377,7 +387,7 @@ Must cover: probe step counts, threshold policy, inline vs background ensure, un
 
 - Unit tests per `exports.py`: materialize against fixtures; JSONPath golden paths; path-prefix scope rejection.
 - **Connections** and **scores** export golden tests.
-- Registry: every production catalog id has export entry; empty catalog validates.
+- Registry: every production catalog id has `export_catalog` on its registration; `EXPORT_REGISTRY` validates sync at import; empty catalogs validate.
 
 ---
 
