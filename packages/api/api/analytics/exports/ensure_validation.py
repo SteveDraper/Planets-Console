@@ -14,6 +14,11 @@ def validate_ensure_dependency_targets(
     for catalog in by_id.values():
         if catalog.is_empty:
             continue
+        if catalog.ensure_dependencies and catalog.ensure_export is None:
+            raise RuntimeError(
+                f"{role} export catalog {catalog.analytic_id!r} "
+                f"has ensure_dependencies but no ensure_export"
+            )
         for dependency in catalog.ensure_dependencies:
             validate_ensure_dependency_target(
                 catalog.analytic_id,

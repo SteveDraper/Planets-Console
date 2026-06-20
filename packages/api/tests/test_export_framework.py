@@ -48,11 +48,12 @@ def _non_empty_export_catalog(
     analytic_id: str,
     *,
     ensure_dependencies: tuple[EnsureDependency, ...] = (),
+    with_ensure_export: bool = True,
 ) -> AnalyticExportCatalog:
     return AnalyticExportCatalog(
         analytic_id=analytic_id,
         ensure_dependencies=ensure_dependencies,
-        ensure_export=lambda _ctx, _scope: None,
+        ensure_export=(lambda _ctx, _scope: None) if with_ensure_export else None,
         materialize_export_tree=lambda _ctx, _scope: {},
         is_persisted=lambda _ctx, _scope: False,
     )
@@ -88,6 +89,22 @@ def test_validate_export_registry_rejects_empty_ensure_dependency_target():
         )
 
 
+def test_validate_export_registry_rejects_missing_ensure_export_with_dependencies():
+    dep = _non_empty_export_catalog("valid-dep")
+    provider = _non_empty_export_catalog(
+        "provider",
+        ensure_dependencies=(EnsureDependency(analytic_id="valid-dep"),),
+        with_ensure_export=False,
+    )
+
+    with pytest.raises(RuntimeError, match="no ensure_export"):
+        _validate_export_registry(
+            (provider, dep),
+            catalog_ids={"provider", "valid-dep"},
+            role="test",
+        )
+
+
 def test_merge_export_registry_rejects_missing_ensure_dependency_target():
     bad_catalog = _non_empty_export_catalog(
         "export-test-bad-merge",
@@ -107,6 +124,18 @@ def test_merge_export_registry_rejects_empty_ensure_dependency_target():
 
     with pytest.raises(RuntimeError, match="empty catalog 'empty-dep'"):
         merge_export_registry(bad_catalog, empty_dep)
+
+
+def test_merge_export_registry_rejects_missing_ensure_export_with_dependencies():
+    valid_dep = _non_empty_export_catalog("valid-dep")
+    bad_catalog = _non_empty_export_catalog(
+        "export-test-bad-merge",
+        ensure_dependencies=(EnsureDependency(analytic_id="valid-dep"),),
+        with_ensure_export=False,
+    )
+
+    with pytest.raises(RuntimeError, match="no ensure_export"):
+        merge_export_registry(valid_dep, bad_catalog)
 
 
 def test_jsonpath_resolver_supports_index_and_wildcard():
