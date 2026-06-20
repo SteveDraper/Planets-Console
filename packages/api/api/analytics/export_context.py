@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from api.analytics.export_errors import ExportCycleDetectedError
 from api.analytics.export_types import (
@@ -24,6 +24,218 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
+
+_CONTINUE = object()
+
+
+class _ExportDependencyVisitor(Protocol):
+    def on_cycle(self) -> Any: ...
+
+    def on_node_enter(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog | None,
+    ) -> Any: ...
+
+    def on_dependency_missing_turn(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+    ) -> Any: ...
+
+    def should_visit_dependency(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        dependency_catalog: AnalyticExportCatalog | None,
+    ) -> bool: ...
+
+    def on_dependency_result(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        nested: Any,
+    ) -> Any: ...
+
+    def on_node_exit(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+    ) -> Any: ...
+
+
+@dataclass
+class _TurnAvailabilityVisitor:
+    def on_cycle(self) -> UnavailableReason | None:
+        return None
+
+    def on_node_enter(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog | None,
+    ) -> Any:
+        return _CONTINUE
+
+    def on_dependency_missing_turn(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+    ) -> Any:
+        return "turn_not_stored"
+
+    def should_visit_dependency(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        dependency_catalog: AnalyticExportCatalog | None,
+    ) -> bool:
+        return dependency_catalog is not None and not dependency_catalog.is_empty
+
+    def on_dependency_result(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        nested: UnavailableReason | None,
+    ) -> Any:
+        if nested is not None:
+            return nested
+        return _CONTINUE
+
+    def on_node_exit(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+    ) -> UnavailableReason | None:
+        return None
+
+
+@dataclass
+class _MissingStepsVisitor:
+    ctx: AnalyticQueryContext
+    missing: list[EnsureMissingStep] = field(default_factory=list)
+
+    def on_cycle(self) -> list[EnsureMissingStep]:
+        return []
+
+    def on_node_enter(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog | None,
+    ) -> Any:
+        if catalog is None or catalog.is_empty:
+            return []
+        if self.ctx._is_at_baseline(analytic_id, scope, catalog):
+            return []
+        if self.ctx._is_persisted(analytic_id, scope, catalog):
+            return []
+        return _CONTINUE
+
+    def on_dependency_missing_turn(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+    ) -> Any:
+        self.missing.append(
+            EnsureMissingStep(
+                analytic_id=dependency.analytic_id,
+                turn=dependency_scope.turn,
+                player_id=dependency_scope.player_id,
+                status="not_persisted",
+            )
+        )
+        return _CONTINUE
+
+    def should_visit_dependency(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        dependency_catalog: AnalyticExportCatalog | None,
+    ) -> bool:
+        return True
+
+    def on_dependency_result(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        nested: list[EnsureMissingStep],
+    ) -> Any:
+        return _CONTINUE
+
+    def on_node_exit(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+    ) -> list[EnsureMissingStep]:
+        self.missing.append(
+            EnsureMissingStep(
+                analytic_id=analytic_id,
+                turn=scope.turn,
+                player_id=scope.player_id,
+                status="not_persisted",
+            )
+        )
+        return self.missing
+
+
+@dataclass
+class _EnsureExportVisitor:
+    ctx: AnalyticQueryContext
+
+    def on_cycle(self) -> None:
+        return None
+
+    def on_node_enter(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog | None,
+    ) -> Any:
+        if catalog is None or catalog.is_empty:
+            return None
+        if self.ctx._is_at_baseline(analytic_id, scope, catalog):
+            return None
+        if self.ctx._is_persisted(analytic_id, scope, catalog):
+            return None
+        return _CONTINUE
+
+    def on_dependency_missing_turn(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+    ) -> Any:
+        return _CONTINUE
+
+    def should_visit_dependency(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        dependency_catalog: AnalyticExportCatalog | None,
+    ) -> bool:
+        return True
+
+    def on_dependency_result(
+        self,
+        dependency: EnsureDependency,
+        dependency_scope: ExportScope,
+        nested: None,
+    ) -> Any:
+        return _CONTINUE
+
+    def on_node_exit(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+    ) -> None:
+        if catalog.ensure_export is not None:
+            catalog.ensure_export(self.ctx, scope)
+        self.ctx._ensured_scopes.add((analytic_id, scope))
 
 
 @dataclass
@@ -178,6 +390,75 @@ class AnalyticQueryContext:
             return None
         return self._walk_dependency_turns(catalog, scope, visiting=set())
 
+    def _walk_export_dependencies(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        *,
+        visiting: set[tuple[str, ExportScope]] | None,
+        visitor: _ExportDependencyVisitor,
+        catalog_override: AnalyticExportCatalog | None = None,
+    ) -> Any:
+        visit_key = (analytic_id, scope)
+        if visiting is not None:
+            if visit_key in visiting:
+                return visitor.on_cycle()
+            visiting.add(visit_key)
+
+        try:
+            catalog = (
+                catalog_override
+                if catalog_override is not None
+                else self.export_registry.get(analytic_id)
+            )
+
+            enter_result = visitor.on_node_enter(analytic_id, scope, catalog)
+            if enter_result is not _CONTINUE:
+                return enter_result
+
+            assert catalog is not None
+
+            for dependency in catalog.ensure_dependencies:
+                dependency_scope = self._dependency_scope(scope, dependency)
+                if dependency_scope.turn < 1:
+                    continue
+
+                if self.load_turn(dependency_scope.turn) is None:
+                    missing_turn_result = visitor.on_dependency_missing_turn(
+                        dependency,
+                        dependency_scope,
+                    )
+                    if missing_turn_result is not _CONTINUE:
+                        return missing_turn_result
+                    continue
+
+                dependency_catalog = self.export_registry.get(dependency.analytic_id)
+                if not visitor.should_visit_dependency(
+                    dependency,
+                    dependency_scope,
+                    dependency_catalog,
+                ):
+                    continue
+
+                nested = self._walk_export_dependencies(
+                    dependency.analytic_id,
+                    dependency_scope,
+                    visiting=visiting,
+                    visitor=visitor,
+                )
+                dependency_result = visitor.on_dependency_result(
+                    dependency,
+                    dependency_scope,
+                    nested,
+                )
+                if dependency_result is not _CONTINUE:
+                    return dependency_result
+
+            return visitor.on_node_exit(analytic_id, scope, catalog)
+        finally:
+            if visiting is not None:
+                visiting.discard(visit_key)
+
     def _walk_dependency_turns(
         self,
         catalog: AnalyticExportCatalog,
@@ -185,32 +466,13 @@ class AnalyticQueryContext:
         *,
         visiting: set[tuple[str, ExportScope]],
     ) -> UnavailableReason | None:
-        visit_key = (catalog.analytic_id, scope)
-        if visit_key in visiting:
-            return None
-        visiting.add(visit_key)
-
-        for dependency in catalog.ensure_dependencies:
-            dependency_scope = self._dependency_scope(scope, dependency)
-            if dependency_scope.turn < 1:
-                continue
-            if self.load_turn(dependency_scope.turn) is None:
-                visiting.remove(visit_key)
-                return "turn_not_stored"
-            dependency_catalog = self.export_registry.get(dependency.analytic_id)
-            if dependency_catalog is None or dependency_catalog.is_empty:
-                continue
-            nested = self._walk_dependency_turns(
-                dependency_catalog,
-                dependency_scope,
-                visiting=visiting,
-            )
-            if nested is not None:
-                visiting.remove(visit_key)
-                return nested
-
-        visiting.remove(visit_key)
-        return None
+        return self._walk_export_dependencies(
+            catalog.analytic_id,
+            scope,
+            visiting=visiting,
+            visitor=_TurnAvailabilityVisitor(),
+            catalog_override=catalog,
+        )
 
     def _collect_missing_steps(
         self,
@@ -219,57 +481,13 @@ class AnalyticQueryContext:
         *,
         visiting: set[tuple[str, ExportScope]],
     ) -> list[EnsureMissingStep]:
-        visit_key = (analytic_id, scope)
-        if visit_key in visiting:
-            return []
-        visiting.add(visit_key)
-
-        catalog = self.export_registry.get(analytic_id)
-        if catalog is None or catalog.is_empty:
-            visiting.remove(visit_key)
-            return []
-
-        if self._is_at_baseline(analytic_id, scope, catalog):
-            visiting.remove(visit_key)
-            return []
-
-        if self._is_persisted(analytic_id, scope, catalog):
-            visiting.remove(visit_key)
-            return []
-
-        missing: list[EnsureMissingStep] = []
-        for dependency in catalog.ensure_dependencies:
-            dependency_scope = self._dependency_scope(scope, dependency)
-            if dependency_scope.turn < 1:
-                continue
-            if self.load_turn(dependency_scope.turn) is None:
-                missing.append(
-                    EnsureMissingStep(
-                        analytic_id=dependency.analytic_id,
-                        turn=dependency_scope.turn,
-                        player_id=dependency_scope.player_id,
-                        status="not_persisted",
-                    )
-                )
-                continue
-            missing.extend(
-                self._collect_missing_steps(
-                    dependency.analytic_id,
-                    dependency_scope,
-                    visiting=visiting,
-                )
-            )
-
-        missing.append(
-            EnsureMissingStep(
-                analytic_id=analytic_id,
-                turn=scope.turn,
-                player_id=scope.player_id,
-                status="not_persisted",
-            )
+        visitor = _MissingStepsVisitor(ctx=self)
+        return self._walk_export_dependencies(
+            analytic_id,
+            scope,
+            visiting=visiting,
+            visitor=visitor,
         )
-        visiting.remove(visit_key)
-        return missing
 
     def _dependency_scope(
         self,
@@ -316,24 +534,13 @@ class AnalyticQueryContext:
 
     def _ensure_export_tree(self, analytic_id: str, scope: ExportScope) -> None:
         catalog = self.export_registry[analytic_id]
-        if catalog.is_empty:
-            return
-        if self._is_at_baseline(analytic_id, scope, catalog):
-            return
-        if self._is_persisted(analytic_id, scope, catalog):
-            return
-
-        for dependency in catalog.ensure_dependencies:
-            dependency_scope = self._dependency_scope(scope, dependency)
-            if dependency_scope.turn < 1:
-                continue
-            if self.load_turn(dependency_scope.turn) is None:
-                continue
-            self._ensure_export_tree(dependency.analytic_id, dependency_scope)
-
-        if catalog.ensure_export is not None:
-            catalog.ensure_export(self, scope)
-        self._ensured_scopes.add((analytic_id, scope))
+        self._walk_export_dependencies(
+            analytic_id,
+            scope,
+            visiting=None,
+            visitor=_EnsureExportVisitor(ctx=self),
+            catalog_override=catalog,
+        )
 
     def _materialize_tree(
         self,
