@@ -13,6 +13,7 @@ from api.analytics.export_types import (
     UnavailableReason,
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.analytics.exports.ensure_validation import validate_ensure_dependency_target
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
@@ -61,9 +62,12 @@ def walk_dependency_tree(
                 result.turn_unavailable = "turn_not_stored"
                 return result
 
-            dependency_catalog = ctx.export_registry.get(dependency.analytic_id)
-            if dependency_catalog is None or dependency_catalog.is_empty:
-                continue
+            validate_ensure_dependency_target(
+                catalog.analytic_id,
+                dependency,
+                ctx.export_registry,
+                role="query",
+            )
 
             nested = walk_dependency_tree(
                 ctx,
