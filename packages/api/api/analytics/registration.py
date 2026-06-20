@@ -58,3 +58,9 @@ def validate_turn_analytic_registrations(
                 f"Turn analytic {analytic_id!r} compute must be callable, "
                 f"got {type(registration.compute).__name__}"
             )
+        export_analytic_id = registration.export_catalog.analytic_id
+        if export_analytic_id != analytic_id:
+            raise RuntimeError(
+                f"Turn analytic {analytic_id!r} export catalog analytic_id must match "
+                f"catalog entry id, got {export_analytic_id!r}"
+            )
