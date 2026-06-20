@@ -10,6 +10,7 @@ UnavailableReason = Literal[
     "invalid_scope",
     "empty_catalog",
     "ensure_blocked",
+    "ensure_cycle",
     "unknown_analytic",
 ]
 

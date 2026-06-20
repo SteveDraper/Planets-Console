@@ -209,6 +209,22 @@ def test_ensure_graph_cycle_raises(sample_turn):
         )
 
 
+def test_probe_ensure_graph_cycle_returns_unavailable(sample_turn):
+    player_id = first_player_id(sample_turn)
+    stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    ctx = make_cycle_fixture_query_context(sample_turn, stored_turns=stored_turns)
+
+    probe = ctx.probe(
+        "export-test-cycle-a",
+        ExportScopeOverrides(turn=2, player_id=player_id),
+    )
+
+    assert probe.status == "unavailable"
+    assert probe.reason == "ensure_cycle"
+    assert probe.total_missing == 0
+    assert probe.missing_steps == ()
+
+
 def test_large_probe_blocks_inline_ensure(sample_turn, monkeypatch):
     from api.analytics import export_context as export_context_module
 

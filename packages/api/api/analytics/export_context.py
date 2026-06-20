@@ -66,13 +66,15 @@ class AnalyticQueryContext:
         prep = self._prepare_export_request(analytic_id, scope_overrides)
         if not isinstance(prep, PreparedExportRequest):
             return self._probe_unavailable(prep)
-        walk_result = walk_dependency_tree(
-            self,
-            analytic_id,
-            prep.scope,
-            visiting=set(),
-            detect_ensure_cycles=False,
-        )
+        try:
+            walk_result = walk_dependency_tree(
+                self,
+                analytic_id,
+                prep.scope,
+                visiting=set(),
+            )
+        except ExportCycleDetectedError:
+            return self._probe_unavailable("ensure_cycle")
         if walk_result.turn_unavailable is not None:
             return self._probe_unavailable(walk_result.turn_unavailable)
         total_missing = len(walk_result.missing_steps)
@@ -124,7 +126,6 @@ class AnalyticQueryContext:
             analytic_id,
             scope,
             visiting=set(),
-            detect_ensure_cycles=True,
         )
         if walk_result.turn_unavailable is not None:
             result = self._unavailable(walk_result.turn_unavailable)

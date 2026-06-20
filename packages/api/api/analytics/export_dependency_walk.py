@@ -33,17 +33,14 @@ def walk_dependency_tree(
     scope: ExportScope,
     *,
     visiting: set[tuple[str, ExportScope]],
-    detect_ensure_cycles: bool,
 ) -> DependencyWalkResult:
     result = DependencyWalkResult()
     visit_key = (analytic_id, scope)
     if visit_key in visiting:
-        if detect_ensure_cycles:
-            raise ExportCycleDetectedError(
-                f"Analytic export ensure cycle detected for {analytic_id!r} "
-                f"at turn {scope.turn} with player_id {scope.player_id!r}"
-            )
-        return result
+        raise ExportCycleDetectedError(
+            f"Analytic export ensure cycle detected for {analytic_id!r} "
+            f"at turn {scope.turn} with player_id {scope.player_id!r}"
+        )
 
     visiting.add(visit_key)
     try:
@@ -71,7 +68,6 @@ def walk_dependency_tree(
                 dependency.analytic_id,
                 dependency_scope,
                 visiting=visiting,
-                detect_ensure_cycles=detect_ensure_cycles,
             )
             if nested.turn_unavailable is not None:
                 result.turn_unavailable = nested.turn_unavailable
