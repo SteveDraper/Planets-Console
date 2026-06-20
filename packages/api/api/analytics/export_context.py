@@ -6,7 +6,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from api.analytics.export_dependency_walk import walk_dependency_tree
+from api.analytics.export_dependency_walk import (
+    DependencyWalkResult,
+    walk_dependency_tree,
+)
 from api.analytics.export_errors import ExportCycleDetectedError
 from api.analytics.export_types import (
     ExportProbeResult,
@@ -66,17 +69,14 @@ class AnalyticQueryContext:
         prep = self._prepare_export_request(analytic_id, scope_overrides)
         if not isinstance(prep, PreparedExportRequest):
             return self._probe_unavailable(prep)
-        try:
-            walk_result = walk_dependency_tree(
-                self,
-                analytic_id,
-                prep.scope,
-                visiting=set(),
-            )
-        except ExportCycleDetectedError:
-            return self._probe_unavailable("ensure_cycle")
-        if walk_result.turn_unavailable is not None:
-            return self._probe_unavailable(walk_result.turn_unavailable)
+        walk_outcome = self._walk_export_dependencies(
+            analytic_id,
+            prep.scope,
+            catch_ensure_cycle=True,
+        )
+        if not isinstance(walk_outcome, DependencyWalkResult):
+            return self._probe_unavailable(walk_outcome)
+        walk_result = walk_outcome
         total_missing = len(walk_result.missing_steps)
         blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
         return ExportProbeResult(
@@ -121,16 +121,12 @@ class AnalyticQueryContext:
             self._memo[resolution_key] = result
             return result
 
-        walk_result = walk_dependency_tree(
-            self,
-            analytic_id,
-            scope,
-            visiting=set(),
-        )
-        if walk_result.turn_unavailable is not None:
-            result = self._unavailable(walk_result.turn_unavailable)
+        walk_outcome = self._walk_export_dependencies(analytic_id, scope)
+        if not isinstance(walk_outcome, DependencyWalkResult):
+            result = self._unavailable(walk_outcome)
             self._memo[resolution_key] = result
             return result
+        walk_result = walk_outcome
 
         total_missing = len(walk_result.missing_steps)
         blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
@@ -151,6 +147,28 @@ class AnalyticQueryContext:
             return result
         finally:
             self._resolution_stack.pop()
+
+    def _walk_export_dependencies(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        *,
+        catch_ensure_cycle: bool = False,
+    ) -> DependencyWalkResult | UnavailableReason:
+        try:
+            walk_result = walk_dependency_tree(
+                self,
+                analytic_id,
+                scope,
+                visiting=set(),
+            )
+        except ExportCycleDetectedError:
+            if catch_ensure_cycle:
+                return "ensure_cycle"
+            raise
+        if walk_result.turn_unavailable is not None:
+            return walk_result.turn_unavailable
+        return walk_result
 
     def _prepare_export_request(
         self,
