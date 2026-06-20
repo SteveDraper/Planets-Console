@@ -75,6 +75,7 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
     for registration in TURN_ANALYTIC_REGISTRATIONS:
         assert registration.catalog_entry.id in TURN_ANALYTICS
         assert callable(registration.compute)
+        assert registration.export_catalog.analytic_id == registration.catalog_entry.id
 
 
 def test_validate_turn_analytic_registrations_rejects_empty_tuple():

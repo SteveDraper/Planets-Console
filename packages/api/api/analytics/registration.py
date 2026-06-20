@@ -5,14 +5,8 @@ from dataclasses import dataclass
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
-
-
-@dataclass(frozen=True)
-class EmptyExportCatalog:
-    """Placeholder export catalog until analytic exports land (#93)."""
-
-
-EMPTY_EXPORT_CATALOG = EmptyExportCatalog()
+from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.analytics.exports.empty import EMPTY_EXPORT_CATALOG
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
 
@@ -23,7 +17,7 @@ class TurnAnalyticRegistration:
 
     catalog_entry: TurnAnalyticCatalogEntry
     compute: TurnAnalyticHandler
-    export_catalog: EmptyExportCatalog = EMPTY_EXPORT_CATALOG
+    export_catalog: AnalyticExportCatalog = EMPTY_EXPORT_CATALOG
 
 
 _VALID_ANALYTIC_TYPES = frozenset({"base", "selectable"})

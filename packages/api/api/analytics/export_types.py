@@ -1,0 +1,103 @@
+"""Types for cross-analytic export queries."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+UnavailableReason = Literal[
+    "turn_not_stored",
+    "invalid_scope",
+    "empty_catalog",
+    "ensure_blocked",
+    "unknown_analytic",
+]
+
+PathResultKind = Literal["value", "none", "invalid_path"]
+
+EnsureStepStatus = Literal[
+    "not_persisted",
+    "persisted",
+    "in_progress",
+    "baseline",
+]
+
+
+@dataclass(frozen=True)
+class ExportScope:
+    """Fully resolved export scope for one analytic at one turn."""
+
+    game_id: int
+    perspective: int
+    turn: int
+    player_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ExportScopeOverrides:
+    """Partial scope parameters supplied on probe/query."""
+
+    turn: int | None = None
+    player_id: int | None = None
+
+
+@dataclass(frozen=True)
+class PathPrefixScopeRule:
+    """Scope validation keyed by JSONPath prefix."""
+
+    prefix: str
+    requires: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class EnsureDependency:
+    """Provider-declared upstream ensure edge."""
+
+    analytic_id: str
+    turn_delta: int = 0
+    player_id: Literal["same"] | None = "same"
+
+
+@dataclass(frozen=True)
+class EnsureMissingStep:
+    """One step reported by probe as not yet terminal."""
+
+    analytic_id: str
+    turn: int
+    player_id: int | None
+    status: EnsureStepStatus
+
+
+@dataclass(frozen=True)
+class ExportProbeResult:
+    """Dry-run ensure dependency walk."""
+
+    missing_steps: tuple[EnsureMissingStep, ...]
+    total_missing: int
+    blocked_inline: bool
+
+
+@dataclass(frozen=True)
+class PathResult:
+    """Discriminated outcome for one JSONPath selector."""
+
+    kind: PathResultKind
+    value: Any | None = None
+
+
+@dataclass(frozen=True)
+class ExportQueryResult:
+    """Top-level export query envelope."""
+
+    status: Literal["ok", "unavailable"]
+    paths: dict[str, PathResult] = field(default_factory=dict)
+    reason: UnavailableReason | None = None
+
+
+@dataclass(frozen=True)
+class ResolutionKey:
+    """Memoization and cycle-detection key."""
+
+    analytic_id: str
+    scope: ExportScope
+    paths: tuple[str, ...]

@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores_assets import ANALYTIC_ID
+from api.analytics.scores_exports import EXPORT_CATALOG
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
@@ -133,4 +134,5 @@ def iter_scores_table_inference_stream(
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_scores_table,
+    export_catalog=EXPORT_CATALOG,
 )
