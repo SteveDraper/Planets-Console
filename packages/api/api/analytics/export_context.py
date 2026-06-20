@@ -60,6 +60,12 @@ class AnalyticQueryContext:
     _resolution_stack: list[ResolutionKey] = field(default_factory=list, repr=False)
     _ensured_scopes: set[tuple[str, ExportScope]] = field(default_factory=set, repr=False)
 
+    def is_scope_ensured(self, analytic_id: str, scope: ExportScope) -> bool:
+        return (analytic_id, scope) in self._ensured_scopes
+
+    def mark_scope_ensured(self, analytic_id: str, scope: ExportScope) -> None:
+        self._ensured_scopes.add((analytic_id, scope))
+
     def probe(
         self,
         analytic_id: str,
@@ -231,7 +237,7 @@ class AnalyticQueryContext:
         for analytic_id, scope, catalog in pending_ensure:
             if catalog.ensure_export is not None:
                 catalog.ensure_export(self, scope)
-            self._ensured_scopes.add((analytic_id, scope))
+            self.mark_scope_ensured(analytic_id, scope)
 
     def _materialize_tree(
         self,

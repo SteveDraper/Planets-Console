@@ -197,8 +197,7 @@ def _is_persisted(
     scope: ExportScope,
     catalog: AnalyticExportCatalog,
 ) -> bool:
-    scope_key = (analytic_id, scope)
-    if scope_key in ctx._ensured_scopes:
+    if ctx.is_scope_ensured(analytic_id, scope):
         return True
     if catalog.is_persisted is None:
         return False
