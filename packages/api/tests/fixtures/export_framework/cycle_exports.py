@@ -53,9 +53,7 @@ CYCLE_A_EXPORT_CATALOG = AnalyticExportCatalog(
     analytic_id=CYCLE_A_ID,
     value_schema=_EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=_PATH_PREFIX_SCOPE_RULES,
-    ensure_dependencies=(
-        EnsureDependency(analytic_id=CYCLE_B_ID, turn_delta=0, player_id="same"),
-    ),
+    ensure_dependencies=(EnsureDependency(analytic_id=CYCLE_B_ID, turn_delta=0, player_id="same"),),
     ensure_export=_ensure_export(CYCLE_A_ID),
     materialize_export_tree=_materialize_export_tree(CYCLE_A_ID),
     is_persisted=_is_persisted(CYCLE_A_ID),
@@ -65,9 +63,7 @@ CYCLE_B_EXPORT_CATALOG = AnalyticExportCatalog(
     analytic_id=CYCLE_B_ID,
     value_schema=_EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=_PATH_PREFIX_SCOPE_RULES,
-    ensure_dependencies=(
-        EnsureDependency(analytic_id=CYCLE_A_ID, turn_delta=0, player_id="same"),
-    ),
+    ensure_dependencies=(EnsureDependency(analytic_id=CYCLE_A_ID, turn_delta=0, player_id="same"),),
     ensure_export=_ensure_export(CYCLE_B_ID),
     materialize_export_tree=_materialize_export_tree(CYCLE_B_ID),
     is_persisted=_is_persisted(CYCLE_B_ID),
