@@ -36,6 +36,15 @@ class PreparedExportRequest:
     scope: ExportScope
 
 
+@dataclass(frozen=True)
+class PlannedEnsureWalk:
+    """Prepared request plus dependency walk outcome for probe or query."""
+
+    prep: PreparedExportRequest
+    walk_result: DependencyWalkResult
+    blocked_inline: bool
+
+
 @dataclass
 class AnalyticQueryContext:
     """Cross-analytic export queries during Core turn analytic compute."""
@@ -72,27 +81,23 @@ class AnalyticQueryContext:
         scope_overrides: ExportScopeOverrides | Mapping[str, object] | None = None,
     ) -> ExportProbeResult:
         """Dry-run ensure dependencies without materialization."""
-        prep = self._prepare_export_request(analytic_id, scope_overrides)
-        if not isinstance(prep, PreparedExportRequest):
-            return self._probe_unavailable(prep)
-        unavailable = self._requested_turn_unavailable_reason(prep.scope)
-        if unavailable is not None:
-            return self._probe_unavailable(unavailable)
-        walk_outcome = self._walk_export_dependencies(
+        plan = self._plan_ensure_walk(
             analytic_id,
-            prep.scope,
+            scope_overrides,
+            pre_walk_unavailable=lambda prep: self._requested_turn_unavailable_reason(
+                prep.scope
+            ),
             catch_ensure_cycle=True,
         )
-        if not isinstance(walk_outcome, DependencyWalkResult):
-            return self._probe_unavailable(walk_outcome)
-        walk_result = walk_outcome
+        if not isinstance(plan, PlannedEnsureWalk):
+            return self._probe_unavailable(plan)
+        walk_result = plan.walk_result
         total_missing = len(walk_result.missing_steps)
-        blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
         return ExportProbeResult(
             status="ok",
             missing_steps=tuple(walk_result.missing_steps),
             total_missing=total_missing,
-            blocked_inline=blocked_inline,
+            blocked_inline=plan.blocked_inline,
         )
 
     def query(
@@ -130,24 +135,30 @@ class AnalyticQueryContext:
                 f"at turn {scope.turn} with paths {list(normalized_paths)!r}"
             )
 
-        unavailable = self._scope_unavailable_reason(catalog, scope, normalized_paths)
-        if unavailable is not None:
-            result = self._unavailable(unavailable)
+        plan = self._plan_ensure_walk(
+            analytic_id,
+            scope_overrides,
+            prep=prep,
+            pre_walk_unavailable=lambda prepared: self._scope_unavailable_reason(
+                prepared.catalog,
+                prepared.scope,
+                normalized_paths,
+            ),
+            catch_ensure_cycle=False,
+        )
+        if not isinstance(plan, PlannedEnsureWalk):
+            result = self._unavailable(plan)
             self._memo[resolution_key] = result
             return result
 
-        walk_outcome = self._walk_export_dependencies(analytic_id, scope)
-        if not isinstance(walk_outcome, DependencyWalkResult):
-            result = self._unavailable(walk_outcome)
-            self._memo[resolution_key] = result
-            return result
-        walk_result = walk_outcome
-
-        total_missing = len(walk_result.missing_steps)
-        blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
-        if blocked_inline and not force_inline_ensure and self.enforce_inline_ensure_threshold:
+        if (
+            plan.blocked_inline
+            and not force_inline_ensure
+            and self.enforce_inline_ensure_threshold
+        ):
             return self._unavailable("ensure_blocked")
 
+        walk_result = plan.walk_result
         self._resolution_stack.append(resolution_key)
         try:
             self._apply_pending_ensure(walk_result.pending_ensure)
@@ -160,6 +171,38 @@ class AnalyticQueryContext:
             return result
         finally:
             self._resolution_stack.pop()
+
+    def _plan_ensure_walk(
+        self,
+        analytic_id: str,
+        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None,
+        *,
+        prep: PreparedExportRequest | None = None,
+        pre_walk_unavailable: Callable[[PreparedExportRequest], UnavailableReason | None],
+        catch_ensure_cycle: bool,
+    ) -> UnavailableReason | PlannedEnsureWalk:
+        resolved_prep = prep
+        if resolved_prep is None:
+            prepared = self._prepare_export_request(analytic_id, scope_overrides)
+            if not isinstance(prepared, PreparedExportRequest):
+                return prepared
+            resolved_prep = prepared
+        unavailable = pre_walk_unavailable(resolved_prep)
+        if unavailable is not None:
+            return unavailable
+        walk_outcome = self._walk_export_dependencies(
+            analytic_id,
+            resolved_prep.scope,
+            catch_ensure_cycle=catch_ensure_cycle,
+        )
+        if not isinstance(walk_outcome, DependencyWalkResult):
+            return walk_outcome
+        total_missing = len(walk_outcome.missing_steps)
+        return PlannedEnsureWalk(
+            prep=resolved_prep,
+            walk_result=walk_outcome,
+            blocked_inline=total_missing > INLINE_ENSURE_MAX_MISSING_STEPS,
+        )
 
     def _walk_export_dependencies(
         self,
