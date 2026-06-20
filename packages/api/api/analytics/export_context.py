@@ -75,6 +75,9 @@ class AnalyticQueryContext:
         prep = self._prepare_export_request(analytic_id, scope_overrides)
         if not isinstance(prep, PreparedExportRequest):
             return self._probe_unavailable(prep)
+        unavailable = self._requested_turn_unavailable_reason(prep.scope)
+        if unavailable is not None:
+            return self._probe_unavailable(unavailable)
         walk_outcome = self._walk_export_dependencies(
             analytic_id,
             prep.scope,
@@ -217,14 +220,23 @@ class AnalyticQueryContext:
             player_id=scope_overrides.get("player_id"),  # type: ignore[arg-type]
         )
 
+    def _requested_turn_unavailable_reason(
+        self,
+        scope: ExportScope,
+    ) -> UnavailableReason | None:
+        if self.load_turn(scope.turn) is None:
+            return "turn_not_stored"
+        return None
+
     def _scope_unavailable_reason(
         self,
         catalog: AnalyticExportCatalog,
         scope: ExportScope,
         paths: tuple[str, ...],
     ) -> UnavailableReason | None:
-        if self.load_turn(scope.turn) is None:
-            return "turn_not_stored"
+        unavailable = self._requested_turn_unavailable_reason(scope)
+        if unavailable is not None:
+            return unavailable
         for path in paths:
             if catalog.requires_player_id_for_path(path) and scope.player_id is None:
                 return "invalid_scope"
