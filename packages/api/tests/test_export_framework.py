@@ -234,7 +234,7 @@ def test_probe_empty_catalog_returns_unavailable(sample_turn):
 
     ctx = make_analytic_compute_context(sample_turn, TurnAnalyticsOptions())
 
-    probe = ctx.query.probe("base-map")
+    probe = ctx.exports.probe("base-map")
 
     assert probe.status == "unavailable"
     assert probe.reason == "empty_catalog"
@@ -251,10 +251,9 @@ def test_get_turn_analytic_wires_query_context(sample_turn):
     from api.analytics.compute_context import make_analytic_compute_context
 
     ctx = make_analytic_compute_context(sample_turn, TurnAnalyticsOptions())
-    assert ctx.query is not None
-    empty_probe = ctx.query.probe("base-map")
+    empty_probe = ctx.exports.probe("base-map")
     assert empty_probe.status == "unavailable"
     assert empty_probe.reason == "empty_catalog"
-    empty_result = ctx.query.query("base-map", ["$.meta"])
+    empty_result = ctx.exports.query("base-map", ["$.meta"])
     assert empty_result.status == "unavailable"
     assert empty_result.reason == "empty_catalog"

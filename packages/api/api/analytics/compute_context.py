@@ -20,8 +20,8 @@ class AnalyticComputeContext:
 
     turn: TurnInfo
     options: TurnAnalyticsOptions
+    exports: AnalyticQueryContext
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS
-    query: AnalyticQueryContext | None = None
 
 
 def make_analytic_compute_context(
@@ -36,7 +36,7 @@ def make_analytic_compute_context(
         turn=turn,
         options=resolved,
         diagnostics=resolved.diagnostics,
-        query=make_analytic_query_context(turn, resolved, load_turn=load_turn),
+        exports=make_analytic_query_context(turn, resolved, load_turn=load_turn),
     )
 
 
