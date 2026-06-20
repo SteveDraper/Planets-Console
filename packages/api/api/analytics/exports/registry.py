@@ -2,21 +2,9 @@
 
 from __future__ import annotations
 
-from api.analytics.base_map_exports import EXPORT_CATALOG as BASE_MAP_EXPORT_CATALOG
 from api.analytics.catalog import TURN_ANALYTIC_CATALOG
-from api.analytics.connections_exports import EXPORT_CATALOG as CONNECTIONS_EXPORT_CATALOG
 from api.analytics.exports.catalog import AnalyticExportCatalog
-from api.analytics.scores_exports import EXPORT_CATALOG as SCORES_EXPORT_CATALOG
-from api.analytics.stellar_cartography_exports import (
-    EXPORT_CATALOG as STELLAR_CARTOGRAPHY_EXPORT_CATALOG,
-)
-
-_PRODUCTION_EXPORT_CATALOGS: tuple[AnalyticExportCatalog, ...] = (
-    BASE_MAP_EXPORT_CATALOG,
-    SCORES_EXPORT_CATALOG,
-    CONNECTIONS_EXPORT_CATALOG,
-    STELLAR_CARTOGRAPHY_EXPORT_CATALOG,
-)
+from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
 
 def _validate_export_registry(
@@ -50,7 +38,7 @@ def _validate_export_registry(
 _CATALOG_IDS = {entry.id for entry in TURN_ANALYTIC_CATALOG}
 
 EXPORT_REGISTRY: dict[str, AnalyticExportCatalog] = _validate_export_registry(
-    _PRODUCTION_EXPORT_CATALOGS,
+    tuple(registration.export_catalog for registration in TURN_ANALYTIC_REGISTRATIONS),
     catalog_ids=_CATALOG_IDS,
     role="production",
 )

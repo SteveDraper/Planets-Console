@@ -27,11 +27,14 @@ def sample_turn():
 
 def test_export_registry_covers_production_catalog():
     from api.analytics.catalog import TURN_ANALYTIC_CATALOG
+    from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
     catalog_ids = {entry.id for entry in TURN_ANALYTIC_CATALOG}
     assert set(EXPORT_REGISTRY) == catalog_ids
-    for analytic_id in catalog_ids:
+    for registration in TURN_ANALYTIC_REGISTRATIONS:
+        analytic_id = registration.catalog_entry.id
         assert EXPORT_REGISTRY[analytic_id].analytic_id == analytic_id
+        assert registration.export_catalog is EXPORT_REGISTRY[analytic_id]
 
 
 def test_jsonpath_resolver_supports_index_and_wildcard():
