@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 from api.analytics.export_errors import ExportCycleDetectedError
-from api.analytics.export_types import ExportScope, ExportScopeOverrides
+from api.analytics.export_types import EnsureDependency, ExportScope, ExportScopeOverrides
+from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
-from api.analytics.exports.registry import EXPORT_REGISTRY
+from api.analytics.exports.registry import EXPORT_REGISTRY, _validate_export_registry
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.export_framework.harness import (
@@ -37,6 +38,50 @@ def test_export_registry_covers_production_catalog():
         analytic_id = registration.catalog_entry.id
         assert EXPORT_REGISTRY[analytic_id].analytic_id == analytic_id
         assert registration.export_catalog is EXPORT_REGISTRY[analytic_id]
+
+
+def _non_empty_export_catalog(
+    analytic_id: str,
+    *,
+    ensure_dependencies: tuple[EnsureDependency, ...] = (),
+) -> AnalyticExportCatalog:
+    return AnalyticExportCatalog(
+        analytic_id=analytic_id,
+        ensure_dependencies=ensure_dependencies,
+        ensure_export=lambda _ctx, _scope: None,
+        materialize_export_tree=lambda _ctx, _scope: {},
+        is_persisted=lambda _ctx, _scope: False,
+    )
+
+
+def test_validate_export_registry_rejects_missing_ensure_dependency_target():
+    provider = _non_empty_export_catalog(
+        "provider",
+        ensure_dependencies=(EnsureDependency(analytic_id="missing-dep"),),
+    )
+    placeholder = AnalyticExportCatalog(analytic_id="placeholder", is_empty=True)
+
+    with pytest.raises(RuntimeError, match="missing analytic_id 'missing-dep'"):
+        _validate_export_registry(
+            (provider, placeholder),
+            catalog_ids={"provider", "placeholder"},
+            role="test",
+        )
+
+
+def test_validate_export_registry_rejects_empty_ensure_dependency_target():
+    provider = _non_empty_export_catalog(
+        "provider",
+        ensure_dependencies=(EnsureDependency(analytic_id="empty-dep"),),
+    )
+    empty_dep = AnalyticExportCatalog(analytic_id="empty-dep", is_empty=True)
+
+    with pytest.raises(RuntimeError, match="empty catalog 'empty-dep'"):
+        _validate_export_registry(
+            (provider, empty_dep),
+            catalog_ids={"provider", "empty-dep"},
+            role="test",
+        )
 
 
 def test_jsonpath_resolver_supports_index_and_wildcard():
