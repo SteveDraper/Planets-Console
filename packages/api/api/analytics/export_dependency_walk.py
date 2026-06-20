@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from api.analytics.export_errors import ExportCycleDetectedError
 from api.analytics.export_types import (
@@ -17,6 +18,9 @@ from api.analytics.exports.ensure_validation import validate_ensure_dependency_t
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
+
+T = TypeVar("T")
+K = TypeVar("K")
 
 
 @dataclass
@@ -79,15 +83,17 @@ def walk_dependency_tree(
                 result.turn_unavailable = nested.turn_unavailable
                 return result
 
-            _extend_unique_missing_steps(
+            _extend_unique(
                 result.missing_steps,
                 nested.missing_steps,
                 seen_missing,
+                _missing_step_key,
             )
-            _extend_unique_pending_ensure(
+            _extend_unique(
                 result.pending_ensure,
                 nested.pending_ensure,
                 seen_pending,
+                _pending_ensure_key,
             )
 
         result.missing_steps.append(
@@ -104,51 +110,29 @@ def walk_dependency_tree(
         visiting.discard(visit_key)
 
 
+def _extend_unique(
+    target: list[T],
+    source: list[T],
+    seen: set[K],
+    key_fn: Callable[[T], K],
+) -> None:
+    for item in source:
+        key = key_fn(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        target.append(item)
+
+
 def _missing_step_key(step: EnsureMissingStep) -> tuple[str, int, int | None]:
     return (step.analytic_id, step.turn, step.player_id)
 
 
-def _extend_unique_missing_steps(
-    target: list[EnsureMissingStep],
-    source: list[EnsureMissingStep],
-    seen: set[tuple[str, int, int | None]],
-) -> None:
-    for step in source:
-        _append_unique_missing_step(target, step, seen)
-
-
-def _append_unique_missing_step(
-    target: list[EnsureMissingStep],
-    step: EnsureMissingStep,
-    seen: set[tuple[str, int, int | None]],
-) -> None:
-    key = _missing_step_key(step)
-    if key in seen:
-        return
-    seen.add(key)
-    target.append(step)
-
-
-def _extend_unique_pending_ensure(
-    target: list[tuple[str, ExportScope, AnalyticExportCatalog]],
-    source: list[tuple[str, ExportScope, AnalyticExportCatalog]],
-    seen: set[tuple[str, ExportScope]],
-) -> None:
-    for item in source:
-        _append_unique_pending_ensure(target, item, seen)
-
-
-def _append_unique_pending_ensure(
-    target: list[tuple[str, ExportScope, AnalyticExportCatalog]],
+def _pending_ensure_key(
     item: tuple[str, ExportScope, AnalyticExportCatalog],
-    seen: set[tuple[str, ExportScope]],
-) -> None:
+) -> tuple[str, ExportScope]:
     analytic_id, scope, _catalog = item
-    key = (analytic_id, scope)
-    if key in seen:
-        return
-    seen.add(key)
-    target.append(item)
+    return (analytic_id, scope)
 
 
 def dependency_scope_for(
