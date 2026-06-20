@@ -13,6 +13,7 @@ from api.serialization.turn import turn_info_from_json
 from tests.fixtures.export_framework.harness import (
     build_stored_turn_chain,
     first_player_id,
+    make_cycle_fixture_query_context,
     make_fixture_query_context,
 )
 
@@ -174,6 +175,19 @@ def test_cycle_detection_raises(sample_turn):
     with pytest.raises(ExportCycleDetectedError):
         ctx.query(
             "export-test-alpha",
+            ["$.payload.label"],
+            ExportScopeOverrides(turn=2, player_id=player_id),
+        )
+
+
+def test_ensure_graph_cycle_raises(sample_turn):
+    player_id = first_player_id(sample_turn)
+    stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    ctx = make_cycle_fixture_query_context(sample_turn, stored_turns=stored_turns)
+
+    with pytest.raises(ExportCycleDetectedError, match="ensure cycle"):
+        ctx.query(
+            "export-test-cycle-a",
             ["$.payload.label"],
             ExportScopeOverrides(turn=2, player_id=player_id),
         )

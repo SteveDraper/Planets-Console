@@ -8,9 +8,17 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 from tests.fixtures.export_framework.alpha_exports import EXPORT_CATALOG as ALPHA_EXPORT_CATALOG
 from tests.fixtures.export_framework.beta_exports import EXPORT_CATALOG as BETA_EXPORT_CATALOG
+from tests.fixtures.export_framework.cycle_exports import (
+    CYCLE_A_EXPORT_CATALOG,
+    CYCLE_B_EXPORT_CATALOG,
+)
 from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
 
 FIXTURE_EXPORT_REGISTRY = merge_export_registry(ALPHA_EXPORT_CATALOG, BETA_EXPORT_CATALOG)
+CYCLE_FIXTURE_EXPORT_REGISTRY = merge_export_registry(
+    CYCLE_A_EXPORT_CATALOG,
+    CYCLE_B_EXPORT_CATALOG,
+)
 
 
 def make_fixture_query_context(
@@ -31,6 +39,28 @@ def make_fixture_query_context(
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_registry=FIXTURE_EXPORT_REGISTRY,
+        allow_inline_ensure=allow_inline_ensure,
+    )
+
+
+def make_cycle_fixture_query_context(
+    turn: TurnInfo,
+    *,
+    stored_turns: dict[int, TurnInfo] | None = None,
+    allow_inline_ensure: bool = True,
+) -> AnalyticQueryContext:
+    """Build a query context with cyclic ensure-dependency fixture catalogs."""
+    FIXTURE_EXPORT_STATE.reset()
+    turns = stored_turns or {turn.settings.turn: turn}
+
+    def load_turn(turn_number: int) -> TurnInfo | None:
+        return turns.get(turn_number)
+
+    return make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_registry=CYCLE_FIXTURE_EXPORT_REGISTRY,
         allow_inline_ensure=allow_inline_ensure,
     )
 

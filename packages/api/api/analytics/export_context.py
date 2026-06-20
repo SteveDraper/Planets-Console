@@ -29,7 +29,7 @@ _CONTINUE = object()
 
 
 class _ExportDependencyVisitor(Protocol):
-    def on_cycle(self) -> Any: ...
+    def on_cycle(self, analytic_id: str, scope: ExportScope) -> Any: ...
 
     def on_node_enter(
         self,
@@ -68,7 +68,7 @@ class _ExportDependencyVisitor(Protocol):
 
 @dataclass
 class _TurnAvailabilityVisitor:
-    def on_cycle(self) -> UnavailableReason | None:
+    def on_cycle(self, analytic_id: str, scope: ExportScope) -> UnavailableReason | None:
         return None
 
     def on_node_enter(
@@ -118,7 +118,7 @@ class _MissingStepsVisitor:
     ctx: AnalyticQueryContext
     missing: list[EnsureMissingStep] = field(default_factory=list)
 
-    def on_cycle(self) -> list[EnsureMissingStep]:
+    def on_cycle(self, analytic_id: str, scope: ExportScope) -> list[EnsureMissingStep]:
         return []
 
     def on_node_enter(
@@ -187,8 +187,11 @@ class _MissingStepsVisitor:
 class _EnsureExportVisitor:
     ctx: AnalyticQueryContext
 
-    def on_cycle(self) -> None:
-        return None
+    def on_cycle(self, analytic_id: str, scope: ExportScope) -> None:
+        raise ExportCycleDetectedError(
+            f"Analytic export ensure cycle detected for {analytic_id!r} "
+            f"at turn {scope.turn} with player_id {scope.player_id!r}"
+        )
 
     def on_node_enter(
         self,
@@ -407,7 +410,7 @@ class AnalyticQueryContext:
         visit_key = (analytic_id, scope)
         if visiting is not None:
             if visit_key in visiting:
-                return visitor.on_cycle()
+                return visitor.on_cycle(analytic_id, scope)
             visiting.add(visit_key)
 
         try:
@@ -542,7 +545,7 @@ class AnalyticQueryContext:
         self._walk_export_dependencies(
             analytic_id,
             scope,
-            visiting=None,
+            visiting=set(),
             visitor=_EnsureExportVisitor(ctx=self),
             catalog_override=catalog,
         )
