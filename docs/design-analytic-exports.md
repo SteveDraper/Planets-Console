@@ -58,7 +58,7 @@ ctx.query(analytic_id, paths, scope)
 | **AnalyticQueryContext** | `api/analytics/export_context.py` |
 | **Analytic export registry** | `api/analytics/exports/registry.py` -- **`EXPORT_REGISTRY` derived at import** from each `TurnAnalyticRegistration.export_catalog` in `TURN_ANALYTIC_REGISTRATIONS` (do not register catalogs manually here) |
 | Per-analytic catalog + materializer | Wired on **`TurnAnalyticRegistration.export_catalog`**; non-empty implementations may live in `api/analytics/<id>/exports.py` |
-| JSONPath engine | shared helper (e.g. `jsonpath-ng`) |
+| JSONPath engine | `api/analytics/exports/jsonpath.py` -- in-repo RFC 9535-ish subset (not `jsonpath-ng`) |
 | **BFF export ensure orchestration** | `packages/bff/bff/routers/export_ensure.py` (probe + background job stream) |
 
 Table/map handlers receive the same `ctx` and should call the same **materialize_export_tree** (or shared helpers) where the export tree is the domain source of truth.
