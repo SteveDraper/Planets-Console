@@ -117,7 +117,13 @@ class AnalyticQueryContext:
             paths=normalized_paths,
         )
         if resolution_key in self._memo:
-            return self._memo[resolution_key]
+            cached = self._memo[resolution_key]
+            if not (
+                force_inline_ensure
+                and cached.status == "unavailable"
+                and cached.reason == "ensure_blocked"
+            ):
+                return cached
         if resolution_key in self._resolution_stack:
             raise ExportCycleDetectedError(
                 f"Analytic export cycle detected for {analytic_id!r} "
@@ -140,9 +146,7 @@ class AnalyticQueryContext:
         total_missing = len(walk_result.missing_steps)
         blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
         if blocked_inline and not force_inline_ensure and self.enforce_inline_ensure_threshold:
-            result = self._unavailable("ensure_blocked")
-            self._memo[resolution_key] = result
-            return result
+            return self._unavailable("ensure_blocked")
 
         self._resolution_stack.append(resolution_key)
         try:
