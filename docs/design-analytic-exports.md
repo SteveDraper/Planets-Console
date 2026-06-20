@@ -148,7 +148,7 @@ Every **non-empty** provider catalog is checked at registry build time: each `en
 | **Test fixture merge** | `merge_export_registry(...)` after overlaying extra catalogs (`role="merged"`) | `RuntimeError` when the harness or test imports the merged registry |
 | **Ensure walk** | `walk_dependency_tree` before recursing into each dependency (`validate_ensure_dependency_target`, `role="query"`) | `RuntimeError` -- miswired edges are not silently skipped |
 
-Authors should treat miswired `ensure_dependencies` as a **configuration error** caught at import (or fixture merge), not as a deferred `ctx.query` failure. The query-time check is a fail-loud safety net if a registry is assembled without going through `_validate_export_registry` / `merge_export_registry`.
+Authors should treat miswired `ensure_dependencies` as a **configuration error** caught at import (or fixture merge), not as a deferred `ctx.query` failure. The query-time check is a fail-loud safety net if a registry is assembled without going through `validate_export_catalogs` / `merge_export_registry`.
 
 Typical failure messages:
 
@@ -381,10 +381,11 @@ Non-empty `exports.py` modules typically export an **`AnalyticExportCatalog`** (
 | **`ensure_export(ctx, scope)`** | Idempotent ensure for this analytic's scope (optional if materialize-only) |
 | **`materialize_export_tree(ctx, scope) -> dict`** | Build tree after ensure (memoized on ctx) |
 
-Import-time validation in `exports/registry.py` (`_validate_export_registry`):
+Import-time validation in `exports/registry.py` (`validate_export_catalogs`):
 
 1. Every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration (no missing or extra ids).
 2. Every **non-empty** catalog's `ensure_dependencies` must point at registry ids with **non-empty** catalogs (see **Ensure dependency target validation** above).
+3. Every **non-empty** catalog with `ensure_dependencies` must provide `ensure_export`.
 
 `EXPORT_REGISTRY` is built once at import; any mismatch raises `RuntimeError` before the server accepts traffic. Tests that add fixture catalogs use `merge_export_registry`, which re-runs ensure-target validation on the merged map.
 
