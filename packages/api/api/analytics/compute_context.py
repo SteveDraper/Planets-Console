@@ -3,17 +3,10 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.options import TurnAnalyticsOptions
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.models.game import TurnInfo
-
-
-class AnalyticQueryContext:
-    """Placeholder for the analytic export query context.
-
-    Full type and wiring are specified in ``docs/design-analytic-exports.md`` (planned
-    module ``api/analytics/export_context.py``).
-    """
 
 
 @dataclass(frozen=True)
@@ -27,13 +20,15 @@ class AnalyticComputeContext:
 
     turn: TurnInfo
     options: TurnAnalyticsOptions
+    exports: AnalyticQueryContext
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS
-    query: AnalyticQueryContext | None = None
 
 
 def make_analytic_compute_context(
     turn: TurnInfo,
     options: TurnAnalyticsOptions | None = None,
+    *,
+    load_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> AnalyticComputeContext:
     """Build dispatch context; mirrors diagnostics from options when present."""
     resolved = options or TurnAnalyticsOptions()
@@ -41,6 +36,7 @@ def make_analytic_compute_context(
         turn=turn,
         options=resolved,
         diagnostics=resolved.diagnostics,
+        exports=make_analytic_query_context(turn, resolved, load_turn=load_turn),
     )
 
 
@@ -48,6 +44,8 @@ def invoke_analytic_compute(
     compute: Callable[[AnalyticComputeContext], dict],
     turn: TurnInfo,
     options: TurnAnalyticsOptions | None = None,
+    *,
+    load_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> dict:
     """Run a context-first compute handler for tests and direct callers."""
-    return compute(make_analytic_compute_context(turn, options))
+    return compute(make_analytic_compute_context(turn, options, load_turn=load_turn))

@@ -2,6 +2,7 @@
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
@@ -231,4 +232,5 @@ def get_stellar_cartography_map(
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_stellar_cartography_map,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),
 )

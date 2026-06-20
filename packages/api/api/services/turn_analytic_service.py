@@ -90,6 +90,7 @@ class TurnAnalyticService:
                 connection_include_illustrative_routes=connection_include_illustrative_routes,
                 diagnostics=diagnostics,
             ),
+            load_turn=self._load_scoreboard_turn(game_id, perspective),
         )
 
     def get_scores_row_inference(

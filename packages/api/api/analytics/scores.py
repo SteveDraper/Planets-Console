@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -133,4 +134,5 @@ def iter_scores_table_inference_stream(
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_scores_table,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),
 )

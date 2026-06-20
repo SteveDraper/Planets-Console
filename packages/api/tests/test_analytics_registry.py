@@ -75,6 +75,7 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
     for registration in TURN_ANALYTIC_REGISTRATIONS:
         assert registration.catalog_entry.id in TURN_ANALYTICS
         assert callable(registration.compute)
+        assert registration.export_catalog.analytic_id == registration.catalog_entry.id
 
 
 def test_validate_turn_analytic_registrations_rejects_empty_tuple():
@@ -86,6 +87,7 @@ def test_validate_turn_analytic_registrations_rejects_empty_tuple():
 
 def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.exports.empty import empty_export_catalog_for
     from api.analytics.registration import (
         TurnAnalyticRegistration,
         validate_turn_analytic_registrations,
@@ -102,9 +104,18 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     def compute(_ctx: AnalyticComputeContext) -> dict:
         return {"analyticId": "duplicate-id"}
 
+    export_catalog = empty_export_catalog_for(entry.id)
     registrations = (
-        TurnAnalyticRegistration(catalog_entry=entry, compute=compute),
-        TurnAnalyticRegistration(catalog_entry=entry, compute=compute),
+        TurnAnalyticRegistration(
+            catalog_entry=entry,
+            compute=compute,
+            export_catalog=export_catalog,
+        ),
+        TurnAnalyticRegistration(
+            catalog_entry=entry,
+            compute=compute,
+            export_catalog=export_catalog,
+        ),
     )
 
     with pytest.raises(RuntimeError, match="Duplicate"):
@@ -113,6 +124,7 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
 
 def _registration_for_validation(*, compute=None, **catalog_overrides):
     from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.exports.empty import empty_export_catalog_for
     from api.analytics.registration import TurnAnalyticRegistration
 
     catalog_fields = {
@@ -129,7 +141,11 @@ def _registration_for_validation(*, compute=None, **catalog_overrides):
         def compute(_ctx: AnalyticComputeContext) -> dict:
             return {"analyticId": entry.id}
 
-    return TurnAnalyticRegistration(catalog_entry=entry, compute=compute)
+    return TurnAnalyticRegistration(
+        catalog_entry=entry,
+        compute=compute,
+        export_catalog=empty_export_catalog_for(entry.id),
+    )
 
 
 @pytest.mark.parametrize(
@@ -158,3 +174,32 @@ def test_validate_turn_analytic_registrations_rejects_non_callable_compute():
 
     with pytest.raises(RuntimeError, match="compute must be callable"):
         validate_turn_analytic_registrations((_registration_for_validation(compute=object()),))
+
+
+def test_validate_turn_analytic_registrations_rejects_mismatched_export_catalog_id():
+    from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.exports.empty import empty_export_catalog_for
+    from api.analytics.registration import (
+        TurnAnalyticRegistration,
+        validate_turn_analytic_registrations,
+    )
+
+    entry = TurnAnalyticCatalogEntry(
+        id="test-analytic",
+        name="Test",
+        supports_table=True,
+        supports_map=False,
+        type="selectable",
+    )
+
+    def compute(_ctx: AnalyticComputeContext) -> dict:
+        return {"analyticId": entry.id}
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=entry,
+        compute=compute,
+        export_catalog=empty_export_catalog_for("other-analytic"),
+    )
+
+    with pytest.raises(RuntimeError, match="export catalog analytic_id must match"):
+        validate_turn_analytic_registrations((registration,))

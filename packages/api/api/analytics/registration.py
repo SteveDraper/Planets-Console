@@ -5,14 +5,7 @@ from dataclasses import dataclass
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
-
-
-@dataclass(frozen=True)
-class EmptyExportCatalog:
-    """Placeholder export catalog until analytic exports land (#95)."""
-
-
-EMPTY_EXPORT_CATALOG = EmptyExportCatalog()
+from api.analytics.exports.catalog import AnalyticExportCatalog
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
 
@@ -23,7 +16,7 @@ class TurnAnalyticRegistration:
 
     catalog_entry: TurnAnalyticCatalogEntry
     compute: TurnAnalyticHandler
-    export_catalog: EmptyExportCatalog = EMPTY_EXPORT_CATALOG
+    export_catalog: AnalyticExportCatalog
 
 
 _VALID_ANALYTIC_TYPES = frozenset({"base", "selectable"})
@@ -64,4 +57,10 @@ def validate_turn_analytic_registrations(
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} compute must be callable, "
                 f"got {type(registration.compute).__name__}"
+            )
+        export_analytic_id = registration.export_catalog.analytic_id
+        if export_analytic_id != analytic_id:
+            raise RuntimeError(
+                f"Turn analytic {analytic_id!r} export catalog analytic_id must match "
+                f"catalog entry id, got {export_analytic_id!r}"
             )
