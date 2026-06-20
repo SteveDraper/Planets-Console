@@ -252,6 +252,11 @@ class AnalyticQueryContext:
     load_turn: Callable[[int], TurnInfo | None]
     export_registry: Mapping[str, AnalyticExportCatalog]
     allow_inline_ensure: bool = True
+    # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
+    # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
+    # ctx.options and are not fingerprinted here (#108 skeleton); connections
+    # exports (#110) must extend keying before varying connection options within
+    # one request can yield correct cache behaviour.
     _memo: dict[ResolutionKey, ExportQueryResult] = field(default_factory=dict, repr=False)
     _materialized_trees: dict[tuple[str, ExportScope], dict[str, Any]] = field(
         default_factory=dict,

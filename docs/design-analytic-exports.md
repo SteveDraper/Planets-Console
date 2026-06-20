@@ -48,6 +48,7 @@ ctx.query(analytic_id, paths, scope)
   -> export_registry materialize + JSONPath
   memo key: (analytic_id, normalized scope, normalized path set)
   cycle stack: same tuple re-entered -> hard error
+  scope excludes TurnAnalyticsOptions connection fields (#108 skeleton; #110 keying)
 ```
 
 | Piece | Location |
@@ -175,6 +176,25 @@ Scope parameters on each query:
 | `player_id` | often **required** for scoreboard rows | Does not default from viewpoint name |
 | Connection options | from `TurnAnalyticsOptions` | Affect values, not tree shape |
 
+### Connection options excluded from scope identity (#108)
+
+The #108 export-framework skeleton defines **`ExportScope`** as
+`(game_id, perspective, turn, player_id)` only. Connection fields on
+**`TurnAnalyticsOptions`** (`connection_warp_speed`, `connection_gravitonic_movement`,
+`connection_flare_mode`, `connection_flare_depth`, `connection_include_illustrative_routes`)
+are ambient on **`AnalyticQueryContext.options`** and are **not** fingerprinted in:
+
+- query memo keys (`ResolutionKey`)
+- materialized-tree cache (`(analytic_id, ExportScope)`)
+- ensure idempotency sets
+- cycle-detection stack keys
+
+That is intentional for the skeleton: most analytics do not depend on connection
+settings, and scope stays small. **Connections exports ([#110](https://github.com/SteveDraper/Planets-Console/issues/110))**
+must define correct cache keying (e.g. an options fingerprint on scope or a
+connections-specific memo partition) before callers can vary connection options
+within one request and get distinct cached export trees.
+
 **Path-prefix scope rules** in the catalog (examples):
 
 | Prefix | Rule |
@@ -244,6 +264,10 @@ Resolution stack key:
 ```
 (analytic_id, normalized scope parameters, normalized path set)
 ```
+
+Normalized scope parameters are **`ExportScope`** fields only; connection options
+on **`TurnAnalyticsOptions`** are excluded (see **Connection options excluded from
+scope identity** above).
 
 - Re-entering the **same** key -> hard error (**`cycle_detected`**, exception).
 - Cross-turn chains are **not** cycles: fleet turn *N* -> scores turn *N−1* -> fleet turn *N−1* differ in scope.

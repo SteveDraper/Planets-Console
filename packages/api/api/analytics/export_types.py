@@ -25,7 +25,16 @@ EnsureStepStatus = Literal[
 
 @dataclass(frozen=True)
 class ExportScope:
-    """Fully resolved export scope for one analytic at one turn."""
+    """Fully resolved export scope for one analytic at one turn.
+
+    Scope identity is ``game_id``, ``perspective``, ``turn``, and optional
+    ``player_id`` only. Connection fields on ``TurnAnalyticsOptions`` (warp
+    speed, gravitonic movement, flare mode/depth, illustrative routes) are
+    **not** part of ``ExportScope`` in the #108 export-framework skeleton.
+    They may affect materialized values (e.g. connections exports) but are
+    excluded from memo, cycle-detection, and ensure keys until #110 defines
+    connection export cache keying.
+    """
 
     game_id: int
     perspective: int
@@ -98,7 +107,11 @@ class ExportQueryResult:
 
 @dataclass(frozen=True)
 class ResolutionKey:
-    """Memoization and cycle-detection key."""
+    """Memoization and cycle-detection key.
+
+    ``scope`` carries ``ExportScope`` only; see ``ExportScope`` for the
+    intentional exclusion of ``TurnAnalyticsOptions`` connection fields.
+    """
 
     analytic_id: str
     scope: ExportScope
