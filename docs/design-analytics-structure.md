@@ -119,7 +119,7 @@ Adding a **turn analytic** touches:
 
 1. **Catalog** -- one `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG` (`catalog.py`)
 2. **Core registration** -- one `TurnAnalyticRegistration` in the analytic module (`catalog_entry` reference, ctx-first `compute` handler, `export_catalog` placeholder); append to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py`
-3. **Core exports** -- `analytics/<id>/exports.py` + entry in export registry (may be empty until wired in #95); see [design-analytic-exports.md](design-analytic-exports.md)
+3. **Core exports** -- `analytics/<id>/exports.py` + entry in export registry (may be empty until wired in #93); see [design-analytic-exports.md](design-analytic-exports.md)
 4. **BFF** -- module with `from_catalog_entry` descriptor + entry in `_BFF_DESCRIPTORS_BY_ID` (`registry.py`)
 
 `TURN_ANALYTICS` is derived from registrations at import and aligned to the catalog; a missing or extra registration raises `RuntimeError` on startup.

@@ -9,7 +9,7 @@ from api.analytics.compute_context import AnalyticComputeContext
 
 @dataclass(frozen=True)
 class EmptyExportCatalog:
-    """Placeholder export catalog until analytic exports land (#95)."""
+    """Placeholder export catalog until analytic exports land (#93)."""
 
 
 EMPTY_EXPORT_CATALOG = EmptyExportCatalog()

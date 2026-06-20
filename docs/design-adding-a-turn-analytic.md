@@ -72,7 +72,7 @@ TURN_ANALYTIC_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
 
 ### 2.3 Core -- exports (required)
 
-Every turn analytic registers an export catalog (may be **empty**). See [design-analytic-exports.md](design-analytic-exports.md) for the full mechanism.
+Every turn analytic registers an export catalog (may be **empty**). See [design-analytic-exports.md](design-analytic-exports.md) for the full mechanism (issue **#93**).
 
 Add `packages/api/api/analytics/<id>/exports.py` (or `exports.py` beside a single-file analytic):
 
@@ -89,12 +89,23 @@ PATH_PREFIX_SCOPE_RULES = [
     # e.g. {"prefix": "$.solution", "requires": ["player_id"]},
 ]
 
+ENSURE_DEPENDENCIES = (
+    # Provider-declared upstream ensures (probe + ensure unwind follow these edges).
+    # e.g. EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+)
+
+def ensure_export(scope, ctx) -> None:
+    """Idempotent: persist/scheduler attach/sync ensure for this scope before materialize."""
+    ...
+
 def materialize_export_tree(scope, ctx) -> dict:
     ...
 
 EXPORT_CATALOG = {
     "schema": EXPORT_VALUE_SCHEMA,
     "path_prefix_scope_rules": PATH_PREFIX_SCOPE_RULES,
+    "ensure_dependencies": ENSURE_DEPENDENCIES,
+    "ensure": ensure_export,
     "materialize": materialize_export_tree,
 }
 ```
@@ -105,6 +116,8 @@ Guidelines:
 
 - **One schema tree** per analytic; scope is on the query, not separate root shapes.
 - **JSONPath** selectors (`$.solution.ships[0]`); document array ordering in the catalog.
+- **`ENSURE_DEPENDENCIES`:** declared by the **provider** (upstream requirements). Do not reference analytics that are not yet in `TURN_ANALYTIC_CATALOG` until they register.
+- **`ctx.query(...)`** runs ensure then materialize (not read-only). Large missing-step probes use BFF **export ensure orchestration** (background job), not blocking HTTP.
 - **Concept-shim:** delegate to `api/concepts/` inside `materialize_export_tree` (Connections pattern).
 - Table/map handlers should call the same materializer (or shared helpers) where the tree is the source of truth.
 - Consumers query only via **`AnalyticQueryContext`** passed into handlers -- not direct imports of other analytics.
