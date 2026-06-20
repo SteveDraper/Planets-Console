@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -16,7 +17,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores_assets import ANALYTIC_ID
-from api.analytics.exports.empty import empty_export_catalog_for
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 

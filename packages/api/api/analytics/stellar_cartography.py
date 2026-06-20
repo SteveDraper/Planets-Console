@@ -2,9 +2,9 @@
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
-from api.analytics.exports.empty import empty_export_catalog_for
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
