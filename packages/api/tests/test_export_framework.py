@@ -121,6 +121,22 @@ def test_turn_not_stored_returns_unavailable(sample_turn):
     assert result.reason == "turn_not_stored"
 
 
+def test_probe_turn_not_stored_when_dependency_turn_missing(sample_turn):
+    player_id = first_player_id(sample_turn)
+    stored_turns = {sample_turn.settings.turn: sample_turn}
+    ctx = make_fixture_query_context(sample_turn, stored_turns=stored_turns)
+
+    probe = ctx.probe(
+        "export-test-alpha",
+        ExportScopeOverrides(turn=sample_turn.settings.turn, player_id=player_id),
+    )
+
+    assert probe.status == "unavailable"
+    assert probe.reason == "turn_not_stored"
+    assert probe.total_missing == 0
+    assert probe.missing_steps == ()
+
+
 def test_none_vs_unavailable_for_missing_index(sample_turn):
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)

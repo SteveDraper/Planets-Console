@@ -33,7 +33,6 @@ def walk_dependency_tree(
     scope: ExportScope,
     *,
     visiting: set[tuple[str, ExportScope]],
-    check_turn_availability: bool,
     detect_ensure_cycles: bool,
 ) -> DependencyWalkResult:
     result = DependencyWalkResult()
@@ -60,23 +59,11 @@ def walk_dependency_tree(
                 continue
 
             if ctx.load_turn(dependency_scope.turn) is None:
-                if check_turn_availability:
-                    result.turn_unavailable = "turn_not_stored"
-                    return result
-                result.missing_steps.append(
-                    EnsureMissingStep(
-                        analytic_id=dependency.analytic_id,
-                        turn=dependency_scope.turn,
-                        player_id=dependency_scope.player_id,
-                        status="not_persisted",
-                    )
-                )
-                continue
+                result.turn_unavailable = "turn_not_stored"
+                return result
 
             dependency_catalog = ctx.export_registry.get(dependency.analytic_id)
-            if check_turn_availability and (
-                dependency_catalog is None or dependency_catalog.is_empty
-            ):
+            if dependency_catalog is None or dependency_catalog.is_empty:
                 continue
 
             nested = walk_dependency_tree(
@@ -84,7 +71,6 @@ def walk_dependency_tree(
                 dependency.analytic_id,
                 dependency_scope,
                 visiting=visiting,
-                check_turn_availability=check_turn_availability,
                 detect_ensure_cycles=detect_ensure_cycles,
             )
             if nested.turn_unavailable is not None:

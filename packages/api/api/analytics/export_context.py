@@ -71,9 +71,10 @@ class AnalyticQueryContext:
             analytic_id,
             prep.scope,
             visiting=set(),
-            check_turn_availability=False,
             detect_ensure_cycles=False,
         )
+        if walk_result.turn_unavailable is not None:
+            return self._probe_unavailable(walk_result.turn_unavailable)
         total_missing = len(walk_result.missing_steps)
         blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
         return ExportProbeResult(
@@ -123,7 +124,6 @@ class AnalyticQueryContext:
             analytic_id,
             scope,
             visiting=set(),
-            check_turn_availability=True,
             detect_ensure_cycles=True,
         )
         if walk_result.turn_unavailable is not None:
