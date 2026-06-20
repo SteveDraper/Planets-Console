@@ -2,11 +2,6 @@
 
 from api.analytics.exports.catalog import AnalyticExportCatalog
 
-EMPTY_EXPORT_CATALOG = AnalyticExportCatalog(
-    analytic_id="",
-    is_empty=True,
-)
-
 
 def empty_export_catalog_for(analytic_id: str) -> AnalyticExportCatalog:
     """Return a catalog placeholder for one production analytic id."""

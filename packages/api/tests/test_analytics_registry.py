@@ -87,6 +87,7 @@ def test_validate_turn_analytic_registrations_rejects_empty_tuple():
 
 def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.exports.empty import empty_export_catalog_for
     from api.analytics.registration import (
         TurnAnalyticRegistration,
         validate_turn_analytic_registrations,
@@ -103,9 +104,18 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
     def compute(_ctx: AnalyticComputeContext) -> dict:
         return {"analyticId": "duplicate-id"}
 
+    export_catalog = empty_export_catalog_for(entry.id)
     registrations = (
-        TurnAnalyticRegistration(catalog_entry=entry, compute=compute),
-        TurnAnalyticRegistration(catalog_entry=entry, compute=compute),
+        TurnAnalyticRegistration(
+            catalog_entry=entry,
+            compute=compute,
+            export_catalog=export_catalog,
+        ),
+        TurnAnalyticRegistration(
+            catalog_entry=entry,
+            compute=compute,
+            export_catalog=export_catalog,
+        ),
     )
 
     with pytest.raises(RuntimeError, match="Duplicate"):
@@ -114,6 +124,7 @@ def test_validate_turn_analytic_registrations_rejects_duplicate_ids():
 
 def _registration_for_validation(*, compute=None, **catalog_overrides):
     from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.exports.empty import empty_export_catalog_for
     from api.analytics.registration import TurnAnalyticRegistration
 
     catalog_fields = {
@@ -130,7 +141,11 @@ def _registration_for_validation(*, compute=None, **catalog_overrides):
         def compute(_ctx: AnalyticComputeContext) -> dict:
             return {"analyticId": entry.id}
 
-    return TurnAnalyticRegistration(catalog_entry=entry, compute=compute)
+    return TurnAnalyticRegistration(
+        catalog_entry=entry,
+        compute=compute,
+        export_catalog=empty_export_catalog_for(entry.id),
+    )
 
 
 @pytest.mark.parametrize(
