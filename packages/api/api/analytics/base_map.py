@@ -1,7 +1,7 @@
 """Core base-map analytic."""
 
-from api.analytics.base_map_exports import EXPORT_CATALOG
 from api.analytics.catalog import catalog_entry
+from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.warp_well import WarpWellKind, map_cell_indices_in_warp_well
@@ -49,5 +49,5 @@ def get_base_map(turn: TurnInfo) -> dict:
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_base_map,
-    export_catalog=EXPORT_CATALOG,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),
 )
