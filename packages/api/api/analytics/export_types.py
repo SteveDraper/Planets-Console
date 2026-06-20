@@ -16,6 +16,10 @@ UnavailableReason = Literal[
 
 PathResultKind = Literal["value", "none", "invalid_path"]
 
+# Probe missing-step lifecycle on the wire. The #108 skeleton walker only
+# emits ``not_persisted`` on ``EnsureMissingStep``; ``persisted``,
+# ``in_progress``, and ``baseline`` are reserved for scheduler and
+# persistence probes in #109+.
 EnsureStepStatus = Literal[
     "not_persisted",
     "persisted",
@@ -70,7 +74,15 @@ class EnsureDependency:
 
 @dataclass(frozen=True)
 class EnsureMissingStep:
-    """One step reported by probe as not yet terminal."""
+    """One ensure step that probe reports as not yet terminal.
+
+    The #108 skeleton probe walk only appends rows with
+    ``status="not_persisted"``. Steps that are already persisted, attached
+    to in-flight scheduler work, or at an analytic-specific ensure baseline are
+    omitted from ``missing_steps`` entirely rather than listed with another
+    status. Other ``EnsureStepStatus`` values are reserved for follow-up probe
+    work (#109+) that distinguishes persistence, in-progress, and baseline.
+    """
 
     analytic_id: str
     turn: int
