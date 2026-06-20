@@ -35,6 +35,14 @@ class DependencyWalkResult:
     )
 
 
+@dataclass(frozen=True)
+class PreparedExportRequest:
+    """Catalog and scope resolved for one probe or query."""
+
+    catalog: AnalyticExportCatalog
+    scope: ExportScope
+
+
 @dataclass
 class AnalyticQueryContext:
     """Cross-analytic export queries during Core turn analytic compute."""
@@ -65,15 +73,12 @@ class AnalyticQueryContext:
         scope_overrides: ExportScopeOverrides | Mapping[str, object] | None = None,
     ) -> ExportProbeResult:
         """Dry-run ensure dependencies without materialization."""
-        catalog = self._catalog_or_none(analytic_id)
-        if catalog is None:
-            return self._probe_unavailable("unknown_analytic")
-        if catalog.is_empty:
-            return self._probe_unavailable("empty_catalog")
-        scope = self._resolve_scope(scope_overrides)
+        prep = self._prepare_export_request(analytic_id, scope_overrides)
+        if not isinstance(prep, PreparedExportRequest):
+            return self._probe_unavailable(prep)
         walk_result = self._walk_dependency_tree(
             analytic_id,
-            scope,
+            prep.scope,
             visiting=set(),
             check_turn_availability=False,
             detect_ensure_cycles=False,
@@ -97,7 +102,12 @@ class AnalyticQueryContext:
     ) -> ExportQueryResult:
         """Ensure, materialize, and resolve JSONPath selectors for one analytic."""
         normalized_paths = tuple(sorted(paths))
-        scope = self._resolve_scope(scope_overrides)
+        prep = self._prepare_export_request(analytic_id, scope_overrides)
+        if not isinstance(prep, PreparedExportRequest):
+            return self._unavailable(prep)
+
+        scope = prep.scope
+        catalog = prep.catalog
         resolution_key = ResolutionKey(
             analytic_id=analytic_id,
             scope=scope,
@@ -110,12 +120,6 @@ class AnalyticQueryContext:
                 f"Analytic export cycle detected for {analytic_id!r} "
                 f"at turn {scope.turn} with paths {list(normalized_paths)!r}"
             )
-
-        catalog = self._catalog_or_none(analytic_id)
-        if catalog is None:
-            return self._unavailable("unknown_analytic")
-        if catalog.is_empty:
-            return self._unavailable("empty_catalog")
 
         unavailable = self._scope_unavailable_reason(catalog, scope, normalized_paths)
         if unavailable is not None:
@@ -158,6 +162,19 @@ class AnalyticQueryContext:
             return result
         finally:
             self._resolution_stack.pop()
+
+    def _prepare_export_request(
+        self,
+        analytic_id: str,
+        scope_overrides: ExportScopeOverrides | Mapping[str, object] | None,
+    ) -> PreparedExportRequest | UnavailableReason:
+        catalog = self._catalog_or_none(analytic_id)
+        if catalog is None:
+            return "unknown_analytic"
+        if catalog.is_empty:
+            return "empty_catalog"
+        scope = self._resolve_scope(scope_overrides)
+        return PreparedExportRequest(catalog=catalog, scope=scope)
 
     def _catalog_or_none(self, analytic_id: str) -> AnalyticExportCatalog | None:
         return self.export_registry.get(analytic_id)
