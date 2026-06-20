@@ -63,6 +63,7 @@ def test_probe_reports_missing_steps_before_ensure(sample_turn):
     )
 
     assert probe.total_missing >= 2
+    assert probe.status == "ok"
     assert not probe.blocked_inline
     assert any(
         step.analytic_id == "export-test-alpha" and step.turn == 3 for step in probe.missing_steps
@@ -190,6 +191,7 @@ def test_large_probe_blocks_inline_ensure(sample_turn, monkeypatch):
         "export-test-alpha",
         ExportScopeOverrides(turn=2, player_id=player_id),
     )
+    assert probe.status == "ok"
     assert probe.blocked_inline
 
     result = ctx.query(
@@ -199,6 +201,31 @@ def test_large_probe_blocks_inline_ensure(sample_turn, monkeypatch):
     )
     assert result.status == "unavailable"
     assert result.reason == "ensure_blocked"
+
+
+def test_probe_unknown_analytic_returns_unavailable(sample_turn):
+    ctx = make_fixture_query_context(sample_turn)
+
+    probe = ctx.probe("missing-analytic")
+
+    assert probe.status == "unavailable"
+    assert probe.reason == "unknown_analytic"
+    assert probe.total_missing == 0
+    assert probe.missing_steps == ()
+
+
+def test_probe_empty_catalog_returns_unavailable(sample_turn):
+    from api.analytics import TurnAnalyticsOptions
+    from api.analytics.compute_context import make_analytic_compute_context
+
+    ctx = make_analytic_compute_context(sample_turn, TurnAnalyticsOptions())
+
+    probe = ctx.query.probe("base-map")
+
+    assert probe.status == "unavailable"
+    assert probe.reason == "empty_catalog"
+    assert probe.total_missing == 0
+    assert probe.missing_steps == ()
 
 
 def test_get_turn_analytic_wires_query_context(sample_turn):
@@ -211,6 +238,9 @@ def test_get_turn_analytic_wires_query_context(sample_turn):
 
     ctx = make_analytic_compute_context(sample_turn, TurnAnalyticsOptions())
     assert ctx.query is not None
+    empty_probe = ctx.query.probe("base-map")
+    assert empty_probe.status == "unavailable"
+    assert empty_probe.reason == "empty_catalog"
     empty_result = ctx.query.query("base-map", ["$.meta"])
     assert empty_result.status == "unavailable"
     assert empty_result.reason == "empty_catalog"

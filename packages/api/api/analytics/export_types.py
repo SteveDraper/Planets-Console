@@ -72,9 +72,11 @@ class EnsureMissingStep:
 class ExportProbeResult:
     """Dry-run ensure dependency walk."""
 
-    missing_steps: tuple[EnsureMissingStep, ...]
-    total_missing: int
-    blocked_inline: bool
+    status: Literal["ok", "unavailable"]
+    missing_steps: tuple[EnsureMissingStep, ...] = ()
+    total_missing: int = 0
+    blocked_inline: bool = False
+    reason: UnavailableReason | None = None
 
 
 @dataclass(frozen=True)

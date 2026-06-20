@@ -265,14 +265,15 @@ class AnalyticQueryContext:
         """Dry-run ensure dependencies without materialization."""
         catalog = self._catalog_or_none(analytic_id)
         if catalog is None:
-            return ExportProbeResult(missing_steps=(), total_missing=0, blocked_inline=False)
+            return self._probe_unavailable("unknown_analytic")
         if catalog.is_empty:
-            return ExportProbeResult(missing_steps=(), total_missing=0, blocked_inline=False)
+            return self._probe_unavailable("empty_catalog")
         scope = self._resolve_scope(scope_overrides)
         missing = self._collect_missing_steps(analytic_id, scope, visiting=set())
         total_missing = len(missing)
         blocked_inline = total_missing > INLINE_ENSURE_MAX_MISSING_STEPS
         return ExportProbeResult(
+            status="ok",
             missing_steps=tuple(missing),
             total_missing=total_missing,
             blocked_inline=blocked_inline,
@@ -321,6 +322,10 @@ class AnalyticQueryContext:
             return result
 
         probe_result = self.probe(analytic_id, scope_overrides)
+        if probe_result.status == "unavailable":
+            result = self._unavailable(probe_result.reason)  # type: ignore[arg-type]
+            self._memo[resolution_key] = result
+            return result
         if probe_result.blocked_inline and not force_inline_ensure and self.allow_inline_ensure:
             result = self._unavailable("ensure_blocked")
             self._memo[resolution_key] = result
@@ -581,6 +586,10 @@ class AnalyticQueryContext:
     @staticmethod
     def _unavailable(reason: UnavailableReason) -> ExportQueryResult:
         return ExportQueryResult(status="unavailable", reason=reason)
+
+    @staticmethod
+    def _probe_unavailable(reason: UnavailableReason) -> ExportProbeResult:
+        return ExportProbeResult(status="unavailable", reason=reason)
 
 
 def make_analytic_query_context(
