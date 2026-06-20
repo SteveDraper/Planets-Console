@@ -48,10 +48,7 @@ def parse_jsonpath(path: str) -> list[str | int]:
 
 def resolve_jsonpath(document: Any, path: str) -> list[Any]:
     """Return all nodes matched by *path* (empty list means zero matches)."""
-    try:
-        steps = parse_jsonpath(path)
-    except ValueError:
-        return []
+    steps = parse_jsonpath(path)
     nodes: list[Any] = [document]
     for step in steps:
         next_nodes: list[Any] = []

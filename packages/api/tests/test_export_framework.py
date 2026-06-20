@@ -151,6 +151,8 @@ def test_jsonpath_resolver_supports_index_and_wildcard():
     assert resolve_jsonpath(document, "$.payload.items[9]") == []
     with pytest.raises(ValueError):
         parse_jsonpath("not-a-path")
+    with pytest.raises(ValueError):
+        resolve_jsonpath(document, "not-a-path")
 
 
 def test_probe_reports_missing_steps_before_ensure(sample_turn):
