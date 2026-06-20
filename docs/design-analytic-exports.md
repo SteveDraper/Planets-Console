@@ -136,6 +136,25 @@ ENSURE_DEPENDENCIES = (
 
 Probe and ensure unwind follow these edges. Cross-turn scopes differ, so unwind is **not** a cycle (see below).
 
+### Ensure dependency target validation
+
+Every **non-empty** provider catalog is checked at registry build time: each `ensure_dependencies` entry must reference an `analytic_id` that exists in the same registry and has a **non-empty** export catalog. Empty catalogs declare no queryable surface and are not valid ensure targets.
+
+| When | Where | On failure |
+|------|-------|------------|
+| **Production import** | `EXPORT_REGISTRY` build in `exports/registry.py` (`validate_ensure_dependency_targets`, `role="production"`) | `RuntimeError` at process startup |
+| **Test fixture merge** | `merge_export_registry(...)` after overlaying extra catalogs (`role="merged"`) | `RuntimeError` when the harness or test imports the merged registry |
+| **Ensure walk** | `walk_dependency_tree` before recursing into each dependency (`validate_ensure_dependency_target`, `role="query"`) | `RuntimeError` -- miswired edges are not silently skipped |
+
+Authors should treat miswired `ensure_dependencies` as a **configuration error** caught at import (or fixture merge), not as a deferred `ctx.query` failure. The query-time check is a fail-loud safety net if a registry is assembled without going through `_validate_export_registry` / `merge_export_registry`.
+
+Typical failure messages:
+
+- `ensure_dependencies references missing analytic_id` -- target id not in the registry
+- `ensure_dependencies references empty catalog` -- target exists but `is_empty` (e.g. `empty_export_catalog_for`)
+
+Empty provider catalogs skip ensure-target validation entirely (no `ensure_dependencies` to validate).
+
 ### Ensure baseline
 
 Unwind stops when:
@@ -360,7 +379,12 @@ Non-empty `exports.py` modules typically export an **`AnalyticExportCatalog`** (
 | **`ensure_export(ctx, scope)`** | Idempotent ensure for this analytic's scope (optional if materialize-only) |
 | **`materialize_export_tree(ctx, scope) -> dict`** | Build tree after ensure (memoized on ctx) |
 
-Import-time validation: every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration; `EXPORT_REGISTRY` raises if production catalog and registrations are out of sync.
+Import-time validation in `exports/registry.py` (`_validate_export_registry`):
+
+1. Every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration (no missing or extra ids).
+2. Every **non-empty** catalog's `ensure_dependencies` must point at registry ids with **non-empty** catalogs (see **Ensure dependency target validation** above).
+
+`EXPORT_REGISTRY` is built once at import; any mismatch raises `RuntimeError` before the server accepts traffic. Tests that add fixture catalogs use `merge_export_registry`, which re-runs ensure-target validation on the merged map.
 
 See [Adding a turn analytic -- Core exports](design-adding-a-turn-analytic.md#23-core--exports-required).
 
@@ -435,7 +459,7 @@ Must cover: probe step counts, threshold policy, inline vs background ensure, un
 
 - Unit tests per `exports.py`: materialize against fixtures; JSONPath golden paths; path-prefix scope rejection.
 - **Connections** and **scores** export golden tests.
-- Registry: every production catalog id has `export_catalog` on its registration; `EXPORT_REGISTRY` validates sync at import; empty catalogs validate.
+- Registry: every production catalog id has `export_catalog` on its registration; `EXPORT_REGISTRY` validates catalog sync and ensure dependency targets at import; `merge_export_registry` validates merged fixture catalogs; empty catalogs skip ensure-target checks.
 
 ---
 

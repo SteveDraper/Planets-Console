@@ -142,13 +142,16 @@ REGISTRATION = TurnAnalyticRegistration(
 )
 ```
 
-Import-time validation: every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration; `EXPORT_REGISTRY` raises if they are out of sync.
+Import-time validation (`exports/registry.py`):
+
+1. Every `TURN_ANALYTIC_CATALOG` id must have a matching `export_catalog` on its registration.
+2. For **non-empty** catalogs, each `ensure_dependencies` target must exist in `EXPORT_REGISTRY` and must itself be **non-empty**. Miswired edges raise `RuntimeError` at import, not on first `ctx.query`. See [Ensure dependency target validation](design-analytic-exports.md#ensure-dependency-target-validation) in the exports design doc.
 
 Guidelines:
 
 - **One schema tree** per analytic; scope is on the query, not separate root shapes.
 - **JSONPath** selectors (`$.solution.ships[0]`); document array ordering in the catalog.
-- **`ensure_dependencies`:** declared by the **provider** (upstream requirements). Do not reference analytics that are not yet in `TURN_ANALYTIC_CATALOG` until they register.
+- **`ensure_dependencies`:** declared by the **provider** (upstream requirements). Each target must be a registered analytic with a **non-empty** export catalog. Do not reference analytics that are not yet in `TURN_ANALYTIC_CATALOG`, and do not point at `empty_export_catalog_for(...)` placeholders -- both fail import-time validation. When the upstream analytic ships, wire a real `AnalyticExportCatalog` on its registration first, then add the dependency edge.
 - **`ctx.query(...)`** runs ensure then materialize (not read-only). Large missing-step probes use BFF **export ensure orchestration** (background job), not blocking HTTP.
 - **Concept-shim:** delegate to `api/concepts/` inside `materialize_export_tree` (Connections pattern).
 - Table/map handlers should call the same materializer (or shared helpers) where the tree is the source of truth.
@@ -326,7 +329,7 @@ Use this before opening a PR:
 
 - [ ] **Core:** module with `TurnAnalyticRegistration` (`catalog_entry` + ctx-first `compute` handler) appended to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` + unit tests
 - [ ] **Catalog:** `TurnAnalyticCatalogEntry` in `TURN_ANALYTIC_CATALOG` (`catalog.py`)
-- [ ] **Core exports:** `export_catalog` on `TurnAnalyticRegistration` (`empty_export_catalog_for` or `exports.py` + `AnalyticExportCatalog`; empty allowed) + export tests when non-empty
+- [ ] **Core exports:** `export_catalog` on `TurnAnalyticRegistration` (`empty_export_catalog_for` or `exports.py` + `AnalyticExportCatalog`; empty allowed) + export tests when non-empty; non-empty `ensure_dependencies` targets must be registered non-empty catalogs (validated at import)
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
 - [ ] **BFF:** unit/integration tests for dispatch and HTTP shape
@@ -343,6 +346,7 @@ Use this before opening a PR:
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
 | Export catalog missing for catalog id | Startup `RuntimeError` | Set `export_catalog=empty_export_catalog_for(ANALYTIC_ID)` on registration, or wire `EXPORT_CATALOG` from `exports.py` |
+| `ensure_dependencies` references missing or empty catalog | Startup `RuntimeError` (`missing analytic_id` / `empty catalog`) | Register the upstream analytic with a non-empty `export_catalog` before adding the edge; see [Ensure dependency target validation](design-analytic-exports.md#ensure-dependency-target-validation) |
 | Core handler registered, BFF descriptor missing | Startup `RuntimeError` or 422 on BFF GET | Add BFF module + `_BFF_DESCRIPTORS_BY_ID` entry |
 | BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Append `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |
