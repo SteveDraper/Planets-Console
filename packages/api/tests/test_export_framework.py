@@ -16,10 +16,10 @@ from api.analytics.exports.registry import (
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.export_framework.harness import (
+    CYCLE_FIXTURE_EXPORT_REGISTRY,
+    DIAMOND_FIXTURE_EXPORT_REGISTRY,
     build_stored_turn_chain,
     first_player_id,
-    make_cycle_fixture_query_context,
-    make_diamond_fixture_query_context,
     make_fixture_query_context,
 )
 
@@ -301,7 +301,11 @@ def test_cycle_detection_raises(sample_turn):
 def test_ensure_graph_cycle_raises(sample_turn):
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
-    ctx = make_cycle_fixture_query_context(sample_turn, stored_turns=stored_turns)
+    ctx = make_fixture_query_context(
+        sample_turn,
+        stored_turns=stored_turns,
+        registry=CYCLE_FIXTURE_EXPORT_REGISTRY,
+    )
 
     with pytest.raises(ExportCycleDetectedError, match="ensure cycle"):
         ctx.query(
@@ -316,7 +320,11 @@ def test_diamond_dag_ensures_shared_dependency_once(sample_turn):
 
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
-    ctx = make_diamond_fixture_query_context(sample_turn, stored_turns=stored_turns)
+    ctx = make_fixture_query_context(
+        sample_turn,
+        stored_turns=stored_turns,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
     shared_scope = ExportScope(
         game_id=ctx.game_id,
         perspective=ctx.perspective,
@@ -365,7 +373,11 @@ def test_probe_ensure_graph_cycle_returns_unavailable(sample_turn):
 
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
-    ctx = make_cycle_fixture_query_context(sample_turn, stored_turns=stored_turns)
+    ctx = make_fixture_query_context(
+        sample_turn,
+        stored_turns=stored_turns,
+        registry=CYCLE_FIXTURE_EXPORT_REGISTRY,
+    )
 
     probe = ctx.probe(
         "export-test-cycle-a",

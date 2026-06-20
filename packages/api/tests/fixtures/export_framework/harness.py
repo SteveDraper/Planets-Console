@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.registry import merge_export_registry
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
@@ -37,6 +38,7 @@ def make_fixture_query_context(
     turn: TurnInfo,
     *,
     stored_turns: dict[int, TurnInfo] | None = None,
+    registry: dict[str, AnalyticExportCatalog] = FIXTURE_EXPORT_REGISTRY,
     enforce_inline_ensure_threshold: bool = True,
 ) -> AnalyticQueryContext:
     """Build a query context with fixture catalogs and optional stored-turn map."""
@@ -50,51 +52,7 @@ def make_fixture_query_context(
         turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
-        export_registry=FIXTURE_EXPORT_REGISTRY,
-        enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
-    )
-
-
-def make_diamond_fixture_query_context(
-    turn: TurnInfo,
-    *,
-    stored_turns: dict[int, TurnInfo] | None = None,
-    enforce_inline_ensure_threshold: bool = True,
-) -> AnalyticQueryContext:
-    """Build a query context with diamond ensure-dependency fixture catalogs."""
-    FIXTURE_EXPORT_STATE.reset()
-    turns = stored_turns or {turn.settings.turn: turn}
-
-    def load_turn(turn_number: int) -> TurnInfo | None:
-        return turns.get(turn_number)
-
-    return make_analytic_query_context(
-        turn,
-        TurnAnalyticsOptions(),
-        load_turn=load_turn,
-        export_registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
-        enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
-    )
-
-
-def make_cycle_fixture_query_context(
-    turn: TurnInfo,
-    *,
-    stored_turns: dict[int, TurnInfo] | None = None,
-    enforce_inline_ensure_threshold: bool = True,
-) -> AnalyticQueryContext:
-    """Build a query context with cyclic ensure-dependency fixture catalogs."""
-    FIXTURE_EXPORT_STATE.reset()
-    turns = stored_turns or {turn.settings.turn: turn}
-
-    def load_turn(turn_number: int) -> TurnInfo | None:
-        return turns.get(turn_number)
-
-    return make_analytic_query_context(
-        turn,
-        TurnAnalyticsOptions(),
-        load_turn=load_turn,
-        export_registry=CYCLE_FIXTURE_EXPORT_REGISTRY,
+        export_registry=registry,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
     )
 
