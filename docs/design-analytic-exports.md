@@ -43,11 +43,13 @@ TurnAnalyticService.get_turn_analytics(...)
   handler(ctx)  -- consumer may ctx.query(...) or ctx.probe(...)
 
 ctx.probe(root_scope)  -- DFS declared ENSURE_DEPENDENCIES; persistence/scheduler checks only
+  ensure-graph cycle -> unavailable reason ensure_cycle (no ensure side effects)
 ctx.query(analytic_id, paths, scope)
   -> ensure_export(scope)   -- idempotent; may run sync (prior turns) or attach async (current turn)
   -> export_registry materialize + JSONPath
   memo key: (analytic_id, normalized scope, normalized path set)
-  cycle stack: same tuple re-entered -> hard error
+  resolution stack: same tuple re-entered during materialize -> hard error (exception)
+  ensure-graph cycle during ensure walk -> hard error (exception)
   scope excludes TurnAnalyticsOptions connection fields (#108 skeleton; #110 keying)
 ```
 
@@ -99,6 +101,13 @@ Dry-run before expensive work:
 3. Return missing steps `{ analytic_id, turn, player_id, status }` for confirm UI and progress denominator.
 
 When `totalMissing` exceeds a tunable threshold, inline ensure is blocked; the SPA calls BFF orchestration to start a background job.
+
+**Ensure-graph cycles:** if the declared `ENSURE_DEPENDENCIES` edges revisit the same
+`(analytic_id, scope)` during the walk (e.g. A -> B -> A at the same turn), probe returns
+root **`unavailable`** with reason **`ensure_cycle`** and performs no ensure work. BFF
+orchestration should treat this as a configuration error, not an inline-able job. See
+**Cycle detection** below for the distinction from resolution-stack cycles and from valid
+cross-turn chains.
 
 ---
 
@@ -221,7 +230,17 @@ Missing stored turn at requested **perspective** -> root **`unavailable`: `turn_
 | **`none`** | Valid selector, zero matches (e.g. empty `ships` array -> `$.solution.ships[0]`) |
 | **`invalid_path`** | Not allowed by catalog or bad syntax |
 
-Root **`unavailable`** only when the tree cannot be established (turn not stored, persistence missing, invalid scope, etc.).
+Root **`unavailable`** when the tree cannot be established for scope. **`query`** returns an
+envelope; **`probe`** uses the same reason strings where applicable.
+
+| Reason | Typical cause |
+|--------|----------------|
+| **`turn_not_stored`** | Requested or dependency turn not in storage for **perspective** |
+| **`invalid_scope`** | Path-prefix rule violated (e.g. `$.payload.*` without `player_id`) |
+| **`empty_catalog`** | Analytic has no queryable export surface yet |
+| **`ensure_blocked`** | Missing-step count exceeds inline threshold (`query` only) |
+| **`ensure_cycle`** | `ENSURE_DEPENDENCIES` graph revisits the same `(analytic_id, scope)` (**`probe` only**; see **Cycle detection**) |
+| **`unknown_analytic`** | `analytic_id` not in export registry |
 
 **Important:** `none` is not bad data. **`complete`** meta + `none` on ships = authoritative "no ship builds in explanation."
 
@@ -259,7 +278,12 @@ Solver-specific outcomes (`no_exact_solution`, band residual, accelerated segmen
 
 ## Cycle detection
 
-Resolution stack key:
+Two mechanisms apply during in-process export resolution. They use different keys and
+different surfaces.
+
+### Resolution-stack cycles (`query` / materialize)
+
+While materializing and resolving paths, the context keeps a **resolution stack** keyed by:
 
 ```
 (analytic_id, normalized scope parameters, normalized path set)
@@ -269,10 +293,26 @@ Normalized scope parameters are **`ExportScope`** fields only; connection option
 on **`TurnAnalyticsOptions`** are excluded (see **Connection options excluded from
 scope identity** above).
 
-- Re-entering the **same** key -> hard error (**`cycle_detected`**, exception).
+- Re-entering the **same** key during one `query(...)` (e.g. materializer calls back into `query` with identical scope and paths) -> hard error (`ExportCycleDetectedError`, HTTP 422).
 - Cross-turn chains are **not** cycles: fleet turn *N* -> scores turn *N−1* -> fleet turn *N−1* differ in scope.
 - Different paths at same scope (`$.solution.ships` vs `$.aggregates`) are **not** a cycle.
 - Per-request memoization for identical keys.
+
+### Ensure-graph cycles (`ENSURE_DEPENDENCIES` walk)
+
+The probe and pre-ensure walk DFS **provider-declared** `ENSURE_DEPENDENCIES`. Revisiting
+the same `(analytic_id, ExportScope)` on the active walk stack is an **ensure-graph
+cycle** (invalid catalog wiring). Cross-turn unwind is **not** a cycle: scopes differ by
+turn.
+
+| Surface | Ensure-graph cycle behavior |
+|---------|----------------------------|
+| **`probe(...)`** | Root **`unavailable`**, reason **`ensure_cycle`**; no ensure callbacks, no missing-step denominator |
+| **`query(...)`** | `ExportCycleDetectedError` (same exception type as resolution-stack cycles) |
+
+BFF export-ensure orchestration should call **probe** first; **`ensure_cycle`** means the
+job cannot proceed until catalog dependencies are fixed, not that the user should confirm
+inline ensure.
 
 ---
 
@@ -381,7 +421,7 @@ Stopping unwind at turn *N−K* with neutral priors/empty fleet may return faste
 
 Production catalog stays unchanged. Framework tests use **test-only** mutual-dependency fixture analytics under `packages/api/tests/fixtures/export_framework/` (e.g. `export-test-alpha` / `export-test-beta`), registered via a test harness -- **not** in `TURN_ANALYTIC_CATALOG`.
 
-Must cover: probe step counts, threshold policy, inline vs background ensure, unwind to baseline, `turn_not_stored`, cycle detection, memoization, `none` vs `unavailable`, cross-turn chain allowed.
+Must cover: probe step counts, threshold policy, inline vs background ensure, unwind to baseline, `turn_not_stored`, `ensure_cycle` on probe, resolution and ensure-graph cycle detection, diamond DAG dedupe, memoization, `none` vs `unavailable`, cross-turn chain allowed.
 
 ### Per-analytic and integration
 
