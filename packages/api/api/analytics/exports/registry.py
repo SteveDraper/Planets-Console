@@ -20,10 +20,6 @@ def _validate_export_registry(
             raise RuntimeError(f"{role} export catalog must set analytic_id")
         if analytic_id in by_id:
             raise RuntimeError(f"Duplicate export catalog id: {analytic_id!r}")
-        if export_catalog.is_empty and export_catalog.analytic_id != analytic_id:
-            raise RuntimeError(
-                f"Export catalog {analytic_id!r} is_empty flag inconsistent with analytic_id"
-            )
         by_id[analytic_id] = export_catalog
     missing = sorted(catalog_ids - set(by_id))
     extra = sorted(set(by_id) - catalog_ids)
