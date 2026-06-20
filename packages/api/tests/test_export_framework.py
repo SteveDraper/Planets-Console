@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from api.analytics.export_errors import ExportCycleDetectedError
-from api.analytics.export_types import ExportScopeOverrides
+from api.analytics.export_types import ExportScope, ExportScopeOverrides
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
 from api.analytics.exports.registry import EXPORT_REGISTRY
 from api.serialization.turn import turn_info_from_json
@@ -79,6 +79,18 @@ def test_inline_ensure_materializes_fixture_export(sample_turn):
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     ctx = make_fixture_query_context(sample_turn, stored_turns=stored_turns)
+    alpha_scope = ExportScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=2,
+        player_id=player_id,
+    )
+    beta_scope = ExportScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=1,
+        player_id=player_id,
+    )
 
     result = ctx.query(
         "export-test-alpha",
@@ -89,7 +101,8 @@ def test_inline_ensure_materializes_fixture_export(sample_turn):
     assert result.status == "ok"
     assert result.paths["$.payload.label"].kind == "value"
     assert result.paths["$.payload.label"].value == f"alpha-t2-p{player_id}"
-    assert len(ctx._ensured_scopes) >= 1
+    assert ctx.is_scope_ensured("export-test-alpha", alpha_scope)
+    assert ctx.is_scope_ensured("export-test-beta", beta_scope)
 
 
 def test_cross_turn_chain_is_allowed_without_cycle_error(sample_turn):
@@ -168,17 +181,19 @@ def test_invalid_scope_without_player_id(sample_turn):
 
 
 def test_query_memoizes_identical_resolution(sample_turn):
+    from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
+
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     ctx = make_fixture_query_context(sample_turn, stored_turns=stored_turns)
     scope = ExportScopeOverrides(turn=2, player_id=player_id)
 
     first = ctx.query("export-test-alpha", ["$.payload.label"], scope)
-    materialize_calls_after_first = len(ctx._materialized_trees)
+    materialize_calls_after_first = len(FIXTURE_EXPORT_STATE.materialize_calls)
     second = ctx.query("export-test-alpha", ["$.payload.label"], scope)
 
     assert first == second
-    assert materialize_calls_after_first == len(ctx._materialized_trees)
+    assert materialize_calls_after_first == len(FIXTURE_EXPORT_STATE.materialize_calls)
 
 
 def test_cycle_detection_raises(sample_turn):
@@ -216,6 +231,12 @@ def test_diamond_dag_ensures_shared_dependency_once(sample_turn):
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     ctx = make_diamond_fixture_query_context(sample_turn, stored_turns=stored_turns)
+    shared_scope = ExportScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=2,
+        player_id=player_id,
+    )
 
     probe = ctx.probe(
         "export-test-diamond-root",
@@ -223,11 +244,16 @@ def test_diamond_dag_ensures_shared_dependency_once(sample_turn):
     )
 
     assert probe.status == "ok"
-    shared_missing_steps = [
-        step for step in probe.missing_steps if step.analytic_id == "export-test-diamond-shared"
-    ]
-    assert len(shared_missing_steps) == 1
     assert probe.total_missing == 4
+    missing_by_analytic = {}
+    for step in probe.missing_steps:
+        missing_by_analytic[step.analytic_id] = missing_by_analytic.get(step.analytic_id, 0) + 1
+    assert missing_by_analytic == {
+        "export-test-diamond-shared": 1,
+        "export-test-diamond-b": 1,
+        "export-test-diamond-c": 1,
+        "export-test-diamond-root": 1,
+    }
 
     result = ctx.query(
         "export-test-diamond-root",
@@ -236,15 +262,21 @@ def test_diamond_dag_ensures_shared_dependency_once(sample_turn):
     )
 
     assert result.status == "ok"
-    shared_ensure_calls = [
-        (analytic_id, scope)
-        for analytic_id, scope in FIXTURE_EXPORT_STATE.ensure_calls
-        if analytic_id == "export-test-diamond-shared"
-    ]
-    assert len(shared_ensure_calls) == 1
+    ensure_calls_by_analytic = {}
+    for analytic_id, _scope in FIXTURE_EXPORT_STATE.ensure_calls:
+        ensure_calls_by_analytic[analytic_id] = ensure_calls_by_analytic.get(analytic_id, 0) + 1
+    assert ensure_calls_by_analytic == {
+        "export-test-diamond-shared": 1,
+        "export-test-diamond-b": 1,
+        "export-test-diamond-c": 1,
+        "export-test-diamond-root": 1,
+    }
+    assert ctx.is_scope_ensured("export-test-diamond-shared", shared_scope)
 
 
 def test_probe_ensure_graph_cycle_returns_unavailable(sample_turn):
+    from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
+
     player_id = first_player_id(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     ctx = make_cycle_fixture_query_context(sample_turn, stored_turns=stored_turns)
@@ -258,6 +290,8 @@ def test_probe_ensure_graph_cycle_returns_unavailable(sample_turn):
     assert probe.reason == "ensure_cycle"
     assert probe.total_missing == 0
     assert probe.missing_steps == ()
+    assert not probe.blocked_inline
+    assert FIXTURE_EXPORT_STATE.ensure_calls == []
 
 
 def test_large_probe_blocks_inline_ensure(sample_turn, monkeypatch):
