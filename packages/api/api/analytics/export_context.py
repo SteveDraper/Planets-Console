@@ -251,7 +251,7 @@ class AnalyticQueryContext:
     options: TurnAnalyticsOptions
     load_turn: Callable[[int], TurnInfo | None]
     export_registry: Mapping[str, AnalyticExportCatalog]
-    allow_inline_ensure: bool = True
+    enforce_inline_ensure_threshold: bool = True
     # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
     # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
     # ctx.options and are not fingerprinted here (#108 skeleton); connections
@@ -334,7 +334,11 @@ class AnalyticQueryContext:
             result = self._unavailable(probe_result.reason)  # type: ignore[arg-type]
             self._memo[resolution_key] = result
             return result
-        if probe_result.blocked_inline and not force_inline_ensure and self.allow_inline_ensure:
+        if (
+            probe_result.blocked_inline
+            and not force_inline_ensure
+            and self.enforce_inline_ensure_threshold
+        ):
             result = self._unavailable("ensure_blocked")
             self._memo[resolution_key] = result
             return result
@@ -606,7 +610,7 @@ def make_analytic_query_context(
     *,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
-    allow_inline_ensure: bool = True,
+    enforce_inline_ensure_threshold: bool = True,
 ) -> AnalyticQueryContext:
     """Build query context with ambient scope from one loaded turn."""
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -629,5 +633,5 @@ def make_analytic_query_context(
         options=options,
         load_turn=resolved_load_turn,
         export_registry=export_registry or EXPORT_REGISTRY,
-        allow_inline_ensure=allow_inline_ensure,
+        enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
     )

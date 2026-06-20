@@ -217,6 +217,33 @@ def test_large_probe_blocks_inline_ensure(sample_turn, monkeypatch):
     assert result.reason == "ensure_blocked"
 
 
+def test_force_inline_ensure_bypasses_blocked_threshold(sample_turn, monkeypatch):
+    from api.analytics import export_context as export_context_module
+
+    monkeypatch.setattr(export_context_module, "INLINE_ENSURE_MAX_MISSING_STEPS", 0)
+    player_id = first_player_id(sample_turn)
+    stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    ctx = make_fixture_query_context(sample_turn, stored_turns=stored_turns)
+
+    probe = ctx.probe(
+        "export-test-alpha",
+        ExportScopeOverrides(turn=2, player_id=player_id),
+    )
+    assert probe.status == "ok"
+    assert probe.blocked_inline
+
+    result = ctx.query(
+        "export-test-alpha",
+        ["$.payload.label"],
+        ExportScopeOverrides(turn=2, player_id=player_id),
+        force_inline_ensure=True,
+    )
+
+    assert result.status == "ok"
+    assert result.paths["$.payload.label"].kind == "value"
+    assert result.paths["$.payload.label"].value == f"alpha-t2-p{player_id}"
+
+
 def test_probe_unknown_analytic_returns_unavailable(sample_turn):
     ctx = make_fixture_query_context(sample_turn)
 

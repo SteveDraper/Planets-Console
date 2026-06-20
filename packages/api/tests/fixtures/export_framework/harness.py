@@ -25,7 +25,7 @@ def make_fixture_query_context(
     turn: TurnInfo,
     *,
     stored_turns: dict[int, TurnInfo] | None = None,
-    allow_inline_ensure: bool = True,
+    enforce_inline_ensure_threshold: bool = True,
 ) -> AnalyticQueryContext:
     """Build a query context with fixture catalogs and optional stored-turn map."""
     FIXTURE_EXPORT_STATE.reset()
@@ -39,7 +39,7 @@ def make_fixture_query_context(
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_registry=FIXTURE_EXPORT_REGISTRY,
-        allow_inline_ensure=allow_inline_ensure,
+        enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
     )
 
 
@@ -47,7 +47,7 @@ def make_cycle_fixture_query_context(
     turn: TurnInfo,
     *,
     stored_turns: dict[int, TurnInfo] | None = None,
-    allow_inline_ensure: bool = True,
+    enforce_inline_ensure_threshold: bool = True,
 ) -> AnalyticQueryContext:
     """Build a query context with cyclic ensure-dependency fixture catalogs."""
     FIXTURE_EXPORT_STATE.reset()
@@ -61,7 +61,7 @@ def make_cycle_fixture_query_context(
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_registry=CYCLE_FIXTURE_EXPORT_REGISTRY,
-        allow_inline_ensure=allow_inline_ensure,
+        enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
     )
 
 
