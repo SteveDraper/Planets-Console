@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from api.analytics.export_context import (
+    AnalyticQueryContext,
+    ScoresExportContext,
+    export_service_for,
+)
 from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import resolve_hull_catalog_mask
@@ -34,9 +39,6 @@ from api.serialization.inference_row_persistence import (
 )
 from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
-if TYPE_CHECKING:
-    from api.analytics.export_context import AnalyticQueryContext
-
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
     PathPrefixScopeRule(prefix="$.diagnostics", requires=("player_id",)),
@@ -55,8 +57,8 @@ ORDERING_SEMANTICS = {
 ENSURE_DEPENDENCIES: tuple = ()
 
 
-def _scores_services(ctx: AnalyticQueryContext):
-    return ctx.scores_export
+def _scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext | None:
+    return export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
 
 
 def _persistence(ctx: AnalyticQueryContext):

@@ -1,6 +1,6 @@
 """Registry for Core turn analytics."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
 from api.analytics.catalog import (
@@ -9,7 +9,6 @@ from api.analytics.catalog import (
 )
 from api.analytics.compute_context import make_analytic_compute_context
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
-from api.analytics.export_context import ScoresExportContext
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import (
     TurnAnalyticHandler,
@@ -54,7 +53,7 @@ def get_turn_analytic(
     options: TurnAnalyticsOptions,
     *,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
-    scores_export: ScoresExportContext | None = None,
+    export_services: Mapping[str, object] | None = None,
 ) -> dict:
     try:
         handler = TURN_ANALYTICS[analytic_id]
@@ -65,6 +64,6 @@ def get_turn_analytic(
             turn,
             options,
             load_turn=load_turn,
-            scores_export=scores_export,
+            export_services=export_services,
         )
     )

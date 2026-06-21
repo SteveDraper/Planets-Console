@@ -73,7 +73,7 @@ class AnalyticQueryContext:
     load_turn: Callable[[int], TurnInfo | None]
     export_registry: Mapping[str, AnalyticExportCatalog]
     enforce_inline_ensure_threshold: bool = True
-    scores_export: ScoresExportContext | None = None
+    export_services: Mapping[str, object] = field(default_factory=dict)
     # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
     # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
     # ctx.options and are not fingerprinted here (#108 skeleton); connections
@@ -355,6 +355,18 @@ class AnalyticQueryContext:
         return ExportProbeResult(status="unavailable", reason=reason)
 
 
+def export_service_for[T](
+    ctx: AnalyticQueryContext,
+    analytic_id: str,
+    service_type: type[T],
+) -> T | None:
+    """Return a per-analytic export service bundle when present and typed."""
+    service = ctx.export_services.get(analytic_id)
+    if isinstance(service, service_type):
+        return service
+    return None
+
+
 def make_analytic_query_context(
     turn: TurnInfo,
     options: TurnAnalyticsOptions,
@@ -362,7 +374,7 @@ def make_analytic_query_context(
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
     enforce_inline_ensure_threshold: bool = True,
-    scores_export: ScoresExportContext | None = None,
+    export_services: Mapping[str, object] | None = None,
 ) -> AnalyticQueryContext:
     """Build query context with ambient scope from one loaded turn."""
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -386,5 +398,5 @@ def make_analytic_query_context(
         load_turn=resolved_load_turn,
         export_registry=export_registry or EXPORT_REGISTRY,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
-        scores_export=scores_export,
+        export_services=export_services or {},
     )

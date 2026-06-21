@@ -73,10 +73,12 @@ def _query_context(
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
-        scores_export=ScoresExportContext(
-            persistence=persistence,
-            scheduler=scheduler,
-        ),
+        export_services={
+            "scores": ScoresExportContext(
+                persistence=persistence,
+                scheduler=scheduler,
+            ),
+        },
     )
 
 
@@ -618,7 +620,7 @@ def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
-        scores_export=ScoresExportContext(persistence=persistence),
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
     )
     scope = ExportScope(
         game_id=628580,
