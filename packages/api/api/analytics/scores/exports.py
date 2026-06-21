@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     controller_for_scope,
 )
 from api.analytics.scores.export_materialization import (
+    ScoresInferenceSnapshot,
     export_meta_branch,
     gather_scores_inference_snapshot,
     hull_catalog_mask_branch,
@@ -58,6 +59,24 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
     return resolve_scores_export_search_status(snapshot) == "complete"
 
 
+def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> bool:
+    if snapshot.persisted_row is not None:
+        return True
+    admission = snapshot.admission
+    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
+        return True
+    return snapshot.scheduler_run is not None
+
+
+def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    if scope.player_id is None:
+        return True
+
+    services = resolve_scores_services(ctx)
+    snapshot = gather_scores_inference_snapshot(ctx, services, scope, ctx.load_turn(scope.turn))
+    return is_scores_inference_ensure_satisfied(snapshot)
+
+
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
     if scope.player_id is None:
         return
@@ -68,11 +87,7 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
         return
 
     snapshot = gather_scores_inference_snapshot(ctx, services, scope, turn)
-    if snapshot.persisted_row is not None:
-        return
-
-    admission = snapshot.admission
-    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
+    if is_scores_inference_ensure_satisfied(snapshot):
         return
 
     if scope.turn < ctx.ambient_turn:
@@ -187,4 +202,5 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     ensure_export=ensure_scores_export,
     materialize_export_tree=materialize_scores_export_tree,
     is_persisted=is_scores_export_persisted,
+    is_ensure_satisfied=is_scores_export_ensure_satisfied,
 )

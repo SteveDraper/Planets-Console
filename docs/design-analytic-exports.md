@@ -100,10 +100,13 @@ Dry-run before expensive work:
 2. Check persistence and scheduler status at each step (no CP-SAT, no full materialization).
 3. Return missing steps `{ analytic_id, turn, player_id, status }` for confirm UI and progress denominator.
 
-**#108 skeleton:** the in-process probe walk calls provider `is_persisted`
-hooks and `is_scope_ensured` on the query context to **omit** already-satisfied
-scopes from the walk. Baseline scopes are also skipped. It does not yet check
-scheduler status. Steps that need work appear in `missing_steps` with
+**#108 skeleton:** the in-process probe walk calls provider `is_ensure_satisfied`
+when defined, otherwise `is_persisted`, plus `is_scope_ensured` on the query
+context to **omit** already-satisfied scopes from the walk. Baseline scopes are
+also skipped. **`is_persisted`** remains chain-complete / authoritative
+persistence only; **`is_ensure_satisfied`** means probe/ensure should skip
+because no further ensure work is possible or needed (e.g. scores stopped
+persisted rows). Steps that need work appear in `missing_steps` with
 `status: "not_persisted"` only -- satisfied, in-progress, and baseline scopes
 are omitted rather than returned with `persisted`, `in_progress`, or
 `baseline`. Full status discrimination is planned for

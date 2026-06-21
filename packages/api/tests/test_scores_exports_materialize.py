@@ -333,9 +333,8 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
     assert tree["meta"]["solutionsHeld"] == 1
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
-
-
-def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_turn):
+    assert EXPORT_CATALOG.is_ensure_satisfied is not None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
     player_id = first_player_id(sample_turn)
 
     def resolve_none_mask(_turn, _player_id):
