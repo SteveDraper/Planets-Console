@@ -26,6 +26,7 @@ from api.analytics.scores.export_materialization import (
     is_scores_export_inference_satisfied,
     ranked_solutions_from_wire,
     resolve_search_status,
+    solutions_diagnostics_from_wire_complete_event,
     solutions_from_domain,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
@@ -281,14 +282,13 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
         diagnostics = persisted_row.diagnostics
         solutions_held = persisted_row.solution_count
     elif isinstance(admission, ImmediateRowAdmission) and admission.events:
-        wire_event = admission.events[-1]
-        wire_solutions = wire_event.get("solutions")
-        solutions = ranked_solutions_from_wire(
-            wire_solutions if isinstance(wire_solutions, list) else []
+        solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
+            admission.events[-1]
         )
-        event_diagnostics = wire_event.get("diagnostics")
-        diagnostics = event_diagnostics if isinstance(event_diagnostics, dict) else None
-        solutions_held = int(wire_event.get("solutionCount", 0))
+    elif isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
+        solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
+            admission.event
+        )
     elif scheduler_run is not None and scheduler_run.ladder_state is not None:
         ladder_state = scheduler_run.ladder_state
         merged = ladder_state.merged_solutions

@@ -49,6 +49,20 @@ def ranked_solutions_from_wire(
     )
 
 
+def solutions_diagnostics_from_wire_complete_event(
+    wire_event: dict[str, object],
+) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
+    """Extract solutions, diagnostics, and held count from a wire complete event."""
+    wire_solutions = wire_event.get("solutions")
+    solutions = ranked_solutions_from_wire(
+        wire_solutions if isinstance(wire_solutions, list) else []
+    )
+    event_diagnostics = wire_event.get("diagnostics")
+    diagnostics = event_diagnostics if isinstance(event_diagnostics, dict) else None
+    solutions_held = int(wire_event.get("solutionCount", 0))
+    return solutions, diagnostics, solutions_held
+
+
 def solutions_from_domain(
     solutions: list[InferenceSolution] | tuple[InferenceSolution, ...],
     *,

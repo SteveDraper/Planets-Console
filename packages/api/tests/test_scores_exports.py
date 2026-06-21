@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
+    CachedCompleteRowAdmission,
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -25,7 +26,10 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_materialization import ranked_solutions_from_wire
+from api.analytics.scores.export_materialization import (
+    ranked_solutions_from_wire,
+    solutions_diagnostics_from_wire_complete_event,
+)
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -362,6 +366,79 @@ def test_ranked_solutions_from_wire_orders_by_objective_value():
     )
     assert solutions[0]["objectiveValue"] == 99
     assert solutions[1]["objectiveValue"] == 10
+
+
+def test_solutions_diagnostics_from_wire_complete_event():
+    solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
+        {
+            "type": "complete",
+            "status": STATUS_EXACT,
+            "summary": "wire",
+            "solutionCount": 1,
+            "isComplete": True,
+            "solutions": [
+                {
+                    "objectiveValue": 55,
+                    "actions": [],
+                    "shipBuilds": [{"hullId": 7}],
+                }
+            ],
+            "diagnostics": {"note": "cached"},
+        }
+    )
+    assert solutions_held == 1
+    assert solutions[0]["objectiveValue"] == 55
+    assert diagnostics == {"note": "cached"}
+
+
+def test_cached_complete_admission_materializes_from_event(sample_turn, persistence, monkeypatch):
+    player_id = sample_turn.scores[0].ownerid
+    wire_event = {
+        "type": "complete",
+        "status": STATUS_EXACT,
+        "summary": "cached admission",
+        "solutionCount": 1,
+        "isComplete": True,
+        "solutions": [
+            {
+                "objectiveValue": 77,
+                "actions": [],
+                "shipBuilds": [
+                    {
+                        "comboId": "cached-admission-combo",
+                        "label": "Cached admission hull",
+                        "count": 1,
+                        "hullId": 88,
+                        "engineId": 3,
+                        "beamId": None,
+                        "torpId": None,
+                        "beamCount": 0,
+                        "launcherCount": 0,
+                    }
+                ],
+            }
+        ],
+        "diagnostics": {"source": "cached_admission"},
+    }
+    admission = CachedCompleteRowAdmission(event=wire_event)
+
+    ctx = _query_context(sample_turn, persistence=persistence)
+    scope = ctx._resolve_scope({"player_id": player_id})
+
+    monkeypatch.setattr(
+        "api.analytics.scores.exports._load_persisted_row",
+        lambda _ctx, _scope: None,
+    )
+    monkeypatch.setattr(
+        "api.analytics.scores.exports._row_admission",
+        lambda _ctx, _scope, _turn: admission,
+    )
+
+    tree = EXPORT_CATALOG.materialize_export_tree(ctx, scope)
+    assert tree["meta"]["searchStatus"] == "complete"
+    assert tree["meta"]["solutionsHeld"] == 1
+    assert tree["solutions"][0]["shipBuilds"][0]["hullId"] == 88
+    assert tree["diagnostics"] == {"source": "cached_admission"}
 
 
 def test_first_turn_materializes_complete_without_ensure(sample_turn):
