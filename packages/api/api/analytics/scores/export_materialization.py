@@ -36,7 +36,6 @@ class ScoresInferenceSnapshot:
     admission: RowStreamAdmission | None
     scheduler_run: RowRun | None
     globally_paused: bool
-    scope_matches_active_stream: bool
 
 
 @dataclass(frozen=True)
@@ -50,12 +49,10 @@ class ScoresExportPayload:
 
 
 _PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
-_IMMEDIATE_COMPLETE_STATUSES = frozenset(
+_FALLBACK_COMPLETE_PERSISTED_STATUSES = frozenset(
     {
         STATUS_NO_PRIOR_TURN,
         "player_not_found",
-        STATUS_EXACT,
-        STATUS_NO_EXACT_SOLUTION,
         "invalid_problem",
         "solver_error",
     }
@@ -131,13 +128,28 @@ def _payload_from_persisted_row(
     )
 
 
+def _persisted_row_priority_search_status(status: str) -> SearchStatus | None:
+    """Persisted statuses that override live admission or scheduler state."""
+    if status in _PERSISTABLE_STATUSES:
+        return "complete"
+    if status == STATUS_STOPPED:
+        return "stopped"
+    return None
+
+
+def _persisted_row_fallback_search_status(status: str) -> SearchStatus:
+    """Persisted statuses used when admission and scheduler are absent."""
+    if status in _FALLBACK_COMPLETE_PERSISTED_STATUSES:
+        return "complete"
+    return "not_started"
+
+
 def _search_status_from_scheduler(
     scheduler_run: RowRun,
     *,
     globally_paused: bool,
-    scope_matches_active_stream: bool,
 ) -> SearchStatus:
-    if globally_paused and scope_matches_active_stream:
+    if globally_paused:
         return "paused"
     ladder_state = scheduler_run.ladder_state
     if ladder_state is not None and ladder_state.last_status == STATUS_STOPPED:
@@ -199,11 +211,10 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
     admission = snapshot.admission
     scheduler_run = snapshot.scheduler_run
 
-    if persisted_row is not None and persisted_row.status in _PERSISTABLE_STATUSES:
-        return _payload_from_persisted_row("complete", persisted_row)
-
-    if persisted_row is not None and persisted_row.status == STATUS_STOPPED:
-        return _payload_from_persisted_row("stopped", persisted_row)
+    if persisted_row is not None:
+        priority_status = _persisted_row_priority_search_status(persisted_row.status)
+        if priority_status is not None:
+            return _payload_from_persisted_row(priority_status, persisted_row)
 
     if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
         solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
@@ -228,18 +239,17 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
             search_status=_search_status_from_scheduler(
                 scheduler_run,
                 globally_paused=snapshot.globally_paused,
-                scope_matches_active_stream=snapshot.scope_matches_active_stream,
             ),
             solutions=solutions,
             diagnostics=diagnostics,
             solutions_held=solutions_held,
         )
 
-    if persisted_row is not None and persisted_row.status in _IMMEDIATE_COMPLETE_STATUSES:
-        return _payload_from_persisted_row("complete", persisted_row)
-
     if persisted_row is not None:
-        return _payload_from_persisted_row("not_started", persisted_row)
+        return _payload_from_persisted_row(
+            _persisted_row_fallback_search_status(persisted_row.status),
+            persisted_row,
+        )
 
     return ScoresExportPayload(
         search_status="not_started",
@@ -254,11 +264,10 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
 
 def resolve_search_status(
     *,
-    persisted_row,
+    persisted_row: PersistedInferenceRow | None,
     admission: RowStreamAdmission | None,
     scheduler_run: RowRun | None,
     globally_paused: bool,
-    scope_matches_active_stream: bool,
 ) -> SearchStatus:
     return resolve_scores_export_payload(
         ScoresInferenceSnapshot(
@@ -266,14 +275,13 @@ def resolve_search_status(
             admission=admission,
             scheduler_run=scheduler_run,
             globally_paused=globally_paused,
-            scope_matches_active_stream=scope_matches_active_stream,
         )
     ).search_status
 
 
 def held_solution_count(
     *,
-    persisted_row,
+    persisted_row: PersistedInferenceRow | None,
     scheduler_run: RowRun | None,
 ) -> int:
     if persisted_row is not None:
@@ -289,11 +297,10 @@ def is_persistable_inference_status(status: str) -> bool:
 
 def is_scores_export_inference_satisfied(
     *,
-    persisted_row,
+    persisted_row: PersistedInferenceRow | None,
     admission: RowStreamAdmission | None,
     scheduler_run: RowRun | None,
     globally_paused: bool,
-    scope_matches_active_stream: bool,
 ) -> bool:
     """True when inference is terminal and satisfied for export dependency probes."""
     return (
@@ -303,7 +310,6 @@ def is_scores_export_inference_satisfied(
                 admission=admission,
                 scheduler_run=scheduler_run,
                 globally_paused=globally_paused,
-                scope_matches_active_stream=scope_matches_active_stream,
             )
         ).search_status
         == "complete"

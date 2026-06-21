@@ -133,7 +133,6 @@ def _resolve_scores_inference_snapshot(
             admission=None,
             scheduler_run=None,
             globally_paused=False,
-            scope_matches_active_stream=False,
         )
 
     stream_scope = _stream_scope(scope)
@@ -144,7 +143,6 @@ def _resolve_scores_inference_snapshot(
         admission=_row_admission(ctx, scope, turn),
         scheduler_run=_scheduler_row_run(ctx, scope),
         globally_paused=bool(pause_status.get("paused")),
-        scope_matches_active_stream=scheduler.active_scope_matches(stream_scope),
     )
 
 
@@ -158,7 +156,6 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
         admission=snapshot.admission,
         scheduler_run=snapshot.scheduler_run,
         globally_paused=snapshot.globally_paused,
-        scope_matches_active_stream=snapshot.scope_matches_active_stream,
     )
 
 
