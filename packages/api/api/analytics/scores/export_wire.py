@@ -126,11 +126,23 @@ def _diagnostics_from_scheduler_ladder(scheduler_run: RowRun) -> dict[str, objec
     )
 
 
-def _solutions_from_scheduler_ladder(
+def solutions_from_terminal_admission(
+    admission: ImmediateRowAdmission | CachedCompleteRowAdmission,
+) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
+    """Serialize solutions from one terminal wire-complete row admission."""
+    if isinstance(admission, ImmediateRowAdmission):
+        return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
+    assert admission.event is not None
+    return solutions_diagnostics_from_wire_complete_event(admission.event)
+
+
+def solutions_from_scheduler_run(
     scheduler_run: RowRun,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
+    """Serialize solutions from live scheduler ladder state when present."""
     ladder_state = scheduler_run.ladder_state
-    assert ladder_state is not None
+    if ladder_state is None:
+        return [], None, 0
     merged = ladder_state.merged_solutions
     return (
         solutions_from_domain(
@@ -140,26 +152,4 @@ def _solutions_from_scheduler_ladder(
         ),
         _diagnostics_from_scheduler_ladder(scheduler_run),
         len(merged),
-    )
-
-
-def solutions_from_admission_or_scheduler(
-    *,
-    admission: RowStreamAdmission | None,
-    scheduler_run: RowRun | None,
-    persisted_row: PersistedInferenceRow | None,
-) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
-    if isinstance(admission, ImmediateRowAdmission) and admission.events:
-        return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
-    if isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
-        return solutions_diagnostics_from_wire_complete_event(admission.event)
-    if scheduler_run is not None and scheduler_run.ladder_state is not None:
-        return _solutions_from_scheduler_ladder(scheduler_run)
-    return (
-        [],
-        None,
-        held_solution_count(
-            persisted_row=persisted_row,
-            scheduler_run=scheduler_run,
-        ),
     )

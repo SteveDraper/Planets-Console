@@ -84,7 +84,7 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     return is_scores_inference_ensure_satisfied(resolved)
 
 
-def sync_persist_empty_branch(
+def _sync_persist_empty_branch(
     resolved: ScoresExportResolved,
     *,
     services: ScoresExportContext,
@@ -137,7 +137,7 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
     # ctx.query still marks the scope ensured after ensure_export returns; probe walks
     # skip re-entry via is_scope_ensured even when is_persisted remains False.
     if scope.turn < ctx.ambient_turn:
-        if sync_persist_empty_branch(
+        if _sync_persist_empty_branch(
             resolved,
             services=services,
             scope=scope,

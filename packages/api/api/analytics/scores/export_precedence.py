@@ -20,8 +20,9 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
     held_solution_count,
-    solutions_from_admission_or_scheduler,
     solutions_from_persisted_row,
+    solutions_from_scheduler_run,
+    solutions_from_terminal_admission,
     terminal_row_admission,
 )
 
@@ -44,16 +45,14 @@ _FALLBACK_COMPLETE_PERSISTED_STATUSES = frozenset(
     }
 )
 _AUTHORITATIVE_PERSISTED_BRANCHES = frozenset({"priority_persisted", "fallback_persisted"})
-ScoresExportPayloadSource = Literal["persisted_row", "admission", "scheduler", "empty"]
 
 
 @dataclass(frozen=True)
 class ScoresExportDecision:
-    """Precedence branch, lifecycle status, and payload source for one snapshot."""
+    """Precedence branch and lifecycle status for one snapshot."""
 
     branch: ScoresExportPrecedenceBranch
     search_status: SearchStatus
-    payload_source: ScoresExportPayloadSource
 
 
 def is_persistable_inference_status(status: str) -> bool:
@@ -120,7 +119,7 @@ def _search_status_from_scheduler(
 
 
 def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> ScoresExportDecision:
-    """Single precedence ladder: branch, search status, and payload source."""
+    """Single precedence ladder: branch and search status."""
     persisted_row = snapshot.persisted_row
     admission = snapshot.admission
     scheduler_run = snapshot.scheduler_run
@@ -128,10 +127,10 @@ def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> ScoresExportDe
     if persisted_row is not None:
         priority_status = _persisted_row_priority_search_status(persisted_row.status)
         if priority_status is not None:
-            return ScoresExportDecision("priority_persisted", priority_status, "persisted_row")
+            return ScoresExportDecision("priority_persisted", priority_status)
 
     if terminal_row_admission(admission) is not None:
-        return ScoresExportDecision("terminal_admission", "complete", "admission")
+        return ScoresExportDecision("terminal_admission", "complete")
 
     if scheduler_run is not None:
         return ScoresExportDecision(
@@ -140,59 +139,47 @@ def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> ScoresExportDe
                 scheduler_run,
                 globally_paused=snapshot.globally_paused,
             ),
-            "scheduler",
         )
 
     if persisted_row is not None:
         return ScoresExportDecision(
             "fallback_persisted",
             _persisted_row_fallback_search_status(persisted_row.status),
-            "persisted_row",
         )
 
-    return ScoresExportDecision("empty", "not_started", "empty")
+    return ScoresExportDecision("empty", "not_started")
 
 
 def _build_scores_export_payload(
     snapshot: ScoresInferenceSnapshot,
     decision: ScoresExportDecision,
 ) -> ScoresExportPayload:
-    """Materialize solutions and diagnostics for one precedence decision."""
+    """Materialize solutions and diagnostics for one precedence branch."""
     search_status = decision.search_status
-    persisted_row = snapshot.persisted_row
-
-    if decision.payload_source == "persisted_row":
-        assert persisted_row is not None
-        solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
-        return ScoresExportPayload(
-            search_status=search_status,
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
-    if decision.payload_source in ("admission", "scheduler"):
-        admission = snapshot.admission if decision.payload_source == "admission" else None
-        solutions, diagnostics, solutions_held = solutions_from_admission_or_scheduler(
-            admission=admission,
-            scheduler_run=snapshot.scheduler_run,
-            persisted_row=persisted_row,
-        )
-        return ScoresExportPayload(
-            search_status=search_status,
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
+    match decision.branch:
+        case "priority_persisted" | "fallback_persisted":
+            persisted_row = snapshot.persisted_row
+            assert persisted_row is not None
+            solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
+        case "terminal_admission":
+            terminal = terminal_row_admission(snapshot.admission)
+            assert terminal is not None
+            solutions, diagnostics, solutions_held = solutions_from_terminal_admission(terminal)
+        case "scheduler":
+            scheduler_run = snapshot.scheduler_run
+            assert scheduler_run is not None
+            solutions, diagnostics, solutions_held = solutions_from_scheduler_run(scheduler_run)
+        case "empty":
+            solutions, diagnostics = [], None
+            solutions_held = held_solution_count(
+                persisted_row=snapshot.persisted_row,
+                scheduler_run=snapshot.scheduler_run,
+            )
     return ScoresExportPayload(
         search_status=search_status,
-        solutions=[],
-        diagnostics=None,
-        solutions_held=held_solution_count(
-            persisted_row=persisted_row,
-            scheduler_run=snapshot.scheduler_run,
-        ),
+        solutions=solutions,
+        diagnostics=diagnostics,
+        solutions_held=solutions_held,
     )
 
 
