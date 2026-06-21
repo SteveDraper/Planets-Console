@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from api.analytics.export_context import ScoresExportContext, make_analytic_query_context
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -22,7 +23,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_materialization import ranked_solutions_from_wire
 from api.analytics.scores.exports import EXPORT_CATALOG
@@ -389,6 +390,211 @@ def test_first_turn_materializes_complete_without_ensure(sample_turn):
     assert result.status == "ok"
     assert result.paths["$.meta.searchStatus"].value == "complete"
     assert result.paths["$.solutions[0]"].kind == "none"
+
+
+def test_paused_when_globally_paused_on_active_stream(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    stream_scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+        turn_number=sample_turn.settings.turn,
+    )
+    scheduler.begin_scope(stream_scope)
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+    )
+    assert scheduled is not None
+    run = scheduler.row_run_for_player(stream_scope, player_id)
+    assert run is not None
+    run.ladder_state = PolicyLadderState(
+        policy_steps=(),
+        merged_solutions=[
+            InferenceSolution(
+                objective_value=25,
+                actions=(),
+                ship_builds=(),
+            )
+        ],
+    )
+    scheduler.pause_globally(stream_scope)
+
+    ctx = _query_context(sample_turn, scheduler=scheduler)
+    scope = ctx._resolve_scope({"player_id": player_id})
+    tree = EXPORT_CATALOG.materialize_export_tree(ctx, scope)
+    assert tree["meta"]["searchStatus"] == "paused"
+
+
+def test_stopped_when_ladder_last_status_stopped(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    stream_scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+        turn_number=sample_turn.settings.turn,
+    )
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+    )
+    assert scheduled is not None
+    run = scheduler.row_run_for_player(stream_scope, player_id)
+    assert run is not None
+    run.ladder_state = PolicyLadderState(
+        policy_steps=(),
+        merged_solutions=[
+            InferenceSolution(
+                objective_value=40,
+                actions=(
+                    InferenceSolutionAction(
+                        action_id="planet_defense_posts_added_total",
+                        label="Planet defense",
+                        count=1,
+                    ),
+                ),
+                ship_builds=(),
+            )
+        ],
+        last_status=STATUS_STOPPED,
+    )
+
+    ctx = _query_context(sample_turn, scheduler=scheduler)
+    scope = ctx._resolve_scope({"player_id": player_id})
+    tree = EXPORT_CATALOG.materialize_export_tree(ctx, scope)
+    assert tree["meta"]["searchStatus"] == "stopped"
+    assert tree["meta"]["solutionsHeld"] == 1
+
+
+def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
+    player_id = sample_turn.scores[0].ownerid
+    prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=110),
+        game=replace(sample_turn.game, turn=110),
+    )
+    prior_prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=109),
+        game=replace(sample_turn.game, turn=109),
+    )
+    stored_turns = {
+        109: prior_prior_turn,
+        110: prior_turn,
+        sample_turn.settings.turn: sample_turn,
+    }
+
+    def load_turn(turn_number: int):
+        return stored_turns.get(turn_number)
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        scores_export=ScoresExportContext(persistence=persistence),
+    )
+    scope = ExportScope(
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+        turn=110,
+        player_id=player_id,
+    )
+    assert persistence.get_row(628580, _perspective(sample_turn), 110, player_id) is None
+
+    EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    row = persistence.get_row(628580, _perspective(sample_turn), 110, player_id)
+    assert row is not None
+    assert row.status in {STATUS_EXACT, "no_exact_solution"}
+
+
+def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    stream_scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+        turn_number=sample_turn.settings.turn,
+    )
+    ctx = _query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    scope = ctx._resolve_scope({"player_id": player_id})
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
+
+    EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    assert scheduler.row_run_for_player(stream_scope, player_id) is not None
+
+
+def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    stream_scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+        turn_number=sample_turn.settings.turn,
+    )
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+    )
+    run_before = scheduler.row_run_for_player(stream_scope, player_id)
+    assert run_before is not None
+
+    ctx = _query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    scope = ctx._resolve_scope({"player_id": player_id})
+    EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    run_after = scheduler.row_run_for_player(stream_scope, player_id)
+    assert run_after is run_before
+
+
+def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    stream_scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=_perspective(sample_turn),
+        turn_number=sample_turn.settings.turn,
+    )
+    persistence.put_row(
+        628580,
+        _perspective(sample_turn),
+        sample_turn.settings.turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="cached",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    ctx = _query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    scope = ctx._resolve_scope({"player_id": player_id})
+
+    EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
 
 def test_first_turn_immediate_complete_is_persisted(sample_turn):
