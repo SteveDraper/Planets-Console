@@ -153,9 +153,7 @@ def build_scores_export_payload(
         )
 
     if classification.branch in ("terminal_admission", "scheduler"):
-        admission = (
-            snapshot.admission if classification.branch == "terminal_admission" else None
-        )
+        admission = snapshot.admission if classification.branch == "terminal_admission" else None
         solutions, diagnostics, solutions_held = solutions_from_admission_or_scheduler(
             admission=admission,
             scheduler_run=snapshot.scheduler_run,

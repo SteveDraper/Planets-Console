@@ -205,9 +205,7 @@ def test_resolve_search_status_matches_payload_status(sample_turn):
         globally_paused=False,
     )
     classification = classify_scores_export(snapshot)
-    assert (
-        classification.search_status == resolve_scores_export_payload(snapshot).search_status
-    )
+    assert classification.search_status == resolve_scores_export_payload(snapshot).search_status
     assert classification.search_status == "in_progress"
 
 
