@@ -1,4 +1,4 @@
-"""Unit tests for scores export precedence and classification."""
+"""Unit tests for scores export precedence and payload resolution."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.export_precedence import (
-    classify_scores_export,
     is_scores_inference_ensure_satisfied,
     resolve_scores_export,
     resolve_scores_export_payload,
@@ -111,12 +110,11 @@ def test_resolve_search_status_matches_payload_status(sample_turn):
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
-    classification = classify_scores_export(snapshot)
-    assert classification.search_status == resolve_scores_export_payload(resolved).search_status
-    assert classification.search_status == "in_progress"
+    assert resolved.decision.search_status == resolve_scores_export_payload(resolved).search_status
+    assert resolved.decision.search_status == "in_progress"
 
 
-def test_classify_search_status_does_not_materialize_solutions(sample_turn):
+def test_decision_search_status_available_without_payload_materialization(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
@@ -135,7 +133,7 @@ def test_classify_search_status_does_not_materialize_solutions(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
-    assert classify_scores_export(snapshot).search_status == "in_progress"
+    assert resolve_scores_export(snapshot).decision.search_status == "in_progress"
 
 
 def test_cached_complete_admission_resolves_payload_from_event():
@@ -257,8 +255,7 @@ def test_ensure_satisfied_tracks_precedence_branch(
     search_status: str,
 ):
     resolved = resolve_scores_export(snapshot)
-    classification = classify_scores_export(snapshot)
-    assert classification.branch == expected_branch
+    assert resolved.decision.branch == expected_branch
     assert is_scores_inference_ensure_satisfied(resolved) is ensure_satisfied
     payload = resolve_scores_export_payload(resolved)
     assert payload.search_status == search_status
@@ -285,8 +282,7 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
-    classification = classify_scores_export(snapshot)
-    assert classification.branch == "scheduler"
+    assert resolved.decision.branch == "scheduler"
     assert is_scores_inference_ensure_satisfied(resolved) is True
     payload = resolve_scores_export_payload(resolved)
     assert payload.search_status == "in_progress"

@@ -93,7 +93,7 @@ def sync_persist_empty_branch(
     load_scoreboard_turn: Callable[[int], TurnInfo | None],
 ) -> bool:
     """Persist sync inference when precedence is empty (prior-turn ensure path)."""
-    if resolved.classification.branch != "empty":
+    if resolved.decision.branch != "empty":
         return False
     if services.persistence is None or scope.player_id is None:
         return False

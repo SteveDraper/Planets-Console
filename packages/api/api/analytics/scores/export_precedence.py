@@ -48,7 +48,9 @@ ScoresExportPayloadSource = Literal["persisted_row", "admission", "scheduler", "
 
 
 @dataclass(frozen=True)
-class _ScoresExportDecision:
+class ScoresExportDecision:
+    """Precedence branch, lifecycle status, and payload source for one snapshot."""
+
     branch: ScoresExportPrecedenceBranch
     search_status: SearchStatus
     payload_source: ScoresExportPayloadSource
@@ -56,14 +58,6 @@ class _ScoresExportDecision:
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in PERSISTABLE_INFERENCE_STATUSES
-
-
-@dataclass(frozen=True)
-class ScoresExportClassification:
-    """Precedence branch and lifecycle status for one inference snapshot."""
-
-    branch: ScoresExportPrecedenceBranch
-    search_status: SearchStatus
 
 
 @dataclass(frozen=True)
@@ -78,16 +72,16 @@ class ScoresExportPayload:
 
 @dataclass(frozen=True)
 class ScoresExportResolved:
-    """Gathered snapshot with precedence classification computed once."""
+    """Gathered snapshot with precedence decision computed once."""
 
     snapshot: ScoresInferenceSnapshot
-    classification: ScoresExportClassification
+    decision: ScoresExportDecision
 
 
 def resolve_scores_export(snapshot: ScoresInferenceSnapshot) -> ScoresExportResolved:
     return ScoresExportResolved(
         snapshot=snapshot,
-        classification=classify_scores_export(snapshot),
+        decision=_scores_export_decision(snapshot),
     )
 
 
@@ -125,7 +119,7 @@ def _search_status_from_scheduler(
     return "in_progress"
 
 
-def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> _ScoresExportDecision:
+def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> ScoresExportDecision:
     """Single precedence ladder: branch, search status, and payload source."""
     persisted_row = snapshot.persisted_row
     admission = snapshot.admission
@@ -134,13 +128,13 @@ def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> _ScoresExportD
     if persisted_row is not None:
         priority_status = _persisted_row_priority_search_status(persisted_row.status)
         if priority_status is not None:
-            return _ScoresExportDecision("priority_persisted", priority_status, "persisted_row")
+            return ScoresExportDecision("priority_persisted", priority_status, "persisted_row")
 
     if terminal_row_admission(admission) is not None:
-        return _ScoresExportDecision("terminal_admission", "complete", "admission")
+        return ScoresExportDecision("terminal_admission", "complete", "admission")
 
     if scheduler_run is not None:
-        return _ScoresExportDecision(
+        return ScoresExportDecision(
             "scheduler",
             _search_status_from_scheduler(
                 scheduler_run,
@@ -150,24 +144,20 @@ def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> _ScoresExportD
         )
 
     if persisted_row is not None:
-        return _ScoresExportDecision(
+        return ScoresExportDecision(
             "fallback_persisted",
             _persisted_row_fallback_search_status(persisted_row.status),
             "persisted_row",
         )
 
-    return _ScoresExportDecision("empty", "not_started", "empty")
+    return ScoresExportDecision("empty", "not_started", "empty")
 
 
-def classify_scores_export(snapshot: ScoresInferenceSnapshot) -> ScoresExportClassification:
-    """Classify precedence branch and search status without materializing solutions."""
-    decision = _scores_export_decision(snapshot)
-    return ScoresExportClassification(decision.branch, decision.search_status)
-
-
-def build_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
+def _build_scores_export_payload(
+    snapshot: ScoresInferenceSnapshot,
+    decision: ScoresExportDecision,
+) -> ScoresExportPayload:
     """Materialize solutions and diagnostics for one precedence decision."""
-    decision = _scores_export_decision(snapshot)
     search_status = decision.search_status
     persisted_row = snapshot.persisted_row
 
@@ -208,18 +198,18 @@ def build_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExpo
 
 def is_scores_inference_ensure_satisfied(resolved: ScoresExportResolved) -> bool:
     """True when no further ensure work is needed for this snapshot."""
-    return resolved.classification.branch != "empty"
+    return resolved.decision.branch != "empty"
 
 
 def is_scores_export_authoritatively_persisted(resolved: ScoresExportResolved) -> bool:
     """True when a persisted inference row authoritatively completes this scope."""
-    classification = resolved.classification
+    decision = resolved.decision
     return (
-        classification.branch in _AUTHORITATIVE_PERSISTED_BRANCHES
-        and classification.search_status == "complete"
+        decision.branch in _AUTHORITATIVE_PERSISTED_BRANCHES
+        and decision.search_status == "complete"
     )
 
 
 def resolve_scores_export_payload(resolved: ScoresExportResolved) -> ScoresExportPayload:
-    """Resolve search status and solution sources from one precedence ladder."""
-    return build_scores_export_payload(resolved.snapshot)
+    """Resolve search status and solution sources from one stored precedence decision."""
+    return _build_scores_export_payload(resolved.snapshot, resolved.decision)
