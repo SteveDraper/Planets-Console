@@ -255,23 +255,6 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
     )
 
 
-def resolve_search_status(
-    *,
-    persisted_row: PersistedInferenceRow | None,
-    admission: RowStreamAdmission | None,
-    scheduler_run: RowRun | None,
-    globally_paused: bool,
-) -> SearchStatus:
-    return resolve_scores_export_payload(
-        ScoresInferenceSnapshot(
-            persisted_row=persisted_row,
-            admission=admission,
-            scheduler_run=scheduler_run,
-            globally_paused=globally_paused,
-        )
-    ).search_status
-
-
 def held_solution_count(
     *,
     persisted_row: PersistedInferenceRow | None,
@@ -286,24 +269,3 @@ def held_solution_count(
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in _PERSISTABLE_STATUSES
-
-
-def is_scores_export_inference_satisfied(
-    *,
-    persisted_row: PersistedInferenceRow | None,
-    admission: RowStreamAdmission | None,
-    scheduler_run: RowRun | None,
-    globally_paused: bool,
-) -> bool:
-    """True when inference is terminal and satisfied for export dependency probes."""
-    return (
-        resolve_scores_export_payload(
-            ScoresInferenceSnapshot(
-                persisted_row=persisted_row,
-                admission=admission,
-                scheduler_run=scheduler_run,
-                globally_paused=globally_paused,
-            )
-        ).search_status
-        == "complete"
-    )

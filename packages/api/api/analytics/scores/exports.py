@@ -22,7 +22,6 @@ from api.analytics.scores.export_materialization import (
     export_meta_branch,
     hull_catalog_mask_branch,
     is_persistable_inference_status,
-    is_scores_export_inference_satisfied,
     resolve_scores_export_payload,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
@@ -132,12 +131,7 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
     snapshot = _resolve_scores_inference_snapshot(
         ctx, services, scope, ctx.load_turn(scope.turn)
     )
-    return is_scores_export_inference_satisfied(
-        persisted_row=snapshot.persisted_row,
-        admission=snapshot.admission,
-        scheduler_run=snapshot.scheduler_run,
-        globally_paused=snapshot.globally_paused,
-    )
+    return resolve_scores_export_payload(snapshot).search_status == "complete"
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
