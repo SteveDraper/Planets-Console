@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.exports.schema_validation import validate_export_value_schema
-from api.analytics.scores.exports import EXPORT_VALUE_SCHEMA
+from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 
 
 def test_scores_export_value_schema_is_fully_described() -> None:
