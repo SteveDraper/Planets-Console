@@ -17,7 +17,6 @@ from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
-    STATUS_TIME_LIMITED,
 )
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
@@ -131,11 +130,3 @@ def held_solution_count(
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in _PERSISTABLE_STATUSES
-
-
-def is_terminal_inference_status(status: str, *, is_complete: bool) -> bool:
-    if status in _PERSISTABLE_STATUSES:
-        return True
-    if status == STATUS_TIME_LIMITED:
-        return is_complete
-    return status in _IMMEDIATE_COMPLETE_STATUSES
