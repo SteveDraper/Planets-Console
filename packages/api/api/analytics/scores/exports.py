@@ -27,6 +27,7 @@ from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ResolvedScoresServices, resolve_scores_services
 from api.analytics.scores.inference_persist import persist_prior_turn_inference_if_persistable
 from api.analytics.scores_assets import ANALYTIC_ID
+from api.errors import ValidationError
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -115,7 +116,8 @@ def _ensure_current_turn_scheduler(
 def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope) -> dict[str, Any]:
     services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
-    assert turn is not None
+    if turn is None:
+        raise ValidationError(f"Turn {scope.turn} is not stored")
 
     snapshot = gather_scores_inference_snapshot(ctx, services, scope, turn)
     payload = resolve_scores_export_payload(snapshot)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
+from api.errors import ValidationError
 from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -83,7 +84,7 @@ def test_turn_not_stored_materialize_asserts(sample_turn):
         TurnAnalyticsOptions(),
         load_turn=load_turn,
     )
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValidationError, match="not stored"):
         materialize_scores_tree(ctx, player_id)
 
 
