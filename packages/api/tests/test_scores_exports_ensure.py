@@ -115,7 +115,7 @@ def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, per
         "diagnostics": {"turn": 110},
     }
     with patch(
-        "api.analytics.scores.export_precedence.get_scores_row_inference",
+        "api.analytics.scores.exports.get_scores_row_inference",
         return_value=stopped_inference,
     ):
         EXPORT_CATALOG.ensure_export(ctx, scope)
@@ -167,7 +167,7 @@ def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn
         "diagnostics": {"turn": 110},
     }
     with patch(
-        "api.analytics.scores.export_precedence.get_scores_row_inference",
+        "api.analytics.scores.exports.get_scores_row_inference",
         return_value=stopped_inference,
     ):
         result = ctx.query(

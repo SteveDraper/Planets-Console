@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -14,10 +15,10 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
     build_scores_export_materialized_tree,
+    is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
     is_scores_inference_ensure_satisfied,
     resolve_scores_export,
-    sync_persist_empty_branch,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
@@ -25,9 +26,12 @@ from api.analytics.scores.export_snapshot import (
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
 )
+from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
+from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
+from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -78,6 +82,43 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
 
     _services, resolved = _scores_resolved(ctx, scope)
     return is_scores_inference_ensure_satisfied(resolved)
+
+
+def sync_persist_empty_branch(
+    resolved: ScoresExportResolved,
+    *,
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None],
+) -> bool:
+    """Persist sync inference when precedence is empty (prior-turn ensure path)."""
+    if resolved.classification.branch != "empty":
+        return False
+    if services.persistence is None or scope.player_id is None:
+        return False
+
+    player_id = scope.player_id
+    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
+    inference = get_scores_row_inference(
+        turn,
+        player_id,
+        load_scoreboard_turn=load_scoreboard_turn,
+        resolved_mask=resolved_mask,
+    )
+    status = str(inference.get("status", ""))
+    if not is_persistable_inference_status(status):
+        return False
+    wire_event = inference_api_payload_to_wire_complete(inference)
+    row = persisted_inference_row_from_wire_complete(wire_event)
+    services.persistence.put_row(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        player_id,
+        row,
+    )
+    return True
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:

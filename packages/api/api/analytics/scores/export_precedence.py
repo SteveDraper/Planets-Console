@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -27,10 +26,7 @@ from api.analytics.scores.export_wire import (
     solutions_from_persisted_row,
     terminal_row_admission,
 )
-from api.analytics.scores.inference import get_scores_row_inference
 from api.models.game import TurnInfo
-from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
-from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
 ScoresExportPrecedenceBranch = Literal[
@@ -279,40 +275,3 @@ def build_scores_export_materialized_tree(
             )
 
     return tree
-
-
-def sync_persist_empty_branch(
-    resolved: ScoresExportResolved,
-    *,
-    services: ScoresExportContext,
-    scope: ExportScope,
-    turn: TurnInfo,
-    load_scoreboard_turn: Callable[[int], TurnInfo | None],
-) -> bool:
-    """Persist sync inference when precedence is empty (prior-turn ensure path)."""
-    if resolved.classification.branch != "empty":
-        return False
-    if services.persistence is None or scope.player_id is None:
-        return False
-
-    player_id = scope.player_id
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
-    inference = get_scores_row_inference(
-        turn,
-        player_id,
-        load_scoreboard_turn=load_scoreboard_turn,
-        resolved_mask=resolved_mask,
-    )
-    status = str(inference.get("status", ""))
-    if not is_persistable_inference_status(status):
-        return False
-    wire_event = inference_api_payload_to_wire_complete(inference)
-    row = persisted_inference_row_from_wire_complete(wire_event)
-    services.persistence.put_row(
-        scope.game_id,
-        scope.perspective,
-        scope.turn,
-        player_id,
-        row,
-    )
-    return True
