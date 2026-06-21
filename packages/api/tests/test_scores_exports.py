@@ -480,6 +480,42 @@ def test_stopped_when_ladder_last_status_stopped(sample_turn):
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
 
 
+def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
+    player_id = sample_turn.scores[0].ownerid
+    persistence.put_row(
+        628580,
+        _perspective(sample_turn),
+        sample_turn.settings.turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_STOPPED,
+            summary="stopped",
+            solution_count=1,
+            is_complete=True,
+            solutions=[
+                {
+                    "objectiveValue": 40,
+                    "actions": [
+                        {
+                            "actionId": "planet_defense_posts_added_total",
+                            "label": "Planet defense",
+                            "count": 1,
+                        }
+                    ],
+                    "shipBuilds": [],
+                }
+            ],
+        ),
+    )
+    ctx = _query_context(sample_turn, persistence=persistence)
+    scope = ctx._resolve_scope({"player_id": player_id})
+    tree = EXPORT_CATALOG.materialize_export_tree(ctx, scope)
+    assert tree["meta"]["searchStatus"] == "stopped"
+    assert tree["meta"]["solutionsHeld"] == 1
+    assert EXPORT_CATALOG.is_persisted is not None
+    assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
+
+
 def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
     player_id = sample_turn.scores[0].ownerid
     prior_turn = replace(

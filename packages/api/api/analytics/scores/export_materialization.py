@@ -34,7 +34,6 @@ _IMMEDIATE_COMPLETE_STATUSES = frozenset(
         STATUS_NO_EXACT_SOLUTION,
         "invalid_problem",
         "solver_error",
-        STATUS_STOPPED,
     }
 )
 
@@ -92,6 +91,9 @@ def resolve_search_status(
 ) -> SearchStatus:
     if persisted_row is not None and persisted_row.status in _PERSISTABLE_STATUSES:
         return "complete"
+
+    if persisted_row is not None and persisted_row.status == STATUS_STOPPED:
+        return "stopped"
 
     if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
         return "complete"
