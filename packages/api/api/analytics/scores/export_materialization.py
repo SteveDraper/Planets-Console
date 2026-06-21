@@ -276,7 +276,7 @@ def is_persistable_inference_status(status: str) -> bool:
     return status in _PERSISTABLE_STATUSES
 
 
-def _stream_scope(scope: ExportScope) -> InferenceStreamScope:
+def scores_inference_stream_scope(scope: ExportScope) -> InferenceStreamScope:
     return InferenceStreamScope(
         game_id=scope.game_id,
         perspective=scope.perspective,
@@ -320,7 +320,8 @@ def _row_admission(
 def _scheduler_row_run(services: ResolvedScoresServices, scope: ExportScope):
     if scope.player_id is None:
         return None
-    return services.scheduler.row_run_for_player(_stream_scope(scope), scope.player_id)
+    stream_scope = scores_inference_stream_scope(scope)
+    return services.scheduler.row_run_for_player(stream_scope, scope.player_id)
 
 
 def gather_scores_inference_snapshot(
@@ -338,7 +339,7 @@ def gather_scores_inference_snapshot(
             globally_paused=False,
         )
 
-    stream_scope = _stream_scope(scope)
+    stream_scope = scores_inference_stream_scope(scope)
     pause_status = services.scheduler.global_pause_status(stream_scope)
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,

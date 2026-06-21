@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import ExportScope, PathPrefixScopeRule
+from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.inference_stream_rows import (
     CachedCompleteRowAdmission,
@@ -16,18 +16,16 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     controller_for_scope,
 )
 from api.analytics.scores.export_materialization import (
-    _stream_scope,
     export_meta_branch,
     gather_scores_inference_snapshot,
     hull_catalog_mask_branch,
-    is_persistable_inference_status,
     resolve_scores_export_payload,
+    scores_inference_stream_scope,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ResolvedScoresServices, resolve_scores_services
+from api.analytics.scores.inference_persist import persist_prior_turn_inference_if_persistable
 from api.analytics.scores_assets import ANALYTIC_ID
-from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
-from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -44,7 +42,7 @@ ORDERING_SEMANTICS = {
     ),
 }
 
-ENSURE_DEPENDENCIES: tuple = ()
+ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
 
 
 def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
@@ -76,43 +74,10 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
         return
 
     if scope.turn < ctx.ambient_turn:
-        _ensure_prior_turn_sync(ctx, services, scope, turn)
+        persist_prior_turn_inference_if_persistable(ctx, services, scope, turn)
         return
 
     _ensure_current_turn_scheduler(ctx, services, scope, turn)
-
-
-def _ensure_prior_turn_sync(
-    ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
-    scope: ExportScope,
-    turn,
-) -> None:
-    from api.analytics.scores import get_scores_row_inference
-
-    player_id = scope.player_id
-    assert player_id is not None
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
-    inference = get_scores_row_inference(
-        turn,
-        player_id,
-        load_scoreboard_turn=ctx.load_turn,
-        resolved_mask=resolved_mask,
-    )
-    if services.persistence is None:
-        return
-    status = str(inference.get("status", ""))
-    if not is_persistable_inference_status(status):
-        return
-    wire_event = inference_api_payload_to_wire_complete(inference)
-    row = persisted_inference_row_from_wire_complete(wire_event)
-    services.persistence.put_row(
-        scope.game_id,
-        scope.perspective,
-        scope.turn,
-        player_id,
-        row,
-    )
 
 
 def _ensure_current_turn_scheduler(
@@ -123,7 +88,7 @@ def _ensure_current_turn_scheduler(
 ) -> None:
     player_id = scope.player_id
     assert player_id is not None
-    stream_scope = _stream_scope(scope)
+    stream_scope = scores_inference_stream_scope(scope)
     if services.scheduler.row_run_for_player(stream_scope, player_id) is not None:
         return
 
