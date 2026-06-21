@@ -11,7 +11,6 @@ from api.analytics.scores.export_precedence import (
     resolve_scores_export_payload,
 )
 from api.analytics.scores.export_services import ScoresExportContext
-from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.models.game import TurnInfo
 
 
@@ -35,14 +34,14 @@ def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> di
 
 
 def build_scores_export_materialized_tree(
-    view: ScoresExportResolved | ScoresInferenceSnapshot,
+    resolved: ScoresExportResolved,
     scope: ExportScope,
     *,
     services: ScoresExportContext,
     turn: TurnInfo,
 ) -> dict[str, Any]:
     """Materialize the full scores export value tree for one resolved snapshot."""
-    payload = resolve_scores_export_payload(view)
+    payload = resolve_scores_export_payload(resolved)
     tree: dict[str, Any] = {
         "meta": _export_meta_branch(
             search_status=payload.search_status,

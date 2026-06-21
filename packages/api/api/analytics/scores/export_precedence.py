@@ -76,12 +76,6 @@ class ScoresExportResolved:
     classification: ScoresExportClassification
 
 
-def _as_resolved(view: ScoresExportResolved | ScoresInferenceSnapshot) -> ScoresExportResolved:
-    if isinstance(view, ScoresExportResolved):
-        return view
-    return resolve_scores_export(view)
-
-
 def resolve_scores_export(snapshot: ScoresInferenceSnapshot) -> ScoresExportResolved:
     return ScoresExportResolved(
         snapshot=snapshot,
@@ -199,27 +193,20 @@ def build_scores_export_payload(
     )
 
 
-def is_scores_inference_ensure_satisfied(
-    view: ScoresExportResolved | ScoresInferenceSnapshot,
-) -> bool:
+def is_scores_inference_ensure_satisfied(resolved: ScoresExportResolved) -> bool:
     """True when no further ensure work is needed for this snapshot."""
-    return _as_resolved(view).classification.branch != "empty"
+    return resolved.classification.branch != "empty"
 
 
-def is_scores_export_authoritatively_persisted(
-    view: ScoresExportResolved | ScoresInferenceSnapshot,
-) -> bool:
+def is_scores_export_authoritatively_persisted(resolved: ScoresExportResolved) -> bool:
     """True when a persisted inference row authoritatively completes this scope."""
-    classification = _as_resolved(view).classification
+    classification = resolved.classification
     return (
         classification.branch in _AUTHORITATIVE_PERSISTED_BRANCHES
         and classification.search_status == "complete"
     )
 
 
-def resolve_scores_export_payload(
-    view: ScoresExportResolved | ScoresInferenceSnapshot,
-) -> ScoresExportPayload:
+def resolve_scores_export_payload(resolved: ScoresExportResolved) -> ScoresExportPayload:
     """Resolve search status and solution sources from one precedence ladder."""
-    resolved = _as_resolved(view)
     return build_scores_export_payload(resolved.classification, resolved.snapshot)
