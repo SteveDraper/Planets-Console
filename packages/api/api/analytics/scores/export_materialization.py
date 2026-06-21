@@ -10,7 +10,11 @@ from api.analytics.military_score_inference.inference_api_payload import (
     _serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
-from api.analytics.military_score_inference.inference_stream_rows import RowStreamAdmission
+from api.analytics.military_score_inference.inference_stream_rows import (
+    CachedCompleteRowAdmission,
+    ImmediateRowAdmission,
+    RowStreamAdmission,
+)
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
@@ -89,12 +93,8 @@ def resolve_search_status(
     if persisted_row is not None and persisted_row.status in _PERSISTABLE_STATUSES:
         return "complete"
 
-    if admission is not None:
-        admission_kind = getattr(admission, "kind", None)
-        if admission_kind == "immediate":
-            return "complete"
-        if admission_kind == "cached":
-            return "complete"
+    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
+        return "complete"
 
     if scheduler_run is not None:
         if globally_paused and scope_matches_active_stream:
