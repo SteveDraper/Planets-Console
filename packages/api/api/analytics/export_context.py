@@ -92,9 +92,11 @@ class AnalyticQueryContext:
         self._export_snapshot_cache[cache_key] = snapshot
         return snapshot
 
-    def invalidate_export_snapshot(self, analytic_id: str, scope: ExportScope) -> None:
-        """Drop a cached export snapshot after ensure mutates underlying state."""
-        self._export_snapshot_cache.pop((analytic_id, scope), None)
+    def invalidate_export_scope_cache(self, analytic_id: str, scope: ExportScope) -> None:
+        """Drop cached export snapshot and materialized tree after ensure mutates state."""
+        cache_key = (analytic_id, scope)
+        self._export_snapshot_cache.pop(cache_key, None)
+        self._materialized_trees.pop(cache_key, None)
 
     def is_scope_ensured(self, analytic_id: str, scope: ExportScope) -> bool:
         return (analytic_id, scope) in self._ensured_scopes

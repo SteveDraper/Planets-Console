@@ -28,6 +28,30 @@ from tests.scores_exports_helpers import (
 )
 
 
+def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
+    """Materialized tree cached before ensure must not survive scheduler mutation."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
+    catalog = EXPORT_CATALOG
+
+    tree_before = ctx._materialize_tree("scores", scope, catalog)
+    assert tree_before["meta"]["searchStatus"] == "not_started"
+
+    EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    tree_after = ctx._materialize_tree("scores", scope, catalog)
+    assert tree_after["meta"]["searchStatus"] == "in_progress"
+    assert tree_after is not tree_before
+
+
 def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
     prior_turn = replace(

@@ -144,11 +144,11 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
             turn=turn,
             load_scoreboard_turn=ctx.load_turn,
         ):
-            ctx.invalidate_export_snapshot(ANALYTIC_ID, scope)
+            ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
         return
 
     if _ensure_current_turn_scheduler(ctx, services, scope, turn):
-        ctx.invalidate_export_snapshot(ANALYTIC_ID, scope)
+        ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
 
 
 def _ensure_current_turn_scheduler(
