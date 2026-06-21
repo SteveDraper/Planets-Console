@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from api.analytics.export_context import ScoresExportContext, make_analytic_query_context
+from api.analytics.export_context import make_analytic_query_context
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,

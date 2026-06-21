@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.export_context import (
-    AnalyticQueryContext,
-    ScoresExportContext,
-    export_service_for,
-)
+from api.analytics.export_context import AnalyticQueryContext, export_service_for
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import resolve_hull_catalog_mask

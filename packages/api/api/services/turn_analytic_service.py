@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
-from api.analytics.export_context import ScoresExportContext
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
