@@ -185,6 +185,9 @@ def _is_ensure_satisfied(
     scope: ExportScope,
     catalog: AnalyticExportCatalog,
 ) -> bool:
+    # is_scope_ensured can be True after ensure_export even when the catalog hook
+    # still reports unsatisfied (scores prior-turn non-persistable sync); see
+    # test_probe_after_non_persistable_prior_ensure_omits_missing_step.
     if ctx.is_scope_ensured(analytic_id, scope):
         return True
     if catalog.is_ensure_satisfied is not None:

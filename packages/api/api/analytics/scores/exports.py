@@ -17,10 +17,12 @@ from api.analytics.scores.export_materialization import (
     gather_scores_inference_snapshot,
     hull_catalog_mask_branch,
     is_persistable_inference_status,
+    scores_inference_stream_scope,
+)
+from api.analytics.scores.export_precedence import (
+    is_scores_export_authoritatively_persisted,
     is_scores_inference_ensure_satisfied,
     resolve_scores_export_payload,
-    resolve_scores_export_search_status,
-    scores_inference_stream_scope,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
@@ -70,7 +72,7 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
         return False
 
     _services, snapshot = _scores_snapshot(ctx, scope)
-    return resolve_scores_export_search_status(snapshot) == "complete"
+    return is_scores_export_authoritatively_persisted(snapshot)
 
 
 def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:

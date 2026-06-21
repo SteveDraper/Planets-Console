@@ -18,13 +18,15 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_materialization import (
+from api.analytics.scores.export_precedence import (
     ScoresInferenceSnapshot,
     is_scores_inference_ensure_satisfied,
-    ranked_solutions_from_wire,
     resolve_scores_export_payload,
     resolve_scores_export_search_status,
     scores_export_precedence_branch,
+)
+from api.analytics.scores.export_wire import (
+    ranked_solutions_from_wire,
     solutions_diagnostics_from_wire_complete_event,
 )
 from api.analytics.scores.exports import EXPORT_CATALOG
@@ -232,7 +234,7 @@ def test_resolve_search_status_does_not_materialize_solutions(sample_turn):
         globally_paused=False,
     )
     with patch(
-        "api.analytics.scores.export_materialization._solutions_from_admission_or_scheduler",
+        "api.analytics.scores.export_wire.solutions_from_admission_or_scheduler",
         side_effect=AssertionError("status-only path must not materialize solutions"),
     ):
         assert resolve_scores_export_search_status(snapshot) == "in_progress"

@@ -358,7 +358,7 @@ def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_t
     assert tree["meta"]["searchStatus"] == "not_started"
 
 
-def test_first_turn_immediate_complete_is_persisted(sample_turn):
+def test_first_turn_immediate_complete_is_ensure_satisfied_not_persisted(sample_turn):
     first_turn = first_turn_from(sample_turn)
     player_id = first_player_id(first_turn)
 
@@ -375,7 +375,9 @@ def test_first_turn_immediate_complete_is_persisted(sample_turn):
     tree, scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "complete"
     assert EXPORT_CATALOG.is_persisted is not None
-    assert EXPORT_CATALOG.is_persisted(ctx, scope) is True
+    assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
+    assert EXPORT_CATALOG.is_ensure_satisfied is not None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
 
 
 def test_scheduler_materializes_diagnostics_from_ladder_state(sample_turn):
