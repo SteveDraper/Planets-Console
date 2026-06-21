@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
-from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     STATUS_PLAYER_NOT_FOUND,
@@ -18,7 +17,6 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
     held_solution_count,
@@ -26,7 +24,6 @@ from api.analytics.scores.export_wire import (
     solutions_from_persisted_row,
     terminal_row_admission,
 )
-from api.models.game import TurnInfo
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
 ScoresExportPrecedenceBranch = Literal[
@@ -90,25 +87,6 @@ def resolve_scores_export(snapshot: ScoresInferenceSnapshot) -> ScoresExportReso
         snapshot=snapshot,
         classification=classify_scores_export(snapshot),
     )
-
-
-def _export_meta_branch(
-    *,
-    search_status: SearchStatus,
-    host_turn: int,
-    solutions_held: int = 0,
-) -> dict[str, object]:
-    meta: dict[str, object] = {
-        "searchStatus": search_status,
-        "hostTurn": host_turn,
-    }
-    if solutions_held > 0:
-        meta["solutionsHeld"] = solutions_held
-    return meta
-
-
-def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:
-    return {"enabledHullIds": sorted(enabled_hull_ids)}
 
 
 def _persisted_row_priority_search_status(status: str) -> SearchStatus | None:
@@ -245,33 +223,3 @@ def resolve_scores_export_payload(
     """Resolve search status and solution sources from one precedence ladder."""
     resolved = _as_resolved(view)
     return build_scores_export_payload(resolved.classification, resolved.snapshot)
-
-
-def build_scores_export_materialized_tree(
-    view: ScoresExportResolved | ScoresInferenceSnapshot,
-    scope: ExportScope,
-    *,
-    services: ScoresExportContext,
-    turn: TurnInfo,
-) -> dict[str, Any]:
-    """Materialize the full scores export value tree for one resolved snapshot."""
-    payload = resolve_scores_export_payload(view)
-    tree: dict[str, Any] = {
-        "meta": _export_meta_branch(
-            search_status=payload.search_status,
-            host_turn=scope.turn,
-            solutions_held=payload.solutions_held,
-        ),
-        "solutions": payload.solutions,
-    }
-    if payload.diagnostics is not None:
-        tree["diagnostics"] = payload.diagnostics
-
-    if scope.player_id is not None:
-        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
-        if resolved_mask is not None:
-            tree["hullCatalogMask"] = _hull_catalog_mask_branch(
-                resolved_mask.effective_enabled_hull_ids
-            )
-
-    return tree

@@ -12,9 +12,9 @@ from api.analytics.military_score_inference.inference_stream_rows import schedul
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
+from api.analytics.scores.export_materialize import build_scores_export_materialized_tree
 from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
-    build_scores_export_materialized_tree,
     is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
     is_scores_inference_ensure_satisfied,
