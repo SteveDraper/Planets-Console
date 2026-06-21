@@ -77,15 +77,19 @@ def query_context(
     def load_turn(turn_number: int):
         return turns.get(turn_number)
 
+    scores_services = ScoresExportContext(persistence=persistence)
+    if scheduler is not None:
+        scores_services = ScoresExportContext(
+            persistence=persistence,
+            scheduler=scheduler,
+        )
+
     return make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_services={
-            "scores": ScoresExportContext(
-                persistence=persistence,
-                scheduler=scheduler,
-            ),
+            "scores": scores_services,
         },
     )
 

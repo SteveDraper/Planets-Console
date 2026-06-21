@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
@@ -25,6 +25,8 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
+
+T = TypeVar("T")
 
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
 
@@ -70,6 +72,29 @@ class AnalyticQueryContext:
     )
     _resolution_stack: list[ResolutionKey] = field(default_factory=list, repr=False)
     _ensured_scopes: set[tuple[str, ExportScope]] = field(default_factory=set, repr=False)
+    _export_snapshot_cache: dict[tuple[str, ExportScope], Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
+
+    def export_snapshot_for(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        gather: Callable[[], T],
+    ) -> T:
+        """Memoize a per-scope export snapshot for the lifetime of this query context."""
+        cache_key = (analytic_id, scope)
+        cached = self._export_snapshot_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        snapshot = gather()
+        self._export_snapshot_cache[cache_key] = snapshot
+        return snapshot
+
+    def invalidate_export_snapshot(self, analytic_id: str, scope: ExportScope) -> None:
+        """Drop a cached export snapshot after ensure mutates underlying state."""
+        self._export_snapshot_cache.pop((analytic_id, scope), None)
 
     def is_scope_ensured(self, analytic_id: str, scope: ExportScope) -> bool:
         return (analytic_id, scope) in self._ensured_scopes

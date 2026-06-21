@@ -123,6 +123,73 @@ def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, per
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
 
 
+def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn, persistence):
+    """After ctx.query ensure, is_scope_ensured skips the walk even when not persisted."""
+    player_id = first_player_id(sample_turn)
+    prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=110),
+        game=replace(sample_turn.game, turn=110),
+    )
+    prior_prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=109),
+        game=replace(sample_turn.game, turn=109),
+    )
+    stored_turns = {
+        109: prior_prior_turn,
+        110: prior_turn,
+        sample_turn.settings.turn: sample_turn,
+    }
+
+    def load_turn(turn_number: int):
+        return stored_turns.get(turn_number)
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=110,
+        player_id=player_id,
+    )
+    stopped_inference = {
+        "playerId": player_id,
+        "status": STATUS_STOPPED,
+        "summary": "stopped",
+        "solutionCount": 1,
+        "isComplete": True,
+        "solutions": [],
+        "diagnostics": {"turn": 110},
+    }
+    with patch(
+        "api.analytics.scores.exports.get_scores_row_inference",
+        return_value=stopped_inference,
+    ):
+        result = ctx.query(
+            "scores",
+            ["$.meta.searchStatus"],
+            {"turn": 110, "player_id": player_id},
+            force_inline_ensure=True,
+        )
+
+    assert result.status == "ok"
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+    assert EXPORT_CATALOG.is_persisted is not None
+    assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
+    assert EXPORT_CATALOG.is_ensure_satisfied is not None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
+
+    probe = ctx.probe("scores", {"turn": 110, "player_id": player_id})
+    assert probe.status == "ok"
+    assert probe.total_missing == 0
+    assert probe.missing_steps == ()
+
+
 def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)

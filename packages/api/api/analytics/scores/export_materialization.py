@@ -140,6 +140,17 @@ def hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dic
     return {"enabledHullIds": sorted(enabled_hull_ids)}
 
 
+def terminal_row_admission(
+    admission: RowStreamAdmission | None,
+) -> ImmediateRowAdmission | CachedCompleteRowAdmission | None:
+    """Return admission only when it carries a terminal wire-complete payload."""
+    if isinstance(admission, ImmediateRowAdmission) and admission.events:
+        return admission
+    if isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
+        return admission
+    return None
+
+
 def _payload_from_persisted_row(
     search_status: SearchStatus,
     persisted_row: PersistedInferenceRow,
@@ -240,11 +251,7 @@ def _resolve_scores_export(snapshot: ScoresInferenceSnapshot) -> ResolvedScoresE
                 snapshot=snapshot,
             )
 
-    admission_is_complete = isinstance(
-        admission,
-        (ImmediateRowAdmission, CachedCompleteRowAdmission),
-    )
-    if admission_is_complete:
+    if terminal_row_admission(admission) is not None:
         return ResolvedScoresExport(
             source="admission",
             search_status="complete",
@@ -286,22 +293,9 @@ def _payload_from_resolved_scores_export(resolved: ResolvedScoresExport) -> Scor
         assert persisted_row is not None
         return _payload_from_persisted_row(search_status, persisted_row)
 
-    if resolved.source == "admission":
+    if resolved.source in ("admission", "scheduler"):
         solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=admission,
-            scheduler_run=scheduler_run,
-            persisted_row=persisted_row,
-        )
-        return ScoresExportPayload(
-            search_status=search_status,
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
-    if resolved.source == "scheduler":
-        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=None,
+            admission=admission if resolved.source == "admission" else None,
             scheduler_run=scheduler_run,
             persisted_row=persisted_row,
         )
