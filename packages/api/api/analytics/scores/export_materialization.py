@@ -220,30 +220,24 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
         if priority_status is not None:
             return _payload_from_persisted_row(priority_status, persisted_row)
 
-    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
-        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=admission,
-            scheduler_run=scheduler_run,
-            persisted_row=persisted_row,
-        )
-        return ScoresExportPayload(
-            search_status="complete",
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
-    if scheduler_run is not None:
-        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=None,
-            scheduler_run=scheduler_run,
-            persisted_row=persisted_row,
-        )
-        return ScoresExportPayload(
-            search_status=_search_status_from_scheduler(
+    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)) or scheduler_run is not None:
+        search_status = (
+            "complete"
+            if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission))
+            else _search_status_from_scheduler(
                 scheduler_run,
                 globally_paused=snapshot.globally_paused,
-            ),
+            )
+        )
+        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
+            admission=admission
+            if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission))
+            else None,
+            scheduler_run=scheduler_run,
+            persisted_row=persisted_row,
+        )
+        return ScoresExportPayload(
+            search_status=search_status,
             solutions=solutions,
             diagnostics=diagnostics,
             solutions_held=solutions_held,
