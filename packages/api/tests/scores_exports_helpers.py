@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -19,6 +18,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService

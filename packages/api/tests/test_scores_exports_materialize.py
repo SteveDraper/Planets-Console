@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from api.analytics.export_context import make_analytic_query_context
+from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.models import InferenceSolutionAction
-from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.exports import EXPORT_CATALOG

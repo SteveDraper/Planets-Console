@@ -128,9 +128,7 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
         return False
 
     services = resolve_scores_services(ctx)
-    snapshot = _resolve_scores_inference_snapshot(
-        ctx, services, scope, ctx.load_turn(scope.turn)
-    )
+    snapshot = _resolve_scores_inference_snapshot(ctx, services, scope, ctx.load_turn(scope.turn))
     return resolve_scores_export_payload(snapshot).search_status == "complete"
 
 

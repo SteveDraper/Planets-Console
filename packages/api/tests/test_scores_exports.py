@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import pytest
-
 from api.analytics.export_context import make_analytic_query_context
-from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
-    reset_inference_row_scheduler_for_tests,
-)
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_INVALID_PROBLEM,
     STATUS_PLAYER_NOT_FOUND,
     STATUS_SOLVER_ERROR,
+)
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
 from api.analytics.military_score_inference.solver import STATUS_EXACT

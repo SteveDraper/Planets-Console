@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.export_context import make_analytic_query_context
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -14,6 +13,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
