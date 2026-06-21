@@ -19,7 +19,6 @@ from api.analytics.military_score_inference.solver import (
 )
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
-    held_solution_count,
     solutions_from_persisted_row,
     solutions_from_scheduler_run,
     solutions_from_terminal_admission,
@@ -61,9 +60,8 @@ def is_persistable_inference_status(status: str) -> bool:
 
 @dataclass(frozen=True)
 class ScoresExportPayload:
-    """Resolved export status and solution payload for a scores inference snapshot."""
+    """Resolved solution payload for a scores inference snapshot."""
 
-    search_status: SearchStatus
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None
     solutions_held: int
@@ -155,7 +153,6 @@ def _build_scores_export_payload(
     decision: ScoresExportDecision,
 ) -> ScoresExportPayload:
     """Materialize solutions and diagnostics for one precedence branch."""
-    search_status = decision.search_status
     match decision.branch:
         case "priority_persisted" | "fallback_persisted":
             persisted_row = snapshot.persisted_row
@@ -171,12 +168,8 @@ def _build_scores_export_payload(
             solutions, diagnostics, solutions_held = solutions_from_scheduler_run(scheduler_run)
         case "empty":
             solutions, diagnostics = [], None
-            solutions_held = held_solution_count(
-                persisted_row=snapshot.persisted_row,
-                scheduler_run=snapshot.scheduler_run,
-            )
+            solutions_held = 0
     return ScoresExportPayload(
-        search_status=search_status,
         solutions=solutions,
         diagnostics=diagnostics,
         solutions_held=solutions_held,
@@ -198,5 +191,5 @@ def is_scores_export_authoritatively_persisted(resolved: ScoresExportResolved) -
 
 
 def resolve_scores_export_payload(resolved: ScoresExportResolved) -> ScoresExportPayload:
-    """Resolve search status and solution sources from one stored precedence decision."""
+    """Resolve solution sources from one stored precedence decision."""
     return _build_scores_export_payload(resolved.snapshot, resolved.decision)

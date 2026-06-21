@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 from api.analytics.military_score_inference.inference_api_payload import (
     serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
@@ -66,18 +67,6 @@ def terminal_row_admission(
     return None
 
 
-def held_solution_count(
-    *,
-    persisted_row: PersistedInferenceRow | None,
-    scheduler_run: RowRun | None,
-) -> int:
-    if persisted_row is not None:
-        return persisted_row.solution_count
-    if scheduler_run is not None and scheduler_run.ladder_state is not None:
-        return len(scheduler_run.ladder_state.merged_solutions)
-    return 0
-
-
 def solutions_from_persisted_row(
     persisted_row: PersistedInferenceRow,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
@@ -99,8 +88,6 @@ def _diagnostics_from_scheduler_ladder(scheduler_run: RowRun) -> dict[str, objec
         and not ladder_state.policy_steps_attempted
     ):
         return None
-
-    from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 
     session = scheduler_run.session
     solver_diagnostics: dict[str, object] = {

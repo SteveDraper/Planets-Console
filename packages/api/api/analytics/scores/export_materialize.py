@@ -44,7 +44,7 @@ def build_scores_export_materialized_tree(
     payload = resolve_scores_export_payload(resolved)
     tree: dict[str, Any] = {
         "meta": _export_meta_branch(
-            search_status=payload.search_status,
+            search_status=resolved.decision.search_status,
             host_turn=scope.turn,
             solutions_held=payload.solutions_held,
         ),

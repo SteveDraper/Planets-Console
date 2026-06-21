@@ -54,8 +54,9 @@ def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_stat
         scheduler_run=None,
         globally_paused=False,
     )
-    payload = resolve_scores_export_payload(resolve_scores_export(snapshot))
-    assert payload.search_status == "complete"
+    resolved = resolve_scores_export(snapshot)
+    payload = resolve_scores_export_payload(resolved)
+    assert resolved.decision.search_status == "complete"
     assert payload.solutions == []
     assert payload.solutions_held == 0
 
@@ -85,12 +86,13 @@ def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_tu
         scheduler_run=run,
         globally_paused=False,
     )
-    payload = resolve_scores_export_payload(resolve_scores_export(snapshot))
-    assert payload.search_status == "in_progress"
+    resolved = resolve_scores_export(snapshot)
+    payload = resolve_scores_export_payload(resolved)
+    assert resolved.decision.search_status == "in_progress"
     assert payload.solutions_held == 1
 
 
-def test_resolve_search_status_matches_payload_status(sample_turn):
+def test_scheduler_branch_search_status_in_progress(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
@@ -110,8 +112,8 @@ def test_resolve_search_status_matches_payload_status(sample_turn):
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
-    assert resolved.decision.search_status == resolve_scores_export_payload(resolved).search_status
     assert resolved.decision.search_status == "in_progress"
+    resolve_scores_export_payload(resolved)
 
 
 def test_decision_search_status_available_without_payload_materialization(sample_turn):
@@ -165,8 +167,9 @@ def test_cached_complete_admission_resolves_payload_from_event():
         scheduler_run=None,
         globally_paused=False,
     )
-    payload = resolve_scores_export_payload(resolve_scores_export(snapshot))
-    assert payload.search_status == "complete"
+    resolved = resolve_scores_export(snapshot)
+    payload = resolve_scores_export_payload(resolved)
+    assert resolved.decision.search_status == "complete"
     assert payload.solutions_held == 1
     assert payload.solutions[0]["shipBuilds"][0]["hullId"] == 88
     assert payload.diagnostics == {"source": "cached_admission"}
@@ -257,9 +260,8 @@ def test_ensure_satisfied_tracks_precedence_branch(
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == expected_branch
     assert is_scores_inference_ensure_satisfied(resolved) is ensure_satisfied
-    payload = resolve_scores_export_payload(resolved)
-    assert payload.search_status == search_status
-    assert (payload.search_status == "complete") == (search_status == "complete")
+    assert resolved.decision.search_status == search_status
+    resolve_scores_export_payload(resolved)
 
 
 def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
@@ -284,9 +286,8 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == "scheduler"
     assert is_scores_inference_ensure_satisfied(resolved) is True
-    payload = resolve_scores_export_payload(resolved)
-    assert payload.search_status == "in_progress"
-    assert payload.search_status != "complete"
+    assert resolved.decision.search_status == "in_progress"
+    resolve_scores_export_payload(resolved)
 
 
 def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn):
