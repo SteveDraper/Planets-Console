@@ -265,28 +265,132 @@ def _solutions_from_admission_or_scheduler(
     )
 
 
-def scores_export_precedence_branch(
+@dataclass(frozen=True)
+class _ScoresExportResolution:
+    branch: ScoresExportPrecedenceBranch
+    search_status: SearchStatus
+    solutions: list[dict[str, object]] | None = None
+    diagnostics: dict[str, object] | None = None
+    solutions_held: int | None = None
+
+    def as_payload(self) -> ScoresExportPayload:
+        assert self.solutions is not None
+        assert self.solutions_held is not None
+        return ScoresExportPayload(
+            search_status=self.search_status,
+            solutions=self.solutions,
+            diagnostics=self.diagnostics,
+            solutions_held=self.solutions_held,
+        )
+
+
+def _resolve_scores_export(
     snapshot: ScoresInferenceSnapshot,
-) -> ScoresExportPrecedenceBranch:
-    """Classify which precedence branch resolves export state for a snapshot."""
+    *,
+    materialize_payload: bool,
+) -> _ScoresExportResolution:
+    """Classify precedence and resolve status, optionally materializing solutions."""
     persisted_row = snapshot.persisted_row
     admission = snapshot.admission
     scheduler_run = snapshot.scheduler_run
 
     if persisted_row is not None:
-        if _persisted_row_priority_search_status(persisted_row.status) is not None:
-            return "priority_persisted"
+        priority_status = _persisted_row_priority_search_status(persisted_row.status)
+        if priority_status is not None:
+            if materialize_payload:
+                payload = _payload_from_persisted_row(priority_status, persisted_row)
+                return _ScoresExportResolution(
+                    branch="priority_persisted",
+                    search_status=priority_status,
+                    solutions=payload.solutions,
+                    diagnostics=payload.diagnostics,
+                    solutions_held=payload.solutions_held,
+                )
+            return _ScoresExportResolution(
+                branch="priority_persisted",
+                search_status=priority_status,
+            )
 
     if terminal_row_admission(admission) is not None:
-        return "terminal_admission"
+        if materialize_payload:
+            solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
+                admission=admission,
+                scheduler_run=scheduler_run,
+                persisted_row=persisted_row,
+            )
+            return _ScoresExportResolution(
+                branch="terminal_admission",
+                search_status="complete",
+                solutions=solutions,
+                diagnostics=diagnostics,
+                solutions_held=solutions_held,
+            )
+        return _ScoresExportResolution(
+            branch="terminal_admission",
+            search_status="complete",
+        )
 
     if scheduler_run is not None:
-        return "scheduler"
+        search_status = _search_status_from_scheduler(
+            scheduler_run,
+            globally_paused=snapshot.globally_paused,
+        )
+        if materialize_payload:
+            solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
+                admission=None,
+                scheduler_run=scheduler_run,
+                persisted_row=persisted_row,
+            )
+            return _ScoresExportResolution(
+                branch="scheduler",
+                search_status=search_status,
+                solutions=solutions,
+                diagnostics=diagnostics,
+                solutions_held=solutions_held,
+            )
+        return _ScoresExportResolution(
+            branch="scheduler",
+            search_status=search_status,
+        )
 
     if persisted_row is not None:
-        return "fallback_persisted"
+        fallback_status = _persisted_row_fallback_search_status(persisted_row.status)
+        if materialize_payload:
+            payload = _payload_from_persisted_row(fallback_status, persisted_row)
+            return _ScoresExportResolution(
+                branch="fallback_persisted",
+                search_status=fallback_status,
+                solutions=payload.solutions,
+                diagnostics=payload.diagnostics,
+                solutions_held=payload.solutions_held,
+            )
+        return _ScoresExportResolution(
+            branch="fallback_persisted",
+            search_status=fallback_status,
+        )
 
-    return "empty"
+    if materialize_payload:
+        return _ScoresExportResolution(
+            branch="empty",
+            search_status="not_started",
+            solutions=[],
+            diagnostics=None,
+            solutions_held=held_solution_count(
+                persisted_row=persisted_row,
+                scheduler_run=scheduler_run,
+            ),
+        )
+    return _ScoresExportResolution(
+        branch="empty",
+        search_status="not_started",
+    )
+
+
+def scores_export_precedence_branch(
+    snapshot: ScoresInferenceSnapshot,
+) -> ScoresExportPrecedenceBranch:
+    """Classify which precedence branch resolves export state for a snapshot."""
+    return _resolve_scores_export(snapshot, materialize_payload=False).branch
 
 
 def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> bool:
@@ -296,92 +400,12 @@ def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> b
 
 def resolve_scores_export_search_status(snapshot: ScoresInferenceSnapshot) -> SearchStatus:
     """Resolve search status from the export precedence ladder without materializing solutions."""
-    branch = scores_export_precedence_branch(snapshot)
-    persisted_row = snapshot.persisted_row
-    scheduler_run = snapshot.scheduler_run
-
-    if branch == "priority_persisted":
-        assert persisted_row is not None
-        priority_status = _persisted_row_priority_search_status(persisted_row.status)
-        assert priority_status is not None
-        return priority_status
-
-    if branch == "terminal_admission":
-        return "complete"
-
-    if branch == "scheduler":
-        assert scheduler_run is not None
-        return _search_status_from_scheduler(
-            scheduler_run,
-            globally_paused=snapshot.globally_paused,
-        )
-
-    if branch == "fallback_persisted":
-        assert persisted_row is not None
-        return _persisted_row_fallback_search_status(persisted_row.status)
-
-    return "not_started"
+    return _resolve_scores_export(snapshot, materialize_payload=False).search_status
 
 
 def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
     """Resolve search status and solution sources from one precedence ladder."""
-    branch = scores_export_precedence_branch(snapshot)
-    persisted_row = snapshot.persisted_row
-    admission = snapshot.admission
-    scheduler_run = snapshot.scheduler_run
-
-    if branch == "priority_persisted":
-        assert persisted_row is not None
-        priority_status = _persisted_row_priority_search_status(persisted_row.status)
-        assert priority_status is not None
-        return _payload_from_persisted_row(priority_status, persisted_row)
-
-    if branch == "terminal_admission":
-        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=admission,
-            scheduler_run=scheduler_run,
-            persisted_row=persisted_row,
-        )
-        return ScoresExportPayload(
-            search_status="complete",
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
-    if branch == "scheduler":
-        assert scheduler_run is not None
-        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=None,
-            scheduler_run=scheduler_run,
-            persisted_row=persisted_row,
-        )
-        return ScoresExportPayload(
-            search_status=_search_status_from_scheduler(
-                scheduler_run,
-                globally_paused=snapshot.globally_paused,
-            ),
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
-    if branch == "fallback_persisted":
-        assert persisted_row is not None
-        return _payload_from_persisted_row(
-            _persisted_row_fallback_search_status(persisted_row.status),
-            persisted_row,
-        )
-
-    return ScoresExportPayload(
-        search_status="not_started",
-        solutions=[],
-        diagnostics=None,
-        solutions_held=held_solution_count(
-            persisted_row=persisted_row,
-            scheduler_run=scheduler_run,
-        ),
-    )
+    return _resolve_scores_export(snapshot, materialize_payload=True).as_payload()
 
 
 def held_solution_count(
