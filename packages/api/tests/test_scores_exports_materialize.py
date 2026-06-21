@@ -335,6 +335,9 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
     assert EXPORT_CATALOG.is_ensure_satisfied is not None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
+
+
+def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_turn):
     player_id = first_player_id(sample_turn)
 
     def resolve_none_mask(_turn, _player_id):
@@ -343,7 +346,9 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
-        load_turn=lambda turn_number: sample_turn if turn_number == sample_turn.settings.turn else None,
+        load_turn=lambda turn_number: (
+            sample_turn if turn_number == sample_turn.settings.turn else None
+        ),
         export_services={
             "scores": ScoresExportContext(resolve_hull_catalog_mask=resolve_none_mask),
         },

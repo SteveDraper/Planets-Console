@@ -15,7 +15,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
-from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores.export_materialization import (
     ScoresInferenceSnapshot,
     export_meta_branch,
@@ -28,6 +27,7 @@ from api.analytics.scores.export_materialization import (
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
+from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete

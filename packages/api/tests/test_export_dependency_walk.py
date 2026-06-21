@@ -21,9 +21,7 @@ def _catalog(
         materialize_export_tree=lambda _ctx, _scope: {},
         is_persisted=lambda _ctx, _scope: is_persisted,
         is_ensure_satisfied=(
-            None
-            if is_ensure_satisfied is None
-            else (lambda _ctx, _scope: is_ensure_satisfied)
+            None if is_ensure_satisfied is None else (lambda _ctx, _scope: is_ensure_satisfied)
         ),
     )
 

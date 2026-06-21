@@ -12,7 +12,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.exports import EXPORT_CATALOG
-from api.analytics.scores.inference import get_scores_row_inference
+from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
