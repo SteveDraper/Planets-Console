@@ -389,3 +389,29 @@ def test_first_turn_materializes_complete_without_ensure(sample_turn):
     assert result.status == "ok"
     assert result.paths["$.meta.searchStatus"].value == "complete"
     assert result.paths["$.solutions[0]"].kind == "none"
+
+
+def test_first_turn_immediate_complete_is_persisted(sample_turn):
+    first_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+        game=replace(sample_turn.game, turn=1),
+    )
+    player_id = first_turn.scores[0].ownerid
+
+    def load_turn(turn_number: int):
+        if turn_number == 1:
+            return first_turn
+        return None
+
+    ctx = make_analytic_query_context(
+        first_turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+    )
+    scope = ctx._resolve_scope({"player_id": player_id})
+
+    tree = EXPORT_CATALOG.materialize_export_tree(ctx, scope)
+    assert tree["meta"]["searchStatus"] == "complete"
+    assert EXPORT_CATALOG.is_persisted is not None
+    assert EXPORT_CATALOG.is_persisted(ctx, scope) is True

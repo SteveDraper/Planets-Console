@@ -130,3 +130,24 @@ def held_solution_count(
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in _PERSISTABLE_STATUSES
+
+
+def is_scores_export_inference_satisfied(
+    *,
+    persisted_row,
+    admission: RowStreamAdmission | None,
+    scheduler_run: RowRun | None,
+    globally_paused: bool,
+    scope_matches_active_stream: bool,
+) -> bool:
+    """True when inference is terminal and satisfied for export dependency probes."""
+    return (
+        resolve_search_status(
+            persisted_row=persisted_row,
+            admission=admission,
+            scheduler_run=scheduler_run,
+            globally_paused=globally_paused,
+            scope_matches_active_stream=scope_matches_active_stream,
+        )
+        == "complete"
+    )

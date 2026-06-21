@@ -23,6 +23,7 @@ from api.analytics.scores.export_materialization import (
     held_solution_count,
     hull_catalog_mask_branch,
     is_persistable_inference_status,
+    is_scores_export_inference_satisfied,
     ranked_solutions_from_wire,
     resolve_search_status,
     solutions_from_domain,
@@ -470,7 +471,35 @@ def _scheduler_row_run(ctx: AnalyticQueryContext, scope: ExportScope):
 
 
 def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    return _load_persisted_row(ctx, scope) is not None
+    if scope.player_id is None:
+        return False
+
+    persisted_row = _load_persisted_row(ctx, scope)
+    turn = ctx.load_turn(scope.turn)
+    if turn is None:
+        return is_scores_export_inference_satisfied(
+            persisted_row=persisted_row,
+            admission=None,
+            scheduler_run=None,
+            globally_paused=False,
+            scope_matches_active_stream=False,
+        )
+
+    admission = _row_admission(ctx, scope, turn)
+    scheduler_run = _scheduler_row_run(ctx, scope)
+    stream_scope = _stream_scope(scope)
+    scheduler = _scheduler(ctx)
+    pause_status = scheduler.global_pause_status(stream_scope)
+    globally_paused = bool(pause_status.get("paused"))
+    scope_matches_active_stream = scheduler.active_scope_matches(stream_scope)
+
+    return is_scores_export_inference_satisfied(
+        persisted_row=persisted_row,
+        admission=admission,
+        scheduler_run=scheduler_run,
+        globally_paused=globally_paused,
+        scope_matches_active_stream=scope_matches_active_stream,
+    )
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
