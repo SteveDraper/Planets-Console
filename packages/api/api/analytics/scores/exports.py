@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.export_context import AnalyticQueryContext, export_service_for
-from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
-from api.analytics.military_score_inference.hull_catalog_mask import resolve_hull_catalog_mask
-from api.analytics.military_score_inference.inference_scheduler import get_inference_row_scheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
     CachedCompleteRowAdmission,
     ImmediateRowAdmission,
@@ -29,6 +26,7 @@ from api.analytics.scores.export_materialization import (
     resolve_scores_export_payload,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
+from api.analytics.scores.export_services import ResolvedScoresServices, resolve_scores_services
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.serialization.inference_row_persistence import (
     PersistedInferenceRow,
@@ -54,29 +52,6 @@ ORDERING_SEMANTICS = {
 ENSURE_DEPENDENCIES: tuple = ()
 
 
-def _scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext | None:
-    return export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
-
-
-def _persistence(ctx: AnalyticQueryContext):
-    services = _scores_services(ctx)
-    return None if services is None else services.persistence
-
-
-def _scheduler(ctx: AnalyticQueryContext):
-    services = _scores_services(ctx)
-    if services is not None and services.scheduler is not None:
-        return services.scheduler
-    return get_inference_row_scheduler()
-
-
-def _resolve_mask(ctx: AnalyticQueryContext, turn, player_id: int):
-    services = _scores_services(ctx)
-    if services is not None and services.resolve_hull_catalog_mask is not None:
-        return services.resolve_hull_catalog_mask(turn, player_id)
-    return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=None)
-
-
 def _stream_scope(scope: ExportScope) -> InferenceStreamScope:
     return InferenceStreamScope(
         game_id=scope.game_id,
@@ -86,13 +61,12 @@ def _stream_scope(scope: ExportScope) -> InferenceStreamScope:
 
 
 def _load_persisted_row(
-    ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
     scope: ExportScope,
 ) -> PersistedInferenceRow | None:
-    persistence = _persistence(ctx)
-    if persistence is None or scope.player_id is None:
+    if services.persistence is None or scope.player_id is None:
         return None
-    return persistence.get_row(
+    return services.persistence.get_row(
         scope.game_id,
         scope.perspective,
         scope.turn,
@@ -100,7 +74,12 @@ def _load_persisted_row(
     )
 
 
-def _row_admission(ctx: AnalyticQueryContext, scope: ExportScope, turn):
+def _row_admission(
+    ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
+    scope: ExportScope,
+    turn,
+):
     if scope.player_id is None:
         return None
     return resolve_row_stream_admission(
@@ -110,22 +89,23 @@ def _row_admission(ctx: AnalyticQueryContext, scope: ExportScope, turn):
         perspective=scope.perspective,
         turn_number=scope.turn,
         load_scoreboard_turn=ctx.load_turn,
-        persistence=_persistence(ctx),
+        persistence=services.persistence,
     )
 
 
-def _scheduler_row_run(ctx: AnalyticQueryContext, scope: ExportScope):
+def _scheduler_row_run(services: ResolvedScoresServices, scope: ExportScope):
     if scope.player_id is None:
         return None
-    return _scheduler(ctx).row_run_for_player(_stream_scope(scope), scope.player_id)
+    return services.scheduler.row_run_for_player(_stream_scope(scope), scope.player_id)
 
 
 def _resolve_scores_inference_snapshot(
     ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
     scope: ExportScope,
     turn,
 ) -> ScoresInferenceSnapshot:
-    persisted_row = _load_persisted_row(ctx, scope)
+    persisted_row = _load_persisted_row(services, scope)
     if turn is None:
         return ScoresInferenceSnapshot(
             persisted_row=persisted_row,
@@ -135,12 +115,11 @@ def _resolve_scores_inference_snapshot(
         )
 
     stream_scope = _stream_scope(scope)
-    scheduler = _scheduler(ctx)
-    pause_status = scheduler.global_pause_status(stream_scope)
+    pause_status = services.scheduler.global_pause_status(stream_scope)
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
-        admission=_row_admission(ctx, scope, turn),
-        scheduler_run=_scheduler_row_run(ctx, scope),
+        admission=_row_admission(ctx, services, scope, turn),
+        scheduler_run=_scheduler_row_run(services, scope),
         globally_paused=bool(pause_status.get("paused")),
     )
 
@@ -149,7 +128,10 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
     if scope.player_id is None:
         return False
 
-    snapshot = _resolve_scores_inference_snapshot(ctx, scope, ctx.load_turn(scope.turn))
+    services = resolve_scores_services(ctx)
+    snapshot = _resolve_scores_inference_snapshot(
+        ctx, services, scope, ctx.load_turn(scope.turn)
+    )
     return is_scores_export_inference_satisfied(
         persisted_row=snapshot.persisted_row,
         admission=snapshot.admission,
@@ -162,45 +144,50 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
     if scope.player_id is None:
         return
 
+    services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return
 
-    if _load_persisted_row(ctx, scope) is not None:
+    if _load_persisted_row(services, scope) is not None:
         return
 
-    admission = _row_admission(ctx, scope, turn)
+    admission = _row_admission(ctx, services, scope, turn)
     if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
         return
 
     if scope.turn < ctx.ambient_turn:
-        _ensure_prior_turn_sync(ctx, scope, turn)
+        _ensure_prior_turn_sync(ctx, services, scope, turn)
         return
 
-    _ensure_current_turn_scheduler(ctx, scope, turn)
+    _ensure_current_turn_scheduler(ctx, services, scope, turn)
 
 
-def _ensure_prior_turn_sync(ctx: AnalyticQueryContext, scope: ExportScope, turn) -> None:
+def _ensure_prior_turn_sync(
+    ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
+    scope: ExportScope,
+    turn,
+) -> None:
     from api.analytics.scores import get_scores_row_inference
 
     player_id = scope.player_id
     assert player_id is not None
-    resolved_mask = _resolve_mask(ctx, turn, player_id)
+    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
     inference = get_scores_row_inference(
         turn,
         player_id,
         load_scoreboard_turn=ctx.load_turn,
         resolved_mask=resolved_mask,
     )
-    persistence = _persistence(ctx)
-    if persistence is None:
+    if services.persistence is None:
         return
     status = str(inference.get("status", ""))
     if not is_persistable_inference_status(status):
         return
     wire_event = inference_api_payload_to_wire_complete(inference)
     row = persisted_inference_row_from_wire_complete(wire_event)
-    persistence.put_row(
+    services.persistence.put_row(
         scope.game_id,
         scope.perspective,
         scope.turn,
@@ -209,12 +196,16 @@ def _ensure_prior_turn_sync(ctx: AnalyticQueryContext, scope: ExportScope, turn)
     )
 
 
-def _ensure_current_turn_scheduler(ctx: AnalyticQueryContext, scope: ExportScope, turn) -> None:
+def _ensure_current_turn_scheduler(
+    ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
+    scope: ExportScope,
+    turn,
+) -> None:
     player_id = scope.player_id
     assert player_id is not None
-    scheduler = _scheduler(ctx)
     stream_scope = _stream_scope(scope)
-    if scheduler.row_run_for_player(stream_scope, player_id) is not None:
+    if services.scheduler.row_run_for_player(stream_scope, player_id) is not None:
         return
 
     controller = controller_for_scope(stream_scope)
@@ -224,9 +215,9 @@ def _ensure_current_turn_scheduler(ctx: AnalyticQueryContext, scope: ExportScope
     if score is None:
         return
 
-    resolved_mask = _resolve_mask(ctx, turn, player_id)
+    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
     schedule_inference_row(
-        scheduler,
+        services.scheduler,
         score=score,
         turn=turn,
         player_id=player_id,
@@ -239,6 +230,7 @@ def _ensure_current_turn_scheduler(ctx: AnalyticQueryContext, scope: ExportScope
 
 
 def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope) -> dict[str, Any]:
+    services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return {
@@ -249,7 +241,7 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
             "solutions": [],
         }
 
-    snapshot = _resolve_scores_inference_snapshot(ctx, scope, turn)
+    snapshot = _resolve_scores_inference_snapshot(ctx, services, scope, turn)
     payload = resolve_scores_export_payload(snapshot)
 
     tree: dict[str, Any] = {
@@ -264,7 +256,7 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
         tree["diagnostics"] = payload.diagnostics
 
     if scope.player_id is not None:
-        resolved_mask = _resolve_mask(ctx, turn, scope.player_id)
+        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
         tree["hullCatalogMask"] = hull_catalog_mask_branch(resolved_mask.effective_enabled_hull_ids)
 
     return tree
