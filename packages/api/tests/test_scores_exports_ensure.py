@@ -115,7 +115,7 @@ def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, per
         "diagnostics": {"turn": 110},
     }
     with patch(
-        "api.analytics.scores.exports.get_scores_row_inference",
+        "api.analytics.scores.export_precedence.get_scores_row_inference",
         return_value=stopped_inference,
     ):
         EXPORT_CATALOG.ensure_export(ctx, scope)
@@ -167,7 +167,7 @@ def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn
         "diagnostics": {"turn": 110},
     }
     with patch(
-        "api.analytics.scores.exports.get_scores_row_inference",
+        "api.analytics.scores.export_precedence.get_scores_row_inference",
         return_value=stopped_inference,
     ):
         result = ctx.query(
@@ -196,7 +196,12 @@ def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence
     player_id = first_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
-    scope = ctx._resolve_scope({"player_id": player_id})
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
     EXPORT_CATALOG.ensure_export(ctx, scope)
@@ -222,7 +227,12 @@ def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
     assert run_before is not None
 
     ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
-    scope = ctx._resolve_scope({"player_id": player_id})
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
     EXPORT_CATALOG.ensure_export(ctx, scope)
 
     run_after = scheduler.row_run_for_player(stream_scope, player_id)
@@ -247,7 +257,12 @@ def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
         ),
     )
     ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
-    scope = ctx._resolve_scope({"player_id": player_id})
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
 
     EXPORT_CATALOG.ensure_export(ctx, scope)
 
@@ -295,7 +310,12 @@ def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
         ),
     )
     ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
-    scope = ctx._resolve_scope({"player_id": player_id})
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
 
     EXPORT_CATALOG.ensure_export(ctx, scope)
 

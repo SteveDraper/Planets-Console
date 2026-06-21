@@ -33,6 +33,7 @@ from tests.scores_exports_helpers import (
     first_player_id,
     first_turn_from,
     inference_solution,
+    materialize_scores_tree,
     put_persisted_row,
     query_context,
     schedule_row_with_ladder,
@@ -488,3 +489,17 @@ def test_scheduler_branch_surfaces_ladder_diagnostics(sample_turn):
     assert payload.diagnostics is not None
     assert payload.diagnostics["turn"] == sample_turn.settings.turn
     assert payload.diagnostics["solver"]["source"] == "scheduler_ladder"
+
+    ctx = query_context(sample_turn, scheduler=scheduler)
+    result = ctx.query(
+        "scores",
+        ["$.diagnostics.solver.source", "$.meta.searchStatus"],
+        {"player_id": player_id},
+        force_inline_ensure=True,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.meta.searchStatus"].value == "in_progress"
+    assert result.paths["$.diagnostics.solver.source"].value == "scheduler_ladder"
+
+    tree, _scope = materialize_scores_tree(ctx, player_id)
+    assert tree["diagnostics"]["solver"]["source"] == "scheduler_ladder"

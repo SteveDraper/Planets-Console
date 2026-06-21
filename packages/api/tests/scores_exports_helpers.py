@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -209,6 +210,11 @@ def put_persisted_row(
     )
 
 
-def materialize_scores_tree(ctx, player_id: int):
-    scope = ctx._resolve_scope({"player_id": player_id})
+def materialize_scores_tree(ctx, player_id: int, *, turn: int | None = None):
+    scope = ExportScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=turn if turn is not None else ctx.ambient_turn,
+        player_id=player_id,
+    )
     return EXPORT_CATALOG.materialize_export_tree(ctx, scope), scope

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
-from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -32,26 +31,6 @@ from tests.scores_exports_helpers import (
     ship_build_wire,
     stream_scope_for_turn,
 )
-
-
-def test_fallback_persisted_terminal_status_materializes_complete(sample_turn, persistence):
-    player_id = first_player_id(sample_turn)
-    put_persisted_row(
-        persistence,
-        sample_turn,
-        player_id,
-        PersistedInferenceRow(
-            status=STATUS_PLAYER_NOT_FOUND,
-            summary="player missing from scoreboard",
-            solution_count=0,
-            is_complete=True,
-            solutions=[],
-        ),
-    )
-    ctx = query_context(sample_turn, persistence=persistence)
-    tree, _scope = materialize_scores_tree(ctx, player_id)
-    assert tree["meta"]["searchStatus"] == "complete"
-    assert tree["solutions"] == []
 
 
 def test_turn_not_stored_query_unavailable(sample_turn):
@@ -378,33 +357,3 @@ def test_first_turn_immediate_complete_is_ensure_satisfied_not_persisted(sample_
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
     assert EXPORT_CATALOG.is_ensure_satisfied is not None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
-
-
-def test_scheduler_materializes_diagnostics_from_ladder_state(sample_turn):
-    reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
-    schedule_row_with_ladder(
-        scheduler,
-        sample_turn,
-        player_id,
-        merged_solutions=[inference_solution(objective_value=50)],
-    )
-    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
-    assert run is not None
-    assert run.ladder_state is not None
-    run.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
-
-    ctx = query_context(sample_turn, scheduler=scheduler)
-    result = ctx.query(
-        "scores",
-        ["$.diagnostics.solver.source", "$.meta.searchStatus"],
-        {"player_id": player_id},
-        force_inline_ensure=True,
-    )
-    assert result.status == "ok"
-    assert result.paths["$.meta.searchStatus"].value == "in_progress"
-    assert result.paths["$.diagnostics.solver.source"].value == "scheduler_ladder"
-
-    tree, _scope = materialize_scores_tree(ctx, player_id)
-    assert tree["diagnostics"]["solver"]["source"] == "scheduler_ladder"

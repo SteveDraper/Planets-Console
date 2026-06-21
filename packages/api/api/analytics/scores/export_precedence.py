@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     STATUS_PLAYER_NOT_FOUND,
@@ -17,6 +19,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
     held_solution_count,
@@ -24,6 +27,10 @@ from api.analytics.scores.export_wire import (
     solutions_from_persisted_row,
     terminal_row_admission,
 )
+from api.analytics.scores.inference import get_scores_row_inference
+from api.models.game import TurnInfo
+from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
+from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
 ScoresExportPrecedenceBranch = Literal[
@@ -66,6 +73,46 @@ class ScoresExportPayload:
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None
     solutions_held: int
+
+
+@dataclass(frozen=True)
+class ScoresExportResolved:
+    """Gathered snapshot with precedence classification computed once."""
+
+    snapshot: ScoresInferenceSnapshot
+    classification: ScoresExportClassification
+
+
+def _as_resolved(view: ScoresExportResolved | ScoresInferenceSnapshot) -> ScoresExportResolved:
+    if isinstance(view, ScoresExportResolved):
+        return view
+    return resolve_scores_export(view)
+
+
+def resolve_scores_export(snapshot: ScoresInferenceSnapshot) -> ScoresExportResolved:
+    return ScoresExportResolved(
+        snapshot=snapshot,
+        classification=classify_scores_export(snapshot),
+    )
+
+
+def _export_meta_branch(
+    *,
+    search_status: SearchStatus,
+    host_turn: int,
+    solutions_held: int = 0,
+) -> dict[str, object]:
+    meta: dict[str, object] = {
+        "searchStatus": search_status,
+        "hostTurn": host_turn,
+    }
+    if solutions_held > 0:
+        meta["solutionsHeld"] = solutions_held
+    return meta
+
+
+def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:
+    return {"enabledHullIds": sorted(enabled_hull_ids)}
 
 
 def _persisted_row_priority_search_status(status: str) -> SearchStatus | None:
@@ -153,6 +200,7 @@ def build_scores_export_payload(
         )
 
     if classification.branch in ("terminal_admission", "scheduler"):
+        # Scheduler branch intentionally ignores non-terminal admission on the snapshot.
         admission = snapshot.admission if classification.branch == "terminal_admission" else None
         solutions, diagnostics, solutions_held = solutions_from_admission_or_scheduler(
             admission=admission,
@@ -177,21 +225,94 @@ def build_scores_export_payload(
     )
 
 
-def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> bool:
+def is_scores_inference_ensure_satisfied(
+    view: ScoresExportResolved | ScoresInferenceSnapshot,
+) -> bool:
     """True when no further ensure work is needed for this snapshot."""
-    return classify_scores_export(snapshot).branch != "empty"
+    return _as_resolved(view).classification.branch != "empty"
 
 
-def is_scores_export_authoritatively_persisted(snapshot: ScoresInferenceSnapshot) -> bool:
+def is_scores_export_authoritatively_persisted(
+    view: ScoresExportResolved | ScoresInferenceSnapshot,
+) -> bool:
     """True when a persisted inference row authoritatively completes this scope."""
-    classification = classify_scores_export(snapshot)
+    classification = _as_resolved(view).classification
     return (
         classification.branch in _AUTHORITATIVE_PERSISTED_BRANCHES
         and classification.search_status == "complete"
     )
 
 
-def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
+def resolve_scores_export_payload(
+    view: ScoresExportResolved | ScoresInferenceSnapshot,
+) -> ScoresExportPayload:
     """Resolve search status and solution sources from one precedence ladder."""
-    classification = classify_scores_export(snapshot)
-    return build_scores_export_payload(classification, snapshot)
+    resolved = _as_resolved(view)
+    return build_scores_export_payload(resolved.classification, resolved.snapshot)
+
+
+def build_scores_export_materialized_tree(
+    view: ScoresExportResolved | ScoresInferenceSnapshot,
+    scope: ExportScope,
+    *,
+    services: ScoresExportContext,
+    turn: TurnInfo,
+) -> dict[str, Any]:
+    """Materialize the full scores export value tree for one resolved snapshot."""
+    payload = resolve_scores_export_payload(view)
+    tree: dict[str, Any] = {
+        "meta": _export_meta_branch(
+            search_status=payload.search_status,
+            host_turn=scope.turn,
+            solutions_held=payload.solutions_held,
+        ),
+        "solutions": payload.solutions,
+    }
+    if payload.diagnostics is not None:
+        tree["diagnostics"] = payload.diagnostics
+
+    if scope.player_id is not None:
+        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
+        if resolved_mask is not None:
+            tree["hullCatalogMask"] = _hull_catalog_mask_branch(
+                resolved_mask.effective_enabled_hull_ids
+            )
+
+    return tree
+
+
+def sync_persist_empty_branch(
+    resolved: ScoresExportResolved,
+    *,
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None],
+) -> bool:
+    """Persist sync inference when precedence is empty (prior-turn ensure path)."""
+    if resolved.classification.branch != "empty":
+        return False
+    if services.persistence is None or scope.player_id is None:
+        return False
+
+    player_id = scope.player_id
+    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
+    inference = get_scores_row_inference(
+        turn,
+        player_id,
+        load_scoreboard_turn=load_scoreboard_turn,
+        resolved_mask=resolved_mask,
+    )
+    status = str(inference.get("status", ""))
+    if not is_persistable_inference_status(status):
+        return False
+    wire_event = inference_api_payload_to_wire_complete(inference)
+    row = persisted_inference_row_from_wire_complete(wire_event)
+    services.persistence.put_row(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        player_id,
+        row,
+    )
+    return True

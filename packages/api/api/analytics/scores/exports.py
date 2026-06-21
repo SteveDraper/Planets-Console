@@ -12,25 +12,22 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     controller_for_scope,
 )
 from api.analytics.scores.export_precedence import (
-    SearchStatus,
-    is_persistable_inference_status,
+    ScoresExportResolved,
+    build_scores_export_materialized_tree,
     is_scores_export_authoritatively_persisted,
     is_scores_inference_ensure_satisfied,
-    resolve_scores_export_payload,
+    resolve_scores_export,
+    sync_persist_empty_branch,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
 from api.analytics.scores.export_snapshot import (
-    ScoresInferenceSnapshot,
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
 )
-from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
-from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
-from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -50,111 +47,67 @@ ORDERING_SEMANTICS = {
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
 
 
-def _export_meta_branch(
-    *,
-    search_status: SearchStatus,
-    host_turn: int,
-    solutions_held: int = 0,
-) -> dict[str, object]:
-    meta: dict[str, object] = {
-        "searchStatus": search_status,
-        "hostTurn": host_turn,
-    }
-    if solutions_held > 0:
-        meta["solutionsHeld"] = solutions_held
-    return meta
-
-
-def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:
-    return {"enabledHullIds": sorted(enabled_hull_ids)}
-
-
-def _scores_snapshot(
+def _scores_resolved(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
     *,
     turn: TurnInfo | None = None,
-) -> tuple[ScoresExportContext, ScoresInferenceSnapshot]:
+) -> tuple[ScoresExportContext, ScoresExportResolved]:
     services = resolve_scores_services(ctx)
     resolved_turn = turn if turn is not None else ctx.load_turn(scope.turn)
 
-    def gather() -> ScoresInferenceSnapshot:
-        return gather_scores_inference_snapshot(ctx, services, scope, resolved_turn)
+    def gather() -> ScoresExportResolved:
+        snapshot = gather_scores_inference_snapshot(ctx, services, scope, resolved_turn)
+        return resolve_scores_export(snapshot)
 
-    snapshot = ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
-    return services, snapshot
+    resolved = ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
+    return services, resolved
 
 
 def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if scope.player_id is None:
         return False
 
-    _services, snapshot = _scores_snapshot(ctx, scope)
-    return is_scores_export_authoritatively_persisted(snapshot)
+    _services, resolved = _scores_resolved(ctx, scope)
+    return is_scores_export_authoritatively_persisted(resolved)
 
 
 def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if scope.player_id is None:
         return True
 
-    _services, snapshot = _scores_snapshot(ctx, scope)
-    return is_scores_inference_ensure_satisfied(snapshot)
+    _services, resolved = _scores_resolved(ctx, scope)
+    return is_scores_inference_ensure_satisfied(resolved)
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
     if scope.player_id is None:
         return
 
-    services, snapshot = _scores_snapshot(ctx, scope)
+    services, resolved = _scores_resolved(ctx, scope)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return
 
-    if is_scores_inference_ensure_satisfied(snapshot):
+    if is_scores_inference_ensure_satisfied(resolved):
         return
 
     # Prior-turn sync ensure may no-op when inference is non-persistable (e.g. stopped).
     # ctx.query still marks the scope ensured after ensure_export returns; probe walks
     # skip re-entry via is_scope_ensured even when is_persisted remains False.
     if scope.turn < ctx.ambient_turn:
-        if _persist_prior_turn_inference_if_persistable(ctx, services, scope, turn):
+        if sync_persist_empty_branch(
+            resolved,
+            services=services,
+            scope=scope,
+            turn=turn,
+            load_scoreboard_turn=ctx.load_turn,
+        ):
             ctx.invalidate_export_snapshot(ANALYTIC_ID, scope)
         return
 
     if _ensure_current_turn_scheduler(ctx, services, scope, turn):
         ctx.invalidate_export_snapshot(ANALYTIC_ID, scope)
-
-
-def _persist_prior_turn_inference_if_persistable(
-    ctx: AnalyticQueryContext,
-    services: ScoresExportContext,
-    scope: ExportScope,
-    turn: TurnInfo,
-) -> bool:
-    player_id = scope.player_id
-    assert player_id is not None
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
-    inference = get_scores_row_inference(
-        turn,
-        player_id,
-        load_scoreboard_turn=ctx.load_turn,
-        resolved_mask=resolved_mask,
-    )
-    if services.persistence is None:
-        return False
-    status = str(inference.get("status", ""))
-    if not is_persistable_inference_status(status):
-        return False
-    wire_event = inference_api_payload_to_wire_complete(inference)
-    row = persisted_inference_row_from_wire_complete(wire_event)
-    services.persistence.put_row(
-        scope.game_id,
-        scope.perspective,
-        scope.turn,
-        player_id,
-        row,
-    )
-    return True
 
 
 def _ensure_current_turn_scheduler(
@@ -196,28 +149,13 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
     if turn is None:
         raise ValidationError(f"Turn {scope.turn} is not stored")
 
-    services, snapshot = _scores_snapshot(ctx, scope, turn=turn)
-    payload = resolve_scores_export_payload(snapshot)
-
-    tree: dict[str, Any] = {
-        "meta": _export_meta_branch(
-            search_status=payload.search_status,
-            host_turn=scope.turn,
-            solutions_held=payload.solutions_held,
-        ),
-        "solutions": payload.solutions,
-    }
-    if payload.diagnostics is not None:
-        tree["diagnostics"] = payload.diagnostics
-
-    if scope.player_id is not None:
-        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
-        if resolved_mask is not None:
-            tree["hullCatalogMask"] = _hull_catalog_mask_branch(
-                resolved_mask.effective_enabled_hull_ids
-            )
-
-    return tree
+    services, resolved = _scores_resolved(ctx, scope, turn=turn)
+    return build_scores_export_materialized_tree(
+        resolved,
+        scope,
+        services=services,
+        turn=turn,
+    )
 
 
 EXPORT_CATALOG = AnalyticExportCatalog(
