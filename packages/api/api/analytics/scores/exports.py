@@ -11,21 +11,20 @@ from api.analytics.military_score_inference.inference_stream_rows import schedul
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
-from api.analytics.scores.export_materialization import (
-    ScoresInferenceSnapshot,
-    export_meta_branch,
-    gather_scores_inference_snapshot,
-    hull_catalog_mask_branch,
-    is_persistable_inference_status,
-    scores_inference_stream_scope,
-)
 from api.analytics.scores.export_precedence import (
+    SearchStatus,
+    is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
     is_scores_inference_ensure_satisfied,
     resolve_scores_export_payload,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
+from api.analytics.scores.export_snapshot import (
+    ScoresInferenceSnapshot,
+    gather_scores_inference_snapshot,
+    scores_inference_stream_scope,
+)
 from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
@@ -49,6 +48,25 @@ ORDERING_SEMANTICS = {
 }
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
+
+
+def _export_meta_branch(
+    *,
+    search_status: SearchStatus,
+    host_turn: int,
+    solutions_held: int = 0,
+) -> dict[str, object]:
+    meta: dict[str, object] = {
+        "searchStatus": search_status,
+        "hostTurn": host_turn,
+    }
+    if solutions_held > 0:
+        meta["solutionsHeld"] = solutions_held
+    return meta
+
+
+def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:
+    return {"enabledHullIds": sorted(enabled_hull_ids)}
 
 
 def _scores_snapshot(
@@ -182,7 +200,7 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
     payload = resolve_scores_export_payload(snapshot)
 
     tree: dict[str, Any] = {
-        "meta": export_meta_branch(
+        "meta": _export_meta_branch(
             search_status=payload.search_status,
             host_turn=scope.turn,
             solutions_held=payload.solutions_held,
@@ -195,7 +213,7 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
     if scope.player_id is not None:
         resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
         if resolved_mask is not None:
-            tree["hullCatalogMask"] = hull_catalog_mask_branch(
+            tree["hullCatalogMask"] = _hull_catalog_mask_branch(
                 resolved_mask.effective_enabled_hull_ids
             )
 

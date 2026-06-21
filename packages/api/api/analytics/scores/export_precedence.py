@@ -10,7 +10,6 @@ from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_PLAYER_NOT_FOUND,
     STATUS_SOLVER_ERROR,
 )
-from api.analytics.military_score_inference.inference_stream_rows import RowStreamAdmission
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -18,13 +17,13 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
+from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
     held_solution_count,
     solutions_from_admission_or_scheduler,
     solutions_from_persisted_row,
     terminal_row_admission,
 )
-from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
 ScoresExportPrecedenceBranch = Literal[
@@ -47,14 +46,8 @@ _FALLBACK_COMPLETE_PERSISTED_STATUSES = frozenset(
 _AUTHORITATIVE_PERSISTED_BRANCHES = frozenset({"priority_persisted", "fallback_persisted"})
 
 
-@dataclass(frozen=True)
-class ScoresInferenceSnapshot:
-    """Gathered inference state for scores export persistence and materialization."""
-
-    persisted_row: PersistedInferenceRow | None
-    admission: RowStreamAdmission | None
-    scheduler_run: RowRun | None
-    globally_paused: bool
+def is_persistable_inference_status(status: str) -> bool:
+    return status in PERSISTABLE_INFERENCE_STATUSES
 
 
 @dataclass(frozen=True)
@@ -159,22 +152,12 @@ def build_scores_export_payload(
             solutions_held=solutions_held,
         )
 
-    if classification.branch == "terminal_admission":
-        solutions, diagnostics, solutions_held = solutions_from_admission_or_scheduler(
-            admission=snapshot.admission,
-            scheduler_run=snapshot.scheduler_run,
-            persisted_row=persisted_row,
+    if classification.branch in ("terminal_admission", "scheduler"):
+        admission = (
+            snapshot.admission if classification.branch == "terminal_admission" else None
         )
-        return ScoresExportPayload(
-            search_status=search_status,
-            solutions=solutions,
-            diagnostics=diagnostics,
-            solutions_held=solutions_held,
-        )
-
-    if classification.branch == "scheduler":
         solutions, diagnostics, solutions_held = solutions_from_admission_or_scheduler(
-            admission=None,
+            admission=admission,
             scheduler_run=snapshot.scheduler_run,
             persisted_row=persisted_row,
         )
@@ -196,13 +179,6 @@ def build_scores_export_payload(
     )
 
 
-def scores_export_precedence_branch(
-    snapshot: ScoresInferenceSnapshot,
-) -> ScoresExportPrecedenceBranch:
-    """Classify which precedence branch resolves export state for a snapshot."""
-    return classify_scores_export(snapshot).branch
-
-
 def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> bool:
     """True when no further ensure work is needed for this snapshot."""
     return classify_scores_export(snapshot).branch != "empty"
@@ -215,11 +191,6 @@ def is_scores_export_authoritatively_persisted(snapshot: ScoresInferenceSnapshot
         classification.branch in _AUTHORITATIVE_PERSISTED_BRANCHES
         and classification.search_status == "complete"
     )
-
-
-def resolve_scores_export_search_status(snapshot: ScoresInferenceSnapshot) -> SearchStatus:
-    """Resolve search status from the export precedence ladder without materializing solutions."""
-    return classify_scores_export(snapshot).search_status
 
 
 def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:

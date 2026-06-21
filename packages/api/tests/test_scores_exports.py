@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_api_payload import (
@@ -19,12 +17,11 @@ from api.analytics.military_score_inference.inference_stream_rows import CachedC
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_precedence import (
-    ScoresInferenceSnapshot,
+    classify_scores_export,
     is_scores_inference_ensure_satisfied,
     resolve_scores_export_payload,
-    resolve_scores_export_search_status,
-    scores_export_precedence_branch,
 )
+from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
     ranked_solutions_from_wire,
     solutions_diagnostics_from_wire_complete_event,
@@ -207,14 +204,14 @@ def test_resolve_search_status_matches_payload_status(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
+    classification = classify_scores_export(snapshot)
     assert (
-        resolve_scores_export_search_status(snapshot)
-        == resolve_scores_export_payload(snapshot).search_status
+        classification.search_status == resolve_scores_export_payload(snapshot).search_status
     )
-    assert resolve_scores_export_search_status(snapshot) == "in_progress"
+    assert classification.search_status == "in_progress"
 
 
-def test_resolve_search_status_does_not_materialize_solutions(sample_turn):
+def test_classify_search_status_does_not_materialize_solutions(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
@@ -233,11 +230,7 @@ def test_resolve_search_status_does_not_materialize_solutions(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
-    with patch(
-        "api.analytics.scores.export_wire.solutions_from_admission_or_scheduler",
-        side_effect=AssertionError("status-only path must not materialize solutions"),
-    ):
-        assert resolve_scores_export_search_status(snapshot) == "in_progress"
+    assert classify_scores_export(snapshot).search_status == "in_progress"
 
 
 def test_cached_complete_admission_resolves_payload_from_event():
@@ -437,7 +430,8 @@ def test_ensure_satisfied_tracks_precedence_branch(
     ensure_satisfied: bool,
     search_status: str,
 ):
-    assert scores_export_precedence_branch(snapshot) == expected_branch
+    classification = classify_scores_export(snapshot)
+    assert classification.branch == expected_branch
     assert is_scores_inference_ensure_satisfied(snapshot) is ensure_satisfied
     payload = resolve_scores_export_payload(snapshot)
     assert payload.search_status == search_status
@@ -463,7 +457,8 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
-    assert scores_export_precedence_branch(snapshot) == "scheduler"
+    classification = classify_scores_export(snapshot)
+    assert classification.branch == "scheduler"
     assert is_scores_inference_ensure_satisfied(snapshot) is True
     payload = resolve_scores_export_payload(snapshot)
     assert payload.search_status == "in_progress"

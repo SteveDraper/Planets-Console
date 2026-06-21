@@ -1,51 +1,30 @@
-"""Shared materialization helpers for scores analytic exports."""
+"""Gathered inference snapshot for scores export precedence and materialization."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_stream_rows import (
+    RowStreamAdmission,
     resolve_row_stream_admission,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.scores.export_precedence import (
-    PERSISTABLE_INFERENCE_STATUSES,
-    ScoresInferenceSnapshot,
-    SearchStatus,
-)
+from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_services import ScoresExportContext
-
-__all__ = [
-    "ScoresInferenceSnapshot",
-    "export_meta_branch",
-    "gather_scores_inference_snapshot",
-    "hull_catalog_mask_branch",
-    "is_persistable_inference_status",
-    "scores_inference_stream_scope",
-]
+from api.models.game import TurnInfo
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 
-def export_meta_branch(
-    *,
-    search_status: SearchStatus,
-    host_turn: int,
-    solutions_held: int = 0,
-) -> dict[str, object]:
-    meta: dict[str, object] = {
-        "searchStatus": search_status,
-        "hostTurn": host_turn,
-    }
-    if solutions_held > 0:
-        meta["solutionsHeld"] = solutions_held
-    return meta
+@dataclass(frozen=True)
+class ScoresInferenceSnapshot:
+    """Gathered inference state for scores export persistence and materialization."""
 
-
-def hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:
-    return {"enabledHullIds": sorted(enabled_hull_ids)}
-
-
-def is_persistable_inference_status(status: str) -> bool:
-    return status in PERSISTABLE_INFERENCE_STATUSES
+    persisted_row: PersistedInferenceRow | None
+    admission: RowStreamAdmission | None
+    scheduler_run: RowRun | None
+    globally_paused: bool
 
 
 def scores_inference_stream_scope(scope: ExportScope) -> InferenceStreamScope:
@@ -59,7 +38,7 @@ def scores_inference_stream_scope(scope: ExportScope) -> InferenceStreamScope:
 def _load_persisted_row(
     services: ScoresExportContext,
     scope: ExportScope,
-):
+) -> PersistedInferenceRow | None:
     if services.persistence is None or scope.player_id is None:
         return None
     return services.persistence.get_row(
@@ -74,8 +53,8 @@ def _row_admission(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
     scope: ExportScope,
-    turn,
-):
+    turn: TurnInfo,
+) -> RowStreamAdmission | None:
     if scope.player_id is None:
         return None
     return resolve_row_stream_admission(
@@ -89,7 +68,10 @@ def _row_admission(
     )
 
 
-def _scheduler_row_run(services: ScoresExportContext, scope: ExportScope):
+def _scheduler_row_run(
+    services: ScoresExportContext,
+    scope: ExportScope,
+) -> RowRun | None:
     if scope.player_id is None:
         return None
     stream_scope = scores_inference_stream_scope(scope)
@@ -100,7 +82,7 @@ def gather_scores_inference_snapshot(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
     scope: ExportScope,
-    turn,
+    turn: TurnInfo | None,
 ) -> ScoresInferenceSnapshot:
     persisted_row = _load_persisted_row(services, scope)
     if turn is None:
