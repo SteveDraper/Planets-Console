@@ -13,11 +13,16 @@ from api.analytics.military_score_inference.inference_api_payload import (
     _serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_stream_rows import (
     CachedCompleteRowAdmission,
     ImmediateRowAdmission,
     RowStreamAdmission,
+    resolve_row_stream_admission,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.scores.export_services import ResolvedScoresServices
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
@@ -275,3 +280,75 @@ def held_solution_count(
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in _PERSISTABLE_STATUSES
+
+
+def _stream_scope(scope: ExportScope) -> InferenceStreamScope:
+    return InferenceStreamScope(
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn_number=scope.turn,
+    )
+
+
+def _load_persisted_row(
+    services: ResolvedScoresServices,
+    scope: ExportScope,
+) -> PersistedInferenceRow | None:
+    if services.persistence is None or scope.player_id is None:
+        return None
+    return services.persistence.get_row(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        scope.player_id,
+    )
+
+
+def _row_admission(
+    ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
+    scope: ExportScope,
+    turn,
+):
+    if scope.player_id is None:
+        return None
+    return resolve_row_stream_admission(
+        turn,
+        scope.player_id,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn_number=scope.turn,
+        load_scoreboard_turn=ctx.load_turn,
+        persistence=services.persistence,
+    )
+
+
+def _scheduler_row_run(services: ResolvedScoresServices, scope: ExportScope):
+    if scope.player_id is None:
+        return None
+    return services.scheduler.row_run_for_player(_stream_scope(scope), scope.player_id)
+
+
+def gather_scores_inference_snapshot(
+    ctx: AnalyticQueryContext,
+    services: ResolvedScoresServices,
+    scope: ExportScope,
+    turn,
+) -> ScoresInferenceSnapshot:
+    persisted_row = _load_persisted_row(services, scope)
+    if turn is None:
+        return ScoresInferenceSnapshot(
+            persisted_row=persisted_row,
+            admission=None,
+            scheduler_run=None,
+            globally_paused=False,
+        )
+
+    stream_scope = _stream_scope(scope)
+    pause_status = services.scheduler.global_pause_status(stream_scope)
+    return ScoresInferenceSnapshot(
+        persisted_row=persisted_row,
+        admission=_row_admission(ctx, services, scope, turn),
+        scheduler_run=_scheduler_row_run(services, scope),
+        globally_paused=bool(pause_status.get("paused")),
+    )

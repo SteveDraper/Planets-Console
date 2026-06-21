@@ -10,16 +10,15 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.inference_stream_rows import (
     CachedCompleteRowAdmission,
     ImmediateRowAdmission,
-    resolve_row_stream_admission,
     schedule_inference_row,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
 from api.analytics.scores.export_materialization import (
-    ScoresInferenceSnapshot,
+    _stream_scope,
     export_meta_branch,
+    gather_scores_inference_snapshot,
     hull_catalog_mask_branch,
     is_persistable_inference_status,
     resolve_scores_export_payload,
@@ -27,10 +26,7 @@ from api.analytics.scores.export_materialization import (
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ResolvedScoresServices, resolve_scores_services
 from api.analytics.scores_assets import ANALYTIC_ID
-from api.serialization.inference_row_persistence import (
-    PersistedInferenceRow,
-    persisted_inference_row_from_wire_complete,
-)
+from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
 from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 PATH_PREFIX_SCOPE_RULES = (
@@ -51,84 +47,14 @@ ORDERING_SEMANTICS = {
 ENSURE_DEPENDENCIES: tuple = ()
 
 
-def _stream_scope(scope: ExportScope) -> InferenceStreamScope:
-    return InferenceStreamScope(
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn_number=scope.turn,
-    )
-
-
-def _load_persisted_row(
-    services: ResolvedScoresServices,
-    scope: ExportScope,
-) -> PersistedInferenceRow | None:
-    if services.persistence is None or scope.player_id is None:
-        return None
-    return services.persistence.get_row(
-        scope.game_id,
-        scope.perspective,
-        scope.turn,
-        scope.player_id,
-    )
-
-
-def _row_admission(
-    ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
-    scope: ExportScope,
-    turn,
-):
-    if scope.player_id is None:
-        return None
-    return resolve_row_stream_admission(
-        turn,
-        scope.player_id,
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn_number=scope.turn,
-        load_scoreboard_turn=ctx.load_turn,
-        persistence=services.persistence,
-    )
-
-
-def _scheduler_row_run(services: ResolvedScoresServices, scope: ExportScope):
-    if scope.player_id is None:
-        return None
-    return services.scheduler.row_run_for_player(_stream_scope(scope), scope.player_id)
-
-
-def _resolve_scores_inference_snapshot(
-    ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
-    scope: ExportScope,
-    turn,
-) -> ScoresInferenceSnapshot:
-    persisted_row = _load_persisted_row(services, scope)
-    if turn is None:
-        return ScoresInferenceSnapshot(
-            persisted_row=persisted_row,
-            admission=None,
-            scheduler_run=None,
-            globally_paused=False,
-        )
-
-    stream_scope = _stream_scope(scope)
-    pause_status = services.scheduler.global_pause_status(stream_scope)
-    return ScoresInferenceSnapshot(
-        persisted_row=persisted_row,
-        admission=_row_admission(ctx, services, scope, turn),
-        scheduler_run=_scheduler_row_run(services, scope),
-        globally_paused=bool(pause_status.get("paused")),
-    )
-
-
 def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if scope.player_id is None:
         return False
 
     services = resolve_scores_services(ctx)
-    snapshot = _resolve_scores_inference_snapshot(ctx, services, scope, ctx.load_turn(scope.turn))
+    snapshot = gather_scores_inference_snapshot(
+        ctx, services, scope, ctx.load_turn(scope.turn)
+    )
     return resolve_scores_export_payload(snapshot).search_status == "complete"
 
 
@@ -141,10 +67,11 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
     if turn is None:
         return
 
-    if _load_persisted_row(services, scope) is not None:
+    snapshot = gather_scores_inference_snapshot(ctx, services, scope, turn)
+    if snapshot.persisted_row is not None:
         return
 
-    admission = _row_admission(ctx, services, scope, turn)
+    admission = snapshot.admission
     if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
         return
 
@@ -226,7 +153,7 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
     turn = ctx.load_turn(scope.turn)
     assert turn is not None
 
-    snapshot = _resolve_scores_inference_snapshot(ctx, services, scope, turn)
+    snapshot = gather_scores_inference_snapshot(ctx, services, scope, turn)
     payload = resolve_scores_export_payload(snapshot)
 
     tree: dict[str, Any] = {
