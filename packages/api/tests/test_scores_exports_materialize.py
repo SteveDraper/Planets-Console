@@ -13,6 +13,7 @@ from api.analytics.military_score_inference.inference_stream_rows import schedul
 from api.analytics.military_score_inference.models import InferenceSolutionAction
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.errors import ValidationError
 from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -332,6 +333,25 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
     assert tree["meta"]["solutionsHeld"] == 1
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
+
+
+def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_turn):
+    player_id = first_player_id(sample_turn)
+
+    def resolve_none_mask(_turn, _player_id):
+        return None
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=lambda turn_number: sample_turn if turn_number == sample_turn.settings.turn else None,
+        export_services={
+            "scores": ScoresExportContext(resolve_hull_catalog_mask=resolve_none_mask),
+        },
+    )
+    tree, _scope = materialize_scores_tree(ctx, player_id)
+    assert "hullCatalogMask" not in tree
+    assert tree["meta"]["searchStatus"] == "not_started"
 
 
 def test_first_turn_immediate_complete_is_persisted(sample_turn):

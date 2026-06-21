@@ -170,7 +170,10 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
 
     if scope.player_id is not None:
         resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
-        tree["hullCatalogMask"] = hull_catalog_mask_branch(resolved_mask.effective_enabled_hull_ids)
+        if resolved_mask is not None:
+            tree["hullCatalogMask"] = hull_catalog_mask_branch(
+                resolved_mask.effective_enabled_hull_ids
+            )
 
     return tree
 
