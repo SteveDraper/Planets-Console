@@ -7,6 +7,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
+from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.models import InferenceSolutionAction
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
@@ -14,10 +15,12 @@ from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.scores_exports_helpers import (
+    GAME_ID,
     first_player_id,
     first_turn_from,
     inference_solution,
     materialize_scores_tree,
+    perspective,
     put_persisted_row,
     query_context,
     schedule_row_with_ladder,
@@ -151,6 +154,61 @@ def test_paused_when_globally_paused_on_active_stream(sample_turn):
     ctx = query_context(sample_turn, scheduler=scheduler)
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "paused"
+
+
+def test_in_progress_when_scheduler_pre_ladder(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+    )
+    assert scheduled is not None
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+    run.ladder_state = None
+
+    ctx = query_context(sample_turn, scheduler=scheduler)
+    tree, _scope = materialize_scores_tree(ctx, player_id)
+    assert tree["meta"]["searchStatus"] == "in_progress"
+
+
+def test_stopped_when_ladder_time_limited(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[
+            inference_solution(
+                objective_value=35,
+                actions=(
+                    InferenceSolutionAction(
+                        action_id="planet_defense_posts_added_total",
+                        label="Planet defense",
+                        count=1,
+                    ),
+                ),
+            )
+        ],
+        time_limited=True,
+        ladder_complete=True,
+    )
+
+    ctx = query_context(sample_turn, scheduler=scheduler)
+    tree, scope = materialize_scores_tree(ctx, player_id)
+    assert tree["meta"]["searchStatus"] == "stopped"
+    assert tree["meta"]["solutionsHeld"] == 1
+    assert EXPORT_CATALOG.is_persisted is not None
+    assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
 
 
 def test_stopped_when_ladder_last_status_stopped(sample_turn):

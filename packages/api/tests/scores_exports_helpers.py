@@ -160,6 +160,8 @@ def schedule_row_with_ladder(
     *,
     merged_solutions: list[InferenceSolution],
     last_status: str | None = None,
+    time_limited: bool = False,
+    ladder_complete: bool = False,
     game_id: int = GAME_ID,
 ) -> InferenceStreamScope:
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
@@ -179,6 +181,8 @@ def schedule_row_with_ladder(
         policy_steps=(),
         merged_solutions=merged_solutions,
         last_status=last_status,
+        time_limited=time_limited,
+        ladder_complete=ladder_complete,
     )
     return stream_scope
 

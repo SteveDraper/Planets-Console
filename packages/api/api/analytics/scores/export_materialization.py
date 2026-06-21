@@ -152,10 +152,13 @@ def _search_status_from_scheduler(
     if globally_paused:
         return "paused"
     ladder_state = scheduler_run.ladder_state
-    if ladder_state is not None and ladder_state.last_status == STATUS_STOPPED:
-        return "stopped"
-    if ladder_state is not None and ladder_state.time_limited and not ladder_state.ladder_complete:
+    # enqueue_tier_ladder has not run yet; the row is still scheduled.
+    if ladder_state is None:
         return "in_progress"
+    if ladder_state.last_status == STATUS_STOPPED:
+        return "stopped"
+    if ladder_state.time_limited:
+        return "stopped"
     return "in_progress"
 
 
