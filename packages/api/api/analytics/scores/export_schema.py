@@ -228,8 +228,9 @@ _DIAGNOSTICS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
         "Developer-facing inference diagnostics for this row. Same shape as scores row "
-        "inference diagnostics wire. Present when persisted or live inference produced "
-        "diagnostics. Additional solver-owned keys may appear beyond those listed."
+        "inference diagnostics wire. Present when persisted, admission, or scheduler "
+        "inference produced diagnostics. Additional solver-owned keys may appear "
+        "beyond those listed."
     ),
     "additionalProperties": True,
     "properties": {

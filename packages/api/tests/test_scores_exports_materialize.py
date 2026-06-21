@@ -376,3 +376,33 @@ def test_first_turn_immediate_complete_is_persisted(sample_turn):
     assert tree["meta"]["searchStatus"] == "complete"
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is True
+
+
+def test_scheduler_materializes_diagnostics_from_ladder_state(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=50)],
+    )
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+    assert run.ladder_state is not None
+    run.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
+
+    ctx = query_context(sample_turn, scheduler=scheduler)
+    result = ctx.query(
+        "scores",
+        ["$.diagnostics.solver.source", "$.meta.searchStatus"],
+        {"player_id": player_id},
+        force_inline_ensure=True,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.meta.searchStatus"].value == "in_progress"
+    assert result.paths["$.diagnostics.solver.source"].value == "scheduler_ladder"
+
+    tree, _scope = materialize_scores_tree(ctx, player_id)
+    assert tree["diagnostics"]["solver"]["source"] == "scheduler_ladder"

@@ -203,9 +203,10 @@ def test_resolve_search_status_matches_payload_status(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
-    assert resolve_scores_export_search_status(snapshot) == resolve_scores_export_payload(
-        snapshot
-    ).search_status
+    assert (
+        resolve_scores_export_search_status(snapshot)
+        == resolve_scores_export_payload(snapshot).search_status
+    )
     assert resolve_scores_export_search_status(snapshot) == "in_progress"
 
 
@@ -437,3 +438,30 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
     payload = resolve_scores_export_payload(snapshot)
     assert payload.search_status == "in_progress"
     assert payload.search_status != "complete"
+
+
+def test_scheduler_branch_surfaces_ladder_diagnostics(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=12)],
+    )
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+    assert run.ladder_state is not None
+    run.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
+
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=None,
+        admission=None,
+        scheduler_run=run,
+        globally_paused=False,
+    )
+    payload = resolve_scores_export_payload(snapshot)
+    assert payload.diagnostics is not None
+    assert payload.diagnostics["turn"] == sample_turn.settings.turn
+    assert payload.diagnostics["solver"]["source"] == "scheduler_ladder"

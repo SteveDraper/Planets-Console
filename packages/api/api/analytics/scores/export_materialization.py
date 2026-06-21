@@ -188,6 +188,44 @@ def _search_status_from_scheduler(
     return "in_progress"
 
 
+def _diagnostics_from_scheduler_ladder(scheduler_run: RowRun) -> dict[str, object] | None:
+    """Build scores row inference diagnostics wire from live scheduler ladder state."""
+    ladder_state = scheduler_run.ladder_state
+    assert ladder_state is not None
+    if (
+        not ladder_state.last_diagnostics
+        and ladder_state.catalog is None
+        and not ladder_state.step_diagnostics
+        and not ladder_state.policy_steps_attempted
+    ):
+        return None
+
+    from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
+
+    session = scheduler_run.session
+    solver_diagnostics: dict[str, object] = {
+        "status": ladder_state.last_status,
+        **ladder_state.last_diagnostics,
+    }
+    extra: dict[str, object] = {
+        "solution_count": len(ladder_state.merged_solutions),
+    }
+    if ladder_state.policy_steps_attempted:
+        extra["policy_steps_attempted"] = list(ladder_state.policy_steps_attempted)
+    if ladder_state.step_diagnostics:
+        extra["policy_step_attempts"] = list(ladder_state.step_diagnostics)
+
+    return build_inference_solver_diagnostics(
+        turn=session.turn.settings.turn,
+        observation=session.observation,
+        problem=ladder_state.problem,
+        catalog=ladder_state.catalog,
+        turn_info=session.turn,
+        solver=solver_diagnostics,
+        extra=extra,
+    )
+
+
 def _solutions_from_scheduler_ladder(
     scheduler_run: RowRun,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
@@ -200,7 +238,7 @@ def _solutions_from_scheduler_ladder(
             observation=scheduler_run.session.observation,
             catalog=ladder_state.catalog,
         ),
-        None,
+        _diagnostics_from_scheduler_ladder(scheduler_run),
         len(merged),
     )
 
