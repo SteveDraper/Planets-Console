@@ -18,9 +18,11 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_materialization import (
     ScoresInferenceSnapshot,
+    is_scores_inference_ensure_satisfied,
     ranked_solutions_from_wire,
     resolve_scores_export_payload,
     resolve_scores_export_search_status,
+    scores_export_precedence_branch,
     solutions_diagnostics_from_wire_complete_event,
 )
 from api.analytics.scores.exports import EXPORT_CATALOG
@@ -320,3 +322,118 @@ def test_first_turn_materializes_complete_without_ensure(sample_turn):
     assert result.status == "ok"
     assert result.paths["$.meta.searchStatus"].value == "complete"
     assert result.paths["$.solutions[0]"].kind == "none"
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected_branch", "ensure_satisfied", "search_status"),
+    [
+        (
+            ScoresInferenceSnapshot(
+                persisted_row=PersistedInferenceRow(
+                    status=STATUS_EXACT,
+                    summary="exact",
+                    solution_count=0,
+                    is_complete=True,
+                    solutions=[],
+                ),
+                admission=None,
+                scheduler_run=None,
+                globally_paused=False,
+            ),
+            "priority_persisted",
+            True,
+            "complete",
+        ),
+        (
+            ScoresInferenceSnapshot(
+                persisted_row=None,
+                admission=CachedCompleteRowAdmission(
+                    event={
+                        "type": "complete",
+                        "status": STATUS_EXACT,
+                        "summary": "admission",
+                        "solutionCount": 0,
+                        "isComplete": True,
+                        "solutions": [],
+                    }
+                ),
+                scheduler_run=None,
+                globally_paused=False,
+            ),
+            "terminal_admission",
+            True,
+            "complete",
+        ),
+        (
+            ScoresInferenceSnapshot(
+                persisted_row=None,
+                admission=None,
+                scheduler_run=None,
+                globally_paused=False,
+            ),
+            "empty",
+            False,
+            "not_started",
+        ),
+        (
+            ScoresInferenceSnapshot(
+                persisted_row=PersistedInferenceRow(
+                    status=STATUS_PLAYER_NOT_FOUND,
+                    summary="player missing",
+                    solution_count=0,
+                    is_complete=True,
+                    solutions=[],
+                ),
+                admission=None,
+                scheduler_run=None,
+                globally_paused=False,
+            ),
+            "fallback_persisted",
+            True,
+            "complete",
+        ),
+    ],
+    ids=[
+        "priority_persisted",
+        "terminal_admission",
+        "empty",
+        "fallback_persisted",
+    ],
+)
+def test_ensure_satisfied_tracks_precedence_branch(
+    snapshot: ScoresInferenceSnapshot,
+    expected_branch: str,
+    ensure_satisfied: bool,
+    search_status: str,
+):
+    assert scores_export_precedence_branch(snapshot) == expected_branch
+    assert is_scores_inference_ensure_satisfied(snapshot) is ensure_satisfied
+    payload = resolve_scores_export_payload(snapshot)
+    assert payload.search_status == search_status
+    assert (payload.search_status == "complete") == (search_status == "complete")
+
+
+def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=12)],
+    )
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=None,
+        admission=None,
+        scheduler_run=run,
+        globally_paused=False,
+    )
+    assert scores_export_precedence_branch(snapshot) == "scheduler"
+    assert is_scores_inference_ensure_satisfied(snapshot) is True
+    payload = resolve_scores_export_payload(snapshot)
+    assert payload.search_status == "in_progress"
+    assert payload.search_status != "complete"

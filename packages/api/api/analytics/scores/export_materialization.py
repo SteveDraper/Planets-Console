@@ -34,6 +34,13 @@ from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
+ScoresExportPrecedenceBranch = Literal[
+    "priority_persisted",
+    "terminal_admission",
+    "scheduler",
+    "fallback_persisted",
+    "empty",
+]
 
 
 @dataclass(frozen=True)
@@ -220,6 +227,35 @@ def _solutions_from_admission_or_scheduler(
     )
 
 
+def scores_export_precedence_branch(
+    snapshot: ScoresInferenceSnapshot,
+) -> ScoresExportPrecedenceBranch:
+    """Classify which precedence branch resolves export state for a snapshot."""
+    persisted_row = snapshot.persisted_row
+    admission = snapshot.admission
+    scheduler_run = snapshot.scheduler_run
+
+    if persisted_row is not None:
+        if _persisted_row_priority_search_status(persisted_row.status) is not None:
+            return "priority_persisted"
+
+    if terminal_row_admission(admission) is not None:
+        return "terminal_admission"
+
+    if scheduler_run is not None:
+        return "scheduler"
+
+    if persisted_row is not None:
+        return "fallback_persisted"
+
+    return "empty"
+
+
+def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> bool:
+    """True when no further ensure work is needed for this snapshot."""
+    return scores_export_precedence_branch(snapshot) != "empty"
+
+
 def resolve_scores_export_search_status(snapshot: ScoresInferenceSnapshot) -> SearchStatus:
     """Resolve search status from the export precedence ladder."""
     return resolve_scores_export_payload(snapshot).search_status
@@ -227,16 +263,18 @@ def resolve_scores_export_search_status(snapshot: ScoresInferenceSnapshot) -> Se
 
 def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
     """Resolve search status and solution sources from one precedence ladder."""
+    branch = scores_export_precedence_branch(snapshot)
     persisted_row = snapshot.persisted_row
     admission = snapshot.admission
     scheduler_run = snapshot.scheduler_run
 
-    if persisted_row is not None:
+    if branch == "priority_persisted":
+        assert persisted_row is not None
         priority_status = _persisted_row_priority_search_status(persisted_row.status)
-        if priority_status is not None:
-            return _payload_from_persisted_row(priority_status, persisted_row)
+        assert priority_status is not None
+        return _payload_from_persisted_row(priority_status, persisted_row)
 
-    if terminal_row_admission(admission) is not None:
+    if branch == "terminal_admission":
         solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
             admission=admission,
             scheduler_run=scheduler_run,
@@ -249,7 +287,8 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
             solutions_held=solutions_held,
         )
 
-    if scheduler_run is not None:
+    if branch == "scheduler":
+        assert scheduler_run is not None
         solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
             admission=None,
             scheduler_run=scheduler_run,
@@ -265,7 +304,8 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
             solutions_held=solutions_held,
         )
 
-    if persisted_row is not None:
+    if branch == "fallback_persisted":
+        assert persisted_row is not None
         return _payload_from_persisted_row(
             _persisted_row_fallback_search_status(persisted_row.status),
             persisted_row,

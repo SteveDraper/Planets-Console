@@ -17,10 +17,10 @@ from api.analytics.scores.export_materialization import (
     gather_scores_inference_snapshot,
     hull_catalog_mask_branch,
     is_persistable_inference_status,
+    is_scores_inference_ensure_satisfied,
     resolve_scores_export_payload,
     resolve_scores_export_search_status,
     scores_inference_stream_scope,
-    terminal_row_admission,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
@@ -71,14 +71,6 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
 
     _services, snapshot = _scores_snapshot(ctx, scope)
     return resolve_scores_export_search_status(snapshot) == "complete"
-
-
-def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> bool:
-    if snapshot.persisted_row is not None:
-        return True
-    if terminal_row_admission(snapshot.admission) is not None:
-        return True
-    return snapshot.scheduler_run is not None
 
 
 def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
