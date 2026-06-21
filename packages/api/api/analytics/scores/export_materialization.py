@@ -154,11 +154,7 @@ def _search_status_from_scheduler(
     ladder_state = scheduler_run.ladder_state
     if ladder_state is not None and ladder_state.last_status == STATUS_STOPPED:
         return "stopped"
-    if (
-        ladder_state is not None
-        and ladder_state.time_limited
-        and not ladder_state.ladder_complete
-    ):
+    if ladder_state is not None and ladder_state.time_limited and not ladder_state.ladder_complete:
         return "in_progress"
     return "in_progress"
 
@@ -188,10 +184,7 @@ def _solutions_from_admission_or_scheduler(
 ) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
     if isinstance(admission, ImmediateRowAdmission) and admission.events:
         return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
-    if (
-        isinstance(admission, CachedCompleteRowAdmission)
-        and admission.event is not None
-    ):
+    if isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
         return solutions_diagnostics_from_wire_complete_event(admission.event)
     if scheduler_run is not None and scheduler_run.ladder_state is not None:
         return _solutions_from_scheduler_ladder(scheduler_run)
