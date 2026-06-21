@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.actions import ActionCatalog
@@ -22,8 +23,20 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
+
+
+@dataclass(frozen=True)
+class ScoresInferenceSnapshot:
+    """Gathered inference state for scores export persistence and materialization."""
+
+    persisted_row: PersistedInferenceRow | None
+    admission: RowStreamAdmission | None
+    scheduler_run: RowRun | None
+    globally_paused: bool
+    scope_matches_active_stream: bool
 
 _PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 _IMMEDIATE_COMPLETE_STATUSES = frozenset(

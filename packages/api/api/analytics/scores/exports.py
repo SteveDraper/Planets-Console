@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     controller_for_scope,
 )
 from api.analytics.scores.export_materialization import (
+    ScoresInferenceSnapshot,
     export_meta_branch,
     held_solution_count,
     hull_catalog_mask_branch,
@@ -123,14 +124,14 @@ def _scheduler_row_run(ctx: AnalyticQueryContext, scope: ExportScope):
     return _scheduler(ctx).row_run_for_player(_stream_scope(scope), scope.player_id)
 
 
-def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    if scope.player_id is None:
-        return False
-
+def _resolve_scores_inference_snapshot(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    turn,
+) -> ScoresInferenceSnapshot:
     persisted_row = _load_persisted_row(ctx, scope)
-    turn = ctx.load_turn(scope.turn)
     if turn is None:
-        return is_scores_export_inference_satisfied(
+        return ScoresInferenceSnapshot(
             persisted_row=persisted_row,
             admission=None,
             scheduler_run=None,
@@ -138,20 +139,29 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
             scope_matches_active_stream=False,
         )
 
-    admission = _row_admission(ctx, scope, turn)
-    scheduler_run = _scheduler_row_run(ctx, scope)
     stream_scope = _stream_scope(scope)
     scheduler = _scheduler(ctx)
     pause_status = scheduler.global_pause_status(stream_scope)
-    globally_paused = bool(pause_status.get("paused"))
-    scope_matches_active_stream = scheduler.active_scope_matches(stream_scope)
-
-    return is_scores_export_inference_satisfied(
+    return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
-        admission=admission,
-        scheduler_run=scheduler_run,
-        globally_paused=globally_paused,
-        scope_matches_active_stream=scope_matches_active_stream,
+        admission=_row_admission(ctx, scope, turn),
+        scheduler_run=_scheduler_row_run(ctx, scope),
+        globally_paused=bool(pause_status.get("paused")),
+        scope_matches_active_stream=scheduler.active_scope_matches(stream_scope),
+    )
+
+
+def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    if scope.player_id is None:
+        return False
+
+    snapshot = _resolve_scores_inference_snapshot(ctx, scope, ctx.load_turn(scope.turn))
+    return is_scores_export_inference_satisfied(
+        persisted_row=snapshot.persisted_row,
+        admission=snapshot.admission,
+        scheduler_run=snapshot.scheduler_run,
+        globally_paused=snapshot.globally_paused,
+        scope_matches_active_stream=snapshot.scope_matches_active_stream,
     )
 
 
@@ -257,51 +267,47 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
             "solutions": [],
         }
 
-    persisted_row = _load_persisted_row(ctx, scope)
-    admission = _row_admission(ctx, scope, turn)
-    scheduler_run = _scheduler_row_run(ctx, scope)
-    stream_scope = _stream_scope(scope)
-    scheduler = _scheduler(ctx)
-    pause_status = scheduler.global_pause_status(stream_scope)
-    globally_paused = bool(pause_status.get("paused"))
-    scope_matches_active_stream = scheduler.active_scope_matches(stream_scope)
+    snapshot = _resolve_scores_inference_snapshot(ctx, scope, turn)
 
     search_status = resolve_search_status(
-        persisted_row=persisted_row,
-        admission=admission,
-        scheduler_run=scheduler_run,
-        globally_paused=globally_paused,
-        scope_matches_active_stream=scope_matches_active_stream,
+        persisted_row=snapshot.persisted_row,
+        admission=snapshot.admission,
+        scheduler_run=snapshot.scheduler_run,
+        globally_paused=snapshot.globally_paused,
+        scope_matches_active_stream=snapshot.scope_matches_active_stream,
     )
 
     solutions: list[dict[str, object]] = []
     diagnostics: dict[str, object] | None = None
 
-    if persisted_row is not None:
-        solutions = ranked_solutions_from_wire(persisted_row.solutions)
-        diagnostics = persisted_row.diagnostics
-        solutions_held = persisted_row.solution_count
-    elif isinstance(admission, ImmediateRowAdmission) and admission.events:
+    if snapshot.persisted_row is not None:
+        solutions = ranked_solutions_from_wire(snapshot.persisted_row.solutions)
+        diagnostics = snapshot.persisted_row.diagnostics
+        solutions_held = snapshot.persisted_row.solution_count
+    elif isinstance(snapshot.admission, ImmediateRowAdmission) and snapshot.admission.events:
         solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
-            admission.events[-1]
+            snapshot.admission.events[-1]
         )
-    elif isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
+    elif (
+        isinstance(snapshot.admission, CachedCompleteRowAdmission)
+        and snapshot.admission.event is not None
+    ):
         solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
-            admission.event
+            snapshot.admission.event
         )
-    elif scheduler_run is not None and scheduler_run.ladder_state is not None:
-        ladder_state = scheduler_run.ladder_state
+    elif snapshot.scheduler_run is not None and snapshot.scheduler_run.ladder_state is not None:
+        ladder_state = snapshot.scheduler_run.ladder_state
         merged = ladder_state.merged_solutions
         solutions = solutions_from_domain(
             merged,
-            observation=scheduler_run.session.observation,
+            observation=snapshot.scheduler_run.session.observation,
             catalog=ladder_state.catalog,
         )
         solutions_held = len(merged)
     else:
         solutions_held = held_solution_count(
-            persisted_row=persisted_row,
-            scheduler_run=scheduler_run,
+            persisted_row=snapshot.persisted_row,
+            scheduler_run=snapshot.scheduler_run,
         )
 
     tree: dict[str, Any] = {
