@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
@@ -13,8 +15,6 @@ from api.analytics.military_score_inference.inference_api_payload import (
     serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
-from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_stream_rows import (
     CachedCompleteRowAdmission,
     ImmediateRowAdmission,
@@ -22,7 +22,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     resolve_row_stream_admission,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.scores.export_services import ResolvedScoresServices
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
@@ -31,6 +30,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
+from api.analytics.scores.export_services import ResolvedScoresServices
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
@@ -220,19 +220,21 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
         if priority_status is not None:
             return _payload_from_persisted_row(priority_status, persisted_row)
 
-    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)) or scheduler_run is not None:
+    admission_is_complete = isinstance(
+        admission,
+        (ImmediateRowAdmission, CachedCompleteRowAdmission),
+    )
+    if admission_is_complete or scheduler_run is not None:
         search_status = (
             "complete"
-            if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission))
+            if admission_is_complete
             else _search_status_from_scheduler(
                 scheduler_run,
                 globally_paused=snapshot.globally_paused,
             )
         )
         solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
-            admission=admission
-            if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission))
-            else None,
+            admission=admission if admission_is_complete else None,
             scheduler_run=scheduler_run,
             persisted_row=persisted_row,
         )

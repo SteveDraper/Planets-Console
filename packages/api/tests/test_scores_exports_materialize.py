@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import (
