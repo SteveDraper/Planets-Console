@@ -160,7 +160,7 @@ def inference_api_payload(
                 for solution in solutions
             ]
             if observation is not None and catalog is not None
-            else [_serialize_solution_without_arithmetic(solution) for solution in solutions]
+            else [serialize_solution_without_arithmetic(solution) for solution in solutions]
         ),
         "diagnostics": diagnostics,
     }
@@ -223,7 +223,7 @@ def _serialize_solution_with_arithmetic(
     return payload
 
 
-def _serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[str, object]:
+def serialize_solution_without_arithmetic(solution: InferenceSolution) -> dict[str, object]:
     return _serialize_solution_core(solution)
 
 

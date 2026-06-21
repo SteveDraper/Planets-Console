@@ -10,7 +10,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     STATUS_PLAYER_NOT_FOUND,
     STATUS_SOLVER_ERROR,
-    _serialize_solution_without_arithmetic,
+    serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
 from api.analytics.export_context import AnalyticQueryContext
@@ -102,7 +102,7 @@ def solutions_from_domain(
     ranked = sorted(solutions, key=lambda solution: solution.objective_value, reverse=True)
     if observation is not None and catalog is not None:
         return serialize_solutions_with_arithmetic(observation, catalog, ranked)
-    return [_serialize_solution_without_arithmetic(solution) for solution in ranked]
+    return [serialize_solution_without_arithmetic(solution) for solution in ranked]
 
 
 def export_meta_branch(
