@@ -295,8 +295,32 @@ def is_scores_inference_ensure_satisfied(snapshot: ScoresInferenceSnapshot) -> b
 
 
 def resolve_scores_export_search_status(snapshot: ScoresInferenceSnapshot) -> SearchStatus:
-    """Resolve search status from the export precedence ladder."""
-    return resolve_scores_export_payload(snapshot).search_status
+    """Resolve search status from the export precedence ladder without materializing solutions."""
+    branch = scores_export_precedence_branch(snapshot)
+    persisted_row = snapshot.persisted_row
+    scheduler_run = snapshot.scheduler_run
+
+    if branch == "priority_persisted":
+        assert persisted_row is not None
+        priority_status = _persisted_row_priority_search_status(persisted_row.status)
+        assert priority_status is not None
+        return priority_status
+
+    if branch == "terminal_admission":
+        return "complete"
+
+    if branch == "scheduler":
+        assert scheduler_run is not None
+        return _search_status_from_scheduler(
+            scheduler_run,
+            globally_paused=snapshot.globally_paused,
+        )
+
+    if branch == "fallback_persisted":
+        assert persisted_row is not None
+        return _persisted_row_fallback_search_status(persisted_row.status)
+
+    return "not_started"
 
 
 def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:

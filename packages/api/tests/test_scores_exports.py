@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_api_payload import (
@@ -208,6 +210,32 @@ def test_resolve_search_status_matches_payload_status(sample_turn):
         == resolve_scores_export_payload(snapshot).search_status
     )
     assert resolve_scores_export_search_status(snapshot) == "in_progress"
+
+
+def test_resolve_search_status_does_not_materialize_solutions(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=50)],
+    )
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=None,
+        admission=None,
+        scheduler_run=run,
+        globally_paused=False,
+    )
+    with patch(
+        "api.analytics.scores.export_materialization._solutions_from_admission_or_scheduler",
+        side_effect=AssertionError("status-only path must not materialize solutions"),
+    ):
+        assert resolve_scores_export_search_status(snapshot) == "in_progress"
 
 
 def test_cached_complete_admission_resolves_payload_from_event():
