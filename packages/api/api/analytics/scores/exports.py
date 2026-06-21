@@ -25,7 +25,7 @@ from api.analytics.scores.export_materialization import (
     scores_inference_stream_scope,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
-from api.analytics.scores.export_services import ResolvedScoresServices, resolve_scores_services
+from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
@@ -84,7 +84,7 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
 
 def _persist_prior_turn_inference_if_persistable(
     ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
+    services: ScoresExportContext,
     scope: ExportScope,
     turn,
 ) -> None:
@@ -117,7 +117,7 @@ def _persist_prior_turn_inference_if_persistable(
 
 def _ensure_current_turn_scheduler(
     ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
+    services: ScoresExportContext,
     scope: ExportScope,
     turn,
 ) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext, export_service_for
@@ -18,6 +18,12 @@ if TYPE_CHECKING:
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
+def _default_hull_catalog_mask_resolver(
+    turn: TurnInfo, player_id: int
+) -> ResolvedHullCatalogMask | None:
+    return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=None)
+
+
 @dataclass(frozen=True)
 class ScoresExportContext:
     """Inference services used by scores export ensure and materialization."""
@@ -29,32 +35,18 @@ class ScoresExportContext:
     )
 
 
-@dataclass(frozen=True)
-class ResolvedScoresServices:
-    """Scores export services with scheduler and mask fallbacks applied."""
-
-    persistence: InferenceRowPersistenceService | None
-    scheduler: InferenceRowScheduler
-    _resolve_hull_catalog_mask: Callable[[TurnInfo, int], ResolvedHullCatalogMask | None] | None
-
-    def resolve_hull_catalog_mask(
-        self, turn: TurnInfo, player_id: int
-    ) -> ResolvedHullCatalogMask | None:
-        if self._resolve_hull_catalog_mask is not None:
-            return self._resolve_hull_catalog_mask(turn, player_id)
-        return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=None)
-
-
-def resolve_scores_services(ctx: AnalyticQueryContext) -> ResolvedScoresServices:
+def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:
     services = export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
     if services is None:
-        return ResolvedScoresServices(
+        return ScoresExportContext(
             persistence=None,
             scheduler=get_inference_row_scheduler(),
-            _resolve_hull_catalog_mask=None,
+            resolve_hull_catalog_mask=_default_hull_catalog_mask_resolver,
         )
-    return ResolvedScoresServices(
-        persistence=services.persistence,
+    return replace(
+        services,
         scheduler=services.scheduler or get_inference_row_scheduler(),
-        _resolve_hull_catalog_mask=services.resolve_hull_catalog_mask,
+        resolve_hull_catalog_mask=(
+            services.resolve_hull_catalog_mask or _default_hull_catalog_mask_resolver
+        ),
     )

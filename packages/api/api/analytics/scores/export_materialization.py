@@ -30,7 +30,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
-from api.analytics.scores.export_services import ResolvedScoresServices
+from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
@@ -307,7 +307,7 @@ def scores_inference_stream_scope(scope: ExportScope) -> InferenceStreamScope:
 
 
 def _load_persisted_row(
-    services: ResolvedScoresServices,
+    services: ScoresExportContext,
     scope: ExportScope,
 ) -> PersistedInferenceRow | None:
     if services.persistence is None or scope.player_id is None:
@@ -322,7 +322,7 @@ def _load_persisted_row(
 
 def _row_admission(
     ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
+    services: ScoresExportContext,
     scope: ExportScope,
     turn,
 ):
@@ -339,7 +339,7 @@ def _row_admission(
     )
 
 
-def _scheduler_row_run(services: ResolvedScoresServices, scope: ExportScope):
+def _scheduler_row_run(services: ScoresExportContext, scope: ExportScope):
     if scope.player_id is None:
         return None
     stream_scope = scores_inference_stream_scope(scope)
@@ -348,7 +348,7 @@ def _scheduler_row_run(services: ResolvedScoresServices, scope: ExportScope):
 
 def gather_scores_inference_snapshot(
     ctx: AnalyticQueryContext,
-    services: ResolvedScoresServices,
+    services: ScoresExportContext,
     scope: ExportScope,
     turn,
 ) -> ScoresInferenceSnapshot:
