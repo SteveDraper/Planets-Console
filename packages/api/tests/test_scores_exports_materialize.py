@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
-from api.errors import ValidationError
 from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -15,6 +14,7 @@ from api.analytics.military_score_inference.models import InferenceSolutionActio
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.exports import EXPORT_CATALOG
+from api.errors import ValidationError
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.scores_exports_helpers import (
