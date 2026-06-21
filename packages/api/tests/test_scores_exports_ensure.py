@@ -115,7 +115,7 @@ def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, per
         "diagnostics": {"turn": 110},
     }
     with patch(
-        "api.analytics.scores.get_scores_row_inference",
+        "api.analytics.scores.exports.get_scores_row_inference",
         return_value=stopped_inference,
     ):
         EXPORT_CATALOG.ensure_export(ctx, scope)

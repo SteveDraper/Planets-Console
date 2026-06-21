@@ -4,12 +4,7 @@ from collections.abc import Callable, Iterator
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
-from api.analytics.military_score_inference.analytic import (
-    infer_military_score_build,
-    run_inference_with_artifacts,
-)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
@@ -17,6 +12,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.exports import EXPORT_CATALOG
+from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -73,37 +69,6 @@ def get_scores_table(
 ) -> dict:
     """Convenience entry for tests and direct callers."""
     return invoke_analytic_compute(compute_scores_table, turn, options)
-
-
-def get_scores_row_inference(
-    turn: TurnInfo,
-    player_id: int,
-    *,
-    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
-) -> dict[str, object]:
-    """Run military score build inference for one scoreboard row."""
-    score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    if score is None:
-        return {
-            "playerId": player_id,
-            "status": STATUS_PLAYER_NOT_FOUND,
-            "summary": f"No score row for player {player_id}",
-            "solutionCount": 0,
-            "isComplete": True,
-            "solutions": [],
-            "diagnostics": {"playerId": player_id, "turn": turn.settings.turn},
-        }
-    if load_scoreboard_turn is None:
-        inference = infer_military_score_build(score, turn)
-    else:
-        inference, _, _ = run_inference_with_artifacts(
-            score,
-            turn,
-            load_scoreboard_turn=load_scoreboard_turn,
-            resolved_mask=resolved_mask,
-        )
-    return {"playerId": player_id, **inference}
 
 
 def iter_scores_table_inference_stream(

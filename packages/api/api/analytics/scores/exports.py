@@ -15,6 +15,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
+from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores.export_materialization import (
     ScoresInferenceSnapshot,
     export_meta_branch,
@@ -103,8 +104,6 @@ def _persist_prior_turn_inference_if_persistable(
     scope: ExportScope,
     turn,
 ) -> None:
-    from api.analytics.scores import get_scores_row_inference
-
     player_id = scope.player_id
     assert player_id is not None
     resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
