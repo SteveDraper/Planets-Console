@@ -105,7 +105,7 @@ EXPORT_VALUE_SCHEMA = {
 }
 
 PATH_PREFIX_SCOPE_RULES = (
-    # e.g. PathPrefixScopeRule(prefix="$.solution", requires=("player_id",)),
+    # e.g. PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
 )
 
 ENSURE_DEPENDENCIES = (
@@ -150,7 +150,7 @@ Import-time validation (`exports/registry.py`):
 Guidelines:
 
 - **One schema tree** per analytic; scope is on the query, not separate root shapes.
-- **JSONPath** selectors (`$.solution.ships[0]`); document array ordering in the catalog.
+- **JSONPath** selectors (`$.solutions[0]`); document array ordering in the catalog.
 - **`ensure_dependencies`:** declared by the **provider** (upstream requirements). Each target must be a registered analytic with a **non-empty** export catalog. Do not reference analytics that are not yet in `TURN_ANALYTIC_CATALOG`, and do not point at `empty_export_catalog_for(...)` placeholders -- both fail import-time validation. When the upstream analytic ships, wire a real `AnalyticExportCatalog` on its registration first, then add the dependency edge.
 - **`ctx.query(...)`** runs ensure then materialize (not read-only). Large missing-step probes use BFF **export ensure orchestration** (background job), not blocking HTTP.
 - **Concept-shim:** delegate to `api/concepts/` inside `materialize_export_tree` (Connections pattern).

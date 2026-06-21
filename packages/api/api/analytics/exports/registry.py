@@ -5,6 +5,7 @@ from __future__ import annotations
 from api.analytics.catalog import TURN_ANALYTIC_CATALOG
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.ensure_validation import validate_ensure_dependency_targets
+from api.analytics.exports.schema_validation import validate_export_value_schema
 from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
 
@@ -31,6 +32,13 @@ def validate_export_catalogs(
             f"catalog without export={missing!r}, export without catalog={extra!r}"
         )
     validate_ensure_dependency_targets(by_id, role=role)
+    for export_catalog in catalogs:
+        if export_catalog.is_empty or export_catalog.value_schema is None:
+            continue
+        validate_export_value_schema(
+            export_catalog.value_schema,
+            analytic_id=export_catalog.analytic_id,
+        )
     return by_id
 
 
@@ -51,4 +59,12 @@ def merge_export_registry(
     for export_catalog in extra_catalogs:
         merged[export_catalog.analytic_id] = export_catalog
     validate_ensure_dependency_targets(merged, role="merged")
+
+    for export_catalog in extra_catalogs:
+        if export_catalog.is_empty or export_catalog.value_schema is None:
+            continue
+        validate_export_value_schema(
+            export_catalog.value_schema,
+            analytic_id=export_catalog.analytic_id,
+        )
     return merged

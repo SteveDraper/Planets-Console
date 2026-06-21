@@ -92,6 +92,27 @@ class InferenceRowScheduler:
         with self._condition:
             return self._active_table_stream_token == stream_token
 
+    def active_scope_matches(self, scope: InferenceStreamScope) -> bool:
+        with self._condition:
+            return self._active_scope == scope
+
+    def row_run_for_player(
+        self,
+        scope: InferenceStreamScope,
+        player_id: int,
+    ) -> RowRun | None:
+        with self._condition:
+            for run in self._runs.values():
+                session = run.session
+                if (
+                    session.game_id == scope.game_id
+                    and session.perspective == scope.perspective
+                    and session.turn_number == scope.turn_number
+                    and session.player_id == player_id
+                ):
+                    return run
+            return None
+
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
         scope_matches = self._active_scope == scope
         return {

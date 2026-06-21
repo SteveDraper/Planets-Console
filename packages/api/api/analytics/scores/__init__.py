@@ -4,7 +4,6 @@ from collections.abc import Callable, Iterator
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
-from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -16,6 +15,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.scores.exports import EXPORT_CATALOG
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -134,5 +134,5 @@ def iter_scores_table_inference_stream(
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_scores_table,
-    export_catalog=empty_export_catalog_for(ANALYTIC_ID),
+    export_catalog=EXPORT_CATALOG,
 )

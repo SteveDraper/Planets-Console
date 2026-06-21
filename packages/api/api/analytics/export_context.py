@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
@@ -26,7 +26,23 @@ from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+    from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
+
+
+@dataclass(frozen=True)
+class ScoresExportContext:
+    """Inference services used by scores export ensure and materialization."""
+
+    persistence: InferenceRowPersistenceService | None = None
+    scheduler: InferenceRowScheduler | None = None
+    resolve_hull_catalog_mask: Callable[[TurnInfo, int], ResolvedHullCatalogMask | None] | None = (
+        None
+    )
 
 
 @dataclass(frozen=True)
@@ -57,6 +73,7 @@ class AnalyticQueryContext:
     load_turn: Callable[[int], TurnInfo | None]
     export_registry: Mapping[str, AnalyticExportCatalog]
     enforce_inline_ensure_threshold: bool = True
+    scores_export: ScoresExportContext | None = None
     # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
     # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
     # ctx.options and are not fingerprinted here (#108 skeleton); connections
@@ -345,6 +362,7 @@ def make_analytic_query_context(
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
     enforce_inline_ensure_threshold: bool = True,
+    scores_export: ScoresExportContext | None = None,
 ) -> AnalyticQueryContext:
     """Build query context with ambient scope from one loaded turn."""
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -368,4 +386,5 @@ def make_analytic_query_context(
         load_turn=resolved_load_turn,
         export_registry=export_registry or EXPORT_REGISTRY,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
+        scores_export=scores_export,
     )

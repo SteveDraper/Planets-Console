@@ -15,11 +15,16 @@ DEFAULT_PATH_PREFIX_SCOPE_RULES = (
 
 PAYLOAD_LABEL_SCHEMA = {
     "type": "object",
+    "description": "Minimal export tree for export-framework fixture tests.",
     "properties": {
         "payload": {
             "type": "object",
+            "description": "Fixture payload branch.",
             "properties": {
-                "label": {"type": "string"},
+                "label": {
+                    "type": "string",
+                    "description": "Scope-identifying label for the materialized tree.",
+                },
             },
         },
     },
@@ -27,12 +32,35 @@ PAYLOAD_LABEL_SCHEMA = {
 
 PAYLOAD_LABEL_ITEMS_SCHEMA = {
     "type": "object",
+    "description": "Fixture export tree with a labeled payload and item list.",
     "properties": {
         "payload": {
             "type": "object",
+            "description": "Fixture payload branch.",
             "properties": {
-                "label": {"type": "string"},
-                "items": {"type": "array"},
+                "label": {
+                    "type": "string",
+                    "description": "Scope-identifying label for the materialized tree.",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Optional fixture item list.",
+                    "items": {
+                        "type": "object",
+                        "description": "One opaque fixture item.",
+                        "additionalProperties": True,
+                    },
+                },
+            },
+        },
+        "meta": {
+            "type": "object",
+            "description": "Optional fixture lifecycle metadata.",
+            "properties": {
+                "searchStatus": {
+                    "type": "string",
+                    "description": "Fixture search status string.",
+                },
             },
         },
     },
@@ -40,17 +68,36 @@ PAYLOAD_LABEL_ITEMS_SCHEMA = {
 
 ALPHA_EXPORT_VALUE_SCHEMA = {
     "type": "object",
+    "description": "Export-test-alpha fixture tree (label + optional items + meta).",
     "properties": {
         "payload": {
             "type": "object",
+            "description": "Fixture payload branch.",
             "properties": {
-                "label": {"type": "string"},
-                "items": {"type": "array"},
+                "label": {
+                    "type": "string",
+                    "description": "Scope-identifying label for the materialized tree.",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Optional fixture item list.",
+                    "items": {
+                        "type": "object",
+                        "description": "One opaque fixture item.",
+                        "additionalProperties": True,
+                    },
+                },
             },
         },
         "meta": {
             "type": "object",
-            "properties": {"searchStatus": {"type": "string"}},
+            "description": "Optional fixture lifecycle metadata.",
+            "properties": {
+                "searchStatus": {
+                    "type": "string",
+                    "description": "Fixture search status string.",
+                },
+            },
         },
     },
 }
