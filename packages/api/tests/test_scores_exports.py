@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+import pytest
+
 from api.analytics.export_context import make_analytic_query_context
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    reset_inference_row_scheduler_for_tests,
+)
+from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_INVALID_PROBLEM,
+    STATUS_PLAYER_NOT_FOUND,
+    STATUS_SOLVER_ERROR,
+)
 from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
@@ -18,9 +29,12 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from tests.scores_exports_helpers import (
     first_player_id,
     first_turn_from,
+    inference_solution,
     put_persisted_row,
     query_context,
+    schedule_row_with_ladder,
     ship_build_wire,
+    stream_scope_for_turn,
 )
 
 
@@ -107,6 +121,65 @@ def test_solutions_diagnostics_from_wire_complete_event():
     assert solutions_held == 1
     assert solutions[0]["objectiveValue"] == 55
     assert diagnostics == {"note": "cached"}
+
+
+@pytest.mark.parametrize(
+    "persisted_status",
+    [
+        STATUS_PLAYER_NOT_FOUND,
+        STATUS_INVALID_PROBLEM,
+        STATUS_SOLVER_ERROR,
+    ],
+)
+def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_state(
+    persisted_status: str,
+):
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=PersistedInferenceRow(
+            status=persisted_status,
+            summary=persisted_status,
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        admission=None,
+        scheduler_run=None,
+        globally_paused=False,
+    )
+    payload = resolve_scores_export_payload(snapshot)
+    assert payload.search_status == "complete"
+    assert payload.solutions == []
+    assert payload.solutions_held == 0
+
+
+def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=12)],
+    )
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=PersistedInferenceRow(
+            status=STATUS_PLAYER_NOT_FOUND,
+            summary="player missing from scoreboard",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        admission=None,
+        scheduler_run=run,
+        globally_paused=False,
+    )
+    payload = resolve_scores_export_payload(snapshot)
+    assert payload.search_status == "in_progress"
+    assert payload.solutions_held == 1
 
 
 def test_cached_complete_admission_resolves_payload_from_event():

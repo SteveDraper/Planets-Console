@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 )
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.models import InferenceSolutionAction
+from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.exports import EXPORT_CATALOG
@@ -28,6 +29,42 @@ from tests.scores_exports_helpers import (
     ship_build_wire,
     stream_scope_for_turn,
 )
+
+
+def test_fallback_persisted_terminal_status_materializes_complete(sample_turn, persistence):
+    player_id = first_player_id(sample_turn)
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_PLAYER_NOT_FOUND,
+            summary="player missing from scoreboard",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    ctx = query_context(sample_turn, persistence=persistence)
+    tree, _scope = materialize_scores_tree(ctx, player_id)
+    assert tree["meta"]["searchStatus"] == "complete"
+    assert tree["solutions"] == []
+
+
+def test_turn_not_stored_materializes_not_started(sample_turn):
+    player_id = first_player_id(sample_turn)
+
+    def load_turn(_turn_number: int):
+        return None
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+    )
+    tree, _scope = materialize_scores_tree(ctx, player_id)
+    assert tree["meta"]["searchStatus"] == "not_started"
+    assert tree["solutions"] == []
 
 
 def test_not_started_when_no_persistence_or_scheduler(sample_turn):
