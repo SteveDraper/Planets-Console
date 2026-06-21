@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from unittest.mock import patch
 
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
@@ -11,7 +12,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
-from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
@@ -67,6 +68,59 @@ def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
     row = persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id)
     assert row is not None
     assert row.status in {STATUS_EXACT, "no_exact_solution"}
+
+
+def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, persistence):
+    player_id = first_player_id(sample_turn)
+    prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=110),
+        game=replace(sample_turn.game, turn=110),
+    )
+    prior_prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=109),
+        game=replace(sample_turn.game, turn=109),
+    )
+    stored_turns = {
+        109: prior_prior_turn,
+        110: prior_turn,
+        sample_turn.settings.turn: sample_turn,
+    }
+
+    def load_turn(turn_number: int):
+        return stored_turns.get(turn_number)
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=110,
+        player_id=player_id,
+    )
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+
+    stopped_inference = {
+        "playerId": player_id,
+        "status": STATUS_STOPPED,
+        "summary": "stopped",
+        "solutionCount": 1,
+        "isComplete": True,
+        "solutions": [],
+        "diagnostics": {"turn": 110},
+    }
+    with patch(
+        "api.analytics.scores.get_scores_row_inference",
+        return_value=stopped_inference,
+    ):
+        EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
 
 
 def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):

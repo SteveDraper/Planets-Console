@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -69,6 +71,21 @@ def test_turn_not_stored_query_unavailable(sample_turn):
     )
     assert result.status == "unavailable"
     assert result.reason == "turn_not_stored"
+
+
+def test_turn_not_stored_materialize_asserts(sample_turn):
+    player_id = first_player_id(sample_turn)
+
+    def load_turn(_turn_number: int):
+        return None
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+    )
+    with pytest.raises(AssertionError):
+        materialize_scores_tree(ctx, player_id)
 
 
 def test_not_started_when_no_persistence_or_scheduler(sample_turn):
