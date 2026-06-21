@@ -224,14 +224,7 @@ def _ensure_current_turn_scheduler(
 def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope) -> dict[str, Any]:
     services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
-    if turn is None:
-        return {
-            "meta": export_meta_branch(
-                search_status="not_started",
-                host_turn=scope.turn,
-            ),
-            "solutions": [],
-        }
+    assert turn is not None
 
     snapshot = _resolve_scores_inference_snapshot(ctx, services, scope, turn)
     payload = resolve_scores_export_payload(snapshot)

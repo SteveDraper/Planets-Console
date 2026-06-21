@@ -51,7 +51,7 @@ def test_fallback_persisted_terminal_status_materializes_complete(sample_turn, p
     assert tree["solutions"] == []
 
 
-def test_turn_not_stored_materializes_not_started(sample_turn):
+def test_turn_not_stored_query_unavailable(sample_turn):
     player_id = first_player_id(sample_turn)
 
     def load_turn(_turn_number: int):
@@ -62,9 +62,13 @@ def test_turn_not_stored_materializes_not_started(sample_turn):
         TurnAnalyticsOptions(),
         load_turn=load_turn,
     )
-    tree, _scope = materialize_scores_tree(ctx, player_id)
-    assert tree["meta"]["searchStatus"] == "not_started"
-    assert tree["solutions"] == []
+    result = ctx.query(
+        "scores",
+        ["$.meta.searchStatus"],
+        {"player_id": player_id},
+    )
+    assert result.status == "unavailable"
+    assert result.reason == "turn_not_stored"
 
 
 def test_not_started_when_no_persistence_or_scheduler(sample_turn):
