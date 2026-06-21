@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.analytic import (
     run_inference_with_artifacts,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
@@ -86,7 +87,7 @@ def get_scores_row_inference(
     if score is None:
         return {
             "playerId": player_id,
-            "status": "player_not_found",
+            "status": STATUS_PLAYER_NOT_FOUND,
             "summary": f"No score row for player {player_id}",
             "solutionCount": 0,
             "isComplete": True,

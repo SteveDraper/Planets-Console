@@ -8,6 +8,8 @@ from typing import Literal
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
+    STATUS_PLAYER_NOT_FOUND,
+    STATUS_SOLVER_ERROR,
     _serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
@@ -20,6 +22,7 @@ from api.analytics.military_score_inference.models import InferenceObservation, 
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
+    STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
 )
@@ -52,9 +55,9 @@ _PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 _FALLBACK_COMPLETE_PERSISTED_STATUSES = frozenset(
     {
         STATUS_NO_PRIOR_TURN,
-        "player_not_found",
-        "invalid_problem",
-        "solver_error",
+        STATUS_PLAYER_NOT_FOUND,
+        STATUS_INVALID_PROBLEM,
+        STATUS_SOLVER_ERROR,
     }
 )
 

@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.solver import (
 from api.models.game import TurnInfo
 
 STATUS_NO_PRIOR_TURN = "no_prior_turn"
+STATUS_PLAYER_NOT_FOUND = "player_not_found"
 STATUS_SOLVER_ERROR = "solver_error"
 
 
