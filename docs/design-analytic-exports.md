@@ -331,6 +331,8 @@ envelope; **`probe`** uses the same reason strings where applicable.
 | **`stopped`** | Warn; partial or empty; offer refresh |
 | **`complete`** | Trust path results, including **`none`** |
 
+When materializing from the live inference scheduler, ladder state with **`time_limited=True`** maps to export **`stopped`**, not **`in_progress`**. The solver may still hold partial top-K solutions, but that outcome is terminal for export lifecycle: consumers should warn and offer refresh rather than wait for further progress on the same run.
+
 Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
