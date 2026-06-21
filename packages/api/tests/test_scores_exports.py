@@ -476,6 +476,8 @@ def test_stopped_when_ladder_last_status_stopped(sample_turn):
     tree = EXPORT_CATALOG.materialize_export_tree(ctx, scope)
     assert tree["meta"]["searchStatus"] == "stopped"
     assert tree["meta"]["solutionsHeld"] == 1
+    assert EXPORT_CATALOG.is_persisted is not None
+    assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
 
 
 def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
