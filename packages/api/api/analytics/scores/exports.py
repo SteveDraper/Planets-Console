@@ -21,14 +21,10 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.scores.export_materialization import (
     ScoresInferenceSnapshot,
     export_meta_branch,
-    held_solution_count,
     hull_catalog_mask_branch,
     is_persistable_inference_status,
     is_scores_export_inference_satisfied,
-    ranked_solutions_from_wire,
-    resolve_search_status,
-    solutions_diagnostics_from_wire_complete_event,
-    solutions_from_domain,
+    resolve_scores_export_payload,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores_assets import ANALYTIC_ID
@@ -268,58 +264,18 @@ def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope
         }
 
     snapshot = _resolve_scores_inference_snapshot(ctx, scope, turn)
-
-    search_status = resolve_search_status(
-        persisted_row=snapshot.persisted_row,
-        admission=snapshot.admission,
-        scheduler_run=snapshot.scheduler_run,
-        globally_paused=snapshot.globally_paused,
-        scope_matches_active_stream=snapshot.scope_matches_active_stream,
-    )
-
-    solutions: list[dict[str, object]] = []
-    diagnostics: dict[str, object] | None = None
-
-    if snapshot.persisted_row is not None:
-        solutions = ranked_solutions_from_wire(snapshot.persisted_row.solutions)
-        diagnostics = snapshot.persisted_row.diagnostics
-        solutions_held = snapshot.persisted_row.solution_count
-    elif isinstance(snapshot.admission, ImmediateRowAdmission) and snapshot.admission.events:
-        solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
-            snapshot.admission.events[-1]
-        )
-    elif (
-        isinstance(snapshot.admission, CachedCompleteRowAdmission)
-        and snapshot.admission.event is not None
-    ):
-        solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
-            snapshot.admission.event
-        )
-    elif snapshot.scheduler_run is not None and snapshot.scheduler_run.ladder_state is not None:
-        ladder_state = snapshot.scheduler_run.ladder_state
-        merged = ladder_state.merged_solutions
-        solutions = solutions_from_domain(
-            merged,
-            observation=snapshot.scheduler_run.session.observation,
-            catalog=ladder_state.catalog,
-        )
-        solutions_held = len(merged)
-    else:
-        solutions_held = held_solution_count(
-            persisted_row=snapshot.persisted_row,
-            scheduler_run=snapshot.scheduler_run,
-        )
+    payload = resolve_scores_export_payload(snapshot)
 
     tree: dict[str, Any] = {
         "meta": export_meta_branch(
-            search_status=search_status,
+            search_status=payload.search_status,
             host_turn=scope.turn,
-            solutions_held=solutions_held,
+            solutions_held=payload.solutions_held,
         ),
-        "solutions": solutions,
+        "solutions": payload.solutions,
     }
-    if diagnostics is not None:
-        tree["diagnostics"] = diagnostics
+    if payload.diagnostics is not None:
+        tree["diagnostics"] = payload.diagnostics
 
     if scope.player_id is not None:
         resolved_mask = _resolve_mask(ctx, turn, scope.player_id)

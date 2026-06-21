@@ -38,6 +38,17 @@ class ScoresInferenceSnapshot:
     globally_paused: bool
     scope_matches_active_stream: bool
 
+
+@dataclass(frozen=True)
+class ScoresExportPayload:
+    """Resolved export status and solution payload for a scores inference snapshot."""
+
+    search_status: SearchStatus
+    solutions: list[dict[str, object]]
+    diagnostics: dict[str, object] | None
+    solutions_held: int
+
+
 _PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 _IMMEDIATE_COMPLETE_STATUSES = frozenset(
     {
@@ -108,6 +119,139 @@ def hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dic
     return {"enabledHullIds": sorted(enabled_hull_ids)}
 
 
+def _payload_from_persisted_row(
+    search_status: SearchStatus,
+    persisted_row: PersistedInferenceRow,
+) -> ScoresExportPayload:
+    return ScoresExportPayload(
+        search_status=search_status,
+        solutions=ranked_solutions_from_wire(persisted_row.solutions),
+        diagnostics=persisted_row.diagnostics,
+        solutions_held=persisted_row.solution_count,
+    )
+
+
+def _search_status_from_scheduler(
+    scheduler_run: RowRun,
+    *,
+    globally_paused: bool,
+    scope_matches_active_stream: bool,
+) -> SearchStatus:
+    if globally_paused and scope_matches_active_stream:
+        return "paused"
+    ladder_state = scheduler_run.ladder_state
+    if ladder_state is not None and ladder_state.last_status == STATUS_STOPPED:
+        return "stopped"
+    if (
+        ladder_state is not None
+        and ladder_state.time_limited
+        and not ladder_state.ladder_complete
+    ):
+        return "in_progress"
+    return "in_progress"
+
+
+def _solutions_from_scheduler_ladder(
+    scheduler_run: RowRun,
+) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
+    ladder_state = scheduler_run.ladder_state
+    assert ladder_state is not None
+    merged = ladder_state.merged_solutions
+    return (
+        solutions_from_domain(
+            merged,
+            observation=scheduler_run.session.observation,
+            catalog=ladder_state.catalog,
+        ),
+        None,
+        len(merged),
+    )
+
+
+def _solutions_from_admission_or_scheduler(
+    *,
+    admission: RowStreamAdmission | None,
+    scheduler_run: RowRun | None,
+    persisted_row: PersistedInferenceRow | None,
+) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
+    if isinstance(admission, ImmediateRowAdmission) and admission.events:
+        return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
+    if (
+        isinstance(admission, CachedCompleteRowAdmission)
+        and admission.event is not None
+    ):
+        return solutions_diagnostics_from_wire_complete_event(admission.event)
+    if scheduler_run is not None and scheduler_run.ladder_state is not None:
+        return _solutions_from_scheduler_ladder(scheduler_run)
+    return (
+        [],
+        None,
+        held_solution_count(
+            persisted_row=persisted_row,
+            scheduler_run=scheduler_run,
+        ),
+    )
+
+
+def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
+    """Resolve search status and solution sources from one precedence ladder."""
+    persisted_row = snapshot.persisted_row
+    admission = snapshot.admission
+    scheduler_run = snapshot.scheduler_run
+
+    if persisted_row is not None and persisted_row.status in _PERSISTABLE_STATUSES:
+        return _payload_from_persisted_row("complete", persisted_row)
+
+    if persisted_row is not None and persisted_row.status == STATUS_STOPPED:
+        return _payload_from_persisted_row("stopped", persisted_row)
+
+    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
+        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
+            admission=admission,
+            scheduler_run=scheduler_run,
+            persisted_row=persisted_row,
+        )
+        return ScoresExportPayload(
+            search_status="complete",
+            solutions=solutions,
+            diagnostics=diagnostics,
+            solutions_held=solutions_held,
+        )
+
+    if scheduler_run is not None:
+        solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
+            admission=None,
+            scheduler_run=scheduler_run,
+            persisted_row=persisted_row,
+        )
+        return ScoresExportPayload(
+            search_status=_search_status_from_scheduler(
+                scheduler_run,
+                globally_paused=snapshot.globally_paused,
+                scope_matches_active_stream=snapshot.scope_matches_active_stream,
+            ),
+            solutions=solutions,
+            diagnostics=diagnostics,
+            solutions_held=solutions_held,
+        )
+
+    if persisted_row is not None and persisted_row.status in _IMMEDIATE_COMPLETE_STATUSES:
+        return _payload_from_persisted_row("complete", persisted_row)
+
+    if persisted_row is not None:
+        return _payload_from_persisted_row("not_started", persisted_row)
+
+    return ScoresExportPayload(
+        search_status="not_started",
+        solutions=[],
+        diagnostics=None,
+        solutions_held=held_solution_count(
+            persisted_row=persisted_row,
+            scheduler_run=scheduler_run,
+        ),
+    )
+
+
 def resolve_search_status(
     *,
     persisted_row,
@@ -116,33 +260,15 @@ def resolve_search_status(
     globally_paused: bool,
     scope_matches_active_stream: bool,
 ) -> SearchStatus:
-    if persisted_row is not None and persisted_row.status in _PERSISTABLE_STATUSES:
-        return "complete"
-
-    if persisted_row is not None and persisted_row.status == STATUS_STOPPED:
-        return "stopped"
-
-    if isinstance(admission, (ImmediateRowAdmission, CachedCompleteRowAdmission)):
-        return "complete"
-
-    if scheduler_run is not None:
-        if globally_paused and scope_matches_active_stream:
-            return "paused"
-        ladder_state = scheduler_run.ladder_state
-        if ladder_state is not None and ladder_state.last_status == STATUS_STOPPED:
-            return "stopped"
-        if (
-            ladder_state is not None
-            and ladder_state.time_limited
-            and not ladder_state.ladder_complete
-        ):
-            return "in_progress"
-        return "in_progress"
-
-    if persisted_row is not None and persisted_row.status in _IMMEDIATE_COMPLETE_STATUSES:
-        return "complete"
-
-    return "not_started"
+    return resolve_scores_export_payload(
+        ScoresInferenceSnapshot(
+            persisted_row=persisted_row,
+            admission=admission,
+            scheduler_run=scheduler_run,
+            globally_paused=globally_paused,
+            scope_matches_active_stream=scope_matches_active_stream,
+        )
+    ).search_status
 
 
 def held_solution_count(
@@ -171,12 +297,14 @@ def is_scores_export_inference_satisfied(
 ) -> bool:
     """True when inference is terminal and satisfied for export dependency probes."""
     return (
-        resolve_search_status(
-            persisted_row=persisted_row,
-            admission=admission,
-            scheduler_run=scheduler_run,
-            globally_paused=globally_paused,
-            scope_matches_active_stream=scope_matches_active_stream,
-        )
+        resolve_scores_export_payload(
+            ScoresInferenceSnapshot(
+                persisted_row=persisted_row,
+                admission=admission,
+                scheduler_run=scheduler_run,
+                globally_paused=globally_paused,
+                scope_matches_active_stream=scope_matches_active_stream,
+            )
+        ).search_status
         == "complete"
     )
