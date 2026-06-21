@@ -32,6 +32,7 @@ from api.serialization.inference_row_persistence import (
     PersistedInferenceRow,
     persisted_inference_row_from_wire_complete,
 )
+from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
@@ -201,18 +202,7 @@ def _ensure_prior_turn_sync(ctx: AnalyticQueryContext, scope: ExportScope, turn)
     status = str(inference.get("status", ""))
     if not is_persistable_inference_status(status):
         return
-    wire_solutions = inference.get("solutions")
-    wire_event = {
-        "type": "complete",
-        "status": status,
-        "summary": str(inference.get("summary", "")),
-        "solutionCount": int(inference.get("solutionCount", 0)),
-        "isComplete": bool(inference.get("isComplete", True)),
-        "solutions": wire_solutions if isinstance(wire_solutions, list) else [],
-        "diagnostics": inference.get("diagnostics")
-        if isinstance(inference.get("diagnostics"), dict)
-        else None,
-    }
+    wire_event = inference_api_payload_to_wire_complete(inference)
     row = persisted_inference_row_from_wire_complete(wire_event)
     persistence.put_row(
         scope.game_id,
