@@ -166,7 +166,7 @@ _SOLUTION_WIRE_SCHEMA: dict[str, Any] = {
     ),
     "properties": {
         "objectiveValue": {
-            "type": "number",
+            "type": "integer",
             "description": (
                 "Inference solution rank weight (UI: Plausibility). Higher means more "
                 "plausible. Built from scaled integer sums of prior log-probability "
