@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_api_payload import (
@@ -20,6 +22,7 @@ from api.analytics.scores.export_materialization import (
     ScoresInferenceSnapshot,
     ranked_solutions_from_wire,
     resolve_scores_export_payload,
+    resolve_scores_export_search_status,
     solutions_diagnostics_from_wire_complete_event,
 )
 from api.analytics.scores.exports import EXPORT_CATALOG
@@ -179,6 +182,33 @@ def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_tu
     payload = resolve_scores_export_payload(snapshot)
     assert payload.search_status == "in_progress"
     assert payload.solutions_held == 1
+
+
+def test_resolve_search_status_does_not_serialize_solutions(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=50)],
+    )
+    run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
+    assert run is not None
+
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=None,
+        admission=None,
+        scheduler_run=run,
+        globally_paused=False,
+    )
+    with patch(
+        "api.analytics.scores.export_materialization.solutions_from_domain",
+        side_effect=AssertionError("status-only resolution must not serialize solutions"),
+    ):
+        status = resolve_scores_export_search_status(snapshot)
+    assert status == "in_progress"
 
 
 def test_cached_complete_admission_resolves_payload_from_event():

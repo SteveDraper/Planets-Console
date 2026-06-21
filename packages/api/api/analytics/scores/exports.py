@@ -20,6 +20,7 @@ from api.analytics.scores.export_materialization import (
     gather_scores_inference_snapshot,
     hull_catalog_mask_branch,
     resolve_scores_export_payload,
+    resolve_scores_export_search_status,
     scores_inference_stream_scope,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
@@ -51,7 +52,7 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
 
     services = resolve_scores_services(ctx)
     snapshot = gather_scores_inference_snapshot(ctx, services, scope, ctx.load_turn(scope.turn))
-    return resolve_scores_export_payload(snapshot).search_status == "complete"
+    return resolve_scores_export_search_status(snapshot) == "complete"
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:

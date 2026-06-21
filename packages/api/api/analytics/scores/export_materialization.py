@@ -209,8 +209,8 @@ def _solutions_from_admission_or_scheduler(
     )
 
 
-def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
-    """Resolve search status and solution sources from one precedence ladder."""
+def resolve_scores_export_search_status(snapshot: ScoresInferenceSnapshot) -> SearchStatus:
+    """Resolve search status from one precedence ladder without serializing solutions."""
     persisted_row = snapshot.persisted_row
     admission = snapshot.admission
     scheduler_run = snapshot.scheduler_run
@@ -218,21 +218,44 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
     if persisted_row is not None:
         priority_status = _persisted_row_priority_search_status(persisted_row.status)
         if priority_status is not None:
-            return _payload_from_persisted_row(priority_status, persisted_row)
+            return priority_status
+
+    admission_is_complete = isinstance(
+        admission,
+        (ImmediateRowAdmission, CachedCompleteRowAdmission),
+    )
+    if admission_is_complete:
+        return "complete"
+
+    if scheduler_run is not None:
+        return _search_status_from_scheduler(
+            scheduler_run,
+            globally_paused=snapshot.globally_paused,
+        )
+
+    if persisted_row is not None:
+        return _persisted_row_fallback_search_status(persisted_row.status)
+
+    return "not_started"
+
+
+def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresExportPayload:
+    """Resolve search status and solution sources from one precedence ladder."""
+    search_status = resolve_scores_export_search_status(snapshot)
+    persisted_row = snapshot.persisted_row
+    admission = snapshot.admission
+    scheduler_run = snapshot.scheduler_run
+
+    if persisted_row is not None:
+        priority_status = _persisted_row_priority_search_status(persisted_row.status)
+        if priority_status is not None:
+            return _payload_from_persisted_row(search_status, persisted_row)
 
     admission_is_complete = isinstance(
         admission,
         (ImmediateRowAdmission, CachedCompleteRowAdmission),
     )
     if admission_is_complete or scheduler_run is not None:
-        search_status = (
-            "complete"
-            if admission_is_complete
-            else _search_status_from_scheduler(
-                scheduler_run,
-                globally_paused=snapshot.globally_paused,
-            )
-        )
         solutions, diagnostics, solutions_held = _solutions_from_admission_or_scheduler(
             admission=admission if admission_is_complete else None,
             scheduler_run=scheduler_run,
@@ -246,13 +269,10 @@ def resolve_scores_export_payload(snapshot: ScoresInferenceSnapshot) -> ScoresEx
         )
 
     if persisted_row is not None:
-        return _payload_from_persisted_row(
-            _persisted_row_fallback_search_status(persisted_row.status),
-            persisted_row,
-        )
+        return _payload_from_persisted_row(search_status, persisted_row)
 
     return ScoresExportPayload(
-        search_status="not_started",
+        search_status=search_status,
         solutions=[],
         diagnostics=None,
         solutions_held=held_solution_count(
