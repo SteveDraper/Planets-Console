@@ -13,3 +13,5 @@ from tests.fixtures.military_score_inference import (  # noqa: F401
 from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F401
     minimal_prior_catalog,
 )
+
+pytest_plugins = ["tests.scores_exports_helpers"]

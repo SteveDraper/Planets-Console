@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
@@ -25,6 +25,8 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
+
+T = TypeVar("T")
 
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
 
@@ -57,6 +59,7 @@ class AnalyticQueryContext:
     load_turn: Callable[[int], TurnInfo | None]
     export_registry: Mapping[str, AnalyticExportCatalog]
     enforce_inline_ensure_threshold: bool = True
+    export_services: Mapping[str, object] = field(default_factory=dict)
     # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
     # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
     # ctx.options and are not fingerprinted here (#108 skeleton); connections
@@ -69,6 +72,55 @@ class AnalyticQueryContext:
     )
     _resolution_stack: list[ResolutionKey] = field(default_factory=list, repr=False)
     _ensured_scopes: set[tuple[str, ExportScope]] = field(default_factory=set, repr=False)
+    _export_snapshot_cache: dict[tuple[str, ExportScope], Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    _ensure_ephemeral: dict[tuple[str, ExportScope], object] = field(
+        default_factory=dict,
+        repr=False,
+    )
+
+    def export_snapshot_for(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        gather: Callable[[], T],
+    ) -> T:
+        """Memoize a per-scope export snapshot for the lifetime of this query context."""
+        cache_key = (analytic_id, scope)
+        cached = self._export_snapshot_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        snapshot = gather()
+        self._export_snapshot_cache[cache_key] = snapshot
+        return snapshot
+
+    def invalidate_export_scope_cache(self, analytic_id: str, scope: ExportScope) -> None:
+        """Drop cached export snapshot and materialized tree after ensure mutates state."""
+        cache_key = (analytic_id, scope)
+        self._export_snapshot_cache.pop(cache_key, None)
+        self._materialized_trees.pop(cache_key, None)
+
+    def ensure_ephemeral(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+    ) -> object | None:
+        """Ephemeral ensure outcome for one analytic scope; type is analytic-owned."""
+        return self._ensure_ephemeral.get((analytic_id, scope))
+
+    def record_ensure_ephemeral(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        value: object,
+    ) -> None:
+        """Remember one ensure-time outcome until snapshot cache is invalidated."""
+        self._ensure_ephemeral[(analytic_id, scope)] = value
+
+    def clear_ensure_ephemeral(self, analytic_id: str, scope: ExportScope) -> None:
+        self._ensure_ephemeral.pop((analytic_id, scope), None)
 
     def is_scope_ensured(self, analytic_id: str, scope: ExportScope) -> bool:
         return (analytic_id, scope) in self._ensured_scopes
@@ -81,7 +133,13 @@ class AnalyticQueryContext:
         analytic_id: str,
         scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
     ) -> ExportProbeResult:
-        """Dry-run ensure dependencies without materialization."""
+        """Estimate ensure completion cost without running inference or materializing exports.
+
+        DFS-walks declared ``ENSURE_DEPENDENCIES`` and counts scopes that still need
+        ensure work. Provider ``is_ensure_satisfied`` hooks must use cheap persistence
+        and scheduler checks only -- not CP-SAT, sync inference, or payload
+        materialization. Used to choose inline ensure vs background orchestration.
+        """
         plan = self._plan_ensure_walk(
             analytic_id,
             scope_overrides,
@@ -289,9 +347,10 @@ class AnalyticQueryContext:
         pending_ensure: list[tuple[str, ExportScope, AnalyticExportCatalog]],
     ) -> None:
         for analytic_id, scope, catalog in pending_ensure:
-            if catalog.ensure_export is not None:
-                catalog.ensure_export(self, scope)
-            self.mark_scope_ensured(analytic_id, scope)
+            if catalog.ensure_export is None:
+                continue
+            if catalog.ensure_export(self, scope):
+                self.mark_scope_ensured(analytic_id, scope)
 
     def _materialize_tree(
         self,
@@ -338,6 +397,18 @@ class AnalyticQueryContext:
         return ExportProbeResult(status="unavailable", reason=reason)
 
 
+def export_service_for[T](
+    ctx: AnalyticQueryContext,
+    analytic_id: str,
+    service_type: type[T],
+) -> T | None:
+    """Return a per-analytic export service bundle when present and typed."""
+    service = ctx.export_services.get(analytic_id)
+    if isinstance(service, service_type):
+        return service
+    return None
+
+
 def make_analytic_query_context(
     turn: TurnInfo,
     options: TurnAnalyticsOptions,
@@ -345,6 +416,7 @@ def make_analytic_query_context(
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
     enforce_inline_ensure_threshold: bool = True,
+    export_services: Mapping[str, object] | None = None,
 ) -> AnalyticQueryContext:
     """Build query context with ambient scope from one loaded turn."""
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -368,4 +440,5 @@ def make_analytic_query_context(
         load_turn=resolved_load_turn,
         export_registry=export_registry or EXPORT_REGISTRY,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
+        export_services=export_services or {},
     )

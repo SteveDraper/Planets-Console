@@ -5,7 +5,17 @@ from __future__ import annotations
 from api.analytics.catalog import TURN_ANALYTIC_CATALOG
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.ensure_validation import validate_ensure_dependency_targets
+from api.analytics.exports.schema_validation import validate_export_value_schema
+from api.analytics.registration import resolve_registration_export_catalog
 from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
+
+
+def _production_export_catalogs() -> tuple[AnalyticExportCatalog, ...]:
+    """Resolve registration placeholders to production export catalogs."""
+    return tuple(
+        resolve_registration_export_catalog(registration)
+        for registration in TURN_ANALYTIC_REGISTRATIONS
+    )
 
 
 def validate_export_catalogs(
@@ -31,13 +41,20 @@ def validate_export_catalogs(
             f"catalog without export={missing!r}, export without catalog={extra!r}"
         )
     validate_ensure_dependency_targets(by_id, role=role)
+    for export_catalog in catalogs:
+        if export_catalog.is_empty or export_catalog.value_schema is None:
+            continue
+        validate_export_value_schema(
+            export_catalog.value_schema,
+            analytic_id=export_catalog.analytic_id,
+        )
     return by_id
 
 
 _CATALOG_IDS = {entry.id for entry in TURN_ANALYTIC_CATALOG}
 
 EXPORT_REGISTRY: dict[str, AnalyticExportCatalog] = validate_export_catalogs(
-    tuple(registration.export_catalog for registration in TURN_ANALYTIC_REGISTRATIONS),
+    _production_export_catalogs(),
     catalog_ids=_CATALOG_IDS,
     role="production",
 )
@@ -51,4 +68,12 @@ def merge_export_registry(
     for export_catalog in extra_catalogs:
         merged[export_catalog.analytic_id] = export_catalog
     validate_ensure_dependency_targets(merged, role="merged")
+
+    for export_catalog in extra_catalogs:
+        if export_catalog.is_empty or export_catalog.value_schema is None:
+            continue
+        validate_export_value_schema(
+            export_catalog.value_schema,
+            analytic_id=export_catalog.analytic_id,
+        )
     return merged

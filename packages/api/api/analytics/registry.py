@@ -1,6 +1,6 @@
 """Registry for Core turn analytics."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from api.analytics.base_map import REGISTRATION as BASE_MAP_REGISTRATION
 from api.analytics.catalog import (
@@ -53,9 +53,17 @@ def get_turn_analytic(
     options: TurnAnalyticsOptions,
     *,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
+    export_services: Mapping[str, object] | None = None,
 ) -> dict:
     try:
         handler = TURN_ANALYTICS[analytic_id]
     except KeyError as err:
         raise ValidationError(f"Unknown analytic_id: {analytic_id!r}") from err
-    return handler(make_analytic_compute_context(turn, options, load_turn=load_turn))
+    return handler(
+        make_analytic_compute_context(
+            turn,
+            options,
+            load_turn=load_turn,
+            export_services=export_services,
+        )
+    )

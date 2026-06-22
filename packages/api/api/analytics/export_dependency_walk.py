@@ -160,7 +160,7 @@ def _dependency_needs_processing(
         return False
     if _is_at_baseline(scope, catalog):
         return False
-    if _is_persisted(ctx, analytic_id, scope, catalog):
+    if _is_ensure_satisfied(ctx, analytic_id, scope, catalog):
         return False
     return True
 
@@ -179,14 +179,17 @@ def _is_at_baseline(
     return False
 
 
-def _is_persisted(
+def _is_ensure_satisfied(
     ctx: AnalyticQueryContext,
     analytic_id: str,
     scope: ExportScope,
     catalog: AnalyticExportCatalog,
 ) -> bool:
+    """Cheap probe/ensure gate: must not run inference or materialize export payloads."""
     if ctx.is_scope_ensured(analytic_id, scope):
         return True
+    if catalog.is_ensure_satisfied is not None:
+        return catalog.is_ensure_satisfied(ctx, scope)
     if catalog.is_persisted is None:
         return False
     return catalog.is_persisted(ctx, scope)

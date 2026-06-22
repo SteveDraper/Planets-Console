@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
+    STATUS_PLAYER_NOT_FOUND,
     no_prior_turn_inference_api_payload,
 )
 from api.analytics.military_score_inference.inference_path import (
@@ -132,7 +133,7 @@ def immediate_row_inference_events(
     if score is None:
         return (
             inference_complete_event(
-                status="player_not_found",
+                status=STATUS_PLAYER_NOT_FOUND,
                 summary=f"No score row for player {player_id}",
                 solution_count=0,
                 is_complete=True,

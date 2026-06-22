@@ -1,6 +1,6 @@
 """Compute-time context passed into Core turn analytic handlers."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
@@ -29,6 +29,7 @@ def make_analytic_compute_context(
     options: TurnAnalyticsOptions | None = None,
     *,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
+    export_services: Mapping[str, object] | None = None,
 ) -> AnalyticComputeContext:
     """Build dispatch context; mirrors diagnostics from options when present."""
     resolved = options or TurnAnalyticsOptions()
@@ -36,7 +37,12 @@ def make_analytic_compute_context(
         turn=turn,
         options=resolved,
         diagnostics=resolved.diagnostics,
-        exports=make_analytic_query_context(turn, resolved, load_turn=load_turn),
+        exports=make_analytic_query_context(
+            turn,
+            resolved,
+            load_turn=load_turn,
+            export_services=export_services,
+        ),
     )
 
 
@@ -46,6 +52,14 @@ def invoke_analytic_compute(
     options: TurnAnalyticsOptions | None = None,
     *,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
+    export_services: Mapping[str, object] | None = None,
 ) -> dict:
     """Run a context-first compute handler for tests and direct callers."""
-    return compute(make_analytic_compute_context(turn, options, load_turn=load_turn))
+    return compute(
+        make_analytic_compute_context(
+            turn,
+            options,
+            load_turn=load_turn,
+            export_services=export_services,
+        )
+    )

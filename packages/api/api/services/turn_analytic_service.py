@@ -4,6 +4,8 @@ from collections.abc import Callable
 
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import NotFoundError
 from api.models.game import TurnInfo
@@ -91,6 +93,27 @@ class TurnAnalyticService:
                 diagnostics=diagnostics,
             ),
             load_turn=self._load_scoreboard_turn(game_id, perspective),
+            export_services={
+                SCORES_ANALYTIC_ID: self._scores_export_context(game_id, perspective),
+            },
+        )
+
+    def _scores_export_context(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> ScoresExportContext:
+        def resolve_hull_catalog_mask(turn: TurnInfo, player_id: int):
+            return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
+                turn,
+                game_id,
+                player_id,
+            )
+
+        return ScoresExportContext(
+            persistence=self._inference_persistence,
+            scheduler=self._inference_scheduler_instance(),
+            resolve_hull_catalog_mask=resolve_hull_catalog_mask,
         )
 
     def get_scores_row_inference(

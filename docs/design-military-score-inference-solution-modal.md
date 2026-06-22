@@ -97,7 +97,7 @@ Each solution is one block:
 
 `Solution {n} · Plausibility {objectiveValue}`
 
-**Plausibility** is the UI label for wire field `objectiveValue` (**inference solution rank weight** in the glossary). Higher integer means more plausible. It is **not** a percentage or log-probability. Optional tooltip: *Composite rank score from action priors and parsimony penalties -- not a percentage.*
+**Plausibility** is the UI label for wire field `objectiveValue` (**inference solution rank weight** in the glossary). Higher integer means more plausible. Treat it as **plausibility on a pseudo log-likelihood scale**: prior bin and combo weights are derived from `SCALE * log(p)` at catalog build, then summed (with ranking heuristics) into one integer rank score -- monotonic with prior support, but **not** a percentage, calibrated probability, or exact joint log-likelihood. Optional tooltip: *Composite rank score from action priors and parsimony penalties -- not a percentage.*
 
 Do not show raw solver sub-status strings (e.g. per-pass `INFEASIBLE`).
 

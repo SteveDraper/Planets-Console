@@ -10,7 +10,7 @@ Related:
 - [Analytics module structure](design-analytics-structure.md) -- layer roles and registration
 - [Adding a turn analytic](design-adding-a-turn-analytic.md) -- checklist including exports
 - [Analytic persistence ADR](adr/0002-analytic-persistence.md) -- persisted slices merged by materializers
-- [Military score build inference](design-military-score-build-inference.md) -- `$.solution` branch and streaming
+- [Military score build inference](design-military-score-build-inference.md) -- `$.solutions` branch and streaming
 - [Homeworld locator](design-homeworld-locator-analytic.md) -- `$.slots`, `$.evidence` branches (exports ship with **#33**, not #93)
 
 ---
@@ -45,7 +45,7 @@ TurnAnalyticService.get_turn_analytics(...)
 ctx.probe(root_scope)  -- DFS declared ENSURE_DEPENDENCIES; persistence/scheduler checks only
   ensure-graph cycle -> unavailable reason ensure_cycle (no ensure side effects)
 ctx.query(analytic_id, paths, scope)
-  -> ensure_export(scope)   -- idempotent; may run sync (prior turns) or attach async (current turn)
+  -> ensure_export(scope) -> bool   -- idempotent; True when scope needs no further ensure work
   -> export_registry materialize + JSONPath
   memo key: (analytic_id, normalized scope, normalized path set)
   resolution stack: same tuple re-entered during materialize -> hard error (exception)
@@ -81,7 +81,7 @@ Export materialization is **not** read-only. `ctx.query(...)` runs **analytic ex
 |------|--------|
 | **Idempotent** | Re-ensure for an already terminal/persisted scope is cheap (read cache). |
 | **In-flight attach** | If the same scope is already on the inference scheduler/stream, ensure attaches and reflects live state -- no duplicate jobs. |
-| **Ensure scope** | Typically `(game_id, perspective, turn, player_id)` for row-scoped exports (e.g. **scores** `$.solution.*`). No batch ensure API in v1. |
+| **Ensure scope** | Typically `(game_id, perspective, turn, player_id)` for row-scoped exports (e.g. **scores** `$.solutions.*`). No batch ensure API in v1. |
 | **Unwind direction** | Turn *N* reads *N−1* only. Example chain: Fleet@N <- Scores@N <- Fleet@N−1 <- Scores@N−1 <- … |
 | **Small probe** | Inline ensure allowed; prior turns may sync-ensure when step count is at or below threshold. |
 | **Large probe** | Block inline ensure; user confirms; **background full-unwind job** with progress stream. |
@@ -100,10 +100,13 @@ Dry-run before expensive work:
 2. Check persistence and scheduler status at each step (no CP-SAT, no full materialization).
 3. Return missing steps `{ analytic_id, turn, player_id, status }` for confirm UI and progress denominator.
 
-**#108 skeleton:** the in-process probe walk calls provider `is_persisted`
-hooks and `is_scope_ensured` on the query context to **omit** already-satisfied
-scopes from the walk. Baseline scopes are also skipped. It does not yet check
-scheduler status. Steps that need work appear in `missing_steps` with
+**#108 skeleton:** the in-process probe walk calls provider `is_ensure_satisfied`
+when defined, otherwise `is_persisted`, plus `is_scope_ensured` on the query
+context to **omit** already-satisfied scopes from the walk. Baseline scopes are
+also skipped. **`is_persisted`** remains chain-complete / authoritative
+persistence only; **`is_ensure_satisfied`** means probe/ensure should skip
+because no further ensure work is possible or needed (e.g. scores stopped
+persisted rows). Steps that need work appear in `missing_steps` with
 `status: "not_persisted"` only -- satisfied, in-progress, and baseline scopes
 are omitted rather than returned with `persisted`, `in_progress`, or
 `baseline`. Full status discrimination is planned for
@@ -171,6 +174,30 @@ Unwind stops when:
 
 Each turn analytic publishes **one** JSON-shaped **analytic export value schema** (JSON Schema dict in `exports.py`). Structure does **not** vary by scope -- scope selects which slice of the tree is populated.
 
+### Map the analytic's normal output shape
+
+Export trees should **mirror the analytic's canonical domain output**, not ad hoc projections tuned for one consumer. Cross-analytic callers query the same structures the analytic already produces for row inference, table/map handlers, or persistence -- so a held top-K explanation stays one queryable solution object (ships, aggregates, arithmetic together), not flattened arrays that lose grouping.
+
+Practical rules:
+
+| Rule | Detail |
+|------|--------|
+| **Prefer existing wire/persistence shapes** | Reuse serializers and field names from the analytic's normal output (e.g. scores held `solutions[]` matches inference row wire). |
+| **Lifecycle in `meta`** | Materialization status (`searchStatus`, `solutionsHeld`, …) lives under `$.meta`; domain payloads stay separate. |
+| **Ordering semantics** | Document array ordering in the catalog (e.g. `$.solutions[0]` = top ranked explanation). |
+| **Projections are queries, not schema** | Consumers may JSONPath into nested fields (`$.solutions[0].shipBuilds[0]`); the schema still owns full solution objects. |
+
+### Self-describing field descriptions (#98)
+
+Every property node in **`value_schema`** must carry a non-empty JSON Schema **`description`**. Registry import validates non-empty catalogs at startup (and fixture catalogs merged in tests). Future **analytic MCP** adapters (issue **#98**) surface these strings so clients can discover export trees without reading implementation code.
+
+| Rule | Detail |
+|------|--------|
+| **Root + branches** | The schema root and every declared `properties` entry need descriptions. |
+| **Array items** | When `items` is an object with `properties`, the items schema and each nested property are described too. |
+| **Open objects** | Branches with evolving payloads (e.g. `diagnostics`) may use `additionalProperties`; document known top-level keys and describe the branch role. |
+| **Wire names** | Descriptions explain semantics; renaming wire fields still requires a coordinated contract change. |
+
 Example branches (scores):
 
 ```json
@@ -180,13 +207,22 @@ Example branches (scores):
     "solutionsHeld": 2,
     "hostTurn": 41
   },
-  "solution": {
-    "ships": [ { "hullId": 12, "engineId": 5, "…": "…" } ],
-    "aggregates": [ { "id": "planet_defense_posts", "count": 3 } ]
-  },
+  "solutions": [
+    {
+      "objectiveValue": 99,
+      "actions": [ { "actionId": "planet_defense_posts_added_total", "label": "…", "count": 3 } ],
+      "shipBuilds": [ { "hullId": 12, "engineId": 5, "comboId": "…", "…": "…" } ],
+      "militaryScoreArithmetic": { }
+    }
+  ],
+  "diagnostics": { },
   "hullCatalogMask": { "enabledHullIds": [1, 2, 3] }
 }
 ```
+
+`$.solutions` uses the same held top-K shape as scores row inference wire/persistence. `$.solutions[0]` is the full top explanation (all `shipBuilds` and `actions` for that rank). `$.meta.searchStatus` carries lifecycle only.
+
+**`objectiveValue` (Plausibility):** each solution's `objectiveValue` is the **inference solution rank weight** shown in the UI as *Plausibility*. Higher integer = more plausible. It is built from **scaled log-probability prior terms** (Laplace-smoothed histogram weights on magnitude bins and ship combos, composed additively in the solver objective) plus **non-likelihood ranking heuristics** (partial weapon-slot fill penalties, tier-overflow penalties). Consumers may treat it as **plausibility on a pseudo log-likelihood scale**: monotonic with prior support and useful for ordering held explanations, but **not** a calibrated probability, percentage, or exact joint log-likelihood (bucketed aggregates use one bin penalty per action, not per-unit iid terms). The wire field name `objectiveValue` is retained from the CP-SAT solver; do not rename without a coordinated contract change.
 
 Example branches (homeworld locator -- **#33**, not #93):
 
@@ -237,7 +273,8 @@ within one request and get distinct cached export trees.
 
 | Prefix | Rule |
 |--------|------|
-| `$.solution.*` | requires `player_id` |
+| `$.solutions.*` | requires `player_id` |
+| `$.diagnostics.*` | requires `player_id` (scores row inference diagnostics) |
 | `$.evidence.*` | uses ambient **perspective** only; override forbidden |
 | `$.slots.*` | game-global; turn param ignored (baseline resolved inside materializer) |
 
@@ -248,15 +285,15 @@ Missing stored turn at requested **perspective** -> root **`unavailable`: `turn_
 ## JSONPath queries
 
 - Dialect: **JSONPath** (RFC 9535-ish subset).
-- Catalog documents **ordering semantics**: e.g. `$.solution.ships` sorted descending by **inference solution rank weight**, so `$.solution.ships[0]` is the top ship.
-- **Batched export query:** one scope binding, multiple paths, e.g. `["$.solution.ships[0]", "$.solution.aggregates"]`.
+- Catalog documents **ordering semantics**: e.g. `$.solutions` sorted descending by **inference solution rank weight** (`objectiveValue`), so `$.solutions[0]` is the top held explanation.
+- **Batched export query:** one scope binding, multiple paths, e.g. `["$.solutions[0]", "$.meta.searchStatus"]`.
 
 ### Path results (under root `ok`)
 
 | Path result | Meaning |
 |-------------|---------|
 | **`value`** | Selector matched; JSON payload |
-| **`none`** | Valid selector, zero matches (e.g. empty `ships` array -> `$.solution.ships[0]`) |
+| **`none`** | Valid selector, zero matches (e.g. empty `solutions` array -> `$.solutions[0]`) |
 | **`invalid_path`** | Not allowed by catalog or bad syntax |
 
 Root **`unavailable`** when the tree cannot be established for scope. **`query`** returns an
@@ -271,15 +308,15 @@ envelope; **`probe`** uses the same reason strings where applicable.
 | **`ensure_cycle`** | `ENSURE_DEPENDENCIES` graph revisits the same `(analytic_id, scope)` (**`probe` only**; see **Cycle detection**) |
 | **`unknown_analytic`** | `analytic_id` not in export registry |
 
-**Important:** `none` is not bad data. **`complete`** meta + `none` on ships = authoritative "no ship builds in explanation."
+**Important:** `none` is not bad data. **`complete`** meta + `none` on `$.solutions[0]` = authoritative "no held explanations."
 
 ### Projections on empty arrays
 
-| Path | `ships: []` |
-|------|-------------|
-| `$.solution.ships[0]` | **`none`** |
-| `$.solution.ships[*].hullId` | **`none`** |
-| `$.solution.ships` | **`value: []`** (branch exists, empty) |
+| Path | `solutions: []` |
+|------|-----------------|
+| `$.solutions[0]` | **`none`** |
+| `$.solutions[0].shipBuilds[0]` | **`none`** |
+| `$.solutions` | **`value: []`** (branch exists, empty) |
 
 ---
 
@@ -297,11 +334,13 @@ envelope; **`probe`** uses the same reason strings where applicable.
 | **`stopped`** | Warn; partial or empty; offer refresh |
 | **`complete`** | Trust path results, including **`none`** |
 
+When materializing from the live inference scheduler, ladder state with **`time_limited=True`** maps to export **`stopped`**, not **`in_progress`**. The solver may still hold partial top-K solutions, but that outcome is terminal for export lifecycle: consumers should warn and offer refresh rather than wait for further progress on the same run.
+
 Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 
-Solver-specific outcomes (`no_exact_solution`, band residual, accelerated segments) belong under **`$.solution.diagnostics`** (Scores UI / diagnostics panel), not in **`searchStatus`**.
+Solver-specific outcomes (`no_exact_solution`, band residual, accelerated segments) belong under **`$.diagnostics`** (scores row inference diagnostics), not in **`searchStatus`**.
 
 ---
 
@@ -324,7 +363,7 @@ scope identity** above).
 
 - Re-entering the **same** key during one `query(...)` (e.g. materializer calls back into `query` with identical scope and paths) -> hard error (`ExportCycleDetectedError`, HTTP 422).
 - Cross-turn chains are **not** cycles: fleet turn *N* -> scores turn *N−1* -> fleet turn *N−1* differ in scope.
-- Different paths at same scope (`$.solution.ships` vs `$.aggregates`) are **not** a cycle.
+- Different paths at same scope (`$.solutions[0]` vs `$.diagnostics`) are **not** a cycle.
 - Per-request memoization for identical keys.
 
 ### Ensure-graph cycles (`ENSURE_DEPENDENCIES` walk)
@@ -374,11 +413,11 @@ Non-empty `exports.py` modules typically export an **`AnalyticExportCatalog`** (
 
 | Field / hook | Purpose |
 |--------------|---------|
-| **`value_schema`** | JSON Schema dict for the one tree |
+| **`value_schema`** | JSON Schema dict for the one tree; every declared property must include a non-empty `description` (validated at registry import; surfaced by future MCP -- #98) |
 | **`path_prefix_scope_rules`** | Scope validation by path prefix |
 | **`ordering_semantics`** | Documented array ordering for index paths |
 | **`ensure_dependencies`** | Provider-declared upstream ensure edges |
-| **`ensure_export(ctx, scope)`** | Idempotent ensure for this analytic's scope (optional if materialize-only) |
+| **`ensure_export(ctx, scope) -> bool`** | Idempotent ensure; returns True when the scope needs no further ensure work (optional if materialize-only) |
 | **`materialize_export_tree(ctx, scope) -> dict`** | Build tree after ensure (memoized on ctx) |
 
 Import-time validation in `exports/registry.py` (`validate_export_catalogs`):
@@ -416,11 +455,12 @@ hw = ctx.query(
 ```python
 prior = ctx.query(
     "scores",
-    paths=["$.solution.ships[0]", "$.meta.searchStatus"],
+    paths=["$.solutions[0]", "$.meta.searchStatus"],
     scope={"turn": turn - 1, "player_id": player_id},
 )
 if prior.paths["$.meta.searchStatus"].value != "complete":
     mark_row_warning("Prior-turn build inference not complete")
+top_build = prior.paths["$.solutions[0]"].value  # full top explanation when present
 ```
 
 ### Inference priors overlay (#87)
@@ -473,5 +513,5 @@ Must cover: probe step counts, threshold policy, inline vs background ensure, un
 | **#93a** | [#108](https://github.com/SteveDraper/Planets-Console/issues/108) | `export_types`, `export_context` (query, probe, ensure), `export_registry`, JSONPath resolver, handler plumbing, empty catalogs for current production analytics, **fixture pair tests** |
 | **#93b** | [#109](https://github.com/SteveDraper/Planets-Console/issues/109) | BFF export ensure orchestration (probe + background job NDJSON stream) |
 | **#93c** | [#110](https://github.com/SteveDraper/Planets-Console/issues/110) | `connections/exports.py` -- concept-shim reference |
-| **#93d** | [#111](https://github.com/SteveDraper/Planets-Console/issues/111) | `scores/exports.py` -- `$.solution`, `$.meta`, scheduler/persistence; **`ENSURE_DEPENDENCIES = ()`** until fleet ships |
+| **#93d** | [#111](https://github.com/SteveDraper/Planets-Console/issues/111) | `scores/exports.py` -- `$.solutions`, `$.meta`, scheduler/persistence; **`ENSURE_DEPENDENCIES = ()`** until fleet ships |
 | **Follow-on** | Homeworld exports (**#33**); fleet analytic + Scores fleet@N−1 edge; truncated unwind + provenance ADR |

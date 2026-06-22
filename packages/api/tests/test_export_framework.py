@@ -34,6 +34,7 @@ def sample_turn():
 
 def test_export_registry_covers_production_catalog():
     from api.analytics.catalog import TURN_ANALYTIC_CATALOG
+    from api.analytics.registration import resolve_registration_export_catalog
     from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
     catalog_ids = {entry.id for entry in TURN_ANALYTIC_CATALOG}
@@ -41,7 +42,7 @@ def test_export_registry_covers_production_catalog():
     for registration in TURN_ANALYTIC_REGISTRATIONS:
         analytic_id = registration.catalog_entry.id
         assert EXPORT_REGISTRY[analytic_id].analytic_id == analytic_id
-        assert registration.export_catalog is EXPORT_REGISTRY[analytic_id]
+        assert resolve_registration_export_catalog(registration) is EXPORT_REGISTRY[analytic_id]
 
 
 def _non_empty_export_catalog(

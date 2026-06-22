@@ -24,6 +24,22 @@ from api.transport.inference_stream import (
 )
 
 
+def inference_api_payload_to_wire_complete(
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Shape a scores row inference API payload into a terminal wire ``complete`` event."""
+    wire_solutions = payload.get("solutions")
+    diagnostics = payload.get("diagnostics")
+    return inference_complete_event(
+        status=str(payload.get("status", "")),
+        summary=str(payload.get("summary", "")),
+        solution_count=int(payload.get("solutionCount", 0)),
+        is_complete=bool(payload.get("isComplete", True)),
+        diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        solutions=wire_solutions if isinstance(wire_solutions, list) else [],
+    )
+
+
 def row_complete_to_complete_wire_event(
     event: RowComplete,
     *,
