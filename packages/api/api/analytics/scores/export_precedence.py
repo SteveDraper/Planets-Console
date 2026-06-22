@@ -23,7 +23,6 @@ from api.analytics.scores.export_wire import (
     solutions_from_persisted_row,
     solutions_from_scheduler_run,
     solutions_from_terminal_admission,
-    terminal_row_admission,
     wire_complete_event_from_terminal_admission,
 )
 
@@ -136,7 +135,6 @@ def _resolve_scores_export_ladder(
 ) -> tuple[ScoresExportDecision, ScoresExportPayload]:
     """Single precedence ladder: branch, lifecycle status, and wire payload."""
     persisted_row = snapshot.persisted_row
-    admission = snapshot.admission
     scheduler_run = snapshot.scheduler_run
 
     if persisted_row is not None:
@@ -152,7 +150,7 @@ def _resolve_scores_export_ladder(
                 ScoresExportPayload(solutions, diagnostics, solutions_held),
             )
 
-    terminal = terminal_row_admission(admission)
+    terminal = snapshot.resolved_terminal_admission()
     if terminal is not None:
         solutions, diagnostics, solutions_held = solutions_from_terminal_admission(terminal)
         return (

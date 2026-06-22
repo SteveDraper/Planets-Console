@@ -7,9 +7,12 @@ from dataclasses import dataclass
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_stream_rows import (
+    CachedCompleteRowAdmission,
+    ImmediateRowAdmission,
     RowStreamAdmission,
     resolve_row_stream_admission,
 )
+from api.analytics.scores.export_wire import terminal_row_admission
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_services import ScoresExportContext
@@ -23,9 +26,18 @@ class ScoresInferenceSnapshot:
     """Gathered inference state for scores export persistence and materialization."""
 
     persisted_row: PersistedInferenceRow | None
-    admission: RowStreamAdmission | None
+    stream_admission: RowStreamAdmission | None
+    ensure_sync_admission: ImmediateRowAdmission | None
     scheduler_run: RowRun | None
     globally_paused: bool
+
+    def resolved_terminal_admission(
+        self,
+    ) -> ImmediateRowAdmission | CachedCompleteRowAdmission | None:
+        """Terminal row admission for precedence: ensure-sync overrides live stream."""
+        if self.ensure_sync_admission is not None:
+            return self.ensure_sync_admission
+        return terminal_row_admission(self.stream_admission)
 
 
 def scores_inference_stream_scope(scope: ExportScope) -> InferenceStreamScope:
@@ -89,20 +101,18 @@ def gather_scores_inference_snapshot(
     if turn is None:
         return ScoresInferenceSnapshot(
             persisted_row=persisted_row,
-            admission=None,
+            stream_admission=None,
+            ensure_sync_admission=None,
             scheduler_run=None,
             globally_paused=False,
         )
 
     stream_scope = scores_inference_stream_scope(scope)
     pause_status = services.scheduler.global_pause_status(stream_scope)
-    admission = _row_admission(ctx, services, scope, turn)
-    ensure_sync_admission = ctx.ensure_sync_terminal_admission(ANALYTIC_ID, scope)
-    if ensure_sync_admission is not None:
-        admission = ensure_sync_admission
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
-        admission=admission,
+        stream_admission=_row_admission(ctx, services, scope, turn),
+        ensure_sync_admission=ctx.ensure_sync_terminal_admission(ANALYTIC_ID, scope),
         scheduler_run=_scheduler_row_run(services, scope),
         globally_paused=bool(pause_status.get("paused")),
     )

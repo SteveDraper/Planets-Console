@@ -12,7 +12,10 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
+from api.analytics.military_score_inference.inference_stream_rows import (
+    CachedCompleteRowAdmission,
+    ImmediateRowAdmission,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.scores.export_precedence import resolve_scores_export
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
@@ -46,7 +49,8 @@ def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_stat
             is_complete=True,
             solutions=[],
         ),
-        admission=None,
+        stream_admission=None,
+        ensure_sync_admission=None,
         scheduler_run=None,
         globally_paused=False,
     )
@@ -78,7 +82,8 @@ def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_tu
             is_complete=True,
             solutions=[],
         ),
-        admission=None,
+        stream_admission=None,
+        ensure_sync_admission=None,
         scheduler_run=run,
         globally_paused=False,
     )
@@ -103,7 +108,8 @@ def test_scheduler_branch_search_status_in_progress(sample_turn):
 
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
-        admission=None,
+        stream_admission=None,
+        ensure_sync_admission=None,
         scheduler_run=run,
         globally_paused=False,
     )
@@ -127,7 +133,8 @@ def test_decision_search_status_available_without_payload_materialization(sample
 
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
-        admission=None,
+        stream_admission=None,
+        ensure_sync_admission=None,
         scheduler_run=run,
         globally_paused=False,
     )
@@ -159,7 +166,8 @@ def test_cached_complete_admission_resolves_payload_from_event():
     }
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
-        admission=CachedCompleteRowAdmission(event=wire_event),
+        stream_admission=CachedCompleteRowAdmission(event=wire_event),
+        ensure_sync_admission=None,
         scheduler_run=None,
         globally_paused=False,
     )
@@ -183,13 +191,45 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
     }
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
-        admission=CachedCompleteRowAdmission(event=wire_event),
+        stream_admission=CachedCompleteRowAdmission(event=wire_event),
+        ensure_sync_admission=None,
         scheduler_run=None,
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == "terminal_admission"
     assert resolved.decision.search_status == "stopped"
+
+
+def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolution():
+    stream_event = {
+        "type": "complete",
+        "status": STATUS_EXACT,
+        "summary": "stream",
+        "solutionCount": 1,
+        "isComplete": True,
+        "solutions": [{"objectiveValue": 10, "actions": [], "shipBuilds": []}],
+    }
+    ensure_sync_event = {
+        "type": "complete",
+        "status": STATUS_STOPPED,
+        "summary": "ensure sync",
+        "solutionCount": 0,
+        "isComplete": True,
+        "solutions": [],
+        "diagnostics": {"source": "ensure_sync"},
+    }
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=None,
+        stream_admission=CachedCompleteRowAdmission(event=stream_event),
+        ensure_sync_admission=ImmediateRowAdmission(events=(ensure_sync_event,)),
+        scheduler_run=None,
+        globally_paused=False,
+    )
+    resolved = resolve_scores_export(snapshot)
+    assert resolved.decision.branch == "terminal_admission"
+    assert resolved.decision.search_status == "stopped"
+    assert resolved.payload.diagnostics == {"source": "ensure_sync"}
 
 
 @pytest.mark.parametrize(
@@ -210,7 +250,8 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
                     is_complete=True,
                     solutions=[],
                 ),
-                admission=None,
+                stream_admission=None,
+                ensure_sync_admission=None,
                 scheduler_run=None,
                 globally_paused=False,
             ),
@@ -222,7 +263,7 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
         (
             ScoresInferenceSnapshot(
                 persisted_row=None,
-                admission=CachedCompleteRowAdmission(
+                stream_admission=CachedCompleteRowAdmission(
                     event={
                         "type": "complete",
                         "status": STATUS_EXACT,
@@ -232,6 +273,7 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
                         "solutions": [],
                     }
                 ),
+                ensure_sync_admission=None,
                 scheduler_run=None,
                 globally_paused=False,
             ),
@@ -243,7 +285,8 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
         (
             ScoresInferenceSnapshot(
                 persisted_row=None,
-                admission=None,
+                stream_admission=None,
+                ensure_sync_admission=None,
                 scheduler_run=None,
                 globally_paused=False,
             ),
@@ -261,7 +304,8 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
                     is_complete=True,
                     solutions=[],
                 ),
-                admission=None,
+                stream_admission=None,
+                ensure_sync_admission=None,
                 scheduler_run=None,
                 globally_paused=False,
             ),
@@ -308,7 +352,8 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
 
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
-        admission=None,
+        stream_admission=None,
+        ensure_sync_admission=None,
         scheduler_run=run,
         globally_paused=False,
     )
@@ -337,7 +382,8 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
 
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
-        admission=None,
+        stream_admission=None,
+        ensure_sync_admission=None,
         scheduler_run=run,
         globally_paused=False,
     )
