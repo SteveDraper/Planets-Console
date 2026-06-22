@@ -23,7 +23,6 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
-from api.analytics.military_score_inference.inference_stream_rows import ImmediateRowAdmission
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 
@@ -77,30 +76,6 @@ class AnalyticQueryContext:
         default_factory=dict,
         repr=False,
     )
-    _ensure_sync_terminal_admissions: dict[tuple[str, ExportScope], ImmediateRowAdmission] = field(
-        default_factory=dict,
-        repr=False,
-    )
-
-    def ensure_sync_terminal_admission(
-        self,
-        analytic_id: str,
-        scope: ExportScope,
-    ) -> ImmediateRowAdmission | None:
-        """Terminal row admission recorded by ensure-time sync inference for this scope."""
-        return self._ensure_sync_terminal_admissions.get((analytic_id, scope))
-
-    def record_ensure_sync_terminal_admission(
-        self,
-        analytic_id: str,
-        scope: ExportScope,
-        admission: ImmediateRowAdmission,
-    ) -> None:
-        """Remember one ensure-time sync terminal outcome for snapshot re-gather."""
-        self._ensure_sync_terminal_admissions[(analytic_id, scope)] = admission
-
-    def clear_ensure_sync_terminal_admission(self, analytic_id: str, scope: ExportScope) -> None:
-        self._ensure_sync_terminal_admissions.pop((analytic_id, scope), None)
 
     def export_snapshot_for(
         self,

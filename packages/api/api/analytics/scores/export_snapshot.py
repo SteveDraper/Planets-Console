@@ -13,7 +13,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_services import ScoresExportContext
-from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -97,7 +96,7 @@ def gather_scores_inference_snapshot(
     stream_scope = scores_inference_stream_scope(scope)
     pause_status = services.scheduler.global_pause_status(stream_scope)
     admission = _row_admission(ctx, services, scope, turn)
-    ensure_sync_admission = ctx.ensure_sync_terminal_admission(ANALYTIC_ID, scope)
+    ensure_sync_admission = services.ensure_sync_terminal_admission(scope)
     if ensure_sync_admission is not None:
         admission = ensure_sync_admission
     return ScoresInferenceSnapshot(

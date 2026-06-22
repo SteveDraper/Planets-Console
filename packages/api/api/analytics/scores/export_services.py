@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from api.analytics.export_context import AnalyticQueryContext, export_service_for
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.hull_catalog_mask import (
     ResolvedHullCatalogMask,
     resolve_hull_catalog_mask,
@@ -14,6 +15,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     get_inference_row_scheduler,
 )
+from api.analytics.military_score_inference.inference_stream_rows import ImmediateRowAdmission
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
@@ -46,6 +48,30 @@ class ScoresExportContext:
         default_factory=lambda: _default_stream_token_resolver
     )
     persistence: InferenceRowPersistenceService | None = None
+    _ensure_sync_terminal_admissions: dict[ExportScope, ImmediateRowAdmission] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
+
+    def ensure_sync_terminal_admission(
+        self,
+        scope: ExportScope,
+    ) -> ImmediateRowAdmission | None:
+        """Terminal row admission recorded by ensure-time sync inference for this scope."""
+        return self._ensure_sync_terminal_admissions.get(scope)
+
+    def record_ensure_sync_terminal_admission(
+        self,
+        scope: ExportScope,
+        admission: ImmediateRowAdmission,
+    ) -> None:
+        """Remember one ensure-time sync terminal outcome for snapshot re-gather."""
+        self._ensure_sync_terminal_admissions[scope] = admission
+
+    def clear_ensure_sync_terminal_admission(self, scope: ExportScope) -> None:
+        self._ensure_sync_terminal_admissions.pop(scope, None)
 
 
 def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:

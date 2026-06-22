@@ -158,11 +158,10 @@ def _run_prior_turn_sync_ensure(
             inputs.player_id,
             row,
         )
-        ctx.clear_ensure_sync_terminal_admission(ANALYTIC_ID, scope)
+        services.clear_ensure_sync_terminal_admission(scope)
     elif _is_terminal_sync_inference(inference):
         wire_event = inference_api_payload_to_wire_complete(inference)
-        ctx.record_ensure_sync_terminal_admission(
-            ANALYTIC_ID,
+        services.record_ensure_sync_terminal_admission(
             scope,
             ImmediateRowAdmission(events=(wire_event,)),
         )
