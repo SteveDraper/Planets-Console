@@ -103,6 +103,53 @@ def first_turn_from(sample_turn):
     )
 
 
+def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
+    prior_prior_turn = prior_turn - 1
+    prior_turn_obj = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=prior_turn),
+        game=replace(sample_turn.game, turn=prior_turn),
+    )
+    prior_prior_turn_obj = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=prior_prior_turn),
+        game=replace(sample_turn.game, turn=prior_prior_turn),
+    )
+    stored_turns = {
+        prior_prior_turn: prior_prior_turn_obj,
+        prior_turn: prior_turn_obj,
+        sample_turn.settings.turn: sample_turn,
+    }
+    return stored_turns, prior_turn_obj, prior_prior_turn_obj
+
+
+def prior_turn_ensure_context(
+    sample_turn,
+    persistence: InferenceRowPersistenceService,
+    *,
+    prior_turn: int = 110,
+    game_id: int = GAME_ID,
+):
+    stored_turns, _, _ = prior_turn_chain(sample_turn, prior_turn=prior_turn)
+    player_id = first_player_id(sample_turn)
+
+    def load_turn(turn_number: int):
+        return stored_turns.get(turn_number)
+
+    ctx = query_context(
+        sample_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+    )
+    scope = ExportScope(
+        game_id=game_id,
+        perspective=perspective(sample_turn),
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    return ctx, scope, player_id, stored_turns, load_turn
+
+
 def ship_build_wire(
     *,
     combo_id: str,
