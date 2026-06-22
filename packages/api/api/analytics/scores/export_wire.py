@@ -63,9 +63,7 @@ def wire_complete_event_from_terminal_admission(
     if isinstance(admission, ImmediateRowAdmission):
         return admission.events[-1]
     if admission.event is None:
-        raise ValueError(
-            "CachedCompleteRowAdmission must carry a terminal wire-complete event"
-        )
+        raise ValueError("CachedCompleteRowAdmission must carry a terminal wire-complete event")
     return admission.event
 
 
@@ -134,9 +132,7 @@ def solutions_from_terminal_admission(
     if isinstance(admission, ImmediateRowAdmission):
         return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
     if admission.event is None:
-        raise ValueError(
-            "CachedCompleteRowAdmission must carry a terminal wire-complete event"
-        )
+        raise ValueError("CachedCompleteRowAdmission must carry a terminal wire-complete event")
     return solutions_diagnostics_from_wire_complete_event(admission.event)
 
 

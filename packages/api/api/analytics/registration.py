@@ -79,10 +79,20 @@ def validate_turn_analytic_registrations(
                 f"Turn analytic {analytic_id!r} compute must be callable, "
                 f"got {type(registration.compute).__name__}"
             )
-        export_catalog = resolve_registration_export_catalog(registration)
-        export_analytic_id = export_catalog.analytic_id
-        if export_analytic_id != analytic_id:
+        if registration.export_catalog_loader is not None:
+            if not callable(registration.export_catalog_loader):
+                raise RuntimeError(
+                    f"Turn analytic {analytic_id!r} export_catalog_loader must be callable, "
+                    f"got {type(registration.export_catalog_loader).__name__}"
+                )
+        elif registration.export_catalog is not None:
+            export_analytic_id = registration.export_catalog.analytic_id
+            if export_analytic_id != analytic_id:
+                raise RuntimeError(
+                    f"Turn analytic {analytic_id!r} export catalog analytic_id must match "
+                    f"catalog entry id, got {export_analytic_id!r}"
+                )
+        else:
             raise RuntimeError(
-                f"Turn analytic {analytic_id!r} export catalog analytic_id must match "
-                f"catalog entry id, got {export_analytic_id!r}"
+                f"Turn analytic {analytic_id!r} must set export_catalog or export_catalog_loader"
             )

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        ImmediateRowAdmission,
+    )
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
@@ -23,7 +28,6 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
-from api.analytics.military_score_inference.inference_stream_rows import ImmediateRowAdmission
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 
@@ -77,11 +81,9 @@ class AnalyticQueryContext:
         default_factory=dict,
         repr=False,
     )
-    _ensure_sync_terminal_admissions: dict[tuple[str, ExportScope], ImmediateRowAdmission] = (
-        field(
-            default_factory=dict,
-            repr=False,
-        )
+    _ensure_sync_terminal_admissions: dict[tuple[str, ExportScope], Any] = field(
+        default_factory=dict,
+        repr=False,
     )
 
     def export_snapshot_for(
