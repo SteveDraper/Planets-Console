@@ -14,6 +14,10 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     get_inference_row_scheduler,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    controller_for_scope,
+)
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -25,6 +29,11 @@ def _default_hull_catalog_mask_resolver(
     return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=None)
 
 
+def _default_stream_token_resolver(scope: InferenceStreamScope) -> str | None:
+    controller = controller_for_scope(scope)
+    return controller.stream_token if controller is not None else None
+
+
 @dataclass(frozen=True)
 class ScoresExportContext:
     """Inference services used by scores export ensure and materialization."""
@@ -32,6 +41,9 @@ class ScoresExportContext:
     scheduler: InferenceRowScheduler = field(default_factory=get_inference_row_scheduler)
     resolve_hull_catalog_mask: Callable[[TurnInfo, int], ResolvedHullCatalogMask | None] = field(
         default_factory=lambda: _default_hull_catalog_mask_resolver
+    )
+    resolve_stream_token: Callable[[InferenceStreamScope], str | None] = field(
+        default_factory=lambda: _default_stream_token_resolver
     )
     persistence: InferenceRowPersistenceService | None = None
 
@@ -45,5 +57,6 @@ def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:
         resolve_hull_catalog_mask=(
             services.resolve_hull_catalog_mask or _default_hull_catalog_mask_resolver
         ),
+        resolve_stream_token=services.resolve_stream_token or _default_stream_token_resolver,
         persistence=services.persistence,
     )

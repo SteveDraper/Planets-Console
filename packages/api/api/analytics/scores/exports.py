@@ -12,9 +12,6 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.inference_table_stream_registry import (
-    controller_for_scope,
-)
 from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
     SearchStatus,
@@ -22,7 +19,6 @@ from api.analytics.scores.export_precedence import (
     is_scores_export_authoritatively_persisted,
     is_scores_inference_ensure_satisfied,
     resolve_scores_export,
-    resolve_scores_export_payload,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
@@ -77,8 +73,7 @@ def _scores_row_ensure_inputs(
         return None
 
     stream_scope = scores_inference_stream_scope(scope)
-    controller = controller_for_scope(stream_scope)
-    stream_token = controller.stream_token if controller is not None else None
+    stream_token = services.resolve_stream_token(stream_scope)
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
     resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
     return ScoresRowEnsureInputs(
@@ -245,7 +240,7 @@ def build_scores_export_materialized_tree(
     turn: TurnInfo,
 ) -> dict[str, Any]:
     """Materialize the full scores export value tree for one resolved snapshot."""
-    payload = resolve_scores_export_payload(resolved)
+    payload = resolved.payload
     tree: dict[str, Any] = {
         "meta": _export_meta_branch(
             search_status=resolved.decision.search_status,
