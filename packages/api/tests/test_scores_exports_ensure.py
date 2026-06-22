@@ -162,6 +162,7 @@ def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn
         )
 
     assert result.status == "ok"
+    assert result.paths["$.meta.searchStatus"].value == "stopped"
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False

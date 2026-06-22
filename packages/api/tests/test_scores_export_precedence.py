@@ -13,7 +13,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
-from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.scores.export_precedence import (
     is_scores_inference_ensure_satisfied,
     resolve_scores_export,
@@ -172,6 +172,27 @@ def test_cached_complete_admission_resolves_payload_from_event():
     assert payload.solutions_held == 1
     assert payload.solutions[0]["shipBuilds"][0]["hullId"] == 88
     assert payload.diagnostics == {"source": "cached_admission"}
+
+
+def test_stopped_terminal_admission_resolves_stopped_search_status():
+    wire_event = {
+        "type": "complete",
+        "status": STATUS_STOPPED,
+        "summary": "stopped",
+        "solutionCount": 1,
+        "isComplete": True,
+        "solutions": [],
+        "diagnostics": {"turn": 110},
+    }
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=None,
+        admission=CachedCompleteRowAdmission(event=wire_event),
+        scheduler_run=None,
+        globally_paused=False,
+    )
+    resolved = resolve_scores_export(snapshot)
+    assert resolved.decision.branch == "terminal_admission"
+    assert resolved.decision.search_status == "stopped"
 
 
 @pytest.mark.parametrize(

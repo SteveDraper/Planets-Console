@@ -56,6 +56,16 @@ def solutions_from_domain(
     return [serialize_solution_without_arithmetic(solution) for solution in ranked]
 
 
+def wire_complete_event_from_terminal_admission(
+    admission: ImmediateRowAdmission | CachedCompleteRowAdmission,
+) -> dict[str, object]:
+    """Return the terminal wire ``complete`` event carried by row admission."""
+    if isinstance(admission, ImmediateRowAdmission):
+        return admission.events[-1]
+    assert admission.event is not None
+    return admission.event
+
+
 def terminal_row_admission(
     admission: RowStreamAdmission | None,
 ) -> ImmediateRowAdmission | CachedCompleteRowAdmission | None:
