@@ -153,7 +153,7 @@ The in-process Core facility passed into **turn analytic** computation through w
 _Avoid_: export microservice, cross-analytic REST (v1)
 
 **Analytic export ensure**:
-Idempotent producer step before materialization: bring one **analytic export** scope to the best terminal state available (run inference, read persistence, attach to in-flight scheduler work). Invoked by **analytic query context** `query(...)`, not by ad hoc cross-imports. Ensure scope is typically `(game_id, perspective, turn, player_id)` for row-scoped exports such as **scores** `$.solution.*`. Does not start duplicate work when the same scope is already in flight. Cross-turn chains unwind one prior turn at a time (turn *N* reads *N−1* only). Large missing-step counts use a background ensure job with progress feedback, not a single blocking HTTP request. Truncated pseudo-baseline unwind is out of scope until **analytic export ensure provenance** and invalidation are designed.
+Idempotent producer step before materialization: bring one **analytic export** scope to the best terminal state available (run inference, read persistence, attach to in-flight scheduler work). Invoked by **analytic query context** `query(...)`, not by ad hoc cross-imports. Ensure scope is typically `(game_id, perspective, turn, player_id)` for row-scoped exports such as **scores** `$.solutions.*`. Does not start duplicate work when the same scope is already in flight. Cross-turn chains unwind one prior turn at a time (turn *N* reads *N−1* only). Large missing-step counts use a background ensure job with progress feedback, not a single blocking HTTP request. Truncated pseudo-baseline unwind is out of scope until **analytic export ensure provenance** and invalidation are designed.
 _Avoid_: mutating query (vague), read-only export materializer, user visit order as prerequisite
 
 **Analytic export ensure baseline**:
@@ -169,7 +169,7 @@ Dry-run dependency walk for a requested consumer scope: **analytic export ensure
 _Avoid_: route-probe (implementation jargon), running ensure during probe, BFF JSONPath export query endpoints (v1)
 
 **Analytic export scope**:
-Scope parameters on an export query (game, turn, **perspective**, `player_id`, connection **options**, etc.). Unspecified dimensions default to the ambient compute scope (shell turn, **perspective**, and related context). **Path-prefix scope rules** in the **analytic export catalog** declare where defaults are wrong or forbidden (e.g. `$.evidence.*` uses ambient **perspective** only; `$.solution.*` requires explicit `player_id`). The **analytic query context** validates scope, enforces **perspective**-visible stored turns for cross-turn reads, and merges **analytic persistence** when needed. Missing stored turns or unknown players yield root **unavailable** -- not silent fallback.
+Scope parameters on an export query (game, turn, **perspective**, `player_id`, connection **options**, etc.). Unspecified dimensions default to the ambient compute scope (shell turn, **perspective**, and related context). **Path-prefix scope rules** in the **analytic export catalog** declare where defaults are wrong or forbidden (e.g. `$.evidence.*` uses ambient **perspective** only; `$.solutions.*` requires explicit `player_id`). The **analytic query context** validates scope, enforces **perspective**-visible stored turns for cross-turn reads, and merges **analytic persistence** when needed. Missing stored turns or unknown players yield root **unavailable** -- not silent fallback.
 _Avoid_: scope baked into separate root schemas, omniscient cross-perspective reads
 
 **Analytic export cycle detection**:
@@ -181,15 +181,15 @@ Whether a Core **analytic export** query can be satisfied for the requested scop
 _Avoid_: enabled analytic check, client toggle gate
 
 **Analytic export value schema**:
-The single self-describing JSON-shaped type tree one **turn analytic** publishes in the **analytic export catalog**. Structure is independent of scope -- scope selects which slice of the tree is populated. Top-level branches may differ in role (e.g. `solution`, `hullCatalogMask`, `slots`, `evidence`) with **path-prefix scope rules** per branch. Catalog documents array **ordering semantics** (e.g. `solution.ships` sorted by **inference solution rank weight** so `$.solution.ships[0]` is top ship). Wire values are JSON-serializable for future MCP adapters.
+The single self-describing JSON-shaped type tree one **turn analytic** publishes in the **analytic export catalog**. Structure is independent of scope -- scope selects which slice of the tree is populated. Top-level branches may differ in role (e.g. `solutions`, `hullCatalogMask`, `slots`, `evidence`) with **path-prefix scope rules** per branch. Catalog documents array **ordering semantics** (e.g. `$.solutions` sorted descending by **inference solution rank weight** so `$.solutions[0]` is the top held explanation). Wire values are JSON-serializable for future MCP adapters.
 _Avoid_: flat scalar-only catalog, separate schema per scope, SPA table row as the schema
 
 **Analytic export path**:
-A JSONPath selector into the analytic's **value schema** tree -- e.g. `$`, `$.solution.ships`, `$.solution.ships[0]`, `$.solution.ships[*].hull_id`. One **analytic query context** request binds scope once, materializes the tree (memoized), then resolves one or more paths (**batched export query**). Zero matches yield **analytic export path none**, not root **unavailable**.
+A JSONPath selector into the analytic's **value schema** tree -- e.g. `$`, `$.solutions`, `$.solutions[0]`, `$.solutions[0].shipBuilds[0]`. One **analytic query context** request binds scope once, materializes the tree (memoized), then resolves one or more paths (**batched export query**). Zero matches yield **analytic export path none**, not root **unavailable**.
 _Avoid_: custom path dialect, treating empty index as query failure
 
 **Analytic export result**:
-Discriminated outcome of one path query through the **analytic query context**. Top level: **`ok`** when the export tree can be established for scope; **`unavailable`** when it cannot (e.g. `turn_not_stored`, `invalid_scope`, `persistence_empty`). Under **`ok`**, each path gets a **path result**: **`value`**, **`none`** (zero matches -- e.g. `$.solution.ships[0]` when `ships` is `[]`), or **`invalid_path`**. Batched paths do not fail the whole query when one path is **`none`**. **`cycle_detected`** is a hard error (exception).
+Discriminated outcome of one path query through the **analytic query context**. Top level: **`ok`** when the export tree can be established for scope; **`unavailable`** when it cannot (e.g. `turn_not_stored`, `invalid_scope`, `persistence_empty`). Under **`ok`**, each path gets a **path result**: **`value`**, **`none`** (zero matches -- e.g. `$.solutions[0]` when `solutions` is `[]`), or **`invalid_path`**. Batched paths do not fail the whole query when one path is **`none`**. **`cycle_detected`** is a hard error (exception).
 _Avoid_: top-level failure for path none, conflating none with turn_not_stored
 
 **Analytic export path none**:
@@ -197,7 +197,7 @@ A **path result** status: root available, JSONPath valid, zero nodes matched. Di
 _Avoid_: path miss as query failure
 
 **Batched export query**:
-One **analytic query context** request resolving multiple JSONPath selectors under one scope binding -- e.g. `["$.solution.ships[0]", "$.solution.aggregates"]` without re-materializing the tree.
+One **analytic query context** request resolving multiple JSONPath selectors under one scope binding -- e.g. `["$.solutions[0]", "$.meta.searchStatus"]` without re-materializing the tree.
 _Avoid_: N sequential queries when one tree pass suffices
 
 **Analytic export materializer**:
@@ -205,7 +205,7 @@ The per-**turn analytic** function (`materialize_export_tree`) registered in Cor
 _Avoid_: duplicate domain logic in handler vs exports, silent partial data without status
 
 **Analytic export meta**:
-A documented branch of the export value tree (e.g. `$.meta`) carrying **materialization lifecycle** status independent of path **`none`** / **`value`**. Generic **`searchStatus`** values: **`not_started`**, **`in_progress`**, **`paused`**, **`stopped`**, **`complete`**. Consumers warn users when status is not **`complete`** (e.g. fleet analytic: prior-turn inference not ready). **`complete`** with path **`none`** is authoritative empty data, not bad data. Solver-specific outcomes (e.g. inference `no_exact_solution`, band residual) live under domain branches (e.g. `$.solution.diagnostics`), not in **`searchStatus`**. Optional **`solutionsHeld`** counts held rows under **`complete`** / in-progress partial trees.
+A documented branch of the export value tree (e.g. `$.meta`) carrying **materialization lifecycle** status independent of path **`none`** / **`value`**. Generic **`searchStatus`** values: **`not_started`**, **`in_progress`**, **`paused`**, **`stopped`**, **`complete`**. Consumers warn users when status is not **`complete`** (e.g. fleet analytic: prior-turn inference not ready). **`complete`** with path **`none`** is authoritative empty data, not bad data. Solver-specific outcomes (e.g. inference `no_exact_solution`, band residual) live under domain branches (e.g. `$.diagnostics`), not in **`searchStatus`**. Optional **`solutionsHeld`** counts held rows under **`complete`** / in-progress partial trees.
 _Avoid_: inference-only statuses in generic meta, inferring quality from empty paths alone
 
 **Analytic export registry**:
