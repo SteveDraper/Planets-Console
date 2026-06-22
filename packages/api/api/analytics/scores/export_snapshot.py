@@ -12,10 +12,10 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     RowStreamAdmission,
     resolve_row_stream_admission,
 )
-from api.analytics.scores.export_wire import terminal_row_admission
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.scores.export_wire import terminal_row_admission
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.serialization.inference_row_persistence import PersistedInferenceRow
