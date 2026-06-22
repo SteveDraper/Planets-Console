@@ -196,8 +196,3 @@ def is_scores_export_authoritatively_persisted(resolved: ScoresExportResolved) -
         decision.branch in _AUTHORITATIVE_PERSISTED_BRANCHES
         and decision.search_status == "complete"
     )
-
-
-def resolve_scores_export_payload(resolved: ScoresExportResolved) -> ScoresExportPayload:
-    """Return the payload resolved alongside the precedence decision."""
-    return resolved.payload

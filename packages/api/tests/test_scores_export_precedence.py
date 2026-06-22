@@ -17,7 +17,6 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.export_precedence import (
     is_scores_inference_ensure_satisfied,
     resolve_scores_export,
-    resolve_scores_export_payload,
 )
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -55,7 +54,7 @@ def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_stat
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
-    payload = resolve_scores_export_payload(resolved)
+    payload = resolved.payload
     assert resolved.decision.search_status == "complete"
     assert payload.solutions == []
     assert payload.solutions_held == 0
@@ -87,7 +86,7 @@ def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_tu
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
-    payload = resolve_scores_export_payload(resolved)
+    payload = resolved.payload
     assert resolved.decision.search_status == "in_progress"
     assert payload.solutions_held == 1
 
@@ -113,7 +112,7 @@ def test_scheduler_branch_search_status_in_progress(sample_turn):
     )
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.search_status == "in_progress"
-    resolve_scores_export_payload(resolved)
+    _ = resolved.payload
 
 
 def test_decision_search_status_available_without_payload_materialization(sample_turn):
@@ -168,7 +167,7 @@ def test_cached_complete_admission_resolves_payload_from_event():
         globally_paused=False,
     )
     resolved = resolve_scores_export(snapshot)
-    payload = resolve_scores_export_payload(resolved)
+    payload = resolved.payload
     assert resolved.decision.search_status == "complete"
     assert payload.solutions_held == 1
     assert payload.solutions[0]["shipBuilds"][0]["hullId"] == 88
@@ -273,7 +272,7 @@ def test_ensure_satisfied_tracks_precedence_branch(
     assert resolved.decision.needs_ensure_work is needs_ensure_work
     assert is_scores_inference_ensure_satisfied(resolved) is ensure_satisfied
     assert resolved.decision.search_status == search_status
-    resolve_scores_export_payload(resolved)
+    _ = resolved.payload
 
 
 def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
@@ -300,7 +299,7 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
     assert resolved.decision.needs_ensure_work is False
     assert is_scores_inference_ensure_satisfied(resolved) is True
     assert resolved.decision.search_status == "in_progress"
-    resolve_scores_export_payload(resolved)
+    _ = resolved.payload
 
 
 def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn):
@@ -324,7 +323,7 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
         scheduler_run=run,
         globally_paused=False,
     )
-    payload = resolve_scores_export_payload(resolve_scores_export(snapshot))
+    payload = resolve_scores_export(snapshot).payload
     assert payload.diagnostics is not None
     assert payload.diagnostics["turn"] == sample_turn.settings.turn
     assert payload.diagnostics["solver"]["source"] == "scheduler_ladder"
