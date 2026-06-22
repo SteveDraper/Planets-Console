@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
@@ -30,6 +33,7 @@ from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
+from api.models.player import Score
 from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
 from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
@@ -49,6 +53,40 @@ ORDERING_SEMANTICS = {
 }
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
+
+
+@dataclass(frozen=True)
+class ScoresRowEnsureInputs:
+    """Shared row-level inputs for scores export ensure strategies."""
+
+    player_id: int
+    score: Score | None
+    resolved_mask: ResolvedHullCatalogMask | None
+    stream_scope: InferenceStreamScope
+    stream_token: str | None
+
+
+def _scores_row_ensure_inputs(
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+) -> ScoresRowEnsureInputs | None:
+    player_id = scope.player_id
+    if player_id is None:
+        return None
+
+    stream_scope = scores_inference_stream_scope(scope)
+    controller = controller_for_scope(stream_scope)
+    stream_token = controller.stream_token if controller is not None else None
+    score = next((row for row in turn.scores if row.ownerid == player_id), None)
+    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
+    return ScoresRowEnsureInputs(
+        player_id=player_id,
+        score=score,
+        resolved_mask=resolved_mask,
+        stream_scope=stream_scope,
+        stream_token=stream_token,
+    )
 
 
 def _scores_resolved(
@@ -93,18 +131,20 @@ def _sync_persist_empty_branch(
     load_scoreboard_turn: Callable[[int], TurnInfo | None],
 ) -> bool:
     """Persist sync inference when precedence is empty (prior-turn ensure path)."""
-    if resolved.decision.branch != "empty":
+    if not resolved.decision.needs_ensure_work:
         return False
-    if services.persistence is None or scope.player_id is None:
+    if services.persistence is None:
         return False
 
-    player_id = scope.player_id
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
+    inputs = _scores_row_ensure_inputs(services, scope, turn)
+    if inputs is None:
+        return False
+
     inference = get_scores_row_inference(
         turn,
-        player_id,
+        inputs.player_id,
         load_scoreboard_turn=load_scoreboard_turn,
-        resolved_mask=resolved_mask,
+        resolved_mask=inputs.resolved_mask,
     )
     status = str(inference.get("status", ""))
     if not is_persistable_inference_status(status):
@@ -115,7 +155,7 @@ def _sync_persist_empty_branch(
         scope.game_id,
         scope.perspective,
         scope.turn,
-        player_id,
+        inputs.player_id,
         row,
     )
     return True
@@ -157,30 +197,22 @@ def _ensure_current_turn_scheduler(
     scope: ExportScope,
     turn: TurnInfo,
 ) -> bool:
-    player_id = scope.player_id
-    assert player_id is not None
-    stream_scope = scores_inference_stream_scope(scope)
-    if services.scheduler.row_run_for_player(stream_scope, player_id) is not None:
+    inputs = _scores_row_ensure_inputs(services, scope, turn)
+    if inputs is None or inputs.score is None:
+        return False
+    if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
 
-    controller = controller_for_scope(stream_scope)
-    stream_token = controller.stream_token if controller is not None else None
-
-    score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    if score is None:
-        return False
-
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
     schedule_inference_row(
         services.scheduler,
-        score=score,
+        score=inputs.score,
         turn=turn,
-        player_id=player_id,
+        player_id=inputs.player_id,
         game_id=scope.game_id,
         perspective=scope.perspective,
         load_scoreboard_turn=ctx.load_turn,
-        resolved_mask=resolved_mask,
-        stream_token=stream_token,
+        resolved_mask=inputs.resolved_mask,
+        stream_token=inputs.stream_token,
     )
     return True
 
