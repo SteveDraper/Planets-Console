@@ -50,13 +50,4 @@ class ScoresExportContext:
 
 def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:
     services = export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
-    if services is None:
-        return ScoresExportContext()
-    return ScoresExportContext(
-        scheduler=services.scheduler or get_inference_row_scheduler(),
-        resolve_hull_catalog_mask=(
-            services.resolve_hull_catalog_mask or _default_hull_catalog_mask_resolver
-        ),
-        resolve_stream_token=services.resolve_stream_token or _default_stream_token_resolver,
-        persistence=services.persistence,
-    )
+    return services or ScoresExportContext()
