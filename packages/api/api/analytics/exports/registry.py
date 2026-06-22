@@ -6,21 +6,16 @@ from api.analytics.catalog import TURN_ANALYTIC_CATALOG
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.ensure_validation import validate_ensure_dependency_targets
 from api.analytics.exports.schema_validation import validate_export_value_schema
+from api.analytics.registration import resolve_registration_export_catalog
 from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 
 
 def _production_export_catalogs() -> tuple[AnalyticExportCatalog, ...]:
     """Resolve registration placeholders to production export catalogs."""
-    catalogs: list[AnalyticExportCatalog] = []
-    for registration in TURN_ANALYTIC_REGISTRATIONS:
-        if registration.catalog_entry.id == SCORES_ANALYTIC_ID:
-            from api.analytics.scores.exports import EXPORT_CATALOG as scores_export_catalog
-
-            catalogs.append(scores_export_catalog)
-        else:
-            catalogs.append(registration.export_catalog)
-    return tuple(catalogs)
+    return tuple(
+        resolve_registration_export_catalog(registration)
+        for registration in TURN_ANALYTIC_REGISTRATIONS
+    )
 
 
 def validate_export_catalogs(

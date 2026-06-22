@@ -64,6 +64,7 @@ def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn, monkeypatc
 
 
 def test_turn_analytic_registrations_derive_catalog_and_handlers():
+    from api.analytics.registration import resolve_registration_export_catalog
     from api.analytics.registry import TURN_ANALYTIC_REGISTRATIONS
 
     assert TURN_ANALYTIC_CATALOG == tuple(
@@ -75,7 +76,8 @@ def test_turn_analytic_registrations_derive_catalog_and_handlers():
     for registration in TURN_ANALYTIC_REGISTRATIONS:
         assert registration.catalog_entry.id in TURN_ANALYTICS
         assert callable(registration.compute)
-        assert registration.export_catalog.analytic_id == registration.catalog_entry.id
+        export_catalog = resolve_registration_export_catalog(registration)
+        assert export_catalog.analytic_id == registration.catalog_entry.id
 
 
 def test_validate_turn_analytic_registrations_rejects_empty_tuple():
