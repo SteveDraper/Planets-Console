@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -168,19 +169,40 @@ def test_top_solution_query_returns_full_build(sample_turn, persistence):
     assert actions[0]["count"] == 2
 
 
+def test_resolve_scores_services_fails_without_injection(sample_turn):
+    player_id = first_player_id(sample_turn)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=lambda turn_number: (
+            sample_turn if turn_number == sample_turn.settings.turn else None
+        ),
+    )
+    with pytest.raises(RuntimeError, match="requires 'scores' in ctx.export_services"):
+        materialize_scores_tree(ctx, player_id)
+
+
+def test_resolve_scores_services_fails_on_wrong_type(sample_turn):
+    player_id = first_player_id(sample_turn)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=lambda turn_number: (
+            sample_turn if turn_number == sample_turn.settings.turn else None
+        ),
+        export_services={"scores": object()},
+    )
+    with pytest.raises(RuntimeError, match="must be ScoresExportContext"):
+        materialize_scores_tree(ctx, player_id)
+
+
 def test_first_turn_materializes_complete_without_ensure(sample_turn):
     first_turn = first_turn_from(sample_turn)
     player_id = first_player_id(first_turn)
 
-    def load_turn(turn_number: int):
-        if turn_number == 1:
-            return first_turn
-        return None
-
-    ctx = make_analytic_query_context(
+    ctx = query_context(
         first_turn,
-        TurnAnalyticsOptions(),
-        load_turn=load_turn,
+        stored_turns={1: first_turn},
     )
     result = ctx.query(
         "scores",

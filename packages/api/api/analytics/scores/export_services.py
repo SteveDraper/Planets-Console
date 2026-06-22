@@ -50,4 +50,16 @@ class ScoresExportContext:
 
 def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:
     services = export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
-    return services or ScoresExportContext()
+    if services is not None:
+        return services
+
+    injected = ctx.export_services.get(ANALYTIC_ID)
+    if injected is None:
+        raise RuntimeError(
+            f"Scores export requires {ANALYTIC_ID!r} in ctx.export_services; "
+            "inject ScoresExportContext via TurnAnalyticService or test helpers."
+        )
+    raise RuntimeError(
+        f"Scores export_services[{ANALYTIC_ID!r}] must be ScoresExportContext, "
+        f"got {type(injected).__name__}."
+    )

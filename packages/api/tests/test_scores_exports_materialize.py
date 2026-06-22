@@ -341,15 +341,9 @@ def test_first_turn_immediate_complete_is_ensure_satisfied_not_persisted(sample_
     first_turn = first_turn_from(sample_turn)
     player_id = first_player_id(first_turn)
 
-    def load_turn(turn_number: int):
-        if turn_number == 1:
-            return first_turn
-        return None
-
-    ctx = make_analytic_query_context(
+    ctx = query_context(
         first_turn,
-        TurnAnalyticsOptions(),
-        load_turn=load_turn,
+        stored_turns={1: first_turn},
     )
     tree, scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "complete"
