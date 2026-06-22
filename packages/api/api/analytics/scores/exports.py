@@ -134,11 +134,11 @@ def _run_prior_turn_sync_ensure(
     scope: ExportScope,
     turn: TurnInfo,
     load_scoreboard_turn: Callable[[int], TurnInfo | None],
-) -> None:
+) -> bool:
     """Run prior-turn sync inference once; persist or stash terminal admission."""
     inputs = _scores_row_ensure_inputs(services, scope, turn)
     if inputs is None:
-        return
+        return False
 
     inference = get_scores_row_inference(
         turn,
@@ -166,9 +166,9 @@ def _run_prior_turn_sync_ensure(
             ImmediateRowAdmission(events=(wire_event,)),
         )
     else:
-        return
+        return False
 
-    ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+    return True
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
@@ -183,20 +183,23 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if resolved.decision.is_ensure_satisfied:
         return True
 
+    mutated = False
     if scope.turn < ctx.ambient_turn:
         if resolved.decision.needs_ensure_work:
-            _run_prior_turn_sync_ensure(
+            mutated = _run_prior_turn_sync_ensure(
                 ctx,
                 services=services,
                 scope=scope,
                 turn=turn,
                 load_scoreboard_turn=ctx.load_turn,
             )
-        _, resolved = _scores_resolved(ctx, scope)
+    else:
+        mutated = _ensure_current_turn_scheduler(ctx, services, scope, turn)
+
+    if not mutated:
         return resolved.decision.is_ensure_satisfied
 
-    if _ensure_current_turn_scheduler(ctx, services, scope, turn):
-        ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+    ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     _, resolved = _scores_resolved(ctx, scope)
     return resolved.decision.is_ensure_satisfied
 
