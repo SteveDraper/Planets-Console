@@ -113,8 +113,12 @@ ENSURE_DEPENDENCIES = (
     # e.g. EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
 )
 
-def ensure_export(ctx, scope) -> None:
-    """Idempotent: persist/scheduler attach/sync ensure for this scope before materialize."""
+def ensure_export(ctx, scope) -> bool:
+    """Idempotent: persist/scheduler attach/sync ensure for this scope before materialize.
+
+    Return True when the scope needs no further ensure work (already satisfied or
+    terminal with no persistable row). ctx.query marks the scope ensured only on True.
+    """
     ...
 
 def materialize_export_tree(ctx, scope) -> dict:
