@@ -21,7 +21,6 @@ from api.analytics.scores.export_precedence import (
     SearchStatus,
     is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
-    is_scores_inference_ensure_satisfied,
     resolve_scores_export,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
@@ -119,7 +118,7 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
         return True
 
     _services, resolved = _scores_resolved(ctx, scope)
-    return is_scores_inference_ensure_satisfied(resolved)
+    return resolved.decision.is_ensure_satisfied
 
 
 def _is_terminal_sync_inference(inference: dict[str, object]) -> bool:
@@ -180,7 +179,7 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if turn is None:
         return True
 
-    if is_scores_inference_ensure_satisfied(resolved):
+    if resolved.decision.is_ensure_satisfied:
         return True
 
     if scope.turn < ctx.ambient_turn:
@@ -193,12 +192,12 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
                 load_scoreboard_turn=ctx.load_turn,
             )
         _, resolved = _scores_resolved(ctx, scope)
-        return is_scores_inference_ensure_satisfied(resolved)
+        return resolved.decision.is_ensure_satisfied
 
     if _ensure_current_turn_scheduler(ctx, services, scope, turn):
         ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     _, resolved = _scores_resolved(ctx, scope)
-    return is_scores_inference_ensure_satisfied(resolved)
+    return resolved.decision.is_ensure_satisfied
 
 
 def _ensure_current_turn_scheduler(

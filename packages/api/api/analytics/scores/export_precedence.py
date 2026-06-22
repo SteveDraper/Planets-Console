@@ -64,6 +64,10 @@ class ScoresExportDecision:
     search_status: SearchStatus
     needs_ensure_work: bool
 
+    @property
+    def is_ensure_satisfied(self) -> bool:
+        return not self.needs_ensure_work
+
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in PERSISTABLE_INFERENCE_STATUSES
@@ -204,11 +208,6 @@ def _resolve_scores_export_ladder(
         ScoresExportDecision("empty", "not_started", needs_ensure_work=True),
         ScoresExportPayload([], None, 0),
     )
-
-
-def is_scores_inference_ensure_satisfied(resolved: ScoresExportResolved) -> bool:
-    """True when no further ensure work is needed for this snapshot."""
-    return not resolved.decision.needs_ensure_work
 
 
 def is_scores_export_authoritatively_persisted(resolved: ScoresExportResolved) -> bool:

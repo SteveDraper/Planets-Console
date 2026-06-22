@@ -14,10 +14,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 )
 from api.analytics.military_score_inference.inference_stream_rows import CachedCompleteRowAdmission
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
-from api.analytics.scores.export_precedence import (
-    is_scores_inference_ensure_satisfied,
-    resolve_scores_export,
-)
+from api.analytics.scores.export_precedence import resolve_scores_export
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -291,7 +288,7 @@ def test_ensure_satisfied_tracks_precedence_branch(
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == expected_branch
     assert resolved.decision.needs_ensure_work is needs_ensure_work
-    assert is_scores_inference_ensure_satisfied(resolved) is ensure_satisfied
+    assert resolved.decision.is_ensure_satisfied is ensure_satisfied
     assert resolved.decision.search_status == search_status
     _ = resolved.payload
 
@@ -318,7 +315,7 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == "scheduler"
     assert resolved.decision.needs_ensure_work is False
-    assert is_scores_inference_ensure_satisfied(resolved) is True
+    assert resolved.decision.is_ensure_satisfied is True
     assert resolved.decision.search_status == "in_progress"
     _ = resolved.payload
 
