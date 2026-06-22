@@ -49,6 +49,60 @@ def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
     assert tree_after is not tree_before
 
 
+def test_probe_reports_prior_turn_work_without_running_ensure(sample_turn, persistence):
+    """Probe must count missing prior-turn work without sync inference or persistence."""
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
+
+    with (
+        patch(
+            "api.analytics.scores.exports.get_scores_row_inference",
+        ) as mock_inference,
+        patch(
+            "api.analytics.scores.exports.schedule_inference_row",
+        ) as mock_schedule,
+        patch.object(persistence, "put_row") as mock_put_row,
+    ):
+        probe = ctx.probe("scores", {"turn": 110, "player_id": player_id})
+
+        mock_inference.assert_not_called()
+        mock_schedule.assert_not_called()
+        mock_put_row.assert_not_called()
+
+    assert probe.status == "ok"
+    assert probe.total_missing == 1
+    assert len(probe.missing_steps) == 1
+    missing = probe.missing_steps[0]
+    assert missing.analytic_id == "scores"
+    assert missing.turn == 110
+    assert missing.player_id == player_id
+    assert missing.status == "not_persisted"
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+
+
+def test_probe_reports_current_turn_work_without_scheduling(sample_turn, persistence):
+    """Probe must count missing current-turn work without attaching the scheduler."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    stream_scope = stream_scope_for_turn(sample_turn)
+    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
+
+    with patch(
+        "api.analytics.scores.exports.schedule_inference_row",
+    ) as mock_schedule:
+        probe = ctx.probe("scores", {"player_id": player_id})
+        mock_schedule.assert_not_called()
+
+    assert probe.status == "ok"
+    assert probe.total_missing == 1
+    assert probe.missing_steps[0].analytic_id == "scores"
+    assert probe.missing_steps[0].turn == sample_turn.settings.turn
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
+
+
 def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
     ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
@@ -76,14 +130,16 @@ def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, per
     with patch(
         "api.analytics.scores.exports.get_scores_row_inference",
         return_value=stopped_inference,
-    ):
-        EXPORT_CATALOG.ensure_export(ctx, scope)
+    ) as mock_inference:
+        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        mock_inference.assert_called_once()
 
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
 
 
 def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn, persistence):
-    """After ctx.query ensure returns True, probe omits missing step even when not persisted."""
+    """After ensure stashes terminal sync admission, probe and is_ensure_satisfied agree."""
     ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
     stopped_inference = {
         "playerId": player_id,
@@ -110,7 +166,7 @@ def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
     assert EXPORT_CATALOG.is_ensure_satisfied is not None
-    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
 
     probe = ctx.probe("scores", {"turn": 110, "player_id": player_id})
     assert probe.status == "ok"

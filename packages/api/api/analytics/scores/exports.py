@@ -10,7 +10,10 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
+from api.analytics.military_score_inference.inference_stream_rows import (
+    ImmediateRowAdmission,
+    schedule_inference_row,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.analytics.scores.export_precedence import (
@@ -119,23 +122,24 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     return is_scores_inference_ensure_satisfied(resolved)
 
 
-def _sync_persist_prior_turn_when_needs_ensure(
-    resolved: ScoresExportResolved,
+def _is_terminal_sync_inference(inference: dict[str, object]) -> bool:
+    if inference.get("isComplete"):
+        return True
+    return str(inference.get("status", "")) == STATUS_STOPPED
+
+
+def _run_prior_turn_sync_ensure(
+    ctx: AnalyticQueryContext,
     *,
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo,
     load_scoreboard_turn: Callable[[int], TurnInfo | None],
-) -> bool:
-    """Persist prior-turn sync inference when ``needs_ensure_work`` is set."""
-    if not resolved.decision.needs_ensure_work:
-        return False
-    if services.persistence is None:
-        return False
-
+) -> None:
+    """Run prior-turn sync inference once; persist or stash terminal admission."""
     inputs = _scores_row_ensure_inputs(services, scope, turn)
     if inputs is None:
-        return False
+        return
 
     inference = get_scores_row_inference(
         turn,
@@ -144,40 +148,28 @@ def _sync_persist_prior_turn_when_needs_ensure(
         resolved_mask=inputs.resolved_mask,
     )
     status = str(inference.get("status", ""))
-    if not is_persistable_inference_status(status):
-        return False
-    wire_event = inference_api_payload_to_wire_complete(inference)
-    row = persisted_inference_row_from_wire_complete(wire_event)
-    services.persistence.put_row(
-        scope.game_id,
-        scope.perspective,
-        scope.turn,
-        inputs.player_id,
-        row,
-    )
-    return True
+    if services.persistence is not None and is_persistable_inference_status(status):
+        wire_event = inference_api_payload_to_wire_complete(inference)
+        row = persisted_inference_row_from_wire_complete(wire_event)
+        services.persistence.put_row(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            inputs.player_id,
+            row,
+        )
+        ctx.clear_ensure_sync_terminal_admission(ANALYTIC_ID, scope)
+    elif _is_terminal_sync_inference(inference):
+        wire_event = inference_api_payload_to_wire_complete(inference)
+        ctx.record_ensure_sync_terminal_admission(
+            ANALYTIC_ID,
+            scope,
+            ImmediateRowAdmission(events=(wire_event,)),
+        )
+    else:
+        return
 
-
-def _prior_turn_sync_inference_terminal(
-    services: ScoresExportContext,
-    scope: ExportScope,
-    turn: TurnInfo,
-    load_scoreboard_turn: Callable[[int], TurnInfo | None],
-) -> bool:
-    """True when prior-turn sync inference finished with no persistable row to write."""
-    inputs = _scores_row_ensure_inputs(services, scope, turn)
-    if inputs is None:
-        return False
-
-    inference = get_scores_row_inference(
-        turn,
-        inputs.player_id,
-        load_scoreboard_turn=load_scoreboard_turn,
-        resolved_mask=inputs.resolved_mask,
-    )
-    if inference.get("isComplete"):
-        return True
-    return str(inference.get("status", "")) == STATUS_STOPPED
+    ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
 
 
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
@@ -193,18 +185,16 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
         return True
 
     if scope.turn < ctx.ambient_turn:
-        if _sync_persist_prior_turn_when_needs_ensure(
-            resolved,
-            services=services,
-            scope=scope,
-            turn=turn,
-            load_scoreboard_turn=ctx.load_turn,
-        ):
-            ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+        if resolved.decision.needs_ensure_work:
+            _run_prior_turn_sync_ensure(
+                ctx,
+                services=services,
+                scope=scope,
+                turn=turn,
+                load_scoreboard_turn=ctx.load_turn,
+            )
         _, resolved = _scores_resolved(ctx, scope)
-        if is_scores_inference_ensure_satisfied(resolved):
-            return True
-        return _prior_turn_sync_inference_terminal(services, scope, turn, ctx.load_turn)
+        return is_scores_inference_ensure_satisfied(resolved)
 
     if _ensure_current_turn_scheduler(ctx, services, scope, turn):
         ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
