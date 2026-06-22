@@ -119,7 +119,7 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     return is_scores_inference_ensure_satisfied(resolved)
 
 
-def _sync_persist_empty_branch(
+def _sync_persist_prior_turn_when_needs_ensure(
     resolved: ScoresExportResolved,
     *,
     services: ScoresExportContext,
@@ -127,7 +127,7 @@ def _sync_persist_empty_branch(
     turn: TurnInfo,
     load_scoreboard_turn: Callable[[int], TurnInfo | None],
 ) -> bool:
-    """Persist sync inference when precedence is empty (prior-turn ensure path)."""
+    """Persist prior-turn sync inference when ``needs_ensure_work`` is set."""
     if not resolved.decision.needs_ensure_work:
         return False
     if services.persistence is None:
@@ -193,7 +193,7 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
         return True
 
     if scope.turn < ctx.ambient_turn:
-        if _sync_persist_empty_branch(
+        if _sync_persist_prior_turn_when_needs_ensure(
             resolved,
             services=services,
             scope=scope,

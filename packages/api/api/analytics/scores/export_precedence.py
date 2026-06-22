@@ -48,7 +48,12 @@ _AUTHORITATIVE_PERSISTED_BRANCHES = frozenset({"priority_persisted", "fallback_p
 
 @dataclass(frozen=True)
 class ScoresExportDecision:
-    """Precedence branch and lifecycle status for one snapshot."""
+    """Precedence branch and lifecycle status for one snapshot.
+
+    Attributes:
+        needs_ensure_work: Driver for export ensure (prior-turn sync). Today only
+            the empty branch sets this; other branches may set it in future.
+    """
 
     branch: ScoresExportPrecedenceBranch
     search_status: SearchStatus
