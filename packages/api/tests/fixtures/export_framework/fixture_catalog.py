@@ -112,10 +112,11 @@ def _make_is_persisted(analytic_id: str) -> Callable[[object, ExportScope], bool
     return is_persisted
 
 
-def _make_ensure_export(analytic_id: str) -> Callable[[object, ExportScope], None]:
-    def ensure_export(_ctx: object, scope: ExportScope) -> None:
+def _make_ensure_export(analytic_id: str) -> Callable[[object, ExportScope], bool]:
+    def ensure_export(_ctx: object, scope: ExportScope) -> bool:
         FIXTURE_EXPORT_STATE.ensure_calls.append((analytic_id, scope))
         FIXTURE_EXPORT_STATE.mark_persisted(analytic_id, scope)
+        return True
 
     return ensure_export
 

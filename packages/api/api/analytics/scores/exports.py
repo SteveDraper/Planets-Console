@@ -12,6 +12,7 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
     SearchStatus,
@@ -157,21 +158,40 @@ def _sync_persist_empty_branch(
     return True
 
 
-def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
+def _prior_turn_sync_inference_terminal(
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+    load_scoreboard_turn: Callable[[int], TurnInfo | None],
+) -> bool:
+    """True when prior-turn sync inference finished with no persistable row to write."""
+    inputs = _scores_row_ensure_inputs(services, scope, turn)
+    if inputs is None:
+        return False
+
+    inference = get_scores_row_inference(
+        turn,
+        inputs.player_id,
+        load_scoreboard_turn=load_scoreboard_turn,
+        resolved_mask=inputs.resolved_mask,
+    )
+    if inference.get("isComplete"):
+        return True
+    return str(inference.get("status", "")) == STATUS_STOPPED
+
+
+def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if scope.player_id is None:
-        return
+        return True
 
     services, resolved = _scores_resolved(ctx, scope)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
-        return
+        return True
 
     if is_scores_inference_ensure_satisfied(resolved):
-        return
+        return True
 
-    # Prior-turn sync ensure may no-op when inference is non-persistable (e.g. stopped).
-    # ctx.query still marks the scope ensured after ensure_export returns; probe walks
-    # skip re-entry via is_scope_ensured even when is_persisted remains False.
     if scope.turn < ctx.ambient_turn:
         if _sync_persist_empty_branch(
             resolved,
@@ -181,10 +201,15 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> None:
             load_scoreboard_turn=ctx.load_turn,
         ):
             ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-        return
+        _, resolved = _scores_resolved(ctx, scope)
+        if is_scores_inference_ensure_satisfied(resolved):
+            return True
+        return _prior_turn_sync_inference_terminal(services, scope, turn, ctx.load_turn)
 
     if _ensure_current_turn_scheduler(ctx, services, scope, turn):
         ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+    _, resolved = _scores_resolved(ctx, scope)
+    return is_scores_inference_ensure_satisfied(resolved)
 
 
 def _ensure_current_turn_scheduler(

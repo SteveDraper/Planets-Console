@@ -17,7 +17,7 @@ def _catalog(
 ) -> AnalyticExportCatalog:
     return AnalyticExportCatalog(
         analytic_id=analytic_id,
-        ensure_export=lambda _ctx, _scope: None,
+        ensure_export=lambda _ctx, _scope: False,
         materialize_export_tree=lambda _ctx, _scope: {},
         is_persisted=lambda _ctx, _scope: is_persisted,
         is_ensure_satisfied=(

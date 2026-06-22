@@ -83,7 +83,7 @@ def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, per
 
 
 def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn, persistence):
-    """After ctx.query ensure, is_scope_ensured skips the walk even when not persisted."""
+    """After ctx.query ensure returns True, probe omits missing step even when not persisted."""
     ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
     stopped_inference = {
         "playerId": player_id,

@@ -45,7 +45,7 @@ TurnAnalyticService.get_turn_analytics(...)
 ctx.probe(root_scope)  -- DFS declared ENSURE_DEPENDENCIES; persistence/scheduler checks only
   ensure-graph cycle -> unavailable reason ensure_cycle (no ensure side effects)
 ctx.query(analytic_id, paths, scope)
-  -> ensure_export(scope)   -- idempotent; may run sync (prior turns) or attach async (current turn)
+  -> ensure_export(scope) -> bool   -- idempotent; True when scope needs no further ensure work
   -> export_registry materialize + JSONPath
   memo key: (analytic_id, normalized scope, normalized path set)
   resolution stack: same tuple re-entered during materialize -> hard error (exception)
@@ -417,7 +417,7 @@ Non-empty `exports.py` modules typically export an **`AnalyticExportCatalog`** (
 | **`path_prefix_scope_rules`** | Scope validation by path prefix |
 | **`ordering_semantics`** | Documented array ordering for index paths |
 | **`ensure_dependencies`** | Provider-declared upstream ensure edges |
-| **`ensure_export(ctx, scope)`** | Idempotent ensure for this analytic's scope (optional if materialize-only) |
+| **`ensure_export(ctx, scope) -> bool`** | Idempotent ensure; returns True when the scope needs no further ensure work (optional if materialize-only) |
 | **`materialize_export_tree(ctx, scope) -> dict`** | Build tree after ensure (memoized on ctx) |
 
 Import-time validation in `exports/registry.py` (`validate_export_catalogs`):

@@ -317,9 +317,10 @@ class AnalyticQueryContext:
         pending_ensure: list[tuple[str, ExportScope, AnalyticExportCatalog]],
     ) -> None:
         for analytic_id, scope, catalog in pending_ensure:
-            if catalog.ensure_export is not None:
-                catalog.ensure_export(self, scope)
-            self.mark_scope_ensured(analytic_id, scope)
+            if catalog.ensure_export is None:
+                continue
+            if catalog.ensure_export(self, scope):
+                self.mark_scope_ensured(analytic_id, scope)
 
     def _materialize_tree(
         self,

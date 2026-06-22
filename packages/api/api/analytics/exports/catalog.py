@@ -15,7 +15,7 @@ from api.analytics.export_types import (
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
-EnsureExportFn = Callable[["AnalyticQueryContext", ExportScope], None]
+EnsureExportFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 MaterializeExportFn = Callable[["AnalyticQueryContext", ExportScope], dict[str, Any]]
 ProbePersistedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 ProbeEnsureSatisfiedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
