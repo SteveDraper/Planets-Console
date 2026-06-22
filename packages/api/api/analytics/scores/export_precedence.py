@@ -10,10 +10,6 @@ from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_PLAYER_NOT_FOUND,
     STATUS_SOLVER_ERROR,
 )
-from api.analytics.military_score_inference.inference_stream_rows import (
-    CachedCompleteRowAdmission,
-    ImmediateRowAdmission,
-)
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -23,6 +19,7 @@ from api.analytics.military_score_inference.solver import (
 )
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
+    search_status_from_wire_complete_event,
     solutions_from_persisted_row,
     solutions_from_scheduler_run,
     solutions_from_terminal_admission,
@@ -116,18 +113,6 @@ def _persisted_row_fallback_search_status(status: str) -> SearchStatus:
     return "not_started"
 
 
-def _search_status_from_terminal_admission(
-    terminal: ImmediateRowAdmission | CachedCompleteRowAdmission,
-) -> SearchStatus:
-    """Derive lifecycle status from a terminal wire-complete row admission."""
-    wire_event = wire_complete_event_from_terminal_admission(terminal)
-    status = str(wire_event.get("status", ""))
-    priority_status = _persisted_row_priority_search_status(status)
-    if priority_status is not None:
-        return priority_status
-    return "complete"
-
-
 def _search_status_from_scheduler(
     scheduler_run: RowRun,
     *,
@@ -173,7 +158,9 @@ def _resolve_scores_export_ladder(
         return (
             ScoresExportDecision(
                 "terminal_admission",
-                _search_status_from_terminal_admission(terminal),
+                search_status_from_wire_complete_event(
+                    wire_complete_event_from_terminal_admission(terminal),
+                ),
                 needs_ensure_work=False,
             ),
             ScoresExportPayload(solutions, diagnostics, solutions_held),

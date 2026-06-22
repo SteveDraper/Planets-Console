@@ -15,7 +15,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
     SearchStatus,
@@ -29,6 +28,7 @@ from api.analytics.scores.export_snapshot import (
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
 )
+from api.analytics.scores.export_wire import is_terminal_inference_api_payload
 from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
@@ -121,12 +121,6 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     return resolved.decision.is_ensure_satisfied
 
 
-def _is_terminal_sync_inference(inference: dict[str, object]) -> bool:
-    if inference.get("isComplete"):
-        return True
-    return str(inference.get("status", "")) == STATUS_STOPPED
-
-
 def _run_prior_turn_sync_ensure(
     ctx: AnalyticQueryContext,
     *,
@@ -158,7 +152,7 @@ def _run_prior_turn_sync_ensure(
             row,
         )
         ctx.clear_ensure_sync_terminal_admission(ANALYTIC_ID, scope)
-    elif _is_terminal_sync_inference(inference):
+    elif is_terminal_inference_api_payload(inference):
         wire_event = inference_api_payload_to_wire_complete(inference)
         ctx.record_ensure_sync_terminal_admission(
             ANALYTIC_ID,

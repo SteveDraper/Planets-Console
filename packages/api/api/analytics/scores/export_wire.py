@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 from api.analytics.military_score_inference.inference_api_payload import (
@@ -15,7 +17,42 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+TerminalWireSearchStatus = Literal["complete", "stopped"]
+
+
+def is_terminal_wire_complete_semantics(*, is_complete: bool, status: str) -> bool:
+    """Return whether wire/API fields describe a terminal inference outcome."""
+    if is_complete:
+        return True
+    return status == STATUS_STOPPED
+
+
+def is_terminal_wire_complete_event(wire_event: dict[str, object]) -> bool:
+    """Return whether a wire ``complete`` event is terminal."""
+    return is_terminal_wire_complete_semantics(
+        is_complete=bool(wire_event.get("isComplete")),
+        status=str(wire_event.get("status", "")),
+    )
+
+
+def is_terminal_inference_api_payload(payload: dict[str, object]) -> bool:
+    """Return whether a scores row inference API payload is terminal."""
+    return is_terminal_wire_complete_semantics(
+        is_complete=bool(payload.get("isComplete")),
+        status=str(payload.get("status", "")),
+    )
+
+
+def search_status_from_wire_complete_event(
+    wire_event: dict[str, object],
+) -> TerminalWireSearchStatus:
+    """Derive lifecycle status from a terminal wire ``complete`` event."""
+    if str(wire_event.get("status", "")) == STATUS_STOPPED:
+        return "stopped"
+    return "complete"
 
 
 def ranked_solutions_from_wire(
