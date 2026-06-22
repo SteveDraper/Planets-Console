@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar
-
-if TYPE_CHECKING:
-    from api.analytics.military_score_inference.inference_stream_rows import (
-        ImmediateRowAdmission,
-    )
+from typing import Any, TypeVar
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
@@ -34,19 +29,6 @@ from api.models.game import TurnInfo
 T = TypeVar("T")
 
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
-
-
-def _as_immediate_row_admission(value: object) -> ImmediateRowAdmission:
-    from api.analytics.military_score_inference.inference_stream_rows import (
-        ImmediateRowAdmission,
-    )
-
-    if not isinstance(value, ImmediateRowAdmission):
-        raise TypeError(
-            "ensure sync terminal admission must be ImmediateRowAdmission, "
-            f"got {type(value).__name__}"
-        )
-    return value
 
 
 @dataclass(frozen=True)
@@ -94,7 +76,7 @@ class AnalyticQueryContext:
         default_factory=dict,
         repr=False,
     )
-    _ensure_sync_terminal_admissions: dict[tuple[str, ExportScope], object] = field(
+    _ensure_ephemeral: dict[tuple[str, ExportScope], object] = field(
         default_factory=dict,
         repr=False,
     )
@@ -120,30 +102,25 @@ class AnalyticQueryContext:
         self._export_snapshot_cache.pop(cache_key, None)
         self._materialized_trees.pop(cache_key, None)
 
-    def ensure_sync_terminal_admission(
+    def ensure_ephemeral(
         self,
         analytic_id: str,
         scope: ExportScope,
-    ) -> ImmediateRowAdmission | None:
-        """Terminal row admission recorded by ensure-time sync inference for this scope."""
-        stored = self._ensure_sync_terminal_admissions.get((analytic_id, scope))
-        if stored is None:
-            return None
-        return _as_immediate_row_admission(stored)
+    ) -> object | None:
+        """Ephemeral ensure outcome for one analytic scope; type is analytic-owned."""
+        return self._ensure_ephemeral.get((analytic_id, scope))
 
-    def record_ensure_sync_terminal_admission(
+    def record_ensure_ephemeral(
         self,
         analytic_id: str,
         scope: ExportScope,
-        admission: ImmediateRowAdmission,
+        value: object,
     ) -> None:
-        """Remember one ensure-time sync terminal outcome for snapshot re-gather."""
-        self._ensure_sync_terminal_admissions[(analytic_id, scope)] = _as_immediate_row_admission(
-            admission
-        )
+        """Remember one ensure-time outcome until snapshot cache is invalidated."""
+        self._ensure_ephemeral[(analytic_id, scope)] = value
 
-    def clear_ensure_sync_terminal_admission(self, analytic_id: str, scope: ExportScope) -> None:
-        self._ensure_sync_terminal_admissions.pop((analytic_id, scope), None)
+    def clear_ensure_ephemeral(self, analytic_id: str, scope: ExportScope) -> None:
+        self._ensure_ephemeral.pop((analytic_id, scope), None)
 
     def is_scope_ensured(self, analytic_id: str, scope: ExportScope) -> bool:
         return (analytic_id, scope) in self._ensured_scopes
@@ -156,7 +133,13 @@ class AnalyticQueryContext:
         analytic_id: str,
         scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
     ) -> ExportProbeResult:
-        """Dry-run ensure dependencies without materialization."""
+        """Estimate ensure completion cost without running inference or materializing exports.
+
+        DFS-walks declared ``ENSURE_DEPENDENCIES`` and counts scopes that still need
+        ensure work. Provider ``is_ensure_satisfied`` hooks must use cheap persistence
+        and scheduler checks only -- not CP-SAT, sync inference, or payload
+        materialization. Used to choose inline ensure vs background orchestration.
+        """
         plan = self._plan_ensure_walk(
             analytic_id,
             scope_overrides,

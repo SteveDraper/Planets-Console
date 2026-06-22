@@ -40,6 +40,21 @@ class ScoresInferenceSnapshot:
         return terminal_row_admission(self.stream_admission)
 
 
+def _ensure_sync_admission_from_context(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> ImmediateRowAdmission | None:
+    stored = ctx.ensure_ephemeral(ANALYTIC_ID, scope)
+    if stored is None:
+        return None
+    if not isinstance(stored, ImmediateRowAdmission):
+        raise TypeError(
+            "scores ensure ephemeral must be ImmediateRowAdmission, "
+            f"got {type(stored).__name__}"
+        )
+    return stored
+
+
 def scores_inference_stream_scope(scope: ExportScope) -> InferenceStreamScope:
     return InferenceStreamScope(
         game_id=scope.game_id,
@@ -91,6 +106,52 @@ def _scheduler_row_run(
     return services.scheduler.row_run_for_player(stream_scope, scope.player_id)
 
 
+def _cached_stream_admission(
+    services: ScoresExportContext,
+    scope: ExportScope,
+) -> CachedCompleteRowAdmission | None:
+    """Return persisted wire-complete admission only; never run row inference."""
+    if services.persistence is None or scope.player_id is None:
+        return None
+    cached = services.persistence.wire_complete_for_row(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        scope.player_id,
+    )
+    if cached is None:
+        return None
+    return CachedCompleteRowAdmission(event=cached)
+
+
+def gather_scores_ensure_probe_snapshot(
+    ctx: AnalyticQueryContext,
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo | None,
+) -> ScoresInferenceSnapshot:
+    """Lightweight snapshot for export probe walks: persistence and scheduler lookups only."""
+    persisted_row = _load_persisted_row(services, scope)
+    if turn is None:
+        return ScoresInferenceSnapshot(
+            persisted_row=persisted_row,
+            stream_admission=None,
+            ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
+            scheduler_run=None,
+            globally_paused=False,
+        )
+
+    stream_scope = scores_inference_stream_scope(scope)
+    pause_status = services.scheduler.global_pause_status(stream_scope)
+    return ScoresInferenceSnapshot(
+        persisted_row=persisted_row,
+        stream_admission=_cached_stream_admission(services, scope),
+        ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
+        scheduler_run=_scheduler_row_run(services, scope),
+        globally_paused=bool(pause_status.get("paused")),
+    )
+
+
 def gather_scores_inference_snapshot(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
@@ -112,7 +173,7 @@ def gather_scores_inference_snapshot(
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
         stream_admission=_row_admission(ctx, services, scope, turn),
-        ensure_sync_admission=ctx.ensure_sync_terminal_admission(ANALYTIC_ID, scope),
+        ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
         scheduler_run=_scheduler_row_run(services, scope),
         globally_paused=bool(pause_status.get("paused")),
     )

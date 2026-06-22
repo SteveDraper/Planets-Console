@@ -20,11 +20,13 @@ from api.analytics.scores.export_precedence import (
     SearchStatus,
     is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
+    is_scores_export_ensure_satisfied_from_snapshot,
     resolve_scores_export,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
 from api.analytics.scores.export_snapshot import (
+    gather_scores_ensure_probe_snapshot,
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
 )
@@ -114,11 +116,20 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
 
 
 def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Probe/ensure walk hook: classify gathered state only, no inference or payload materialization."""
     if scope.player_id is None:
         return True
+    if scope.turn <= 1 and not ENSURE_DEPENDENCIES:
+        return True
 
-    _services, resolved = _scores_resolved(ctx, scope)
-    return resolved.decision.is_ensure_satisfied
+    services = resolve_scores_services(ctx)
+    snapshot = gather_scores_ensure_probe_snapshot(
+        ctx,
+        services,
+        scope,
+        ctx.load_turn(scope.turn),
+    )
+    return is_scores_export_ensure_satisfied_from_snapshot(snapshot)
 
 
 def _run_prior_turn_sync_ensure(
@@ -151,10 +162,10 @@ def _run_prior_turn_sync_ensure(
             inputs.player_id,
             row,
         )
-        ctx.clear_ensure_sync_terminal_admission(ANALYTIC_ID, scope)
+        ctx.clear_ensure_ephemeral(ANALYTIC_ID, scope)
     elif is_terminal_inference_api_payload(inference):
         wire_event = inference_api_payload_to_wire_complete(inference)
-        ctx.record_ensure_sync_terminal_admission(
+        ctx.record_ensure_ephemeral(
             ANALYTIC_ID,
             scope,
             ImmediateRowAdmission(events=(wire_event,)),

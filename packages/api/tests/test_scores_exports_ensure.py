@@ -25,6 +25,86 @@ from tests.scores_exports_helpers import (
 )
 
 
+def _assert_probe_does_not_compute(monkeypatch):
+    """Fail the test if probe invokes inference, stream resolution, or payload materialization."""
+    from api.analytics.scores import export_precedence, exports
+    from api.analytics.scores import export_snapshot as export_snapshot_module
+
+    monkeypatch.setattr(
+        exports,
+        "resolve_scores_export",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe must not resolve scores export payloads")
+        ),
+    )
+    monkeypatch.setattr(
+        exports,
+        "get_scores_row_inference",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe must not run scores row inference")
+        ),
+    )
+    monkeypatch.setattr(
+        export_snapshot_module,
+        "gather_scores_inference_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe must not gather full scores inference snapshots")
+        ),
+    )
+    monkeypatch.setattr(
+        export_snapshot_module,
+        "resolve_row_stream_admission",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe must not resolve live stream admission")
+        ),
+    )
+    monkeypatch.setattr(
+        export_precedence,
+        "solutions_from_scheduler_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe must not materialize scheduler solutions")
+        ),
+    )
+
+
+def test_probe_counts_prior_turn_missing_without_computing(sample_turn, persistence, monkeypatch):
+    """Probe must count prior-turn ensure work without inference or payload materialization."""
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+
+    _assert_probe_does_not_compute(monkeypatch)
+
+    probe = ctx.probe("scores", {"turn": 110, "player_id": player_id})
+
+    assert probe.status == "ok"
+    assert probe.total_missing == 1
+    assert probe.missing_steps[0].analytic_id == "scores"
+    assert probe.missing_steps[0].turn == 110
+    assert probe.missing_steps[0].player_id == player_id
+
+
+def test_probe_counts_current_turn_missing_without_computing(
+    sample_turn, persistence, monkeypatch
+):
+    """Probe must count current-turn scheduler attachment without scheduling or materializing."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    stream_scope = stream_scope_for_turn(sample_turn)
+    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
+
+    _assert_probe_does_not_compute(monkeypatch)
+
+    probe = ctx.probe("scores", {"player_id": player_id})
+
+    assert probe.status == "ok"
+    assert probe.total_missing == 1
+    assert probe.missing_steps[0].analytic_id == "scores"
+    assert probe.missing_steps[0].turn == sample_turn.settings.turn
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
+
+
 def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
     """Materialized tree cached before ensure must not survive scheduler mutation."""
     reset_inference_row_scheduler_for_tests()

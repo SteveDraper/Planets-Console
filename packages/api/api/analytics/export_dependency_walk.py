@@ -185,6 +185,7 @@ def _is_ensure_satisfied(
     scope: ExportScope,
     catalog: AnalyticExportCatalog,
 ) -> bool:
+    """Cheap probe/ensure gate: must not run inference or materialize export payloads."""
     if ctx.is_scope_ensured(analytic_id, scope):
         return True
     if catalog.is_ensure_satisfied is not None:
