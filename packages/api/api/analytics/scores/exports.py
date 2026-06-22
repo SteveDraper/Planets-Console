@@ -116,7 +116,7 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
 
 
 def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """Probe/ensure walk hook: classify gathered state only, no inference or payload materialization."""
+    """Probe/ensure hook: classify gathered state only; no inference or payload build."""
     if scope.player_id is None:
         return True
     if scope.turn <= 1 and not ENSURE_DEPENDENCIES:

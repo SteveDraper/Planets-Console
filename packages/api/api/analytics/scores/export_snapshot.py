@@ -49,8 +49,7 @@ def _ensure_sync_admission_from_context(
         return None
     if not isinstance(stored, ImmediateRowAdmission):
         raise TypeError(
-            "scores ensure ephemeral must be ImmediateRowAdmission, "
-            f"got {type(stored).__name__}"
+            f"scores ensure ephemeral must be ImmediateRowAdmission, got {type(stored).__name__}"
         )
     return stored
 

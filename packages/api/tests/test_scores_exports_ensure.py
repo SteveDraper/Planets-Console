@@ -83,9 +83,7 @@ def test_probe_counts_prior_turn_missing_without_computing(sample_turn, persiste
     assert probe.missing_steps[0].player_id == player_id
 
 
-def test_probe_counts_current_turn_missing_without_computing(
-    sample_turn, persistence, monkeypatch
-):
+def test_probe_counts_current_turn_missing_without_computing(sample_turn, persistence, monkeypatch):
     """Probe must count current-turn scheduler attachment without scheduling or materializing."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
