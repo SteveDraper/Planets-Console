@@ -62,7 +62,10 @@ def wire_complete_event_from_terminal_admission(
     """Return the terminal wire ``complete`` event carried by row admission."""
     if isinstance(admission, ImmediateRowAdmission):
         return admission.events[-1]
-    assert admission.event is not None
+    if admission.event is None:
+        raise ValueError(
+            "CachedCompleteRowAdmission must carry a terminal wire-complete event"
+        )
     return admission.event
 
 
@@ -90,7 +93,8 @@ def solutions_from_persisted_row(
 def _diagnostics_from_scheduler_ladder(scheduler_run: RowRun) -> dict[str, object] | None:
     """Build scores row inference diagnostics wire from live scheduler ladder state."""
     ladder_state = scheduler_run.ladder_state
-    assert ladder_state is not None
+    if ladder_state is None:
+        raise ValueError("scheduler run must have ladder_state for diagnostics")
     if (
         not ladder_state.last_diagnostics
         and ladder_state.catalog is None
@@ -129,7 +133,10 @@ def solutions_from_terminal_admission(
     """Serialize solutions from one terminal wire-complete row admission."""
     if isinstance(admission, ImmediateRowAdmission):
         return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
-    assert admission.event is not None
+    if admission.event is None:
+        raise ValueError(
+            "CachedCompleteRowAdmission must carry a terminal wire-complete event"
+        )
     return solutions_diagnostics_from_wire_complete_event(admission.event)
 
 
