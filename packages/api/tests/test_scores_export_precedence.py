@@ -176,7 +176,13 @@ def test_cached_complete_admission_resolves_payload_from_event():
 
 
 @pytest.mark.parametrize(
-    ("snapshot", "expected_branch", "ensure_satisfied", "search_status"),
+    (
+        "snapshot",
+        "expected_branch",
+        "ensure_satisfied",
+        "needs_ensure_work",
+        "search_status",
+    ),
     [
         (
             ScoresInferenceSnapshot(
@@ -193,6 +199,7 @@ def test_cached_complete_admission_resolves_payload_from_event():
             ),
             "priority_persisted",
             True,
+            False,
             "complete",
         ),
         (
@@ -213,6 +220,7 @@ def test_cached_complete_admission_resolves_payload_from_event():
             ),
             "terminal_admission",
             True,
+            False,
             "complete",
         ),
         (
@@ -224,6 +232,7 @@ def test_cached_complete_admission_resolves_payload_from_event():
             ),
             "empty",
             False,
+            True,
             "not_started",
         ),
         (
@@ -241,6 +250,7 @@ def test_cached_complete_admission_resolves_payload_from_event():
             ),
             "fallback_persisted",
             True,
+            False,
             "complete",
         ),
     ],
@@ -255,10 +265,12 @@ def test_ensure_satisfied_tracks_precedence_branch(
     snapshot: ScoresInferenceSnapshot,
     expected_branch: str,
     ensure_satisfied: bool,
+    needs_ensure_work: bool,
     search_status: str,
 ):
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == expected_branch
+    assert resolved.decision.needs_ensure_work is needs_ensure_work
     assert is_scores_inference_ensure_satisfied(resolved) is ensure_satisfied
     assert resolved.decision.search_status == search_status
     resolve_scores_export_payload(resolved)
@@ -285,6 +297,7 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
     )
     resolved = resolve_scores_export(snapshot)
     assert resolved.decision.branch == "scheduler"
+    assert resolved.decision.needs_ensure_work is False
     assert is_scores_inference_ensure_satisfied(resolved) is True
     assert resolved.decision.search_status == "in_progress"
     resolve_scores_export_payload(resolved)

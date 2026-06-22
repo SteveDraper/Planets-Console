@@ -52,6 +52,7 @@ class ScoresExportDecision:
 
     branch: ScoresExportPrecedenceBranch
     search_status: SearchStatus
+    needs_ensure_work: bool
 
 
 def is_persistable_inference_status(status: str) -> bool:
@@ -125,10 +126,18 @@ def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> ScoresExportDe
     if persisted_row is not None:
         priority_status = _persisted_row_priority_search_status(persisted_row.status)
         if priority_status is not None:
-            return ScoresExportDecision("priority_persisted", priority_status)
+            return ScoresExportDecision(
+                "priority_persisted",
+                priority_status,
+                needs_ensure_work=False,
+            )
 
     if terminal_row_admission(admission) is not None:
-        return ScoresExportDecision("terminal_admission", "complete")
+        return ScoresExportDecision(
+            "terminal_admission",
+            "complete",
+            needs_ensure_work=False,
+        )
 
     if scheduler_run is not None:
         return ScoresExportDecision(
@@ -137,15 +146,17 @@ def _scores_export_decision(snapshot: ScoresInferenceSnapshot) -> ScoresExportDe
                 scheduler_run,
                 globally_paused=snapshot.globally_paused,
             ),
+            needs_ensure_work=False,
         )
 
     if persisted_row is not None:
         return ScoresExportDecision(
             "fallback_persisted",
             _persisted_row_fallback_search_status(persisted_row.status),
+            needs_ensure_work=False,
         )
 
-    return ScoresExportDecision("empty", "not_started")
+    return ScoresExportDecision("empty", "not_started", needs_ensure_work=True)
 
 
 def _build_scores_export_payload(
@@ -178,7 +189,7 @@ def _build_scores_export_payload(
 
 def is_scores_inference_ensure_satisfied(resolved: ScoresExportResolved) -> bool:
     """True when no further ensure work is needed for this snapshot."""
-    return resolved.decision.branch != "empty"
+    return not resolved.decision.needs_ensure_work
 
 
 def is_scores_export_authoritatively_persisted(resolved: ScoresExportResolved) -> bool:
