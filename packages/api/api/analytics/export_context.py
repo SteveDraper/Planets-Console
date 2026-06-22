@@ -36,6 +36,19 @@ T = TypeVar("T")
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
 
 
+def _as_immediate_row_admission(value: object) -> ImmediateRowAdmission:
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        ImmediateRowAdmission,
+    )
+
+    if not isinstance(value, ImmediateRowAdmission):
+        raise TypeError(
+            "ensure sync terminal admission must be ImmediateRowAdmission, "
+            f"got {type(value).__name__}"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class PreparedExportRequest:
     """Catalog and scope resolved for one probe or query."""
@@ -81,7 +94,7 @@ class AnalyticQueryContext:
         default_factory=dict,
         repr=False,
     )
-    _ensure_sync_terminal_admissions: dict[tuple[str, ExportScope], Any] = field(
+    _ensure_sync_terminal_admissions: dict[tuple[str, ExportScope], object] = field(
         default_factory=dict,
         repr=False,
     )
@@ -113,7 +126,10 @@ class AnalyticQueryContext:
         scope: ExportScope,
     ) -> ImmediateRowAdmission | None:
         """Terminal row admission recorded by ensure-time sync inference for this scope."""
-        return self._ensure_sync_terminal_admissions.get((analytic_id, scope))
+        stored = self._ensure_sync_terminal_admissions.get((analytic_id, scope))
+        if stored is None:
+            return None
+        return _as_immediate_row_admission(stored)
 
     def record_ensure_sync_terminal_admission(
         self,
@@ -122,7 +138,9 @@ class AnalyticQueryContext:
         admission: ImmediateRowAdmission,
     ) -> None:
         """Remember one ensure-time sync terminal outcome for snapshot re-gather."""
-        self._ensure_sync_terminal_admissions[(analytic_id, scope)] = admission
+        self._ensure_sync_terminal_admissions[(analytic_id, scope)] = _as_immediate_row_admission(
+            admission
+        )
 
     def clear_ensure_sync_terminal_admission(self, analytic_id: str, scope: ExportScope) -> None:
         self._ensure_sync_terminal_admissions.pop((analytic_id, scope), None)
