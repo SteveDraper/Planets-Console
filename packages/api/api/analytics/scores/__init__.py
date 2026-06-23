@@ -9,13 +9,11 @@ from api.analytics.military_score_inference.inference_scheduler import Inference
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
-from api.analytics.military_score_inference.inference_turn_lookup import (
-    players_by_id as turn_players_by_id,
-)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
+from api.analytics.turn_roster import players_by_id as turn_players_by_id
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 

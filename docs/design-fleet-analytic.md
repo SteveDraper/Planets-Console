@@ -265,6 +265,8 @@ flowchart TB
 
 ### Core modules (planned)
 
+F0.2 registration uses a single `api/analytics/fleet.py` module (same pattern as `connections.py` and `base_map.py`); split into the package layout below when phase 1 domain types and persistence land.
+
 | Module | Responsibility |
 |--------|----------------|
 | `api/analytics/fleet/` | Types, ledger engine, snapshot chain, table/map compute |
