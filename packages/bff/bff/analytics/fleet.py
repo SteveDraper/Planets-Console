@@ -14,13 +14,6 @@ from bff.analytics.models import (
 ANALYTIC_ID = "fleet"
 
 
-def table_from_core(core_data: dict) -> dict:
-    return {
-        "analyticId": ANALYTIC_ID,
-        "players": core_data.get("players", []),
-    }
-
-
 def map_from_core(core_data: dict) -> dict:
     players: list[dict[str, object]] = []
     for player in core_data.get("players", []):
@@ -44,8 +37,7 @@ def get_table(
     load_core: CoreAnalyticsLoader,
     diagnostics: Diagnostics,
 ) -> dict:
-    core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
-    return table_from_core(core_data)
+    return load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
 
 
 def get_map(
