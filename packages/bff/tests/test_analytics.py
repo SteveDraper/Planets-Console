@@ -254,3 +254,40 @@ def test_list_analytics_includes_stellar_cartography_map_analytic():
     assert stellar["supportsTable"] is False
     assert stellar["supportsMap"] is True
     assert stellar["type"] == "selectable"
+
+
+def test_list_analytics_includes_fleet_table_and_map_analytic():
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    analytics = response.json()["analytics"]
+    fleet = next(a for a in analytics if a["id"] == "fleet")
+    assert fleet == {
+        "id": "fleet",
+        "name": "Fleet",
+        "supportsTable": True,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
+def test_fleet_table_returns_scaffold_players():
+    response = client.get(f"/analytics/fleet/table?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "fleet"
+    players = data["players"]
+    assert len(players) == 4
+    assert players[0]["playerName"] == "koshling"
+    assert players[0]["records"] == []
+
+
+def test_fleet_map_returns_scaffold_nodes():
+    response = client.get(f"/analytics/fleet/map?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "fleet"
+    players = data["players"]
+    assert len(players) == 4
+    for player in players:
+        assert player["nodes"] == []
+        assert player["overlayCircles"] == []

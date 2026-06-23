@@ -50,6 +50,97 @@ def test_registry_metadata_keeps_stellar_cartography_selectable_map_only():
     }
 
 
+def test_registry_metadata_keeps_fleet_selectable_table_and_map():
+    fleet = next(a for a in ANALYTICS_LIST if a["id"] == "fleet")
+    assert fleet == {
+        "id": "fleet",
+        "name": "Fleet",
+        "supportsTable": True,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
+def test_fleet_table_dispatch_forwards_to_core():
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return {
+            "analyticId": "fleet",
+            "players": [
+                {
+                    "playerId": 1,
+                    "playerName": "koshling",
+                    "records": [],
+                }
+            ],
+        }
+
+    data = get_table_response("fleet", TurnScope(628580, 1, 111), load_core, NOOP_DIAGNOSTICS)
+    assert data == {
+        "analyticId": "fleet",
+        "players": [
+            {
+                "playerId": 1,
+                "playerName": "koshling",
+                "records": [],
+            }
+        ],
+    }
+    assert calls == [
+        (
+            628580,
+            1,
+            111,
+            "fleet",
+            {"diagnostics": NOOP_DIAGNOSTICS},
+        )
+    ]
+
+
+def test_fleet_map_dispatch_shapes_scaffold_nodes():
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return {
+            "analyticId": "fleet",
+            "players": [
+                {
+                    "playerId": 1,
+                    "playerName": "koshling",
+                    "records": [],
+                }
+            ],
+        }
+
+    data = get_map_response(
+        "fleet",
+        TurnScope(628580, 1, 111),
+        ConnectionsMapQuery(
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.OFF,
+            flare_depth=1,
+            include_illustrative_routes=False,
+        ),
+        load_core,
+        NOOP_DIAGNOSTICS,
+    )
+    assert data == {
+        "analyticId": "fleet",
+        "players": [
+            {
+                "playerId": 1,
+                "nodes": [],
+                "overlayCircles": [],
+            }
+        ],
+    }
+    assert calls[0][3] == "fleet"
+
+
 def test_stellar_cartography_map_dispatch_forwards_to_core():
     calls = []
 
