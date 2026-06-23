@@ -1,4 +1,4 @@
-"""Core Fleet turn analytic (registration shell)."""
+"""Core Fleet turn analytic."""
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
