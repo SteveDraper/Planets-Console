@@ -1,6 +1,9 @@
-"""Fleet analytic scaffold computation."""
+"""Core Fleet turn analytic (registration shell)."""
 
+from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.exports.empty import empty_export_catalog_for
+from api.analytics.registration import TurnAnalyticRegistration
 from api.models.game import TurnInfo
 
 ANALYTIC_ID = "fleet"
@@ -34,3 +37,10 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
 def get_fleet(turn: TurnInfo) -> dict:
     """Convenience entry for tests and direct callers."""
     return invoke_analytic_compute(compute_fleet, turn)
+
+
+REGISTRATION = TurnAnalyticRegistration(
+    catalog_entry=catalog_entry(ANALYTIC_ID),
+    compute=compute_fleet,
+    export_catalog=empty_export_catalog_for(ANALYTIC_ID),
+)
