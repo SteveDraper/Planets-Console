@@ -4,13 +4,13 @@ from collections.abc import Callable, Iterator
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
-from api.analytics.military_score_inference.inference_turn_lookup import (
-    players_by_id as turn_players_by_id,
-)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
+)
+from api.analytics.military_score_inference.inference_turn_lookup import (
+    players_by_id as turn_players_by_id,
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
