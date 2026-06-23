@@ -4,6 +4,9 @@ from collections.abc import Callable, Iterator
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.military_score_inference.inference_turn_lookup import (
+    players_by_id as turn_players_by_id,
+)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -52,7 +55,7 @@ def _score_row(
 def compute_scores_table(ctx: AnalyticComputeContext) -> dict:
     """Return scoreboard values for each player in a turn."""
     turn = ctx.turn
-    players_by_id = {player.id: player for player in [turn.player, *turn.players]}
+    players_by_id = turn_players_by_id(turn)
     races_by_id = {race.id: race for race in turn.races}
 
     rows = [
