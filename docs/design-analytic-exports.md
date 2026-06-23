@@ -514,4 +514,4 @@ Must cover: probe step counts, threshold policy, inline vs background ensure, un
 | **#93b** | [#109](https://github.com/SteveDraper/Planets-Console/issues/109) | BFF export ensure orchestration (probe + background job NDJSON stream) |
 | **#93c** | [#110](https://github.com/SteveDraper/Planets-Console/issues/110) | `connections/exports.py` -- concept-shim reference |
 | **#93d** | [#111](https://github.com/SteveDraper/Planets-Console/issues/111) | `scores/exports.py` -- `$.solutions`, `$.meta`, scheduler/persistence; **`ENSURE_DEPENDENCIES = ()`** until fleet ships |
-| **Follow-on** | Homeworld exports (**#33**); fleet analytic + Scores fleet@N−1 edge; truncated unwind + provenance ADR |
+| **Follow-on** | Homeworld exports (**#33**); [fleet analytic](design-fleet-analytic.md) + Scores fleet@N−1 edge; truncated unwind + provenance ADR |

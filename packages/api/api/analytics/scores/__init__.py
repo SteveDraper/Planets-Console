@@ -13,6 +13,7 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
+from api.analytics.turn_roster import players_by_id as turn_players_by_id
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
@@ -52,7 +53,7 @@ def _score_row(
 def compute_scores_table(ctx: AnalyticComputeContext) -> dict:
     """Return scoreboard values for each player in a turn."""
     turn = ctx.turn
-    players_by_id = {player.id: player for player in [turn.player, *turn.players]}
+    players_by_id = turn_players_by_id(turn)
     races_by_id = {race.id: race for race in turn.races}
 
     rows = [

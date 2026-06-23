@@ -145,3 +145,6 @@ This is deliberate for now (one special case, known location). **Re-examine when
 | `scores` | `scores.py` | `scores.py` | yes | no | none |
 | `connections` | `connections.py` | `connections.py` | no | yes (overlay) | `src/analytics/connections/` |
 | `stellar-cartography` | `stellar_cartography.py` | `stellar_cartography.py` | no | yes (overlay + edges) | `src/analytics/stellar-cartography/` |
+| `fleet` | `fleet.py` | `fleet.py` | yes | yes (per-player overlay) | scaffold only (F0.2) |
+
+`fleet` is the first **selectable** analytic that supports both table and map.

@@ -356,6 +356,82 @@ _Avoid_: disabled analytic (generic), HW not applicable toast
 Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=2` (Circular)** on round maps (`mapshape=0`) only. Other distributions remain active for baseline profile, evidence, and manual annotation, but skip sector/ring overlay geometry until extended.
 _Avoid_: full hwdistribution support (v1 claim)
 
+**Fleet analytic**:
+A **turn analytic** (tabular and map) that maintains each **Player**'s inferred fleet composition as of the shell turn. Computed at `(game, turn T, perspective P)` using turns `1..T` stored at **perspective** `P` only -- not an omniscient merge across slots. Combines **fleet observed ship** sightings from `TurnInfo.ships` with **fleet inferred acquisition** rows from **military score build inference** (and later trade/capture sources). Map layers are per-player, individually color-coded and toggleable; tabular output is one ship list per **Player**. v1 may leave many **fleet field constraint** branches empty; the wire and export schema must still represent partial knowledge when available. See [design-fleet-analytic.md](docs/design-fleet-analytic.md) ([#114](https://github.com/SteveDraper/Planets-Console/issues/114)).
+_Avoid_: omniscient fleet, viewpoint-player-only fleet (unless explicitly scoped)
+
+**Fleet observation scope**:
+Which stored turns and visibility feed the **fleet analytic** for one shell context. Direct evidence: ships appearing in `turn.ships` on turns `1..T` at the shell **perspective**. Build evidence: **scores** inference per `player_id` on host turns in that same turn range. Cross-perspective union is out of scope. Location constraints from starbase builds may later consume **homeworld locator** or planet-ownership analytics when those exist; v1 may record unconstrained location.
+_Avoid_: all-perspectives merge, single-turn-only fleet
+
+**Fleet ship record**:
+One row in a **Player**'s fleet table -- a single acquired ship tracked across turns until reconciled or retired. Carries **fleet field constraint** values for id, hull, launcher, beam, engine, built turn, and last known or inferred location. May originate as **fleet observed ship** or **fleet inferred acquisition**; reconciliation merges evidence onto one record when observation matches inference.
+_Avoid_: ship snapshot (implies no cross-turn identity), fleet entry (informal)
+
+**Fleet observed ship**:
+A **fleet ship record** backed by a direct sighting in `TurnInfo.ships` at the shell **perspective**. When the host assigns a stable ship id visible in the snapshot, id is known (or upper-bounded by sequential allocation rules). Position and fitted components come from the sighting turn unless later sightings refine them.
+_Avoid_: inferred-only row, ghost ship (without evidence class)
+
+**Fleet inferred acquisition**:
+A **fleet ship record** attributed to a **Player** from scoreboard build counts (**military score build inference** `shipBuilds` on a host turn) when no matching **fleet observed ship** exists yet. Hull and component fields may be fixed (from a held solution), a set of options (top-K ambiguity), or unknown. Id may be unknown, range-bounded (e.g. max id from prior game ship count plus builds that turn), or fixed after first sighting. Initial location may be constrained to the builder's starbases (or a region envelope) when planet positions are known; v1 may emit **unknown** until locator/planet analytics supply coordinates.
+_Avoid_: proved build history (implies unique solution), scoreboard row (solve-time grain)
+
+**Fleet field constraint**:
+How one attribute on a **fleet ship record** is represented when knowledge is partial. **Known** -- single definite value. **Unknown** -- no constraint (`?` in UI). **Bounded** -- numeric range (e.g. ship id `<= maxId`). **Options** -- finite candidate set on one field only when other fields are already known or fixed. **Region** -- location constrained to a set of planet ids, starbase coordinates, or a map overlay (not necessarily a single x/y). Producers may leave constraints empty in v1; consumers and export schema must accept all shapes for forward compatibility.
+_Avoid_: nullable-only (collapses bounded vs options), string `?` in API (use structured constraint objects)
+
+**Fleet build option set**:
+One feasible fitted-ship specification drawn from **military score build inference** held solutions -- e.g. hull + engine + beam + launcher types and slot fills that appeared together in one `shipBuilds` entry. When top-K solutions disagree on components, **fleet inferred acquisition** rows expose ambiguity as a list of **fleet build option set**s (each a consistent tuple), not as independent per-field unions that would admit impossible cross-products. UI may show the highest-**inference solution rank weight** set as the display default while listing alternates. Observation reconciliation matches a sighting to at most one option set before collapsing fields to **known**.
+_Avoid_: component Cartesian product, independent field options, combo row (use inference glossary **ship build combo** for solver catalog ids)
+
+**Fleet evidence event**:
+One append-only fact in a **fleet ship record** or player fleet summary timeline -- e.g. scoreboard `+1 warship` on a host turn, inference solution update, direct sighting, id bound tightened, option-set match chosen, disposition change, **fleet alibi**, **fleet possibly lost** candidacy, **fleet count discrepancy**, or countervailing sighting. Report-derived facts (when ingested) are first-class evidence sources alongside scoreboard and `TurnInfo.ships`. Reconciliation decisions are recorded as events (including which **fleet build option set** index matched and tie-break rule used), not overwritten silently. Prior events stay available so a later **fleet reconciliation correction** can reassign a sighting to a different row or revert a collapsed field to **options** without losing history. v1 may not expose correction UI; Core/export representation must support it.
+_Avoid_: mutable snapshot only, last-write-wins merge
+
+**Fleet reconciliation correction**:
+Re-opening or reversing an earlier observation-to-row link when new evidence contradicts it -- e.g. a second sighting fits a different **fleet build option set**, or scoreboard reconciliation shows one too many **active** rows. Emits new **fleet evidence event**s and adjusts current field constraints and disposition; does not delete prior events. User-facing correction workflow is a follow-on ticket; **fleet acquisition ledger** and exports must retain enough structure to apply corrections deterministically later.
+_Avoid_: edit row in place (without audit), manual override (generic)
+
+**Fleet count discrepancy**:
+Player-level state when scoreboard ship-count deltas (or future report evidence) imply fewer **active** ships than the ledger shows, but no **strong evidence** identifies which **fleet ship record** was destroyed or traded. v1 does **not** flip row **fleet ship disposition** on guesswork (no FIFO demotion). The discrepancy is recorded explicitly (`activeRowCount` vs `scoreboardImpliedCount`, host turn, optional report refs) and surfaced in UI chrome. Row-level status may use **fleet possibly lost** and **fleet alibi** without changing disposition until resolved.
+_Avoid_: silent FIFO demotion, forced `unknown` disposition
+
+**Fleet possibly lost**:
+Row-level qualifier (not a **fleet ship disposition** change) when a ship-count decrease or report makes this row a candidate for destruction or trade but selection is not strongly evidenced. Displayed as a warning icon or badge; row stays **`active`** in the ledger until disposition changes with strong evidence. Distinct from **`lost`** disposition and from **fleet count discrepancy** (player-level).
+_Avoid_: `unknown` disposition (too strong for v1 guess), lost badge (implies confirmed)
+
+**Fleet alibi**:
+Row-level qualifier: evidence proves this **fleet ship record** still existed after a given host turn -- e.g. direct sighting on turn *T+k* after a scoreboard `-1 warship` on turn *T*. Excludes this row from **fleet possibly lost** candidacy for that event. Recorded as **fleet evidence event** with turn and source.
+_Avoid_: confirmed active (use disposition `active` only), safe ship (informal)
+
+**Fleet ship disposition**:
+Whether a **fleet ship record** still counts toward a **Player**'s active fleet as of the shell turn. Values include **`active`** (still in fleet accounting), **`lost`** (destroyed or otherwise removed with evidence), **`traded`** (transferred to another **Player** when trade evidence exists), and **`unknown`** (no longer active but removal cause not resolved). Inferred-only rows may flip to **`lost`** or **`unknown`** when scoreboard ship-count reconciliation says they are gone without a sighting. Distinct from **fleet field constraint** -- disposition is record lifecycle, not attribute uncertainty.
+_Avoid_: status (generic), deleted flag (implies hard purge)
+
+**Fleet acquisition ledger**:
+The full set of **fleet ship record**s for one **Player**, including non-**active** dispositions and the evidence timeline (built turn, sightings, inference source). Core and **analytic export** materializers own the ledger; the SPA tabular v1 defaults to **`active`** rows only. Map v1 shows **active** records with known or region-constrained position; lost or unknown rows stay off the map unless a follow-on layer requests them.
+_Avoid_: current fleet table (when meaning the filtered view only), ship history log (generic)
+
+**Fleet turn snapshot**:
+Persisted **fleet acquisition ledger** for all **Player**s at one `(game_id, perspective, turn)` scope. Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet` under **turn-scoped analytic persistence**. Materialized by chaining from turn *T-1* snapshot (or empty **fleet ensure baseline** at turn 1) plus evidence applied on turn *T* only. Each snapshot retains **fleet evidence event** history sufficient for later **fleet reconciliation correction** without re-reading prior snapshots' event streams. Turn document replace at *T* invalidates this snapshot and all later turn snapshots at that **perspective**; scores inference invalidation may require re-chain from the first affected host turn.
+_Avoid_: perspective-wide single ledger file, recompute 1..T on every GET
+
+**Fleet ensure baseline**:
+**Analytic export ensure baseline** for **fleet**: turn 1 has implicit empty fleet per **Player** (no prior snapshot). Unwind stops at turn 1; no fleet@turn 0.
+_Avoid_: neutral fleet priors (scores vocabulary)
+
+**Fleet map layer**:
+The **map layer** contribution of the **fleet analytic** -- ship markers and optional region geometry for one shell turn. **Known position:** a ship **fleet map node** at last sighted `x/y` (stable id `fleet:{playerId}:{recordId}`). **Region only:** optional **overlayCircles** or starbase markers when **fleet field constraint** **region** is populated (v1 may omit). **No position:** excluded from map payload. Only **`active`** rows with known point or region appear in v1.
+_Avoid_: duplicate ship graph (separate from base map planets)
+
+**Fleet player visibility**:
+Single per-**Player** enablement preference (localStorage, global) controlling whether that **Player**'s fleet appears in both **view mode**s -- one **fleet table tile** and the same player's **fleet map layer** ships and region overlays. Default on for viewpoint **Player**; others off until toggled in the **fleet analytic** sidebar. Same **client preference** pattern as **Cartography layer** toggles.
+_Avoid_: separate map-only and table-only player toggles (v1), per-player analytic id
+
+**Fleet table tile**:
+One tabular sub-tile per **fleet player visibility**-enabled **Player** in **view mode** tabular -- TanStack Table of **`active`** **fleet ship record** rows with columns for id, hull, engine, beams, launchers, built turn, last seen, and status icons (**fleet alibi**, **fleet possibly lost**). Ambiguous fit shows default **fleet build option set** in row cells; row expander lists alternates. Tile header carries **fleet count discrepancy** banner when set. Viewpoint **Player** tile first, then **GameInfo** player order.
+_Avoid_: master fleet table (all players one grid), scores table reuse
+
 **Military score build inference**:
 Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row** with top-K **20**. No fixed row time budget once **#71** ships -- SPA runs continue until the ladder finishes, **inference global pause** freezes them, or the stream is cancelled (scope change, disable build inference, disconnect). See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
 _Avoid_: build solver, score guesser

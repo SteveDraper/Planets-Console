@@ -8,6 +8,8 @@ Step-by-step guide for registering a new **turn analytic** in Planets Console. R
 
 **Domain + inference rules (homeworld locator):** [design-homeworld-locator-analytic.md](design-homeworld-locator-analytic.md) -- **required reading** for issues #33--#37 (Starmap settings, baseline/evidence signals, confidence tiers, layout constraints).
 
+**Domain + inference rules (fleet):** [design-fleet-analytic.md](design-fleet-analytic.md) -- fleet ledger, constraints, persistence, scores coupling, map/table contracts.
+
 ---
 
 ## 1. Choose an `analytic_id`
