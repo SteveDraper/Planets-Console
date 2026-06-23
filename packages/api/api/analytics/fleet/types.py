@@ -79,12 +79,9 @@ class FleetFieldRegion:
 
 
 FleetFieldConstraint = (
-    FleetFieldKnown
-    | FleetFieldUnknown
-    | FleetFieldBounded
-    | FleetFieldOptions
-    | FleetFieldRegion
+    FleetFieldKnown | FleetFieldUnknown | FleetFieldBounded | FleetFieldOptions | FleetFieldRegion
 )
+
 
 @dataclass(frozen=True)
 class FleetBuildOptionSet:

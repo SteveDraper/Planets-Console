@@ -381,8 +381,7 @@ def fleet_ship_record_to_json(record: FleetShipRecord) -> dict[str, Any]:
         "qualifiers": fleet_row_qualifiers_to_json(record.qualifiers),
         "fields": fleet_ship_record_fields_to_json(record.fields),
         "buildOptionSets": [
-            fleet_build_option_set_to_json(option_set)
-            for option_set in record.build_option_sets
+            fleet_build_option_set_to_json(option_set) for option_set in record.build_option_sets
         ],
         "events": [fleet_evidence_event_to_json(event) for event in record.events],
     }
@@ -437,9 +436,7 @@ def fleet_ship_record_from_json(data: dict[str, Any]) -> FleetShipRecord:
                 "fleet ship record displayDefaultOptionSetIndex requires buildOptionSets"
             )
         if not 0 <= display_default_option_set_index < len(build_option_sets):
-            raise ValidationError(
-                "fleet ship record displayDefaultOptionSetIndex is out of range"
-            )
+            raise ValidationError("fleet ship record displayDefaultOptionSetIndex is out of range")
 
     last_seen_raw = data.get("lastSeen")
     last_seen: FleetLastSeen | None = None
@@ -547,8 +544,7 @@ def fleet_turn_snapshot_to_json(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
         "perspective": snapshot.perspective,
         "turn": snapshot.turn,
         "players": [
-            fleet_acquisition_ledger_to_json(player_ledger)
-            for player_ledger in snapshot.players
+            fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
         ],
     }
 
