@@ -1,22 +1,9 @@
 """Tests for Fleet turn analytic registration shell."""
 
-import json
-from pathlib import Path
-
-import pytest
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.fleet import ANALYTIC_ID, get_fleet
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.registry import TURN_ANALYTICS
-from api.serialization.turn import turn_info_from_json
-
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-@pytest.fixture
-def sample_turn():
-    with open(ASSETS_DIR / "turn_sample.json") as f:
-        return turn_info_from_json(json.load(f))
 
 
 def test_fleet_registered_in_turn_analytics():
