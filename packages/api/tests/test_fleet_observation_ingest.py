@@ -153,7 +153,7 @@ def test_repeat_sighting_appends_events_and_updates_position():
         turn_two,
         scores=[replace(score, turn=2) for score in turn_two.scores],
     )
-    result = ingest_turn_ship_observations(snapshot, turn_two, prior_turn=turn_one)
+    result = ingest_turn_ship_observations(snapshot, turn_two)
 
     record = _ledger_for_player(result, 8).records[0]
     assert record.record_id == record_id
@@ -202,10 +202,17 @@ def test_turn_one_sightings_seed_ledger_without_game_start_inventory():
 
 
 def test_id_bound_tightens_for_unmatched_rows_when_counts_known():
-    prior_turn = _single_ship_turn(turn_number=1, ship_id=1, owner_id=8, x=100, y=100)
-    prior_turn = replace(prior_turn, scores=[])
     current_turn = _single_ship_turn(turn_number=2, ship_id=2, owner_id=8, x=200, y=200)
-    current_turn = replace(current_turn, scores=[])
+    score = replace(
+        current_turn.scores[0],
+        turn=2,
+        ownerid=8,
+        capitalships=1,
+        freighters=0,
+        shipchange=0,
+        freighterchange=0,
+    )
+    current_turn = replace(current_turn, scores=[score])
     snapshot = ensure_fleet_baseline(628580, 1, current_turn)
     snapshot.players[0].records.append(
         FleetShipRecord(
@@ -214,7 +221,7 @@ def test_id_bound_tightens_for_unmatched_rows_when_counts_known():
         )
     )
 
-    result = ingest_turn_ship_observations(snapshot, current_turn, prior_turn=prior_turn)
+    result = ingest_turn_ship_observations(snapshot, current_turn)
 
     placeholder = next(
         rec
@@ -226,17 +233,15 @@ def test_id_bound_tightens_for_unmatched_rows_when_counts_known():
 
 
 def test_compute_max_ship_id_bound_uses_scoreboard_totals(sample_turn):
-    prior_turn = replace(sample_turn, settings=replace(sample_turn.settings, turn=110))
-    prior_turn = replace(prior_turn, game=replace(prior_turn.game, turn=110))
-    prior_scores = [replace(score, turn=110) for score in sample_turn.scores]
-    prior_turn = replace(prior_turn, scores=prior_scores)
-
-    bound = compute_max_ship_id_bound(prior_turn, sample_turn)
-    prior_total = sum(score.capitalships + score.freighters for score in prior_scores)
+    bound = compute_max_ship_id_bound(sample_turn)
+    turn_number = sample_turn.settings.turn
+    current_scores = [score for score in sample_turn.scores if score.turn == turn_number]
+    total = sum(score.capitalships + score.freighters for score in current_scores)
+    net = sum(score.shipchange + score.freighterchange for score in current_scores)
     builds = sum(
-        max(0, score.shipchange) + max(0, score.freighterchange) for score in sample_turn.scores
+        max(0, score.shipchange) + max(0, score.freighterchange) for score in current_scores
     )
-    assert bound == prior_total + builds
+    assert bound == total - net + builds
 
 
 def test_alibi_applies_after_recorded_count_decrease_and_later_sighting():
@@ -248,7 +253,7 @@ def test_alibi_applies_after_recorded_count_decrease_and_later_sighting():
     )
 
     turn_six = _single_ship_turn(turn_number=6, ship_id=42, owner_id=8, x=1000, y=2000)
-    result = ingest_turn_ship_observations(snapshot, turn_six, prior_turn=turn_one)
+    result = ingest_turn_ship_observations(snapshot, turn_six)
 
     updated = _ledger_for_player(result, 8).records[0]
     assert updated.qualifiers.alibi is not None

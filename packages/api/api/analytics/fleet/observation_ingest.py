@@ -28,13 +28,11 @@ TURN_SHIPS_SOURCE = "turnInfo.ships"
 def ingest_turn_ship_observations(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
-    *,
-    prior_turn: TurnInfo | None = None,
 ) -> FleetTurnSnapshot:
     """Apply turn-T ship sightings to every player ledger in the snapshot."""
     turn_number = turn.settings.turn
     ledgers_by_player_id = {ledger.player_id: ledger for ledger in snapshot.players}
-    max_ship_id_bound = compute_max_ship_id_bound(prior_turn, turn)
+    max_ship_id_bound = compute_max_ship_id_bound(turn)
 
     for ship in turn.ships:
         if ship.turnkilled != 0:
@@ -51,15 +49,14 @@ def ingest_turn_ship_observations(
     return snapshot
 
 
-def compute_max_ship_id_bound(prior_turn: TurnInfo | None, turn: TurnInfo) -> int | None:
-    """Upper-bound unknown ship ids from prior global ship totals plus turn builds."""
-    if prior_turn is None:
+def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
+    """Upper-bound unknown ship ids from current-turn scoreboard totals and deltas."""
+    total = global_ship_count_from_scores(turn)
+    if total is None:
         return None
-    prior_count = global_ship_count_from_scores(prior_turn)
-    if prior_count is None:
-        prior_count = len(prior_turn.ships)
+    net = global_net_delta_from_scores(turn)
     builds = global_build_count_from_scores(turn)
-    return prior_count + builds
+    return total - net + builds
 
 
 def global_ship_count_from_scores(turn: TurnInfo) -> int | None:
@@ -86,6 +83,17 @@ def global_build_count_from_scores(turn: TurnInfo) -> int:
             total += score.shipchange
         if score.freighterchange > 0:
             total += score.freighterchange
+    return total
+
+
+def global_net_delta_from_scores(turn: TurnInfo) -> int:
+    """Sum signed warship and freighter scoreboard deltas for the turn."""
+    turn_number = turn.settings.turn
+    total = 0
+    for score in turn.scores:
+        if score.turn != turn_number:
+            continue
+        total += score.shipchange + score.freighterchange
     return total
 
 
