@@ -66,7 +66,12 @@ def apply_fleet_turn_delta(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
 ) -> FleetTurnSnapshot:
-    """Apply evidence from shell turn T only."""
+    """Apply all turn-T fleet evidence deltas for materialization.
+
+    Extension seam for fleet delta ingest. Currently delegates to direct ship
+    observation ingest (#118). Scoreboard and inference ingest (#119+) will extend
+    this hook rather than bypassing it from chain call sites.
+    """
     return ingest_turn_ship_observations(snapshot, turn)
 
 
