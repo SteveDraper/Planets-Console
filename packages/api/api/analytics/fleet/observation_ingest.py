@@ -236,6 +236,7 @@ def _apply_alibi_if_needed(record: FleetShipRecord, *, sighting_turn: int) -> No
 def _recorded_count_decrease_turn(record: FleetShipRecord) -> int | None:
     if record.qualifiers.possibly_lost is not None:
         return record.qualifiers.possibly_lost.since_turn
+    latest_decrease_turn: int | None = None
     for event in record.events:
         if event.kind != "scoreboard_delta":
             continue
@@ -246,8 +247,9 @@ def _recorded_count_decrease_turn(record: FleetShipRecord) -> int | None:
         if not isinstance(freighter_delta, int) or isinstance(freighter_delta, bool):
             continue
         if warship_delta + freighter_delta < 0:
-            return event.turn
-    return None
+            if latest_decrease_turn is None or event.turn > latest_decrease_turn:
+                latest_decrease_turn = event.turn
+    return latest_decrease_turn
 
 
 def _planet_id_at_coordinates(turn: TurnInfo, x: int, y: int) -> int | None:

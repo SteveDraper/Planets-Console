@@ -344,3 +344,33 @@ def test_alibi_from_scoreboard_delta_event_on_record():
     )
     assert updated.qualifiers.alibi is not None
     assert updated.qualifiers.alibi.after_turn == 4
+
+
+def test_alibi_uses_latest_scoreboard_decrease_before_sighting():
+    turn_six = _single_ship_turn(turn_number=6, ship_id=42, owner_id=8, x=1000, y=2000)
+    snapshot = ensure_fleet_baseline(628580, 1, turn_six)
+    record = FleetShipRecord(
+        record_id="tracked",
+        fields=FleetShipRecordFields(ship_id=FleetFieldKnown(value=42)),
+    )
+    for turn, event_id in ((3, "evt-decrease-3"), (5, "evt-decrease-5")):
+        append_fleet_evidence_event(
+            record,
+            FleetEvidenceEvent(
+                event_id=event_id,
+                kind="scoreboard_delta",
+                turn=turn,
+                source="scoreboard",
+                payload={"warshipDelta": -1, "freighterDelta": 0},
+            ),
+        )
+    snapshot.players[0].records.append(record)
+
+    result = ingest_turn_ship_observations(snapshot, turn_six)
+
+    updated = next(
+        rec for rec in _ledger_for_player(result, 8).records if rec.record_id == "tracked"
+    )
+    assert updated.qualifiers.alibi is not None
+    assert updated.qualifiers.alibi.after_turn == 5
+    assert updated.qualifiers.alibi.sighting_turn == 6
