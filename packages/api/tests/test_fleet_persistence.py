@@ -13,7 +13,7 @@ from api.analytics.fleet.chain import (
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, FleetTurnSnapshot
-from api.errors import ValidationError
+from api.errors import NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
@@ -143,6 +143,92 @@ def test_turn_one_baseline_is_empty_per_player(persistence, load_turn, memory_ba
     assert len(snapshot.players) == 4
     assert all(player.records == [] for player in snapshot.players)
     assert persistence.get_snapshot(628580, 1, 1) == snapshot
+
+
+def _put_turn_rst(memory_backend, turn_number: int, template_turn_number: int = 111) -> None:
+    template = memory_backend.get(f"games/628580/1/turns/{template_turn_number}")
+    assert isinstance(template, dict)
+    turn_rst = copy.deepcopy(template)
+    turn_rst["settings"]["turn"] = turn_number
+    turn_rst["game"]["turn"] = turn_number
+    memory_backend.put(f"games/628580/1/turns/{turn_number}", turn_rst)
+
+
+def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memory_backend):
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    prior = ensure_fleet_baseline(628580, 1, turn_110)
+    prior.players[0].records.append(
+        FleetShipRecord(record_id="gap-rec", disposition="active"),
+    )
+    persistence.put_snapshot(628580, 1, 110, prior)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+    )
+
+    assert snapshot.turn == 112
+    assert len(snapshot.players[0].records) == 1
+    assert snapshot.players[0].records[0].record_id == "gap-rec"
+    intermediate = persistence.get_snapshot(628580, 1, 111)
+    assert intermediate is not None
+    assert intermediate.turn == 111
+    assert len(intermediate.players[0].records) == 1
+    assert persistence.get_snapshot(628580, 1, 112) == snapshot
+
+
+def test_chain_raises_when_intermediate_rst_missing(persistence, load_turn, memory_backend):
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(
+        628580,
+        1,
+        110,
+        ensure_fleet_baseline(628580, 1, turn_110),
+    )
+    memory_backend.delete("games/628580/1/turns/111")
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    with pytest.raises(NotFoundError, match="requires stored turn 111"):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_112,
+            load_turn=load_turn,
+        )
+    assert persistence.get_snapshot(628580, 1, 112) is None
+
+
+def test_implicit_turn_one_baseline_without_persisting_turn_one(
+    persistence,
+    load_turn,
+    memory_backend,
+    sample_turn,
+):
+    for turn_number in range(2, 110):
+        _put_turn_rst(memory_backend, turn_number)
+
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        sample_turn,
+        load_turn=load_turn,
+    )
+
+    assert snapshot.turn == 111
+    assert len(snapshot.players) == 4
+    assert all(player.records == [] for player in snapshot.players)
+    assert persistence.get_snapshot(628580, 1, 1) is None
+    assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
 
 def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sample_turn):
