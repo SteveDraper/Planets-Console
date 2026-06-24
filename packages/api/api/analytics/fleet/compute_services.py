@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from api.analytics.compute_context import AnalyticComputeContext
+from api.analytics.export_context import export_service_for
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.storage.memory_asset import MemoryAssetBackend
@@ -55,15 +56,17 @@ def build_ephemeral_fleet_compute_services(
 
 
 def resolve_fleet_compute_services(ctx: AnalyticComputeContext) -> FleetComputeServices:
+    services = export_service_for(ctx.exports, ANALYTIC_ID, FleetComputeServices)
+    if services is not None:
+        return services
+
     injected = ctx.exports.export_services.get(ANALYTIC_ID)
     if injected is None:
         raise RuntimeError(
             f"Fleet compute requires {ANALYTIC_ID!r} in ctx.export_services; "
             "inject FleetComputeServices via TurnAnalyticService or test helpers."
         )
-    if not isinstance(injected, FleetComputeServices):
-        raise RuntimeError(
-            f"Fleet compute export_services[{ANALYTIC_ID!r}] must be FleetComputeServices, "
-            f"got {type(injected).__name__}."
-        )
-    return injected
+    raise RuntimeError(
+        f"Fleet compute export_services[{ANALYTIC_ID!r}] must be FleetComputeServices, "
+        f"got {type(injected).__name__}."
+    )
