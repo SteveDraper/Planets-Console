@@ -17,13 +17,18 @@ def ensure_fleet_baseline(
     game_id: int,
     perspective: int,
     turn: TurnInfo,
+    *,
+    baseline_turn_number: int | None = None,
 ) -> FleetTurnSnapshot:
     """Return an empty per-player fleet ledger for turn 1 (fleet ensure baseline)."""
+    snapshot_turn = (
+        baseline_turn_number if baseline_turn_number is not None else turn.settings.turn
+    )
     return FleetTurnSnapshot(
         analytic_id=ANALYTIC_ID,
         game_id=game_id,
         perspective=perspective,
-        turn=turn.settings.turn,
+        turn=snapshot_turn,
         players=[
             FleetAcquisitionLedger(player_id=player.id, player_name=player.username)
             for player in iter_turn_players(turn)
@@ -91,11 +96,19 @@ def get_or_materialize_fleet_snapshot(
             break
 
     start_turn = ancestor_turn + 1
-    if start_turn == 1 and turn_number > 1 and load_turn(1) is None:
+    implicit_baseline = (
+        ancestor_turn == 0 and turn_number > 1 and load_turn(1) is None
+    )
+    if implicit_baseline and start_turn == 1:
         start_turn = 2
 
     for materialize_turn in range(start_turn, turn_number + 1):
-        if materialize_turn > 1 and load_turn(materialize_turn - 1) is None:
+        prior_turn_rst_missing = (
+            materialize_turn > 1 and load_turn(materialize_turn - 1) is None
+        )
+        if prior_turn_rst_missing and not (
+            implicit_baseline and materialize_turn == start_turn
+        ):
             raise NotFoundError(
                 f"fleet snapshot chain requires stored turn {materialize_turn - 1} "
                 f"for game {game_id} perspective {perspective}"
@@ -108,6 +121,19 @@ def get_or_materialize_fleet_snapshot(
 
         if materialize_turn == 1:
             snapshot = ensure_fleet_baseline(game_id, perspective, turn_info)
+        elif implicit_baseline and current_snapshot is None:
+            baseline = ensure_fleet_baseline(
+                game_id,
+                perspective,
+                turn_info,
+                baseline_turn_number=1,
+            )
+            snapshot = advance_snapshot_to_turn(
+                baseline,
+                turn_info,
+                game_id=game_id,
+                perspective=perspective,
+            )
         else:
             assert current_snapshot is not None
             snapshot = advance_snapshot_to_turn(
