@@ -51,6 +51,18 @@ class FleetSnapshotPersistenceService:
             raise ValidationError("stored fleet turn snapshot must be a JSON object")
         return fleet_turn_snapshot_from_json(data)
 
+    def has_snapshot(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> bool:
+        try:
+            data = self._storage.get(self.document_key(game_id, perspective, turn_number))
+        except NotFoundError:
+            return False
+        return data is not None
+
     def put_snapshot(
         self,
         game_id: int,
@@ -98,7 +110,7 @@ class FleetSnapshotPersistenceService:
         for stored_turn in self._stored_turn_numbers(game_id, perspective):
             if stored_turn < turn_number:
                 continue
-            if self.get_snapshot(game_id, perspective, stored_turn) is None:
+            if not self.has_snapshot(game_id, perspective, stored_turn):
                 continue
             self.delete_snapshot(game_id, perspective, stored_turn)
             cleared.add(stored_turn)
