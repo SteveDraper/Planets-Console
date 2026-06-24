@@ -143,7 +143,11 @@ def get_or_materialize_fleet_snapshot(
                 perspective=perspective,
             )
         else:
-            assert current_snapshot is not None
+            if current_snapshot is None:
+                raise RuntimeError(
+                    f"fleet snapshot chain missing prior snapshot at turn "
+                    f"{materialize_turn - 1} for game {game_id} perspective {perspective}"
+                )
             snapshot = advance_snapshot_to_turn(
                 current_snapshot,
                 turn_info,
@@ -155,5 +159,9 @@ def get_or_materialize_fleet_snapshot(
         persistence.put_snapshot(game_id, perspective, materialize_turn, snapshot)
         current_snapshot = snapshot
 
-    assert current_snapshot is not None
+    if current_snapshot is None:
+        raise RuntimeError(
+            f"fleet snapshot chain produced no snapshot for turn {turn_number} "
+            f"for game {game_id} perspective {perspective}"
+        )
     return current_snapshot
