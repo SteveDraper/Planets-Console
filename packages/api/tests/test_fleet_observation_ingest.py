@@ -253,6 +253,30 @@ def test_id_bound_tightens_for_unmatched_rows_when_counts_known():
     assert placeholder.events[-1].kind == "id_bound_tightened"
 
 
+def test_bounded_placeholder_absorbs_matching_sighting():
+    current_turn = _single_ship_turn(turn_number=2, ship_id=3, owner_id=8, x=200, y=200)
+    snapshot = ensure_fleet_baseline(628580, 1, current_turn)
+    snapshot.players[0].records.append(
+        FleetShipRecord(
+            record_id="bounded-placeholder",
+            fields=FleetShipRecordFields(
+                ship_id=FleetFieldBounded(operator="lte", value=5),
+            ),
+            last_seen=FleetLastSeen(turn=1, x=200, y=200),
+        )
+    )
+
+    result = ingest_turn_ship_observations(snapshot, current_turn)
+
+    ledger = _ledger_for_player(result, 8)
+    assert len(ledger.records) == 1
+    record = ledger.records[0]
+    assert record.record_id == "bounded-placeholder"
+    assert record.fields.ship_id == FleetFieldKnown(value=3)
+    assert record.events[-1].kind == "sighting"
+    assert record.events[-1].payload["shipId"] == 3
+
+
 def test_compute_max_ship_id_bound_uses_scoreboard_totals(sample_turn):
     bound = compute_max_ship_id_bound(sample_turn)
     turn_number = sample_turn.settings.turn
