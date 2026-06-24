@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
+from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.turn_roster import iter_turn_players
@@ -19,7 +20,7 @@ def ensure_fleet_baseline(
 ) -> FleetTurnSnapshot:
     """Return an empty per-player fleet ledger for turn 1 (fleet ensure baseline)."""
     return FleetTurnSnapshot(
-        analytic_id="fleet",
+        analytic_id=ANALYTIC_ID,
         game_id=game_id,
         perspective=perspective,
         turn=turn.settings.turn,

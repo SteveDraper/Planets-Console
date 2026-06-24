@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.serialization import (
     fleet_turn_snapshot_from_json,
     fleet_turn_snapshot_to_json,
@@ -9,8 +10,6 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import StorageBackend
-
-ANALYTIC_ID = "fleet"
 
 
 class FleetSnapshotPersistenceService:
@@ -59,6 +58,19 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         snapshot: FleetTurnSnapshot,
     ) -> None:
+        if snapshot.game_id != game_id:
+            raise ValidationError(
+                f"fleet snapshot game_id {snapshot.game_id} does not match key game_id {game_id}"
+            )
+        if snapshot.perspective != perspective:
+            raise ValidationError(
+                "fleet snapshot perspective "
+                f"{snapshot.perspective} does not match key perspective {perspective}"
+            )
+        if snapshot.turn != turn_number:
+            raise ValidationError(
+                f"fleet snapshot turn {snapshot.turn} does not match key turn_number {turn_number}"
+            )
         self._storage.put(
             self.document_key(game_id, perspective, turn_number),
             fleet_turn_snapshot_to_json(snapshot),

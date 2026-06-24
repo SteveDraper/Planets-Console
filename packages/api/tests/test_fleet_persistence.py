@@ -13,6 +13,7 @@ from api.analytics.fleet.chain import (
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, FleetTurnSnapshot
+from api.errors import ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
@@ -69,6 +70,58 @@ def test_fleet_snapshot_round_trip(persistence, sample_turn):
     persistence.put_snapshot(628580, 1, 111, snapshot)
     loaded = persistence.get_snapshot(628580, 1, 111)
     assert loaded == snapshot
+
+
+@pytest.mark.parametrize(
+    ("game_id", "perspective", "turn_number", "snapshot"),
+    [
+        (
+            999,
+            1,
+            111,
+            FleetTurnSnapshot(
+                analytic_id="fleet",
+                game_id=628580,
+                perspective=1,
+                turn=111,
+                players=[],
+            ),
+        ),
+        (
+            628580,
+            2,
+            111,
+            FleetTurnSnapshot(
+                analytic_id="fleet",
+                game_id=628580,
+                perspective=1,
+                turn=111,
+                players=[],
+            ),
+        ),
+        (
+            628580,
+            1,
+            110,
+            FleetTurnSnapshot(
+                analytic_id="fleet",
+                game_id=628580,
+                perspective=1,
+                turn=111,
+                players=[],
+            ),
+        ),
+    ],
+)
+def test_put_snapshot_rejects_metadata_mismatch(
+    persistence,
+    game_id,
+    perspective,
+    turn_number,
+    snapshot,
+):
+    with pytest.raises(ValidationError):
+        persistence.put_snapshot(game_id, perspective, turn_number, snapshot)
 
 
 def test_turn_one_baseline_is_empty_per_player(persistence, load_turn, memory_backend):

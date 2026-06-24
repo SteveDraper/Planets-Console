@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.types import (
     FLEET_BOUNDED_OPERATORS,
     FLEET_EVIDENCE_EVENT_KINDS,
@@ -564,7 +565,7 @@ def fleet_turn_snapshot_to_json(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
 
 
 def fleet_turn_snapshot_from_json(data: dict[str, Any]) -> FleetTurnSnapshot:
-    analytic_id = data.get("analyticId", "fleet")
+    analytic_id = data.get("analyticId", ANALYTIC_ID)
     if not isinstance(analytic_id, str):
         raise ValidationError("fleet turn snapshot analyticId must be a string")
 

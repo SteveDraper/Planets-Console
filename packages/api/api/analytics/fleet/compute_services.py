@@ -7,11 +7,10 @@ from dataclasses import dataclass, replace
 
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.export_context import export_service_for
+from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.storage.memory_asset import MemoryAssetBackend
-
-ANALYTIC_ID = "fleet"
 
 
 @dataclass(frozen=True)
