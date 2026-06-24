@@ -42,7 +42,11 @@ def global_net_delta_from_scores(turn: TurnInfo) -> int:
 
 
 def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
-    """Upper-bound unknown ship ids from current-turn scoreboard totals and deltas."""
+    """Upper-bound unknown ship ids from current-turn scoreboard totals and deltas.
+
+    Returns None when the current turn has no scoreboard rows; callers must skip
+    id-bound tightening rather than inferring from visible ship lists.
+    """
     total = global_ship_count_from_scores(turn)
     if total is None:
         return None

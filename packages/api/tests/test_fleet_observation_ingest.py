@@ -199,6 +199,29 @@ def test_turn_one_sightings_seed_ledger_without_game_start_inventory():
     assert ledger.records[0].fields.ship_id == FleetFieldKnown(value=7)
 
 
+def test_id_bound_skipped_when_scores_missing():
+    current_turn = _single_ship_turn(turn_number=2, ship_id=2, owner_id=8, x=200, y=200)
+    current_turn = replace(current_turn, scores=[])
+    snapshot = ensure_fleet_baseline(628580, 1, current_turn)
+    snapshot.players[0].records.append(
+        FleetShipRecord(
+            record_id="inferred-placeholder",
+            fields=FleetShipRecordFields(ship_id=FleetFieldUnknown()),
+        )
+    )
+
+    result = ingest_turn_ship_observations(snapshot, current_turn)
+
+    placeholder = next(
+        rec
+        for rec in _ledger_for_player(result, 8).records
+        if rec.record_id == "inferred-placeholder"
+    )
+    assert placeholder.fields.ship_id == FleetFieldUnknown()
+    assert not any(event.kind == "id_bound_tightened" for event in placeholder.events)
+    assert compute_max_ship_id_bound(current_turn) is None
+
+
 def test_id_bound_tightens_for_unmatched_rows_when_counts_known():
     current_turn = _single_ship_turn(turn_number=2, ship_id=2, owner_id=8, x=200, y=200)
     score = replace(
