@@ -54,6 +54,12 @@ def test_resolve_breakpoint_turn_scoped_scores_inference_row():
     assert suffix == "inference_rows/8"
 
 
+def test_resolve_breakpoint_turn_scoped_fleet_snapshot():
+    bp, suffix = resolve_breakpoint("games/628580/1/turns/111/analytics/fleet")
+    assert bp == "games/628580/1/turns/111/analytics/fleet"
+    assert suffix is None
+
+
 def test_resolve_breakpoint_unregistered_raises():
     with pytest.raises(ValidationError, match="Unregistered"):
         resolve_breakpoint("unknown/path")

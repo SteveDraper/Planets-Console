@@ -1,5 +1,6 @@
 """Construct the default Core service dependency graph for a storage backend."""
 
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
@@ -33,11 +34,17 @@ def build_service_stack(
         inference_persistence,
         inference_scheduler,
     )
+    fleet_persistence = FleetSnapshotPersistenceService(storage)
+
+    def on_turn_stored(game_id: int, perspective: int, turn_number: int) -> None:
+        inference_invalidation.on_turn_stored(game_id, perspective, turn_number)
+        fleet_persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
+
     turns = TurnLoadService(
         storage,
         credentials,
         games,
-        on_turn_stored=inference_invalidation.on_turn_stored,
+        on_turn_stored=on_turn_stored,
     )
     load_all = LoadAllTurnsService(credentials, games, turns)
     concepts = TurnConceptService(turns)
@@ -47,6 +54,7 @@ def build_service_stack(
         inference_persistence=inference_persistence,
         inference_invalidation=inference_invalidation,
         inference_scheduler=inference_scheduler,
+        fleet_persistence=fleet_persistence,
     )
     return games, turns, load_all, concepts, analytics
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from api.analytics.fleet.constants import ANALYTIC_ID
+
 FleetShipDisposition = Literal["active", "lost", "traded", "unknown"]
 
 FleetBoundedOperator = Literal["lte", "gte", "lt", "gt", "eq"]
@@ -173,7 +175,7 @@ class FleetAcquisitionLedger:
 
 @dataclass
 class FleetTurnSnapshot:
-    analytic_id: str = "fleet"
+    analytic_id: str = ANALYTIC_ID
     game_id: int = 0
     perspective: int = 0
     turn: int = 0

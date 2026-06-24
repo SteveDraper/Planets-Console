@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
-from api.analytics.fleet import get_fleet
+from api.analytics.fleet import ANALYTIC_ID, get_fleet
+from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.registry import TURN_ANALYTICS
 from api.serialization.turn import turn_info_from_json
 
@@ -39,7 +40,13 @@ def test_fleet_compute_returns_scaffold_players_with_empty_records(sample_turn):
 
 
 def test_registry_dispatches_fleet(sample_turn):
-    data = get_turn_analytic("fleet", sample_turn, TurnAnalyticsOptions())
+    services = build_ephemeral_fleet_compute_services(sample_turn)
+    data = get_turn_analytic(
+        "fleet",
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={ANALYTIC_ID: services},
+    )
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4
     assert data["players"][0]["playerName"] == "koshling"

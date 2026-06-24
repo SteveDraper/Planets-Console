@@ -3,6 +3,9 @@
 from collections.abc import Callable
 
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
+from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet.compute_services import FleetComputeServices
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
@@ -29,6 +32,7 @@ class TurnAnalyticService:
         inference_persistence: InferenceRowPersistenceService | None = None,
         inference_invalidation: InferenceInvalidationService | None = None,
         inference_scheduler: InferenceRowScheduler | None = None,
+        fleet_persistence: FleetSnapshotPersistenceService | None = None,
     ) -> None:
         self._turns = turns
         if storage is None:
@@ -47,6 +51,10 @@ class TurnAnalyticService:
             self._inference_invalidation = inference_invalidation
         else:
             self._inference_invalidation = InferenceInvalidationService(self._inference_persistence)
+        if fleet_persistence is not None:
+            self._fleet_persistence = fleet_persistence
+        else:
+            self._fleet_persistence = FleetSnapshotPersistenceService(storage)
         self._inference_scheduler = inference_scheduler
 
     def _load_scoreboard_turn(
@@ -95,7 +103,20 @@ class TurnAnalyticService:
             load_turn=self._load_scoreboard_turn(game_id, perspective),
             export_services={
                 SCORES_ANALYTIC_ID: self._scores_export_context(game_id, perspective),
+                FLEET_ANALYTIC_ID: self._fleet_compute_services(game_id, perspective),
             },
+        )
+
+    def _fleet_compute_services(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> FleetComputeServices:
+        return FleetComputeServices(
+            persistence=self._fleet_persistence,
+            game_id=game_id,
+            perspective=perspective,
+            load_turn=self._load_scoreboard_turn(game_id, perspective),
         )
 
     def _scores_export_context(
