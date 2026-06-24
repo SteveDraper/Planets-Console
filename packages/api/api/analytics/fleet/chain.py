@@ -6,6 +6,7 @@ import copy
 from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.turn_roster import iter_turn_players
@@ -61,13 +62,14 @@ def advance_snapshot_to_turn(
     )
 
 
-def apply_fleet_turn_delta(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> FleetTurnSnapshot:
-    """Apply evidence from shell turn T only.
-
-    Direct observation ingest (#118) and scores integration (#119+) extend this hook.
-    """
-    _ = turn
-    return snapshot
+def apply_fleet_turn_delta(
+    snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
+    *,
+    prior_turn: TurnInfo | None = None,
+) -> FleetTurnSnapshot:
+    """Apply evidence from shell turn T only."""
+    return ingest_turn_ship_observations(snapshot, turn, prior_turn=prior_turn)
 
 
 def _find_chain_anchor(
@@ -91,6 +93,7 @@ def _materialize_and_persist_turn(
     materialize_turn: int,
     prior_snapshot: FleetTurnSnapshot,
     turn_info: TurnInfo,
+    load_turn: Callable[[int], TurnInfo | None],
 ) -> FleetTurnSnapshot:
     snapshot = advance_snapshot_to_turn(
         prior_snapshot,
@@ -98,7 +101,8 @@ def _materialize_and_persist_turn(
         game_id=game_id,
         perspective=perspective,
     )
-    snapshot = apply_fleet_turn_delta(snapshot, turn_info)
+    prior_turn = load_turn(materialize_turn - 1) if materialize_turn > 1 else None
+    snapshot = apply_fleet_turn_delta(snapshot, turn_info, prior_turn=prior_turn)
     persistence.put_snapshot(game_id, perspective, materialize_turn, snapshot)
     return snapshot
 
@@ -197,6 +201,7 @@ def get_or_materialize_fleet_snapshot(
             materialize_turn=materialize_turn,
             prior_snapshot=current_snapshot,
             turn_info=turn_info,
+            load_turn=cached_load,
         )
 
     return current_snapshot

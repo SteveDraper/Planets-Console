@@ -12,7 +12,12 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, FleetTurnSnapshot
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetFieldKnown,
+    FleetShipRecord,
+    FleetTurnSnapshot,
+)
 from api.errors import NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
@@ -124,11 +129,15 @@ def test_put_snapshot_rejects_metadata_mismatch(
         persistence.put_snapshot(game_id, perspective, turn_number, snapshot)
 
 
-def test_turn_one_baseline_is_empty_per_player(persistence, load_turn, memory_backend):
+def test_turn_one_baseline_seeds_from_turn_one_sightings(persistence, load_turn, memory_backend):
     turn_one_data = copy.deepcopy(memory_backend.get("games/628580/1/turns/110"))
     assert isinstance(turn_one_data, dict)
     turn_one_data["settings"]["turn"] = 1
     turn_one_data["game"]["turn"] = 1
+    turn_one_data["ships"] = [turn_one_data["ships"][0]]
+    turn_one_data["ships"][0]["id"] = 99
+    turn_one_data["ships"][0]["ownerid"] = 8
+    turn_one_data["ships"][0]["turnkilled"] = 0
     memory_backend.put("games/628580/1/turns/1", turn_one_data)
     turn_one = turn_info_from_json(memory_backend.get("games/628580/1/turns/1"))
 
@@ -141,7 +150,8 @@ def test_turn_one_baseline_is_empty_per_player(persistence, load_turn, memory_ba
     )
     assert snapshot.turn == 1
     assert len(snapshot.players) == 4
-    assert all(player.records == [] for player in snapshot.players)
+    assert len(snapshot.players[0].records) == 1
+    assert snapshot.players[0].records[0].fields.ship_id == FleetFieldKnown(value=99)
     assert persistence.get_snapshot(628580, 1, 1) == snapshot
 
 
@@ -174,12 +184,12 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     )
 
     assert snapshot.turn == 112
-    assert len(snapshot.players[0].records) == 1
+    assert len(snapshot.players[0].records) == 5
     assert snapshot.players[0].records[0].record_id == "gap-rec"
     intermediate = persistence.get_snapshot(628580, 1, 111)
     assert intermediate is not None
     assert intermediate.turn == 111
-    assert len(intermediate.players[0].records) == 1
+    assert len(intermediate.players[0].records) == 5
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
@@ -226,7 +236,7 @@ def test_implicit_turn_one_baseline_without_persisting_turn_one(
 
     assert snapshot.turn == 111
     assert len(snapshot.players) == 4
-    assert all(player.records == [] for player in snapshot.players)
+    assert len(snapshot.players[0].records) == 4
     assert persistence.get_snapshot(628580, 1, 1) is None
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -246,7 +256,7 @@ def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sam
         load_turn=load_turn,
     )
     assert snapshot.turn == 111
-    assert len(snapshot.players[0].records) == 1
+    assert len(snapshot.players[0].records) == 5
     assert snapshot.players[0].records[0].record_id == "rec-1"
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -319,5 +329,6 @@ def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load
     data = analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4
-    assert all(player["records"] == [] for player in data["players"])
+    koshling = next(player for player in data["players"] if player["playerId"] == 8)
+    assert len(koshling["records"]) == 4
     assert persistence.get_snapshot(628580, 1, 111) is not None
