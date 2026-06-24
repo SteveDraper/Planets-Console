@@ -102,6 +102,17 @@ def get_or_materialize_fleet_snapshot(
     if implicit_baseline and start_turn == 1:
         start_turn = 2
 
+    def require_turn(materialize_turn: int) -> TurnInfo:
+        if materialize_turn == turn_number:
+            return turn
+        turn_info = load_turn(materialize_turn)
+        if turn_info is None:
+            raise NotFoundError(
+                f"fleet snapshot chain requires stored turn {materialize_turn} "
+                f"for game {game_id} perspective {perspective}"
+            )
+        return turn_info
+
     for materialize_turn in range(start_turn, turn_number + 1):
         prior_turn_rst_missing = (
             materialize_turn > 1 and load_turn(materialize_turn - 1) is None
@@ -114,10 +125,7 @@ def get_or_materialize_fleet_snapshot(
                 f"for game {game_id} perspective {perspective}"
             )
 
-        if materialize_turn == turn_number:
-            turn_info = turn
-        else:
-            turn_info = load_turn(materialize_turn)
+        turn_info = require_turn(materialize_turn)
 
         if materialize_turn == 1:
             snapshot = ensure_fleet_baseline(game_id, perspective, turn_info)
