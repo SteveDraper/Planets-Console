@@ -4,11 +4,11 @@ from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
-from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.compute_services import (
     build_ephemeral_fleet_compute_services,
     resolve_fleet_compute_services,
 )
+from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.registration import TurnAnalyticRegistration
 from api.models.game import TurnInfo
