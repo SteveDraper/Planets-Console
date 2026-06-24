@@ -537,15 +537,29 @@ def fleet_acquisition_ledger_from_json(data: dict[str, Any]) -> FleetAcquisition
     )
 
 
+def _fleet_turn_snapshot_players_to_json(
+    snapshot: FleetTurnSnapshot,
+) -> list[dict[str, Any]]:
+    return [
+        fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
+    ]
+
+
+def fleet_turn_snapshot_to_compute_wire(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
+    """Turn-analytic compute response shape (analytic id + per-player ledgers)."""
+    return {
+        "analyticId": snapshot.analytic_id,
+        "players": _fleet_turn_snapshot_players_to_json(snapshot),
+    }
+
+
 def fleet_turn_snapshot_to_json(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
     return {
         "analyticId": snapshot.analytic_id,
         "gameId": snapshot.game_id,
         "perspective": snapshot.perspective,
         "turn": snapshot.turn,
-        "players": [
-            fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
-        ],
+        "players": _fleet_turn_snapshot_players_to_json(snapshot),
     }
 
 

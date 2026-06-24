@@ -9,18 +9,9 @@ from api.analytics.fleet.compute_services import (
     build_ephemeral_fleet_compute_services,
     resolve_fleet_compute_services,
 )
-from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
+from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.registration import TurnAnalyticRegistration
 from api.models.game import TurnInfo
-
-
-def _fleet_snapshot_to_compute_wire(snapshot) -> dict[str, object]:
-    return {
-        "analyticId": snapshot.analytic_id,
-        "players": [
-            fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
-        ],
-    }
 
 
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
@@ -33,7 +24,7 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
         ctx.turn,
         load_turn=services.load_turn,
     )
-    return _fleet_snapshot_to_compute_wire(snapshot)
+    return fleet_turn_snapshot_to_compute_wire(snapshot)
 
 
 def get_fleet(turn: TurnInfo) -> dict:
