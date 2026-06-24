@@ -36,9 +36,7 @@ def global_build_count_from_scores(turn: TurnInfo) -> int:
 
 def global_net_delta_from_scores(turn: TurnInfo) -> int:
     """Sum signed warship and freighter scoreboard deltas for the turn."""
-    return sum(
-        score.shipchange + score.freighterchange for score in _current_turn_scores(turn)
-    )
+    return sum(score.shipchange + score.freighterchange for score in _current_turn_scores(turn))
 
 
 def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
