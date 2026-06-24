@@ -82,29 +82,45 @@ def get_or_materialize_fleet_snapshot(
     if cached is not None:
         return cached
 
-    if turn_number == 1:
-        snapshot = ensure_fleet_baseline(game_id, perspective, turn)
-    else:
-        prior_turn = load_turn(turn_number - 1)
-        if prior_turn is None:
+    ancestor_turn = 0
+    current_snapshot: FleetTurnSnapshot | None = None
+    for prior_turn_number in range(turn_number - 1, 0, -1):
+        prior_snapshot = persistence.get_snapshot(game_id, perspective, prior_turn_number)
+        if prior_snapshot is not None:
+            ancestor_turn = prior_turn_number
+            current_snapshot = prior_snapshot
+            break
+
+    start_turn = ancestor_turn + 1
+    if start_turn == 1 and turn_number > 1 and load_turn(1) is None:
+        start_turn = 2
+
+    for materialize_turn in range(start_turn, turn_number + 1):
+        if materialize_turn > 1 and load_turn(materialize_turn - 1) is None:
             raise NotFoundError(
-                f"fleet snapshot chain requires stored turn {turn_number - 1} "
+                f"fleet snapshot chain requires stored turn {materialize_turn - 1} "
                 f"for game {game_id} perspective {perspective}"
             )
-        prior_snapshot = get_or_materialize_fleet_snapshot(
-            persistence,
-            game_id,
-            perspective,
-            prior_turn,
-            load_turn=load_turn,
-        )
-        snapshot = advance_snapshot_to_turn(
-            prior_snapshot,
-            turn,
-            game_id=game_id,
-            perspective=perspective,
-        )
 
-    snapshot = apply_fleet_turn_delta(snapshot, turn)
-    persistence.put_snapshot(game_id, perspective, turn_number, snapshot)
-    return snapshot
+        if materialize_turn == turn_number:
+            turn_info = turn
+        else:
+            turn_info = load_turn(materialize_turn)
+
+        if materialize_turn == 1:
+            snapshot = ensure_fleet_baseline(game_id, perspective, turn_info)
+        else:
+            assert current_snapshot is not None
+            snapshot = advance_snapshot_to_turn(
+                current_snapshot,
+                turn_info,
+                game_id=game_id,
+                perspective=perspective,
+            )
+
+        snapshot = apply_fleet_turn_delta(snapshot, turn_info)
+        persistence.put_snapshot(game_id, perspective, materialize_turn, snapshot)
+        current_snapshot = snapshot
+
+    assert current_snapshot is not None
+    return current_snapshot
