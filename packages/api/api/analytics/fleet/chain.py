@@ -44,9 +44,7 @@ def advance_snapshot_to_turn(
     for player in iter_turn_players(turn):
         prior_ledger = ledgers_by_player_id.get(player.id)
         if prior_ledger is None:
-            players.append(
-                FleetAcquisitionLedger(player_id=player.id, player_name=player.username)
-            )
+            players.append(FleetAcquisitionLedger(player_id=player.id, player_name=player.username))
             continue
         ledger = copy.deepcopy(prior_ledger)
         ledger.player_name = player.username

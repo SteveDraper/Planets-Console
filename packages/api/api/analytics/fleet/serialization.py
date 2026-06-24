@@ -541,9 +541,7 @@ def fleet_acquisition_ledger_from_json(data: dict[str, Any]) -> FleetAcquisition
 def _fleet_turn_snapshot_players_to_json(
     snapshot: FleetTurnSnapshot,
 ) -> list[dict[str, Any]]:
-    return [
-        fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
-    ]
+    return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players]
 
 
 def fleet_turn_snapshot_to_compute_wire(snapshot: FleetTurnSnapshot) -> dict[str, Any]:

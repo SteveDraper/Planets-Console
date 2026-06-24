@@ -218,6 +218,7 @@ def test_turn_store_invalidates_fleet_snapshots(memory_backend):
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.get_snapshot(628580, 1, 112) is None
 
+
 def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load_turn):
     persistence = FleetSnapshotPersistenceService(memory_backend)
     turn_110 = load_turn(110)

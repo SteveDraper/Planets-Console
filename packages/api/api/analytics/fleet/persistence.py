@@ -108,7 +108,7 @@ class FleetSnapshotPersistenceService:
         turns_prefix = f"games/{game_id}/{perspective}/turns"
         try:
             segments = self._storage.list(turns_prefix)
-        except (NotFoundError, ValidationError):
+        except NotFoundError, ValidationError:
             return []
         turn_numbers: list[int] = []
         for segment in segments:
