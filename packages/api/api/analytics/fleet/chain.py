@@ -70,6 +70,39 @@ def apply_fleet_turn_delta(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> Fleet
     return snapshot
 
 
+def _find_chain_anchor(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+) -> tuple[int, FleetTurnSnapshot | None]:
+    for prior_turn_number in range(turn_number - 1, 0, -1):
+        prior_snapshot = persistence.get_snapshot(game_id, perspective, prior_turn_number)
+        if prior_snapshot is not None:
+            return prior_turn_number, prior_snapshot
+    return 0, None
+
+
+def _materialize_and_persist_turn(
+    persistence: FleetSnapshotPersistenceService,
+    *,
+    game_id: int,
+    perspective: int,
+    materialize_turn: int,
+    prior_snapshot: FleetTurnSnapshot,
+    turn_info: TurnInfo,
+) -> FleetTurnSnapshot:
+    snapshot = advance_snapshot_to_turn(
+        prior_snapshot,
+        turn_info,
+        game_id=game_id,
+        perspective=perspective,
+    )
+    snapshot = apply_fleet_turn_delta(snapshot, turn_info)
+    persistence.put_snapshot(game_id, perspective, materialize_turn, snapshot)
+    return snapshot
+
+
 def get_or_materialize_fleet_snapshot(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -84,24 +117,17 @@ def get_or_materialize_fleet_snapshot(
     if cached is not None:
         return cached
 
-    ancestor_turn = 0
-    current_snapshot: FleetTurnSnapshot | None = None
-    for prior_turn_number in range(turn_number - 1, 0, -1):
-        prior_snapshot = persistence.get_snapshot(game_id, perspective, prior_turn_number)
-        if prior_snapshot is not None:
-            ancestor_turn = prior_turn_number
-            current_snapshot = prior_snapshot
-            break
+    loaded_turns: dict[int, TurnInfo | None] = {}
 
-    start_turn = ancestor_turn + 1
-    implicit_baseline = ancestor_turn == 0 and turn_number > 1 and load_turn(1) is None
-    if implicit_baseline and start_turn == 1:
-        start_turn = 2
+    def cached_load(stored_turn_number: int) -> TurnInfo | None:
+        if stored_turn_number not in loaded_turns:
+            loaded_turns[stored_turn_number] = load_turn(stored_turn_number)
+        return loaded_turns[stored_turn_number]
 
     def require_turn(materialize_turn: int) -> TurnInfo:
         if materialize_turn == turn_number:
             return turn
-        turn_info = load_turn(materialize_turn)
+        turn_info = cached_load(materialize_turn)
         if turn_info is None:
             raise NotFoundError(
                 f"fleet snapshot chain requires stored turn {materialize_turn} "
@@ -109,51 +135,68 @@ def get_or_materialize_fleet_snapshot(
             )
         return turn_info
 
-    for materialize_turn in range(start_turn, turn_number + 1):
-        prior_turn_rst_missing = materialize_turn > 1 and load_turn(materialize_turn - 1) is None
-        if prior_turn_rst_missing and not (implicit_baseline and materialize_turn == start_turn):
+    def require_prior_rst(materialize_turn: int, *, allow_missing_turn_one_rst: bool) -> None:
+        if materialize_turn <= 1:
+            return
+        prior_turn_number = materialize_turn - 1
+        if allow_missing_turn_one_rst and prior_turn_number == 1:
+            return
+        if cached_load(prior_turn_number) is None:
             raise NotFoundError(
-                f"fleet snapshot chain requires stored turn {materialize_turn - 1} "
+                f"fleet snapshot chain requires stored turn {prior_turn_number} "
                 f"for game {game_id} perspective {perspective}"
             )
 
-        turn_info = require_turn(materialize_turn)
+    anchor_turn, current_snapshot = _find_chain_anchor(
+        persistence,
+        game_id,
+        perspective,
+        turn_number,
+    )
+    skip_turn_one_rst = anchor_turn == 0 and turn_number > 1 and cached_load(1) is None
+    start_turn = anchor_turn + 1
 
-        if materialize_turn == 1:
-            snapshot = ensure_fleet_baseline(game_id, perspective, turn_info)
-        elif implicit_baseline and current_snapshot is None:
-            baseline = ensure_fleet_baseline(
-                game_id,
-                perspective,
-                turn_info,
-                baseline_turn_number=1,
-            )
-            snapshot = advance_snapshot_to_turn(
-                baseline,
-                turn_info,
-                game_id=game_id,
-                perspective=perspective,
-            )
-        else:
-            if current_snapshot is None:
-                raise RuntimeError(
-                    f"fleet snapshot chain missing prior snapshot at turn "
-                    f"{materialize_turn - 1} for game {game_id} perspective {perspective}"
-                )
-            snapshot = advance_snapshot_to_turn(
-                current_snapshot,
-                turn_info,
-                game_id=game_id,
-                perspective=perspective,
-            )
-
-        snapshot = apply_fleet_turn_delta(snapshot, turn_info)
-        persistence.put_snapshot(game_id, perspective, materialize_turn, snapshot)
-        current_snapshot = snapshot
-
-    if current_snapshot is None:
-        raise RuntimeError(
-            f"fleet snapshot chain produced no snapshot for turn {turn_number} "
-            f"for game {game_id} perspective {perspective}"
+    if skip_turn_one_rst:
+        if start_turn == 1:
+            start_turn = 2
+        first_rst_turn = require_turn(start_turn)
+        implicit_baseline = ensure_fleet_baseline(
+            game_id,
+            perspective,
+            first_rst_turn,
+            baseline_turn_number=1,
         )
+        current_snapshot = advance_snapshot_to_turn(
+            implicit_baseline,
+            first_rst_turn,
+            game_id=game_id,
+            perspective=perspective,
+        )
+    elif anchor_turn == 0:
+        turn_one = require_turn(1)
+        turn_one_snapshot = apply_fleet_turn_delta(
+            ensure_fleet_baseline(game_id, perspective, turn_one),
+            turn_one,
+        )
+        persistence.put_snapshot(game_id, perspective, 1, turn_one_snapshot)
+        current_snapshot = turn_one_snapshot
+        if turn_number == 1:
+            return turn_one_snapshot
+        start_turn = 2
+
+    for materialize_turn in range(start_turn, turn_number + 1):
+        require_prior_rst(
+            materialize_turn,
+            allow_missing_turn_one_rst=skip_turn_one_rst and materialize_turn == start_turn,
+        )
+        turn_info = require_turn(materialize_turn)
+        current_snapshot = _materialize_and_persist_turn(
+            persistence,
+            game_id=game_id,
+            perspective=perspective,
+            materialize_turn=materialize_turn,
+            prior_snapshot=current_snapshot,
+            turn_info=turn_info,
+        )
+
     return current_snapshot
