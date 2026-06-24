@@ -21,9 +21,7 @@ def ensure_fleet_baseline(
     baseline_turn_number: int | None = None,
 ) -> FleetTurnSnapshot:
     """Return an empty per-player fleet ledger for turn 1 (fleet ensure baseline)."""
-    snapshot_turn = (
-        baseline_turn_number if baseline_turn_number is not None else turn.settings.turn
-    )
+    snapshot_turn = baseline_turn_number if baseline_turn_number is not None else turn.settings.turn
     return FleetTurnSnapshot(
         analytic_id=ANALYTIC_ID,
         game_id=game_id,
@@ -96,9 +94,7 @@ def get_or_materialize_fleet_snapshot(
             break
 
     start_turn = ancestor_turn + 1
-    implicit_baseline = (
-        ancestor_turn == 0 and turn_number > 1 and load_turn(1) is None
-    )
+    implicit_baseline = ancestor_turn == 0 and turn_number > 1 and load_turn(1) is None
     if implicit_baseline and start_turn == 1:
         start_turn = 2
 
@@ -114,12 +110,8 @@ def get_or_materialize_fleet_snapshot(
         return turn_info
 
     for materialize_turn in range(start_turn, turn_number + 1):
-        prior_turn_rst_missing = (
-            materialize_turn > 1 and load_turn(materialize_turn - 1) is None
-        )
-        if prior_turn_rst_missing and not (
-            implicit_baseline and materialize_turn == start_turn
-        ):
+        prior_turn_rst_missing = materialize_turn > 1 and load_turn(materialize_turn - 1) is None
+        if prior_turn_rst_missing and not (implicit_baseline and materialize_turn == start_turn):
             raise NotFoundError(
                 f"fleet snapshot chain requires stored turn {materialize_turn - 1} "
                 f"for game {game_id} perspective {perspective}"
