@@ -1,5 +1,6 @@
 """Unit tests for BFF analytics routes. Verify response shape and map node coordinates."""
 
+import copy
 import json
 import math
 from pathlib import Path
@@ -37,7 +38,12 @@ def _setup_storage_for_core_calls():
     with open(ASSETS_DIR / "game_info_sample.json") as f:
         storage.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
-        storage.put("games/628580/1/turns/111", json.load(f))
+        turn_rst = json.load(f)
+        for turn_number in range(1, 112):
+            turn_data = copy.deepcopy(turn_rst)
+            turn_data["settings"]["turn"] = turn_number
+            turn_data["game"]["turn"] = turn_number
+            storage.put(f"games/628580/1/turns/{turn_number}", turn_data)
     yield
     clear_backend_cache()
     clear_core_client_cache()
