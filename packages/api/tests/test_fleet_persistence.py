@@ -14,7 +14,6 @@ from api.analytics.fleet.chain import (
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, FleetTurnSnapshot
 from api.serialization.turn import turn_info_from_json
-from api.services.fleet_invalidation_service import FleetInvalidationService
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -165,26 +164,6 @@ def test_turn_store_invalidates_fleet_snapshots(memory_backend):
         turns._store_turn_rst(628580, 1, 111, json.load(f))
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.get_snapshot(628580, 1, 112) is None
-
-
-def test_fleet_invalidation_service_delegates_to_persistence(persistence):
-    invalidation = FleetInvalidationService(persistence)
-    persistence.put_snapshot(
-        628580,
-        1,
-        111,
-        FleetTurnSnapshot(
-            analytic_id="fleet",
-            game_id=628580,
-            perspective=1,
-            turn=111,
-            players=[],
-        ),
-    )
-    cleared = invalidation.on_turn_stored(628580, 1, 111)
-    assert cleared == {111}
-    assert persistence.get_snapshot(628580, 1, 111) is None
-
 
 def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load_turn):
     persistence = FleetSnapshotPersistenceService(memory_backend)

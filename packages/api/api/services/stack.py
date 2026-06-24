@@ -5,7 +5,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
 from api.services.credential_service import CredentialService
-from api.services.fleet_invalidation_service import FleetInvalidationService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -36,11 +35,10 @@ def build_service_stack(
         inference_scheduler,
     )
     fleet_persistence = FleetSnapshotPersistenceService(storage)
-    fleet_invalidation = FleetInvalidationService(fleet_persistence)
 
     def on_turn_stored(game_id: int, perspective: int, turn_number: int) -> None:
         inference_invalidation.on_turn_stored(game_id, perspective, turn_number)
-        fleet_invalidation.on_turn_stored(game_id, perspective, turn_number)
+        fleet_persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
 
     turns = TurnLoadService(
         storage,
