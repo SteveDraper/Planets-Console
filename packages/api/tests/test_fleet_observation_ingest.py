@@ -9,10 +9,8 @@ from pathlib import Path
 
 import pytest
 from api.analytics.fleet.chain import apply_fleet_turn_delta, ensure_fleet_baseline
-from api.analytics.fleet.observation_ingest import (
-    compute_max_ship_id_bound,
-    ingest_turn_ship_observations,
-)
+from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
+from api.analytics.fleet.scoreboard_counts import compute_max_ship_id_bound
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,

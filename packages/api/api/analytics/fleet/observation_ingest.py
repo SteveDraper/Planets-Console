@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+from api.analytics.fleet.scoreboard_counts import compute_max_ship_id_bound
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -47,54 +48,6 @@ def ingest_turn_ship_observations(
             _tighten_unknown_ship_id_bounds(ledger, max_ship_id_bound, turn_number)
 
     return snapshot
-
-
-def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
-    """Upper-bound unknown ship ids from current-turn scoreboard totals and deltas."""
-    total = global_ship_count_from_scores(turn)
-    if total is None:
-        return None
-    net = global_net_delta_from_scores(turn)
-    builds = global_build_count_from_scores(turn)
-    return total - net + builds
-
-
-def global_ship_count_from_scores(turn: TurnInfo) -> int | None:
-    """Sum scoreboard ship totals for the turn, when score rows exist."""
-    turn_number = turn.settings.turn
-    total = 0
-    found = False
-    for score in turn.scores:
-        if score.turn != turn_number:
-            continue
-        found = True
-        total += score.capitalships + score.freighters
-    return total if found else None
-
-
-def global_build_count_from_scores(turn: TurnInfo) -> int:
-    """Sum positive warship and freighter builds reported on the turn."""
-    turn_number = turn.settings.turn
-    total = 0
-    for score in turn.scores:
-        if score.turn != turn_number:
-            continue
-        if score.shipchange > 0:
-            total += score.shipchange
-        if score.freighterchange > 0:
-            total += score.freighterchange
-    return total
-
-
-def global_net_delta_from_scores(turn: TurnInfo) -> int:
-    """Sum signed warship and freighter scoreboard deltas for the turn."""
-    turn_number = turn.settings.turn
-    total = 0
-    for score in turn.scores:
-        if score.turn != turn_number:
-            continue
-        total += score.shipchange + score.freighterchange
-    return total
 
 
 def _ingest_ship_sighting(
