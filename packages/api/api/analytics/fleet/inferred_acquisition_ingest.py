@@ -19,6 +19,9 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
+from api.analytics.military_score_inference.ship_build_combos import (
+    is_generic_zero_military_score_combo_id,
+)
 from api.analytics.scores.export_wire import ranked_solutions_from_wire
 from api.models.game import TurnInfo
 
@@ -367,8 +370,8 @@ def _option_set_from_wire_build(
 
 
 def _wire_ship_build_class(wire_build: dict[str, object]) -> FleetShipClass:
-    combo_id = str(wire_build.get("comboId", ""))
-    if "freighter" in combo_id.lower():
+    combo_id = wire_build.get("comboId")
+    if isinstance(combo_id, str) and is_generic_zero_military_score_combo_id(combo_id):
         return "freighter"
     return "warship"
 
