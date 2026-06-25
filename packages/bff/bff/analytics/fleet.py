@@ -19,16 +19,17 @@ def _shape_table_record(record: dict[str, object]) -> dict[str, object]:
     shaped: dict[str, object] = {
         "recordId": record.get("recordId"),
         "disposition": record.get("disposition", "active"),
-        "qualifiers": record.get("qualifiers", {}),
-        "fields": record.get("fields", {}),
-        "buildOptionSets": record.get("buildOptionSets", []),
     }
-    display_default = record.get("displayDefaultOptionSetIndex")
-    if display_default is not None:
-        shaped["displayDefaultOptionSetIndex"] = display_default
-    last_seen = record.get("lastSeen")
-    if last_seen is not None:
-        shaped["lastSeen"] = last_seen
+    if "qualifiers" in record:
+        shaped["qualifiers"] = record["qualifiers"]
+    if "fields" in record:
+        shaped["fields"] = record["fields"]
+    if "buildOptionSets" in record:
+        shaped["buildOptionSets"] = record["buildOptionSets"]
+    if "displayDefaultOptionSetIndex" in record:
+        shaped["displayDefaultOptionSetIndex"] = record["displayDefaultOptionSetIndex"]
+    if "lastSeen" in record:
+        shaped["lastSeen"] = record["lastSeen"]
     return shaped
 
 

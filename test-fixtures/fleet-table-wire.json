@@ -172,6 +172,54 @@
           }
         ]
       }
+    },
+    {
+      "name": "omits optional record keys absent from core; defaults disposition only",
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 1,
+            "playerName": "minimal",
+            "records": [
+              {
+                "recordId": "rec-minimal",
+                "events": [{ "eventId": "evt-strip", "kind": "sighting", "turn": 1 }]
+              },
+              {
+                "recordId": "rec-explicit-lost",
+                "disposition": "lost",
+                "qualifiers": {},
+                "fields": {},
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 1,
+            "playerName": "minimal",
+            "records": [
+              {
+                "recordId": "rec-minimal",
+                "disposition": "active"
+              },
+              {
+                "recordId": "rec-explicit-lost",
+                "disposition": "lost",
+                "qualifiers": {},
+                "fields": {},
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
