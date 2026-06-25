@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from bff.analytics.fleet import table_from_core
 
 FIXTURE_PATH = Path(__file__).resolve().parents[3] / "test-fixtures" / "fleet-table-wire.json"
