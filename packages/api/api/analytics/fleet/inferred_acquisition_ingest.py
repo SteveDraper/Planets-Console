@@ -308,18 +308,20 @@ def _option_sets_for_slot(
     builds_by_solution: list[list[FleetBuildOptionSet]],
     slot_index: int,
 ) -> tuple[FleetBuildOptionSet, ...]:
-    seen_combo_ids: set[str] = set()
-    ordered: list[FleetBuildOptionSet] = []
+    best_by_combo_key: dict[str, FleetBuildOptionSet] = {}
     for solution_builds in builds_by_solution:
         if slot_index >= len(solution_builds):
             continue
         option_set = solution_builds[slot_index]
         combo_key = option_set.combo_id or option_set.label
-        if combo_key in seen_combo_ids:
-            continue
-        seen_combo_ids.add(combo_key)
-        ordered.append(option_set)
-    ordered.sort(key=lambda option_set: option_set.solution_rank_weight, reverse=True)
+        existing = best_by_combo_key.get(combo_key)
+        if existing is None or option_set.solution_rank_weight > existing.solution_rank_weight:
+            best_by_combo_key[combo_key] = option_set
+    ordered = sorted(
+        best_by_combo_key.values(),
+        key=lambda option_set: option_set.solution_rank_weight,
+        reverse=True,
+    )
     return tuple(ordered)
 
 

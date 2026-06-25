@@ -395,6 +395,62 @@ def test_persisted_inference_refines_freighter_placeholders():
     assert record.fields.hull == FleetFieldUnknown()
 
 
+def test_duplicate_combo_id_keeps_highest_solution_rank_weight():
+    turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=1)
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        5,
+        8,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="same combo different ranks",
+            solution_count=2,
+            is_complete=True,
+            solutions=[
+                {
+                    "objectiveValue": 40,
+                    "actions": [],
+                    "shipBuilds": [
+                        ship_build_wire(
+                            combo_id="combo-13",
+                            label="Cruiser",
+                            hull_id=13,
+                            engine_id=9,
+                        )
+                    ],
+                },
+                {
+                    "objectiveValue": 90,
+                    "actions": [],
+                    "shipBuilds": [
+                        ship_build_wire(
+                            combo_id="combo-13",
+                            label="Cruiser",
+                            hull_id=13,
+                            engine_id=9,
+                        )
+                    ],
+                },
+            ],
+        ),
+    )
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
+    )
+
+    record = ledger_for_player(snapshot, 8).records[0]
+    assert len(record.build_option_sets) == 1
+    assert record.build_option_sets[0].solution_rank_weight == 90
+    assert record.display_default_option_set_index == 0
+
+
 def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_product():
     turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
