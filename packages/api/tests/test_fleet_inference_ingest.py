@@ -25,7 +25,6 @@ from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.scores_exports_helpers import (
-    GAME_ID,
     inference_solution,
     perspective,
     schedule_row_with_ladder,
@@ -58,8 +57,6 @@ def test_positive_warship_delta_creates_two_placeholder_rows():
     snapshot = ingest_turn_inferred_acquisitions(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        game_id=628580,
-        perspective=1,
     )
 
     ledger = ledger_for_player(snapshot, 8)
@@ -80,8 +77,6 @@ def test_placeholder_rows_remain_unknown_when_inference_in_progress_with_no_solu
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        game_id=628580,
-        perspective=1,
         inference=FleetInferenceSupport(
             scores_services=ScoresExportContext(
                 persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
@@ -163,12 +158,10 @@ def test_streaming_refine_updates_option_sets(sample_turn):
             scheduler=scheduler,
         ),
     )
-    baseline = ensure_fleet_baseline(628580, 1, turn)
+    baseline = ensure_fleet_baseline(628580, perspective(turn), turn)
     snapshot = ingest_turn_inferred_acquisitions(
         baseline,
         turn,
-        game_id=GAME_ID,
-        perspective=perspective(turn),
     )
     ledger = ledger_for_player(snapshot, player_id)
     assert all(record.build_option_sets == [] for record in ledger.records)
@@ -176,8 +169,6 @@ def test_streaming_refine_updates_option_sets(sample_turn):
     refined = ingest_turn_inferred_acquisitions(
         snapshot,
         turn,
-        game_id=GAME_ID,
-        perspective=perspective(turn),
         inference=inference,
         load_turn=lambda _turn_number: turn,
     )
@@ -226,8 +217,6 @@ def test_persisted_inference_refines_placeholders():
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        game_id=628580,
-        perspective=1,
         inference=FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
         load_turn=lambda _turn_number: turn,
     )
@@ -283,8 +272,6 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        game_id=628580,
-        perspective=1,
         inference=FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
         load_turn=lambda _turn_number: turn,
     )

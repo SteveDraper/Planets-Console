@@ -32,8 +32,6 @@ def ingest_turn_inferred_acquisitions(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
     *,
-    game_id: int,
-    perspective: int,
     inference: FleetInferenceSupport | None = None,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> FleetTurnSnapshot:
@@ -43,8 +41,6 @@ def ingest_turn_inferred_acquisitions(
         snapshot = _refine_inferred_acquisitions_from_scores(
             snapshot,
             turn,
-            game_id=game_id,
-            perspective=perspective,
             inference=inference,
             load_turn=load_turn,
         )
@@ -89,8 +85,6 @@ def _refine_inferred_acquisitions_from_scores(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
     *,
-    game_id: int,
-    perspective: int,
     inference: FleetInferenceSupport,
     load_turn: Callable[[int], TurnInfo | None],
 ) -> FleetTurnSnapshot:
@@ -100,8 +94,8 @@ def _refine_inferred_acquisitions_from_scores(
         if not _ledger_has_placeholders_for_turn(ledger, turn_number):
             continue
         held = inference.held_inference_for_player(
-            game_id=game_id,
-            perspective=perspective,
+            game_id=snapshot.game_id,
+            perspective=snapshot.perspective,
             host_turn=turn_number,
             player_id=ledger.player_id,
             turn=turn,

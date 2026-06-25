@@ -68,8 +68,6 @@ def apply_fleet_turn_delta(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
     *,
-    game_id: int,
-    perspective: int,
     inference: FleetInferenceSupport | None = None,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> FleetTurnSnapshot:
@@ -77,8 +75,6 @@ def apply_fleet_turn_delta(
     snapshot = ingest_turn_inferred_acquisitions(
         snapshot,
         turn,
-        game_id=game_id,
-        perspective=perspective,
         inference=inference,
         load_turn=load_turn,
     )
@@ -102,8 +98,6 @@ def _find_chain_anchor(
 def _materialize_and_persist_turn(
     persistence: FleetSnapshotPersistenceService,
     *,
-    game_id: int,
-    perspective: int,
     materialize_turn: int,
     prior_snapshot: FleetTurnSnapshot,
     turn_info: TurnInfo,
@@ -113,18 +107,21 @@ def _materialize_and_persist_turn(
     snapshot = advance_snapshot_to_turn(
         prior_snapshot,
         turn_info,
-        game_id=game_id,
-        perspective=perspective,
+        game_id=prior_snapshot.game_id,
+        perspective=prior_snapshot.perspective,
     )
     snapshot = apply_fleet_turn_delta(
         snapshot,
         turn_info,
-        game_id=game_id,
-        perspective=perspective,
         inference=inference,
         load_turn=load_turn,
     )
-    persistence.put_snapshot(game_id, perspective, materialize_turn, snapshot)
+    persistence.put_snapshot(
+        snapshot.game_id,
+        snapshot.perspective,
+        materialize_turn,
+        snapshot,
+    )
     return snapshot
 
 
@@ -203,8 +200,6 @@ def get_or_materialize_fleet_snapshot(
         turn_one_snapshot = apply_fleet_turn_delta(
             ensure_fleet_baseline(game_id, perspective, turn_one),
             turn_one,
-            game_id=game_id,
-            perspective=perspective,
             inference=inference,
             load_turn=cached_load,
         )
@@ -222,8 +217,6 @@ def get_or_materialize_fleet_snapshot(
         turn_info = require_turn(materialize_turn)
         current_snapshot = _materialize_and_persist_turn(
             persistence,
-            game_id=game_id,
-            perspective=perspective,
             materialize_turn=materialize_turn,
             prior_snapshot=current_snapshot,
             turn_info=turn_info,
