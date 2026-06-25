@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { fleetFieldConstraintSchema } from './fleetWirePrimitives'
 import { fleetTableWireSchema } from './fleetTableWireSchema'
 import { parseFleetTableWire } from './parseFleetTableWire'
 
@@ -48,6 +49,26 @@ describe('fleetTableWireSchema', () => {
     expect(() => parseFleetTableWire(withoutDefault)).toThrow(
       'Fleet table payload defaultActiveOnly must be true.'
     )
+  })
+
+  it('rejects region field constraints with no locators', () => {
+    const result = fleetFieldConstraintSchema.safeParse({ kind: 'region' })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toBe(
+        'Fleet field constraint region requires at least one locator.'
+      )
+    }
+  })
+
+  it('rejects region field constraints with only empty locator lists', () => {
+    const result = fleetFieldConstraintSchema.safeParse({
+      kind: 'region',
+      planetIds: [],
+      starbaseCoords: [],
+      overlayId: '',
+    })
+    expect(result.success).toBe(false)
   })
 
   it('rejects invalid disposition values', () => {

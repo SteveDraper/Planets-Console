@@ -4,83 +4,28 @@
  */
 
 import { z } from 'zod'
+import {
+  fleetBuildOptionSetSchema,
+  fleetFieldConstraintSchema,
+  fleetLastSeenSchema,
+  fleetRowQualifiersSchema,
+  fleetShipDispositionSchema,
+} from './fleetWirePrimitives'
 
-const fleetFieldKnownSchema = z.object({
-  kind: z.literal('known'),
-  value: z.union([z.number(), z.string(), z.boolean()]),
-})
-
-const fleetFieldUnknownSchema = z.object({
-  kind: z.literal('unknown'),
-})
-
-const fleetFieldBoundedSchema = z.object({
-  kind: z.literal('bounded'),
-  operator: z.enum(['lte', 'gte', 'lt', 'gt', 'eq']),
-  value: z.number(),
-})
-
-const fleetFieldOptionsSchema = z.object({
-  kind: z.literal('options'),
-  values: z.array(z.union([z.number(), z.string()])).min(1),
-})
-
-const fleetFieldRegionStarbaseCoordSchema = z.object({
-  x: z.number().int(),
-  y: z.number().int(),
-})
-
-const fleetFieldRegionSchema = z.object({
-  kind: z.literal('region'),
-  planetIds: z.array(z.number().int()).optional(),
-  starbaseCoords: z.array(fleetFieldRegionStarbaseCoordSchema).optional(),
-  overlayId: z.string().optional(),
-})
-
-export const fleetFieldConstraintSchema = z.discriminatedUnion('kind', [
-  fleetFieldKnownSchema,
-  fleetFieldUnknownSchema,
-  fleetFieldBoundedSchema,
-  fleetFieldOptionsSchema,
-  fleetFieldRegionSchema,
-])
-
-const fleetPossiblyLostSchema = z.object({
-  sinceTurn: z.number().int(),
-  source: z.string(),
-})
-
-const fleetAlibiSchema = z.object({
-  afterTurn: z.number().int(),
-  sightingTurn: z.number().int(),
-  source: z.string(),
-})
-
-export const fleetRowQualifiersSchema = z.object({
-  possiblyLost: fleetPossiblyLostSchema.optional(),
-  alibi: fleetAlibiSchema.optional(),
-})
-
-export const fleetBuildOptionSetSchema = z.object({
-  comboId: z.string().optional(),
-  label: z.string(),
-  solutionRankWeight: z.number().int(),
-  hullId: z.number().int().optional(),
-  engineId: z.number().int().optional(),
-  beamId: z.number().int().optional(),
-  torpId: z.number().int().optional(),
-  beamCount: z.number().int(),
-  launcherCount: z.number().int(),
-})
-
-export const fleetLastSeenSchema = z.object({
-  turn: z.number().int(),
-  x: z.number().int(),
-  y: z.number().int(),
-  planetId: z.number().int().optional(),
-})
-
-const fleetShipDispositionSchema = z.enum(['active', 'lost', 'traded', 'unknown'])
+export {
+  fleetBuildOptionSetSchema,
+  fleetFieldConstraintSchema,
+  fleetLastSeenSchema,
+  fleetRowQualifiersSchema,
+  fleetShipDispositionSchema,
+} from './fleetWirePrimitives'
+export type {
+  FleetBuildOptionSet,
+  FleetFieldConstraint,
+  FleetLastSeen,
+  FleetRowQualifiers,
+  FleetShipDisposition,
+} from './fleetWirePrimitives'
 
 const fleetShipRecordFieldsSchema = z.object({
   shipId: fleetFieldConstraintSchema,
@@ -124,10 +69,6 @@ export const fleetTableWireSchema = z.object({
   players: z.array(fleetTablePlayerSchema),
 })
 
-export type FleetFieldConstraint = z.infer<typeof fleetFieldConstraintSchema>
-export type FleetRowQualifiers = z.infer<typeof fleetRowQualifiersSchema>
-export type FleetBuildOptionSet = z.infer<typeof fleetBuildOptionSetSchema>
-export type FleetLastSeen = z.infer<typeof fleetLastSeenSchema>
 export type FleetTableRecord = z.infer<typeof fleetTableRecordSchema>
 export type FleetCountDiscrepancy = z.infer<typeof fleetCountDiscrepancySchema>
 export type FleetTablePlayer = z.infer<typeof fleetTablePlayerSchema>
