@@ -43,11 +43,14 @@ describe('FleetAnalyticTile', () => {
     expect(screen.getByLabelText('Bob')).toBeChecked()
   })
 
-  it('persists player toggle changes through the visibility store', async () => {
+  it('persists player toggle changes and updates checkbox state', async () => {
     const user = userEvent.setup()
     renderTile()
     await user.click(screen.getByLabelText('Expand Fleet player visibility'))
-    await user.click(screen.getByLabelText('Bob'))
+    const bob = screen.getByLabelText('Bob')
+    expect(bob).toBeChecked()
+    await user.click(bob)
+    expect(bob).not.toBeChecked()
     expect(useFleetPlayerVisibilityStore.getState().isFleetPlayerVisible(9, 8)).toBe(false)
   })
 })

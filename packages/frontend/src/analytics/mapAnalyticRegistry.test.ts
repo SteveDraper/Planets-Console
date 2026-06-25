@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { connectionsMapAnalytic, connectionsMapQueryKey } from './connections/mapAnalytic'
+import { fleetMapAnalytic } from './fleet/mapAnalytic'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
 import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
+  FLEET_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
 } from './mapAnalyticIds'
 import {
@@ -32,6 +34,7 @@ describe('map analytic registry', () => {
       BASE_MAP_ANALYTIC_ID,
       CONNECTIONS_ANALYTIC_ID,
       STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+      FLEET_ANALYTIC_ID,
     ])
     for (const analyticId of REGISTERED_MAP_ANALYTIC_IDS) {
       expect(isRegisteredMapAnalytic(analyticId)).toBe(true)
@@ -41,6 +44,7 @@ describe('map analytic registry', () => {
     expect(mapAnalyticRegistrationFor(STELLAR_CARTOGRAPHY_ANALYTIC_ID)).toBe(
       stellarCartographyMapAnalytic
     )
+    expect(mapAnalyticRegistrationFor(FLEET_ANALYTIC_ID)).toBe(fleetMapAnalytic)
   })
 
   it('throws for unregistered map analytics', () => {
@@ -93,6 +97,23 @@ describe('map analytic registry', () => {
       sampleScope,
       'planet-v2',
     ])
+  })
+
+  it('wires fleet to a disabled scaffold query spec until map layer lands', () => {
+    const registration = mapAnalyticRegistrationFor(FLEET_ANALYTIC_ID)
+    expect(registration).toBe(fleetMapAnalytic)
+    expect(registration.buildQuerySpec).toBeDefined()
+    expect(registration.mergeLayer).not.toBe(defaultMapLayerMerger)
+
+    const spec = mapAnalyticQuerySpecFor(FLEET_ANALYTIC_ID, queryContext)
+    expect(spec.queryKey).toEqual([
+      'analytic',
+      FLEET_ANALYTIC_ID,
+      'map',
+      sampleScope,
+      'scaffold-v0',
+    ])
+    expect(spec.enabled).toBe(false)
   })
 })
 

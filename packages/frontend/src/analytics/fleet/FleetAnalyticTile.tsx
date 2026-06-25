@@ -3,7 +3,10 @@ import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
-import { orderFleetSidebarPlayers } from './fleetPlayerVisibilityPolicy'
+import {
+  orderFleetSidebarPlayers,
+  resolveFleetPlayerVisible,
+} from './fleetPlayerVisibilityPolicy'
 import { tileClassName } from '../tileChrome'
 
 type FleetAnalyticTileProps = {
@@ -27,7 +30,7 @@ export function FleetAnalyticTile({
 }: FleetAnalyticTileProps) {
   const [expanded, setExpanded] = useState(false)
   const canExpand = supportsMode && enabled && players.length > 0
-  const isFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.isFleetPlayerVisible)
+  const visibilityOverrides = useFleetPlayerVisibilityStore((state) => state.overrides)
   const setFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.setFleetPlayerVisible)
   const orderedPlayers = orderFleetSidebarPlayers(players, viewpointPlayerId)
 
@@ -96,7 +99,11 @@ export function FleetAnalyticTile({
             <label key={player.playerId} className="flex cursor-pointer items-center gap-2">
               <input
                 type="checkbox"
-                checked={isFleetPlayerVisible(player.playerId, viewpointPlayerId)}
+                checked={resolveFleetPlayerVisible(
+                  player.playerId,
+                  viewpointPlayerId,
+                  visibilityOverrides
+                )}
                 onChange={(event) =>
                   setFleetPlayerVisible(player.playerId, event.target.checked)
                 }

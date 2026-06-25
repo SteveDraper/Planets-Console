@@ -6,6 +6,7 @@ import {
   resolveBaseMapAnalyticId,
 } from './mapAnalyticQueryPlan'
 import { connectionsMapQueryKey } from '../analytics/connections/mapAnalytic'
+import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
@@ -94,6 +95,25 @@ describe('enabledMapAnalyticIds and mapIdsToFetch', () => {
       BASE_MAP_ANALYTIC_ID,
       CONNECTIONS_ANALYTIC_ID,
       STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+    ])
+  })
+
+  it('includes fleet when enabled without throwing', () => {
+    const analyticsWithFleet = [
+      ...sampleAnalytics,
+      {
+        id: FLEET_ANALYTIC_ID,
+        name: 'Fleet',
+        supportsTable: true,
+        supportsMap: true,
+        type: 'selectable' as const,
+      },
+    ]
+    const enabled = enabledMapAnalyticIds([FLEET_ANALYTIC_ID], analyticsWithFleet)
+    expect(enabled).toEqual([FLEET_ANALYTIC_ID])
+    expect(mapIdsToFetch(analyticsWithFleet, enabled)).toEqual([
+      BASE_MAP_ANALYTIC_ID,
+      FLEET_ANALYTIC_ID,
     ])
   })
 

@@ -16,11 +16,13 @@ describe('useFleetPlayerVisibilityStore', () => {
     expect(isFleetPlayerVisible(9, 8)).toBe(true)
   })
 
-  it('persists per-player overrides to localStorage', () => {
-    useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, true)
+  it('persists hide override to localStorage', () => {
+    useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
+    const { isFleetPlayerVisible } = useFleetPlayerVisibilityStore.getState()
+    expect(isFleetPlayerVisible(9, 8)).toBe(false)
     const raw = localStorage.getItem(FLEET_PLAYER_VISIBILITY_STORAGE_KEY)
     expect(raw).toBeTruthy()
-    expect(raw).toContain('"9":true')
+    expect(raw).toContain('"9":false')
   })
 
   it('reads persisted overrides after rehydrate-style state', () => {
