@@ -56,18 +56,22 @@ export const fleetCountDiscrepancySchema = z.object({
   reportRefs: z.array(z.string()).optional(),
 })
 
-export const fleetTablePlayerSchema = z.object({
-  playerId: z.number().int(),
-  playerName: z.string(),
-  discrepancy: fleetCountDiscrepancySchema.optional(),
-  records: z.array(fleetTableRecordSchema),
-})
+export const fleetTablePlayerSchema = z
+  .object({
+    playerId: z.number().int(),
+    playerName: z.string(),
+    discrepancy: fleetCountDiscrepancySchema.optional(),
+    records: z.array(fleetTableRecordSchema),
+  })
+  .strict()
 
-export const fleetTableWireSchema = z.object({
-  analyticId: z.literal('fleet'),
-  defaultActiveOnly: z.literal(true),
-  players: z.array(fleetTablePlayerSchema),
-})
+export const fleetTableWireSchema = z
+  .object({
+    analyticId: z.literal('fleet'),
+    defaultActiveOnly: z.literal(true),
+    players: z.array(fleetTablePlayerSchema),
+  })
+  .strict()
 
 export type FleetTableRecord = z.infer<typeof fleetTableRecordSchema>
 export type FleetCountDiscrepancy = z.infer<typeof fleetCountDiscrepancySchema>

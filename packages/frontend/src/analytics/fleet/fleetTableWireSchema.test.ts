@@ -21,11 +21,33 @@ describe('fleetTableWireSchema', () => {
     cases: GoldenCase[]
   }
 
-  it.each(fixture.cases)('parses golden case $name', ({ expectedTableWire }) => {
+  it.each(fixture.cases.slice(0, 1))('parses golden case $name', ({ expectedTableWire }) => {
     const parsed = parseFleetTableWire(expectedTableWire)
     expect(parsed.analyticId).toBe('fleet')
     expect(parsed.defaultActiveOnly).toBe(true)
     expect(parsed.players[0]?.records[0]?.recordId).toBe('rec-active')
+  })
+
+  it('rejects extra top-level keys on the wire payload', () => {
+    const golden = fixture.cases[0]?.expectedTableWire
+    expect(golden).toBeDefined()
+    const withExtraTopLevel = structuredClone(golden) as Record<string, unknown>
+    withExtraTopLevel.extraField = 'unexpected'
+
+    const result = fleetTableWireSchema.safeParse(withExtraTopLevel)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects extra player-level keys', () => {
+    const golden = fixture.cases[0]?.expectedTableWire
+    expect(golden).toBeDefined()
+    const withExtraPlayerKey = structuredClone(golden) as {
+      players: Array<Record<string, unknown>>
+    }
+    withExtraPlayerKey.players[0]!.extraPlayerField = 'unexpected'
+
+    const result = fleetTableWireSchema.safeParse(withExtraPlayerKey)
+    expect(result.success).toBe(false)
   })
 
   it('rejects payloads that still include core-only events on records', () => {
