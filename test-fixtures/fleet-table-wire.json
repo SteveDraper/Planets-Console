@@ -1,0 +1,352 @@
+{
+  "description": "Golden vectors for BFF fleet table wire shaping (table_from_core).",
+  "cases": [
+    {
+      "name": "shapes per-player records and discrepancy; strips core-only events",
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 8,
+            "playerName": "koshling",
+            "discrepancy": {
+              "hostTurn": 111,
+              "activeRowCount": 2,
+              "scoreboardImpliedCount": 1,
+              "reportRefs": ["report:host:111:player:8"]
+            },
+            "records": [
+              {
+                "recordId": "rec-active",
+                "disposition": "active",
+                "qualifiers": {
+                  "possiblyLost": {
+                    "sinceTurn": 7,
+                    "source": "scoreboard"
+                  },
+                  "alibi": {
+                    "afterTurn": 7,
+                    "sightingTurn": 9,
+                    "source": "turnInfo.ships"
+                  }
+                },
+                "fields": {
+                  "shipId": { "kind": "bounded", "operator": "lte", "value": 318 },
+                  "hull": { "kind": "known", "value": 13 },
+                  "engine": { "kind": "known", "value": 9 },
+                  "beams": { "kind": "options", "values": [3, 5] },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "known", "value": 4 },
+                  "location": {
+                    "kind": "region",
+                    "planetIds": [55],
+                    "starbaseCoords": [{ "x": 1000, "y": 2000 }],
+                    "overlayId": "sb-region-1"
+                  }
+                },
+                "buildOptionSets": [
+                  {
+                    "comboId": "combo_a",
+                    "label": "Option A",
+                    "solutionRankWeight": 10,
+                    "hullId": 13,
+                    "engineId": 9,
+                    "beamCount": 8,
+                    "launcherCount": 6
+                  }
+                ],
+                "displayDefaultOptionSetIndex": 0,
+                "lastSeen": { "turn": 9, "x": 1200, "y": 800, "planetId": 55 },
+                "events": [
+                  {
+                    "eventId": "evt-1",
+                    "kind": "sighting",
+                    "turn": 9,
+                    "source": "turnInfo.ships",
+                    "payload": { "shipId": 301 }
+                  }
+                ]
+              },
+              {
+                "recordId": "rec-lost",
+                "disposition": "lost",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "known", "value": 42 },
+                  "hull": { "kind": "unknown" },
+                  "engine": { "kind": "unknown" },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "unknown" },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": [],
+                "events": []
+              }
+            ]
+          },
+          {
+            "playerId": 3,
+            "playerName": "player-3",
+            "records": []
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 8,
+            "playerName": "koshling",
+            "discrepancy": {
+              "hostTurn": 111,
+              "activeRowCount": 2,
+              "scoreboardImpliedCount": 1,
+              "reportRefs": ["report:host:111:player:8"]
+            },
+            "records": [
+              {
+                "recordId": "rec-active",
+                "disposition": "active",
+                "qualifiers": {
+                  "possiblyLost": {
+                    "sinceTurn": 7,
+                    "source": "scoreboard"
+                  },
+                  "alibi": {
+                    "afterTurn": 7,
+                    "sightingTurn": 9,
+                    "source": "turnInfo.ships"
+                  }
+                },
+                "fields": {
+                  "shipId": { "kind": "bounded", "operator": "lte", "value": 318 },
+                  "hull": { "kind": "known", "value": 13 },
+                  "engine": { "kind": "known", "value": 9 },
+                  "beams": { "kind": "options", "values": [3, 5] },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "known", "value": 4 },
+                  "location": {
+                    "kind": "region",
+                    "planetIds": [55],
+                    "starbaseCoords": [{ "x": 1000, "y": 2000 }],
+                    "overlayId": "sb-region-1"
+                  }
+                },
+                "buildOptionSets": [
+                  {
+                    "comboId": "combo_a",
+                    "label": "Option A",
+                    "solutionRankWeight": 10,
+                    "hullId": 13,
+                    "engineId": 9,
+                    "beamCount": 8,
+                    "launcherCount": 6
+                  }
+                ],
+                "displayDefaultOptionSetIndex": 0,
+                "lastSeen": { "turn": 9, "x": 1200, "y": 800, "planetId": 55 }
+              },
+              {
+                "recordId": "rec-lost",
+                "disposition": "lost",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "known", "value": 42 },
+                  "hull": { "kind": "unknown" },
+                  "engine": { "kind": "unknown" },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "unknown" },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": []
+              }
+            ]
+          },
+          {
+            "playerId": 3,
+            "playerName": "player-3",
+            "records": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "omits player discrepancy when absent from core",
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 5,
+            "playerName": "peaceful",
+            "records": [
+              {
+                "recordId": "rec-plain",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "unknown" },
+                  "hull": { "kind": "unknown" },
+                  "engine": { "kind": "unknown" },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "unknown" },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 5,
+            "playerName": "peaceful",
+            "records": [
+              {
+                "recordId": "rec-plain",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "unknown" },
+                  "hull": { "kind": "unknown" },
+                  "engine": { "kind": "unknown" },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "unknown" },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "omits lastSeen when absent from core record",
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 12,
+            "playerName": "scout",
+            "records": [
+              {
+                "recordId": "rec-no-last-seen",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "known", "value": 99 },
+                  "hull": { "kind": "known", "value": 1 },
+                  "engine": { "kind": "known", "value": 2 },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "known", "value": 3 },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": [
+                  {
+                    "label": "Scout build",
+                    "solutionRankWeight": 1,
+                    "beamCount": 0,
+                    "launcherCount": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 12,
+            "playerName": "scout",
+            "records": [
+              {
+                "recordId": "rec-no-last-seen",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "known", "value": 99 },
+                  "hull": { "kind": "known", "value": 1 },
+                  "engine": { "kind": "known", "value": 2 },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "known", "value": 3 },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": [
+                  {
+                    "label": "Scout build",
+                    "solutionRankWeight": 1,
+                    "beamCount": 0,
+                    "launcherCount": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "omits optional record keys absent from core; defaults disposition only",
+      "zodParseable": false,
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 1,
+            "playerName": "minimal",
+            "records": [
+              {
+                "recordId": "rec-minimal",
+                "events": [{ "eventId": "evt-strip", "kind": "sighting", "turn": 1 }]
+              },
+              {
+                "recordId": "rec-explicit-lost",
+                "disposition": "lost",
+                "qualifiers": {},
+                "fields": {},
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 1,
+            "playerName": "minimal",
+            "records": [
+              {
+                "recordId": "rec-minimal",
+                "disposition": "active"
+              },
+              {
+                "recordId": "rec-explicit-lost",
+                "disposition": "lost",
+                "qualifiers": {},
+                "fields": {},
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

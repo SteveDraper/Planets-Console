@@ -80,6 +80,7 @@ def test_fleet_table_dispatch_forwards_to_core():
     data = get_table_response("fleet", TurnScope(628580, 1, 111), load_core, NOOP_DIAGNOSTICS)
     assert data == {
         "analyticId": "fleet",
+        "defaultActiveOnly": True,
         "players": [
             {
                 "playerId": 1,
