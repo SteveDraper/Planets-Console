@@ -26,15 +26,28 @@ def build_service_stack(
 ]:
     credentials = CredentialService(storage)
     games = GameService(storage, credentials)
+    fleet_persistence = FleetSnapshotPersistenceService(storage)
     inference_persistence = InferenceRowPersistenceService(storage)
-    inference_scheduler = create_inference_row_scheduler(
-        on_row_complete=inference_persistence.persist_row_complete,
-    )
     inference_invalidation = InferenceInvalidationService(
         inference_persistence,
-        inference_scheduler,
+        scheduler=None,
+        fleet_persistence=fleet_persistence,
     )
-    fleet_persistence = FleetSnapshotPersistenceService(storage)
+    inference_invalidation.wire_fleet_invalidation_to_persistence()
+
+    def on_held_solutions_updated(session) -> None:
+        inference_invalidation.on_inference_evidence_updated(
+            session.game_id,
+            session.perspective,
+            session.turn_number,
+            session.player_id,
+        )
+
+    inference_scheduler = create_inference_row_scheduler(
+        on_row_complete=inference_persistence.persist_row_complete,
+        on_held_solutions_updated=on_held_solutions_updated,
+    )
+    inference_invalidation.bind_scheduler(inference_scheduler)
 
     def on_turn_stored(game_id: int, perspective: int, turn_number: int) -> None:
         inference_invalidation.on_turn_stored(game_id, perspective, turn_number)

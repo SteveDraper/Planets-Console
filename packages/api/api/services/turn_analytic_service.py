@@ -48,14 +48,18 @@ class TurnAnalyticService:
             self._inference_persistence = inference_persistence
         else:
             self._inference_persistence = InferenceRowPersistenceService(storage)
-        if inference_invalidation is not None:
-            self._inference_invalidation = inference_invalidation
-        else:
-            self._inference_invalidation = InferenceInvalidationService(self._inference_persistence)
         if fleet_persistence is not None:
             self._fleet_persistence = fleet_persistence
         else:
             self._fleet_persistence = FleetSnapshotPersistenceService(storage)
+        if inference_invalidation is not None:
+            self._inference_invalidation = inference_invalidation
+        else:
+            self._inference_invalidation = InferenceInvalidationService(
+                self._inference_persistence,
+                fleet_persistence=self._fleet_persistence,
+            )
+            self._inference_invalidation.wire_fleet_invalidation_to_persistence()
         self._inference_scheduler = inference_scheduler
 
     def _load_scoreboard_turn(

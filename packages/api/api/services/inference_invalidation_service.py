@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     get_inference_row_scheduler,
@@ -19,9 +20,12 @@ class InferenceInvalidationService:
         self,
         persistence: InferenceRowPersistenceService,
         scheduler: InferenceRowScheduler | None = None,
+        *,
+        fleet_persistence: FleetSnapshotPersistenceService | None = None,
     ) -> None:
         self._persistence = persistence
         self._scheduler = scheduler
+        self._fleet_persistence = fleet_persistence
 
     def _scheduler_instance(self) -> InferenceRowScheduler:
         if self._scheduler is not None:
@@ -44,6 +48,32 @@ class InferenceInvalidationService:
         for host_turn in cleared_host_turns:
             reschedule_all_inference_rows(self._scope(game_id, perspective, host_turn))
 
+    def on_inference_evidence_updated(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        _player_id: int,
+    ) -> set[int]:
+        """Drop fleet snapshots at turns >= host_turn after scores inference evidence changes."""
+        if self._fleet_persistence is None:
+            return set()
+        return self._fleet_persistence.invalidate_for_turn_write(
+            game_id,
+            perspective,
+            host_turn,
+        )
+
+    def wire_fleet_invalidation_to_persistence(self) -> None:
+        """Register fleet snapshot invalidation on inference row persistence writes."""
+        if self._fleet_persistence is None:
+            self._persistence.on_row_persisted = None
+            return
+        self._persistence.on_row_persisted = self.on_inference_evidence_updated
+
+    def bind_scheduler(self, scheduler: InferenceRowScheduler) -> None:
+        self._scheduler = scheduler
+
     def on_hull_mask_changed(
         self,
         game_id: int,
@@ -52,6 +82,12 @@ class InferenceInvalidationService:
         player_id: int,
     ) -> None:
         self._persistence.delete_row(game_id, perspective, host_turn, player_id)
+        self.on_inference_evidence_updated(
+            game_id,
+            perspective,
+            host_turn,
+            player_id,
+        )
         reschedule_inference_row(
             self._scope(game_id, perspective, host_turn),
             player_id,
@@ -64,6 +100,12 @@ class InferenceInvalidationService:
         host_turn: int,
     ) -> None:
         self._persistence.delete_host_turn_document(game_id, perspective, host_turn)
+        if self._fleet_persistence is not None:
+            self._fleet_persistence.invalidate_for_turn_write(
+                game_id,
+                perspective,
+                host_turn,
+            )
         scope = self._scope(game_id, perspective, host_turn)
         scheduler = self._scheduler_instance()
         scheduler.clear_global_pause_for_scope(scope)

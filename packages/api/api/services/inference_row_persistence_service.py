@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -25,10 +27,18 @@ from api.transport.inference_stream_wire import row_complete_to_complete_wire_ev
 _INFERENCE_ROWS_KEY = "inference_rows"
 _PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 
+OnRowPersistedCallback = Callable[[int, int, int, int], None]
+
 
 class InferenceRowPersistenceService:
-    def __init__(self, storage: StorageBackend) -> None:
+    def __init__(
+        self,
+        storage: StorageBackend,
+        *,
+        on_row_persisted: OnRowPersistedCallback | None = None,
+    ) -> None:
         self._storage = storage
+        self._on_row_persisted = on_row_persisted
 
     @staticmethod
     def host_turn_document_key(game_id: int, perspective: int, host_turn: int) -> str:
@@ -84,6 +94,16 @@ class InferenceRowPersistenceService:
             self.row_store_key(game_id, perspective, host_turn, player_id),
             persisted_inference_row_to_json(row),
         )
+        if self._on_row_persisted is not None:
+            self._on_row_persisted(game_id, perspective, host_turn, player_id)
+
+    @property
+    def on_row_persisted(self) -> OnRowPersistedCallback | None:
+        return self._on_row_persisted
+
+    @on_row_persisted.setter
+    def on_row_persisted(self, callback: OnRowPersistedCallback | None) -> None:
+        self._on_row_persisted = callback
 
     def delete_row(
         self,
