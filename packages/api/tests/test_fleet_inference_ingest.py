@@ -82,6 +82,27 @@ def test_positive_warship_delta_creates_two_placeholder_rows():
         assert record.events[0].payload["shipClass"] == "warship"
 
 
+def test_positive_freighter_delta_creates_two_placeholder_rows():
+    turn = _turn_with_score_delta(turn_number=5, owner_id=8, freighterchange=2)
+    snapshot = ingest_turn_inferred_acquisitions(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+    )
+
+    ledger = ledger_for_player(snapshot, 8)
+    assert len(ledger.records) == 2
+    for record in ledger.records:
+        assert record.disposition == "active"
+        assert record.fields.ship_id == FleetFieldUnknown()
+        assert record.fields.hull == FleetFieldUnknown()
+        assert record.fields.engine == FleetFieldUnknown()
+        assert record.build_option_sets == []
+        assert record.events[0].kind == "scoreboard_delta"
+        assert record.events[0].payload["warshipDelta"] == 0
+        assert record.events[0].payload["freighterDelta"] == 2
+        assert record.events[0].payload["shipClass"] == "freighter"
+
+
 def test_placeholder_rows_remain_unknown_when_inference_in_progress_with_no_solutions():
     turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=2)
     snapshot = apply_fleet_turn_delta(
@@ -195,6 +216,92 @@ def test_streaming_refine_updates_option_sets(sample_turn):
     assert any(event.kind == "inference_update" for event in records[0].events)
 
 
+def test_streaming_refine_updates_freighter_option_sets(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    turn = replace(
+        sample_turn,
+        ships=[],
+        scores=[
+            replace(
+                score,
+                turn=sample_turn.settings.turn,
+                ownerid=player_id,
+                shipchange=0,
+                freighterchange=2,
+            )
+            for score in sample_turn.scores
+            if score.ownerid == player_id
+        ],
+    )
+    schedule_row_with_ladder(
+        scheduler,
+        turn,
+        player_id,
+        merged_solutions=[
+            inference_solution(
+                objective_value=90,
+                ship_builds=(
+                    ship_build_domain(
+                        combo_id="combo_freighter",
+                        label="Freighter",
+                        hull_id=15,
+                        engine_id=1,
+                    ),
+                    ship_build_domain(
+                        combo_id="combo_freighter",
+                        label="Freighter",
+                        hull_id=15,
+                        engine_id=1,
+                        count=1,
+                    ),
+                ),
+            ),
+            inference_solution(
+                objective_value=70,
+                ship_builds=(
+                    ship_build_domain(
+                        combo_id="combo_freighter",
+                        label="Freighter",
+                        hull_id=15,
+                        engine_id=1,
+                    ),
+                ),
+            ),
+        ],
+    )
+    inference = FleetInferenceSupport(
+        scores_services=ScoresExportContext(
+            persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            scheduler=scheduler,
+        ),
+    )
+    baseline = ensure_fleet_baseline(628580, perspective(turn), turn)
+    snapshot = ingest_turn_inferred_acquisitions(
+        baseline,
+        turn,
+    )
+    ledger = ledger_for_player(snapshot, player_id)
+    assert all(record.build_option_sets == [] for record in ledger.records)
+
+    refined = ingest_turn_inferred_acquisitions(
+        snapshot,
+        turn,
+        inference_materialization=_inference_materialization(inference, turn),
+    )
+
+    records = ledger_for_player(refined, player_id).records
+    assert len(records) == 2
+    for record in records:
+        assert len(record.build_option_sets) == 1
+        assert record.build_option_sets[0].combo_id == "combo_freighter"
+        assert record.build_option_sets[0].hull_id == 15
+        assert record.display_default_option_set_index == 0
+        assert record.fields.hull == FleetFieldUnknown()
+        assert any(event.kind == "inference_update" for event in record.events)
+
+
 def test_persisted_inference_refines_placeholders():
     turn = _turn_with_score_delta(turn_number=111, owner_id=8, shipchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
@@ -238,6 +345,53 @@ def test_persisted_inference_refines_placeholders():
     assert len(record.build_option_sets) == 1
     assert record.build_option_sets[0].hull_id == 13
     assert record.build_option_sets[0].engine_id == 9
+    assert record.fields.hull == FleetFieldUnknown()
+
+
+def test_persisted_inference_refines_freighter_placeholders():
+    turn = _turn_with_score_delta(turn_number=111, owner_id=8, freighterchange=1)
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        111,
+        8,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="one freighter",
+            solution_count=1,
+            is_complete=True,
+            solutions=[
+                {
+                    "objectiveValue": 55,
+                    "actions": [],
+                    "shipBuilds": [
+                        ship_build_wire(
+                            combo_id="combo_freighter",
+                            label="Freighter",
+                            hull_id=15,
+                            engine_id=1,
+                            count=1,
+                        )
+                    ],
+                }
+            ],
+        ),
+    )
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
+    )
+
+    record = ledger_for_player(snapshot, 8).records[0]
+    assert len(record.build_option_sets) == 1
+    assert record.build_option_sets[0].combo_id == "combo_freighter"
+    assert record.build_option_sets[0].hull_id == 15
+    assert record.build_option_sets[0].engine_id == 1
     assert record.fields.hull == FleetFieldUnknown()
 
 
