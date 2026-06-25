@@ -12,6 +12,7 @@ from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wir
 from api.analytics.fleet.types import (
     FleetFieldUnknown,
 )
+from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -82,7 +83,9 @@ def test_placeholder_rows_remain_unknown_when_inference_in_progress_with_no_solu
         game_id=628580,
         perspective=1,
         inference=FleetInferenceSupport(
-            persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            scores_services=ScoresExportContext(
+                persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            ),
         ),
         load_turn=lambda _turn_number: turn,
     )
@@ -155,8 +158,10 @@ def test_streaming_refine_updates_option_sets(sample_turn):
         ],
     )
     inference = FleetInferenceSupport(
-        persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        scheduler=scheduler,
+        scores_services=ScoresExportContext(
+            persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            scheduler=scheduler,
+        ),
     )
     baseline = ensure_fleet_baseline(628580, 1, turn)
     snapshot = ingest_turn_inferred_acquisitions(
@@ -223,7 +228,7 @@ def test_persisted_inference_refines_placeholders():
         turn,
         game_id=628580,
         perspective=1,
-        inference=FleetInferenceSupport(persistence=persistence),
+        inference=FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
         load_turn=lambda _turn_number: turn,
     )
 
@@ -280,7 +285,7 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
         turn,
         game_id=628580,
         perspective=1,
-        inference=FleetInferenceSupport(persistence=persistence),
+        inference=FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
         load_turn=lambda _turn_number: turn,
     )
 
@@ -351,8 +356,10 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
         turn,
         perspective=perspective(turn),
         inference=FleetInferenceSupport(
-            persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-            scheduler=scheduler,
+            scores_services=ScoresExportContext(
+                persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+                scheduler=scheduler,
+            ),
         ),
     )
     payload = invoke_analytic_compute(

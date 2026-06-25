@@ -102,26 +102,37 @@ class TurnAnalyticService:
                 diagnostics=diagnostics,
             ),
             load_turn=self._load_scoreboard_turn(game_id, perspective),
-            export_services={
-                SCORES_ANALYTIC_ID: self._scores_export_context(game_id, perspective),
-                FLEET_ANALYTIC_ID: self._fleet_compute_services(game_id, perspective),
-            },
+            export_services=self._turn_export_services(game_id, perspective),
         )
+
+    def _turn_export_services(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> dict[str, object]:
+        scores_services = self._scores_export_context(game_id, perspective)
+        return {
+            SCORES_ANALYTIC_ID: scores_services,
+            FLEET_ANALYTIC_ID: self._fleet_compute_services(
+                game_id,
+                perspective,
+                scores_services=scores_services,
+            ),
+        }
 
     def _fleet_compute_services(
         self,
         game_id: int,
         perspective: int,
+        *,
+        scores_services: ScoresExportContext,
     ) -> FleetComputeServices:
         return FleetComputeServices(
             persistence=self._fleet_persistence,
             game_id=game_id,
             perspective=perspective,
             load_turn=self._load_scoreboard_turn(game_id, perspective),
-            inference=FleetInferenceSupport(
-                persistence=self._inference_persistence,
-                scheduler=self._inference_scheduler_instance(),
-            ),
+            inference=FleetInferenceSupport(scores_services=scores_services),
         )
 
     def _scores_export_context(

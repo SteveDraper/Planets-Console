@@ -107,6 +107,17 @@ def _scores_resolved(
     return services, resolved
 
 
+def held_scores_for_scope(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    *,
+    turn: TurnInfo | None = None,
+) -> ScoresExportResolved:
+    """Resolve held inference solutions for one player scope via the scores export pipeline."""
+    _, resolved = _scores_resolved(ctx, scope, turn=turn)
+    return resolved
+
+
 def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if scope.player_id is None:
         return False

@@ -6,16 +6,12 @@ from dataclasses import dataclass
 
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
-from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
-    get_inference_row_scheduler,
-)
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_precedence import SearchStatus, resolve_scores_export
+from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.export_services import ScoresExportContext
-from api.analytics.scores.export_snapshot import gather_scores_ensure_probe_snapshot
+from api.analytics.scores.exports import held_scores_for_scope
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.models.game import TurnInfo
-from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
 @dataclass(frozen=True)
@@ -30,8 +26,7 @@ class FleetHeldInference:
 class FleetInferenceSupport:
     """Read-only scores inference access for fleet materialization."""
 
-    persistence: InferenceRowPersistenceService | None = None
-    scheduler: InferenceRowScheduler | None = None
+    scores_services: ScoresExportContext
 
     def held_inference_for_player(
         self,
@@ -43,19 +38,14 @@ class FleetInferenceSupport:
         turn: TurnInfo,
         load_turn,
     ) -> FleetHeldInference:
-        if self.persistence is None:
+        if self.scores_services.persistence is None:
             return FleetHeldInference(search_status="not_started", solutions=())
 
-        scheduler = self.scheduler if self.scheduler is not None else get_inference_row_scheduler()
-        scores_services = ScoresExportContext(
-            persistence=self.persistence,
-            scheduler=scheduler,
-        )
         ctx = make_analytic_query_context(
             turn,
             TurnAnalyticsOptions(),
             load_turn=load_turn,
-            export_services={"scores": scores_services},
+            export_services={SCORES_ANALYTIC_ID: self.scores_services},
         )
         scope = ExportScope(
             game_id=game_id,
@@ -63,8 +53,7 @@ class FleetInferenceSupport:
             turn=host_turn,
             player_id=player_id,
         )
-        snapshot = gather_scores_ensure_probe_snapshot(ctx, scores_services, scope, turn)
-        resolved = resolve_scores_export(snapshot)
+        resolved = held_scores_for_scope(ctx, scope, turn=turn)
         return FleetHeldInference(
             search_status=resolved.decision.search_status,
             solutions=tuple(resolved.payload.solutions),
