@@ -28,6 +28,7 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
+from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
 from api.errors import ValidationError
 
 
@@ -171,6 +172,25 @@ def fleet_build_option_set_to_json(option_set: FleetBuildOptionSet) -> dict[str,
     if option_set.torp_id is not None:
         payload["torpId"] = option_set.torp_id
     return payload
+
+
+def fleet_build_option_set_from_inference_ship_build(
+    ship_build: InferenceSolutionShipBuild,
+    *,
+    solution_rank_weight: int,
+) -> FleetBuildOptionSet:
+    """Map one inference solution ship build into a fleet build option set."""
+    return FleetBuildOptionSet(
+        combo_id=ship_build.combo_id or None,
+        label=ship_build.label,
+        solution_rank_weight=solution_rank_weight,
+        hull_id=ship_build.hull_id,
+        engine_id=ship_build.engine_id,
+        beam_id=ship_build.beam_id,
+        torp_id=ship_build.torp_id,
+        beam_count=ship_build.beam_count,
+        launcher_count=ship_build.launcher_count,
+    )
 
 
 def fleet_build_option_set_from_json(data: dict[str, Any]) -> FleetBuildOptionSet:

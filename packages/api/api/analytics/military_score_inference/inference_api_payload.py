@@ -1,5 +1,9 @@
 """API payload serialization for military score build inference results."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.models import (
@@ -7,6 +11,7 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
     InferenceSolution,
+    InferenceSolutionShipBuild,
 )
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
@@ -237,3 +242,59 @@ def serialize_solutions_with_arithmetic(
     return [
         _serialize_solution_with_arithmetic(observation, catalog, solution) for solution in ranked
     ]
+
+
+def _optional_wire_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _wire_int_default_zero(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
+def inference_wire_ship_build_entries(solution: dict[str, object]) -> list[dict[str, object]]:
+    """Return inference wire ship build objects from one held solution payload."""
+    raw = solution.get("shipBuilds")
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, dict)]
+
+
+def inference_wire_solution_objective_value(solution: dict[str, object]) -> int:
+    """Return the objective rank weight from one inference wire solution payload."""
+    objective = solution.get("objectiveValue", 0)
+    if isinstance(objective, bool) or not isinstance(objective, (int, float)):
+        return 0
+    return int(objective)
+
+
+def inference_solution_ship_build_from_wire(
+    data: dict[str, Any],
+) -> InferenceSolutionShipBuild | None:
+    """Deserialize one inference wire ship build entry into a domain ship build."""
+    count = data.get("count", 1)
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        return None
+
+    combo_id_raw = data.get("comboId")
+    combo_id = "" if combo_id_raw is None else str(combo_id_raw)
+
+    label = data.get("label", "")
+    if not isinstance(label, str):
+        label = str(label)
+
+    return InferenceSolutionShipBuild(
+        combo_id=combo_id,
+        label=label,
+        count=count,
+        hull_id=_optional_wire_int(data.get("hullId")),
+        engine_id=_optional_wire_int(data.get("engineId")),
+        beam_id=_optional_wire_int(data.get("beamId")),
+        torp_id=_optional_wire_int(data.get("torpId")),
+        beam_count=_wire_int_default_zero(data.get("beamCount")),
+        launcher_count=_wire_int_default_zero(data.get("launcherCount")),
+    )

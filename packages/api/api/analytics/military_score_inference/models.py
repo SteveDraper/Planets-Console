@@ -153,12 +153,12 @@ class InferenceSolutionShipBuild:
     combo_id: str
     label: str
     count: int
-    hull_id: int
-    engine_id: int
-    beam_id: int | None
-    torp_id: int | None
-    beam_count: int
-    launcher_count: int
+    hull_id: int | None = None
+    engine_id: int | None = None
+    beam_id: int | None = None
+    torp_id: int | None = None
+    beam_count: int = 0
+    launcher_count: int = 0
 
 
 @dataclass(frozen=True)

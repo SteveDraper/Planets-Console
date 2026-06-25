@@ -8,7 +8,10 @@ from typing import Literal
 
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.scoreboard_counts import iter_current_turn_scores
-from api.analytics.fleet.serialization import append_fleet_evidence_event
+from api.analytics.fleet.serialization import (
+    append_fleet_evidence_event,
+    fleet_build_option_set_from_inference_ship_build,
+)
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetBuildOptionSet,
@@ -19,6 +22,12 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
+from api.analytics.military_score_inference.inference_api_payload import (
+    inference_solution_ship_build_from_wire,
+    inference_wire_ship_build_entries,
+    inference_wire_solution_objective_value,
+)
+from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
 )
@@ -252,16 +261,19 @@ def _expanded_builds_by_solution(
 ) -> list[list[FleetBuildOptionSet]]:
     per_solution: list[list[FleetBuildOptionSet]] = []
     for solution in solutions:
-        rank_weight = _solution_rank_weight(solution)
+        rank_weight = inference_wire_solution_objective_value(solution)
         expanded: list[FleetBuildOptionSet] = []
-        for wire_build in _wire_ship_builds(solution):
-            if _wire_ship_build_class(wire_build) != ship_class:
+        for wire_build in inference_wire_ship_build_entries(solution):
+            ship_build = inference_solution_ship_build_from_wire(wire_build)
+            if ship_build is None:
                 continue
-            count = wire_build.get("count", 1)
-            if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            if _inference_ship_build_class(ship_build) != ship_class:
                 continue
-            option_set = _option_set_from_wire_build(wire_build, rank_weight)
-            expanded.extend([option_set] * count)
+            option_set = fleet_build_option_set_from_inference_ship_build(
+                ship_build,
+                solution_rank_weight=rank_weight,
+            )
+            expanded.extend([option_set] * ship_build.count)
         per_solution.append(expanded)
     return per_solution
 
@@ -338,60 +350,10 @@ def _ensure_unknown_spec_fields(record: FleetShipRecord) -> None:
         record.fields.location = FleetFieldUnknown()
 
 
-def _wire_ship_builds(solution: dict[str, object]) -> list[dict[str, object]]:
-    raw = solution.get("shipBuilds")
-    if not isinstance(raw, list):
-        return []
-    return [entry for entry in raw if isinstance(entry, dict)]
-
-
-def _solution_rank_weight(solution: dict[str, object]) -> int:
-    objective = solution.get("objectiveValue", 0)
-    if isinstance(objective, bool) or not isinstance(objective, (int, float)):
-        return 0
-    return int(objective)
-
-
-def _option_set_from_wire_build(
-    wire_build: dict[str, object],
-    solution_rank_weight: int,
-) -> FleetBuildOptionSet:
-    return FleetBuildOptionSet(
-        combo_id=_optional_str(wire_build.get("comboId")),
-        label=str(wire_build.get("label", "")),
-        solution_rank_weight=solution_rank_weight,
-        hull_id=_optional_int(wire_build.get("hullId")),
-        engine_id=_optional_int(wire_build.get("engineId")),
-        beam_id=_optional_int(wire_build.get("beamId")),
-        torp_id=_optional_int(wire_build.get("torpId")),
-        beam_count=_int_field(wire_build.get("beamCount")),
-        launcher_count=_int_field(wire_build.get("launcherCount")),
-    )
-
-
-def _wire_ship_build_class(wire_build: dict[str, object]) -> FleetShipClass:
-    combo_id = wire_build.get("comboId")
-    if isinstance(combo_id, str) and is_generic_zero_military_score_combo_id(combo_id):
+def _inference_ship_build_class(ship_build: InferenceSolutionShipBuild) -> FleetShipClass:
+    if is_generic_zero_military_score_combo_id(ship_build.combo_id):
         return "freighter"
     return "warship"
-
-
-def _optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _optional_int(value: object) -> int | None:
-    if value is None or isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value
-
-
-def _int_field(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return 0
-    return value
 
 
 def _inference_update_event(
