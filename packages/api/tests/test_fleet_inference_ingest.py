@@ -7,8 +7,7 @@ from dataclasses import replace
 from api.analytics.fleet.chain import apply_fleet_turn_delta, ensure_fleet_baseline
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
-from api.analytics.fleet.inference_ingest import refine_inferred_acquisitions_from_scores
-from api.analytics.fleet.scoreboard_ingest import ingest_turn_scoreboard_acquisitions
+from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.fleet.types import (
     FleetFieldUnknown,
@@ -55,7 +54,12 @@ def _turn_with_score_delta(
 
 def test_positive_warship_delta_creates_two_placeholder_rows():
     turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=2)
-    snapshot = ingest_turn_scoreboard_acquisitions(ensure_fleet_baseline(628580, 1, turn), turn)
+    snapshot = ingest_turn_inferred_acquisitions(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        game_id=628580,
+        perspective=1,
+    )
 
     ledger = ledger_for_player(snapshot, 8)
     assert len(ledger.records) == 2
@@ -155,11 +159,16 @@ def test_streaming_refine_updates_option_sets(sample_turn):
         scheduler=scheduler,
     )
     baseline = ensure_fleet_baseline(628580, 1, turn)
-    snapshot = ingest_turn_scoreboard_acquisitions(baseline, turn)
+    snapshot = ingest_turn_inferred_acquisitions(
+        baseline,
+        turn,
+        game_id=GAME_ID,
+        perspective=perspective(turn),
+    )
     ledger = ledger_for_player(snapshot, player_id)
     assert all(record.build_option_sets == [] for record in ledger.records)
 
-    refined = refine_inferred_acquisitions_from_scores(
+    refined = ingest_turn_inferred_acquisitions(
         snapshot,
         turn,
         game_id=GAME_ID,

@@ -7,10 +7,9 @@ from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
-from api.analytics.fleet.inference_ingest import refine_inferred_acquisitions_from_scores
+from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.scoreboard_ingest import ingest_turn_scoreboard_acquisitions
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.turn_roster import iter_turn_players
 from api.errors import NotFoundError
@@ -75,16 +74,14 @@ def apply_fleet_turn_delta(
     load_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> FleetTurnSnapshot:
     """Apply all turn-T fleet evidence deltas for materialization."""
-    snapshot = ingest_turn_scoreboard_acquisitions(snapshot, turn)
-    if inference is not None and load_turn is not None:
-        snapshot = refine_inferred_acquisitions_from_scores(
-            snapshot,
-            turn,
-            game_id=game_id,
-            perspective=perspective,
-            inference=inference,
-            load_turn=load_turn,
-        )
+    snapshot = ingest_turn_inferred_acquisitions(
+        snapshot,
+        turn,
+        game_id=game_id,
+        perspective=perspective,
+        inference=inference,
+        load_turn=load_turn,
+    )
     snapshot = ingest_turn_ship_observations(snapshot, turn)
     return snapshot
 
