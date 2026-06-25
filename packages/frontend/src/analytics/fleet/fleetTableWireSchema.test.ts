@@ -1,36 +1,25 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { fleetFieldConstraintSchema } from './fleetWirePrimitives'
+import {
+  loadFleetTableWireFixture,
+  zodParseableFleetTableWireCases,
+} from './loadFleetTableWireFixture'
 import { fleetTableWireSchema, parseFleetTableWire } from './fleetTableWireSchema'
 
-const fixturePath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../../../../test-fixtures/fleet-table-wire.json'
-)
-
-type GoldenCase = {
-  name: string
-  expectedTableWire: unknown
-}
-
 describe('fleetTableWireSchema', () => {
-  const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as {
-    cases: GoldenCase[]
-  }
+  const fixture = loadFleetTableWireFixture()
+  const zodParseableCases = zodParseableFleetTableWireCases(fixture.cases)
+  const primaryGolden = zodParseableCases[0]?.expectedTableWire
 
-  it.each(fixture.cases.slice(0, 1))('parses golden case $name', ({ expectedTableWire }) => {
+  it.each(zodParseableCases)('parses golden case $name', ({ expectedTableWire }) => {
     const parsed = parseFleetTableWire(expectedTableWire)
     expect(parsed.analyticId).toBe('fleet')
     expect(parsed.defaultActiveOnly).toBe(true)
-    expect(parsed.players[0]?.records[0]?.recordId).toBe('rec-active')
   })
 
   it('rejects extra top-level keys on the wire payload', () => {
-    const golden = fixture.cases[0]?.expectedTableWire
-    expect(golden).toBeDefined()
-    const withExtraTopLevel = structuredClone(golden) as Record<string, unknown>
+    expect(primaryGolden).toBeDefined()
+    const withExtraTopLevel = structuredClone(primaryGolden) as Record<string, unknown>
     withExtraTopLevel.extraField = 'unexpected'
 
     const result = fleetTableWireSchema.safeParse(withExtraTopLevel)
@@ -38,9 +27,8 @@ describe('fleetTableWireSchema', () => {
   })
 
   it('rejects extra player-level keys', () => {
-    const golden = fixture.cases[0]?.expectedTableWire
-    expect(golden).toBeDefined()
-    const withExtraPlayerKey = structuredClone(golden) as {
+    expect(primaryGolden).toBeDefined()
+    const withExtraPlayerKey = structuredClone(primaryGolden) as {
       players: Array<Record<string, unknown>>
     }
     withExtraPlayerKey.players[0]!.extraPlayerField = 'unexpected'
@@ -50,9 +38,8 @@ describe('fleetTableWireSchema', () => {
   })
 
   it('rejects payloads that still include core-only events on records', () => {
-    const golden = fixture.cases[0]?.expectedTableWire
-    expect(golden).toBeDefined()
-    const withEvents = structuredClone(golden) as {
+    expect(primaryGolden).toBeDefined()
+    const withEvents = structuredClone(primaryGolden) as {
       players: Array<{ records: Array<Record<string, unknown>> }>
     }
     withEvents.players[0]!.records[0]!.events = [{ eventId: 'evt-1', kind: 'sighting' }]
@@ -62,9 +49,8 @@ describe('fleetTableWireSchema', () => {
   })
 
   it('rejects missing defaultActiveOnly', () => {
-    const golden = fixture.cases[0]?.expectedTableWire
-    expect(golden).toBeDefined()
-    const withoutDefault = structuredClone(golden) as Record<string, unknown>
+    expect(primaryGolden).toBeDefined()
+    const withoutDefault = structuredClone(primaryGolden) as Record<string, unknown>
     delete withoutDefault.defaultActiveOnly
 
     expect(() => parseFleetTableWire(withoutDefault)).toThrow(
@@ -93,9 +79,8 @@ describe('fleetTableWireSchema', () => {
   })
 
   it('rejects invalid disposition values', () => {
-    const golden = fixture.cases[0]?.expectedTableWire
-    expect(golden).toBeDefined()
-    const invalid = structuredClone(golden) as {
+    expect(primaryGolden).toBeDefined()
+    const invalid = structuredClone(primaryGolden) as {
       players: Array<{ records: Array<Record<string, unknown>> }>
     }
     invalid.players[0]!.records[0]!.disposition = 'vanished'

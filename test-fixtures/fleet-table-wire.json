@@ -174,7 +174,134 @@
       }
     },
     {
+      "name": "omits player discrepancy when absent from core",
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 5,
+            "playerName": "peaceful",
+            "records": [
+              {
+                "recordId": "rec-plain",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "unknown" },
+                  "hull": { "kind": "unknown" },
+                  "engine": { "kind": "unknown" },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "unknown" },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 5,
+            "playerName": "peaceful",
+            "records": [
+              {
+                "recordId": "rec-plain",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "unknown" },
+                  "hull": { "kind": "unknown" },
+                  "engine": { "kind": "unknown" },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "unknown" },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "omits lastSeen when absent from core record",
+      "coreInput": {
+        "analyticId": "fleet",
+        "players": [
+          {
+            "playerId": 12,
+            "playerName": "scout",
+            "records": [
+              {
+                "recordId": "rec-no-last-seen",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "known", "value": 99 },
+                  "hull": { "kind": "known", "value": 1 },
+                  "engine": { "kind": "known", "value": 2 },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "known", "value": 3 },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": [
+                  {
+                    "label": "Scout build",
+                    "solutionRankWeight": 1,
+                    "beamCount": 0,
+                    "launcherCount": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedTableWire": {
+        "analyticId": "fleet",
+        "defaultActiveOnly": true,
+        "players": [
+          {
+            "playerId": 12,
+            "playerName": "scout",
+            "records": [
+              {
+                "recordId": "rec-no-last-seen",
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": { "kind": "known", "value": 99 },
+                  "hull": { "kind": "known", "value": 1 },
+                  "engine": { "kind": "known", "value": 2 },
+                  "beams": { "kind": "unknown" },
+                  "launchers": { "kind": "unknown" },
+                  "builtTurn": { "kind": "known", "value": 3 },
+                  "location": { "kind": "unknown" }
+                },
+                "buildOptionSets": [
+                  {
+                    "label": "Scout build",
+                    "solutionRankWeight": 1,
+                    "beamCount": 0,
+                    "launcherCount": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "omits optional record keys absent from core; defaults disposition only",
+      "zodParseable": false,
       "coreInput": {
         "analyticId": "fleet",
         "players": [
