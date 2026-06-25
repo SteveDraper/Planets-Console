@@ -97,6 +97,8 @@ def _refine_inferred_acquisitions_from_scores(
     """Attach fleet build option sets from top-K held solutions to placeholder rows."""
     turn_number = turn.settings.turn
     for ledger in snapshot.players:
+        if not _ledger_has_placeholders_for_turn(ledger, turn_number):
+            continue
         held = inference.held_inference_for_player(
             game_id=game_id,
             perspective=perspective,
@@ -146,6 +148,16 @@ def _ensure_placeholder_rows(
             ),
         )
         ledger.records.append(record)
+
+
+def _ledger_has_placeholders_for_turn(
+    ledger: FleetAcquisitionLedger,
+    turn_number: int,
+) -> bool:
+    return bool(
+        _placeholder_rows_for_turn(ledger, turn_number, ship_class="warship")
+        or _placeholder_rows_for_turn(ledger, turn_number, ship_class="freighter")
+    )
 
 
 def _placeholder_rows_for_turn(
