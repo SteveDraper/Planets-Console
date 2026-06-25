@@ -7,6 +7,7 @@ import {
   isLoginAmongGamePlayers,
   perspectiveOrdinalForName,
   perspectiveNameForOrdinal,
+  playerIdForViewpointName,
   shouldUsePseudoViewpointForLogin,
   selectableTurnMaxForShell,
   SPECTATOR_VIEWPOINT_NAME,
@@ -14,6 +15,7 @@ import {
   viewpointNameForLogin,
 } from './gameInfoShell'
 import type { GameInfoResponse } from '../api/bff'
+import { perspectiveRow } from './perspectiveRowTestFixtures'
 
 const minimalInfo = (overrides: Partial<GameInfoResponse> = {}): GameInfoResponse => ({
   game: { id: 1 },
@@ -68,8 +70,8 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows).toEqual([
-      { ordinal: 1, name: 'alice', raceName: null },
-      { ordinal: 2, name: 'bob', raceName: null },
+      { ordinal: 1, name: 'alice', playerId: 1, raceName: null },
+      { ordinal: 2, name: 'bob', playerId: 2, raceName: null },
     ])
   })
 
@@ -92,6 +94,7 @@ describe('buildPerspectivesFromGameInfo', () => {
     )
     expect(rows[0]).toEqual({
       ordinal: 1,
+      playerId: 1,
       name: 'alice',
       raceName: 'Override From Turn RST',
     })
@@ -104,6 +107,16 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows[0].raceName).toBe('The Evil Empire')
+  })
+
+  it('uses host player id from game info when present', () => {
+    const rows = buildPerspectivesFromGameInfo(
+      minimalInfo({
+        players: [{ username: 'alice', id: 42 }, { username: 'bob' }],
+      })
+    )
+    expect(rows[0].playerId).toBe(42)
+    expect(rows[1].playerId).toBe(2)
   })
 })
 
@@ -131,10 +144,7 @@ describe('getSectorDisplayNameFromGameInfo', () => {
 })
 
 describe('perspectiveOrdinalForName', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
+  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
 
   it('returns null for empty name', () => {
     expect(perspectiveOrdinalForName(p, null)).toBeNull()
@@ -156,10 +166,7 @@ describe('perspectiveOrdinalForName', () => {
 })
 
 describe('viewpointNameForStoredPerspective', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
+  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
 
   it('returns spectator label for pseudo slot 0', () => {
     expect(viewpointNameForStoredPerspective(0, p)).toBe(SPECTATOR_VIEWPOINT_NAME)
@@ -171,10 +178,7 @@ describe('viewpointNameForStoredPerspective', () => {
 })
 
 describe('isLoginAmongGamePlayers', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
+  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
 
   it('is false when login empty', () => {
     expect(isLoginAmongGamePlayers(p, null)).toBe(false)
@@ -191,10 +195,7 @@ describe('isLoginAmongGamePlayers', () => {
 })
 
 describe('shouldUsePseudoViewpointForLogin', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
+  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
 
   it('is true for in-progress game when login is not a player', () => {
     expect(shouldUsePseudoViewpointForLogin(p, 'nobody', false)).toBe(true)
@@ -224,10 +225,7 @@ describe('selectableTurnMaxForShell', () => {
 })
 
 describe('viewpointNameForLogin', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
+  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
 
   it('returns first when no login', () => {
     expect(viewpointNameForLogin(p, null)).toBe('Alpha')
@@ -243,10 +241,7 @@ describe('viewpointNameForLogin', () => {
 })
 
 describe('perspectiveNameForOrdinal', () => {
-  const p = [
-    { ordinal: 1, name: 'Alpha', raceName: null as string | null },
-    { ordinal: 2, name: 'Beta', raceName: null as string | null },
-  ]
+  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
 
   it('returns name for known ordinal', () => {
     expect(perspectiveNameForOrdinal(p, 2)).toBe('Beta')
@@ -254,5 +249,26 @@ describe('perspectiveNameForOrdinal', () => {
 
   it('returns null for unknown ordinal', () => {
     expect(perspectiveNameForOrdinal(p, 99)).toBeNull()
+  })
+})
+
+describe('playerIdForViewpointName', () => {
+  const p = [
+    perspectiveRow(1, 'Alpha', { playerId: 8 }),
+    perspectiveRow(2, 'Beta', { playerId: 9 }),
+  ]
+
+  it('returns null for empty name', () => {
+    expect(playerIdForViewpointName(p, null)).toBeNull()
+    expect(playerIdForViewpointName(p, '')).toBeNull()
+    expect(playerIdForViewpointName(p, '   ')).toBeNull()
+  })
+
+  it('returns host player id for exact name match', () => {
+    expect(playerIdForViewpointName(p, 'Beta')).toBe(9)
+  })
+
+  it('returns null when name not in list', () => {
+    expect(playerIdForViewpointName(p, 'Gamma')).toBeNull()
   })
 })

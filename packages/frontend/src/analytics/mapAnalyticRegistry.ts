@@ -10,9 +10,11 @@ import { connectionsMapAnalytic } from './connections/mapAnalytic'
 import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
+  FLEET_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
 } from './mapAnalyticIds'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
+import { fleetMapAnalytic } from './fleet/mapAnalytic'
 import type { CombineMapDataOptionsBase } from './mapLayers'
 
 export type MapAnalyticQueryContext = {
@@ -102,6 +104,7 @@ const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [BASE_MAP_ANALYTIC_ID]: defaultMapAnalyticRegistration,
   [CONNECTIONS_ANALYTIC_ID]: connectionsMapAnalytic,
   [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: stellarCartographyMapAnalytic,
+  [FLEET_ANALYTIC_ID]: fleetMapAnalytic,
 }
 
 /** Canonical map analytic ids with explicit registry entries. */
@@ -109,6 +112,7 @@ export const REGISTERED_MAP_ANALYTIC_IDS = [
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+  FLEET_ANALYTIC_ID,
 ] as const satisfies readonly string[]
 
 export type RegisteredMapAnalyticId = (typeof REGISTERED_MAP_ANALYTIC_IDS)[number]

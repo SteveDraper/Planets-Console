@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { formatFinalTurnLoadFailuresMessage } from './finalTurnLoadFailuresMessage'
-import type { PerspectiveRow } from '../lib/gameInfoShell'
+import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
 
-const perspectives: PerspectiveRow[] = [
-  { ordinal: 1, name: 'Alice', raceName: null },
-  { ordinal: 2, name: 'Bob', raceName: null },
-  { ordinal: 3, name: 'Carol', raceName: null },
+const perspectives = [
+  perspectiveRow(1, 'Alice'),
+  perspectiveRow(2, 'Bob'),
+  perspectiveRow(3, 'Carol'),
 ]
 
 describe('formatFinalTurnLoadFailuresMessage', () => {
