@@ -1,40 +1,24 @@
 """Tests for Fleet turn analytic registration shell."""
 
-import json
-from pathlib import Path
-
-import pytest
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.fleet import ANALYTIC_ID, get_fleet
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.registry import TURN_ANALYTICS
-from api.serialization.turn import turn_info_from_json
-
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-@pytest.fixture
-def sample_turn():
-    with open(ASSETS_DIR / "turn_sample.json") as f:
-        return turn_info_from_json(json.load(f))
 
 
 def test_fleet_registered_in_turn_analytics():
     assert "fleet" in TURN_ANALYTICS
 
 
-def test_fleet_compute_returns_scaffold_players_with_empty_records(sample_turn):
+def test_fleet_compute_returns_players_with_observed_records(sample_turn):
     data = get_fleet(sample_turn)
     assert data["analyticId"] == "fleet"
     players = data["players"]
     assert len(players) == 4
-    assert players[0] == {
-        "playerId": 8,
-        "playerName": "koshling",
-        "records": [],
-    }
+    koshling = next(player for player in players if player["playerId"] == 8)
+    assert len(koshling["records"]) == 4
+    assert koshling["records"][0]["events"][0]["kind"] == "sighting"
     for player in players:
-        assert player["records"] == []
         assert isinstance(player["playerId"], int)
         assert isinstance(player["playerName"], str)
 

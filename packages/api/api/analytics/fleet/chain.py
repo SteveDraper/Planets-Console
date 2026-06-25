@@ -6,6 +6,7 @@ import copy
 from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.turn_roster import iter_turn_players
@@ -61,13 +62,17 @@ def advance_snapshot_to_turn(
     )
 
 
-def apply_fleet_turn_delta(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> FleetTurnSnapshot:
-    """Apply evidence from shell turn T only.
+def apply_fleet_turn_delta(
+    snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
+) -> FleetTurnSnapshot:
+    """Apply all turn-T fleet evidence deltas for materialization.
 
-    Direct observation ingest (#118) and scores integration (#119+) extend this hook.
+    Extension seam for fleet delta ingest. Currently delegates to direct ship
+    observation ingest (#118). Scoreboard and inference ingest (#119+) will extend
+    this hook rather than bypassing it from chain call sites.
     """
-    _ = turn
-    return snapshot
+    return ingest_turn_ship_observations(snapshot, turn)
 
 
 def _find_chain_anchor(

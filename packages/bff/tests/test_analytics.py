@@ -276,7 +276,7 @@ def test_list_analytics_includes_fleet_table_and_map_analytic():
     }
 
 
-def test_fleet_table_returns_scaffold_players():
+def test_fleet_table_returns_players_with_observed_records():
     response = client.get(f"/analytics/fleet/table?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
@@ -284,7 +284,9 @@ def test_fleet_table_returns_scaffold_players():
     players = data["players"]
     assert len(players) == 4
     assert players[0]["playerName"] == "koshling"
-    assert players[0]["records"] == []
+    koshling = next(player for player in players if player["playerId"] == 8)
+    assert len(koshling["records"]) == 4
+    assert koshling["records"][0]["events"][0]["kind"] == "sighting"
 
 
 def test_fleet_map_returns_scaffold_nodes():
