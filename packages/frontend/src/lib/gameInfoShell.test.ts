@@ -68,8 +68,8 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows).toEqual([
-      { ordinal: 1, name: 'alice', raceName: null },
-      { ordinal: 2, name: 'bob', raceName: null },
+      { ordinal: 1, name: 'alice', playerId: 1, raceName: null },
+      { ordinal: 2, name: 'bob', playerId: 2, raceName: null },
     ])
   })
 
@@ -92,6 +92,7 @@ describe('buildPerspectivesFromGameInfo', () => {
     )
     expect(rows[0]).toEqual({
       ordinal: 1,
+      playerId: 1,
       name: 'alice',
       raceName: 'Override From Turn RST',
     })
@@ -104,6 +105,16 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows[0].raceName).toBe('The Evil Empire')
+  })
+
+  it('uses host player id from game info when present', () => {
+    const rows = buildPerspectivesFromGameInfo(
+      minimalInfo({
+        players: [{ username: 'alice', id: 42 }, { username: 'bob' }],
+      })
+    )
+    expect(rows[0].playerId).toBe(42)
+    expect(rows[1].playerId).toBe(2)
   })
 })
 

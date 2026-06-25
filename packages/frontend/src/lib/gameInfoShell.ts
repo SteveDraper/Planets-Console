@@ -6,6 +6,8 @@ import { stellarCartographySettingsGatesFromGameInfo } from './stellarCartograph
 /** 1-based player index in game info `players` order, with display name. */
 export type PerspectiveRow = {
   ordinal: number
+  /** Host player id from game info `players[].id` when present, else ordinal. */
+  playerId: number
   name: string
   /** From turn-style `races` on the payload when present, else static HOST catalog. */
   raceName: string | null
@@ -58,6 +60,7 @@ export function buildPerspectivesFromGameInfo(data: GameInfoResponse): Perspecti
   return raw.map((entry, i) => {
     let username = ''
     let raceId: number | null = null
+    let playerId = i + 1
     if (entry && typeof entry === 'object') {
       const o = entry as Record<string, unknown>
       const u = o.username
@@ -68,12 +71,17 @@ export function buildPerspectivesFromGameInfo(data: GameInfoResponse): Perspecti
       if (typeof rid === 'number' && Number.isFinite(rid)) {
         raceId = rid
       }
+      const hostPlayerId = o.id
+      if (typeof hostPlayerId === 'number' && Number.isFinite(hostPlayerId)) {
+        playerId = hostPlayerId
+      }
     }
     const trimmed = username.trim()
     const name = trimmed || `Player ${i + 1}`
     const raceName = resolveRaceDisplayNameFromGameInfo(raceId, data)
     return {
       ordinal: i + 1,
+      playerId,
       name,
       raceName,
     }
