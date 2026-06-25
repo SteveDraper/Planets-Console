@@ -281,12 +281,16 @@ def test_fleet_table_returns_players_with_observed_records():
     assert response.status_code == 200
     data = response.json()
     assert data["analyticId"] == "fleet"
+    assert data["defaultActiveOnly"] is True
     players = data["players"]
     assert len(players) == 4
     assert players[0]["playerName"] == "koshling"
     koshling = next(player for player in players if player["playerId"] == 8)
     assert len(koshling["records"]) == 5
-    assert koshling["records"][0]["events"][0]["kind"] == "sighting"
+    first_record = koshling["records"][0]
+    assert first_record["disposition"] == "active"
+    assert "events" not in first_record
+    assert "lastSeen" in first_record
 
 
 def test_fleet_map_returns_scaffold_nodes():
