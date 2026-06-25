@@ -4,7 +4,6 @@ import {
   defaultFleetPlayerVisible,
   orderFleetSidebarPlayers,
   resolveFleetPlayerVisible,
-  viewpointPlayerIdForName,
   visibleFleetPlayerIds,
 } from './fleetPlayerVisibilityPolicy'
 
@@ -33,11 +32,6 @@ describe('fleetPlayerVisibilityPolicy', () => {
       'Alice',
       'Carol',
     ])
-  })
-
-  it('resolves viewpoint player id from shell viewpoint name', () => {
-    expect(viewpointPlayerIdForName(players, 'Bob')).toBe(9)
-    expect(viewpointPlayerIdForName(players, null)).toBeNull()
   })
 
   it('returns visible fleet player ids from defaults and overrides', () => {

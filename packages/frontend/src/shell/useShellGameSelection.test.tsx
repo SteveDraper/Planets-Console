@@ -6,6 +6,7 @@ import { useShellGameSelection } from './useShellGameSelection'
 import { useShellStore } from '../stores/shell'
 import { useSessionStore } from '../stores/session'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
+import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
 
 vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
@@ -50,7 +51,7 @@ describe('useShellGameSelection', () => {
       selectedGameId: '99',
       gameInfoContext: {
         turn: 5,
-        perspectives: [{ ordinal: 1, name: 'Alice', raceName: null }],
+        perspectives: [perspectiveRow(1, 'Alice')],
         isGameFinished: false,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
@@ -182,10 +183,7 @@ describe('useShellGameSelection', () => {
     useShellStore.setState({
       gameInfoContext: {
         turn: 5,
-        perspectives: [
-          { ordinal: 1, name: 'Alice', raceName: null },
-          { ordinal: 2, name: 'Bob', raceName: null },
-        ],
+        perspectives: [perspectiveRow(1, 'Alice'), perspectiveRow(2, 'Bob')],
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },

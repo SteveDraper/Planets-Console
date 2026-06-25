@@ -42,17 +42,6 @@ export function orderFleetSidebarPlayers(
   return [viewpoint, ...players.filter((player) => player.playerId !== viewpointPlayerId)]
 }
 
-export function viewpointPlayerIdForName(
-  players: readonly PerspectiveRow[],
-  viewpointName: string | null
-): number | null {
-  if (viewpointName == null || viewpointName.trim() === '') {
-    return null
-  }
-  const hit = players.find((player) => player.name === viewpointName)
-  return hit?.playerId ?? null
-}
-
 export function visibleFleetPlayerIds(
   players: readonly PerspectiveRow[],
   viewpointPlayerId: number | null,

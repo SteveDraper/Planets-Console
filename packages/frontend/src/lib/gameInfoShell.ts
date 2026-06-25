@@ -118,6 +118,18 @@ export function perspectiveOrdinalForName(
   return hit?.ordinal ?? null
 }
 
+/** Host player id for a shell viewpoint name, or null when unknown or empty. */
+export function playerIdForViewpointName(
+  perspectives: PerspectiveRow[],
+  name: string | null
+): number | null {
+  if (name == null || name.trim() === '') {
+    return null
+  }
+  const hit = perspectives.find((p) => p.name === name)
+  return hit?.playerId ?? null
+}
+
 /** Perspective slot used when login is not a game player on an in-progress game. */
 export const PSEUDO_VIEWPOINT_PERSPECTIVE = 0
 

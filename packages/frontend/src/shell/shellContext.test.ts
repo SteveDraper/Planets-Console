@@ -14,11 +14,12 @@ import {
   shouldClearInProgressPerspectiveOverride,
   type ShellContextInputs,
 } from './shellContext'
+import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
 
 const perspectives = [
-  { ordinal: 1, name: 'Alice', raceName: 'Feds' as string | null },
-  { ordinal: 2, name: 'Bob', raceName: 'Lizards' as string | null },
-  { ordinal: 3, name: 'Carol', raceName: null as string | null },
+  perspectiveRow(1, 'Alice', { raceName: 'Feds' }),
+  perspectiveRow(2, 'Bob', { raceName: 'Lizards' }),
+  perspectiveRow(3, 'Carol'),
 ]
 
 function shellContext(overrides: Partial<GameInfoShellContext> = {}): GameInfoShellContext {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
+import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
 import { SHELL_STORAGE_KEY, useShellStore } from '../stores/shell'
 
 describe('useShellStore', () => {
@@ -46,7 +47,7 @@ describe('useShellStore', () => {
       selectedGameId: '628580',
       gameInfoContext: {
         turn: 10,
-        perspectives: [{ ordinal: 1, name: 'A', raceName: 'Federation' }],
+        perspectives: [perspectiveRow(1, 'A', { raceName: 'Federation' })],
         isGameFinished: false,
         sectorDisplayName: 'Test Sector',
         stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,

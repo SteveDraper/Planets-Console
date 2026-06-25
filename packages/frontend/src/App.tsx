@@ -20,7 +20,7 @@ import {
   applyShellGameBootstrapResult,
   fetchShellGameBootstrap,
 } from './shell/shellGameBootstrap'
-import { viewpointPlayerIdForName } from './analytics/fleet/fleetPlayerVisibilityPolicy'
+import { playerIdForViewpointName } from './lib/gameInfoShell'
 import { useShellContext, useShellGameSelection } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
@@ -256,7 +256,7 @@ function ConsoleShell() {
       : null
 
   const fleetPlayers = gameInfoContext?.perspectives ?? []
-  const fleetViewpointPlayerId = viewpointPlayerIdForName(
+  const fleetViewpointPlayerId = playerIdForViewpointName(
     fleetPlayers,
     shellSelectedViewpointName
   )

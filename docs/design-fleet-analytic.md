@@ -209,7 +209,7 @@ Types: Zod module under `packages/frontend/src/analytics/fleet/` (not central Op
 
 - Master fleet analytic enable (global localStorage, like other analytics)
 - **Fleet player visibility** checklist: one toggle per **Player** for **both** map and table
-- Default: viewpoint **Player** on; others off
+- Default: all **Players** on until the user toggles an override
 - Persisted globally (not per game), same pattern as **Cartography layer**
 
 ### 8.2 Map (deliverable separate from table)
