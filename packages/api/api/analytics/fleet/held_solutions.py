@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import make_analytic_query_context
@@ -20,6 +21,14 @@ class FleetHeldInference:
 
     search_status: SearchStatus
     solutions: tuple[dict[str, object], ...]
+
+
+@dataclass(frozen=True)
+class FleetInferenceMaterialization:
+    """Scores inference refinement inputs; load_turn is required for held-solution lookup."""
+
+    inference: FleetInferenceSupport
+    load_turn: Callable[[int], TurnInfo | None]
 
 
 @dataclass(frozen=True)

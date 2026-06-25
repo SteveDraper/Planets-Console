@@ -6,19 +6,19 @@ from dataclasses import replace
 
 from api.analytics.fleet.chain import apply_fleet_turn_delta, ensure_fleet_baseline
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
-from api.analytics.fleet.held_solutions import FleetInferenceSupport
+from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.fleet.types import (
     FleetFieldUnknown,
 )
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.models import InferenceSolutionAction
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -52,6 +52,16 @@ def _turn_with_score_delta(
     return replace(turn, scores=[score])
 
 
+def _inference_materialization(
+    inference: FleetInferenceSupport,
+    turn,
+) -> FleetInferenceMaterialization:
+    return FleetInferenceMaterialization(
+        inference=inference,
+        load_turn=lambda _turn_number: turn,
+    )
+
+
 def test_positive_warship_delta_creates_two_placeholder_rows():
     turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=2)
     snapshot = ingest_turn_inferred_acquisitions(
@@ -77,12 +87,14 @@ def test_placeholder_rows_remain_unknown_when_inference_in_progress_with_no_solu
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        inference=FleetInferenceSupport(
-            scores_services=ScoresExportContext(
-                persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(
+                scores_services=ScoresExportContext(
+                    persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+                ),
             ),
+            turn,
         ),
-        load_turn=lambda _turn_number: turn,
     )
 
     ledger = ledger_for_player(snapshot, 8)
@@ -169,8 +181,7 @@ def test_streaming_refine_updates_option_sets(sample_turn):
     refined = ingest_turn_inferred_acquisitions(
         snapshot,
         turn,
-        inference=inference,
-        load_turn=lambda _turn_number: turn,
+        inference_materialization=_inference_materialization(inference, turn),
     )
 
     records = ledger_for_player(refined, player_id).records
@@ -217,8 +228,10 @@ def test_persisted_inference_refines_placeholders():
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        inference=FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
-        load_turn=lambda _turn_number: turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
     )
 
     record = ledger_for_player(snapshot, 8).records[0]
@@ -272,8 +285,10 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
-        inference=FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
-        load_turn=lambda _turn_number: turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
     )
 
     wire = fleet_turn_snapshot_to_compute_wire(snapshot)

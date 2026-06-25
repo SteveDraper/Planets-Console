@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from typing import Literal
 
-from api.analytics.fleet.held_solutions import FleetInferenceSupport
+from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.scoreboard_counts import iter_current_turn_scores
 from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
@@ -44,17 +43,15 @@ def ingest_turn_inferred_acquisitions(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
     *,
-    inference: FleetInferenceSupport | None = None,
-    load_turn: Callable[[int], TurnInfo | None] | None = None,
+    inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
     """Create scoreboard placeholders and optionally refine them from held solutions."""
     snapshot = _create_scoreboard_placeholders(snapshot, turn)
-    if inference is not None and load_turn is not None:
+    if inference_materialization is not None:
         snapshot = _refine_inferred_acquisitions_from_scores(
             snapshot,
             turn,
-            inference=inference,
-            load_turn=load_turn,
+            inference_materialization=inference_materialization,
         )
     return snapshot
 
@@ -97,11 +94,12 @@ def _refine_inferred_acquisitions_from_scores(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
     *,
-    inference: FleetInferenceSupport,
-    load_turn: Callable[[int], TurnInfo | None],
+    inference_materialization: FleetInferenceMaterialization,
 ) -> FleetTurnSnapshot:
     """Attach fleet build option sets from top-K held solutions to placeholder rows."""
     turn_number = turn.settings.turn
+    inference = inference_materialization.inference
+    load_turn = inference_materialization.load_turn
     for ledger in snapshot.players:
         if not _ledger_has_placeholders_for_turn(ledger, turn_number):
             continue

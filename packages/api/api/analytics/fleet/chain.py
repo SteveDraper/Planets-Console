@@ -6,7 +6,7 @@ import copy
 from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID
-from api.analytics.fleet.held_solutions import FleetInferenceSupport
+from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
@@ -68,15 +68,13 @@ def apply_fleet_turn_delta(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
     *,
-    inference: FleetInferenceSupport | None = None,
-    load_turn: Callable[[int], TurnInfo | None] | None = None,
+    inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
     """Apply all turn-T fleet evidence deltas for materialization."""
     snapshot = ingest_turn_inferred_acquisitions(
         snapshot,
         turn,
-        inference=inference,
-        load_turn=load_turn,
+        inference_materialization=inference_materialization,
     )
     snapshot = ingest_turn_ship_observations(snapshot, turn)
     return snapshot
@@ -101,8 +99,7 @@ def _materialize_and_persist_turn(
     materialize_turn: int,
     prior_snapshot: FleetTurnSnapshot,
     turn_info: TurnInfo,
-    inference: FleetInferenceSupport | None = None,
-    load_turn: Callable[[int], TurnInfo | None] | None = None,
+    inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
     snapshot = advance_snapshot_to_turn(
         prior_snapshot,
@@ -113,8 +110,7 @@ def _materialize_and_persist_turn(
     snapshot = apply_fleet_turn_delta(
         snapshot,
         turn_info,
-        inference=inference,
-        load_turn=load_turn,
+        inference_materialization=inference_materialization,
     )
     persistence.put_snapshot(
         snapshot.game_id,
@@ -132,7 +128,7 @@ def get_or_materialize_fleet_snapshot(
     turn: TurnInfo,
     *,
     load_turn: Callable[[int], TurnInfo | None],
-    inference: FleetInferenceSupport | None = None,
+    inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
     """Return a cached snapshot or materialize turn T from T-1 plus turn-T delta."""
     turn_number = turn.settings.turn
@@ -146,6 +142,15 @@ def get_or_materialize_fleet_snapshot(
         if stored_turn_number not in loaded_turns:
             loaded_turns[stored_turn_number] = load_turn(stored_turn_number)
         return loaded_turns[stored_turn_number]
+
+    resolved_inference_materialization = (
+        FleetInferenceMaterialization(
+            inference=inference_materialization.inference,
+            load_turn=cached_load,
+        )
+        if inference_materialization is not None
+        else None
+    )
 
     def require_turn(materialize_turn: int) -> TurnInfo:
         if materialize_turn == turn_number:
@@ -200,8 +205,7 @@ def get_or_materialize_fleet_snapshot(
         turn_one_snapshot = apply_fleet_turn_delta(
             ensure_fleet_baseline(game_id, perspective, turn_one),
             turn_one,
-            inference=inference,
-            load_turn=cached_load,
+            inference_materialization=resolved_inference_materialization,
         )
         persistence.put_snapshot(game_id, perspective, 1, turn_one_snapshot)
         current_snapshot = turn_one_snapshot
@@ -220,8 +224,7 @@ def get_or_materialize_fleet_snapshot(
             materialize_turn=materialize_turn,
             prior_snapshot=current_snapshot,
             turn_info=turn_info,
-            inference=inference,
-            load_turn=cached_load,
+            inference_materialization=resolved_inference_materialization,
         )
 
     return current_snapshot
