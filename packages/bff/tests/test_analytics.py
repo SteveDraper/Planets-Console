@@ -285,7 +285,7 @@ def test_fleet_table_returns_players_with_observed_records():
     assert len(players) == 4
     assert players[0]["playerName"] == "koshling"
     koshling = next(player for player in players if player["playerId"] == 8)
-    assert len(koshling["records"]) == 4
+    assert len(koshling["records"]) == 5
     assert koshling["records"][0]["events"][0]["kind"] == "sighting"
 
 

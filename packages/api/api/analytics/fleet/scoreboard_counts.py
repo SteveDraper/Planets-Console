@@ -8,11 +8,16 @@ from api.models.game import TurnInfo
 from api.models.player import Score
 
 
-def _current_turn_scores(turn: TurnInfo) -> Iterator[Score]:
+def iter_current_turn_scores(turn: TurnInfo) -> Iterator[Score]:
+    """Yield scoreboard rows for the shell turn."""
     turn_number = turn.settings.turn
     for score in turn.scores:
         if score.turn == turn_number:
             yield score
+
+
+def _current_turn_scores(turn: TurnInfo) -> Iterator[Score]:
+    return iter_current_turn_scores(turn)
 
 
 def global_ship_count_from_scores(turn: TurnInfo) -> int | None:

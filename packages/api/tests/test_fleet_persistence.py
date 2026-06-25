@@ -184,12 +184,12 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     )
 
     assert snapshot.turn == 112
-    assert len(snapshot.players[0].records) == 5
+    assert len(snapshot.players[0].records) == 6
     assert snapshot.players[0].records[0].record_id == "gap-rec"
     intermediate = persistence.get_snapshot(628580, 1, 111)
     assert intermediate is not None
     assert intermediate.turn == 111
-    assert len(intermediate.players[0].records) == 5
+    assert len(intermediate.players[0].records) == 6
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
@@ -236,7 +236,7 @@ def test_implicit_turn_one_baseline_without_persisting_turn_one(
 
     assert snapshot.turn == 111
     assert len(snapshot.players) == 4
-    assert len(snapshot.players[0].records) == 4
+    assert len(snapshot.players[0].records) == 5
     assert persistence.get_snapshot(628580, 1, 1) is None
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -256,7 +256,7 @@ def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sam
         load_turn=load_turn,
     )
     assert snapshot.turn == 111
-    assert len(snapshot.players[0].records) == 5
+    assert len(snapshot.players[0].records) == 6
     assert snapshot.players[0].records[0].record_id == "rec-1"
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -330,5 +330,5 @@ def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4
     koshling = next(player for player in data["players"] if player["playerId"] == 8)
-    assert len(koshling["records"]) == 4
+    assert len(koshling["records"]) == 5
     assert persistence.get_snapshot(628580, 1, 111) is not None

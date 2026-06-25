@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.export_context import export_service_for
 from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.storage.memory_asset import MemoryAssetBackend
@@ -19,6 +20,7 @@ class FleetComputeServices:
     game_id: int
     perspective: int
     load_turn: Callable[[int], TurnInfo | None]
+    inference: FleetInferenceSupport | None = None
 
 
 def turn_chain_through(turn: TurnInfo) -> dict[int, TurnInfo]:
@@ -39,6 +41,7 @@ def build_ephemeral_fleet_compute_services(
     game_id: int | None = None,
     perspective: int = 1,
     stored_turns: dict[int, TurnInfo] | None = None,
+    inference: FleetInferenceSupport | None = None,
 ) -> FleetComputeServices:
     """In-memory fleet services for tests and direct callers; snapshots are not durable."""
     resolved_turns = stored_turns if stored_turns is not None else turn_chain_through(turn)
@@ -51,6 +54,7 @@ def build_ephemeral_fleet_compute_services(
         game_id=game_id if game_id is not None else turn.game.id,
         perspective=perspective,
         load_turn=load_turn,
+        inference=inference,
     )
 
 

@@ -16,7 +16,7 @@ def test_fleet_compute_returns_players_with_observed_records(sample_turn):
     players = data["players"]
     assert len(players) == 4
     koshling = next(player for player in players if player["playerId"] == 8)
-    assert len(koshling["records"]) == 4
+    assert len(koshling["records"]) == 5
     assert koshling["records"][0]["events"][0]["kind"] == "sighting"
     for player in players:
         assert isinstance(player["playerId"], int)

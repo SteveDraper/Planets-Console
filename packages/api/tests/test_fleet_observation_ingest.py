@@ -97,7 +97,12 @@ def test_events_are_append_only():
 
 def test_turn_one_sightings_seed_ledger_without_game_start_inventory():
     turn = single_ship_turn(turn_number=1, ship_id=7, owner_id=8, x=500, y=600)
-    snapshot = apply_fleet_turn_delta(ensure_fleet_baseline(628580, 1, turn), turn)
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        game_id=628580,
+        perspective=1,
+    )
 
     ledger = ledger_for_player(snapshot, 8)
     assert len(ledger.records) == 1

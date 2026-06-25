@@ -5,6 +5,7 @@ from collections.abc import Callable
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
+from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.scores.export_services import ScoresExportContext
@@ -117,6 +118,10 @@ class TurnAnalyticService:
             game_id=game_id,
             perspective=perspective,
             load_turn=self._load_scoreboard_turn(game_id, perspective),
+            inference=FleetInferenceSupport(
+                persistence=self._inference_persistence,
+                scheduler=self._inference_scheduler_instance(),
+            ),
         )
 
     def _scores_export_context(
