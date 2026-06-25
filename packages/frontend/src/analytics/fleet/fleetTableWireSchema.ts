@@ -103,3 +103,12 @@ export function formatFleetTableWireValidationError(error: z.ZodError): string {
 
   return 'Fleet table payload has an invalid shape.'
 }
+
+/** Parse a BFF fleet table response into a typed payload. */
+export function parseFleetTableWire(payload: unknown): FleetTableWire {
+  const result = fleetTableWireSchema.safeParse(payload)
+  if (!result.success) {
+    throw new Error(formatFleetTableWireValidationError(result.error))
+  }
+  return result.data
+}

@@ -3,8 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { fleetFieldConstraintSchema } from './fleetWirePrimitives'
-import { fleetTableWireSchema } from './fleetTableWireSchema'
-import { parseFleetTableWire } from './parseFleetTableWire'
+import { fleetTableWireSchema, parseFleetTableWire } from './fleetTableWireSchema'
 
 const fixturePath = join(
   dirname(fileURLToPath(import.meta.url)),
