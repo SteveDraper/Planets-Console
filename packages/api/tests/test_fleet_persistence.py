@@ -20,6 +20,8 @@ from api.analytics.fleet.types import (
 )
 from api.errors import NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
+from api.services.inference_invalidation_service import InferenceInvalidationService
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -184,12 +186,12 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     )
 
     assert snapshot.turn == 112
-    assert len(snapshot.players[0].records) == 5
+    assert len(snapshot.players[0].records) == 6
     assert snapshot.players[0].records[0].record_id == "gap-rec"
     intermediate = persistence.get_snapshot(628580, 1, 111)
     assert intermediate is not None
     assert intermediate.turn == 111
-    assert len(intermediate.players[0].records) == 5
+    assert len(intermediate.players[0].records) == 6
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
@@ -236,7 +238,7 @@ def test_implicit_turn_one_baseline_without_persisting_turn_one(
 
     assert snapshot.turn == 111
     assert len(snapshot.players) == 4
-    assert len(snapshot.players[0].records) == 4
+    assert len(snapshot.players[0].records) == 5
     assert persistence.get_snapshot(628580, 1, 1) is None
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -256,7 +258,7 @@ def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sam
         load_turn=load_turn,
     )
     assert snapshot.turn == 111
-    assert len(snapshot.players[0].records) == 5
+    assert len(snapshot.players[0].records) == 6
     assert snapshot.players[0].records[0].record_id == "rec-1"
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -330,5 +332,174 @@ def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4
     koshling = next(player for player in data["players"] if player["playerId"] == 8)
-    assert len(koshling["records"]) == 4
+    assert len(koshling["records"]) == 5
     assert persistence.get_snapshot(628580, 1, 111) is not None
+
+
+def _wired_fleet_inference_services(memory_backend):
+    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=fleet_persistence,
+    )
+    invalidation.wire_fleet_invalidation_to_persistence()
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+    )
+
+    scheduler = InferenceRowScheduler(
+        worker_count=0,
+        on_row_complete=inference_persistence.persist_row_complete,
+        on_held_solutions_updated=lambda session: invalidation.on_inference_evidence_updated(
+            session.game_id,
+            session.perspective,
+            session.turn_number,
+            session.player_id,
+        ),
+    )
+    invalidation.bind_scheduler(scheduler)
+    return fleet_persistence, inference_persistence, invalidation, scheduler
+
+
+def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
+    memory_backend,
+    load_turn,
+):
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.scores_exports_helpers import ship_build_wire
+
+    fleet_persistence, inference_persistence, _, scheduler = _wired_fleet_inference_services(
+        memory_backend
+    )
+    turn = load_turn(111)
+    assert turn is not None
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+
+    def load_turn_fn(turn_number: int):
+        return load_turn(turn_number)
+
+    scores_services = ScoresExportContext(
+        persistence=inference_persistence,
+        scheduler=scheduler,
+    )
+    inference_materialization = FleetInferenceMaterialization(
+        inference=FleetInferenceSupport(scores_services=scores_services),
+        load_turn=load_turn_fn,
+    )
+    fleet_persistence.put_snapshot(
+        628580,
+        1,
+        110,
+        ensure_fleet_baseline(628580, 1, turn_110),
+    )
+
+    snapshot = get_or_materialize_fleet_snapshot(
+        fleet_persistence,
+        628580,
+        1,
+        turn,
+        load_turn=load_turn_fn,
+        inference_materialization=inference_materialization,
+    )
+    koshling = next(ledger for ledger in snapshot.players if ledger.player_id == 8)
+    placeholder = next(
+        record
+        for record in koshling.records
+        if any(event.kind == "scoreboard_delta" for event in record.events)
+    )
+    assert placeholder.build_option_sets == []
+    assert fleet_persistence.get_snapshot(628580, 1, 111) is not None
+
+    inference_persistence.put_row(
+        628580,
+        1,
+        111,
+        8,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="one cruiser",
+            solution_count=1,
+            is_complete=True,
+            solutions=[
+                {
+                    "objectiveValue": 55,
+                    "actions": [],
+                    "shipBuilds": [
+                        ship_build_wire(
+                            combo_id="combo-13",
+                            label="Cruiser",
+                            hull_id=13,
+                            engine_id=9,
+                        )
+                    ],
+                }
+            ],
+        ),
+    )
+    assert fleet_persistence.get_snapshot(628580, 1, 111) is None
+
+    rematerialized = get_or_materialize_fleet_snapshot(
+        fleet_persistence,
+        628580,
+        1,
+        turn,
+        load_turn=load_turn_fn,
+        inference_materialization=inference_materialization,
+    )
+    koshling_refined = next(ledger for ledger in rematerialized.players if ledger.player_id == 8)
+    refined_placeholder = next(
+        record
+        for record in koshling_refined.records
+        if any(event.kind == "scoreboard_delta" for event in record.events)
+    )
+    assert len(refined_placeholder.build_option_sets) == 1
+    assert refined_placeholder.build_option_sets[0].hull_id == 13
+
+
+def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
+    sample_turn,
+    memory_backend,
+):
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        schedule_inference_row,
+    )
+
+    fleet_persistence, _, _, scheduler = _wired_fleet_inference_services(memory_backend)
+    player_id = 8
+    turn_number = sample_turn.settings.turn
+    fleet_persistence.put_snapshot(
+        628580,
+        1,
+        turn_number,
+        FleetTurnSnapshot(
+            analytic_id="fleet",
+            game_id=628580,
+            perspective=1,
+            turn=turn_number,
+            players=[FleetAcquisitionLedger(player_id=player_id)],
+        ),
+    )
+
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=1,
+    )
+    assert scheduled is not None
+    assert scheduler._on_held_solutions_updated is not None
+    scheduler._on_held_solutions_updated(scheduled.session)
+
+    assert fleet_persistence.get_snapshot(628580, 1, turn_number) is None

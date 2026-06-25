@@ -21,11 +21,11 @@ class FleetSnapshotPersistenceService:
     Scores-invalidation coupling (F2.x): when scores inference rows are cleared
     for host turn *H*, fleet snapshots at turns ``>= H`` for the same perspective
     must be re-materialized so build evidence and reconciliation stay aligned.
+    ``InferenceInvalidationService.on_inference_evidence_updated`` performs that
+    invalidation when inference rows are persisted or held solutions stream in.
     Fleet turn-document invalidation (``invalidate_for_turn_write``) is independent
     of scores pair-aware invalidation (turn *T* and *T-1*); both hooks run from
-    ``on_turn_stored`` today. Scores-only invalidation (hull mask, recompute) does
-    not yet cascade into fleet -- that coupling lands with fleet/scores export ensure
-    (#119--#121).
+    ``on_turn_stored`` today.
     """
 
     def __init__(self, storage: StorageBackend) -> None:

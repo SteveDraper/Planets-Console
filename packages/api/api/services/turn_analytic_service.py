@@ -5,6 +5,7 @@ from collections.abc import Callable
 from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
+from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.scores.export_services import ScoresExportContext
@@ -47,14 +48,18 @@ class TurnAnalyticService:
             self._inference_persistence = inference_persistence
         else:
             self._inference_persistence = InferenceRowPersistenceService(storage)
-        if inference_invalidation is not None:
-            self._inference_invalidation = inference_invalidation
-        else:
-            self._inference_invalidation = InferenceInvalidationService(self._inference_persistence)
         if fleet_persistence is not None:
             self._fleet_persistence = fleet_persistence
         else:
             self._fleet_persistence = FleetSnapshotPersistenceService(storage)
+        if inference_invalidation is not None:
+            self._inference_invalidation = inference_invalidation
+        else:
+            self._inference_invalidation = InferenceInvalidationService(
+                self._inference_persistence,
+                fleet_persistence=self._fleet_persistence,
+            )
+            self._inference_invalidation.wire_fleet_invalidation_to_persistence()
         self._inference_scheduler = inference_scheduler
 
     def _load_scoreboard_turn(
@@ -101,22 +106,41 @@ class TurnAnalyticService:
                 diagnostics=diagnostics,
             ),
             load_turn=self._load_scoreboard_turn(game_id, perspective),
-            export_services={
-                SCORES_ANALYTIC_ID: self._scores_export_context(game_id, perspective),
-                FLEET_ANALYTIC_ID: self._fleet_compute_services(game_id, perspective),
-            },
+            export_services=self._turn_export_services(game_id, perspective),
         )
+
+    def _turn_export_services(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> dict[str, object]:
+        scores_services = self._scores_export_context(game_id, perspective)
+        return {
+            SCORES_ANALYTIC_ID: scores_services,
+            FLEET_ANALYTIC_ID: self._fleet_compute_services(
+                game_id,
+                perspective,
+                scores_services=scores_services,
+            ),
+        }
 
     def _fleet_compute_services(
         self,
         game_id: int,
         perspective: int,
+        *,
+        scores_services: ScoresExportContext,
     ) -> FleetComputeServices:
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
         return FleetComputeServices(
             persistence=self._fleet_persistence,
             game_id=game_id,
             perspective=perspective,
-            load_turn=self._load_scoreboard_turn(game_id, perspective),
+            load_turn=load_turn,
+            inference_materialization=FleetInferenceMaterialization(
+                inference=FleetInferenceSupport(scores_services=scores_services),
+                load_turn=load_turn,
+            ),
         )
 
     def _scores_export_context(

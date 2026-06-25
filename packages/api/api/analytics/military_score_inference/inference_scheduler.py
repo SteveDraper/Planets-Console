@@ -41,6 +41,7 @@ _Sentinel = object()
 _Job = TierJob | object
 
 OnRowCompleteCallback = Callable[[InferenceRowStreamSession, RowComplete], None]
+OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
 
 def _configured_worker_count() -> int:
@@ -58,8 +59,10 @@ class InferenceRowScheduler:
         worker_count: int = _DEFAULT_WORKER_COUNT,
         *,
         on_row_complete: OnRowCompleteCallback | None = None,
+        on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
     ) -> None:
         self._on_row_complete = on_row_complete
+        self._on_held_solutions_updated = on_held_solutions_updated
         self._work_queue: deque[TierJob] = deque()
         self._runs: dict[str, RowRun] = {}
         self._lock = threading.Lock()
@@ -359,6 +362,8 @@ class InferenceRowScheduler:
                 segment_id=segment_id,
             )
         )
+        if self._on_held_solutions_updated is not None:
+            self._on_held_solutions_updated(session)
 
     def _emit_progress(self, session: InferenceRowStreamSession) -> None:
         run = self._runs.get(session.run_id)
@@ -461,10 +466,12 @@ class InferenceRowScheduler:
 def create_inference_row_scheduler(
     *,
     on_row_complete: OnRowCompleteCallback | None = None,
+    on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
 ) -> InferenceRowScheduler:
     return InferenceRowScheduler(
         worker_count=_configured_worker_count(),
         on_row_complete=on_row_complete,
+        on_held_solutions_updated=on_held_solutions_updated,
     )
 
 
@@ -475,11 +482,15 @@ _scheduler_lock = threading.Lock()
 def get_inference_row_scheduler(
     *,
     on_row_complete: OnRowCompleteCallback | None = None,
+    on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
 ) -> InferenceRowScheduler:
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
-            _scheduler = create_inference_row_scheduler(on_row_complete=on_row_complete)
+            _scheduler = create_inference_row_scheduler(
+                on_row_complete=on_row_complete,
+                on_held_solutions_updated=on_held_solutions_updated,
+            )
         return _scheduler
 
 
