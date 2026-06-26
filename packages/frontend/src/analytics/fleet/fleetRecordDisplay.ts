@@ -58,6 +58,17 @@ export function alternateBuildOptionSets(record: FleetTableRecord): FleetBuildOp
   return record.buildOptionSets.filter((_, index) => index !== defaultIndex)
 }
 
+function resolvedOptionSetComponentId(
+  optionSet: FleetBuildOptionSet,
+  field: 'hull' | 'engine'
+): number | null {
+  const componentId = field === 'hull' ? optionSet.hullId : optionSet.engineId
+  if (componentId == null || componentId <= 0) {
+    return null
+  }
+  return componentId
+}
+
 function optionSetFieldFallback(
   optionSet: FleetBuildOptionSet | null,
   field: FleetRecordFieldKey
@@ -66,10 +77,20 @@ function optionSetFieldFallback(
     return null
   }
   switch (field) {
-    case 'hull':
-      return optionSet.hullId != null ? String(optionSet.hullId) : null
-    case 'engine':
-      return optionSet.engineId != null ? String(optionSet.engineId) : null
+    case 'hull': {
+      const hullId = resolvedOptionSetComponentId(optionSet, 'hull')
+      if (hullId != null) {
+        return String(hullId)
+      }
+      if (optionSet.label.length > 0) {
+        return optionSet.label
+      }
+      return null
+    }
+    case 'engine': {
+      const engineId = resolvedOptionSetComponentId(optionSet, 'engine')
+      return engineId != null ? String(engineId) : null
+    }
     case 'beams':
       return String(optionSet.beamCount)
     case 'launchers':

@@ -282,6 +282,7 @@ def test_fleet_table_returns_players_with_observed_records():
     data = response.json()
     assert data["analyticId"] == "fleet"
     assert data["defaultActiveOnly"] is True
+    assert isinstance(data.get("componentCatalog"), dict)
     players = data["players"]
     assert len(players) == 4
     assert players[0]["playerName"] == "koshling"

@@ -1,8 +1,13 @@
 """Tests for BFF analytics modules and registry dispatch."""
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from api.analytics.catalog import TURN_ANALYTIC_CATALOG
 from api.diagnostics import NOOP_DIAGNOSTICS
+from api.serialization.turn import turn_info_from_json
 from api.transport.connections_options import derive_include_illustrative_routes
 from bff.analytics import (
     ANALYTICS_LIST,
@@ -15,6 +20,8 @@ from bff.analytics import (
 )
 from bff.analytics.registry import REGISTERED_ANALYTICS
 from bff.errors import BFFValidationError
+
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "api" / "api" / "storage" / "assets"
 
 
 def test_registered_analytics_follow_catalog_order():
@@ -77,18 +84,28 @@ def test_fleet_table_dispatch_forwards_to_core():
             ],
         }
 
-    data = get_table_response("fleet", TurnScope(628580, 1, 111), load_core, NOOP_DIAGNOSTICS)
-    assert data == {
-        "analyticId": "fleet",
-        "defaultActiveOnly": True,
-        "players": [
-            {
-                "playerId": 1,
-                "playerName": "koshling",
-                "records": [],
-            }
-        ],
-    }
+    with open(ASSETS_DIR / "turn_sample.json") as handle:
+        sample_turn = turn_info_from_json(json.load(handle))
+
+    with patch("bff.core_client.get_core_client") as mock_get_client:
+        mock_get_client.return_value.get_turn_info.return_value = sample_turn
+        data = get_table_response("fleet", TurnScope(628580, 1, 111), load_core, NOOP_DIAGNOSTICS)
+    assert data["analyticId"] == "fleet"
+    assert data["defaultActiveOnly"] is True
+    assert data["players"] == [
+        {
+            "playerId": 1,
+            "playerName": "koshling",
+            "records": [],
+        }
+    ]
+    catalog = data["componentCatalog"]
+    assert isinstance(catalog, dict)
+    assert isinstance(catalog.get("hulls"), dict)
+    assert isinstance(catalog.get("engines"), dict)
+    assert isinstance(catalog.get("beams"), dict)
+    assert isinstance(catalog.get("torpedoes"), dict)
+    assert len(catalog["hulls"]) > 0
     assert calls == [
         (
             628580,
