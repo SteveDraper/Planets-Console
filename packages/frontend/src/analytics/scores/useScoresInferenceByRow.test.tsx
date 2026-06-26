@@ -512,12 +512,27 @@ describe('useScoresInferenceByRow', () => {
       inferenceByRow: [{ playerId: 8 }, { playerId: 6 }, { playerId: 11 }],
     }
 
-    it('keeps rows pending with empty diagnostics when the stream resolves without complete', async () => {
+    it('reconnects when the stream resolves before every row is complete', async () => {
+      let streamGeneration = 0
+
       vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
         async (_scope, _playerIds, handlers) => {
+          streamGeneration += 1
+          if (streamGeneration === 1) {
+            emitComplete(handlers.onEvent, 8, 'Other player complete')
+            emitProgress(handlers.onEvent, 6, 'early_game_bands')
+            emitProgress(handlers.onEvent, 11, 'early_game_bands')
+            return
+          }
           emitComplete(handlers.onEvent, 8, 'Other player complete')
-          emitProgress(handlers.onEvent, 6, 'early_game_bands')
-          emitProgress(handlers.onEvent, 11, 'early_game_bands')
+          emitComplete(handlers.onEvent, 6, 'Cyborg from cache', {
+            turn: scope.turn,
+            solver: { status: 'exact' },
+          })
+          emitComplete(handlers.onEvent, 11, 'Colonies from cache', {
+            turn: scope.turn,
+            solver: { status: 'exact' },
+          })
         }
       )
 
@@ -526,23 +541,14 @@ describe('useScoresInferenceByRow', () => {
       )
 
       await waitFor(() => {
-        expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(true)
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Cyborg from cache')
+        expect(result.current.inferenceByRow?.[2]?.summary).toBe('Colonies from cache')
       })
 
-      expect(result.current.inferenceByRow?.[1]).toMatchObject({
-        playerId: 6,
-        displayStatus: 'pending',
-        isComplete: false,
-        diagnostics: {},
-        summary: 'Searching (early game bands)',
-      })
-      expect(result.current.inferenceByRow?.[2]).toMatchObject({
-        playerId: 11,
-        displayStatus: 'pending',
-        isComplete: false,
-        diagnostics: {},
-        summary: 'Searching (early game bands)',
-      })
+      expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(true)
+      expect(result.current.inferenceByRow?.[1]?.isComplete).toBe(true)
+      expect(result.current.inferenceByRow?.[2]?.isComplete).toBe(true)
+      expect(streamGeneration).toBe(2)
     })
 
     it('remount after stream ends without terminal events can serve cached completes', async () => {

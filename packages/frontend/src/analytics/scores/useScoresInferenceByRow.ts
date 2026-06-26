@@ -13,7 +13,7 @@ import {
   stablePlayerIdsKey,
   type RowStreamState,
 } from './inferenceRowStreamState'
-import { connectTableInferenceStream } from './tableInferenceStreamConnect'
+import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'
 
 export type UseScoresInferenceByRowOptions = {
   onGlobalPauseChange?: (paused: boolean) => void
@@ -147,30 +147,47 @@ export function useScoresInferenceByRow(
     const controller = new AbortController()
     tableAbortControllerRef.current = controller
 
-    void connectTableInferenceStream(activeScope, playerIds, {
+    const markIncompleteRowsFailed = (summary: string) => {
+      setDetailsByPlayerId((previous) => {
+        const next = new Map(previous)
+        for (const playerId of playerIds) {
+          if (next.get(playerId)?.isComplete) {
+            continue
+          }
+          next.set(playerId, failureDetail(playerId, summary))
+        }
+        return next
+      })
+    }
+
+    void connectTableInferenceStreamUntilComplete(activeScope, playerIds, {
       signal: controller.signal,
       onEvent: (event) => handleTableStreamEventRef.current(event),
+      hasPendingRows: () => {
+        for (const playerId of playerIds) {
+          const state = rowStreamStateRef.current.get(playerId)
+          if (state == null || !state.isComplete) {
+            return true
+          }
+        }
+        return false
+      },
     })
       .then((result) => {
-        if (controller.signal.aborted || result !== 'conflict_exhausted') {
+        if (controller.signal.aborted) {
           return
         }
-        setDetailsByPlayerId((previous) => {
-          const next = new Map(previous)
-          for (const playerId of playerIds) {
-            if (next.get(playerId)?.isComplete) {
-              continue
-            }
-            next.set(
-              playerId,
-              failureDetail(
-                playerId,
-                'Build inference could not reconnect to the table stream.'
-              )
-            )
-          }
-          return next
-        })
+        if (result === 'conflict_exhausted') {
+          markIncompleteRowsFailed(
+            'Build inference could not reconnect to the table stream.'
+          )
+          return
+        }
+        if (result === 'incomplete_exhausted') {
+          markIncompleteRowsFailed(
+            'Build inference stream ended before all scoreboard rows completed.'
+          )
+        }
       })
       .catch((error) => {
         if (controller.signal.aborted) {
