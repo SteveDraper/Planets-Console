@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
-import {
-  orderFleetSidebarPlayers,
-  resolveFleetPlayerVisible,
-} from './fleetPlayerVisibilityPolicy'
+import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 import { tileClassName } from '../tileChrome'
 
 type FleetAnalyticTileProps = {
@@ -15,8 +11,6 @@ type FleetAnalyticTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
-  players: PerspectiveRow[]
-  viewpointPlayerId: number | null
 }
 
 export function FleetAnalyticTile({
@@ -25,14 +19,11 @@ export function FleetAnalyticTile({
   supportsMode,
   depressed,
   onToggle,
-  players,
-  viewpointPlayerId,
 }: FleetAnalyticTileProps) {
   const [expanded, setExpanded] = useState(false)
-  const canExpand = supportsMode && enabled && players.length > 0
-  const visibilityOverrides = useFleetPlayerVisibilityStore((state) => state.overrides)
+  const { players: orderedPlayers, isPlayerVisible } = useOrderedFleetPlayers()
   const setFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.setFleetPlayerVisible)
-  const orderedPlayers = orderFleetSidebarPlayers(players, viewpointPlayerId)
+  const canExpand = supportsMode && enabled && orderedPlayers.length > 0
 
   useEffect(() => {
     if (!canExpand) {
@@ -99,11 +90,7 @@ export function FleetAnalyticTile({
             <label key={player.playerId} className="flex cursor-pointer items-center gap-2">
               <input
                 type="checkbox"
-                checked={resolveFleetPlayerVisible(
-                  player.playerId,
-                  viewpointPlayerId,
-                  visibilityOverrides
-                )}
+                checked={isPlayerVisible(player.playerId)}
                 onChange={(event) =>
                   setFleetPlayerVisible(player.playerId, event.target.checked)
                 }

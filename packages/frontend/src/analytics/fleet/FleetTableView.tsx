@@ -1,64 +1,19 @@
 import { useMemo } from 'react'
-import { playerIdForViewpointName } from '../../lib/gameInfoShell'
-import { deriveSelectedViewpointName } from '../../shell/shellContext'
-import { useSessionStore } from '../../stores/session'
-import { useShellStore } from '../../stores/shell'
-import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
-import {
-  orderFleetSidebarPlayers,
-  resolveFleetPlayerVisible,
-} from './fleetPlayerVisibilityPolicy'
 import { FleetPlayerTableTile } from './FleetPlayerTableTile'
 import type { FleetTableWire } from './fleetTableWireSchema'
+import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
 type FleetTableViewProps = {
   data: FleetTableWire
 }
 
 export function FleetTableView({ data }: FleetTableViewProps) {
-  const selectedGameId = useShellStore((s) => s.selectedGameId)
-  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
-  const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideName = useShellStore((s) => s.perspectiveOverrideName)
-  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
-  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
-  const loginName = useSessionStore((s) => s.name)
-  const visibilityOverrides = useFleetPlayerVisibilityStore((state) => state.overrides)
-
-  const players = gameInfoContext?.perspectives ?? []
-  const viewpointPlayerId = useMemo(() => {
-    const selectedViewpointName = deriveSelectedViewpointName({
-      selectedGameId,
-      gameInfoContext,
-      selectedTurn,
-      perspectiveOverrideName,
-      loginName,
-      storageOnlyLoad,
-      storageAvailablePerspectives,
-    })
-    return playerIdForViewpointName(players, selectedViewpointName)
-  }, [
-    selectedGameId,
-    gameInfoContext,
-    selectedTurn,
-    perspectiveOverrideName,
-    loginName,
-    storageOnlyLoad,
-    storageAvailablePerspectives,
-    players,
-  ])
+  const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
 
   const playersById = useMemo(
     () => new Map(data.players.map((player) => [player.playerId, player])),
     [data.players]
   )
-
-  const visiblePlayers = useMemo(() => {
-    const enabled = players.filter((player) =>
-      resolveFleetPlayerVisible(player.playerId, viewpointPlayerId, visibilityOverrides)
-    )
-    return orderFleetSidebarPlayers(enabled, viewpointPlayerId)
-  }, [players, viewpointPlayerId, visibilityOverrides])
 
   if (visiblePlayers.length === 0) {
     return (

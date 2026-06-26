@@ -4,7 +4,6 @@ import { FleetAnalyticTile } from '../analytics/fleet/FleetAnalyticTile'
 import { ScoresTableTile } from '../analytics/scores/ScoresTableTile'
 import { StellarCartographyMapTile } from '../analytics/stellar-cartography/StellarCartographyMapTile'
 import { tileClassName } from '../analytics/tileChrome'
-import type { PerspectiveRow } from '../lib/gameInfoShell'
 import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
 import type { AnalyticItem, ConnectionsMapParams, ScoresTableParams } from '../api/bff'
 
@@ -21,8 +20,6 @@ type AnalyticsBarProps = {
   onScoresTableParamsChange: (next: ScoresTableParams) => void
   stellarCartographyGates: StellarCartographySettingsGates
   ionStormCount: number | null
-  fleetPlayers: PerspectiveRow[]
-  fleetViewpointPlayerId: number | null
 }
 
 function supportsCurrentMode(a: AnalyticItem, viewMode: ViewMode): boolean {
@@ -45,8 +42,6 @@ export function AnalyticsBar({
   onScoresTableParamsChange,
   stellarCartographyGates,
   ionStormCount,
-  fleetPlayers,
-  fleetViewpointPlayerId,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
@@ -105,8 +100,6 @@ export function AnalyticsBar({
                   supportsMode={supportsMode}
                   depressed={depressed}
                   onToggle={() => onToggle(a.id)}
-                  players={fleetPlayers}
-                  viewpointPlayerId={fleetViewpointPlayerId}
                 />
               </li>
             )
