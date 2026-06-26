@@ -62,11 +62,6 @@ def is_fleet_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> 
     )
 
 
-def is_fleet_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """Probe/ensure hook: fleet export is satisfied when the turn snapshot is stored."""
-    return is_fleet_export_persisted(ctx, scope)
-
-
 def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if is_fleet_export_persisted(ctx, scope):
         return True
@@ -171,5 +166,4 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     ensure_export=ensure_fleet_export,
     materialize_export_tree=materialize_fleet_export_tree,
     is_persisted=is_fleet_export_persisted,
-    is_ensure_satisfied=is_fleet_export_ensure_satisfied,
 )
