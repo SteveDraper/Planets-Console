@@ -8,9 +8,9 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
-from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.scores.export_precedence import SearchStatus

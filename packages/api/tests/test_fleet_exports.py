@@ -26,7 +26,6 @@ from tests.scores_exports_helpers import (
     put_persisted_row,
     query_context,
     schedule_row_with_ladder,
-    seed_scores_fleet_unwind_through,
     ship_build_wire,
 )
 
