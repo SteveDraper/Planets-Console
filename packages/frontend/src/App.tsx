@@ -20,7 +20,6 @@ import {
   applyShellGameBootstrapResult,
   fetchShellGameBootstrap,
 } from './shell/shellGameBootstrap'
-import { playerIdForViewpointName } from './lib/gameInfoShell'
 import { useShellContext, useShellGameSelection } from './shell'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
@@ -255,12 +254,6 @@ function ConsoleShell() {
       ? (stellarCartographyTurnSummary?.ionStormCount ?? null)
       : null
 
-  const fleetPlayers = gameInfoContext?.perspectives ?? []
-  const fleetViewpointPlayerId = playerIdForViewpointName(
-    fleetPlayers,
-    shellSelectedViewpointName
-  )
-
   const analytics = analyticsData?.analytics ?? []
   const enabledAnalyticIds = useMemo(
     () => analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
@@ -328,8 +321,6 @@ function ConsoleShell() {
           onScoresTableParamsChange={setScoresTableParams}
           stellarCartographyGates={stellarCartographyGates}
           ionStormCount={ionStormCount}
-          fleetPlayers={fleetPlayers}
-          fleetViewpointPlayerId={fleetViewpointPlayerId}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">

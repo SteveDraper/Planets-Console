@@ -15,6 +15,7 @@ import type {
 import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
+import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
@@ -364,22 +365,28 @@ export function MainArea({
 
     return (
       <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
-        {enabledAnalyticIds.map((id) => (
-          <AnalyticTableSection
-            key={id}
-            title={analytics.find((a) => a.id === id)?.name ?? id}
-          >
-            <TableTile
-              analyticId={id}
-              analyticScope={analyticScope}
-              fetchEnabled={
-                analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
-              }
-              scoresTableParams={scoresTableParams}
-              globalInferencePause={globalInferencePause}
-            />
-          </AnalyticTableSection>
-        ))}
+        {enabledAnalyticIds.map((id) => {
+          const fetchEnabled =
+            analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
+          return (
+            <AnalyticTableSection
+              key={id}
+              title={analytics.find((a) => a.id === id)?.name ?? id}
+            >
+              {id === 'fleet' ? (
+                <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
+              ) : (
+                <TableTile
+                  analyticId={id}
+                  analyticScope={analyticScope}
+                  fetchEnabled={fetchEnabled}
+                  scoresTableParams={scoresTableParams}
+                  globalInferencePause={globalInferencePause}
+                />
+              )}
+            </AnalyticTableSection>
+          )
+        })}
       </main>
     )
   }

@@ -3,12 +3,9 @@ import type { ComponentProps } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FleetAnalyticTile } from './FleetAnalyticTile'
+import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
-
-const players = [
-  { ordinal: 1, playerId: 8, name: 'Alice', raceName: null },
-  { ordinal: 2, playerId: 9, name: 'Bob', raceName: null },
-] as const
+import { useShellStore } from '../../stores/shell'
 
 function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>> = {}) {
   return render(
@@ -18,8 +15,6 @@ function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>>
       supportsMode
       depressed
       onToggle={() => {}}
-      players={[...players]}
-      viewpointPlayerId={8}
       {...overrides}
     />
   )
@@ -28,6 +23,15 @@ function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>>
 describe('FleetAnalyticTile', () => {
   beforeEach(() => {
     useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    useShellStore.setState({
+      selectedGameId: null,
+      gameInfoContext: null,
+      selectedTurn: null,
+      perspectiveOverrideName: null,
+      storageOnlyLoad: false,
+      storageAvailablePerspectives: null,
+    })
+    seedShellViewpoint('Alice')
   })
 
   it('hides player checkboxes until expanded', () => {
