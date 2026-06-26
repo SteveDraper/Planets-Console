@@ -3,7 +3,9 @@ import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   useReactTable,
+  type ExpandedState,
 } from '@tanstack/react-table'
 import { AlertTriangle, ChevronDown, ShieldCheck } from 'lucide-react'
 import { cn } from '../../lib/utils'
@@ -62,7 +64,7 @@ export function FleetPlayerTableTile({
   records,
   discrepancy,
 }: FleetPlayerTableTileProps) {
-  const [expandedRecordIds, setExpandedRecordIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
 
   const columns = useMemo(
@@ -71,37 +73,26 @@ export function FleetPlayerTableTile({
         id: 'expander',
         header: '',
         cell: ({ row }) => {
-          const alternates = alternateBuildOptionSets(row.original)
-          if (alternates.length === 0) {
+          if (!row.getCanExpand()) {
             return null
           }
-          const expanded = expandedRecordIds.has(row.original.recordId)
+          const isExpanded = row.getIsExpanded()
           return (
             <button
               type="button"
-              aria-expanded={expanded}
+              aria-expanded={isExpanded}
               aria-label={
-                expanded
+                isExpanded
                   ? `Collapse build options for ${row.original.recordId}`
                   : `Expand build options for ${row.original.recordId}`
               }
-              onClick={() =>
-                setExpandedRecordIds((current) => {
-                  const next = new Set(current)
-                  if (next.has(row.original.recordId)) {
-                    next.delete(row.original.recordId)
-                  } else {
-                    next.add(row.original.recordId)
-                  }
-                  return next
-                })
-              }
+              onClick={row.getToggleExpandedHandler()}
               className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-black/15 hover:text-slate-200"
             >
               <ChevronDown
                 className={cn(
                   'h-4 w-4 transition-transform duration-150',
-                  !expanded && '-rotate-90'
+                  !isExpanded && '-rotate-90'
                 )}
                 aria-hidden
               />
@@ -143,13 +134,17 @@ export function FleetPlayerTableTile({
         cell: ({ row }) => <FleetStatusIcons record={row.original} />,
       }),
     ],
-    [expandedRecordIds]
+    []
   )
 
   const table = useReactTable({
     data: activeRecords,
     columns,
+    state: { expanded },
+    onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: (row) => alternateBuildOptionSets(row.original).length > 0,
     getRowId: (record) => record.recordId,
   })
 
@@ -200,37 +195,33 @@ export function FleetPlayerTableTile({
               ))}
             </thead>
             <tbody>
-              {table.getRowModel().rows.map((row) => {
-                const alternates = alternateBuildOptionSets(row.original)
-                const expanded = expandedRecordIds.has(row.original.recordId)
-                return (
-                  <Fragment key={row.id}>
+              {table.getRowModel().rows.map((row) => (
+                <Fragment key={row.id}>
+                  <tr className="border-b border-[#52575d]/50">
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="px-3 py-2 text-gray-400">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                  {row.getIsExpanded() ? (
                     <tr className="border-b border-[#52575d]/50">
-                      {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-3 py-2 text-gray-400">
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
+                      <td
+                        colSpan={columns.length}
+                        className="bg-black/10 px-3 py-2 text-xs text-slate-300"
+                      >
+                        <ul className="space-y-1">
+                          {alternateBuildOptionSets(row.original).map((optionSet) => (
+                            <li key={optionSet.comboId ?? optionSet.label}>
+                              {formatBuildOptionSetSummary(optionSet)}
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
                     </tr>
-                    {expanded && alternates.length > 0 ? (
-                      <tr key={`${row.id}-alternates`} className="border-b border-[#52575d]/50">
-                        <td
-                          colSpan={columns.length}
-                          className="bg-black/10 px-3 py-2 text-xs text-slate-300"
-                        >
-                          <ul className="space-y-1">
-                            {alternates.map((optionSet) => (
-                              <li key={optionSet.comboId ?? optionSet.label}>
-                                {formatBuildOptionSetSummary(optionSet)}
-                              </li>
-                            ))}
-                          </ul>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                )
-              })}
+                  ) : null}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>
