@@ -4,59 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.exports import EXPORT_CATALOG
-from api.analytics.fleet.held_solutions import FleetInferenceSupport
-from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
-from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_services import ScoresExportContext
-from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-from tests.scores_exports_helpers import (
-    GAME_ID,
-    first_player_id,
-    perspective,
-)
-
-
-def fleet_query_context(
-    sample_turn,
-    *,
-    persistence: InferenceRowPersistenceService | None = None,
-    scheduler: InferenceRowScheduler | None = None,
-    stored_turns: dict[int, object] | None = None,
-):
-    turns = stored_turns or {sample_turn.settings.turn: sample_turn}
-
-    def load_turn(turn_number: int):
-        return turns.get(turn_number)
-
-    scores_services = ScoresExportContext(persistence=persistence)
-    if scheduler is not None:
-        scores_services = ScoresExportContext(
-            persistence=persistence,
-            scheduler=scheduler,
-        )
-
-    fleet_services = build_ephemeral_fleet_compute_services(
-        sample_turn,
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        stored_turns=turns,
-        inference=FleetInferenceSupport(scores_services=scores_services),
-    )
-
-    return make_analytic_query_context(
-        sample_turn,
-        TurnAnalyticsOptions(),
-        load_turn=load_turn,
-        export_services={
-            "scores": scores_services,
-            "fleet": fleet_services,
-        },
-    )
+from tests.scores_exports_helpers import first_player_id
 
 
 def materialize_fleet_tree(ctx, player_id: int, *, turn: int | None = None):

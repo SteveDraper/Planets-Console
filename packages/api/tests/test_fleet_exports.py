@@ -13,13 +13,13 @@ from api.analytics.scores.exports import EXPORT_CATALOG as SCORES_EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.fleet_exports_helpers import (
-    fleet_query_context,
     materialize_fleet_tree,
     turn_with_score_delta,
 )
 from tests.scores_exports_helpers import (
     first_player_id,
     put_persisted_row,
+    query_context,
     schedule_row_with_ladder,
     ship_build_wire,
 )
@@ -45,7 +45,7 @@ def test_scores_catalog_references_fleet_with_non_empty_target():
 
 
 def test_invalid_scope_without_player_id_for_players_path(sample_turn):
-    ctx = fleet_query_context(sample_turn)
+    ctx = query_context(sample_turn)
     result = ctx.query("fleet", ["$.players"])
     assert result.status == "unavailable"
     assert result.reason == "invalid_scope"
@@ -53,7 +53,7 @@ def test_invalid_scope_without_player_id_for_players_path(sample_turn):
 
 def test_materialized_tree_includes_meta_host_turn(sample_turn):
     player_id = first_player_id(sample_turn)
-    ctx = fleet_query_context(sample_turn)
+    ctx = query_context(sample_turn)
     tree, scope = materialize_fleet_tree(ctx, player_id)
     assert scope.turn == sample_turn.settings.turn
     assert tree["meta"]["hostTurn"] == sample_turn.settings.turn
@@ -64,7 +64,7 @@ def test_materialized_tree_includes_meta_host_turn(sample_turn):
 def test_materialized_tree_surfaces_not_started_scores_status(sample_turn):
     reset_inference_row_scheduler_for_tests()
     player_id = first_player_id(sample_turn)
-    ctx = fleet_query_context(sample_turn, scheduler=InferenceRowScheduler(worker_count=0))
+    ctx = query_context(sample_turn, scheduler=InferenceRowScheduler(worker_count=0))
     tree, _scope = materialize_fleet_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "not_started"
     assert "solutionsHeld" not in tree["meta"]
@@ -84,7 +84,7 @@ def test_materialized_tree_surfaces_complete_scores_status(sample_turn, persiste
             solutions=[],
         ),
     )
-    ctx = fleet_query_context(sample_turn, persistence=persistence)
+    ctx = query_context(sample_turn, persistence=persistence)
     tree, _scope = materialize_fleet_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "complete"
     assert "solutionsHeld" not in tree["meta"]
@@ -100,7 +100,7 @@ def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn):
         player_id,
         merged_solutions=[],
     )
-    ctx = fleet_query_context(sample_turn, scheduler=scheduler)
+    ctx = query_context(sample_turn, scheduler=scheduler)
     tree, _scope = materialize_fleet_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "in_progress"
 
@@ -119,7 +119,7 @@ def test_materialized_tree_includes_placeholder_records_with_incomplete_search(s
     stored_turns = turn_chain_through(turn)
     stored_turns[5] = turn
 
-    ctx = fleet_query_context(
+    ctx = query_context(
         turn,
         stored_turns=stored_turns,
         scheduler=InferenceRowScheduler(worker_count=0),
@@ -158,7 +158,7 @@ def test_query_meta_search_status_path(sample_turn, persistence):
             ],
         ),
     )
-    ctx = fleet_query_context(sample_turn, persistence=persistence)
+    ctx = query_context(sample_turn, persistence=persistence)
     result = ctx.query(
         "fleet",
         ["$.meta.searchStatus", "$.meta.solutionsHeld"],
