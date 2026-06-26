@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from api.analytics.fleet.constants import ANALYTIC_ID, GAP_FILL_MAX_RETRIES
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
@@ -18,6 +19,33 @@ from api.models.game import TurnInfo
 
 class _FleetSnapshotInvalidated(Exception):
     """Gap-fill observed a concurrent fleet snapshot invalidation."""
+
+
+@dataclass
+class _GapFillCoherence:
+    """Guard gap-fill puts against concurrent fleet snapshot invalidation."""
+
+    persistence: FleetSnapshotPersistenceService
+    game_id: int
+    perspective: int
+    generation: int
+
+    def put_snapshot(self, turn_number: int, snapshot: FleetTurnSnapshot) -> None:
+        self._assert_unchanged()
+        self.persistence.put_snapshot(
+            self.game_id,
+            self.perspective,
+            turn_number,
+            snapshot,
+        )
+        self._assert_unchanged()
+
+    def _assert_unchanged(self) -> None:
+        if (
+            self.persistence.invalidation_generation(self.game_id, self.perspective)
+            != self.generation
+        ):
+            raise _FleetSnapshotInvalidated()
 
 
 def ensure_fleet_baseline(
@@ -108,25 +136,13 @@ def _first_stored_rst_turn(
     return None
 
 
-def _assert_invalidation_generation_unchanged(
-    persistence: FleetSnapshotPersistenceService,
-    *,
-    game_id: int,
-    perspective: int,
-    generation: int,
-) -> None:
-    if persistence.invalidation_generation(game_id, perspective) != generation:
-        raise _FleetSnapshotInvalidated()
-
-
 def _materialize_and_persist_turn(
-    persistence: FleetSnapshotPersistenceService,
+    coherence: _GapFillCoherence,
     *,
     materialize_turn: int,
     prior_snapshot: FleetTurnSnapshot,
     turn_info: TurnInfo,
     inference_materialization: FleetInferenceMaterialization | None = None,
-    invalidation_generation: int,
 ) -> FleetTurnSnapshot:
     snapshot = advance_snapshot_to_turn(
         prior_snapshot,
@@ -139,18 +155,7 @@ def _materialize_and_persist_turn(
         turn_info,
         inference_materialization=inference_materialization,
     )
-    persistence.put_snapshot(
-        snapshot.game_id,
-        snapshot.perspective,
-        materialize_turn,
-        snapshot,
-    )
-    _assert_invalidation_generation_unchanged(
-        persistence,
-        game_id=snapshot.game_id,
-        perspective=snapshot.perspective,
-        generation=invalidation_generation,
-    )
+    coherence.put_snapshot(materialize_turn, snapshot)
     return snapshot
 
 
@@ -162,7 +167,7 @@ def _materialize_fleet_snapshot_chain(
     *,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
-    invalidation_generation: int,
+    coherence: _GapFillCoherence,
 ) -> FleetTurnSnapshot:
     """Gap-fill fleet snapshots from the latest anchor through turn T."""
     turn_number = turn.settings.turn
@@ -243,13 +248,7 @@ def _materialize_fleet_snapshot_chain(
             turn_one,
             inference_materialization=resolved_inference_materialization,
         )
-        persistence.put_snapshot(game_id, perspective, 1, turn_one_snapshot)
-        _assert_invalidation_generation_unchanged(
-            persistence,
-            game_id=game_id,
-            perspective=perspective,
-            generation=invalidation_generation,
-        )
+        coherence.put_snapshot(1, turn_one_snapshot)
         current_snapshot = turn_one_snapshot
         if turn_number == 1:
             return turn_one_snapshot
@@ -262,12 +261,11 @@ def _materialize_fleet_snapshot_chain(
         )
         turn_info = require_turn(materialize_turn)
         current_snapshot = _materialize_and_persist_turn(
-            persistence,
+            coherence,
             materialize_turn=materialize_turn,
             prior_snapshot=current_snapshot,
             turn_info=turn_info,
             inference_materialization=resolved_inference_materialization,
-            invalidation_generation=invalidation_generation,
         )
 
     return current_snapshot
@@ -289,7 +287,12 @@ def get_or_materialize_fleet_snapshot(
         return cached
 
     for attempt in range(GAP_FILL_MAX_RETRIES):
-        invalidation_generation = persistence.invalidation_generation(game_id, perspective)
+        coherence = _GapFillCoherence(
+            persistence,
+            game_id,
+            perspective,
+            persistence.invalidation_generation(game_id, perspective),
+        )
         try:
             return _materialize_fleet_snapshot_chain(
                 persistence,
@@ -298,7 +301,7 @@ def get_or_materialize_fleet_snapshot(
                 turn,
                 load_turn=load_turn,
                 inference_materialization=inference_materialization,
-                invalidation_generation=invalidation_generation,
+                coherence=coherence,
             )
         except _FleetSnapshotInvalidated:
             if attempt + 1 >= GAP_FILL_MAX_RETRIES:

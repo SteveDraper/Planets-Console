@@ -6,6 +6,7 @@ import copy
 import json
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.chain import (
@@ -19,7 +20,7 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetTurnSnapshot,
 )
-from api.errors import NotFoundError, ValidationError
+from api.errors import ConflictError, NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -589,3 +590,100 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
     assert len(snapshot.players[0].records) == 6
     assert snapshot.players[0].records[0].record_id == "gap-rec"
+
+
+def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persistence, load_turn):
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    sync = threading.Barrier(2)
+    attempt_puts: list[list[int]] = []
+    current_attempt_puts: list[int] = []
+    mid_chain_intercepted = False
+    original_put_snapshot = persistence.put_snapshot
+
+    def hooked_put_snapshot(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        snapshot: FleetTurnSnapshot,
+    ) -> None:
+        nonlocal mid_chain_intercepted
+        original_put_snapshot(game_id, perspective, turn_number, snapshot)
+        current_attempt_puts.append(turn_number)
+        if turn_number == 111 and not mid_chain_intercepted:
+            mid_chain_intercepted = True
+            assert persistence.get_snapshot(628580, 1, 112) is None
+            sync.wait()
+            persistence.invalidate_for_turn_write(628580, 1, 111)
+            assert persistence.get_snapshot(628580, 1, 112) is None
+            attempt_puts.append(list(current_attempt_puts))
+            current_attempt_puts.clear()
+            sync.wait()
+
+    persistence.put_snapshot = hooked_put_snapshot  # type: ignore[method-assign]
+
+    gap_fill_error: BaseException | None = None
+    snapshot: FleetTurnSnapshot | None = None
+
+    def run_gap_fill() -> None:
+        nonlocal gap_fill_error, snapshot
+        try:
+            snapshot = get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            gap_fill_error = exc
+
+    gap_fill_thread = threading.Thread(target=run_gap_fill)
+    gap_fill_thread.start()
+    sync.wait()
+    sync.wait()
+    gap_fill_thread.join()
+
+    assert gap_fill_error is None
+    assert snapshot is not None
+    assert attempt_puts[0] == [111]
+    assert snapshot.turn == 112
+    assert persistence.get_snapshot(628580, 1, 112) == snapshot
+
+
+def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, load_turn):
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    original_put_snapshot = persistence.put_snapshot
+
+    def put_snapshot_that_invalidates(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        snapshot: FleetTurnSnapshot,
+    ) -> None:
+        original_put_snapshot(game_id, perspective, turn_number, snapshot)
+        persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
+
+    persistence.put_snapshot = put_snapshot_that_invalidates  # type: ignore[method-assign]
+
+    with patch("api.analytics.fleet.chain.GAP_FILL_MAX_RETRIES", 3):
+        with pytest.raises(ConflictError, match="exceeded 3 invalidation retries"):
+            get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_111,
+                load_turn=load_turn,
+            )
+
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert persistence.invalidation_generation(628580, 1) == 3
