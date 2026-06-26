@@ -23,7 +23,15 @@ function isScopeLevelStreamConflict(event: InferenceStreamEvent): boolean {
   )
 }
 
-export type TableInferenceStreamConnectResult = 'ok' | 'aborted' | 'conflict_exhausted'
+export type TableInferenceStreamConnectResult =
+  | 'ok'
+  | 'aborted'
+  | 'conflict_exhausted'
+  | 'incomplete_exhausted'
+
+const STREAM_INCOMPLETE_RETRY_INITIAL_MS = 50
+const STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS = 10
+const STREAM_INCOMPLETE_RETRY_MAX_DELAY_MS = 500
 
 export async function connectTableInferenceStream(
   scope: AnalyticShellScope,
@@ -70,4 +78,43 @@ export async function connectTableInferenceStream(
   }
 
   return 'conflict_exhausted'
+}
+
+export async function connectTableInferenceStreamUntilComplete(
+  scope: AnalyticShellScope,
+  playerIds: number[],
+  handlers: {
+    signal: AbortSignal
+    onEvent: (event: InferenceStreamEvent) => void
+    hasPendingRows: () => boolean
+  }
+): Promise<TableInferenceStreamConnectResult> {
+  for (let attempt = 0; attempt < STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS; attempt += 1) {
+    if (handlers.signal.aborted) {
+      return 'aborted'
+    }
+
+    const result = await connectTableInferenceStream(scope, playerIds, {
+      signal: handlers.signal,
+      onEvent: handlers.onEvent,
+    })
+
+    if (handlers.signal.aborted) {
+      return 'aborted'
+    }
+    if (result === 'conflict_exhausted') {
+      return result
+    }
+    if (!handlers.hasPendingRows()) {
+      return 'ok'
+    }
+
+    const delayMs = Math.min(
+      STREAM_INCOMPLETE_RETRY_INITIAL_MS * 2 ** attempt,
+      STREAM_INCOMPLETE_RETRY_MAX_DELAY_MS
+    )
+    await sleep(delayMs)
+  }
+
+  return 'incomplete_exhausted'
 }

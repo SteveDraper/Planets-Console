@@ -3,6 +3,7 @@ import * as bff from '../../api/bff'
 import {
   TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
   connectTableInferenceStream,
+  connectTableInferenceStreamUntilComplete,
 } from './tableInferenceStreamConnect'
 
 const scope = {
@@ -44,5 +45,53 @@ describe('connectTableInferenceStream', () => {
     expect(result).toBe('ok')
     expect(fetchSpy).toHaveBeenCalledTimes(2)
     expect(events).toHaveLength(1)
+  })
+
+  it('reconnects when the stream ends before every row is complete', async () => {
+    const fetchSpy = vi
+      .spyOn(bff, 'fetchScoresTableInferenceStream')
+      .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'cached',
+          solutionCount: 1,
+          isComplete: true,
+        })
+      })
+      .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'cached replay',
+          solutionCount: 1,
+          isComplete: true,
+        })
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 6,
+          status: 'exact',
+          summary: 'after reconnect',
+          solutionCount: 1,
+          isComplete: true,
+        })
+      })
+
+    const completedPlayerIds = new Set<number>()
+    const controller = new AbortController()
+    const result = await connectTableInferenceStreamUntilComplete(scope, [8, 6], {
+      signal: controller.signal,
+      onEvent: (event) => {
+        if (event.type === 'complete' && event.playerId != null) {
+          completedPlayerIds.add(event.playerId)
+        }
+      },
+      hasPendingRows: () => [8, 6].some((playerId) => !completedPlayerIds.has(playerId)),
+    })
+
+    expect(result).toBe('ok')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 })
