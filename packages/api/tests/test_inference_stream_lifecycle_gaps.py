@@ -13,6 +13,8 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+
+import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -37,8 +39,6 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
-
-import pytest
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -174,9 +174,7 @@ def test_multiplex_stops_when_scope_deactivates_before_queued_complete_is_yielde
 
     assert remaining == []
     slow_types = [
-        event["type"]
-        for event in remaining
-        if event.get("playerId") == slow_row.player_id
+        event["type"] for event in remaining if event.get("playerId") == slow_row.player_id
     ]
     assert "complete" not in slow_types
 
@@ -248,10 +246,14 @@ def test_stream_preempt_persists_complete_before_first_connection_drains_in_flig
     _wait_until(lambda: len(scheduler._runs) == len(player_ids))
 
     completed_session = next(
-        run.session for run in scheduler._runs.values() if run.session.player_id == completed_player_id
+        run.session
+        for run in scheduler._runs.values()
+        if run.session.player_id == completed_player_id
     )
     in_flight_session = next(
-        run.session for run in scheduler._runs.values() if run.session.player_id == in_flight_player_id
+        run.session
+        for run in scheduler._runs.values()
+        if run.session.player_id == in_flight_player_id
     )
 
     scheduler._emit_row_complete(
