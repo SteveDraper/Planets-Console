@@ -149,6 +149,7 @@ When scoreboard implies fewer ships than **active** rows:
 | **Baseline** | Turn 1: empty ledger or sightings-only seed |
 | **Events** | Copied forward; new events appended; corrections add events at `T` without erasing `T-1` |
 | **Invalidation** | Turn document replace at `T`: drop fleet snapshots `>= T` at that **perspective**; re-chain. Scores inference invalidation: re-chain from first affected host turn (exact coupling in implementation ticket) |
+| **Invalidation generation** | Each `(gameId, perspective)` has a monotonic counter bumped on every fleet snapshot invalidation. Multi-turn gap-fill records the counter at chain start and aborts (then retries from a fresh anchor, bounded max retries) when the counter advances mid-materialization. Invalidation callbacks only bump the counter and delete stored snapshots; they do not block on an in-progress gap-fill |
 
 ---
 
