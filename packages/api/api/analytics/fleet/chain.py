@@ -93,6 +93,17 @@ def _find_chain_anchor(
     return 0, None
 
 
+def _first_stored_rst_turn(
+    load_turn: Callable[[int], TurnInfo | None],
+    turn_number: int,
+) -> int | None:
+    """Return the lowest stored RST turn in ``1..turn_number``, if any."""
+    for stored_turn_number in range(1, turn_number + 1):
+        if load_turn(stored_turn_number) is not None:
+            return stored_turn_number
+    return None
+
+
 def _materialize_and_persist_turn(
     persistence: FleetSnapshotPersistenceService,
     *,
@@ -163,11 +174,11 @@ def get_or_materialize_fleet_snapshot(
             )
         return turn_info
 
-    def require_prior_rst(materialize_turn: int, *, allow_missing_turn_one_rst: bool) -> None:
+    def require_prior_rst(materialize_turn: int, *, allow_missing_prefix_rst: bool) -> None:
         if materialize_turn <= 1:
             return
         prior_turn_number = materialize_turn - 1
-        if allow_missing_turn_one_rst and prior_turn_number == 1:
+        if allow_missing_prefix_rst:
             return
         if cached_load(prior_turn_number) is None:
             raise NotFoundError(
@@ -181,12 +192,17 @@ def get_or_materialize_fleet_snapshot(
         perspective,
         turn_number,
     )
-    skip_turn_one_rst = anchor_turn == 0 and turn_number > 1 and cached_load(1) is None
+    first_stored_rst = _first_stored_rst_turn(cached_load, turn_number)
+    skip_missing_prefix_rst = (
+        anchor_turn == 0
+        and turn_number > 1
+        and first_stored_rst is not None
+        and first_stored_rst > 1
+    )
     start_turn = anchor_turn + 1
 
-    if skip_turn_one_rst:
-        if start_turn == 1:
-            start_turn = 2
+    if skip_missing_prefix_rst:
+        start_turn = first_stored_rst
         first_rst_turn = require_turn(start_turn)
         implicit_baseline = ensure_fleet_baseline(
             game_id,
@@ -216,7 +232,7 @@ def get_or_materialize_fleet_snapshot(
     for materialize_turn in range(start_turn, turn_number + 1):
         require_prior_rst(
             materialize_turn,
-            allow_missing_turn_one_rst=skip_turn_one_rst and materialize_turn == start_turn,
+            allow_missing_prefix_rst=skip_missing_prefix_rst and materialize_turn == start_turn,
         )
         turn_info = require_turn(materialize_turn)
         current_snapshot = _materialize_and_persist_turn(

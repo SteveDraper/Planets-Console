@@ -57,6 +57,50 @@ describe('scoresDiagnosticsFromTable', () => {
     })
   })
 
+  it('omits rows that have not received terminal diagnostics yet', () => {
+    const data: TableDataResponse = {
+      analyticId: 'scores',
+      includeBuildInference: true,
+      columns: ['Race (player)', 'Build inference'],
+      rows: [['cyborg', ''], ['colonies', '']],
+      inferenceByRow: [
+        {
+          playerId: 6,
+          displayStatus: 'pending',
+          status: 'pending',
+          summary: 'Searching (early game bands)',
+          solutionCount: 0,
+          isComplete: false,
+          solutions: [],
+          diagnostics: {},
+        },
+        {
+          playerId: 11,
+          displayStatus: 'success',
+          status: 'pending',
+          summary: 'Searching (early game bands)',
+          solutionCount: 1,
+          isComplete: false,
+          solutions: [
+            {
+              objectiveValue: 10,
+              actions: [{ actionId: 'a1', label: 'Build Cobol', count: 1 }],
+            },
+          ],
+          diagnostics: {},
+        },
+      ],
+    }
+
+    const snapshot = scoresDiagnosticsFromTable(data, {
+      gameId: '628580',
+      turn: 3,
+      perspective: 1,
+    })
+
+    expect(snapshot?.players).toEqual([])
+  })
+
   it('falls back to constraints.playerId when playerId is omitted on the row detail', () => {
     const data: TableDataResponse = {
       analyticId: 'scores',

@@ -184,6 +184,39 @@ def _merge_score_equivalent_combos(
     )
 
 
+def _freighter_only_zero_military_solution(
+    problem: InferenceProblem,
+) -> InferenceSolution | None:
+    """Return a ship-only freighter explanation without CP-SAT when constraints allow."""
+    observation = problem.observation
+    if (
+        observation.military_delta_2x != 0
+        or observation.warship_delta != 0
+        or observation.freighter_delta <= 0
+    ):
+        return None
+    if observation.priority_point_delta != 0 and problem.enforce_priority_point_constraint:
+        return None
+    if any(action.lower_bound > 0 for action in problem.aggregate_actions):
+        return None
+    freighter_combo = next(
+        (
+            combo
+            for combo in problem.ship_build_combos
+            if is_generic_zero_military_score_combo_id(combo.combo_id)
+        ),
+        None,
+    )
+    if freighter_combo is None or freighter_combo.upper_bound < observation.freighter_delta:
+        return None
+    ship_build = _ship_build_from_member(freighter_combo, observation.freighter_delta)
+    return InferenceSolution(
+        objective_value=_objective_value(problem, {}, (ship_build,)),
+        actions=(),
+        ship_builds=(ship_build,),
+    )
+
+
 def _observation_is_solver_idle(problem: InferenceProblem) -> bool:
     """True when the solver has no modeled deltas to explain."""
     observation = problem.observation
@@ -501,6 +534,20 @@ def solve_inference_problem(
             status=STATUS_NO_EXACT_SOLUTION,
             solutions=(),
             diagnostics={"reason": "no candidate actions for non-zero observation deltas"},
+        )
+
+    freighter_only_solution = _freighter_only_zero_military_solution(problem)
+    if freighter_only_solution is not None:
+        if on_solution is not None:
+            on_solution(freighter_only_solution)
+        return InferenceResult(
+            status=STATUS_EXACT,
+            solutions=(freighter_only_solution,),
+            diagnostics={
+                "solver_status": "FREIGHTER_ONLY_FAST_PATH",
+                "solution_count": 1,
+                "stopped_reason": "freighter_only_fast_path",
+            },
         )
 
     merged_combo_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)

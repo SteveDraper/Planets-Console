@@ -13,6 +13,7 @@ from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     run_inference_tier_job,
+    stream_tier_time_limit_seconds,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
@@ -326,3 +327,48 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
     wire = wire_events[0]
     assert wire["segmentId"] == REPORTED_HOST_TURN_SEGMENT_ID
     assert "isTargetSegment" not in wire
+
+
+def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkeypatch) -> None:
+    orchestration = _accelerated_split_orchestration(sample_turn)
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    run = RowRun(session)
+    run.orchestration = orchestration
+    run.ladder_state = orchestration.new_ladder_state()
+
+    captured: list[float | None] = []
+
+    def fake_tier_step(
+        state,
+        observation,
+        turn,
+        *,
+        time_limit_seconds=None,
+        cancel_token=None,
+        on_admitted=None,
+    ) -> None:
+        del state, observation, turn, cancel_token, on_admitted
+        captured.append(time_limit_seconds)
+        run.ladder_state.ladder_complete = True
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
+        fake_tier_step,
+    )
+
+    callbacks = InferenceTierJobCallbacks(
+        emit_tier_started_progress=lambda: None,
+        emit_progress=lambda: None,
+        emit_held_solutions=lambda _observation: None,
+    )
+    run_inference_tier_job(run, callbacks)
+
+    assert captured == [stream_tier_time_limit_seconds()]
