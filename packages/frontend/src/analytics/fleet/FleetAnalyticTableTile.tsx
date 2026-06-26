@@ -1,13 +1,29 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable } from '../../api/bff'
 import type { AnalyticShellScope } from '../../api/bff'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { FleetTableView } from './FleetTableView'
-import { parseFleetTableWire } from './fleetTableWireSchema'
+import { parseFleetTableWire, type FleetTableWire } from './fleetTableWireSchema'
 
 type FleetAnalyticTableTileProps = {
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
+}
+
+type FleetTableParseResult =
+  | { ok: true; data: FleetTableWire }
+  | { ok: false; error: string }
+
+function parseFleetTableWireResult(payload: unknown): FleetTableParseResult {
+  try {
+    return { ok: true, data: parseFleetTableWire(payload) }
+  } catch (parseError) {
+    return {
+      ok: false,
+      error: parseError instanceof Error ? parseError.message : String(parseError),
+    }
+  }
 }
 
 export function FleetAnalyticTableTile({
@@ -19,6 +35,11 @@ export function FleetAnalyticTableTile({
     queryFn: () => fetchAnalyticTable('fleet', analyticScope!),
     enabled: fetchEnabled,
   })
+
+  const parsedFleetTable = useMemo(
+    () => (data != null ? parseFleetTableWireResult(data) : null),
+    [data]
+  )
 
   if (analyticScope == null) {
     return (
@@ -37,15 +58,14 @@ export function FleetAnalyticTableTile({
   }
   if (!data) return null
 
-  try {
-    const fleetTable = parseFleetTableWire(data)
-    return <FleetTableView data={fleetTable} />
-  } catch (parseError) {
+  if (parsedFleetTable == null || !parsedFleetTable.ok) {
     return (
       <div className="max-w-prose p-4 text-sm text-red-400 break-words">
         Error loading fleet table.{' '}
-        {parseError instanceof Error ? parseError.message : String(parseError)}
+        {parsedFleetTable?.ok === false ? parsedFleetTable.error : 'Unknown parse error.'}
       </div>
     )
   }
+
+  return <FleetTableView data={parsedFleetTable.data} />
 }
