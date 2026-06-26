@@ -10,7 +10,7 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
-from api.analytics.fleet.export_services import resolve_fleet_export_services
+from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.scores.export_precedence import SearchStatus
@@ -35,7 +35,7 @@ def _fleet_snapshot_for_scope(
     *,
     turn: TurnInfo | None = None,
 ) -> FleetTurnSnapshot:
-    services = resolve_fleet_export_services(ctx)
+    services = resolve_fleet_services(ctx)
     resolved_turn = turn if turn is not None else ctx.load_turn(scope.turn)
     if resolved_turn is None:
         raise ValidationError(f"Turn {scope.turn} is not stored")
@@ -54,7 +54,7 @@ def _fleet_snapshot_for_scope(
 
 
 def is_fleet_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    services = resolve_fleet_export_services(ctx)
+    services = resolve_fleet_services(ctx)
     return services.persistence.has_snapshot(
         services.game_id,
         services.perspective,
