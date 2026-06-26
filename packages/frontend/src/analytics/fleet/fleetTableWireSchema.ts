@@ -48,6 +48,19 @@ export const fleetTableRecordSchema = z
     lastSeen: fleetLastSeenSchema.optional(),
   })
   .strict()
+  .superRefine((record, ctx) => {
+    if (
+      record.displayDefaultOptionSetIndex != null &&
+      record.displayDefaultOptionSetIndex >= record.buildOptionSets.length
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Fleet table record displayDefaultOptionSetIndex must be less than buildOptionSets.length.',
+        path: ['displayDefaultOptionSetIndex'],
+      })
+    }
+  })
 
 export const fleetCountDiscrepancySchema = z.object({
   hostTurn: z.number().int(),

@@ -89,4 +89,34 @@ describe('fleetTableWireSchema', () => {
       'Fleet table record disposition is invalid.'
     )
   })
+
+  it('rejects displayDefaultOptionSetIndex out of bounds', () => {
+    expect(primaryGolden).toBeDefined()
+    const invalid = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    const record = invalid.players[0]!.records[0]!
+    record.displayDefaultOptionSetIndex = (record.buildOptionSets as unknown[]).length
+
+    const result = fleetTableWireSchema.safeParse(invalid)
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toBe(
+        'Fleet table record displayDefaultOptionSetIndex must be less than buildOptionSets.length.'
+      )
+    }
+  })
+
+  it('rejects displayDefaultOptionSetIndex when buildOptionSets is empty', () => {
+    expect(primaryGolden).toBeDefined()
+    const invalid = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    const record = invalid.players[0]!.records[0]!
+    record.buildOptionSets = []
+    record.displayDefaultOptionSetIndex = 0
+
+    const result = fleetTableWireSchema.safeParse(invalid)
+    expect(result.success).toBe(false)
+  })
 })
