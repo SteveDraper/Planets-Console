@@ -122,6 +122,8 @@ function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
     scoresPreferencesHydrated: true,
     globalInferencePause: idleGlobalInferencePause,
     futureTurnOffset: 0,
+    fleetPlayers: [],
+    fleetViewpointPlayerId: null,
     onMapZoomChange: vi.fn(),
     onSetZoomReady: vi.fn(),
   }
