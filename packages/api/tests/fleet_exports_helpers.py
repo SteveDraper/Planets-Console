@@ -7,7 +7,15 @@ from dataclasses import replace
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.exports import EXPORT_CATALOG
 
+from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.scores_exports_helpers import first_player_id
+
+__all__ = [
+    "export_chain_query_context",
+    "first_player_id",
+    "materialize_fleet_tree",
+    "turn_with_score_delta",
+]
 
 
 def materialize_fleet_tree(ctx, player_id: int, *, turn: int | None = None):

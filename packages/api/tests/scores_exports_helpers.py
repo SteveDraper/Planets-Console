@@ -9,11 +9,6 @@ from pathlib import Path
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.compute_services import (
-    build_ephemeral_fleet_compute_services,
-    turn_chain_through,
-)
-from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -71,15 +66,16 @@ def stream_scope_for_turn(
     )
 
 
-def query_context(
+def scores_query_context(
     sample_turn,
     *,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
     stored_turns: dict[int, object] | None = None,
-    seed_fleet_prerequisites_for: int | None = None,
 ):
-    turns = stored_turns if stored_turns is not None else turn_chain_through(sample_turn)
+    """Scores-only query context; default stored turns are the ambient turn only."""
+    turn_number = sample_turn.settings.turn
+    turns = stored_turns if stored_turns is not None else {turn_number: sample_turn}
 
     def load_turn(turn_number: int):
         return turns.get(turn_number)
@@ -91,41 +87,19 @@ def query_context(
             scheduler=scheduler,
         )
 
-    fleet_services = build_ephemeral_fleet_compute_services(
-        sample_turn,
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        stored_turns=turns,
-        inference=FleetInferenceSupport(scores_services=scores_services),
-    )
-
-    ctx = make_analytic_query_context(
+    return make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_services={
             "scores": scores_services,
-            "fleet": fleet_services,
         },
-    )
-    if seed_fleet_prerequisites_for is not None:
-        seed_scores_fleet_unwind_through(
-            ctx,
-            through_turn=sample_turn.settings.turn,
-            player_id=seed_fleet_prerequisites_for,
-        )
-    return ctx
-
-
-def first_turn_from(sample_turn):
-    return replace(
-        sample_turn,
-        settings=replace(sample_turn.settings, turn=1),
-        game=replace(sample_turn.game, turn=1),
     )
 
 
 def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
+    from api.analytics.fleet.compute_services import turn_chain_through
+
     prior_prior_turn = prior_turn - 1
     prior_turn_obj = replace(
         sample_turn,
@@ -144,6 +118,14 @@ def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
     return stored_turns, prior_turn_obj, prior_prior_turn_obj
 
 
+def first_turn_from(sample_turn):
+    return replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+        game=replace(sample_turn.game, turn=1),
+    )
+
+
 def prior_turn_ensure_context(
     sample_turn,
     persistence: InferenceRowPersistenceService,
@@ -151,18 +133,23 @@ def prior_turn_ensure_context(
     prior_turn: int = 110,
     game_id: int = GAME_ID,
 ):
+    from tests.export_chain_test_fixtures import (
+        export_chain_query_context,
+        seed_fleet_unwind_through,
+    )
+
     stored_turns, _, _ = prior_turn_chain(sample_turn, prior_turn=prior_turn)
     player_id = first_player_id(sample_turn)
 
     def load_turn(turn_number: int):
         return stored_turns.get(turn_number)
 
-    ctx = query_context(
+    ctx = export_chain_query_context(
         sample_turn,
         persistence=persistence,
         stored_turns=stored_turns,
     )
-    seed_scores_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
+    seed_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
     scope = ExportScope(
         game_id=game_id,
         perspective=perspective(sample_turn),
@@ -279,57 +266,13 @@ def put_persisted_row(
     )
 
 
-def seed_scores_fleet_unwind_through(
-    ctx,
-    *,
-    through_turn: int,
-    player_id: int,
-) -> None:
-    """Persist terminal scores rows and fleet snapshots for turns 1..through_turn-1."""
-    from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
-    from api.analytics.fleet.compute_services import FleetComputeServices
-    from api.analytics.military_score_inference.solver import STATUS_EXACT
-
-    fleet_services = ctx.export_services["fleet"]
-    if not isinstance(fleet_services, FleetComputeServices):
-        raise TypeError("seed_scores_fleet_unwind_through requires FleetComputeServices on ctx")
-
-    scores_services = ctx.export_services["scores"]
-    if scores_services.persistence is None:
-        raise RuntimeError("seed_scores_fleet_unwind_through requires scores persistence")
-
-    for turn_number in range(1, through_turn):
-        turn = ctx.load_turn(turn_number)
-        if turn is None:
-            raise RuntimeError(
-                f"seed_scores_fleet_unwind_through missing stored turn {turn_number}"
-            )
-        put_persisted_row(
-            scores_services.persistence,
-            turn,
-            player_id,
-            PersistedInferenceRow(
-                status=STATUS_EXACT,
-                summary="seed",
-                solution_count=0,
-                is_complete=True,
-                solutions=[],
-            ),
-            host_turn=turn_number,
-        )
-        get_or_materialize_fleet_snapshot(
-            fleet_services.persistence,
-            ctx.game_id,
-            ctx.perspective,
-            turn,
-            load_turn=ctx.load_turn,
-            inference_materialization=fleet_services.inference_materialization,
-        )
-
-
 def scores_missing_step(probe, *, turn: int, player_id: int):
-    """Assert probe reports exactly one missing scores step for turn/player."""
-    assert probe.total_missing == 1
+    """Return the scores missing ensure step; fleet prerequisites must already be seeded."""
+    fleet_steps = [step for step in probe.missing_steps if step.analytic_id == "fleet"]
+    assert not fleet_steps, (
+        "probe reports missing fleet steps; seed fleet prerequisites before asserting "
+        f"scores-only missing work: {fleet_steps}"
+    )
     return ensure_missing_step(probe, analytic_id="scores", turn=turn, player_id=player_id)
 
 

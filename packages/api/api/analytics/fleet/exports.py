@@ -7,6 +7,7 @@ from typing import Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
@@ -85,20 +86,6 @@ def _scores_search_status_for_scope(
     return resolved.decision.search_status, resolved.payload.solutions_held
 
 
-def _export_meta_branch(
-    *,
-    search_status: SearchStatus | None,
-    host_turn: int,
-    solutions_held: int = 0,
-) -> dict[str, object]:
-    meta: dict[str, object] = {"hostTurn": host_turn}
-    if search_status is not None:
-        meta["searchStatus"] = search_status
-    if solutions_held > 0:
-        meta["solutionsHeld"] = solutions_held
-    return meta
-
-
 def _players_for_scope(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
@@ -108,18 +95,17 @@ def _players_for_scope(
     return [ledger for ledger in snapshot.players if ledger.player_id == scope.player_id]
 
 
-def build_fleet_export_materialized_tree(
+def _build_fleet_export_materialized_tree(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
     *,
     search_status: SearchStatus | None,
     solutions_held: int,
 ) -> dict[str, Any]:
-    """Materialize the full fleet export value tree for one resolved snapshot."""
     return {
-        "meta": _export_meta_branch(
-            search_status=search_status,
+        "meta": build_export_meta_branch(
             host_turn=scope.turn,
+            search_status=search_status,
             solutions_held=solutions_held,
         ),
         "players": [
@@ -147,7 +133,7 @@ def materialize_fleet_export_tree(ctx: AnalyticQueryContext, scope: ExportScope)
             turn=turn,
         )
 
-    return build_fleet_export_materialized_tree(
+    return _build_fleet_export_materialized_tree(
         snapshot,
         scope,
         search_status=search_status,
