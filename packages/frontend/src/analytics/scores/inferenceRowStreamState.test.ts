@@ -111,6 +111,40 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(8, complete).solutionCount).toBe(1)
   })
 
+  it('leaves diagnostics empty on progress events', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'progress',
+      policyStepId: 'early_game_bands',
+      comboCount: 2142,
+      heldCount: 1,
+    })
+
+    expect(next.summary).toBe('Searching (early game bands)')
+    expect(next.isComplete).toBe(false)
+    expect(next.diagnostics).toEqual({})
+    expect(rowDetailFromStreamState(11, next).diagnostics).toEqual({})
+  })
+
+  it('populates diagnostics only on complete events', () => {
+    const complete = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'exact',
+      summary: 'Best: Freighter',
+      solutionCount: 1,
+      isComplete: true,
+      diagnostics: {
+        turn: 3,
+        solver: { status: 'exact', solver_status: 'FREIGHTER_ONLY_FAST_PATH' },
+      },
+    })
+
+    expect(complete.isComplete).toBe(true)
+    expect(complete.diagnostics).toMatchObject({
+      turn: 3,
+      solver: { status: 'exact' },
+    })
+  })
+
   it('preserves held solutions on complete events without solutions payload', () => {
     const withSolution = reduceRowStreamState(initialRowStreamState(), {
       type: 'solution',

@@ -39,7 +39,8 @@ function longLivedTableStream(
 function emitComplete(
   onEvent: StreamHandlers['onEvent'],
   playerId: number,
-  summary: string
+  summary: string,
+  diagnostics?: Record<string, unknown>
 ): void {
   onEvent({
     type: 'complete',
@@ -48,6 +49,7 @@ function emitComplete(
     summary,
     solutionCount: 1,
     isComplete: true,
+    ...(diagnostics != null ? { diagnostics } : {}),
   })
 }
 
@@ -498,6 +500,99 @@ describe('useScoresInferenceByRow', () => {
         expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('success')
       })
       expect(streamCallCount).toBe(1)
+    })
+  })
+
+  describe('stream lifecycle gaps (characterization)', () => {
+    const threePlayerTable: TableDataResponse = {
+      analyticId: 'scores',
+      includeBuildInference: true,
+      columns: ['Race (player)', 'Build inference'],
+      rows: [['other', ''], ['cyborg', ''], ['colonies', '']],
+      inferenceByRow: [{ playerId: 8 }, { playerId: 6 }, { playerId: 11 }],
+    }
+
+    it('keeps rows pending with empty diagnostics when the stream resolves without complete', async () => {
+      vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+        async (_scope, _playerIds, handlers) => {
+          emitComplete(handlers.onEvent, 8, 'Other player complete')
+          emitProgress(handlers.onEvent, 6, 'early_game_bands')
+          emitProgress(handlers.onEvent, 11, 'early_game_bands')
+        }
+      )
+
+      const { result } = renderHook(() =>
+        useScoresInferenceByRow(threePlayerTable, scope, true)
+      )
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(true)
+      })
+
+      expect(result.current.inferenceByRow?.[1]).toMatchObject({
+        playerId: 6,
+        displayStatus: 'pending',
+        isComplete: false,
+        diagnostics: {},
+        summary: 'Searching (early game bands)',
+      })
+      expect(result.current.inferenceByRow?.[2]).toMatchObject({
+        playerId: 11,
+        displayStatus: 'pending',
+        isComplete: false,
+        diagnostics: {},
+        summary: 'Searching (early game bands)',
+      })
+    })
+
+    it('remount after stream ends without terminal events can serve cached completes', async () => {
+      let streamGeneration = 0
+
+      vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+        async (_scope, _playerIds, handlers) => {
+          streamGeneration += 1
+          if (streamGeneration === 1) {
+            emitComplete(handlers.onEvent, 8, 'Other player complete')
+            emitProgress(handlers.onEvent, 6, 'early_game_bands')
+            emitProgress(handlers.onEvent, 11, 'early_game_bands')
+            return
+          }
+          emitComplete(handlers.onEvent, 6, 'Cyborg from cache', {
+            turn: scope.turn,
+            solver: { status: 'exact' },
+          })
+          emitComplete(handlers.onEvent, 11, 'Colonies from cache', {
+            turn: scope.turn,
+            solver: { status: 'exact' },
+          })
+        }
+      )
+
+      const { result, unmount } = renderHook(() =>
+        useScoresInferenceByRow(threePlayerTable, scope, true)
+      )
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(true)
+        expect(result.current.inferenceByRow?.[1]?.isComplete).toBe(false)
+      })
+
+      unmount()
+
+      const { result: remounted } = renderHook(() =>
+        useScoresInferenceByRow(threePlayerTable, scope, true)
+      )
+
+      await waitFor(() => {
+        expect(remounted.current.inferenceByRow?.[1]?.summary).toBe('Cyborg from cache')
+        expect(remounted.current.inferenceByRow?.[2]?.summary).toBe('Colonies from cache')
+      })
+      expect(remounted.current.inferenceByRow?.[1]?.isComplete).toBe(true)
+      expect(remounted.current.inferenceByRow?.[2]?.diagnostics).toMatchObject({
+        turn: scope.turn,
+        solver: { status: 'exact' },
+      })
+      expect(streamGeneration).toBe(2)
     })
   })
 })

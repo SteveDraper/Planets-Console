@@ -1,0 +1,505 @@
+"""Characterization tests for inference stream lifecycle gaps (persist vs deliver).
+
+These tests document edge cases in the stream/multiplex/preempt path where terminal
+row state may be persisted or finalized on the backend while the NDJSON consumer
+never receives a ``complete`` event. They use injected events and failures only --
+no production code changes.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
+import pytest
+from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    reset_inference_row_scheduler_for_tests,
+)
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    RowComplete,
+    RowCompleteWirePayload,
+    TierProgress,
+)
+from api.analytics.military_score_inference.inference_stream_rows import (
+    ScheduledInferenceRow,
+    iter_multiplexed_inference_events,
+    iter_scores_table_inference_events,
+    schedule_inference_row,
+)
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
+from api.analytics.military_score_inference.models import InferenceResult
+from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.storage.memory_asset import MemoryAssetBackend
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+def _diagnostics(*, turn: int, player_id: int) -> dict[str, object]:
+    return {
+        "turn": turn,
+        "constraints": {"playerId": player_id, "turn": turn},
+        "solver": {"status": STATUS_EXACT, "solver_status": "OPTIMAL"},
+    }
+
+
+def _row_complete(
+    *,
+    summary: str,
+    diagnostics: dict[str, object] | None = None,
+) -> RowComplete:
+    wire_diagnostics = diagnostics or {}
+    return RowComplete(
+        result=InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics=wire_diagnostics),
+        wire_payload=RowCompleteWirePayload(
+            status=STATUS_EXACT,
+            summary=summary,
+            solution_count=1,
+            is_complete=True,
+            solutions=[],
+            diagnostics=wire_diagnostics,
+        ),
+    )
+
+
+def _session_for_player(sample_turn, *, player_id: int) -> InferenceRowStreamSession:
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    return InferenceRowStreamSession(
+        player_id=player_id,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+
+
+def _scheduled_row(sample_turn, *, player_id: int) -> ScheduledInferenceRow:
+    return ScheduledInferenceRow(
+        player_id=player_id,
+        session=_session_for_player(sample_turn, player_id=player_id),
+    )
+
+
+def _install_workerless_scheduler(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    on_row_complete: Callable | None = None,
+) -> InferenceRowScheduler:
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(
+        worker_count=0,
+        on_row_complete=on_row_complete,
+    )
+
+    def _get_scheduler() -> InferenceRowScheduler:
+        return scheduler
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_scheduler.get_inference_row_scheduler",
+        _get_scheduler,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_stream_rows.get_inference_row_scheduler",
+        _get_scheduler,
+    )
+    return scheduler
+
+
+def _wait_until(predicate: Callable[[], bool], *, timeout_seconds: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+    raise AssertionError("condition not met before timeout")
+
+
+def _collect_stream_events(stream: Iterator[dict[str, object]]) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    try:
+        for event in stream:
+            events.append(event)
+    finally:
+        stream.close()
+    return events
+
+
+@pytest.fixture
+def memory_backend():
+    backend = MemoryAssetBackend(initial={})
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        backend.put("games/628580/info", json.load(handle))
+    with open(ASSETS_DIR / "turn_sample.json") as handle:
+        backend.put("games/628580/1/turns/111", json.load(handle))
+    return backend
+
+
+def test_multiplex_stops_when_scope_deactivates_before_queued_complete_is_yielded(sample_turn):
+    """Queued terminal events for pending rows are dropped when the stream scope ends."""
+    fast_row = _scheduled_row(sample_turn, player_id=sample_turn.scores[0].ownerid)
+    slow_row = _scheduled_row(sample_turn, player_id=sample_turn.scores[1].ownerid)
+    fast_row.session.event_queue.put(_row_complete(summary="fast complete"))
+    slow_row.session.event_queue.put(
+        _row_complete(
+            summary="slow complete never delivered",
+            diagnostics=_diagnostics(turn=sample_turn.settings.turn, player_id=slow_row.player_id),
+        )
+    )
+
+    scope_active = True
+
+    def is_stream_active() -> bool:
+        return scope_active
+
+    stream = iter_multiplexed_inference_events(
+        (fast_row, slow_row),
+        tag_player_id=True,
+        is_stream_active=is_stream_active,
+    )
+    first = next(stream)
+    assert first["type"] == "complete"
+    assert first["playerId"] == fast_row.player_id
+
+    scope_active = False
+    remaining = list(stream)
+
+    assert remaining == []
+    slow_types = [
+        event["type"] for event in remaining if event.get("playerId") == slow_row.player_id
+    ]
+    assert "complete" not in slow_types
+
+
+def test_multiplex_delivers_all_queued_completes_before_scope_deactivation(sample_turn):
+    """Baseline: both rows receive terminal events when the scope stays active."""
+    rows = tuple(
+        _scheduled_row(sample_turn, player_id=player_id)
+        for player_id in (row.ownerid for row in sample_turn.scores[:2])
+    )
+    for row in rows:
+        row.session.event_queue.put(
+            _row_complete(
+                summary=f"player {row.player_id} complete",
+                diagnostics=_diagnostics(turn=sample_turn.settings.turn, player_id=row.player_id),
+            )
+        )
+
+    events = list(
+        iter_multiplexed_inference_events(
+            rows,
+            tag_player_id=True,
+        )
+    )
+    complete_player_ids = {
+        event["playerId"]
+        for event in events
+        if event.get("type") == "complete" and isinstance(event.get("playerId"), int)
+    }
+    assert complete_player_ids == {row.player_id for row in rows}
+
+
+def test_stream_preempt_persists_complete_before_first_connection_drains_in_flight_row(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Persist can succeed while the preempted stream still shows in-progress for other rows."""
+    persistence = InferenceRowPersistenceService(memory_backend)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch,
+        on_row_complete=persistence.persist_row_complete,
+    )
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    completed_player_id, in_flight_player_id = player_ids
+    turn_number = sample_turn.settings.turn
+
+    first_stream = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    assert next(first_stream) == {"type": "globalPause", "paused": False}
+
+    collected: list[dict[str, object]] = []
+    stream_error: list[BaseException] = []
+
+    def consume_first_stream() -> None:
+        try:
+            collected.extend(_collect_stream_events(first_stream))
+        except BaseException as exc:  # pragma: no cover - surfaced via stream_error
+            stream_error.append(exc)
+
+    thread = threading.Thread(target=consume_first_stream, daemon=True)
+    thread.start()
+    _wait_until(lambda: len(scheduler._runs) == len(player_ids))
+
+    completed_session = next(
+        run.session
+        for run in scheduler._runs.values()
+        if run.session.player_id == completed_player_id
+    )
+    in_flight_session = next(
+        run.session
+        for run in scheduler._runs.values()
+        if run.session.player_id == in_flight_player_id
+    )
+
+    scheduler._emit_row_complete(
+        completed_session,
+        _row_complete(
+            summary="persisted on backend",
+            diagnostics=_diagnostics(turn=turn_number, player_id=completed_player_id),
+        ),
+    )
+    in_flight_session.event_queue.put(
+        TierProgress(policy_step_id="early_game_bands", combo_count=2142, held_count=0)
+    )
+
+    replacement = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    assert next(replacement) == {"type": "globalPause", "paused": False}
+    replacement.close()
+
+    thread.join(timeout=2.0)
+    assert not stream_error
+
+    completed_events = [
+        event
+        for event in collected
+        if event.get("type") == "complete" and event.get("playerId") == completed_player_id
+    ]
+    in_flight_completes = [
+        event
+        for event in collected
+        if event.get("type") == "complete" and event.get("playerId") == in_flight_player_id
+    ]
+    in_flight_progress = [
+        event
+        for event in collected
+        if event.get("type") == "progress" and event.get("playerId") == in_flight_player_id
+    ]
+
+    assert persistence.get_row(628580, 1, turn_number, completed_player_id) is not None
+    assert len(in_flight_completes) == 0
+    assert len(in_flight_progress) >= 0
+
+    replay_stream = iter_scores_table_inference_events(
+        sample_turn,
+        (completed_player_id,),
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    replay_events = [next(replay_stream), next(replay_stream)]
+    replay_stream.close()
+    assert replay_events[1]["type"] == "complete"
+    assert replay_events[1]["summary"] == "persisted on backend"
+    assert len(completed_events) in {0, 1}
+
+
+def test_progress_without_terminal_complete_when_scope_deactivates_mid_row(sample_turn):
+    """A row can emit progress on the stream and still never deliver terminal diagnostics."""
+    row = _scheduled_row(sample_turn, player_id=sample_turn.scores[1].ownerid)
+    row.session.event_queue.put(
+        TierProgress(policy_step_id="early_game_bands", combo_count=2142, held_count=0)
+    )
+    row.session.event_queue.put(
+        _row_complete(
+            summary="terminal queued but not delivered",
+            diagnostics=_diagnostics(
+                turn=sample_turn.settings.turn,
+                player_id=row.player_id,
+            ),
+        )
+    )
+
+    scope_active = True
+    stream = iter_multiplexed_inference_events(
+        (row,),
+        tag_player_id=True,
+        is_stream_active=lambda: scope_active,
+    )
+    progress = next(stream)
+    assert progress["type"] == "progress"
+    assert progress["playerId"] == row.player_id
+    assert progress.get("policyStepId") == "early_game_bands"
+    assert "diagnostics" not in progress
+
+    scope_active = False
+    assert list(stream) == []
+
+
+def test_stream_preempt_leaves_in_flight_row_without_persisted_terminal_state(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Preempt before terminal: in-flight row is cancelled without persistence."""
+    persistence = InferenceRowPersistenceService(memory_backend)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch,
+        on_row_complete=persistence.persist_row_complete,
+    )
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    turn_number = sample_turn.settings.turn
+    target_player_id = player_ids[1]
+
+    first_stream = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    next(first_stream)
+
+    collected: list[dict[str, object]] = []
+
+    def consume_first_stream() -> None:
+        collected.extend(_collect_stream_events(first_stream))
+
+    thread = threading.Thread(target=consume_first_stream, daemon=True)
+    thread.start()
+    _wait_until(lambda: len(scheduler._runs) == len(player_ids))
+
+    replacement = iter_scores_table_inference_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    next(replacement)
+    replacement.close()
+    thread.join(timeout=2.0)
+
+    assert persistence.get_row(628580, 1, turn_number, target_player_id) is None
+    target_completes = [
+        event
+        for event in collected
+        if event.get("type") == "complete" and event.get("playerId") == target_player_id
+    ]
+    assert target_completes == []
+
+
+def test_open_stream_scope_keeps_multiplex_alive_after_all_rows_terminal(sample_turn):
+    """Documents: an active scope prevents stream exit even after every row has completed."""
+    row = _scheduled_row(sample_turn, player_id=sample_turn.scores[0].ownerid)
+    row.session.event_queue.put(_row_complete(summary="done"))
+
+    stream = iter_multiplexed_inference_events(
+        (row,),
+        tag_player_id=True,
+        is_stream_active=lambda: True,
+    )
+    terminal = next(stream)
+    assert terminal["type"] == "complete"
+
+    blocked = threading.Event()
+
+    def read_next() -> None:
+        try:
+            next(stream)
+        finally:
+            blocked.set()
+
+    reader = threading.Thread(target=read_next, daemon=True)
+    reader.start()
+    reader.join(timeout=0.2)
+    assert not blocked.is_set()
+
+
+def test_late_complete_on_queue_after_scope_deactivation_is_not_yielded(sample_turn):
+    """Terminal events arriving after scope deactivation never reach the consumer."""
+    row = _scheduled_row(sample_turn, player_id=sample_turn.scores[0].ownerid)
+    scope_active = True
+
+    stream = iter_multiplexed_inference_events(
+        (row,),
+        tag_player_id=True,
+        is_stream_active=lambda: scope_active,
+    )
+
+    scope_active = False
+    assert list(stream) == []
+
+    row.session.event_queue.put(
+        _row_complete(
+            summary="too late",
+            diagnostics=_diagnostics(turn=sample_turn.settings.turn, player_id=row.player_id),
+        )
+    )
+
+    assert list(stream) == []
+
+
+def test_persisted_row_replays_on_new_stream_without_scheduler_work(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Reconnect path serves cached terminal state when persistence already holds the row."""
+    persistence = InferenceRowPersistenceService(memory_backend)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch,
+        on_row_complete=persistence.persist_row_complete,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    turn_number = sample_turn.settings.turn
+
+    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=turn_number)
+    stream_token = scheduler.begin_scope(scope)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=sample_turn.scores[0],
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=1,
+        stream_token=stream_token,
+    )
+    assert scheduled is not None
+    scheduler._emit_row_complete(
+        scheduled.session,
+        _row_complete(
+            summary="terminal before reconnect",
+            diagnostics=_diagnostics(turn=turn_number, player_id=player_id),
+        ),
+    )
+
+    replay = iter_scores_table_inference_events(
+        sample_turn,
+        (player_id,),
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    events = [next(replay), next(replay)]
+    replay.close()
+
+    assert events[1]["type"] == "complete"
+    assert events[1]["summary"] == "terminal before reconnect"
+    assert isinstance(events[1].get("diagnostics"), dict)
+    assert events[1]["diagnostics"].get("turn") == turn_number

@@ -6,12 +6,14 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolutionAction,
     ProbabilityBucket,
+    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
     PLANET_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_FIGHTER_SCORE_DELTA_2X,
 )
+from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
@@ -495,3 +497,49 @@ def test_solver_diagnostics_include_build_time_ranking_metadata():
     diversity_caps = result.diagnostics["diversityCapsApplied"]
     assert isinstance(diversity_caps, list)
     assert any(entry["superclass"] == "torpedo_loads" for entry in diversity_caps)
+
+
+def test_freighter_only_zero_military_score_uses_fast_path():
+    freighter_combo = ShipBuildCombo(
+        combo_id=GENERIC_FREIGHTER_COMBO_ID,
+        hull_id=0,
+        engine_id=0,
+        beam_id=None,
+        torp_id=None,
+        beam_count=0,
+        launcher_count=0,
+        labels=("Freighter",),
+        score_delta_2x=0,
+        freighter_delta=1,
+        upper_bound=1,
+        probability_weight=100,
+    )
+    warship_combo = ShipBuildCombo(
+        combo_id="combo_warship",
+        hull_id=1,
+        engine_id=1,
+        beam_id=None,
+        torp_id=None,
+        beam_count=0,
+        launcher_count=0,
+        labels=("Warship",),
+        score_delta_2x=400,
+        warship_delta=1,
+        upper_bound=1,
+        probability_weight=50,
+    )
+    problem = InferenceProblem(
+        observation=_observation(freighter_delta=1),
+        aggregate_actions=(),
+        ship_build_combos=(warship_combo, freighter_combo),
+        max_solutions=20,
+        time_limit_seconds=0.001,
+    )
+
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_EXACT
+    assert result.diagnostics["solver_status"] == "FREIGHTER_ONLY_FAST_PATH"
+    assert len(result.solutions) == 1
+    assert result.solutions[0].ship_builds[0].combo_id == GENERIC_FREIGHTER_COMBO_ID
+    assert result.solutions[0].ship_builds[0].count == 1

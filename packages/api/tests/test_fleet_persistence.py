@@ -243,6 +243,30 @@ def test_implicit_turn_one_baseline_without_persisting_turn_one(
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
 
+def test_implicit_baseline_when_only_later_turn_rst_stored(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    _put_turn_rst(memory_backend, 3)
+    turn_three = load_turn(3)
+    assert turn_three is not None
+
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_three,
+        load_turn=load_turn,
+    )
+
+    assert snapshot.turn == 3
+    assert len(snapshot.players) == 4
+    assert persistence.get_snapshot(628580, 1, 1) is None
+    assert persistence.get_snapshot(628580, 1, 2) is None
+    assert persistence.get_snapshot(628580, 1, 3) == snapshot
+
+
 def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sample_turn):
     prior = ensure_fleet_baseline(628580, 1, load_turn(110))
     prior.players[0].records.append(
