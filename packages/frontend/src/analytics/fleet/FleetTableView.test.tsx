@@ -3,9 +3,9 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FleetPlayerTableTile } from './FleetPlayerTableTile'
 import { FleetTableView } from './FleetTableView'
+import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
-import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import type { FleetTableRecord, FleetTableWire } from './fleetTableWireSchema'
 
 const activeRecord: FleetTableRecord = {
@@ -62,28 +62,6 @@ const lostRecord: FleetTableRecord = {
     location: { kind: 'unknown' },
   },
   buildOptionSets: [],
-}
-
-const players = [
-  { ordinal: 1, playerId: 8, name: 'Alice', raceName: null },
-  { ordinal: 2, playerId: 9, name: 'Bob', raceName: null },
-] as const
-
-function seedFleetShellViewpoint(viewpointName: 'Alice' | 'Bob') {
-  useShellStore.setState({
-    selectedGameId: '628580',
-    gameInfoContext: {
-      turn: 10,
-      perspectives: [...players],
-      isGameFinished: true,
-      sectorDisplayName: 'Test Sector',
-      stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
-    },
-    selectedTurn: 5,
-    perspectiveOverrideName: viewpointName,
-    storageOnlyLoad: false,
-    storageAvailablePerspectives: null,
-  })
 }
 
 const fleetWire: FleetTableWire = {
@@ -188,7 +166,7 @@ describe('FleetTableView', () => {
   })
 
   it('sorts the viewpoint player tile first', () => {
-    seedFleetShellViewpoint('Bob')
+    seedShellViewpoint('Bob')
 
     render(<FleetTableView data={fleetWire} />)
 
@@ -199,7 +177,7 @@ describe('FleetTableView', () => {
   })
 
   it('hides tiles for players turned off in fleet visibility', () => {
-    seedFleetShellViewpoint('Alice')
+    seedShellViewpoint('Alice')
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
     render(<FleetTableView data={fleetWire} />)

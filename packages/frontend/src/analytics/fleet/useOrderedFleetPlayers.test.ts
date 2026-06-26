@@ -1,31 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
+import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
-import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
-
-const players = [
-  { ordinal: 1, playerId: 8, name: 'Alice', raceName: null },
-  { ordinal: 2, playerId: 9, name: 'Bob', raceName: null },
-] as const
-
-function seedShellViewpoint(viewpointName: 'Alice' | 'Bob') {
-  useShellStore.setState({
-    selectedGameId: '628580',
-    gameInfoContext: {
-      turn: 10,
-      perspectives: [...players],
-      isGameFinished: true,
-      sectorDisplayName: 'Test Sector',
-      stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
-    },
-    selectedTurn: 5,
-    perspectiveOverrideName: viewpointName,
-    storageOnlyLoad: false,
-    storageAvailablePerspectives: null,
-  })
-}
 
 describe('useOrderedFleetPlayers', () => {
   beforeEach(() => {
