@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { FleetPlayerTableTile } from './FleetPlayerTableTile'
 import { FleetTableView } from './FleetTableView'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
+import { useShellStore } from '../../stores/shell'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import type { FleetTableRecord, FleetTableWire } from './fleetTableWireSchema'
 
 const activeRecord: FleetTableRecord = {
@@ -66,6 +68,23 @@ const players = [
   { ordinal: 1, playerId: 8, name: 'Alice', raceName: null },
   { ordinal: 2, playerId: 9, name: 'Bob', raceName: null },
 ] as const
+
+function seedFleetShellViewpoint(viewpointName: 'Alice' | 'Bob') {
+  useShellStore.setState({
+    selectedGameId: '628580',
+    gameInfoContext: {
+      turn: 10,
+      perspectives: [...players],
+      isGameFinished: true,
+      sectorDisplayName: 'Test Sector',
+      stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+    },
+    selectedTurn: 5,
+    perspectiveOverrideName: viewpointName,
+    storageOnlyLoad: false,
+    storageAvailablePerspectives: null,
+  })
+}
 
 const fleetWire: FleetTableWire = {
   analyticId: 'fleet',
@@ -158,16 +177,20 @@ describe('FleetPlayerTableTile', () => {
 describe('FleetTableView', () => {
   beforeEach(() => {
     useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    useShellStore.setState({
+      selectedGameId: null,
+      gameInfoContext: null,
+      selectedTurn: null,
+      perspectiveOverrideName: null,
+      storageOnlyLoad: false,
+      storageAvailablePerspectives: null,
+    })
   })
 
   it('sorts the viewpoint player tile first', () => {
-    render(
-      <FleetTableView
-        data={fleetWire}
-        players={[...players]}
-        viewpointPlayerId={9}
-      />
-    )
+    seedFleetShellViewpoint('Bob')
+
+    render(<FleetTableView data={fleetWire} />)
 
     const tiles = screen.getAllByRole('region', { name: /fleet table$/i })
     expect(tiles).toHaveLength(2)
@@ -176,15 +199,10 @@ describe('FleetTableView', () => {
   })
 
   it('hides tiles for players turned off in fleet visibility', () => {
+    seedFleetShellViewpoint('Alice')
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
-    render(
-      <FleetTableView
-        data={fleetWire}
-        players={[...players]}
-        viewpointPlayerId={8}
-      />
-    )
+    render(<FleetTableView data={fleetWire} />)
 
     expect(screen.getByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Bob fleet table' })).not.toBeInTheDocument()

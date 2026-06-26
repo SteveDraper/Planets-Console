@@ -15,9 +15,7 @@ import type {
 import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
-import { FleetTableView } from '../analytics/fleet/FleetTableView'
-import { parseFleetTableWire } from '../analytics/fleet/fleetTableWireSchema'
-import type { PerspectiveRow } from '../lib/gameInfoShell'
+import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
@@ -101,8 +99,6 @@ type MainAreaProps = {
   globalInferencePause: UseGlobalInferencePauseResult
   /** Turns beyond latest stored game turn for ion storm prediction. */
   futureTurnOffset: number
-  fleetPlayers: PerspectiveRow[]
-  fleetViewpointPlayerId: number | null
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
 }
@@ -113,19 +109,20 @@ function TableTile({
   fetchEnabled,
   scoresTableParams,
   globalInferencePause,
-  fleetPlayers,
-  fleetViewpointPlayerId,
 }: {
   analyticId: string
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
   scoresTableParams: ScoresTableParams
   globalInferencePause: UseGlobalInferencePauseResult
-  fleetPlayers: PerspectiveRow[]
-  fleetViewpointPlayerId: number | null
 }) {
+  if (analyticId === 'fleet') {
+    return (
+      <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
+    )
+  }
+
   const isScores = analyticId === 'scores'
-  const isFleet = analyticId === 'fleet'
   const inferenceEnabled = isScores && scoresTableParams.includeBuildInference
   const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
@@ -191,25 +188,6 @@ function TableTile({
         globalInferencePause={globalInferencePause}
       />
     )
-  }
-  if (isFleet) {
-    try {
-      const fleetTable = parseFleetTableWire(data)
-      return (
-        <FleetTableView
-          data={fleetTable}
-          players={fleetPlayers}
-          viewpointPlayerId={fleetViewpointPlayerId}
-        />
-      )
-    } catch (parseError) {
-      return (
-        <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-          Error loading fleet table.{' '}
-          {parseError instanceof Error ? parseError.message : String(parseError)}
-        </div>
-      )
-    }
   }
   return (
     <div className="overflow-auto">
@@ -352,8 +330,6 @@ export function MainArea({
   scoresPreferencesHydrated,
   globalInferencePause,
   futureTurnOffset,
-  fleetPlayers,
-  fleetViewpointPlayerId,
   onMapZoomChange,
   onSetZoomReady,
 }: MainAreaProps) {
@@ -408,8 +384,6 @@ export function MainArea({
               }
               scoresTableParams={scoresTableParams}
               globalInferencePause={globalInferencePause}
-              fleetPlayers={fleetPlayers}
-              fleetViewpointPlayerId={fleetViewpointPlayerId}
             />
           </AnalyticTableSection>
         ))}

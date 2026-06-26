@@ -351,8 +351,6 @@ function ConsoleShell() {
             scoresPreferencesHydrated={scoresPreferencesHydrated}
             globalInferencePause={globalInferencePause}
             futureTurnOffset={futureTurnOffset}
-            fleetPlayers={fleetPlayers}
-            fleetViewpointPlayerId={fleetViewpointPlayerId}
             onMapZoomChange={handleMapZoomChange}
             onSetZoomReady={handleSetZoomReady}
           />
