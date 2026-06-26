@@ -586,3 +586,56 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
         if player["playerId"] == player_id
     )
     assert record["buildOptionSets"][0]["hullId"] == 13
+
+
+def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
+    turn = _turn_with_score_delta(turn_number=3, owner_id=8, freighterchange=1)
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        3,
+        8,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="one freighter",
+            solution_count=1,
+            is_complete=True,
+            solutions=[
+                {
+                    "objectiveValue": 0,
+                    "actions": [],
+                    "shipBuilds": [
+                        {
+                            "comboId": "combo_freighter",
+                            "label": "Freighter",
+                            "count": 1,
+                            "hullId": 0,
+                            "engineId": 0,
+                            "beamCount": 0,
+                            "launcherCount": 0,
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
+    )
+
+    record = ledger_for_player(snapshot, 8).records[0]
+    assert record.build_option_sets[0].combo_id == "combo_freighter"
+    assert record.build_option_sets[0].hull_id is None
+    assert record.build_option_sets[0].engine_id is None
+
+    wire = fleet_turn_snapshot_to_compute_wire(snapshot)
+    option_set = wire["players"][0]["records"][0]["buildOptionSets"][0]
+    assert option_set["label"] == "Freighter"
+    assert "hullId" not in option_set
+    assert "engineId" not in option_set

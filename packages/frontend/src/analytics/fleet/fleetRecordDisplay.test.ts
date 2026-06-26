@@ -96,4 +96,31 @@ describe('fleetRecordDisplay', () => {
       'Fleet count discrepancy on turn 111: 2 active rows vs 1 implied by scoreboard'
     )
   })
+
+  it('shows generic freighter label instead of hull id zero', () => {
+    const record: FleetTableRecord = {
+      ...lostRecord,
+      disposition: 'active',
+      fields: {
+        ...lostRecord.fields,
+        builtTurn: { kind: 'known', value: 3 },
+      },
+      buildOptionSets: [
+        {
+          comboId: 'combo_freighter',
+          label: 'Freighter',
+          solutionRankWeight: 0,
+          hullId: 0,
+          engineId: 0,
+          beamCount: 0,
+          launcherCount: 0,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+
+    expect(formatFleetRecordField(record, 'hull')).toBe('Freighter')
+    expect(formatFleetRecordField(record, 'engine')).toBe('?')
+    expect(formatFleetRecordField(record, 'beams')).toBe('0')
+  })
 })

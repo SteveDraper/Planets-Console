@@ -196,6 +196,9 @@ class CoreClient:
             )
         )
 
+    def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
+        return self._invoke(lambda: self._turns.get_turn_info(game_id, perspective, turn_number))
+
     def get_turn_analytics(
         self,
         game_id: int,

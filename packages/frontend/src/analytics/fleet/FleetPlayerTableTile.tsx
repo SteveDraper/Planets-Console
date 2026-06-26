@@ -10,19 +10,31 @@ import {
 import { AlertTriangle, ChevronDown, ShieldCheck } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import {
+  EMPTY_FLEET_COMPONENT_CATALOG,
+  type FleetComponentCatalog,
+} from './fleetTableWireSchema'
+import {
   activeFleetRecords,
   alternateBuildOptionSets,
-  formatBuildOptionSetSummary,
   formatFleetCountDiscrepancyBanner,
   formatFleetLastSeen,
   formatFleetRecordField,
 } from './fleetRecordDisplay'
+import {
+  formatBuildOptionSetComponentSummary,
+  formatFleetBeamsDisplay,
+  formatFleetEngineDisplay,
+  formatFleetHullDisplay,
+  formatFleetLaunchersDisplay,
+} from './fleetRecordComponentDisplay'
+import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
 
 type FleetPlayerTableTileProps = {
   playerName: string
   records: readonly FleetTableRecord[]
   discrepancy?: FleetCountDiscrepancy
+  componentCatalog?: FleetComponentCatalog
 }
 
 const columnHelper = createColumnHelper<FleetTableRecord>()
@@ -63,6 +75,7 @@ export function FleetPlayerTableTile({
   playerName,
   records,
   discrepancy,
+  componentCatalog = EMPTY_FLEET_COMPONENT_CATALOG,
 }: FleetPlayerTableTileProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
@@ -104,22 +117,33 @@ export function FleetPlayerTableTile({
         id: 'shipId',
         header: 'ID',
       }),
-      columnHelper.accessor((record) => formatFleetRecordField(record, 'hull'), {
+      columnHelper.display({
         id: 'hull',
         header: 'Hull',
+        cell: ({ row }) => (
+          <FleetRecordHullCell
+            hull={formatFleetHullDisplay(row.original, componentCatalog)}
+          />
+        ),
       }),
-      columnHelper.accessor((record) => formatFleetRecordField(record, 'engine'), {
-        id: 'engine',
-        header: 'Engine',
-      }),
-      columnHelper.accessor((record) => formatFleetRecordField(record, 'beams'), {
+      columnHelper.accessor(
+        (record) => formatFleetEngineDisplay(record, componentCatalog),
+        {
+          id: 'engine',
+          header: 'Engine',
+        }
+      ),
+      columnHelper.accessor((record) => formatFleetBeamsDisplay(record, componentCatalog), {
         id: 'beams',
         header: 'Beams',
       }),
-      columnHelper.accessor((record) => formatFleetRecordField(record, 'launchers'), {
-        id: 'launchers',
-        header: 'Launchers',
-      }),
+      columnHelper.accessor(
+        (record) => formatFleetLaunchersDisplay(record, componentCatalog),
+        {
+          id: 'launchers',
+          header: 'Launchers',
+        }
+      ),
       columnHelper.accessor((record) => formatFleetRecordField(record, 'builtTurn'), {
         id: 'builtTurn',
         header: 'Built',
@@ -134,7 +158,7 @@ export function FleetPlayerTableTile({
         cell: ({ row }) => <FleetStatusIcons record={row.original} />,
       }),
     ],
-    []
+    [componentCatalog]
   )
 
   const table = useReactTable({
@@ -213,7 +237,7 @@ export function FleetPlayerTableTile({
                         <ul className="space-y-1">
                           {alternateBuildOptionSets(row.original).map((optionSet) => (
                             <li key={optionSet.comboId ?? optionSet.label}>
-                              {formatBuildOptionSetSummary(optionSet)}
+                              {formatBuildOptionSetComponentSummary(optionSet, componentCatalog)}
                             </li>
                           ))}
                         </ul>

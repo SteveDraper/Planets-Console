@@ -6,7 +6,14 @@ import { FleetTableView } from './FleetTableView'
 import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
-import type { FleetTableRecord, FleetTableWire } from './fleetTableWireSchema'
+import type { FleetComponentCatalog, FleetTableRecord, FleetTableWire } from './fleetTableWireSchema'
+
+const testComponentCatalog: FleetComponentCatalog = {
+  hulls: { '13': 'Cruiser A', '14': 'Cruiser B' },
+  engines: { '9': 'Transwarp Drive', '10': 'Heavy Drive' },
+  beams: { '3': 'Plasma Bolt', '5': 'Positron Beam' },
+  torpedoes: { '6': 'Mark 4 Photon' },
+}
 
 const activeRecord: FleetTableRecord = {
   recordId: 'rec-active',
@@ -31,8 +38,10 @@ const activeRecord: FleetTableRecord = {
       solutionRankWeight: 10,
       hullId: 13,
       engineId: 9,
+      beamId: 3,
       beamCount: 8,
       launcherCount: 6,
+      torpId: 6,
     },
     {
       comboId: 'combo_b',
@@ -40,8 +49,10 @@ const activeRecord: FleetTableRecord = {
       solutionRankWeight: 3,
       hullId: 14,
       engineId: 10,
+      beamId: 5,
       beamCount: 4,
       launcherCount: 2,
+      torpId: 6,
     },
   ],
   displayDefaultOptionSetIndex: 0,
@@ -67,6 +78,7 @@ const lostRecord: FleetTableRecord = {
 const fleetWire: FleetTableWire = {
   analyticId: 'fleet',
   defaultActiveOnly: true,
+  componentCatalog: testComponentCatalog,
   players: [
     {
       playerId: 8,
@@ -92,10 +104,11 @@ describe('FleetPlayerTableTile', () => {
       <FleetPlayerTableTile
         playerName="Alice"
         records={[activeRecord, lostRecord]}
+        componentCatalog={testComponentCatalog}
       />
     )
 
-    expect(screen.getByText('<= 318')).toBeInTheDocument()
+    expect(screen.getByText('Cruiser A')).toBeInTheDocument()
     expect(screen.queryByText('42')).not.toBeInTheDocument()
   })
 
@@ -125,14 +138,15 @@ describe('FleetPlayerTableTile', () => {
       <FleetPlayerTableTile
         playerName="Alice"
         records={[activeRecord]}
+        componentCatalog={testComponentCatalog}
       />
     )
 
-    expect(screen.queryByText(/Option B/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Cruiser B/)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Expand build options for rec-active' }))
 
-    expect(screen.getByText(/Option B/)).toBeInTheDocument()
+    expect(screen.getByText(/Cruiser B/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Collapse build options for rec-active' })).toHaveAttribute(
       'aria-expanded',
       'true'

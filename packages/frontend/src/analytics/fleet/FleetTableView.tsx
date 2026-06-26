@@ -33,6 +33,7 @@ export function FleetTableView({ data }: FleetTableViewProps) {
             playerName={wirePlayer?.playerName ?? player.name}
             records={wirePlayer?.records ?? []}
             discrepancy={wirePlayer?.discrepancy}
+            componentCatalog={data.componentCatalog}
           />
         )
       })}

@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod'
+import { fleetComponentCatalogSchema } from './fleetComponentCatalog'
 import {
   fleetBuildOptionSetSchema,
   fleetFieldConstraintSchema,
@@ -82,6 +83,7 @@ export const fleetTableWireSchema = z
   .object({
     analyticId: z.literal('fleet'),
     defaultActiveOnly: z.literal(true),
+    componentCatalog: fleetComponentCatalogSchema.optional(),
     players: z.array(fleetTablePlayerSchema),
   })
   .strict()
@@ -90,6 +92,9 @@ export type FleetTableRecord = z.infer<typeof fleetTableRecordSchema>
 export type FleetCountDiscrepancy = z.infer<typeof fleetCountDiscrepancySchema>
 export type FleetTablePlayer = z.infer<typeof fleetTablePlayerSchema>
 export type FleetTableWire = z.infer<typeof fleetTableWireSchema>
+
+export type { FleetComponentCatalog } from './fleetComponentCatalog'
+export { EMPTY_FLEET_COMPONENT_CATALOG } from './fleetComponentCatalog'
 
 /** Map stable validation failures to messages consumed by the SPA and tests. */
 export function formatFleetTableWireValidationError(error: z.ZodError): string {

@@ -2,6 +2,7 @@
 
 from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
+from api.models.game import TurnInfo
 
 from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import (
@@ -49,9 +50,23 @@ def _shape_table_player(player: dict[str, object]) -> dict[str, object]:
     return shaped
 
 
-def table_from_core(core_data: dict) -> dict:
-    """Shape Core fleet compute output for GET /bff/analytics/fleet/table."""
+def component_catalog_wire(turn: TurnInfo) -> dict[str, dict[str, str]]:
+    """Host component id -> display name tables for fleet table rendering."""
     return {
+        "hulls": {str(hull.id): hull.name for hull in turn.hulls},
+        "engines": {str(engine.id): engine.name for engine in turn.engines},
+        "beams": {str(beam.id): beam.name for beam in turn.beams},
+        "torpedoes": {str(torpedo.id): torpedo.name for torpedo in turn.torpedos},
+    }
+
+
+def table_from_core(
+    core_data: dict,
+    *,
+    component_catalog: dict[str, dict[str, str]] | None = None,
+) -> dict:
+    """Shape Core fleet compute output for GET /bff/analytics/fleet/table."""
+    payload: dict[str, object] = {
         "analyticId": ANALYTIC_ID,
         "defaultActiveOnly": True,
         "players": [
@@ -60,6 +75,9 @@ def table_from_core(core_data: dict) -> dict:
             if isinstance(player, dict)
         ],
     }
+    if component_catalog is not None:
+        payload["componentCatalog"] = component_catalog
+    return payload
 
 
 def map_from_core(core_data: dict) -> dict:
@@ -85,8 +103,11 @@ def get_table(
     load_core: CoreAnalyticsLoader,
     diagnostics: Diagnostics,
 ) -> dict:
+    from bff.core_client import get_core_client
+
     core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
-    return table_from_core(core_data)
+    turn = get_core_client().get_turn_info(scope.game_id, scope.perspective, scope.turn)
+    return table_from_core(core_data, component_catalog=component_catalog_wire(turn))
 
 
 def get_map(

@@ -174,20 +174,30 @@ def fleet_build_option_set_to_json(option_set: FleetBuildOptionSet) -> dict[str,
     return payload
 
 
+def _resolved_fleet_component_id(component_id: int) -> int | None:
+    """Map solver sentinel ids (e.g. generic freighter hull 0) to unknown on the wire."""
+    return component_id if component_id > 0 else None
+
+
 def fleet_build_option_set_from_inference_ship_build(
     ship_build: InferenceSolutionShipBuild,
     *,
     solution_rank_weight: int,
 ) -> FleetBuildOptionSet:
     """Map one inference solution ship build into a fleet build option set."""
+    combo_id = ship_build.combo_id or None
     return FleetBuildOptionSet(
-        combo_id=ship_build.combo_id or None,
+        combo_id=combo_id,
         label=ship_build.label,
         solution_rank_weight=solution_rank_weight,
-        hull_id=ship_build.hull_id,
-        engine_id=ship_build.engine_id,
-        beam_id=ship_build.beam_id,
-        torp_id=ship_build.torp_id,
+        hull_id=_resolved_fleet_component_id(ship_build.hull_id),
+        engine_id=_resolved_fleet_component_id(ship_build.engine_id),
+        beam_id=_resolved_fleet_component_id(ship_build.beam_id)
+        if ship_build.beam_id is not None
+        else None,
+        torp_id=_resolved_fleet_component_id(ship_build.torp_id)
+        if ship_build.torp_id is not None
+        else None,
         beam_count=ship_build.beam_count,
         launcher_count=ship_build.launcher_count,
     )
