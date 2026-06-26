@@ -5,15 +5,19 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
-from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.constants import ANALYTIC_ID, GAP_FILL_MAX_RETRIES
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.analytics.turn_roster import iter_turn_players
-from api.errors import NotFoundError
+from api.errors import ConflictError, NotFoundError
 from api.models.game import TurnInfo
+
+
+class _FleetSnapshotInvalidated(Exception):
+    """Gap-fill observed a concurrent fleet snapshot invalidation."""
 
 
 def ensure_fleet_baseline(
@@ -104,6 +108,17 @@ def _first_stored_rst_turn(
     return None
 
 
+def _assert_invalidation_generation_unchanged(
+    persistence: FleetSnapshotPersistenceService,
+    *,
+    game_id: int,
+    perspective: int,
+    generation: int,
+) -> None:
+    if persistence.invalidation_generation(game_id, perspective) != generation:
+        raise _FleetSnapshotInvalidated()
+
+
 def _materialize_and_persist_turn(
     persistence: FleetSnapshotPersistenceService,
     *,
@@ -111,6 +126,7 @@ def _materialize_and_persist_turn(
     prior_snapshot: FleetTurnSnapshot,
     turn_info: TurnInfo,
     inference_materialization: FleetInferenceMaterialization | None = None,
+    invalidation_generation: int,
 ) -> FleetTurnSnapshot:
     snapshot = advance_snapshot_to_turn(
         prior_snapshot,
@@ -129,10 +145,16 @@ def _materialize_and_persist_turn(
         materialize_turn,
         snapshot,
     )
+    _assert_invalidation_generation_unchanged(
+        persistence,
+        game_id=snapshot.game_id,
+        perspective=snapshot.perspective,
+        generation=invalidation_generation,
+    )
     return snapshot
 
 
-def get_or_materialize_fleet_snapshot(
+def _materialize_fleet_snapshot_chain(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
     perspective: int,
@@ -140,12 +162,10 @@ def get_or_materialize_fleet_snapshot(
     *,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
+    invalidation_generation: int,
 ) -> FleetTurnSnapshot:
-    """Return a cached snapshot or materialize turn T from T-1 plus turn-T delta."""
+    """Gap-fill fleet snapshots from the latest anchor through turn T."""
     turn_number = turn.settings.turn
-    cached = persistence.get_snapshot(game_id, perspective, turn_number)
-    if cached is not None:
-        return cached
 
     loaded_turns: dict[int, TurnInfo | None] = {}
 
@@ -224,6 +244,12 @@ def get_or_materialize_fleet_snapshot(
             inference_materialization=resolved_inference_materialization,
         )
         persistence.put_snapshot(game_id, perspective, 1, turn_one_snapshot)
+        _assert_invalidation_generation_unchanged(
+            persistence,
+            game_id=game_id,
+            perspective=perspective,
+            generation=invalidation_generation,
+        )
         current_snapshot = turn_one_snapshot
         if turn_number == 1:
             return turn_one_snapshot
@@ -241,6 +267,45 @@ def get_or_materialize_fleet_snapshot(
             prior_snapshot=current_snapshot,
             turn_info=turn_info,
             inference_materialization=resolved_inference_materialization,
+            invalidation_generation=invalidation_generation,
         )
 
     return current_snapshot
+
+
+def get_or_materialize_fleet_snapshot(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    turn: TurnInfo,
+    *,
+    load_turn: Callable[[int], TurnInfo | None],
+    inference_materialization: FleetInferenceMaterialization | None = None,
+) -> FleetTurnSnapshot:
+    """Return a cached snapshot or materialize turn T from T-1 plus turn-T delta."""
+    turn_number = turn.settings.turn
+    cached = persistence.get_snapshot(game_id, perspective, turn_number)
+    if cached is not None:
+        return cached
+
+    for attempt in range(GAP_FILL_MAX_RETRIES):
+        invalidation_generation = persistence.invalidation_generation(game_id, perspective)
+        try:
+            return _materialize_fleet_snapshot_chain(
+                persistence,
+                game_id,
+                perspective,
+                turn,
+                load_turn=load_turn,
+                inference_materialization=inference_materialization,
+                invalidation_generation=invalidation_generation,
+            )
+        except _FleetSnapshotInvalidated:
+            if attempt + 1 >= GAP_FILL_MAX_RETRIES:
+                break
+            continue
+
+    raise ConflictError(
+        f"fleet snapshot gap-fill for game {game_id} perspective {perspective} "
+        f"turn {turn_number} exceeded {GAP_FILL_MAX_RETRIES} invalidation retries"
+    )

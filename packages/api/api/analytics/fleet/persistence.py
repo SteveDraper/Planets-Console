@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.serialization import (
     fleet_turn_snapshot_from_json,
@@ -26,10 +28,19 @@ class FleetSnapshotPersistenceService:
     Fleet turn-document invalidation (``invalidate_for_turn_write``) is independent
     of scores pair-aware invalidation (turn *T* and *T-1*); both hooks run from
     ``on_turn_stored`` today.
+
+    **Invalidation generation:** Each ``(game_id, perspective)`` pair has a
+    monotonic counter bumped on every ``invalidate_for_turn_write`` call. Gap-fill
+    in ``get_or_materialize_fleet_snapshot`` records the generation at chain start
+    and aborts (then retries from a fresh anchor) when the counter advances during
+    multi-turn materialization. Invalidation does not block on gap-fill; concurrent
+    invalidation callbacks only bump the counter and delete stored snapshots.
     """
 
     def __init__(self, storage: StorageBackend) -> None:
         self._storage = storage
+        self._invalidation_generation: dict[tuple[int, int], int] = {}
+        self._generation_lock = threading.Lock()
 
     @staticmethod
     def document_key(game_id: int, perspective: int, turn_number: int) -> str:
@@ -99,6 +110,11 @@ class FleetSnapshotPersistenceService:
         except NotFoundError:
             pass
 
+    def invalidation_generation(self, game_id: int, perspective: int) -> int:
+        """Return the current invalidation generation for one perspective scope."""
+        with self._generation_lock:
+            return self._invalidation_generation.get((game_id, perspective), 0)
+
     def invalidate_for_turn_write(
         self,
         game_id: int,
@@ -114,7 +130,13 @@ class FleetSnapshotPersistenceService:
                 continue
             self.delete_snapshot(game_id, perspective, stored_turn)
             cleared.add(stored_turn)
+        self._bump_invalidation_generation(game_id, perspective)
         return cleared
+
+    def _bump_invalidation_generation(self, game_id: int, perspective: int) -> None:
+        with self._generation_lock:
+            key = (game_id, perspective)
+            self._invalidation_generation[key] = self._invalidation_generation.get(key, 0) + 1
 
     def _stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:
         turns_prefix = f"games/{game_id}/{perspective}/turns"
