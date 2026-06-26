@@ -54,7 +54,9 @@ ORDERING_SEMANTICS = {
     ),
 }
 
-ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
+ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+)
 
 
 @dataclass(frozen=True)
@@ -130,7 +132,8 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     """Probe/ensure hook: classify gathered state only; no inference or payload build."""
     if scope.player_id is None:
         return True
-    if scope.turn <= 1 and not ENSURE_DEPENDENCIES:
+    if scope.turn <= 1:
+        # Game-start neutral priors; fleet@0 is not a valid ensure target.
         return True
 
     services = resolve_scores_services(ctx)

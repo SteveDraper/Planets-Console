@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_types import EnsureDependency
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -33,7 +34,9 @@ def test_export_registry_includes_non_empty_scores_catalog():
     catalog = EXPORT_CATALOG
     assert catalog.analytic_id == "scores"
     assert not catalog.is_empty
-    assert catalog.ensure_dependencies == ()
+    assert catalog.ensure_dependencies == (
+        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+    )
     assert catalog.materialize_export_tree is not None
     assert catalog.ensure_export is not None
 

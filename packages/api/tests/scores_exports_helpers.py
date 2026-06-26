@@ -9,6 +9,11 @@ from pathlib import Path
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.compute_services import (
+    build_ephemeral_fleet_compute_services,
+    turn_chain_through,
+)
+from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -73,7 +78,7 @@ def query_context(
     scheduler: InferenceRowScheduler | None = None,
     stored_turns: dict[int, object] | None = None,
 ):
-    turns = stored_turns or {sample_turn.settings.turn: sample_turn}
+    turns = stored_turns if stored_turns is not None else turn_chain_through(sample_turn)
 
     def load_turn(turn_number: int):
         return turns.get(turn_number)
@@ -85,12 +90,21 @@ def query_context(
             scheduler=scheduler,
         )
 
+    fleet_services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        stored_turns=turns,
+        inference=FleetInferenceSupport(scores_services=scores_services),
+    )
+
     return make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_services={
             "scores": scores_services,
+            "fleet": fleet_services,
         },
     )
 
@@ -115,11 +129,10 @@ def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
         settings=replace(sample_turn.settings, turn=prior_prior_turn),
         game=replace(sample_turn.game, turn=prior_prior_turn),
     )
-    stored_turns = {
-        prior_prior_turn: prior_prior_turn_obj,
-        prior_turn: prior_turn_obj,
-        sample_turn.settings.turn: sample_turn,
-    }
+    stored_turns = turn_chain_through(sample_turn)
+    stored_turns[prior_prior_turn] = prior_prior_turn_obj
+    stored_turns[prior_turn] = prior_turn_obj
+    stored_turns[sample_turn.settings.turn] = sample_turn
     return stored_turns, prior_turn_obj, prior_prior_turn_obj
 
 
@@ -255,6 +268,64 @@ def put_persisted_row(
         player_id,
         row,
     )
+
+
+def seed_scores_fleet_unwind_through(
+    ctx,
+    *,
+    through_turn: int,
+    player_id: int,
+) -> None:
+    """Persist terminal scores rows and fleet snapshots for turns 1..through_turn-1."""
+    from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+    from api.analytics.fleet.compute_services import FleetComputeServices
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+
+    fleet_services = ctx.export_services["fleet"]
+    if not isinstance(fleet_services, FleetComputeServices):
+        raise TypeError("seed_scores_fleet_unwind_through requires FleetComputeServices on ctx")
+
+    scores_services = ctx.export_services["scores"]
+    if scores_services.persistence is None:
+        raise RuntimeError("seed_scores_fleet_unwind_through requires scores persistence")
+
+    for turn_number in range(1, through_turn):
+        turn = ctx.load_turn(turn_number)
+        if turn is None:
+            raise RuntimeError(
+                f"seed_scores_fleet_unwind_through missing stored turn {turn_number}"
+            )
+        put_persisted_row(
+            scores_services.persistence,
+            turn,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seed",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=turn_number,
+        )
+        get_or_materialize_fleet_snapshot(
+            fleet_services.persistence,
+            ctx.game_id,
+            ctx.perspective,
+            turn,
+            load_turn=ctx.load_turn,
+            inference_materialization=fleet_services.inference_materialization,
+        )
+
+
+def _scores_missing_step(probe, *, turn: int, player_id: int):
+    matches = [
+        step
+        for step in probe.missing_steps
+        if step.analytic_id == "scores" and step.turn == turn and step.player_id == player_id
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def materialize_scores_tree(ctx, player_id: int, *, turn: int | None = None):
