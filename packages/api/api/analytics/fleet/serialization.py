@@ -29,9 +29,6 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
 )
 from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
-from api.analytics.military_score_inference.ship_build_combos import (
-    is_generic_zero_military_score_combo_id,
-)
 from api.errors import ValidationError
 
 
@@ -189,14 +186,6 @@ def fleet_build_option_set_from_inference_ship_build(
 ) -> FleetBuildOptionSet:
     """Map one inference solution ship build into a fleet build option set."""
     combo_id = ship_build.combo_id or None
-    if combo_id is not None and is_generic_zero_military_score_combo_id(combo_id):
-        return FleetBuildOptionSet(
-            combo_id=combo_id,
-            label=ship_build.label,
-            solution_rank_weight=solution_rank_weight,
-            beam_count=ship_build.beam_count,
-            launcher_count=ship_build.launcher_count,
-        )
     return FleetBuildOptionSet(
         combo_id=combo_id,
         label=ship_build.label,
