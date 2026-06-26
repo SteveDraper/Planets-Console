@@ -81,9 +81,6 @@ def _scores_search_status_for_scope(
     *,
     turn: TurnInfo,
 ) -> tuple[SearchStatus, int]:
-    if scope.player_id is None:
-        return "not_started", 0
-
     resolved = held_scores_for_scope(ctx, scope, turn=turn)
     return resolved.decision.search_status, resolved.payload.solutions_held
 
