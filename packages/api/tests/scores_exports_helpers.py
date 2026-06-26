@@ -330,10 +330,21 @@ def seed_scores_fleet_unwind_through(
 def scores_missing_step(probe, *, turn: int, player_id: int):
     """Assert probe reports exactly one missing scores step for turn/player."""
     assert probe.total_missing == 1
+    return ensure_missing_step(probe, analytic_id="scores", turn=turn, player_id=player_id)
+
+
+def ensure_missing_step(
+    probe,
+    *,
+    analytic_id: str,
+    turn: int,
+    player_id: int | None,
+):
+    """Return the single missing ensure step for analytic/turn/player."""
     matches = [
         step
         for step in probe.missing_steps
-        if step.analytic_id == "scores" and step.turn == turn and step.player_id == player_id
+        if step.analytic_id == analytic_id and step.turn == turn and step.player_id == player_id
     ]
     assert len(matches) == 1
     return matches[0]

@@ -16,12 +16,14 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.scores_exports_helpers import (
     GAME_ID,
+    ensure_missing_step,
     first_player_id,
     perspective,
     prior_turn_ensure_context,
     put_persisted_row,
     query_context,
     scores_missing_step,
+    seed_scores_fleet_unwind_through,
     stream_scope_for_turn,
 )
 
@@ -363,6 +365,48 @@ def test_probe_omits_stopped_persisted_row(sample_turn, persistence):
     assert probe.status == "ok"
     assert probe.total_missing == 0
     assert probe.missing_steps == ()
+
+
+def test_probe_reports_scores_depends_on_fleet_prior_turn(sample_turn, persistence):
+    """Probe must count fleet@N-1 before current-turn scores when the chain is incomplete."""
+    player_id = first_player_id(sample_turn)
+    turn_number = sample_turn.settings.turn
+    prior_turn = turn_number - 1
+    ctx = query_context(sample_turn, persistence=persistence)
+    seed_scores_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=prior_turn,
+    )
+
+    probe = ctx.probe("scores", {"player_id": player_id})
+
+    assert probe.status == "ok"
+    assert probe.total_missing == 2
+    fleet_step = ensure_missing_step(
+        probe,
+        analytic_id="fleet",
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    scores_step = ensure_missing_step(
+        probe,
+        analytic_id="scores",
+        turn=turn_number,
+        player_id=player_id,
+    )
+    assert fleet_step.status == "not_persisted"
+    assert scores_step.status == "not_persisted"
+    assert probe.missing_steps.index(fleet_step) < probe.missing_steps.index(scores_step)
 
 
 def test_ensure_no_op_when_row_persisted(sample_turn, persistence):

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from api.analytics.export_types import EnsureDependency
+from api.analytics.export_dependency_walk import walk_dependency_tree
+from api.analytics.export_types import EnsureDependency, ExportScope
+from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
 from api.analytics.fleet.exports import EXPORT_CATALOG
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -17,10 +19,14 @@ from tests.fleet_exports_helpers import (
     turn_with_score_delta,
 )
 from tests.scores_exports_helpers import (
+    GAME_ID,
+    ensure_missing_step,
     first_player_id,
+    perspective,
     put_persisted_row,
     query_context,
     schedule_row_with_ladder,
+    seed_scores_fleet_unwind_through,
     ship_build_wire,
 )
 
@@ -168,3 +174,113 @@ def test_query_meta_search_status_path(sample_turn, persistence):
     assert result.status == "ok"
     assert result.paths["$.meta.searchStatus"].value == "complete"
     assert result.paths["$.meta.solutionsHeld"].value == 1
+
+
+def test_ensure_fleet_export_materializes_snapshot_when_missing(sample_turn, persistence):
+    player_id = first_player_id(sample_turn)
+    turn_number = sample_turn.settings.turn
+    ctx = query_context(
+        sample_turn,
+        persistence=persistence,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    fleet_services = resolve_fleet_services(ctx)
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=turn_number,
+        player_id=player_id,
+    )
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+
+    assert not fleet_services.persistence.has_snapshot(
+        GAME_ID,
+        perspective(sample_turn),
+        turn_number,
+    )
+
+    EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    assert fleet_services.persistence.has_snapshot(
+        GAME_ID,
+        perspective(sample_turn),
+        turn_number,
+    )
+
+
+def test_probe_and_walk_report_fleet_depends_on_scores_same_turn(sample_turn, persistence):
+    player_id = first_player_id(sample_turn)
+    turn_number = sample_turn.settings.turn
+    ctx = query_context(
+        sample_turn,
+        persistence=persistence,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=turn_number,
+        player_id=player_id,
+    )
+
+    probe = ctx.probe("fleet", {"player_id": player_id})
+    assert probe.status == "ok"
+    assert probe.total_missing == 2
+    scores_step = ensure_missing_step(
+        probe,
+        analytic_id="scores",
+        turn=turn_number,
+        player_id=player_id,
+    )
+    fleet_step = ensure_missing_step(
+        probe,
+        analytic_id="fleet",
+        turn=turn_number,
+        player_id=player_id,
+    )
+    assert scores_step.status == "not_persisted"
+    assert fleet_step.status == "not_persisted"
+    assert probe.missing_steps.index(scores_step) < probe.missing_steps.index(fleet_step)
+
+    walk = walk_dependency_tree(ctx, "fleet", scope, visiting=set())
+    assert walk.turn_unavailable is None
+    walk_keys = [(step.analytic_id, step.turn) for step in walk.missing_steps]
+    assert walk_keys == [("scores", turn_number), ("fleet", turn_number)]
+
+
+def test_ensure_fleet_export_no_op_when_turn_not_stored(sample_turn, persistence):
+    player_id = first_player_id(sample_turn)
+    stored_turns = turn_chain_through(sample_turn)
+    missing_turn = 999
+    assert missing_turn not in stored_turns
+
+    ctx = query_context(
+        sample_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+    )
+    fleet_services = resolve_fleet_services(ctx)
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=missing_turn,
+        player_id=player_id,
+    )
+
+    assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+    assert not fleet_services.persistence.has_snapshot(
+        GAME_ID,
+        perspective(sample_turn),
+        missing_turn,
+    )
