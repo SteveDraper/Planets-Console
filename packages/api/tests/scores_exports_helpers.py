@@ -77,6 +77,7 @@ def query_context(
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
     stored_turns: dict[int, object] | None = None,
+    seed_fleet_prerequisites_for: int | None = None,
 ):
     turns = stored_turns if stored_turns is not None else turn_chain_through(sample_turn)
 
@@ -98,7 +99,7 @@ def query_context(
         inference=FleetInferenceSupport(scores_services=scores_services),
     )
 
-    return make_analytic_query_context(
+    ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
@@ -107,6 +108,13 @@ def query_context(
             "fleet": fleet_services,
         },
     )
+    if seed_fleet_prerequisites_for is not None:
+        seed_scores_fleet_unwind_through(
+            ctx,
+            through_turn=sample_turn.settings.turn,
+            player_id=seed_fleet_prerequisites_for,
+        )
+    return ctx
 
 
 def first_turn_from(sample_turn):
@@ -154,6 +162,7 @@ def prior_turn_ensure_context(
         persistence=persistence,
         stored_turns=stored_turns,
     )
+    seed_scores_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
     scope = ExportScope(
         game_id=game_id,
         perspective=perspective(sample_turn),
@@ -318,7 +327,9 @@ def seed_scores_fleet_unwind_through(
         )
 
 
-def _scores_missing_step(probe, *, turn: int, player_id: int):
+def scores_missing_step(probe, *, turn: int, player_id: int):
+    """Assert probe reports exactly one missing scores step for turn/player."""
+    assert probe.total_missing == 1
     matches = [
         step
         for step in probe.missing_steps
