@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { AnalyticShellScope } from '../../api/bff'
+import type { AnalyticShellScope, TableDataResponse } from '../../api/bff'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
@@ -11,6 +11,7 @@ import {
   loadFleetTableWireFixture,
   zodParseableFleetTableWireCases,
 } from './loadFleetTableWireFixture'
+import { parseFleetTableWire } from './fleetTableWireSchema'
 
 vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
@@ -28,9 +29,9 @@ const sampleScope: AnalyticShellScope = {
   perspective: 1,
 }
 
-const goldenFleetTableWire = zodParseableFleetTableWireCases(
-  loadFleetTableWireFixture().cases
-)[0]!.expectedTableWire
+const goldenFleetTableWire = parseFleetTableWire(
+  zodParseableFleetTableWireCases(loadFleetTableWireFixture().cases)[0]!.expectedTableWire
+)
 
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -54,7 +55,9 @@ describe('FleetAnalyticTableTile', () => {
 
   it('renders fleet table content when wire is valid', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(fetchAnalyticTable).mockResolvedValue(goldenFleetTableWire)
+    vi.mocked(fetchAnalyticTable).mockResolvedValue(
+      goldenFleetTableWire as unknown as TableDataResponse
+    )
 
     render(
       <FleetAnalyticTableTile analyticScope={sampleScope} fetchEnabled />,
@@ -69,7 +72,9 @@ describe('FleetAnalyticTableTile', () => {
 
   it('shows a parse error when fleet table wire is invalid', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(fetchAnalyticTable).mockResolvedValue({ analyticId: 'fleet' })
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'fleet',
+    } as unknown as TableDataResponse)
 
     render(
       <FleetAnalyticTableTile analyticScope={sampleScope} fetchEnabled />,

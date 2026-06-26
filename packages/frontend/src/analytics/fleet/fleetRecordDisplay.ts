@@ -13,7 +13,9 @@ export type FleetRecordFieldKey =
   | 'launchers'
   | 'builtTurn'
 
-const BOUNDED_OPERATOR_LABEL: Record<FleetFieldConstraint & { kind: 'bounded' }['operator'], string> =
+type FleetBoundedFieldConstraint = Extract<FleetFieldConstraint, { kind: 'bounded' }>
+
+const BOUNDED_OPERATOR_LABEL: Record<FleetBoundedFieldConstraint['operator'], string> =
   {
     lte: '<=',
     gte: '>=',
