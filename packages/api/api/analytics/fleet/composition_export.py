@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Protocol
 
 from api.analytics.export_types import ExportScope
@@ -20,6 +21,22 @@ from api.concepts.turn_component_catalog import (
     torpedos_by_id,
 )
 from api.models.game import TurnInfo
+
+
+@dataclass(frozen=True, slots=True)
+class _CompositionAxisSpec:
+    field_name: str
+    histogram_output_key: str | None
+    max_tech_key: str
+    catalog_key: str
+
+
+_COMPOSITION_AXIS_SPECS: tuple[_CompositionAxisSpec, ...] = (
+    _CompositionAxisSpec("hull", "hullTypes", "hulls", "hulls"),
+    _CompositionAxisSpec("beams", "beamTypes", "beams", "beams"),
+    _CompositionAxisSpec("launchers", "launcherTypes", "launchers", "launchers"),
+    _CompositionAxisSpec("engine", None, "engines", "engines"),
+)
 
 
 class _TechLevelComponent(Protocol):
@@ -72,46 +89,56 @@ def _active_records_for_scope(
     return records
 
 
+def _component_ids_for_axis(
+    axis: _CompositionAxisSpec,
+    histograms: dict[str, dict[str, int]],
+    engine_ids: list[int],
+) -> Iterable[int]:
+    if axis.histogram_output_key is None:
+        return engine_ids
+    return (int(key) for key in histograms[axis.histogram_output_key])
+
+
 def build_fleet_composition_branch(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
     *,
     turn: TurnInfo,
 ) -> dict[str, object]:
-    hull_types: dict[str, int] = {}
-    beam_types: dict[str, int] = {}
-    launcher_types: dict[str, int] = {}
+    histograms: dict[str, dict[str, int]] = {
+        axis.histogram_output_key: {}
+        for axis in _COMPOSITION_AXIS_SPECS
+        if axis.histogram_output_key is not None
+    }
     engine_ids: list[int] = []
 
     for record in _active_records_for_scope(snapshot, scope):
-        _increment_component_histogram(hull_types, record.fields.hull)
-        _increment_component_histogram(beam_types, record.fields.beams)
-        _increment_component_histogram(launcher_types, record.fields.launchers)
-        engine_id = _known_positive_component_id(record.fields.engine)
-        if engine_id is not None:
-            engine_ids.append(engine_id)
+        for axis in _COMPOSITION_AXIS_SPECS:
+            field = getattr(record.fields, axis.field_name)
+            if axis.histogram_output_key is None:
+                component_id = _known_positive_component_id(field)
+                if component_id is not None:
+                    engine_ids.append(component_id)
+            else:
+                _increment_component_histogram(histograms[axis.histogram_output_key], field)
 
-    hull_catalog = hulls_by_id(turn)
-    engine_catalog = engines_by_id(turn)
-    beam_catalog = beams_by_id(turn)
-    torp_catalog = torpedos_by_id(turn)
+    catalogs: dict[str, dict[int, _TechLevelComponent]] = {
+        "hulls": hulls_by_id(turn),
+        "engines": engines_by_id(turn),
+        "beams": beams_by_id(turn),
+        "launchers": torpedos_by_id(turn),
+    }
 
     max_tech_level: dict[str, int] = {}
-    if hull_max := _max_tech_level((int(key) for key in hull_types), hull_catalog):
-        max_tech_level["hulls"] = hull_max
-    if engine_max := _max_tech_level(engine_ids, engine_catalog):
-        max_tech_level["engines"] = engine_max
-    if launcher_max := _max_tech_level(
-        (int(key) for key in launcher_types), torp_catalog
-    ):
-        max_tech_level["launchers"] = launcher_max
-    if beam_max := _max_tech_level((int(key) for key in beam_types), beam_catalog):
-        max_tech_level["beams"] = beam_max
+    for axis in _COMPOSITION_AXIS_SPECS:
+        if axis_max := _max_tech_level(
+            _component_ids_for_axis(axis, histograms, engine_ids),
+            catalogs[axis.catalog_key],
+        ):
+            max_tech_level[axis.max_tech_key] = axis_max
 
     return {
-        "hullTypes": hull_types,
-        "beamTypes": beam_types,
-        "launcherTypes": launcher_types,
+        **histograms,
         "torpedoTypesLoaded": {},
         "maxTechLevel": max_tech_level,
     }
