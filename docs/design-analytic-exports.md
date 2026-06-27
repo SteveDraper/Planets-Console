@@ -215,22 +215,12 @@ Example branches (scores):
       "militaryScoreArithmetic": { }
     }
   ],
-  "hostTurnTargets": [
-    {
-      "hostTurn": 1,
-      "status": "exact",
-      "solutionCount": 2,
-      "warshipDelta": 1,
-      "freighterDelta": 0,
-      "solutions": [ ]
-    }
-  ],
   "diagnostics": { },
   "hullCatalogMask": { "enabledHullIds": [1, 2, 3] }
 }
 ```
 
-`$.solutions` uses the same held top-K shape as scores row inference wire/persistence. For each scoreboard turn scope, **`$.solutions`** describes the **host turn implied by that row** (`hostTurn = scoreboardTurn - 1`), including accelerated backfill rows and split segments. **`$.hostTurnTargets`** (persisted as `hostTurnTargets` on inference rows) carries per-host-turn functional payloads when a single scoreboard row materializes multiple accelerated segments; consumers must use **`$.solutions`** at the correct scoreboard turn or **`$.hostTurnTargets`**, not **`$.diagnostics.accelerated_segments`**. **`$.diagnostics`** is optional and for developer panels only; cross-analytic ingest must not depend on it. `$.solutions[0]` is the full top explanation (all `shipBuilds` and `actions` for that rank). `$.meta.searchStatus` carries lifecycle only.
+`$.solutions` uses the same held top-K shape as scores row inference wire/persistence. For each scoreboard turn scope, **`$.solutions`** is the authoritative functional branch: it describes the **host turn implied by that row** (`hostTurn = scoreboardTurn - 1`), including accelerated backfill rows and split segments. Export materialization **normalizes per scope** -- when a persisted inference row carries multiple accelerated segments in **`hostTurnTargets`** (wire/persistence-only on inference rows, **not** an export tree branch), the materializer selects the matching segment and exposes only **`$.solutions`** for the requested scoreboard turn. Cross-analytic consumers query **`$.solutions`** at the correct scoreboard turn (e.g. fleet placeholders map `builtTurn` to `scores@(builtTurn + 1)` for backfill); they must not read **`$.diagnostics.accelerated_segments`** or **`hostTurnTargets`**. **`$.diagnostics`** is optional and for developer panels only; cross-analytic ingest must not depend on it. `$.solutions[0]` is the full top explanation (all `shipBuilds` and `actions` for that rank). `$.meta.searchStatus` carries lifecycle only.
 
 **`objectiveValue` (Plausibility):** each solution's `objectiveValue` is the **inference solution rank weight** shown in the UI as *Plausibility*. Higher integer = more plausible. It is built from **scaled log-probability prior terms** (Laplace-smoothed histogram weights on magnitude bins and ship combos, composed additively in the solver objective) plus **non-likelihood ranking heuristics** (partial weapon-slot fill penalties, tier-overflow penalties). Consumers may treat it as **plausibility on a pseudo log-likelihood scale**: monotonic with prior support and useful for ordering held explanations, but **not** a calibrated probability, percentage, or exact joint log-likelihood (bucketed aggregates use one bin penalty per action, not per-unit iid terms). The wire field name `objectiveValue` is retained from the CP-SAT solver; do not rename without a coordinated contract change.
 
@@ -350,7 +340,7 @@ Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 
-Solver-specific outcomes (`no_exact_solution`, band residual) belong under **`$.diagnostics`** (scores row inference diagnostics), not in **`searchStatus`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions live in **`$.solutions`** (normalized per scoreboard turn) and **`$.hostTurnTargets`** when persisted from split rows.
+Solver-specific outcomes (`no_exact_solution`, band residual) belong under **`$.diagnostics`** (scores row inference diagnostics), not in **`searchStatus`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions are exposed only via **`$.solutions`** at the correct scoreboard turn (export normalizes split-row **`hostTurnTargets`** from persistence into scope-local **`$.solutions`**).
 
 ---
 
