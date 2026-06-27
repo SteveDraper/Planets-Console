@@ -114,7 +114,4 @@ def max_ship_id_bound_for_inferred_record(
         if segment_id == REPORTED_HOST_TURN_SEGMENT_ID:
             return compute_max_ship_id_bound(turn)
 
-    if built_turn is not None and built_turn == shell_turn:
-        return compute_max_ship_id_bound(turn)
-
     return compute_max_ship_id_bound(turn)
