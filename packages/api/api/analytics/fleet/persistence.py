@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import threading
 
-from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import (
+    fleet_materialization_version_from_json,
     fleet_turn_snapshot_from_json,
     fleet_turn_snapshot_to_json,
+    is_current_fleet_materialization_version,
 )
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.errors import NotFoundError, ValidationError
@@ -35,6 +37,11 @@ class FleetSnapshotPersistenceService:
     and aborts (then retries from a fresh anchor) when the counter advances during
     multi-turn materialization. Invalidation does not block on gap-fill; concurrent
     invalidation callbacks only bump the counter and delete stored snapshots.
+
+    **Materialization version:** Each persisted snapshot carries
+    ``materializationVersion`` (see ``FLEET_MATERIALIZATION_VERSION``). On read,
+    mismatched or missing versions are deleted and treated as cache misses so
+    deploys that change materialization semantics re-chain without a turn reload.
     """
 
     def __init__(self, storage: StorageBackend) -> None:
@@ -60,6 +67,10 @@ class FleetSnapshotPersistenceService:
             return None
         if not isinstance(data, dict):
             raise ValidationError("stored fleet turn snapshot must be a JSON object")
+        stored_version = fleet_materialization_version_from_json(data)
+        if not is_current_fleet_materialization_version(stored_version):
+            self._drop_stale_materialization_snapshot(game_id, perspective, turn_number)
+            return None
         return fleet_turn_snapshot_from_json(data)
 
     def has_snapshot(
@@ -81,6 +92,7 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         snapshot: FleetTurnSnapshot,
     ) -> None:
+        snapshot.materialization_version = FLEET_MATERIALIZATION_VERSION
         if snapshot.game_id != game_id:
             raise ValidationError(
                 f"fleet snapshot game_id {snapshot.game_id} does not match key game_id {game_id}"
@@ -137,6 +149,18 @@ class FleetSnapshotPersistenceService:
         with self._generation_lock:
             key = (game_id, perspective)
             self._invalidation_generation[key] = self._invalidation_generation.get(key, 0) + 1
+
+    def _drop_stale_materialization_snapshot(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> None:
+        """Remove one cached snapshot whose materialization version is outdated."""
+        if not self.has_snapshot(game_id, perspective, turn_number):
+            return
+        self.delete_snapshot(game_id, perspective, turn_number)
+        self._bump_invalidation_generation(game_id, perspective)
 
     def _stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:
         turns_prefix = f"games/{game_id}/{perspective}/turns"

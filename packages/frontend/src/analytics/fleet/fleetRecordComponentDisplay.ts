@@ -23,6 +23,10 @@ function knownComponentId(constraint: FleetFieldConstraint | undefined): number 
   return value
 }
 
+function isGenericFreighterOptionSet(optionSet: FleetBuildOptionSet | null): boolean {
+  return optionSet?.comboId === GENERIC_FREIGHTER_COMBO_ID
+}
+
 function resolveHullId(
   record: FleetTableRecord,
   optionSet: FleetBuildOptionSet | null
@@ -64,6 +68,12 @@ export function formatFleetHullDisplay(
   catalog: FleetComponentCatalog,
   optionSet: FleetBuildOptionSet | null = defaultBuildOptionSet(record)
 ): FleetHullDisplay {
+  if (isGenericFreighterOptionSet(optionSet) && optionSet!.label.length > 0) {
+    return {
+      hullId: GENERIC_FREIGHTER_HULL_ID,
+      label: optionSet!.label,
+    }
+  }
   const hullId = resolveHullId(record, optionSet)
   if (hullId != null) {
     const hullName = fleetHullName(catalog, hullId)

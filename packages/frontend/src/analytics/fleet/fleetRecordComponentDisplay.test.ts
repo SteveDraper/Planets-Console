@@ -72,4 +72,24 @@ describe('fleetRecordComponentDisplay', () => {
     expect(formatFleetHullDisplay(observed, catalog).label).toBe('Large Deep Space Freighter')
     expect(formatFleetEngineDisplay(observed, catalog)).toBe('Transwarp Drive')
   })
+
+  it('shows generic freighter label instead of LDSF catalog name', () => {
+    const genericFreighter: FleetTableRecord = {
+      ...inferredRecord,
+      buildOptionSets: [
+        {
+          comboId: 'combo_freighter',
+          label: 'Freighter',
+          solutionRankWeight: 0,
+          beamCount: 0,
+          launcherCount: 0,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+    expect(formatFleetHullDisplay(genericFreighter, catalog)).toEqual({
+      hullId: 17,
+      label: 'Freighter',
+    })
+  })
 })

@@ -147,6 +147,15 @@ def test_id_bound_tightens_for_unmatched_rows_when_counts_known():
         FleetShipRecord(
             record_id="inferred-placeholder",
             fields=FleetShipRecordFields(ship_id=FleetFieldUnknown()),
+            events=[
+                FleetEvidenceEvent(
+                    event_id="evt-placeholder",
+                    kind="scoreboard_delta",
+                    turn=2,
+                    source="scoreboard",
+                    payload={"shipClass": "warship", "warshipDelta": 1, "freighterDelta": 0},
+                )
+            ],
         )
     )
 

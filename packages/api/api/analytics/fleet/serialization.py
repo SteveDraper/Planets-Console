@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.types import (
     FLEET_BOUNDED_OPERATORS,
     FLEET_EVIDENCE_EVENT_KINDS,
@@ -582,12 +582,25 @@ def fleet_turn_snapshot_to_compute_wire(snapshot: FleetTurnSnapshot) -> dict[str
     }
 
 
+def fleet_materialization_version_from_json(data: dict[str, Any]) -> int:
+    """Return stored materialization version, or 0 when absent (legacy / unstamped)."""
+    raw = data.get("materializationVersion", 0)
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        return 0
+    return raw
+
+
+def is_current_fleet_materialization_version(version: int) -> bool:
+    return version == FLEET_MATERIALIZATION_VERSION
+
+
 def fleet_turn_snapshot_to_json(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
     return {
         "analyticId": snapshot.analytic_id,
         "gameId": snapshot.game_id,
         "perspective": snapshot.perspective,
         "turn": snapshot.turn,
+        "materializationVersion": snapshot.materialization_version,
         "players": _fleet_turn_snapshot_players_to_json(snapshot),
     }
 
@@ -606,6 +619,7 @@ def fleet_turn_snapshot_from_json(data: dict[str, Any]) -> FleetTurnSnapshot:
         game_id=game_id,
         perspective=perspective,
         turn=turn,
+        materialization_version=fleet_materialization_version_from_json(data),
         players=[
             fleet_acquisition_ledger_from_json(player_ledger)
             for player_ledger in _require_object_list(

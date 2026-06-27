@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from api.analytics.military_score_inference.accelerated_start import (
+    ACCEL_WINDOW_SEGMENT_ID,
+    REPORTED_HOST_TURN_SEGMENT_ID,
+    is_first_reliable_scoreboard_turn,
+    starting_scoreboard_snapshot,
+)
+from api.analytics.turn_roster import iter_turn_players
 from api.models.game import TurnInfo
 from api.models.player import Score
 
@@ -50,9 +57,61 @@ def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
     Returns None when the current turn has no scoreboard rows; callers must skip
     id-bound tightening rather than inferring from visible ship lists.
     """
-    total = global_ship_count_from_scores(turn)
-    if total is None:
+    scores = list(_current_turn_scores(turn))
+    if not scores:
         return None
-    net = global_net_delta_from_scores(turn)
-    builds = global_build_count_from_scores(turn)
+    return _max_ship_id_bound_from_scores(scores)
+
+
+def _max_ship_id_bound_from_scores(scores: list[Score]) -> int:
+    total = sum(score.capitalships + score.freighters for score in scores)
+    net = sum(score.shipchange + score.freighterchange for score in scores)
+    builds = sum(max(0, score.shipchange) + max(0, score.freighterchange) for score in scores)
     return total - net + builds
+
+
+def global_ship_count_from_score_rows(scores: list[Score]) -> int:
+    """Sum scoreboard ship totals across score rows."""
+    return sum(score.capitalships + score.freighters for score in scores)
+
+
+def global_ship_count_at_synthetic_prior(turn: TurnInfo) -> int | None:
+    """Global ship total at host turn N-1 inferred from first reliable accelerated row N."""
+    scores = list(_current_turn_scores(turn))
+    if not scores:
+        return None
+    return sum(
+        score.capitalships - score.shipchange + score.freighters - score.freighterchange
+        for score in scores
+    )
+
+
+def global_homeworld_starting_ship_id_bound(turn: TurnInfo) -> int:
+    """Upper bound on ids after each player receives homeworld starting ships."""
+    baseline = starting_scoreboard_snapshot(turn.settings)
+    per_player = baseline.capitalships + baseline.freighters
+    if per_player <= 0:
+        return 0
+    return per_player * len(list(iter_turn_players(turn)))
+
+
+def max_ship_id_bound_for_inferred_record(
+    turn: TurnInfo,
+    *,
+    shell_turn: int,
+    built_turn: int | None,
+    segment_id: str | None,
+    is_starting_inventory: bool,
+) -> int | None:
+    """Resolve the id upper bound for one inferred placeholder on this shell turn."""
+    if is_starting_inventory:
+        bound = global_homeworld_starting_ship_id_bound(turn)
+        return bound if bound > 0 else None
+
+    if is_first_reliable_scoreboard_turn(shell_turn, turn.settings):
+        if segment_id == ACCEL_WINDOW_SEGMENT_ID:
+            return global_ship_count_at_synthetic_prior(turn)
+        if segment_id == REPORTED_HOST_TURN_SEGMENT_ID:
+            return compute_max_ship_id_bound(turn)
+
+    return compute_max_ship_id_bound(turn)

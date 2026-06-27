@@ -39,7 +39,7 @@ Computed at `(game_id, turn T, perspective P)`.
 | **Players tracked** | Every **Player** in **GameInfo** (not limited to viewpoint) |
 | **Direct evidence** | Ships in `turn.ships` on those snapshots |
 | **Build evidence** | **Scores** held solutions per `player_id` on host turns in `1..T` |
-| **Turn 1 baseline** | **Fleet ensure baseline**: implicit empty fleet per **Player**; also seed from turn-1 sightings when present. No separate game-start inventory concept in v1 (accelerated-start ships appear when visible in RST or explained by turn-1 scores inference) |
+| **Turn 1 baseline** | **Fleet ensure baseline**: implicit empty fleet per **Player**; also seed from turn-1 sightings when present. On the first reliable accelerated scoreboard row, also seed **homeworld starting inventory** rows (starting freighter and any baseline warships from Starmap settings) before accelerated segment placeholders |
 | **Cross-perspective** | Out of scope -- no union across stored perspective slots |
 
 ---
@@ -105,7 +105,7 @@ Display default: highest **inference solution rank weight** option set. Row expa
 
 ### 4.2 Inferred row placeholders
 
-When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutions: create **two** inferred rows with unknown specs. Refine as solutions stream in.
+When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutions: create **two** inferred rows with unknown specs. Refine as solutions stream in. Fleet refinement currently reads accelerated segment solutions from **scores** row `diagnostics`, pending [#151](https://github.com/SteveDraper/Planets-Console/issues/151) (uniform host-turn scores export).
 
 ### 4.3 Observation-inference merge
 
@@ -120,6 +120,17 @@ When a sighting arrives:
 ### 4.4 Id bounds
 
 Sequential host ship id allocation: if turn `N-1` had `X` ships globally and turn `N` had `Y` builds, `maxId <= X + Y` (refine when sighting fixes id).
+
+On the first reliable accelerated row (`turn == acceleratedturns`), apply **segment-aware** bounds when tightening inferred rows on that shell turn:
+
+| Row kind | Id bound source |
+|----------|-----------------|
+| Homeworld starting inventory | Global ship count after each player receives starting ships (`players * (baseline freighters + baseline warships)`) |
+| Accelerated window segment (`accel_window`) | Global ship total at end of host turn `N-2` (prior totals from row `N` before reported host-turn deltas) |
+| Reported host-turn segment (`reported_host_turn`) | Current shell-turn bound (`total - net + builds` on row `N`) |
+| Normal scoreboard-delta rows | Current shell-turn bound |
+
+Missing or stale bounds are not re-tightened to a looser value when a row already has a tighter `lte` bound.
 
 ### 4.5 Location constraints (deferred enrichment)
 
@@ -149,6 +160,7 @@ When scoreboard implies fewer ships than **active** rows:
 | **Baseline** | Turn 1: empty ledger or sightings-only seed |
 | **Events** | Copied forward; new events appended; corrections add events at `T` without erasing `T-1` |
 | **Invalidation** | Turn document replace at `T`: drop fleet snapshots `>= T` at that **perspective**; re-chain. Scores inference invalidation: re-chain from first affected host turn (exact coupling in implementation ticket) |
+| **Materialization version** | Each persisted snapshot stores `materializationVersion` (integer, current code constant `FLEET_MATERIALIZATION_VERSION`). Bump conservatively when materialization semantics change for the same RST + scores inputs (chain rules, inferred acquisition ingest, observation-inference merge). On read, missing or stale versions delete that snapshot and count as a cache miss; gap-fill re-materializes with current logic. Does not replace input-driven invalidation (turn reload, scores row changes) |
 | **Invalidation generation** | Each `(gameId, perspective)` has a monotonic counter bumped on every fleet snapshot invalidation. Multi-turn gap-fill records the counter at chain start and aborts (then retries from a fresh anchor, bounded max retries) when the counter advances mid-materialization. Invalidation callbacks only bump the counter and delete stored snapshots; they do not block on an in-progress gap-fill |
 
 ---
