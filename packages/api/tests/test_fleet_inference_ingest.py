@@ -14,10 +14,6 @@ from api.analytics.fleet.types import (
     FleetFieldKnown,
     FleetFieldUnknown,
 )
-from api.analytics.military_score_inference.accelerated_start import (
-    ACCEL_WINDOW_SEGMENT_ID,
-    REPORTED_HOST_TURN_SEGMENT_ID,
-)
 from api.analytics.military_score_inference.analytic import infer_military_score_build
 from api.analytics.military_score_inference.host_turn_targets import (
     host_turn_targets_from_wire_event,
@@ -723,10 +719,6 @@ def test_accelerated_first_reliable_turn_creates_segment_placeholders_for_root()
         event = next(event for event in record.events if event.kind == "scoreboard_delta")
         assert event.payload["acceleratedIngest"] is True
         assert event.payload["segmentHostTurn"] == _known_built_turn(record)
-        assert event.payload["segmentId"] in {
-            ACCEL_WINDOW_SEGMENT_ID,
-            REPORTED_HOST_TURN_SEGMENT_ID,
-        }
 
 
 def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
@@ -826,11 +818,7 @@ def test_accelerated_first_reliable_window_freighter_placeholder():
     window_row = next(
         record
         for record in freighter_rows
-        if any(
-            event.kind == "scoreboard_delta"
-            and event.payload.get("segmentId") == ACCEL_WINDOW_SEGMENT_ID
-            for event in record.events
-        )
+        if record not in starting_rows and _known_built_turn(record) == 1
     )
     assert _known_built_turn(window_row) == 1
 

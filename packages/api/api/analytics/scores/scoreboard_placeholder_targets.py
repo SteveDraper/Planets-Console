@@ -21,7 +21,6 @@ class ScoreboardPlaceholderTarget:
     host_turn: int
     warship_delta: int
     freighter_delta: int
-    segment_id: str | None = None
 
 
 def homeworld_starting_freighter_hull_id() -> int:
@@ -56,7 +55,6 @@ def scoreboard_placeholder_targets(
                 host_turn=segment.host_turn,
                 warship_delta=segment.warship_delta,
                 freighter_delta=segment.freighter_delta,
-                segment_id=segment.segment_id,
             )
             for segment in segments
         )

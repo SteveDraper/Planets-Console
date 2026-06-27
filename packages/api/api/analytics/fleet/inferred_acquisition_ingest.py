@@ -206,7 +206,6 @@ def _ensure_placeholder_target_rows(
         expected_count=max(0, target.warship_delta),
         warship_delta=target.warship_delta,
         freighter_delta=0,
-        segment_id=target.segment_id,
     )
     _ensure_placeholder_rows(
         ledger,
@@ -216,7 +215,6 @@ def _ensure_placeholder_target_rows(
         expected_count=max(0, target.freighter_delta),
         warship_delta=0,
         freighter_delta=target.freighter_delta,
-        segment_id=target.segment_id,
     )
 
 
@@ -278,7 +276,6 @@ def _ensure_placeholder_rows(
     expected_count: int,
     warship_delta: int,
     freighter_delta: int,
-    segment_id: str | None = None,
 ) -> None:
     if expected_count <= 0:
         return
@@ -302,8 +299,7 @@ def _ensure_placeholder_rows(
                 ship_class=ship_class,
                 warship_delta=warship_delta,
                 freighter_delta=freighter_delta,
-                segment_id=segment_id,
-                segment_host_turn=built_turn if segment_id is not None else None,
+                segment_host_turn=built_turn if built_turn < shell_turn else None,
             ),
         )
         ledger.records.append(record)
@@ -382,7 +378,6 @@ def _scoreboard_delta_event(
     ship_class: FleetShipClass,
     warship_delta: int,
     freighter_delta: int,
-    segment_id: str | None = None,
     segment_host_turn: int | None = None,
 ) -> FleetEvidenceEvent:
     payload: dict[str, object] = {
@@ -390,8 +385,6 @@ def _scoreboard_delta_event(
         "warshipDelta": warship_delta,
         "freighterDelta": freighter_delta,
     }
-    if segment_id is not None:
-        payload["segmentId"] = segment_id
     if segment_host_turn is not None:
         payload["segmentHostTurn"] = segment_host_turn
         payload["acceleratedIngest"] = True
