@@ -99,12 +99,31 @@ def _component_ids_for_axis(
     return (int(key) for key in histograms[axis.histogram_output_key])
 
 
+def _empty_fleet_composition_branch() -> dict[str, object]:
+    return {
+        "hullTypes": {},
+        "beamTypes": {},
+        "launcherTypes": {},
+        "torpedoTypesLoaded": {},
+        "maxTechLevel": {},
+    }
+
+
 def build_fleet_composition_branch(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
     *,
     turn: TurnInfo,
 ) -> dict[str, object]:
+    """Per-player composition histograms and max tech levels.
+
+    When ``scope.player_id`` is unset, returns an empty branch rather than
+    aggregating across all players. Unscoped composition paths are rejected at
+    query time; this keeps materialized trees safe for unscoped meta reads.
+    """
+    if scope.player_id is None:
+        return _empty_fleet_composition_branch()
+
     histograms: dict[str, dict[str, int]] = {
         axis.histogram_output_key: {}
         for axis in _COMPOSITION_AXIS_SPECS

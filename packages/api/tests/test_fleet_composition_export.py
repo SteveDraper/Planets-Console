@@ -83,6 +83,53 @@ def test_build_composition_omits_non_active_and_unknown_fields():
     }
 
 
+def test_build_composition_returns_empty_when_unscoped():
+    turn = single_ship_turn(
+        turn_number=1,
+        ship_id=1,
+        owner_id=8,
+        x=100,
+        y=100,
+        hull_id=15,
+        engine_id=3,
+        beam_id=3,
+        torpedoid=3,
+    )
+    snapshot = FleetTurnSnapshot(
+        players=[
+            FleetAcquisitionLedger(
+                player_id=8,
+                records=[
+                    FleetShipRecord(
+                        record_id="active",
+                        disposition="active",
+                        fields=FleetShipRecordFields(
+                            hull=FleetFieldKnown(15),
+                            engine=FleetFieldKnown(3),
+                            beams=FleetFieldKnown(3),
+                            launchers=FleetFieldKnown(3),
+                        ),
+                    ),
+                ],
+            ),
+        ],
+    )
+    scope = ExportScope(
+        game_id=628580,
+        perspective=1,
+        turn=turn.settings.turn,
+        player_id=None,
+    )
+    composition = build_fleet_composition_branch(snapshot, scope, turn=turn)
+    assert composition == {
+        "hullTypes": {},
+        "beamTypes": {},
+        "launcherTypes": {},
+        "torpedoTypesLoaded": {},
+        "maxTechLevel": {},
+    }
+
+
 def test_build_composition_skips_unknown_catalog_ids_for_max_tech_level():
     turn = single_ship_turn(
         turn_number=1,
