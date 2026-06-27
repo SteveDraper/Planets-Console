@@ -160,3 +160,35 @@ def test_build_composition_skips_unknown_catalog_ids_for_max_tech_level():
     assert composition["hullTypes"] == {"13": 1}
     assert composition["launcherTypes"] == {"6": 1}
     assert composition["maxTechLevel"] == {"beams": 2}
+
+
+def test_build_composition_excludes_known_zero_beams_and_launchers():
+    turn = single_ship_turn(
+        turn_number=1,
+        ship_id=1,
+        owner_id=8,
+        x=100,
+        y=100,
+        hull_id=15,
+        engine_id=3,
+        beam_id=3,
+        torpedoid=3,
+    )
+    composition = _composition_for_records(
+        [
+            FleetShipRecord(
+                record_id="no-beams-or-launchers",
+                disposition="active",
+                fields=FleetShipRecordFields(
+                    hull=FleetFieldKnown(15),
+                    engine=FleetFieldKnown(3),
+                    beams=FleetFieldKnown(0),
+                    launchers=FleetFieldKnown(0),
+                ),
+            ),
+        ],
+        turn=turn,
+    )
+    assert composition["hullTypes"] == {"15": 1}
+    assert composition["beamTypes"] == {}
+    assert composition["launcherTypes"] == {}
