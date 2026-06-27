@@ -12,7 +12,9 @@ from api.analytics.military_score_inference.host_turn_targets import (
     host_turn_functional_target_to_wire_dict,
     host_turn_targets_from_wire_event,
 )
+from api.analytics.military_score_inference.solver import STATUS_TIME_LIMITED
 from api.analytics.scores.host_turn_export import (
+    _payload_from_functional_target,
     functional_target_for_host_turn,
     host_turn_targets_from_persisted_row,
 )
@@ -100,6 +102,21 @@ def test_functional_target_for_host_turn_uses_typed_fields():
     targets = host_turn_targets_from_persisted_row(row)
     resolved = functional_target_for_host_turn(targets, target.host_turn)
     assert resolved is target
+
+
+def test_functional_target_time_limited_maps_to_stopped_search_status():
+    target = host_turn_functional_target_from_wire_dict(_sample_wire_target())
+    time_limited = HostTurnFunctionalTarget(
+        host_turn=target.host_turn,
+        status=STATUS_TIME_LIMITED,
+        solution_count=target.solution_count,
+        military_delta_2x=target.military_delta_2x,
+        warship_delta=target.warship_delta,
+        freighter_delta=target.freighter_delta,
+        solutions=target.solutions,
+    )
+    payload = _payload_from_functional_target(time_limited)
+    assert payload.search_status == "stopped"
 
 
 def test_functional_host_turn_target_strips_segment_diagnostics():

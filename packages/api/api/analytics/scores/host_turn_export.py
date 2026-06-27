@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
+    STATUS_TIME_LIMITED,
 )
 from api.analytics.scores.export_wire import ranked_solutions_from_wire
 from api.models.game import TurnInfo
@@ -62,7 +63,7 @@ class FunctionalHostTurnPayload:
 
 
 def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatus:
-    if row.status == STATUS_STOPPED:
+    if row.status in (STATUS_STOPPED, STATUS_TIME_LIMITED):
         return "stopped"
     if row.status in _COMPLETE_TARGET_STATUSES:
         return "complete"
@@ -70,7 +71,7 @@ def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatu
 
 
 def _search_status_from_target_status(status: object) -> SearchStatus:
-    if status == STATUS_STOPPED:
+    if status in (STATUS_STOPPED, STATUS_TIME_LIMITED):
         return "stopped"
     if isinstance(status, str) and status in _COMPLETE_TARGET_STATUSES:
         return "complete"
