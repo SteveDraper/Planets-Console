@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from api.analytics.scores.scoreboard_placeholder_targets import (
+from api.analytics.scores.placeholder_targets import (
     homeworld_starting_inventory_counts,
     is_first_reliable_accelerated_shell_turn,
 )
