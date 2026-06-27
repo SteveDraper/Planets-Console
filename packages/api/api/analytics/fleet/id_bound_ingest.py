@@ -104,10 +104,3 @@ def _segment_id_from_event(event: FleetEvidenceEvent) -> str | None:
 
 def _is_homeworld_starting_inventory_event(event: FleetEvidenceEvent) -> bool:
     return event.payload.get("homeworldStartingInventory") is True
-
-
-def is_homeworld_starting_inventory_record(record: FleetShipRecord) -> bool:
-    for event in record.events:
-        if event.kind == "scoreboard_delta" and _is_homeworld_starting_inventory_event(event):
-            return True
-    return False
