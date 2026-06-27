@@ -11,7 +11,7 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetTurnSnapshot,
 )
-from api.analytics.military_score_inference.ship_inventory import (
+from api.concepts.turn_component_catalog import (
     beams_by_id,
     engines_by_id,
     hulls_by_id,
