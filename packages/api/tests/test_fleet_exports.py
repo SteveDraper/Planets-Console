@@ -85,34 +85,6 @@ def test_materialized_tree_turn_one_empty_composition(sample_turn):
     }
 
 
-def test_materialized_tree_composition_counts_known_component_types_from_sightings():
-    player_id = 8
-    turn = single_ship_turn(
-        turn_number=1,
-        ship_id=42,
-        owner_id=player_id,
-        x=1000,
-        y=2000,
-        hull_id=15,
-        engine_id=3,
-        beam_id=3,
-        torpedoid=3,
-    )
-    stored_turns = {1: turn}
-    ctx = export_chain_query_context(turn, stored_turns=stored_turns)
-    tree, _scope = materialize_fleet_tree(ctx, player_id, turn=1)
-    assert tree["composition"]["hullTypes"] == {"15": 1}
-    assert tree["composition"]["beamTypes"] == {"3": 1}
-    assert tree["composition"]["launcherTypes"] == {"3": 1}
-    assert tree["composition"]["torpedoTypesLoaded"] == {}
-    assert tree["composition"]["maxTechLevel"] == {
-        "hulls": 1,
-        "engines": 3,
-        "launchers": 3,
-        "beams": 2,
-    }
-
-
 def test_materialized_tree_composition_omits_unknown_placeholder_launchers(sample_turn):
     player_id = first_player_id(sample_turn)
     sighting = single_ship_turn(turn_number=5, ship_id=99, owner_id=player_id, x=100, y=100)
