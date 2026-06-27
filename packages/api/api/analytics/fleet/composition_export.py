@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.types import (
     FleetFieldConstraint,
     FleetFieldKnown,
@@ -76,12 +77,8 @@ def _active_records_for_scope(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
 ) -> list[FleetShipRecord]:
-    if scope.player_id is None:
-        ledgers = snapshot.players
-    else:
-        ledgers = [ledger for ledger in snapshot.players if ledger.player_id == scope.player_id]
     records: list[FleetShipRecord] = []
-    for ledger in ledgers:
+    for ledger in ledgers_for_scope(snapshot, scope):
         for record in ledger.records:
             if record.disposition == "active":
                 records.append(record)
