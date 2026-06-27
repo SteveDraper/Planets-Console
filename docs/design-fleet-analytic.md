@@ -105,7 +105,7 @@ Display default: highest **inference solution rank weight** option set. Row expa
 
 ### 4.2 Inferred row placeholders
 
-When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutions: create **two** inferred rows with unknown specs. Refine as solutions stream in.
+When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutions: create **two** inferred rows with unknown specs. Refine as solutions stream in. Fleet refinement currently reads accelerated segment solutions from **scores** row `diagnostics`, pending [#151](https://github.com/SteveDraper/Planets-Console/issues/151) (uniform host-turn scores export).
 
 ### 4.3 Observation-inference merge
 
