@@ -13,6 +13,7 @@ from api.analytics.fleet.chain import (
     ensure_fleet_baseline,
     get_or_materialize_fleet_snapshot,
 )
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -687,3 +688,86 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
 
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.invalidation_generation(628580, 1) == 3
+
+
+def test_put_snapshot_stamps_current_materialization_version(persistence, load_turn):
+    turn = load_turn(111)
+    assert turn is not None
+    snapshot = ensure_fleet_baseline(628580, 1, turn)
+    assert snapshot.materialization_version == 0
+    persistence.put_snapshot(628580, 1, 111, snapshot)
+    assert snapshot.materialization_version == FLEET_MATERIALIZATION_VERSION
+    stored = persistence.get_snapshot(628580, 1, 111)
+    assert stored is not None
+    assert stored.materialization_version == FLEET_MATERIALIZATION_VERSION
+
+
+def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn, memory_backend):
+    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
+
+    turn = load_turn(111)
+    assert turn is not None
+    snapshot = ensure_fleet_baseline(628580, 1, turn)
+    stale_payload = fleet_turn_snapshot_to_json(snapshot)
+    stale_payload["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
+    memory_backend.put(
+        persistence.document_key(628580, 1, 111),
+        stale_payload,
+    )
+    generation_before = persistence.invalidation_generation(628580, 1)
+
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert persistence.has_snapshot(628580, 1, 111) is False
+    assert persistence.invalidation_generation(628580, 1) == generation_before + 1
+
+
+def test_missing_materialization_version_is_deleted_on_read(persistence, load_turn, memory_backend):
+    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
+
+    turn = load_turn(111)
+    assert turn is not None
+    snapshot = ensure_fleet_baseline(628580, 1, turn)
+    legacy_payload = fleet_turn_snapshot_to_json(snapshot)
+    del legacy_payload["materializationVersion"]
+    memory_backend.put(
+        persistence.document_key(628580, 1, 111),
+        legacy_payload,
+    )
+
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert persistence.has_snapshot(628580, 1, 111) is False
+
+
+def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memory_backend):
+    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    stale_anchor = ensure_fleet_baseline(628580, 1, turn_110)
+    stale_anchor.players[0].records.append(
+        FleetShipRecord(record_id="stale-rec", disposition="active"),
+    )
+    stale_payload = fleet_turn_snapshot_to_json(stale_anchor)
+    stale_payload["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
+    memory_backend.put(
+        persistence.document_key(628580, 1, 110),
+        stale_payload,
+    )
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+    )
+
+    assert snapshot.turn == 112
+    assert snapshot.materialization_version == FLEET_MATERIALIZATION_VERSION
+    assert all(record.record_id != "stale-rec" for record in snapshot.players[0].records)
+    rematerialized_110 = persistence.get_snapshot(628580, 1, 110)
+    assert rematerialized_110 is not None
+    assert rematerialized_110.materialization_version == FLEET_MATERIALIZATION_VERSION
+    assert all(record.record_id != "stale-rec" for record in rematerialized_110.players[0].records)

@@ -149,6 +149,7 @@ When scoreboard implies fewer ships than **active** rows:
 | **Baseline** | Turn 1: empty ledger or sightings-only seed |
 | **Events** | Copied forward; new events appended; corrections add events at `T` without erasing `T-1` |
 | **Invalidation** | Turn document replace at `T`: drop fleet snapshots `>= T` at that **perspective**; re-chain. Scores inference invalidation: re-chain from first affected host turn (exact coupling in implementation ticket) |
+| **Materialization version** | Each persisted snapshot stores `materializationVersion` (integer, current code constant `FLEET_MATERIALIZATION_VERSION`). Bump conservatively when materialization semantics change for the same RST + scores inputs (chain rules, inferred acquisition ingest, observation-inference merge). On read, missing or stale versions delete that snapshot and count as a cache miss; gap-fill re-materializes with current logic. Does not replace input-driven invalidation (turn reload, scores row changes) |
 | **Invalidation generation** | Each `(gameId, perspective)` has a monotonic counter bumped on every fleet snapshot invalidation. Multi-turn gap-fill records the counter at chain start and aborts (then retries from a fresh anchor, bounded max retries) when the counter advances mid-materialization. Invalidation callbacks only bump the counter and delete stored snapshots; they do not block on an in-progress gap-fill |
 
 ---

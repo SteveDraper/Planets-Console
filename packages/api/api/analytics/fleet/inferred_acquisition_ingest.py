@@ -5,7 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
+from api.analytics.fleet.held_solutions import (
+    FleetAcceleratedSegment,
+    FleetHeldInference,
+    FleetInferenceMaterialization,
+)
 from api.analytics.fleet.scoreboard_counts import iter_current_turn_scores
 from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
@@ -20,6 +24,11 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetShipRecordFields,
     FleetTurnSnapshot,
+)
+from api.analytics.military_score_inference.accelerated_start import (
+    AcceleratedInferenceSegment,
+    accelerated_inference_segments,
+    is_first_reliable_scoreboard_turn,
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     inference_solution_ship_build_from_wire,
@@ -63,16 +72,27 @@ def _create_scoreboard_placeholders(
     """Create inferred placeholder rows for positive scoreboard warship/freighter deltas."""
     turn_number = turn.settings.turn
     ledgers_by_player_id = {ledger.player_id: ledger for ledger in snapshot.players}
+    accelerated_first_reliable = is_first_reliable_scoreboard_turn(turn_number, turn.settings)
 
     for score in iter_current_turn_scores(turn):
         ledger = ledgers_by_player_id.get(score.ownerid)
         if ledger is None:
             continue
+        if accelerated_first_reliable:
+            _create_accelerated_scoreboard_placeholders(
+                ledger,
+                score=score,
+                turn=turn,
+                shell_turn=turn_number,
+            )
+            continue
+
         warship_builds = max(0, score.shipchange)
         freighter_builds = max(0, score.freighterchange)
         _ensure_placeholder_rows(
             ledger,
-            turn_number=turn_number,
+            shell_turn=turn_number,
+            built_turn=turn_number,
             ship_class="warship",
             expected_count=warship_builds,
             warship_delta=warship_builds,
@@ -80,7 +100,8 @@ def _create_scoreboard_placeholders(
         )
         _ensure_placeholder_rows(
             ledger,
-            turn_number=turn_number,
+            shell_turn=turn_number,
+            built_turn=turn_number,
             ship_class="freighter",
             expected_count=freighter_builds,
             warship_delta=0,
@@ -88,6 +109,53 @@ def _create_scoreboard_placeholders(
         )
 
     return snapshot
+
+
+def _create_accelerated_scoreboard_placeholders(
+    ledger: FleetAcquisitionLedger,
+    *,
+    score,
+    turn: TurnInfo,
+    shell_turn: int,
+) -> None:
+    """Create placeholders from accelerated segment ship counts on first reliable turn N."""
+    segments = accelerated_inference_segments(score, turn)
+    if segments is None:
+        return
+    for segment in segments:
+        _ensure_accelerated_segment_placeholders(
+            ledger,
+            segment=segment,
+            shell_turn=shell_turn,
+        )
+
+
+def _ensure_accelerated_segment_placeholders(
+    ledger: FleetAcquisitionLedger,
+    *,
+    segment: AcceleratedInferenceSegment,
+    shell_turn: int,
+) -> None:
+    _ensure_placeholder_rows(
+        ledger,
+        shell_turn=shell_turn,
+        built_turn=segment.host_turn,
+        ship_class="warship",
+        expected_count=max(0, segment.warship_delta),
+        warship_delta=segment.warship_delta,
+        freighter_delta=0,
+        segment_id=segment.segment_id,
+    )
+    _ensure_placeholder_rows(
+        ledger,
+        shell_turn=shell_turn,
+        built_turn=segment.host_turn,
+        ship_class="freighter",
+        expected_count=max(0, segment.freighter_delta),
+        warship_delta=0,
+        freighter_delta=segment.freighter_delta,
+        segment_id=segment.segment_id,
+    )
 
 
 def _refine_inferred_acquisitions_from_scores(
@@ -100,6 +168,7 @@ def _refine_inferred_acquisitions_from_scores(
     turn_number = turn.settings.turn
     inference = inference_materialization.inference
     load_turn = inference_materialization.load_turn
+    accelerated_first_reliable = is_first_reliable_scoreboard_turn(turn_number, turn.settings)
     for ledger in snapshot.players:
         if not _ledger_has_placeholders_for_turn(ledger, turn_number):
             continue
@@ -111,11 +180,18 @@ def _refine_inferred_acquisitions_from_scores(
             turn=turn,
             load_turn=load_turn,
         )
+        if accelerated_first_reliable and held.accelerated_segments:
+            _refine_accelerated_player_placeholders(
+                ledger,
+                shell_turn=turn_number,
+                held=held,
+            )
+            continue
         if not held.solutions:
             continue
         _refine_player_placeholders(
             ledger,
-            turn_number=turn_number,
+            shell_turn=turn_number,
             solutions=list(held.solutions),
             search_status=held.search_status,
         )
@@ -123,32 +199,79 @@ def _refine_inferred_acquisitions_from_scores(
     return snapshot
 
 
+def _refine_accelerated_player_placeholders(
+    ledger: FleetAcquisitionLedger,
+    *,
+    shell_turn: int,
+    held: FleetHeldInference,
+) -> None:
+    for segment in held.accelerated_segments:
+        if not segment.solutions:
+            continue
+        search_status = segment.search_status or held.search_status
+        warship_placeholders = _placeholder_rows_for_built_turn(
+            ledger,
+            shell_turn=shell_turn,
+            built_turn=segment.host_turn,
+            ship_class="warship",
+        )
+        freighter_placeholders = _placeholder_rows_for_built_turn(
+            ledger,
+            shell_turn=shell_turn,
+            built_turn=segment.host_turn,
+            ship_class="freighter",
+        )
+        _assign_option_sets_to_placeholders(
+            warship_placeholders,
+            _expanded_builds_by_solution(list(segment.solutions), ship_class="warship"),
+            shell_turn=shell_turn,
+            search_status=search_status,
+            segment=segment,
+        )
+        _assign_option_sets_to_placeholders(
+            freighter_placeholders,
+            _expanded_builds_by_solution(list(segment.solutions), ship_class="freighter"),
+            shell_turn=shell_turn,
+            search_status=search_status,
+            segment=segment,
+        )
+
+
 def _ensure_placeholder_rows(
     ledger: FleetAcquisitionLedger,
     *,
-    turn_number: int,
+    shell_turn: int,
+    built_turn: int,
     ship_class: FleetShipClass,
     expected_count: int,
     warship_delta: int,
     freighter_delta: int,
+    segment_id: str | None = None,
 ) -> None:
     if expected_count <= 0:
         return
-    existing = _placeholder_rows_for_turn(ledger, turn_number, ship_class=ship_class)
+    existing = _placeholder_rows_for_built_turn(
+        ledger,
+        shell_turn=shell_turn,
+        built_turn=built_turn,
+        ship_class=ship_class,
+    )
     for _ in range(expected_count - len(existing)):
         record = FleetShipRecord(
             record_id=str(uuid.uuid4()),
             fields=FleetShipRecordFields(
-                built_turn=FleetFieldKnown(turn_number),
+                built_turn=FleetFieldKnown(built_turn),
             ),
         )
         append_fleet_evidence_event(
             record,
             _scoreboard_delta_event(
-                turn=turn_number,
+                turn=shell_turn,
                 ship_class=ship_class,
                 warship_delta=warship_delta,
                 freighter_delta=freighter_delta,
+                segment_id=segment_id,
+                segment_host_turn=built_turn if segment_id is not None else None,
             ),
         )
         ledger.records.append(record)
@@ -182,6 +305,27 @@ def _placeholder_rows_for_turn(
     return rows
 
 
+def _placeholder_rows_for_built_turn(
+    ledger: FleetAcquisitionLedger,
+    *,
+    shell_turn: int,
+    built_turn: int,
+    ship_class: FleetShipClass,
+) -> list[FleetShipRecord]:
+    return [
+        record
+        for record in _placeholder_rows_for_turn(ledger, shell_turn, ship_class=ship_class)
+        if _known_built_turn(record) == built_turn
+    ]
+
+
+def _known_built_turn(record: FleetShipRecord) -> int | None:
+    built_turn = record.fields.built_turn
+    if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
+        return built_turn.value
+    return None
+
+
 def _scoreboard_acquisition_event(
     record: FleetShipRecord,
     turn_number: int,
@@ -206,48 +350,56 @@ def _scoreboard_delta_event(
     ship_class: FleetShipClass,
     warship_delta: int,
     freighter_delta: int,
+    segment_id: str | None = None,
+    segment_host_turn: int | None = None,
 ) -> FleetEvidenceEvent:
+    payload: dict[str, object] = {
+        "shipClass": ship_class,
+        "warshipDelta": warship_delta,
+        "freighterDelta": freighter_delta,
+    }
+    if segment_id is not None:
+        payload["segmentId"] = segment_id
+    if segment_host_turn is not None:
+        payload["segmentHostTurn"] = segment_host_turn
+        payload["acceleratedIngest"] = True
     return FleetEvidenceEvent(
         event_id=str(uuid.uuid4()),
         kind="scoreboard_delta",
         turn=turn,
         source=SCOREBOARD_SOURCE,
-        payload={
-            "shipClass": ship_class,
-            "warshipDelta": warship_delta,
-            "freighterDelta": freighter_delta,
-        },
+        payload=payload,
     )
 
 
 def _refine_player_placeholders(
     ledger: FleetAcquisitionLedger,
     *,
-    turn_number: int,
+    shell_turn: int,
     solutions: list[dict[str, object]],
     search_status: str,
 ) -> None:
     ranked = ranked_solutions_from_wire(solutions)
     warship_placeholders = _placeholder_rows_for_turn(
         ledger,
-        turn_number,
+        shell_turn,
         ship_class="warship",
     )
     freighter_placeholders = _placeholder_rows_for_turn(
         ledger,
-        turn_number,
+        shell_turn,
         ship_class="freighter",
     )
     _assign_option_sets_to_placeholders(
         warship_placeholders,
         _expanded_builds_by_solution(ranked, ship_class="warship"),
-        turn_number=turn_number,
+        shell_turn=shell_turn,
         search_status=search_status,
     )
     _assign_option_sets_to_placeholders(
         freighter_placeholders,
         _expanded_builds_by_solution(ranked, ship_class="freighter"),
-        turn_number=turn_number,
+        shell_turn=shell_turn,
         search_status=search_status,
     )
 
@@ -280,8 +432,9 @@ def _assign_option_sets_to_placeholders(
     placeholders: list[FleetShipRecord],
     builds_by_solution: list[list[FleetBuildOptionSet]],
     *,
-    turn_number: int,
+    shell_turn: int,
     search_status: str,
+    segment: FleetAcceleratedSegment | None = None,
 ) -> None:
     for index, record in enumerate(placeholders):
         option_sets = _option_sets_for_slot(builds_by_solution, index)
@@ -292,14 +445,14 @@ def _assign_option_sets_to_placeholders(
             continue
         record.build_option_sets = list(option_sets)
         record.display_default_option_set_index = _default_option_set_index(option_sets)
-        record.fields.built_turn = FleetFieldKnown(turn_number)
         _ensure_unknown_spec_fields(record)
         append_fleet_evidence_event(
             record,
             _inference_update_event(
-                turn=turn_number,
+                turn=shell_turn,
                 search_status=search_status,
                 option_set_count=len(option_sets),
+                segment=segment,
             ),
         )
 
@@ -361,14 +514,20 @@ def _inference_update_event(
     turn: int,
     search_status: str,
     option_set_count: int,
+    segment: FleetAcceleratedSegment | None = None,
 ) -> FleetEvidenceEvent:
+    payload: dict[str, object] = {
+        "searchStatus": search_status,
+        "optionSetCount": option_set_count,
+    }
+    if segment is not None:
+        payload["segmentId"] = segment.segment_id
+        payload["segmentHostTurn"] = segment.host_turn
+        payload["acceleratedIngest"] = True
     return FleetEvidenceEvent(
         event_id=str(uuid.uuid4()),
         kind="inference_update",
         turn=turn,
         source=INFERENCE_SOURCE,
-        payload={
-            "searchStatus": search_status,
-            "optionSetCount": option_set_count,
-        },
+        payload=payload,
     )

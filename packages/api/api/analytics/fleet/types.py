@@ -179,4 +179,5 @@ class FleetTurnSnapshot:
     game_id: int = 0
     perspective: int = 0
     turn: int = 0
+    materialization_version: int = 0
     players: list[FleetAcquisitionLedger] = field(default_factory=list)

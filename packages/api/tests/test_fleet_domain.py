@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
     fleet_acquisition_ledger_from_json,
@@ -193,6 +194,7 @@ def test_fleet_turn_snapshot_round_trip():
         game_id=628580,
         perspective=1,
         turn=111,
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
         players=[
             FleetAcquisitionLedger(
                 player_id=8,

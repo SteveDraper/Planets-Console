@@ -10,8 +10,14 @@ from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, Fl
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.fleet.types import (
+    FleetFieldKnown,
     FleetFieldUnknown,
 )
+from api.analytics.military_score_inference.accelerated_start import (
+    ACCEL_WINDOW_SEGMENT_ID,
+    REPORTED_HOST_TURN_SEGMENT_ID,
+)
+from api.analytics.military_score_inference.analytic import infer_military_score_build
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -24,6 +30,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
+from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.scores_exports_helpers import (
     inference_solution,
     perspective,
@@ -589,12 +596,12 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
 
 
 def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
-    turn = _turn_with_score_delta(turn_number=3, owner_id=8, freighterchange=1)
+    turn = _turn_with_score_delta(turn_number=111, owner_id=8, freighterchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     persistence.put_row(
         628580,
         1,
-        3,
+        111,
         8,
         PersistedInferenceRow(
             status=STATUS_EXACT,
@@ -639,3 +646,139 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
     assert option_set["label"] == "Freighter"
     assert "hullId" not in option_set
     assert "engineId" not in option_set
+
+
+def _known_built_turn(record) -> int | None:
+    built_turn = record.fields.built_turn
+    if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
+        return built_turn.value
+    return None
+
+
+def _inferred_warship_rows(ledger, *, shell_turn: int):
+    return [
+        record
+        for record in ledger.records
+        if record.disposition == "active"
+        and any(
+            event.kind == "scoreboard_delta"
+            and event.turn == shell_turn
+            and event.payload.get("shipClass") == "warship"
+            for event in record.events
+        )
+    ]
+
+
+def _inferred_freighter_rows(ledger, *, shell_turn: int):
+    return [
+        record
+        for record in ledger.records
+        if record.disposition == "active"
+        and any(
+            event.kind == "scoreboard_delta"
+            and event.turn == shell_turn
+            and event.payload.get("shipClass") == "freighter"
+            for event in record.events
+        )
+    ]
+
+
+def test_accelerated_first_reliable_turn_creates_segment_placeholders_for_root():
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 11
+    snapshot = ingest_turn_inferred_acquisitions(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
+    assert len(warship_rows) == 2
+    assert sorted(_known_built_turn(record) for record in warship_rows) == [1, 2]
+    for record in warship_rows:
+        event = next(event for event in record.events if event.kind == "scoreboard_delta")
+        assert event.payload["acceleratedIngest"] is True
+        assert event.payload["segmentHostTurn"] == _known_built_turn(record)
+        assert event.payload["segmentId"] in {
+            ACCEL_WINDOW_SEGMENT_ID,
+            REPORTED_HOST_TURN_SEGMENT_ID,
+        }
+
+
+def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 11
+    score = next(entry for entry in turn.scores if entry.ownerid == player_id)
+    inference_payload = infer_military_score_build(score, turn)
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        3,
+        player_id,
+        PersistedInferenceRow(
+            status=str(inference_payload["status"]),
+            summary=str(inference_payload["summary"]),
+            solution_count=int(inference_payload["solutionCount"]),
+            is_complete=True,
+            solutions=inference_payload["solutions"],
+            diagnostics=inference_payload["diagnostics"],
+        ),
+    )
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
+    assert len(warship_rows) == 2
+    for record in warship_rows:
+        assert len(record.build_option_sets) == 1
+        assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
+        inference_event = next(event for event in record.events if event.kind == "inference_update")
+        assert inference_event.payload["acceleratedIngest"] is True
+        assert inference_event.payload["segmentHostTurn"] == _known_built_turn(record)
+
+
+def test_accelerated_first_reliable_window_freighter_placeholder():
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 2
+    snapshot = ingest_turn_inferred_acquisitions(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    freighter_rows = _inferred_freighter_rows(ledger, shell_turn=3)
+    assert len(freighter_rows) == 2
+    window_row = next(
+        record
+        for record in freighter_rows
+        if any(
+            event.kind == "scoreboard_delta"
+            and event.payload.get("segmentId") == ACCEL_WINDOW_SEGMENT_ID
+            for event in record.events
+        )
+    )
+    assert _known_built_turn(window_row) == 1
+
+
+def test_post_accelerated_turn_uses_scoreboard_delta_placeholders_only():
+    turn = load_turn_fixture("628580/1/turns/52.json")
+    player_id = 8
+    snapshot = ingest_turn_inferred_acquisitions(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+    )
+    ledger = ledger_for_player(snapshot, player_id)
+    warship_rows = _inferred_warship_rows(ledger, shell_turn=52)
+    assert len(warship_rows) == 2
+    for record in warship_rows:
+        event = next(event for event in record.events if event.kind == "scoreboard_delta")
+        assert "acceleratedIngest" not in event.payload
+        assert _known_built_turn(record) == 52
