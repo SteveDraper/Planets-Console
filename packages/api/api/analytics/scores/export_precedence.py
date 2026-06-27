@@ -111,7 +111,8 @@ class ScoresExportResolved:
 def classify_scores_export_branch(
     snapshot: ScoresInferenceSnapshot,
     *,
-    resolution_context: ScoresExportResolutionContext | None = None,
+    resolution_context: ScoresExportResolutionContext,
+    functional_payload: FunctionalHostTurnPayload | None,
 ) -> ScoresExportPrecedenceBranch:
     """Classify precedence branch from gathered state without materializing payloads."""
     persisted_row = snapshot.persisted_row
@@ -128,14 +129,7 @@ def classify_scores_export_branch(
     if persisted_row is not None:
         return "fallback_persisted"
 
-    if (
-        resolution_context is not None
-        and _functional_backfill_payload(
-            snapshot,
-            resolution_context=resolution_context,
-        )
-        is not None
-    ):
+    if functional_payload is not None:
         return "functional_backfill"
 
     return "empty"
@@ -144,12 +138,14 @@ def classify_scores_export_branch(
 def classify_scores_export_decision(
     snapshot: ScoresInferenceSnapshot,
     *,
-    resolution_context: ScoresExportResolutionContext | None = None,
+    resolution_context: ScoresExportResolutionContext,
+    functional_payload: FunctionalHostTurnPayload | None,
 ) -> ScoresExportDecision:
     """Resolve branch and lifecycle status without materializing solution payloads."""
     branch = classify_scores_export_branch(
         snapshot,
         resolution_context=resolution_context,
+        functional_payload=functional_payload,
     )
     if branch == "priority_persisted":
         persisted_row = snapshot.persisted_row
@@ -191,14 +187,10 @@ def classify_scores_export_decision(
         )
 
     if branch == "functional_backfill":
-        functional = _functional_backfill_payload(
-            snapshot,
-            resolution_context=resolution_context,
-        )
-        assert functional is not None
+        assert functional_payload is not None
         return ScoresExportDecision(
             branch,
-            functional.search_status,
+            functional_payload.search_status,
             needs_ensure_work=False,
         )
 
@@ -208,19 +200,21 @@ def classify_scores_export_decision(
 def is_scores_export_ensure_satisfied_from_snapshot(
     snapshot: ScoresInferenceSnapshot,
     *,
-    resolution_context: ScoresExportResolutionContext | None = None,
+    resolution_context: ScoresExportResolutionContext,
 ) -> bool:
     """True when probe/ensure walks should skip this scope (no further ensure work)."""
+    functional_payload = _resolve_functional_payload(snapshot, resolution_context)
     return not classify_scores_export_decision(
         snapshot,
         resolution_context=resolution_context,
+        functional_payload=functional_payload,
     ).needs_ensure_work
 
 
 def resolve_scores_export(
     snapshot: ScoresInferenceSnapshot,
     *,
-    resolution_context: ScoresExportResolutionContext | None = None,
+    resolution_context: ScoresExportResolutionContext,
 ) -> ScoresExportResolved:
     decision, payload = _resolve_scores_export_ladder(
         snapshot,
@@ -270,28 +264,27 @@ def _search_status_from_scheduler(
 def _resolve_scores_export_ladder(
     snapshot: ScoresInferenceSnapshot,
     *,
-    resolution_context: ScoresExportResolutionContext | None = None,
+    resolution_context: ScoresExportResolutionContext,
 ) -> tuple[ScoresExportDecision, ScoresExportPayload]:
     """Single precedence ladder: branch, lifecycle status, and wire payload."""
+    functional_payload = _resolve_functional_payload(snapshot, resolution_context)
     decision = classify_scores_export_decision(
         snapshot,
         resolution_context=resolution_context,
+        functional_payload=functional_payload,
     )
     payload = _materialize_scores_export_payload(
         snapshot,
         decision.branch,
-        resolution_context=resolution_context,
+        functional_payload=functional_payload,
     )
     return decision, payload
 
 
-def _functional_backfill_payload(
+def _resolve_functional_payload(
     snapshot: ScoresInferenceSnapshot,
-    *,
-    resolution_context: ScoresExportResolutionContext | None,
+    resolution_context: ScoresExportResolutionContext,
 ) -> FunctionalHostTurnPayload | None:
-    if resolution_context is None:
-        return None
     return resolve_functional_host_turn_payload(
         scoreboard_turn=resolution_context.scoreboard_turn,
         turn=resolution_context.turn,
@@ -302,42 +295,21 @@ def _functional_backfill_payload(
     )
 
 
-def _normalize_persisted_payload(
-    persisted_row: PersistedInferenceRow,
-    *,
-    resolution_context: ScoresExportResolutionContext | None,
-) -> tuple[list[dict[str, object]], dict[str, object] | None, int] | None:
-    if resolution_context is None:
-        return None
-    functional = resolve_functional_host_turn_payload(
-        scoreboard_turn=resolution_context.scoreboard_turn,
-        turn=resolution_context.turn,
-        score=resolution_context.player_score,
-        persisted_row=persisted_row,
-        load_scoreboard_turn=resolution_context.load_scoreboard_turn,
-        get_persisted_row=resolution_context.get_persisted_row,
-    )
-    if functional is None:
-        return None
-    return functional.solutions, None, functional.solutions_held
-
-
 def _materialize_scores_export_payload(
     snapshot: ScoresInferenceSnapshot,
     branch: ScoresExportPrecedenceBranch,
     *,
-    resolution_context: ScoresExportResolutionContext | None = None,
+    functional_payload: FunctionalHostTurnPayload | None,
 ) -> ScoresExportPayload:
     persisted_row = snapshot.persisted_row
     if branch == "priority_persisted":
         assert persisted_row is not None
-        normalized = _normalize_persisted_payload(
-            persisted_row,
-            resolution_context=resolution_context,
-        )
-        if normalized is not None:
-            solutions, diagnostics, solutions_held = normalized
-            return ScoresExportPayload(solutions, diagnostics, solutions_held)
+        if functional_payload is not None:
+            return ScoresExportPayload(
+                functional_payload.solutions,
+                None,
+                functional_payload.solutions_held,
+            )
         solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
         return ScoresExportPayload(solutions, diagnostics, solutions_held)
 
@@ -355,26 +327,21 @@ def _materialize_scores_export_payload(
 
     if branch == "fallback_persisted":
         assert persisted_row is not None
-        normalized = _normalize_persisted_payload(
-            persisted_row,
-            resolution_context=resolution_context,
-        )
-        if normalized is not None:
-            solutions, diagnostics, solutions_held = normalized
-            return ScoresExportPayload(solutions, diagnostics, solutions_held)
+        if functional_payload is not None:
+            return ScoresExportPayload(
+                functional_payload.solutions,
+                None,
+                functional_payload.solutions_held,
+            )
         solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
         return ScoresExportPayload(solutions, diagnostics, solutions_held)
 
     if branch == "functional_backfill":
-        functional = _functional_backfill_payload(
-            snapshot,
-            resolution_context=resolution_context,
-        )
-        assert functional is not None
+        assert functional_payload is not None
         return ScoresExportPayload(
-            functional.solutions,
+            functional_payload.solutions,
             None,
-            functional.solutions_held,
+            functional_payload.solutions_held,
         )
 
     return ScoresExportPayload([], None, 0)

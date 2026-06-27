@@ -101,9 +101,8 @@ def _scores_resolution_context(
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo,
-) -> ScoresExportResolutionContext | None:
-    if scope.player_id is None:
-        return None
+) -> ScoresExportResolutionContext:
+    assert scope.player_id is not None
 
     def get_persisted_row(scoreboard_turn: int, player_id: int) -> PersistedInferenceRow | None:
         if services.persistence is None:
@@ -134,14 +133,12 @@ def _scores_resolved(
 ) -> tuple[ScoresExportContext, ScoresExportResolved]:
     services = resolve_scores_services(ctx)
     resolved_turn = turn if turn is not None else ctx.load_turn(scope.turn)
+    if resolved_turn is None:
+        raise ValidationError(f"Turn {scope.turn} is not stored")
 
     def gather() -> ScoresExportResolved:
         snapshot = gather_scores_inference_snapshot(ctx, services, scope, resolved_turn)
-        resolution_context = (
-            _scores_resolution_context(ctx, services, scope, resolved_turn)
-            if resolved_turn is not None
-            else None
-        )
+        resolution_context = _scores_resolution_context(ctx, services, scope, resolved_turn)
         return resolve_scores_export(
             snapshot,
             resolution_context=resolution_context,
@@ -179,16 +176,17 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
         return True
 
     services = resolve_scores_services(ctx)
+    turn = ctx.load_turn(scope.turn)
+    if turn is None:
+        return True
+
     snapshot = gather_scores_ensure_probe_snapshot(
         ctx,
         services,
         scope,
-        ctx.load_turn(scope.turn),
+        turn,
     )
-    turn = ctx.load_turn(scope.turn)
-    resolution_context = (
-        _scores_resolution_context(ctx, services, scope, turn) if turn is not None else None
-    )
+    resolution_context = _scores_resolution_context(ctx, services, scope, turn)
     return is_scores_export_ensure_satisfied_from_snapshot(
         snapshot,
         resolution_context=resolution_context,

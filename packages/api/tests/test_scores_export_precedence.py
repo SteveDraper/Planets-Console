@@ -24,6 +24,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from tests.scores_exports_helpers import (
     first_player_id,
     inference_solution,
+    minimal_scores_export_resolution_context,
     schedule_row_with_ladder,
     ship_build_wire,
     stream_scope_for_turn,
@@ -40,6 +41,7 @@ from tests.scores_exports_helpers import (
 )
 def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_state(
     persisted_status: str,
+    sample_turn,
 ):
     snapshot = ScoresInferenceSnapshot(
         persisted_row=PersistedInferenceRow(
@@ -54,7 +56,10 @@ def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_stat
         scheduler_run=None,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     payload = resolved.payload
     assert resolved.decision.search_status == "complete"
     assert payload.solutions == []
@@ -87,7 +92,10 @@ def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_tu
         scheduler_run=run,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     payload = resolved.payload
     assert resolved.decision.search_status == "in_progress"
     assert payload.solutions_held == 1
@@ -113,7 +121,10 @@ def test_scheduler_branch_search_status_in_progress(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     assert resolved.decision.search_status == "in_progress"
     _ = resolved.payload
 
@@ -138,10 +149,16 @@ def test_decision_search_status_available_without_payload_materialization(sample
         scheduler_run=run,
         globally_paused=False,
     )
-    assert resolve_scores_export(snapshot).decision.search_status == "in_progress"
+    assert (
+        resolve_scores_export(
+            snapshot,
+            resolution_context=minimal_scores_export_resolution_context(sample_turn),
+        ).decision.search_status
+        == "in_progress"
+    )
 
 
-def test_cached_complete_admission_resolves_payload_from_event():
+def test_cached_complete_admission_resolves_payload_from_event(sample_turn):
     wire_event = {
         "type": "complete",
         "status": STATUS_EXACT,
@@ -171,7 +188,10 @@ def test_cached_complete_admission_resolves_payload_from_event():
         scheduler_run=None,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     payload = resolved.payload
     assert resolved.decision.search_status == "complete"
     assert payload.solutions_held == 1
@@ -179,7 +199,7 @@ def test_cached_complete_admission_resolves_payload_from_event():
     assert payload.diagnostics == {"source": "cached_admission"}
 
 
-def test_stopped_terminal_admission_resolves_stopped_search_status():
+def test_stopped_terminal_admission_resolves_stopped_search_status(sample_turn):
     wire_event = {
         "type": "complete",
         "status": STATUS_STOPPED,
@@ -196,12 +216,15 @@ def test_stopped_terminal_admission_resolves_stopped_search_status():
         scheduler_run=None,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     assert resolved.decision.branch == "terminal_admission"
     assert resolved.decision.search_status == "stopped"
 
 
-def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolution():
+def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolution(sample_turn):
     stream_event = {
         "type": "complete",
         "status": STATUS_EXACT,
@@ -226,7 +249,10 @@ def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolutio
         scheduler_run=None,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     assert resolved.decision.branch == "terminal_admission"
     assert resolved.decision.search_status == "stopped"
     assert resolved.payload.diagnostics == {"source": "ensure_sync"}
@@ -328,8 +354,12 @@ def test_ensure_satisfied_tracks_precedence_branch(
     ensure_satisfied: bool,
     needs_ensure_work: bool,
     search_status: str,
+    sample_turn,
 ):
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     assert resolved.decision.branch == expected_branch
     assert resolved.decision.needs_ensure_work is needs_ensure_work
     assert resolved.decision.is_ensure_satisfied is ensure_satisfied
@@ -357,7 +387,10 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
         scheduler_run=run,
         globally_paused=False,
     )
-    resolved = resolve_scores_export(snapshot)
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
     assert resolved.decision.branch == "scheduler"
     assert resolved.decision.needs_ensure_work is False
     assert resolved.decision.is_ensure_satisfied is True
@@ -387,7 +420,10 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
         scheduler_run=run,
         globally_paused=False,
     )
-    payload = resolve_scores_export(snapshot).payload
+    payload = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    ).payload
     assert payload.diagnostics is not None
     assert payload.diagnostics["turn"] == sample_turn.settings.turn
     assert payload.diagnostics["solver"]["source"] == "scheduler_ladder"
@@ -464,3 +500,41 @@ def test_functional_backfill_resolves_host_turn_targets_without_diagnostics(samp
     assert resolved.payload.diagnostics is None
     assert resolved.payload.solutions
     assert resolved.payload.solutions_held > 0
+
+
+def test_resolve_scores_export_resolves_functional_payload_once(monkeypatch, sample_turn):
+    from api.analytics.scores import export_precedence
+
+    call_count = 0
+    original = export_precedence.resolve_functional_host_turn_payload
+
+    def counting_resolve(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        export_precedence,
+        "resolve_functional_host_turn_payload",
+        counting_resolve,
+    )
+
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="exact",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        stream_admission=None,
+        ensure_sync_admission=None,
+        scheduler_run=None,
+        globally_paused=False,
+    )
+    context = minimal_scores_export_resolution_context(
+        sample_turn,
+        scoreboard_turn=sample_turn.settings.turn,
+    )
+    resolve_scores_export(snapshot, resolution_context=context)
+    assert call_count == 1
