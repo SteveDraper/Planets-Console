@@ -11,9 +11,6 @@ from api.analytics.military_score_inference.accelerated_start import (
     needs_accelerated_backfill,
     scoreboard_host_turn,
 )
-from api.analytics.military_score_inference.host_turn_targets import (
-    host_turn_targets_from_accelerated_segments,
-)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_NO_EXACT_SOLUTION,
@@ -41,10 +38,6 @@ def host_turn_targets_from_persisted_row(
 ) -> tuple[dict[str, object], ...]:
     if row.host_turn_targets:
         return tuple(row.host_turn_targets)
-    if row.diagnostics is not None:
-        return host_turn_targets_from_accelerated_segments(
-            row.diagnostics.get("accelerated_segments"),
-        )
     return ()
 
 

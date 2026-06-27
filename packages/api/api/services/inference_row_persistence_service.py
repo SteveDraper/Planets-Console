@@ -19,6 +19,7 @@ from api.serialization.inference_row_persistence import (
     persisted_inference_row_from_json,
     persisted_inference_row_from_wire_complete,
     persisted_inference_row_to_json,
+    upgrade_persisted_inference_row,
     wire_complete_from_persisted_row,
 )
 from api.storage.base import StorageBackend
@@ -68,7 +69,11 @@ class InferenceRowPersistenceService:
             return None
         if not isinstance(data, dict):
             raise ValidationError("stored inference row must be a JSON object")
-        return persisted_inference_row_from_json(data)
+        row = persisted_inference_row_from_json(data)
+        upgraded, changed = upgrade_persisted_inference_row(row)
+        if changed:
+            self.put_row(game_id, perspective, host_turn, player_id, upgraded)
+        return upgraded
 
     def wire_complete_for_row(
         self,

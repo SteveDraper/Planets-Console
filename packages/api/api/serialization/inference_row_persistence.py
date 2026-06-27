@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from dacite import from_dict
 
+from api.analytics.military_score_inference.host_turn_targets import (
+    host_turn_targets_from_accelerated_segments,
+)
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
+
+INFERENCE_ROW_PERSISTENCE_VERSION = 2
 
 
 @dataclass
@@ -20,6 +25,7 @@ class PersistedInferenceRow:
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None = None
     host_turn_targets: list[dict[str, object]] | None = None
+    persistence_version: int | None = None
 
 
 def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
@@ -32,6 +38,32 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
 
 def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
     return dataclass_to_json(row)
+
+
+def upgrade_persisted_inference_row(
+    row: PersistedInferenceRow,
+) -> tuple[PersistedInferenceRow, bool]:
+    """Migrate legacy v1 rows to v2 functional host-turn targets on read."""
+    if (
+        row.persistence_version is not None
+        and row.persistence_version >= INFERENCE_ROW_PERSISTENCE_VERSION
+    ):
+        return row, False
+
+    host_turn_targets = row.host_turn_targets
+    if not host_turn_targets and row.diagnostics is not None:
+        upgraded_targets = host_turn_targets_from_accelerated_segments(
+            row.diagnostics.get("accelerated_segments"),
+        )
+        if upgraded_targets:
+            host_turn_targets = list(upgraded_targets)
+
+    upgraded = replace(
+        row,
+        host_turn_targets=host_turn_targets,
+        persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
+    )
+    return upgraded, upgraded != row
 
 
 def persisted_inference_row_from_wire_complete(
@@ -52,6 +84,7 @@ def persisted_inference_row_from_wire_complete(
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
         host_turn_targets=host_turn_targets or None,
+        persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
 
 

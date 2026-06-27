@@ -19,7 +19,11 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.serialization.inference_row_persistence import PersistedInferenceRow
+from api.serialization.inference_row_persistence import (
+    INFERENCE_ROW_PERSISTENCE_VERSION,
+    PersistedInferenceRow,
+    upgrade_persisted_inference_row,
+)
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.stack import build_service_stack
@@ -51,6 +55,7 @@ def test_persistence_row_round_trip(persistence):
         is_complete=True,
         solutions=[{"objectiveValue": 1.0, "actions": [], "shipBuilds": []}],
         diagnostics={"playerId": 8},
+        persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
     persistence.put_row(628580, 1, 111, 8, row)
     loaded = persistence.get_row(628580, 1, 111, 8)
@@ -189,3 +194,119 @@ def test_reschedule_without_active_stream_is_noop():
     reset_inference_table_stream_registry_for_tests()
     scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=111)
     assert reschedule_inference_row(scope, 8) is False
+
+
+def _legacy_v1_split_row_from_turn_three():
+    from api.analytics.military_score_inference.analytic import infer_military_score_build
+    from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
+
+    from tests.inference_corpus.fixtures import load_turn_fixture
+
+    turn_three = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 11
+    score = next(entry for entry in turn_three.scores if entry.ownerid == player_id)
+    inference_payload = infer_military_score_build(score, turn_three)
+    wire_complete = inference_api_payload_to_wire_complete(inference_payload)
+    diagnostics = wire_complete.get("diagnostics")
+    assert isinstance(diagnostics, dict)
+    assert diagnostics.get("accelerated_segments")
+    return (
+        turn_three,
+        player_id,
+        PersistedInferenceRow(
+            status=str(inference_payload["status"]),
+            summary=str(inference_payload["summary"]),
+            solution_count=int(inference_payload["solutionCount"]),
+            is_complete=True,
+            solutions=inference_payload["solutions"],
+            diagnostics=diagnostics,
+            host_turn_targets=None,
+            persistence_version=None,
+        ),
+    )
+
+
+def test_upgrade_persisted_inference_row_copies_accelerated_segments():
+    _, _, legacy_row = _legacy_v1_split_row_from_turn_three()
+    upgraded, changed = upgrade_persisted_inference_row(legacy_row)
+    assert changed is True
+    assert upgraded.persistence_version == INFERENCE_ROW_PERSISTENCE_VERSION
+    assert upgraded.host_turn_targets
+    assert all(isinstance(target, dict) for target in upgraded.host_turn_targets)
+    assert "accelerated_segments" not in (upgraded.host_turn_targets[0] or {})
+
+
+def test_get_row_upgrades_legacy_v1_split_row_with_write_back(memory_backend):
+    turn_three, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
+    persistence = InferenceRowPersistenceService(memory_backend)
+    persistence.put_row(628580, 1, turn_three.settings.turn, player_id, legacy_row)
+
+    store_key = persistence.row_store_key(
+        628580,
+        1,
+        turn_three.settings.turn,
+        player_id,
+    )
+    stored_before = memory_backend.get(store_key)
+    assert stored_before is not None
+    assert stored_before.get("host_turn_targets") is None
+    assert stored_before.get("persistence_version") is None
+
+    loaded = persistence.get_row(628580, 1, turn_three.settings.turn, player_id)
+    assert loaded is not None
+    assert loaded.persistence_version == INFERENCE_ROW_PERSISTENCE_VERSION
+    assert loaded.host_turn_targets
+
+    stored_after = memory_backend.get(store_key)
+    assert stored_after is not None
+    assert stored_after.get("persistence_version") == INFERENCE_ROW_PERSISTENCE_VERSION
+    assert stored_after.get("host_turn_targets")
+
+    reloaded = persistence.get_row(628580, 1, turn_three.settings.turn, player_id)
+    assert reloaded == loaded
+
+
+def test_legacy_v1_upgrade_enables_functional_backfill_without_diagnostics():
+    from dataclasses import replace
+
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.exports import held_scores_for_scope
+    from api.analytics.scores.host_turn_export import host_turn_targets_from_persisted_row
+
+    turn_three, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
+    turn_two = replace(turn_three, settings=replace(turn_three.settings, turn=2))
+    turn_two = replace(
+        turn_two,
+        scores=[replace(score, turn=2) for score in turn_two.scores],
+    )
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(628580, 1, turn_three.settings.turn, player_id, legacy_row)
+    loaded = persistence.get_row(628580, 1, turn_three.settings.turn, player_id)
+    assert loaded is not None
+    assert host_turn_targets_from_persisted_row(loaded)
+
+    def load_turn(turn_number: int):
+        if turn_number == 2:
+            return turn_two
+        if turn_number == 3:
+            return turn_three
+        return None
+
+    ctx = make_analytic_query_context(
+        turn_two,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    resolved = held_scores_for_scope(
+        ctx,
+        ExportScope(game_id=628580, perspective=1, turn=2, player_id=player_id),
+        turn=turn_two,
+    )
+    assert resolved.decision.branch == "functional_backfill"
+    assert resolved.payload.diagnostics is None
+    assert resolved.payload.solutions
+    assert resolved.payload.solutions_held > 0
