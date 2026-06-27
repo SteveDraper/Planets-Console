@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol
 
 from api.analytics.export_types import ExportScope
@@ -45,22 +46,8 @@ def _increment_component_histogram(
     histogram[key] = histogram.get(key, 0) + 1
 
 
-def _max_tech_level_for_histogram(
-    histogram: dict[str, int],
-    catalog: dict[int, _TechLevelComponent],
-) -> int | None:
-    max_level: int | None = None
-    for key in histogram:
-        component = catalog.get(int(key))
-        if component is None:
-            continue
-        if max_level is None or component.techlevel > max_level:
-            max_level = component.techlevel
-    return max_level
-
-
-def _max_tech_level_for_component_ids(
-    component_ids: list[int],
+def _max_tech_level(
+    component_ids: Iterable[int],
     catalog: dict[int, _TechLevelComponent],
 ) -> int | None:
     max_level: int | None = None
@@ -110,13 +97,15 @@ def build_fleet_composition_branch(
     torp_catalog = torpedos_by_id(turn)
 
     max_tech_level: dict[str, int] = {}
-    if hull_max := _max_tech_level_for_histogram(hull_types, hull_catalog):
+    if hull_max := _max_tech_level((int(key) for key in hull_types), hull_catalog):
         max_tech_level["hulls"] = hull_max
-    if engine_max := _max_tech_level_for_component_ids(engine_ids, engine_catalog):
+    if engine_max := _max_tech_level(engine_ids, engine_catalog):
         max_tech_level["engines"] = engine_max
-    if launcher_max := _max_tech_level_for_histogram(launcher_types, torp_catalog):
+    if launcher_max := _max_tech_level(
+        (int(key) for key in launcher_types), torp_catalog
+    ):
         max_tech_level["launchers"] = launcher_max
-    if beam_max := _max_tech_level_for_histogram(beam_types, beam_catalog):
+    if beam_max := _max_tech_level((int(key) for key in beam_types), beam_catalog):
         max_tech_level["beams"] = beam_max
 
     return {
