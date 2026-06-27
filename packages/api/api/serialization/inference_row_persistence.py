@@ -19,6 +19,7 @@ class PersistedInferenceRow:
     is_complete: bool
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None = None
+    host_turn_targets: list[dict[str, object]] | None = None
 
 
 def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
@@ -36,8 +37,13 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
 def persisted_inference_row_from_wire_complete(
     wire_event: dict[str, object],
 ) -> PersistedInferenceRow:
+    from api.analytics.military_score_inference.host_turn_targets import (
+        host_turn_targets_from_wire_event,
+    )
+
     diagnostics = wire_event.get("diagnostics")
     wire_solutions = wire_event.get("solutions")
+    host_turn_targets = list(host_turn_targets_from_wire_event(wire_event))
     return PersistedInferenceRow(
         status=str(wire_event.get("status", "")),
         summary=str(wire_event.get("summary", "")),
@@ -45,6 +51,7 @@ def persisted_inference_row_from_wire_complete(
         is_complete=bool(wire_event.get("isComplete", True)),
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        host_turn_targets=host_turn_targets or None,
     )
 
 
@@ -59,4 +66,6 @@ def wire_complete_from_persisted_row(row: PersistedInferenceRow) -> dict[str, ob
     }
     if row.diagnostics is not None:
         payload["diagnostics"] = row.diagnostics
+    if row.host_turn_targets is not None:
+        payload["hostTurnTargets"] = row.host_turn_targets
     return payload

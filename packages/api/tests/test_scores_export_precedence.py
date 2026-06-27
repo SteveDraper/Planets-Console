@@ -391,3 +391,76 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
     assert payload.diagnostics is not None
     assert payload.diagnostics["turn"] == sample_turn.settings.turn
     assert payload.diagnostics["solver"]["source"] == "scheduler_ladder"
+
+
+def test_functional_backfill_resolves_host_turn_targets_without_diagnostics(sample_turn):
+    from dataclasses import replace
+
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.military_score_inference.analytic import infer_military_score_build
+    from api.analytics.military_score_inference.host_turn_targets import (
+        host_turn_targets_from_wire_event,
+    )
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.exports import held_scores_for_scope
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+    from api.storage.memory_asset import MemoryAssetBackend
+    from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
+
+    from tests.inference_corpus.fixtures import load_turn_fixture
+
+    turn_three = load_turn_fixture("628580/1/turns/3.json")
+    turn_two = replace(turn_three, settings=replace(turn_three.settings, turn=2))
+    turn_two = replace(
+        turn_two,
+        scores=[replace(score, turn=2) for score in turn_two.scores],
+    )
+    player_id = 11
+    score = next(entry for entry in turn_three.scores if entry.ownerid == player_id)
+    inference_payload = infer_military_score_build(score, turn_three)
+    host_turn_targets = list(
+        host_turn_targets_from_wire_event(
+            inference_api_payload_to_wire_complete(inference_payload),
+        ),
+    )
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        3,
+        player_id,
+        PersistedInferenceRow(
+            status=str(inference_payload["status"]),
+            summary=str(inference_payload["summary"]),
+            solution_count=int(inference_payload["solutionCount"]),
+            is_complete=True,
+            solutions=inference_payload["solutions"],
+            diagnostics=None,
+            host_turn_targets=host_turn_targets,
+        ),
+    )
+
+    def load_turn(turn_number: int):
+        if turn_number == 2:
+            return turn_two
+        if turn_number == 3:
+            return turn_three
+        return None
+
+    ctx = make_analytic_query_context(
+        turn_two,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    resolved = held_scores_for_scope(
+        ctx,
+        ExportScope(game_id=628580, perspective=1, turn=2, player_id=player_id),
+        turn=turn_two,
+    )
+    assert resolved.decision.branch == "functional_backfill"
+    assert resolved.payload.diagnostics is None
+    assert resolved.payload.solutions
+    assert resolved.payload.solutions_held > 0

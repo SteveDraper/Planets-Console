@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.scores.export_precedence import (
+    ScoresExportResolutionContext,
     ScoresExportResolved,
     is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
@@ -36,7 +37,10 @@ from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.models.player import Score
-from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
+from api.serialization.inference_row_persistence import (
+    PersistedInferenceRow,
+    persisted_inference_row_from_wire_complete,
+)
 from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 PATH_PREFIX_SCOPE_RULES = (
@@ -92,6 +96,36 @@ def _scores_row_ensure_inputs(
     )
 
 
+def _scores_resolution_context(
+    ctx: AnalyticQueryContext,
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+) -> ScoresExportResolutionContext | None:
+    if scope.player_id is None:
+        return None
+
+    def get_persisted_row(scoreboard_turn: int, player_id: int) -> PersistedInferenceRow | None:
+        if services.persistence is None:
+            return None
+        return services.persistence.get_row(
+            scope.game_id,
+            scope.perspective,
+            scoreboard_turn,
+            player_id,
+        )
+
+    score = next((row for row in turn.scores if row.ownerid == scope.player_id), None)
+    return ScoresExportResolutionContext(
+        scoreboard_turn=scope.turn,
+        turn=turn,
+        player_id=scope.player_id,
+        load_scoreboard_turn=ctx.load_turn,
+        get_persisted_row=get_persisted_row,
+        player_score=score,
+    )
+
+
 def _scores_resolved(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
@@ -103,7 +137,15 @@ def _scores_resolved(
 
     def gather() -> ScoresExportResolved:
         snapshot = gather_scores_inference_snapshot(ctx, services, scope, resolved_turn)
-        return resolve_scores_export(snapshot)
+        resolution_context = (
+            _scores_resolution_context(ctx, services, scope, resolved_turn)
+            if resolved_turn is not None
+            else None
+        )
+        return resolve_scores_export(
+            snapshot,
+            resolution_context=resolution_context,
+        )
 
     resolved = ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
     return services, resolved
@@ -143,7 +185,14 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
         scope,
         ctx.load_turn(scope.turn),
     )
-    return is_scores_export_ensure_satisfied_from_snapshot(snapshot)
+    turn = ctx.load_turn(scope.turn)
+    resolution_context = (
+        _scores_resolution_context(ctx, services, scope, turn) if turn is not None else None
+    )
+    return is_scores_export_ensure_satisfied_from_snapshot(
+        snapshot,
+        resolution_context=resolution_context,
+    )
 
 
 def _run_prior_turn_sync_ensure(

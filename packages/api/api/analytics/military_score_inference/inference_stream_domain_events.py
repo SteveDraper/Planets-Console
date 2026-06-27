@@ -35,6 +35,7 @@ class RowCompleteWirePayload:
     is_complete: bool
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None = None
+    host_turn_targets: list[dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)

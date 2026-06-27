@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from api.analytics.military_score_inference.accelerated_start import (
-    ACCEL_WINDOW_SEGMENT_ID,
-    REPORTED_HOST_TURN_SEGMENT_ID,
-    is_first_reliable_scoreboard_turn,
-    starting_scoreboard_snapshot,
-)
+from api.analytics.scores.scoreboard_placeholder_targets import homeworld_starting_inventory_counts
 from api.analytics.turn_roster import iter_turn_players
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -88,11 +83,16 @@ def global_ship_count_at_synthetic_prior(turn: TurnInfo) -> int | None:
 
 def global_homeworld_starting_ship_id_bound(turn: TurnInfo) -> int:
     """Upper bound on ids after each player receives homeworld starting ships."""
-    baseline = starting_scoreboard_snapshot(turn.settings)
-    per_player = baseline.capitalships + baseline.freighters
+    freighters, warships = homeworld_starting_inventory_counts(turn)
+    per_player = warships + freighters
     if per_player <= 0:
         return 0
     return per_player * len(list(iter_turn_players(turn)))
+
+
+def _is_first_reliable_accelerated_shell_turn(shell_turn: int, turn: TurnInfo) -> bool:
+    accelerated = max(0, turn.settings.acceleratedturns)
+    return accelerated > 0 and shell_turn == accelerated
 
 
 def max_ship_id_bound_for_inferred_record(
@@ -100,7 +100,6 @@ def max_ship_id_bound_for_inferred_record(
     *,
     shell_turn: int,
     built_turn: int | None,
-    segment_id: str | None,
     is_starting_inventory: bool,
 ) -> int | None:
     """Resolve the id upper bound for one inferred placeholder on this shell turn."""
@@ -108,10 +107,11 @@ def max_ship_id_bound_for_inferred_record(
         bound = global_homeworld_starting_ship_id_bound(turn)
         return bound if bound > 0 else None
 
-    if is_first_reliable_scoreboard_turn(shell_turn, turn.settings):
-        if segment_id == ACCEL_WINDOW_SEGMENT_ID:
-            return global_ship_count_at_synthetic_prior(turn)
-        if segment_id == REPORTED_HOST_TURN_SEGMENT_ID:
-            return compute_max_ship_id_bound(turn)
+    if (
+        _is_first_reliable_accelerated_shell_turn(shell_turn, turn)
+        and built_turn is not None
+        and built_turn < shell_turn - 1
+    ):
+        return global_ship_count_at_synthetic_prior(turn)
 
     return compute_max_ship_id_bound(turn)

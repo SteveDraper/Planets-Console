@@ -30,6 +30,7 @@ def inference_api_payload_to_wire_complete(
     """Shape a scores row inference API payload into a terminal wire ``complete`` event."""
     wire_solutions = payload.get("solutions")
     diagnostics = payload.get("diagnostics")
+    host_turn_targets = payload.get("hostTurnTargets")
     return inference_complete_event(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
@@ -37,6 +38,7 @@ def inference_api_payload_to_wire_complete(
         is_complete=bool(payload.get("isComplete", True)),
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
+        host_turn_targets=(host_turn_targets if isinstance(host_turn_targets, list) else None),
     )
 
 
@@ -54,6 +56,7 @@ def row_complete_to_complete_wire_event(
         is_complete=payload.is_complete,
         diagnostics=payload.diagnostics,
         solutions=payload.solutions,
+        host_turn_targets=payload.host_turn_targets,
     )
 
 

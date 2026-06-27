@@ -32,6 +32,7 @@ def row_complete_wire_payload_from_api_payload(
         payload = {**payload, "isComplete": force_is_complete}
     diagnostics = payload.get("diagnostics")
     wire_solutions = payload.get("solutions")
+    host_turn_targets = payload.get("hostTurnTargets")
     return RowCompleteWirePayload(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
@@ -39,6 +40,7 @@ def row_complete_wire_payload_from_api_payload(
         is_complete=bool(payload.get("isComplete", True)),
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        host_turn_targets=(host_turn_targets if isinstance(host_turn_targets, list) else None),
     )
 
 

@@ -19,6 +19,9 @@ from api.analytics.military_score_inference.accelerated_start import (
     REPORTED_HOST_TURN_SEGMENT_ID,
 )
 from api.analytics.military_score_inference.analytic import infer_military_score_build
+from api.analytics.military_score_inference.host_turn_targets import (
+    host_turn_targets_from_wire_event,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -29,6 +32,7 @@ from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
+from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.inference_corpus.fixtures import load_turn_fixture
@@ -763,6 +767,47 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
         inference_event = next(event for event in record.events if event.kind == "inference_update")
         assert inference_event.payload["acceleratedIngest"] is True
         assert inference_event.payload["segmentHostTurn"] == _known_built_turn(record)
+
+
+def test_accelerated_first_reliable_refines_without_scores_diagnostics():
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 11
+    score = next(entry for entry in turn.scores if entry.ownerid == player_id)
+    inference_payload = infer_military_score_build(score, turn)
+    wire_complete = inference_api_payload_to_wire_complete(inference_payload)
+    host_turn_targets = list(host_turn_targets_from_wire_event(wire_complete))
+    assert host_turn_targets
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        3,
+        player_id,
+        PersistedInferenceRow(
+            status=str(inference_payload["status"]),
+            summary=str(inference_payload["summary"]),
+            solution_count=int(inference_payload["solutionCount"]),
+            is_complete=True,
+            solutions=inference_payload["solutions"],
+            diagnostics=None,
+            host_turn_targets=host_turn_targets,
+        ),
+    )
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        inference_materialization=_inference_materialization(
+            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            turn,
+        ),
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
+    assert len(warship_rows) == 2
+    for record in warship_rows:
+        assert len(record.build_option_sets) == 1
+        assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
 
 
 def test_accelerated_first_reliable_window_freighter_placeholder():
