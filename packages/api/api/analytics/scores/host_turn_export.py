@@ -11,6 +11,7 @@ from api.analytics.military_score_inference.accelerated_start import (
     needs_accelerated_backfill,
     scoreboard_host_turn,
 )
+from api.analytics.military_score_inference.host_turn_targets import HostTurnFunctionalTarget
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_NO_EXACT_SOLUTION,
@@ -35,19 +36,18 @@ def scores_scoreboard_turn_for_placeholder_refine(*, built_turn: int, shell_turn
 
 def host_turn_targets_from_persisted_row(
     row: PersistedInferenceRow,
-) -> tuple[dict[str, object], ...]:
+) -> tuple[HostTurnFunctionalTarget, ...]:
     if row.host_turn_targets:
         return tuple(row.host_turn_targets)
     return ()
 
 
 def functional_target_for_host_turn(
-    targets: tuple[dict[str, object], ...],
+    targets: tuple[HostTurnFunctionalTarget, ...],
     host_turn: int,
-) -> dict[str, object] | None:
+) -> HostTurnFunctionalTarget | None:
     for target in targets:
-        entry_host_turn = target.get("hostTurn")
-        if entry_host_turn == host_turn:
+        if target.host_turn == host_turn:
             return target
     return None
 
@@ -77,17 +77,12 @@ def _search_status_from_target_status(status: object) -> SearchStatus:
     return "not_started"
 
 
-def _payload_from_functional_target(target: dict[str, object]) -> FunctionalHostTurnPayload:
-    solutions_raw = target.get("solutions")
-    solutions = ranked_solutions_from_wire(
-        solutions_raw if isinstance(solutions_raw, list) else [],
-    )
-    solution_count_raw = target.get("solutionCount", len(solutions))
-    solutions_held = solution_count_raw if isinstance(solution_count_raw, int) else len(solutions)
+def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> FunctionalHostTurnPayload:
+    solutions = ranked_solutions_from_wire(target.solutions)
     return FunctionalHostTurnPayload(
         solutions=solutions,
-        solutions_held=solutions_held,
-        search_status=_search_status_from_target_status(target.get("status")),
+        solutions_held=target.solution_count,
+        search_status=_search_status_from_target_status(target.status),
     )
 
 

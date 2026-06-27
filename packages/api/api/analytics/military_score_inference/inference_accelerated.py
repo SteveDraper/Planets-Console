@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.actions import (
 )
 from api.analytics.military_score_inference.host_turn_targets import (
     functional_host_turn_target_from_segment_payload,
+    host_turn_functional_target_to_wire_dict,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
@@ -63,7 +64,9 @@ def payload_with_host_turn_targets(
     return {
         **payload,
         "hostTurnTargets": [
-            functional_host_turn_target_from_segment_payload(segment)
+            host_turn_functional_target_to_wire_dict(
+                functional_host_turn_target_from_segment_payload(segment),
+            )
             for segment in segment_payloads
         ],
     }
@@ -423,11 +426,7 @@ def build_accelerated_backfill_stream_row_complete(
         },
     )
     target_payload = target.payload
-    segment_targets = (
-        [functional_host_turn_target_from_segment_payload(target_payload)]
-        if target_payload is not None
-        else []
-    )
+    segment_payloads_for_targets = [target_payload] if target_payload is not None else []
     api_payload = payload_with_host_turn_targets(
         inference_result_to_api_payload(
             result,
@@ -445,7 +444,7 @@ def build_accelerated_backfill_stream_row_complete(
                 "accelerated_segments": segment_payloads,
             },
         ),
-        segment_targets,
+        segment_payloads_for_targets,
     )
     return RowComplete(
         result=result,

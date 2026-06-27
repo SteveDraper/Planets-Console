@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from api.analytics.military_score_inference.host_turn_targets import HostTurnFunctionalTarget
 from api.analytics.military_score_inference.inference_scheduler import (
     get_inference_row_scheduler,
     reset_inference_row_scheduler_for_tests,
@@ -232,8 +233,10 @@ def test_upgrade_persisted_inference_row_copies_accelerated_segments():
     assert changed is True
     assert upgraded.persistence_version == INFERENCE_ROW_PERSISTENCE_VERSION
     assert upgraded.host_turn_targets
-    assert all(isinstance(target, dict) for target in upgraded.host_turn_targets)
-    assert "accelerated_segments" not in (upgraded.host_turn_targets[0] or {})
+    assert all(
+        isinstance(target, HostTurnFunctionalTarget) for target in upgraded.host_turn_targets
+    )
+    assert upgraded.host_turn_targets[0].host_turn
 
 
 def test_get_row_upgrades_legacy_v1_split_row_with_write_back(memory_backend):
