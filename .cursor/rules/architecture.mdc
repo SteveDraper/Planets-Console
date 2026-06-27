@@ -31,6 +31,8 @@ The system is structured as four layers, each only ever depending on the layer(s
 **Do not leak UI concerns into the Core REST API layer.**
 **Do not put business logic in the BFF layer.**
 **Do not reference a concrete storage implementation outside `packages/api/storage/`.**
+**Shared primitives live below features.** If two analytics need the same lookup, codec, or scope filter, extract to `concepts/`, `serialization/`, or a dedicated shared module -- never import analytic A from analytic B for convenience.
+**One policy, one encoding.** Branching precedence, export classification, and similar policy must not be duplicated in parallel functions; share a decision record or table.
 
 ## Repo Structure
 

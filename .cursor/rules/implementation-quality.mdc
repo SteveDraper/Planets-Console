@@ -1,0 +1,61 @@
+---
+description: Implementation discipline -- reuse discovery, boundaries, DRY, and error handling. Apply when implementing any feature or fix.
+alwaysApply: true
+---
+
+# Implementation Quality
+
+These rules apply during implementation, not only at review. The goal is to ship the first diff with the structure a thermo-nuclear review would ask for.
+
+## 1. Search before you write
+
+Before adding a function, helper, filter, codec, or test fixture:
+
+1. **Grep and semantic-search** the repo for the operation by name and by behavior (e.g. "filter ledgers by scope", "max tech level", "histogram accumulate").
+2. **Check canonical homes** per `architecture.mdc` and package rules:
+   - `api/concepts/` -- game rules shared across analytics
+   - `api/serialization/` -- wire to domain codecs
+   - `packages/api/tests/*_helpers.py`, `*_fixtures.py` -- shared test utilities
+   - Frontend: `src/analytics/<id>/`, shared `components/`, existing Zod parsers
+3. If something exists or is **>80% similar**, **reuse or extend it** (parametrize, callback, small shared module) instead of copying.
+4. If reuse needs a new shared module, put it at the **lowest layer that owns the concept** and import upward -- do not import across analytic siblings for convenience.
+
+**Stop and discuss** only when extraction scope is large (new package, moving many call sites). Do not silently duplicate and defer to review.
+
+## 2. One owner per concept; no cross-boundary leakage
+
+- Respect layer rules in `architecture.mdc` (Frontend to BFF to API to storage).
+- **Do not import feature A from feature B** when both need the same primitive -- extract to `concepts/`, `serialization/`, or a neutral shared module.
+- BFF imports from API must stay on the **allowed surface** (metadata/catalog), never pull compute paths. Lazy imports are a smell -- fix the ownership model.
+- Keep modules **single-purpose**: precedence classifies; ensure persists; materialize builds trees. Do not let one file absorb unrelated concerns because it was already open in the editor.
+- UI semantics stay out of Core API; business logic stays out of BFF.
+
+## 3. Do not duplicate logic -- in the repo or in the diff
+
+- **Within the change:** if you write similar code a second time in the same PR, extract before merge (shared helper, table-driven loop, shared decision record).
+- **Parallel ladders:** if two functions encode the same branch order (classify vs build, probe vs ensure), share one decision structure or precedence table -- they will drift otherwise.
+- **Tests:** unit tests own pure logic and edge cases; integration tests own wiring and end-to-end contracts. Do not repeat unit assertions at integration level. Extract shared fixtures when the same setup appears in 2+ files.
+
+## 4. Errors are contracts, not assertions
+
+- **Production / library code:** invalid caller input, missing resources, and violated invariants use typed exceptions per `server-exceptions.mdc` (API/BFF) or explicit error returns at internal boundaries. See `core-api.mdc` for deserialize-then-validate -- not raw `dict` walks.
+- **`assert` is for:** tests; truly impossible internal states after prior validation (document why); debug-only checks. Never `assert` on user data, wire payloads, or scope/query parameters.
+- Prefer **explicit types** over `Union`/`Optional`/casts that hide invalid combinations. If a function accepts only a resolved snapshot, say so -- do not accept a union and branch at runtime.
+
+## 5. Prefer table-driven and data-driven over copy-paste
+
+When three or more branches differ only by field name, catalog key, or axis id, use a declarative table (list of specs, schema fragments, dispatch map) instead of copy-pasted blocks. This applies to histogram axes, export branches, and similar.
+
+## 6. Pre-merge self-check (implementer)
+
+Before calling work done, verify:
+
+- [ ] Grepped for existing helpers; reused or extracted shared code where found
+- [ ] No new cross-analytic imports for shared primitives
+- [ ] No parallel policy ladders without a shared decision source
+- [ ] No production `assert` on external or caller-controlled input
+- [ ] Tests split correctly (unit edges vs integration wiring); fixtures shared
+- [ ] Touched files still under ~1k lines, or decomposition done in this PR
+- [ ] `make test` (or package equivalent) passes for affected packages
+
+If any item fails, fix in this PR unless the user explicitly scoped it out.
