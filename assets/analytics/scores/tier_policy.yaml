@@ -1,6 +1,14 @@
 # Inference search tier ladder (sketch A, section 8.5.3).
 # filters.*.all widens eligibility (see tier_policy.py module docstring).
 # filters.*.techLevels narrows by component techlevel; ids derived at runtime.
+#
+# Fleet-informed torp admission + ranking (#87, section 8.8): early torp tiers use
+# belief-set ids only; inference torp escape tier (penultimate step, alpha > 0) admits
+# all eligible torp types. Tunables (loaded when #87 lands):
+#
+# fleetInferenceTuning:
+#   torpMisalignmentLogPenalty: <int>
+#   componentTechGapLogPenaltyPerLevel: <int>   # #156
 version: 1
 
 # Solver magnitude bins for aggregate-action ranking (not per tier step).

@@ -1,4 +1,8 @@
-"""YAML inference search tier policy load, validation, and optional overlay hook."""
+"""YAML inference search tier policy load, validation, and optional overlay hook.
+
+Fleet-informed ranking tunables (``fleetInferenceTuning``) and torp escape-tier admission
+are specified in design-military-score-build-inference-implementation.md section 8.8 (#87, #156).
+"""
 
 from __future__ import annotations
 

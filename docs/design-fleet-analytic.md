@@ -339,7 +339,7 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 - **Fleet reconciliation correction** UI (representation required; UI deferred)
 - Report message parsing
 - Starbase region overlays on map
-- **Inference tier policy overlay** from fleet (#87) -- consumer of fleet exports, not producer
+- **Scores inference fleet overlay** consumer (#87, #133) -- fleet exports belief-set inputs; not producer
 - Wandering Tribes fleet-at-spawn special case
 
 ---
@@ -349,20 +349,25 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | Feature | Use |
 |---------|-----|
 | **Homeworld locator** | SB / planet positions for **region** constraints on inferred builds |
-| **Scores** `#87` | Component histogram and `maxTechLevel` overlay from `$.composition` (`hullTypes`, `beamTypes`, `launcherTypes`, `maxTechLevel`; `torpedoTypesLoaded` when ledger stores loaded ammo) |
+| **Scores** **#87** | **Inference fleet launcher belief set** from `$.composition` (torp admission + misalignment prior); see below |
+| **Scores** **#156** | Per-axis tech ceilings from same `$.composition` rows (**inference component tech-gap prior**) |
+| **Scores** **#78** | Optional **inference tier policy overlay** (component filter widening); parallel axis, not torp ranking |
 | Reports ingest | Strong evidence for loss/trade row selection |
 | Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain |
 
 ### `$.composition` export branch (#154)
 
-Per-player, scoped by `player_id`. Materialized from active `FleetShipRecord` rows for the scoped player(s):
+Per-player, scoped by `player_id`. Materialized from active `FleetShipRecord` rows for the scoped player(s). Feeds **#87** / **#156** via analytic export query at prior turn (see [design-analytic-exports.md](design-analytic-exports.md)); production wiring **#133**.
+
+**Belief-set rule (scores inference):** component ids on a row come from **known** field constraints **or** from every **fleet build option set** on inferred rows (union of consistent tuples -- no per-field Cartesian product, no top-1-only slice). Scores inference is a first-class signal; sightings alone are insufficient because **known** launchers do not promote from inference on later turns.
 
 | Path | Shape | Rule |
 |------|-------|------|
-| `$.composition.hullTypes` | `{ "<hullId>": <shipCount>, ... }` | Known `fields.hull` only |
-| `$.composition.beamTypes` | `{ "<beamId>": <shipCount>, ... }` | Known `fields.beams` with positive id |
-| `$.composition.launcherTypes` | `{ "<torpId>": <shipCount>, ... }` | Known `fields.launchers` (torp type id) with positive id |
-| `$.composition.torpedoTypesLoaded` | same histogram shape | Empty in v1 until loaded-torp evidence is on ledger rows |
-| `$.composition.maxTechLevel` | `{ "hulls"?, "engines"?, "launchers"?, "beams"? }` | Max `techlevel` from turn catalog for ids present in the histograms (engines from known `fields.engine` on rows). Axes with no catalog-resolvable ids omitted. |
+| `$.composition.hullTypes` | `{ "<hullId>": <shipCount>, ... }` | Belief-set hull ids (known or any option set) |
+| `$.composition.engineTypes` | `{ "<engineId>": <shipCount>, ... }` | Belief-set engine ids (known or any option set) |
+| `$.composition.beamTypes` | `{ "<beamId>": <shipCount>, ... }` | Belief-set beam ids with positive id |
+| `$.composition.launcherTypes` | `{ "<torpId>": <shipCount>, ... }` | Belief-set launcher/torp ids with positive id (**inference fleet launcher belief set** for #87) |
+| `$.composition.torpedoTypesLoaded` | same histogram shape | Loaded-torp ids on rows when persisted (future); empty in v1 |
+| `$.composition.maxTechLevel` | `{ "hulls"?, "engines"?, "launchers"?, "beams"? }` | Max `techlevel` from turn catalog over ids present in the matching type histogram for that axis |
 
-Unknown, bounded, options, and region field constraints are excluded from histograms. Known zero for beams/launchers (no fitted weapons) is excluded. Turn 1 baseline: empty histograms and `{}` `maxTechLevel`.
+Unknown-only, bounded-only, and region field constraints contribute no ids until resolved to known or option-set tuples. Known zero for beams/launchers (no fitted weapons) is excluded. Turn 1 baseline: empty histograms and `{}` `maxTechLevel` (scores inference treats absent overlay like empty belief set).

@@ -176,7 +176,8 @@ _COMPOSITION_HISTOGRAM_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
         "Histogram of host component ids keyed by stringified id. Each value is the count of "
-        "active fleet ship records with that known fitted component type."
+        "active fleet ship records contributing that id to the scores-inference belief set "
+        "(known field constraints or any fleet build option set on inferred rows)."
     ),
     "additionalProperties": {
         "type": "integer",
@@ -188,30 +189,29 @@ _COMPOSITION_HISTOGRAM_SCHEMA: dict[str, Any] = {
 _MAX_TECH_LEVEL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
-        "Maximum host tech level per component axis, derived from known component ids in the "
-        "histograms and engine field values. Axes with no catalog-resolvable known components "
-        "are omitted."
+        "Maximum host tech level per component axis, derived from belief-set component ids in "
+        "the type histograms and engineTypes. Axes with no catalog-resolvable ids are omitted."
     ),
     "properties": {
         "hulls": {
             "type": "integer",
             "minimum": 1,
-            "description": "Highest techlevel among known hull ids in hullTypes.",
+            "description": "Highest techlevel among hull ids in hullTypes.",
         },
         "engines": {
             "type": "integer",
             "minimum": 1,
-            "description": "Highest techlevel among known engine ids on active ship records.",
+            "description": "Highest techlevel among engine ids in engineTypes.",
         },
         "launchers": {
             "type": "integer",
             "minimum": 1,
-            "description": "Highest techlevel among known torpedo ids in launcherTypes.",
+            "description": "Highest techlevel among torpedo ids in launcherTypes.",
         },
         "beams": {
             "type": "integer",
             "minimum": 1,
-            "description": "Highest techlevel among known beam ids in beamTypes.",
+            "description": "Highest techlevel among beam ids in beamTypes.",
         },
     },
 }
@@ -219,34 +219,38 @@ _MAX_TECH_LEVEL_SCHEMA: dict[str, Any] = {
 _COMPOSITION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
-        "Per-player aggregated fleet composition derived from the acquisition ledger. Counts "
-        "only active ship records with known component fields; unknown or option-set-only rows "
-        "are omitted."
+        "Per-player aggregated fleet composition for scores inference (#87, #156). Belief-set "
+        "ids come from known field constraints or the union of fleet build option sets on "
+        "inferred rows (see design-fleet-analytic.md). Materialization may lag spec until #133."
     ),
     "properties": {
         "hullTypes": {
             **_COMPOSITION_HISTOGRAM_SCHEMA,
             "description": (
-                "Histogram of known hull types on active ships. Keys are host hull ids as "
-                "strings; values are ship counts. Rows with unknown, bounded, options, or region "
-                "hull constraints are excluded."
+                "Belief-set hull ids on active ships. Keys are host hull ids as strings; values "
+                "are ship counts."
+            ),
+        },
+        "engineTypes": {
+            **_COMPOSITION_HISTOGRAM_SCHEMA,
+            "description": (
+                "Belief-set engine ids on active ships. Keys are host engine ids as strings; "
+                "values are ship counts."
             ),
         },
         "beamTypes": {
             **_COMPOSITION_HISTOGRAM_SCHEMA,
             "description": (
-                "Histogram of known fitted beam weapon types on active ships. Keys are host beam "
-                "ids as strings; values are ship counts. Rows with unknown, bounded, options, or "
-                "region beam constraints are excluded. Known zero (no beams) is excluded."
+                "Belief-set fitted beam ids on active ships. Keys are host beam ids as strings; "
+                "values are ship counts. Known zero (no beams) is excluded."
             ),
         },
         "launcherTypes": {
             **_COMPOSITION_HISTOGRAM_SCHEMA,
             "description": (
-                "Histogram of known fitted torpedo-tube types on active ships. Keys are host "
-                "torpedo ids as strings; values are ship counts. Rows with unknown, bounded, "
-                "options, or region launcher constraints are excluded. Known zero (no tubes) is "
-                "excluded."
+                "Inference fleet launcher belief set (#87): fitted torpedo-tube type ids on "
+                "active ships. Keys are host torpedo ids as strings; values are ship counts. "
+                "Known zero (no tubes) is excluded."
             ),
         },
         "torpedoTypesLoaded": {
