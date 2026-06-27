@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from api.analytics.scores.scoreboard_placeholder_targets import homeworld_starting_inventory_counts
+from api.analytics.scores.scoreboard_placeholder_targets import (
+    homeworld_starting_inventory_counts,
+    is_first_reliable_accelerated_shell_turn,
+)
 from api.analytics.turn_roster import iter_turn_players
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -90,11 +93,6 @@ def global_homeworld_starting_ship_id_bound(turn: TurnInfo) -> int:
     return per_player * len(list(iter_turn_players(turn)))
 
 
-def _is_first_reliable_accelerated_shell_turn(shell_turn: int, turn: TurnInfo) -> bool:
-    accelerated = max(0, turn.settings.acceleratedturns)
-    return accelerated > 0 and shell_turn == accelerated
-
-
 def max_ship_id_bound_for_inferred_record(
     turn: TurnInfo,
     *,
@@ -108,7 +106,7 @@ def max_ship_id_bound_for_inferred_record(
         return bound if bound > 0 else None
 
     if (
-        _is_first_reliable_accelerated_shell_turn(shell_turn, turn)
+        is_first_reliable_accelerated_shell_turn(shell_turn, turn)
         and built_turn is not None
         and built_turn < shell_turn - 1
     ):

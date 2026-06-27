@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from api.analytics.military_score_inference.accelerated_start import (
     HOMEBASE_STARTING_FREIGHTER_HULL_ID,
     accelerated_inference_segments,
+    is_first_reliable_scoreboard_turn,
     starting_scoreboard_snapshot,
 )
 from api.models.game import TurnInfo
@@ -33,20 +34,51 @@ def homeworld_starting_inventory_counts(turn: TurnInfo) -> tuple[int, int]:
     return baseline.freighters, baseline.capitalships
 
 
+def is_first_reliable_accelerated_shell_turn(shell_turn: int, turn: TurnInfo) -> bool:
+    """Return whether this shell turn is the first reliable accelerated scoreboard row."""
+    return is_first_reliable_scoreboard_turn(shell_turn, turn.settings)
+
+
+def should_seed_homeworld_starting_inventory(turn: TurnInfo) -> bool:
+    """Return whether homeworld starting ships should be seeded on this shell turn."""
+    return is_first_reliable_accelerated_shell_turn(turn.settings.turn, turn)
+
+
 def scoreboard_placeholder_targets(
     score: Score,
     turn: TurnInfo,
 ) -> tuple[ScoreboardPlaceholderTarget, ...] | None:
-    """Return accelerated segment placeholder targets on the first reliable row."""
+    """Return placeholder build targets for accelerated segments or normal scoreboard deltas."""
     segments = accelerated_inference_segments(score, turn)
-    if segments is None:
-        return None
-    return tuple(
-        ScoreboardPlaceholderTarget(
-            host_turn=segment.host_turn,
-            warship_delta=segment.warship_delta,
-            freighter_delta=segment.freighter_delta,
-            segment_id=segment.segment_id,
+    if segments is not None:
+        return tuple(
+            ScoreboardPlaceholderTarget(
+                host_turn=segment.host_turn,
+                warship_delta=segment.warship_delta,
+                freighter_delta=segment.freighter_delta,
+                segment_id=segment.segment_id,
+            )
+            for segment in segments
         )
-        for segment in segments
-    )
+
+    turn_number = turn.settings.turn
+    targets: list[ScoreboardPlaceholderTarget] = []
+    warship_builds = max(0, score.shipchange)
+    freighter_builds = max(0, score.freighterchange)
+    if warship_builds > 0:
+        targets.append(
+            ScoreboardPlaceholderTarget(
+                host_turn=turn_number,
+                warship_delta=warship_builds,
+                freighter_delta=0,
+            )
+        )
+    if freighter_builds > 0:
+        targets.append(
+            ScoreboardPlaceholderTarget(
+                host_turn=turn_number,
+                warship_delta=0,
+                freighter_delta=freighter_builds,
+            )
+        )
+    return tuple(targets) if targets else None

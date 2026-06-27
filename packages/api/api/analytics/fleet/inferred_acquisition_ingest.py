@@ -36,6 +36,7 @@ from api.analytics.scores.scoreboard_placeholder_targets import (
     homeworld_starting_freighter_hull_id,
     homeworld_starting_inventory_counts,
     scoreboard_placeholder_targets,
+    should_seed_homeworld_starting_inventory,
 )
 from api.models.game import TurnInfo
 
@@ -62,11 +63,6 @@ def ingest_turn_inferred_acquisitions(
     return snapshot
 
 
-def _is_first_reliable_accelerated_shell_turn(shell_turn: int, turn: TurnInfo) -> bool:
-    accelerated = max(0, turn.settings.acceleratedturns)
-    return accelerated > 0 and shell_turn == accelerated
-
-
 def _create_scoreboard_placeholders(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
@@ -74,67 +70,28 @@ def _create_scoreboard_placeholders(
     """Create inferred placeholder rows for positive scoreboard warship/freighter deltas."""
     turn_number = turn.settings.turn
     ledgers_by_player_id = {ledger.player_id: ledger for ledger in snapshot.players}
-    accelerated_first_reliable = _is_first_reliable_accelerated_shell_turn(turn_number, turn)
 
     for score in iter_current_turn_scores(turn):
         ledger = ledgers_by_player_id.get(score.ownerid)
         if ledger is None:
             continue
-        if accelerated_first_reliable:
+        if should_seed_homeworld_starting_inventory(turn):
             _ensure_homeworld_starting_inventory_rows(
                 ledger,
                 turn=turn,
                 shell_turn=turn_number,
             )
-            _create_accelerated_scoreboard_placeholders(
+        targets = scoreboard_placeholder_targets(score, turn)
+        if targets is None:
+            continue
+        for target in targets:
+            _ensure_placeholder_target_rows(
                 ledger,
-                score=score,
-                turn=turn,
+                target=target,
                 shell_turn=turn_number,
             )
-            continue
-
-        warship_builds = max(0, score.shipchange)
-        freighter_builds = max(0, score.freighterchange)
-        _ensure_placeholder_rows(
-            ledger,
-            shell_turn=turn_number,
-            built_turn=turn_number,
-            ship_class="warship",
-            expected_count=warship_builds,
-            warship_delta=warship_builds,
-            freighter_delta=0,
-        )
-        _ensure_placeholder_rows(
-            ledger,
-            shell_turn=turn_number,
-            built_turn=turn_number,
-            ship_class="freighter",
-            expected_count=freighter_builds,
-            warship_delta=0,
-            freighter_delta=freighter_builds,
-        )
 
     return snapshot
-
-
-def _create_accelerated_scoreboard_placeholders(
-    ledger: FleetAcquisitionLedger,
-    *,
-    score,
-    turn: TurnInfo,
-    shell_turn: int,
-) -> None:
-    """Create placeholders from scores-owned segment build counts on first reliable turn N."""
-    targets = scoreboard_placeholder_targets(score, turn)
-    if targets is None:
-        return
-    for target in targets:
-        _ensure_accelerated_segment_placeholders(
-            ledger,
-            target=target,
-            shell_turn=shell_turn,
-        )
 
 
 def _ensure_homeworld_starting_inventory_rows(
@@ -235,7 +192,7 @@ def _homeworld_starting_inventory_event(
     )
 
 
-def _ensure_accelerated_segment_placeholders(
+def _ensure_placeholder_target_rows(
     ledger: FleetAcquisitionLedger,
     *,
     target: ScoreboardPlaceholderTarget,
