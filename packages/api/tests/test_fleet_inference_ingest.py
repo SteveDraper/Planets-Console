@@ -10,6 +10,7 @@ from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, Fl
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.fleet.types import (
+    FleetFieldBounded,
     FleetFieldKnown,
     FleetFieldUnknown,
 )
@@ -683,6 +684,25 @@ def _inferred_freighter_rows(ledger, *, shell_turn: int):
     ]
 
 
+def _homeworld_starting_freighter_rows(ledger, *, shell_turn: int):
+    return [
+        record
+        for record in _inferred_freighter_rows(ledger, shell_turn=shell_turn)
+        if any(
+            event.kind == "scoreboard_delta"
+            and event.payload.get("homeworldStartingInventory") is True
+            for event in record.events
+        )
+    ]
+
+
+def _ship_id_lte_bound(record) -> int | None:
+    ship_id = record.fields.ship_id
+    if isinstance(ship_id, FleetFieldBounded) and ship_id.operator == "lte":
+        return ship_id.value
+    return None
+
+
 def test_accelerated_first_reliable_turn_creates_segment_placeholders_for_root():
     turn = load_turn_fixture("628580/1/turns/3.json")
     player_id = 11
@@ -755,7 +775,9 @@ def test_accelerated_first_reliable_window_freighter_placeholder():
 
     ledger = ledger_for_player(snapshot, player_id)
     freighter_rows = _inferred_freighter_rows(ledger, shell_turn=3)
-    assert len(freighter_rows) == 2
+    assert len(freighter_rows) == 3
+    starting_rows = _homeworld_starting_freighter_rows(ledger, shell_turn=3)
+    assert len(starting_rows) == 1
     window_row = next(
         record
         for record in freighter_rows
@@ -766,6 +788,63 @@ def test_accelerated_first_reliable_window_freighter_placeholder():
         )
     )
     assert _known_built_turn(window_row) == 1
+
+
+def test_accelerated_first_reliable_privateer_starting_freighter_and_id_bounds():
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 5
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    starting_rows = _homeworld_starting_freighter_rows(ledger, shell_turn=3)
+    assert len(starting_rows) == 1
+    assert _ship_id_lte_bound(starting_rows[0]) == 11
+
+    freighter_rows = [
+        record
+        for record in _inferred_freighter_rows(ledger, shell_turn=3)
+        if record not in starting_rows
+    ]
+    assert len(freighter_rows) == 1
+    assert _known_built_turn(freighter_rows[0]) == 1
+    assert _ship_id_lte_bound(freighter_rows[0]) == 22
+
+    warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
+    assert len(warship_rows) == 1
+    assert _known_built_turn(warship_rows[0]) == 2
+    assert _ship_id_lte_bound(warship_rows[0]) == 33
+
+
+def test_accelerated_first_reliable_arlowat_starting_mdsf_and_freighter_id_bounds():
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 2
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    starting_rows = _homeworld_starting_freighter_rows(ledger, shell_turn=3)
+    assert len(starting_rows) == 1
+    assert starting_rows[0].fields.hull == FleetFieldKnown(16)
+    assert _ship_id_lte_bound(starting_rows[0]) == 11
+
+    inferred_freighters = [
+        record
+        for record in _inferred_freighter_rows(ledger, shell_turn=3)
+        if record not in starting_rows
+    ]
+    assert len(inferred_freighters) == 2
+    assert sorted(_known_built_turn(record) for record in inferred_freighters) == [1, 2]
+    built_turn_one = next(r for r in inferred_freighters if _known_built_turn(r) == 1)
+    built_turn_two = next(r for r in inferred_freighters if _known_built_turn(r) == 2)
+    assert _ship_id_lte_bound(built_turn_one) == 22
+    assert _ship_id_lte_bound(built_turn_two) == 33
+    for record in inferred_freighters:
+        assert record.build_option_sets == []
 
 
 def test_post_accelerated_turn_uses_scoreboard_delta_placeholders_only():

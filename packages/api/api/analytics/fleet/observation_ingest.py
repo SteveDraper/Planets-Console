@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
 from api.analytics.fleet.scoreboard_counts import compute_max_ship_id_bound
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
@@ -45,7 +46,7 @@ def ingest_turn_ship_observations(
 
     if max_ship_id_bound is not None:
         for ledger in snapshot.players:
-            _tighten_unknown_ship_id_bounds(ledger, max_ship_id_bound, turn_number)
+            tighten_inferred_ship_id_bounds(ledger, turn, shell_turn=turn_number)
 
     return snapshot
 
@@ -180,33 +181,6 @@ def _merge_field_constraint(
     if isinstance(observed, FleetFieldKnown):
         return observed
     return current
-
-
-def _tighten_unknown_ship_id_bounds(
-    ledger: FleetAcquisitionLedger,
-    max_bound: int,
-    turn_number: int,
-) -> None:
-    for record in ledger.records:
-        if record.disposition != "active":
-            continue
-        if isinstance(record.fields.ship_id, FleetFieldKnown):
-            continue
-        tightened = FleetFieldBounded(operator="lte", value=max_bound)
-        if record.fields.ship_id == tightened:
-            continue
-        if isinstance(record.fields.ship_id, FleetFieldBounded):
-            if record.fields.ship_id.operator == "lte" and record.fields.ship_id.value <= max_bound:
-                continue
-        record.fields.ship_id = tightened
-        append_fleet_evidence_event(
-            record,
-            _new_evidence_event(
-                kind="id_bound_tightened",
-                turn=turn_number,
-                payload={"maxShipId": max_bound},
-            ),
-        )
 
 
 def _apply_alibi_if_needed(record: FleetShipRecord, *, sighting_turn: int) -> None:

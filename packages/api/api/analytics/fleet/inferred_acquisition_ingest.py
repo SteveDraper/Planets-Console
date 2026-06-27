@@ -26,9 +26,11 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
 )
 from api.analytics.military_score_inference.accelerated_start import (
+    HOMEBASE_STARTING_FREIGHTER_HULL_ID,
     AcceleratedInferenceSegment,
     accelerated_inference_segments,
     is_first_reliable_scoreboard_turn,
+    starting_scoreboard_snapshot,
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     inference_solution_ship_build_from_wire,
@@ -79,6 +81,11 @@ def _create_scoreboard_placeholders(
         if ledger is None:
             continue
         if accelerated_first_reliable:
+            _ensure_homeworld_starting_inventory_rows(
+                ledger,
+                turn=turn,
+                shell_turn=turn_number,
+            )
             _create_accelerated_scoreboard_placeholders(
                 ledger,
                 score=score,
@@ -128,6 +135,104 @@ def _create_accelerated_scoreboard_placeholders(
             segment=segment,
             shell_turn=shell_turn,
         )
+
+
+def _ensure_homeworld_starting_inventory_rows(
+    ledger: FleetAcquisitionLedger,
+    *,
+    turn: TurnInfo,
+    shell_turn: int,
+) -> None:
+    """Seed homeworld starting ships not represented in accelerated scoreboard deltas."""
+    baseline = starting_scoreboard_snapshot(turn.settings)
+    _ensure_starting_inventory_rows(
+        ledger,
+        shell_turn=shell_turn,
+        ship_class="freighter",
+        expected_count=baseline.freighters,
+    )
+    _ensure_starting_inventory_rows(
+        ledger,
+        shell_turn=shell_turn,
+        ship_class="warship",
+        expected_count=baseline.capitalships,
+    )
+
+
+def _ensure_starting_inventory_rows(
+    ledger: FleetAcquisitionLedger,
+    *,
+    shell_turn: int,
+    ship_class: FleetShipClass,
+    expected_count: int,
+) -> None:
+    if expected_count <= 0:
+        return
+    existing = _homeworld_starting_inventory_rows(ledger, shell_turn, ship_class=ship_class)
+    for _ in range(expected_count - len(existing)):
+        record = FleetShipRecord(
+            record_id=str(uuid.uuid4()),
+            fields=FleetShipRecordFields(
+                built_turn=FleetFieldKnown(1),
+                hull=_starting_inventory_hull_field(ship_class),
+            ),
+        )
+        append_fleet_evidence_event(
+            record,
+            _homeworld_starting_inventory_event(
+                turn=shell_turn,
+                ship_class=ship_class,
+            ),
+        )
+        ledger.records.append(record)
+
+
+def _homeworld_starting_inventory_rows(
+    ledger: FleetAcquisitionLedger,
+    shell_turn: int,
+    *,
+    ship_class: FleetShipClass,
+) -> list[FleetShipRecord]:
+    rows: list[FleetShipRecord] = []
+    for record in ledger.records:
+        if record.disposition != "active":
+            continue
+        for event in record.events:
+            if event.kind != "scoreboard_delta" or event.turn != shell_turn:
+                continue
+            if not event.payload.get("homeworldStartingInventory"):
+                continue
+            if event.payload.get("shipClass") == ship_class:
+                rows.append(record)
+                break
+    return rows
+
+
+def _starting_inventory_hull_field(
+    ship_class: FleetShipClass,
+) -> FleetFieldKnown | FleetFieldUnknown:
+    if ship_class == "freighter":
+        return FleetFieldKnown(HOMEBASE_STARTING_FREIGHTER_HULL_ID)
+    return FleetFieldUnknown()
+
+
+def _homeworld_starting_inventory_event(
+    *,
+    turn: int,
+    ship_class: FleetShipClass,
+) -> FleetEvidenceEvent:
+    return FleetEvidenceEvent(
+        event_id=str(uuid.uuid4()),
+        kind="scoreboard_delta",
+        turn=turn,
+        source=SCOREBOARD_SOURCE,
+        payload={
+            "shipClass": ship_class,
+            "warshipDelta": 0,
+            "freighterDelta": 0,
+            "homeworldStartingInventory": True,
+        },
+    )
 
 
 def _ensure_accelerated_segment_placeholders(

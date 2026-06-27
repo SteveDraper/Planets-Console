@@ -39,7 +39,7 @@ Computed at `(game_id, turn T, perspective P)`.
 | **Players tracked** | Every **Player** in **GameInfo** (not limited to viewpoint) |
 | **Direct evidence** | Ships in `turn.ships` on those snapshots |
 | **Build evidence** | **Scores** held solutions per `player_id` on host turns in `1..T` |
-| **Turn 1 baseline** | **Fleet ensure baseline**: implicit empty fleet per **Player**; also seed from turn-1 sightings when present. No separate game-start inventory concept in v1 (accelerated-start ships appear when visible in RST or explained by turn-1 scores inference) |
+| **Turn 1 baseline** | **Fleet ensure baseline**: implicit empty fleet per **Player**; also seed from turn-1 sightings when present. On the first reliable accelerated scoreboard row, also seed **homeworld starting inventory** rows (starting freighter and any baseline warships from Starmap settings) before accelerated segment placeholders |
 | **Cross-perspective** | Out of scope -- no union across stored perspective slots |
 
 ---
@@ -120,6 +120,17 @@ When a sighting arrives:
 ### 4.4 Id bounds
 
 Sequential host ship id allocation: if turn `N-1` had `X` ships globally and turn `N` had `Y` builds, `maxId <= X + Y` (refine when sighting fixes id).
+
+On the first reliable accelerated row (`turn == acceleratedturns`), apply **segment-aware** bounds when tightening inferred rows on that shell turn:
+
+| Row kind | Id bound source |
+|----------|-----------------|
+| Homeworld starting inventory | Global ship count after each player receives starting ships (`players * (baseline freighters + baseline warships)`) |
+| Accelerated window segment (`accel_window`) | Global ship total at end of host turn `N-2` (prior totals from row `N` before reported host-turn deltas) |
+| Reported host-turn segment (`reported_host_turn`) | Current shell-turn bound (`total - net + builds` on row `N`) |
+| Normal scoreboard-delta rows | Current shell-turn bound |
+
+Missing or stale bounds are not re-tightened to a looser value when a row already has a tighter `lte` bound.
 
 ### 4.5 Location constraints (deferred enrichment)
 
