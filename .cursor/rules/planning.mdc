@@ -51,6 +51,16 @@ Never silently absorb scope. Every unplanned fix is a decision point.
 Before analysing code first analyse existing design documents.  Only analyse code if you need
 to clarify finer points that are ambiguous in the documentation in order to formulate the plan.
 
+## Reuse discovery (required before coding each phase)
+
+Each implementation phase must start with:
+
+1. Grep / search for existing helpers, codecs, fixtures, and patterns for the operations in that phase.
+2. Note in the plan: **reuse** (what), **extend** (how), or **extract** (new module and why nothing existing fits).
+3. Identify the **canonical layer** for any new shared code (`concepts/`, `serialization/`, neutral test fixtures, etc.).
+
+If the plan skips this, call that out and justify it. See `implementation-quality.mdc` for the full implementer checklist.
+
 ## Communicate the plan before executing
 
 Before starting any phase, confirm the user has seen and approved the plan for that phase. Don't begin implementation while the plan is still being discussed. A plan that isn't agreed on is just a guess.

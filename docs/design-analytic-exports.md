@@ -468,10 +468,17 @@ top_build = prior.paths["$.solutions[0]"].value  # full top explanation when pre
 ```python
 composition = ctx.query(
     "fleet",
-    paths=["$.composition.launcherTypes"],
+    paths=[
+        "$.composition.launcherTypes",
+        "$.composition.beamTypes",
+        "$.composition.hullTypes",
+        "$.composition.maxTechLevel",
+    ],
     scope={"turn": turn - 1, "player_id": player_id},
 )
 ```
+
+Fleet `$.composition` summarizes **known** fitted components on **active** ledger rows (histograms keyed by stringified host component id) plus `maxTechLevel` per axis (`hulls`, `engines`, `launchers`, `beams`) from the turn component catalog. Unknown or option-set-only rows are omitted from histograms; `torpedoTypesLoaded` stays empty until loaded-torp evidence is persisted on records.
 
 ---
 

@@ -29,6 +29,8 @@ packages/api/
 
 **Race-specific rules:** Anything keyed to a Planets.nu `raceid` lives in `concepts/races.py`. Analytic modules (including `analytics/military_score_inference/`) import helpers from there; they do not define new per-race constants locally. Game-wide rules (homeworld baselines, accelerated start) stay in the module that owns that behavior.
 
+**Placement before adding helpers:** Before adding helpers under `analytics/<feature>/`, check whether the operation is game-domain (`concepts/`), wire-shape (`serialization/`), or truly feature-specific. Wrong placement forces cross-feature imports later. See `implementation-quality.mdc`.
+
 ## Data Model
 
 - All domain objects defined as plain `@dataclass` classes in `packages/api/models/`

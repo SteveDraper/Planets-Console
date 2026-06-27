@@ -172,6 +172,95 @@ _PLAYER_LEDGER_SCHEMA: dict[str, Any] = {
     },
 }
 
+_COMPOSITION_HISTOGRAM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "Histogram of host component ids keyed by stringified id. Each value is the count of "
+        "active fleet ship records with that known fitted component type."
+    ),
+    "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Number of active fleet ship records with this component id.",
+    },
+}
+
+_MAX_TECH_LEVEL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "Maximum host tech level per component axis, derived from known component ids in the "
+        "histograms and engine field values. Axes with no catalog-resolvable known components "
+        "are omitted."
+    ),
+    "properties": {
+        "hulls": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Highest techlevel among known hull ids in hullTypes.",
+        },
+        "engines": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Highest techlevel among known engine ids on active ship records.",
+        },
+        "launchers": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Highest techlevel among known torpedo ids in launcherTypes.",
+        },
+        "beams": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Highest techlevel among known beam ids in beamTypes.",
+        },
+    },
+}
+
+_COMPOSITION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "Per-player aggregated fleet composition derived from the acquisition ledger. Counts "
+        "only active ship records with known component fields; unknown or option-set-only rows "
+        "are omitted."
+    ),
+    "properties": {
+        "hullTypes": {
+            **_COMPOSITION_HISTOGRAM_SCHEMA,
+            "description": (
+                "Histogram of known hull types on active ships. Keys are host hull ids as "
+                "strings; values are ship counts. Rows with unknown, bounded, options, or region "
+                "hull constraints are excluded."
+            ),
+        },
+        "beamTypes": {
+            **_COMPOSITION_HISTOGRAM_SCHEMA,
+            "description": (
+                "Histogram of known fitted beam weapon types on active ships. Keys are host beam "
+                "ids as strings; values are ship counts. Rows with unknown, bounded, options, or "
+                "region beam constraints are excluded. Known zero (no beams) is excluded."
+            ),
+        },
+        "launcherTypes": {
+            **_COMPOSITION_HISTOGRAM_SCHEMA,
+            "description": (
+                "Histogram of known fitted torpedo-tube types on active ships. Keys are host "
+                "torpedo ids as strings; values are ship counts. Rows with unknown, bounded, "
+                "options, or region launcher constraints are excluded. Known zero (no tubes) is "
+                "excluded."
+            ),
+        },
+        "torpedoTypesLoaded": {
+            **_COMPOSITION_HISTOGRAM_SCHEMA,
+            "description": (
+                "Histogram of known torpedo types currently loaded on active ships when the "
+                "ledger has observation evidence for loaded ammo. Empty when loaded-torp "
+                "evidence is not persisted on ship records."
+            ),
+        },
+        "maxTechLevel": _MAX_TECH_LEVEL_SCHEMA,
+    },
+}
+
 _META_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
@@ -215,6 +304,7 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
     ),
     "properties": {
         "meta": _META_SCHEMA,
+        "composition": _COMPOSITION_SCHEMA,
         "players": {
             "type": "array",
             "description": (

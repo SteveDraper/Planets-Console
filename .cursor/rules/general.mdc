@@ -41,6 +41,7 @@ When investigating bugs, flaky tests, or unexplained behavior, read and follow `
 - **Never introduce tech debt silently.** A hack with no comment, a workaround that papers over a real problem, or a "temporary" fix that will never be revisited are all worse than stopping to discuss. If you can't do it right right now, surface it.
 - **Never add backward-compatibility shims unless explicitly asked.** Backward compatibility locks in old patterns and adds complexity. Use the current best approach. If you're unsure whether compatibility is required, ask.
 - **Move forward, not sideways.** When making a change, don't replicate the old pattern in a new location. Fix the pattern.
+- **Search, reuse, extract.** Before adding logic, follow `implementation-quality.mdc` (grep for existing helpers, respect layer boundaries, extract shared code in the same PR). "Move forward, not sideways" includes not leaving duplicate helpers for review to find later.
 
 ## Collaboration
 

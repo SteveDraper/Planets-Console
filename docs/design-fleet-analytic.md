@@ -349,6 +349,20 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | Feature | Use |
 |---------|-----|
 | **Homeworld locator** | SB / planet positions for **region** constraints on inferred builds |
-| **Scores** `#87` | Launcher/torp histogram overlay from `$.composition` export branch |
+| **Scores** `#87` | Component histogram and `maxTechLevel` overlay from `$.composition` (`hullTypes`, `beamTypes`, `launcherTypes`, `maxTechLevel`; `torpedoTypesLoaded` when ledger stores loaded ammo) |
 | Reports ingest | Strong evidence for loss/trade row selection |
 | Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain |
+
+### `$.composition` export branch (#154)
+
+Per-player, scoped by `player_id`. Materialized from active `FleetShipRecord` rows for the scoped player(s):
+
+| Path | Shape | Rule |
+|------|-------|------|
+| `$.composition.hullTypes` | `{ "<hullId>": <shipCount>, ... }` | Known `fields.hull` only |
+| `$.composition.beamTypes` | `{ "<beamId>": <shipCount>, ... }` | Known `fields.beams` with positive id |
+| `$.composition.launcherTypes` | `{ "<torpId>": <shipCount>, ... }` | Known `fields.launchers` (torp type id) with positive id |
+| `$.composition.torpedoTypesLoaded` | same histogram shape | Empty in v1 until loaded-torp evidence is on ledger rows |
+| `$.composition.maxTechLevel` | `{ "hulls"?, "engines"?, "launchers"?, "beams"? }` | Max `techlevel` from turn catalog for ids present in the histograms (engines from known `fields.engine` on rows). Axes with no catalog-resolvable ids omitted. |
+
+Unknown, bounded, options, and region field constraints are excluded from histograms. Known zero for beams/launchers (no fitted weapons) is excluded. Turn 1 baseline: empty histograms and `{}` `maxTechLevel`.
