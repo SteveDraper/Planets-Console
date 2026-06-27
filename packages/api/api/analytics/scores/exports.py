@@ -9,6 +9,7 @@ from typing import Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
@@ -17,7 +18,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
-    SearchStatus,
     is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
     is_scores_export_ensure_satisfied_from_snapshot,
@@ -54,7 +54,9 @@ ORDERING_SEMANTICS = {
     ),
 }
 
-ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
+ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+)
 
 
 @dataclass(frozen=True)
@@ -130,7 +132,8 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     """Probe/ensure hook: classify gathered state only; no inference or payload build."""
     if scope.player_id is None:
         return True
-    if scope.turn <= 1 and not ENSURE_DEPENDENCIES:
+    if scope.turn <= 1:
+        # Game-start neutral priors; fleet@0 is not a valid ensure target.
         return True
 
     services = resolve_scores_services(ctx)
@@ -246,21 +249,6 @@ def _ensure_current_turn_scheduler(
     return True
 
 
-def _export_meta_branch(
-    *,
-    search_status: SearchStatus,
-    host_turn: int,
-    solutions_held: int = 0,
-) -> dict[str, object]:
-    meta: dict[str, object] = {
-        "searchStatus": search_status,
-        "hostTurn": host_turn,
-    }
-    if solutions_held > 0:
-        meta["solutionsHeld"] = solutions_held
-    return meta
-
-
 def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:
     return {"enabledHullIds": sorted(enabled_hull_ids)}
 
@@ -275,9 +263,9 @@ def build_scores_export_materialized_tree(
     """Materialize the full scores export value tree for one resolved snapshot."""
     payload = resolved.payload
     tree: dict[str, Any] = {
-        "meta": _export_meta_branch(
-            search_status=resolved.decision.search_status,
+        "meta": build_export_meta_branch(
             host_turn=scope.turn,
+            search_status=resolved.decision.search_status,
             solutions_held=payload.solutions_held,
         ),
         "solutions": payload.solutions,

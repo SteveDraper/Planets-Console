@@ -25,8 +25,8 @@ from tests.scores_exports_helpers import (
     materialize_scores_tree,
     perspective,
     put_persisted_row,
-    query_context,
     schedule_row_with_ladder,
+    scores_query_context,
     ship_build_domain,
     ship_build_wire,
     stream_scope_for_turn,
@@ -71,7 +71,7 @@ def test_turn_not_stored_materialize_asserts(sample_turn):
 def test_not_started_when_no_persistence_or_scheduler(sample_turn):
     reset_inference_row_scheduler_for_tests()
     player_id = first_player_id(sample_turn)
-    ctx = query_context(sample_turn, scheduler=InferenceRowScheduler(worker_count=0))
+    ctx = scores_query_context(sample_turn, scheduler=InferenceRowScheduler(worker_count=0))
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "not_started"
     assert tree["solutions"] == []
@@ -107,7 +107,7 @@ def test_in_progress_when_scheduler_holds_row(sample_turn):
         ],
     )
 
-    ctx = query_context(sample_turn, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "in_progress"
     assert tree["meta"]["solutionsHeld"] == 1
@@ -163,7 +163,7 @@ def test_persisted_row_replay_overrides_scheduler_state(sample_turn, persistence
         ],
     )
 
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
     result = ctx.query(
         "scores",
         ["$.solutions[0].shipBuilds[0].hullId", "$.meta.searchStatus"],
@@ -189,7 +189,7 @@ def test_paused_when_globally_paused_on_active_stream(sample_turn):
     )
     scheduler.pause_globally(stream_scope)
 
-    ctx = query_context(sample_turn, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "paused"
 
@@ -212,7 +212,7 @@ def test_in_progress_when_scheduler_pre_ladder(sample_turn):
     assert run is not None
     run.ladder_state = None
 
-    ctx = query_context(sample_turn, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "in_progress"
 
@@ -241,7 +241,7 @@ def test_stopped_when_ladder_time_limited(sample_turn):
         ladder_complete=True,
     )
 
-    ctx = query_context(sample_turn, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
     tree, scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "stopped"
     assert tree["meta"]["solutionsHeld"] == 1
@@ -272,7 +272,7 @@ def test_stopped_when_ladder_last_status_stopped(sample_turn):
         last_status=STATUS_STOPPED,
     )
 
-    ctx = query_context(sample_turn, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
     tree, scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "stopped"
     assert tree["meta"]["solutionsHeld"] == 1
@@ -306,7 +306,7 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
             ],
         ),
     )
-    ctx = query_context(sample_turn, persistence=persistence)
+    ctx = scores_query_context(sample_turn, persistence=persistence)
     tree, scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "stopped"
     assert tree["meta"]["solutionsHeld"] == 1
@@ -341,7 +341,7 @@ def test_first_turn_immediate_complete_is_ensure_satisfied_not_persisted(sample_
     first_turn = first_turn_from(sample_turn)
     player_id = first_player_id(first_turn)
 
-    ctx = query_context(
+    ctx = scores_query_context(
         first_turn,
         stored_turns={1: first_turn},
     )

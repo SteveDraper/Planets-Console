@@ -66,14 +66,16 @@ def stream_scope_for_turn(
     )
 
 
-def query_context(
+def scores_query_context(
     sample_turn,
     *,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
     stored_turns: dict[int, object] | None = None,
 ):
-    turns = stored_turns or {sample_turn.settings.turn: sample_turn}
+    """Scores-only query context; default stored turns are the ambient turn only."""
+    turn_number = sample_turn.settings.turn
+    turns = stored_turns if stored_turns is not None else {turn_number: sample_turn}
 
     def load_turn(turn_number: int):
         return turns.get(turn_number)
@@ -95,15 +97,9 @@ def query_context(
     )
 
 
-def first_turn_from(sample_turn):
-    return replace(
-        sample_turn,
-        settings=replace(sample_turn.settings, turn=1),
-        game=replace(sample_turn.game, turn=1),
-    )
-
-
 def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
+    from api.analytics.fleet.compute_services import turn_chain_through
+
     prior_prior_turn = prior_turn - 1
     prior_turn_obj = replace(
         sample_turn,
@@ -115,12 +111,19 @@ def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
         settings=replace(sample_turn.settings, turn=prior_prior_turn),
         game=replace(sample_turn.game, turn=prior_prior_turn),
     )
-    stored_turns = {
-        prior_prior_turn: prior_prior_turn_obj,
-        prior_turn: prior_turn_obj,
-        sample_turn.settings.turn: sample_turn,
-    }
+    stored_turns = turn_chain_through(sample_turn)
+    stored_turns[prior_prior_turn] = prior_prior_turn_obj
+    stored_turns[prior_turn] = prior_turn_obj
+    stored_turns[sample_turn.settings.turn] = sample_turn
     return stored_turns, prior_turn_obj, prior_prior_turn_obj
+
+
+def first_turn_from(sample_turn):
+    return replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+        game=replace(sample_turn.game, turn=1),
+    )
 
 
 def prior_turn_ensure_context(
@@ -130,17 +133,23 @@ def prior_turn_ensure_context(
     prior_turn: int = 110,
     game_id: int = GAME_ID,
 ):
+    from tests.export_chain_test_fixtures import (
+        export_chain_query_context,
+        seed_fleet_unwind_through,
+    )
+
     stored_turns, _, _ = prior_turn_chain(sample_turn, prior_turn=prior_turn)
     player_id = first_player_id(sample_turn)
 
     def load_turn(turn_number: int):
         return stored_turns.get(turn_number)
 
-    ctx = query_context(
+    ctx = export_chain_query_context(
         sample_turn,
         persistence=persistence,
         stored_turns=stored_turns,
     )
+    seed_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
     scope = ExportScope(
         game_id=game_id,
         perspective=perspective(sample_turn),
@@ -255,6 +264,33 @@ def put_persisted_row(
         player_id,
         row,
     )
+
+
+def scores_missing_step(probe, *, turn: int, player_id: int):
+    """Return the scores missing ensure step; fleet prerequisites must already be seeded."""
+    fleet_steps = [step for step in probe.missing_steps if step.analytic_id == "fleet"]
+    assert not fleet_steps, (
+        "probe reports missing fleet steps; seed fleet prerequisites before asserting "
+        f"scores-only missing work: {fleet_steps}"
+    )
+    return ensure_missing_step(probe, analytic_id="scores", turn=turn, player_id=player_id)
+
+
+def ensure_missing_step(
+    probe,
+    *,
+    analytic_id: str,
+    turn: int,
+    player_id: int | None,
+):
+    """Return the single missing ensure step for analytic/turn/player."""
+    matches = [
+        step
+        for step in probe.missing_steps
+        if step.analytic_id == analytic_id and step.turn == turn and step.player_id == player_id
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def materialize_scores_tree(ctx, player_id: int, *, turn: int | None = None):

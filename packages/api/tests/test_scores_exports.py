@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_types import EnsureDependency
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -22,8 +23,8 @@ from tests.scores_exports_helpers import (
     first_turn_from,
     materialize_scores_tree,
     put_persisted_row,
-    query_context,
     schedule_row_with_ladder,
+    scores_query_context,
     ship_build_wire,
     stream_scope_for_turn,
 )
@@ -33,7 +34,9 @@ def test_export_registry_includes_non_empty_scores_catalog():
     catalog = EXPORT_CATALOG
     assert catalog.analytic_id == "scores"
     assert not catalog.is_empty
-    assert catalog.ensure_dependencies == ()
+    assert catalog.ensure_dependencies == (
+        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+    )
     assert catalog.materialize_export_tree is not None
     assert catalog.ensure_export is not None
 
@@ -52,7 +55,7 @@ def test_complete_empty_solutions_returns_path_none(sample_turn, persistence):
             solutions=[],
         ),
     )
-    ctx = query_context(sample_turn, persistence=persistence)
+    ctx = scores_query_context(sample_turn, persistence=persistence)
     result = ctx.query(
         "scores",
         ["$.solutions[0]", "$.meta.searchStatus"],
@@ -66,7 +69,7 @@ def test_complete_empty_solutions_returns_path_none(sample_turn, persistence):
 
 
 def test_invalid_scope_without_player_id(sample_turn):
-    ctx = query_context(sample_turn)
+    ctx = scores_query_context(sample_turn)
     result = ctx.query("scores", ["$.solutions"])
     assert result.status == "unavailable"
     assert result.reason == "invalid_scope"
@@ -153,7 +156,7 @@ def test_top_solution_query_returns_full_build(sample_turn, persistence):
             ],
         ),
     )
-    ctx = query_context(sample_turn, persistence=persistence)
+    ctx = scores_query_context(sample_turn, persistence=persistence)
     result = ctx.query(
         "scores",
         ["$.solutions[0].shipBuilds", "$.solutions[0].actions"],
@@ -200,7 +203,7 @@ def test_first_turn_materializes_complete_without_ensure(sample_turn):
     first_turn = first_turn_from(sample_turn)
     player_id = first_player_id(first_turn)
 
-    ctx = query_context(
+    ctx = scores_query_context(
         first_turn,
         stored_turns={1: first_turn},
     )
@@ -229,7 +232,7 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_via_query(sample_turn):
     assert run.ladder_state is not None
     run.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
 
-    ctx = query_context(sample_turn, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
     result = ctx.query(
         "scores",
         ["$.diagnostics.solver.source", "$.meta.searchStatus"],

@@ -14,13 +14,16 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_S
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
+from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.scores_exports_helpers import (
     GAME_ID,
+    ensure_missing_step,
     first_player_id,
     perspective,
     prior_turn_ensure_context,
     put_persisted_row,
-    query_context,
+    scores_missing_step,
+    scores_query_context,
     stream_scope_for_turn,
 )
 
@@ -77,10 +80,8 @@ def test_probe_counts_prior_turn_missing_without_computing(sample_turn, persiste
     probe = ctx.probe("scores", {"turn": 110, "player_id": player_id})
 
     assert probe.status == "ok"
-    assert probe.total_missing == 1
-    assert probe.missing_steps[0].analytic_id == "scores"
-    assert probe.missing_steps[0].turn == 110
-    assert probe.missing_steps[0].player_id == player_id
+    missing = scores_missing_step(probe, turn=110, player_id=player_id)
+    assert missing.status == "not_persisted"
 
 
 def test_probe_counts_current_turn_missing_without_computing(sample_turn, persistence, monkeypatch):
@@ -89,7 +90,12 @@ def test_probe_counts_current_turn_missing_without_computing(sample_turn, persis
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
     _assert_probe_does_not_compute(monkeypatch)
@@ -97,9 +103,8 @@ def test_probe_counts_current_turn_missing_without_computing(sample_turn, persis
     probe = ctx.probe("scores", {"player_id": player_id})
 
     assert probe.status == "ok"
-    assert probe.total_missing == 1
-    assert probe.missing_steps[0].analytic_id == "scores"
-    assert probe.missing_steps[0].turn == sample_turn.settings.turn
+    missing = scores_missing_step(probe, turn=sample_turn.settings.turn, player_id=player_id)
+    assert missing.status == "not_persisted"
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
 
@@ -108,7 +113,7 @@ def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
     scope = ExportScope(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
@@ -149,12 +154,7 @@ def test_probe_reports_prior_turn_work_without_running_ensure(sample_turn, persi
         mock_put_row.assert_not_called()
 
     assert probe.status == "ok"
-    assert probe.total_missing == 1
-    assert len(probe.missing_steps) == 1
-    missing = probe.missing_steps[0]
-    assert missing.analytic_id == "scores"
-    assert missing.turn == 110
-    assert missing.player_id == player_id
+    missing = scores_missing_step(probe, turn=110, player_id=player_id)
     assert missing.status == "not_persisted"
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
 
@@ -165,7 +165,12 @@ def test_probe_reports_current_turn_work_without_scheduling(sample_turn, persist
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
     with patch(
@@ -175,9 +180,7 @@ def test_probe_reports_current_turn_work_without_scheduling(sample_turn, persist
         mock_schedule.assert_not_called()
 
     assert probe.status == "ok"
-    assert probe.total_missing == 1
-    assert probe.missing_steps[0].analytic_id == "scores"
-    assert probe.missing_steps[0].turn == sample_turn.settings.turn
+    scores_missing_step(probe, turn=sample_turn.settings.turn, player_id=player_id)
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
 
@@ -258,7 +261,12 @@ def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
     scope = ExportScope(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
@@ -289,7 +297,7 @@ def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
     run_before = scheduler.row_run_for_player(stream_scope, player_id)
     assert run_before is not None
 
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
     scope = ExportScope(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
@@ -319,7 +327,7 @@ def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
             solutions=[],
         ),
     )
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
     scope = ExportScope(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
@@ -334,6 +342,11 @@ def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
 
 def test_probe_omits_stopped_persisted_row(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        seed_fleet_prerequisites_for=player_id,
+    )
     put_persisted_row(
         persistence,
         sample_turn,
@@ -346,13 +359,54 @@ def test_probe_omits_stopped_persisted_row(sample_turn, persistence):
             solutions=[],
         ),
     )
-    ctx = query_context(sample_turn, persistence=persistence)
 
     probe = ctx.probe("scores", {"player_id": player_id})
 
     assert probe.status == "ok"
     assert probe.total_missing == 0
     assert probe.missing_steps == ()
+
+
+def test_probe_reports_scores_depends_on_fleet_prior_turn(sample_turn, persistence):
+    """Probe must count fleet@N-1 before current-turn scores when the chain is incomplete."""
+    player_id = first_player_id(sample_turn)
+    turn_number = sample_turn.settings.turn
+    prior_turn = turn_number - 1
+    ctx = export_chain_query_context(sample_turn, persistence=persistence)
+    seed_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=prior_turn,
+    )
+
+    probe = ctx.probe("scores", {"player_id": player_id})
+
+    assert probe.status == "ok"
+    assert probe.total_missing == 2
+    fleet_step = ensure_missing_step(
+        probe,
+        analytic_id="fleet",
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    scores_step = ensure_missing_step(
+        probe,
+        analytic_id="scores",
+        turn=turn_number,
+        player_id=player_id,
+    )
+    assert fleet_step.status == "not_persisted"
+    assert scores_step.status == "not_persisted"
+    assert probe.missing_steps.index(fleet_step) < probe.missing_steps.index(scores_step)
 
 
 def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
@@ -372,7 +426,7 @@ def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
             solutions=[],
         ),
     )
-    ctx = query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
     scope = ExportScope(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
