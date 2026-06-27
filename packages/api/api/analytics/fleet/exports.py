@@ -9,6 +9,7 @@ from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefix
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.composition_export import build_fleet_composition_branch
 from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
@@ -21,6 +22,7 @@ from api.models.game import TurnInfo
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.players", requires=("player_id",)),
+    PathPrefixScopeRule(prefix="$.composition", requires=("player_id",)),
     PathPrefixScopeRule(prefix="$.meta.searchStatus", requires=("player_id",)),
     PathPrefixScopeRule(prefix="$.meta.solutionsHeld", requires=("player_id",)),
 )
@@ -99,6 +101,7 @@ def _build_fleet_export_materialized_tree(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
     *,
+    turn: TurnInfo,
     search_status: SearchStatus | None,
     solutions_held: int,
 ) -> dict[str, Any]:
@@ -108,6 +111,7 @@ def _build_fleet_export_materialized_tree(
             search_status=search_status,
             solutions_held=solutions_held,
         ),
+        "composition": build_fleet_composition_branch(snapshot, scope, turn=turn),
         "players": [
             fleet_acquisition_ledger_to_json(player_ledger)
             for player_ledger in _players_for_scope(snapshot, scope)
@@ -136,6 +140,7 @@ def materialize_fleet_export_tree(ctx: AnalyticQueryContext, scope: ExportScope)
     return _build_fleet_export_materialized_tree(
         snapshot,
         scope,
+        turn=turn,
         search_status=search_status,
         solutions_held=solutions_held,
     )

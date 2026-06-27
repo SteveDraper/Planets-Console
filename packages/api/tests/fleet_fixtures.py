@@ -20,6 +20,9 @@ def single_ship_turn(
     x: int,
     y: int,
     hull_id: int = 13,
+    engine_id: int = 9,
+    beam_id: int = 3,
+    torpedoid: int = 6,
 ) -> TurnInfo:
     with open(ASSETS_DIR / "turn_sample.json") as handle:
         turn_data = json.load(handle)
@@ -65,11 +68,11 @@ def single_ship_turn(
             "heading": 0,
             "turn": 1,
             "turnkilled": 0,
-            "beamid": 3,
-            "engineid": 9,
+            "beamid": beam_id,
+            "engineid": engine_id,
             "hullid": hull_id,
             "ownerid": owner_id,
-            "torpedoid": 6,
+            "torpedoid": torpedoid,
             "experience": 0,
             "infoturn": turn_number,
             "podhullid": 0,

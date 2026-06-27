@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import EnsureDependency, ExportScope
 from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
@@ -19,6 +21,7 @@ from tests.fleet_exports_helpers import (
     materialize_fleet_tree,
     turn_with_score_delta,
 )
+from tests.fleet_fixtures import single_ship_turn
 from tests.scores_exports_helpers import (
     GAME_ID,
     ensure_missing_step,
@@ -54,6 +57,130 @@ def test_invalid_scope_without_player_id_for_players_path(sample_turn):
     result = ctx.query("fleet", ["$.players"])
     assert result.status == "unavailable"
     assert result.reason == "invalid_scope"
+
+
+def test_invalid_scope_without_player_id_for_composition_path(sample_turn):
+    ctx = export_chain_query_context(sample_turn)
+    result = ctx.query("fleet", ["$.composition.launcherTypes"])
+    assert result.status == "unavailable"
+    assert result.reason == "invalid_scope"
+
+
+def test_materialized_tree_turn_one_empty_composition(sample_turn):
+    player_id = first_player_id(sample_turn)
+    turn_one = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+        game=replace(sample_turn.game, turn=1),
+        ships=[],
+    )
+    ctx = export_chain_query_context(turn_one, stored_turns={1: turn_one})
+    tree, _scope = materialize_fleet_tree(ctx, player_id, turn=1)
+    assert tree["composition"] == {
+        "hullTypes": {},
+        "beamTypes": {},
+        "launcherTypes": {},
+        "torpedoTypesLoaded": {},
+        "maxTechLevel": {},
+    }
+
+
+def test_materialized_tree_composition_counts_known_component_types_from_sightings():
+    player_id = 8
+    turn = single_ship_turn(
+        turn_number=1,
+        ship_id=42,
+        owner_id=player_id,
+        x=1000,
+        y=2000,
+        hull_id=15,
+        engine_id=3,
+        beam_id=3,
+        torpedoid=3,
+    )
+    stored_turns = {1: turn}
+    ctx = export_chain_query_context(turn, stored_turns=stored_turns)
+    tree, _scope = materialize_fleet_tree(ctx, player_id, turn=1)
+    assert tree["composition"]["hullTypes"] == {"15": 1}
+    assert tree["composition"]["beamTypes"] == {"3": 1}
+    assert tree["composition"]["launcherTypes"] == {"3": 1}
+    assert tree["composition"]["torpedoTypesLoaded"] == {}
+    assert tree["composition"]["maxTechLevel"] == {
+        "hulls": 1,
+        "engines": 3,
+        "launchers": 3,
+        "beams": 2,
+    }
+
+
+def test_materialized_tree_composition_omits_unknown_placeholder_launchers(sample_turn):
+    player_id = first_player_id(sample_turn)
+    sighting = single_ship_turn(turn_number=5, ship_id=99, owner_id=player_id, x=100, y=100)
+    turn = turn_with_score_delta(sighting, turn_number=5, owner_id=player_id, shipchange=1)
+    turn = replace(turn, ships=sighting.ships)
+    stored_turns = turn_chain_through(turn)
+    stored_turns[5] = turn
+
+    ctx = export_chain_query_context(
+        turn,
+        stored_turns=stored_turns,
+        scheduler=InferenceRowScheduler(worker_count=0),
+    )
+    tree, _scope = materialize_fleet_tree(ctx, player_id, turn=5)
+    ledger = tree["players"][0]
+    assert len(ledger["records"]) == 2
+    known_launcher_records = [
+        record
+        for record in ledger["records"]
+        if record["fields"]["launchers"].get("kind") == "known"
+    ]
+    unknown_launcher_records = [
+        record
+        for record in ledger["records"]
+        if record["fields"]["launchers"].get("kind") == "unknown"
+    ]
+    assert len(known_launcher_records) == 1
+    assert len(unknown_launcher_records) == 1
+    assert tree["composition"]["hullTypes"] == {"13": 1}
+    assert tree["composition"]["beamTypes"] == {"3": 1}
+    assert tree["composition"]["launcherTypes"] == {"6": 1}
+    assert tree["composition"]["torpedoTypesLoaded"] == {}
+    assert tree["composition"]["maxTechLevel"] == {"beams": 2}
+
+
+def test_query_composition_launcher_types_path():
+    player_id = 8
+    turn = single_ship_turn(
+        turn_number=1,
+        ship_id=42,
+        owner_id=player_id,
+        x=1000,
+        y=2000,
+        hull_id=15,
+        engine_id=3,
+        beam_id=3,
+        torpedoid=3,
+    )
+    ctx = export_chain_query_context(turn, stored_turns={1: turn})
+    result = ctx.query(
+        "fleet",
+        [
+            "$.composition.launcherTypes",
+            "$.composition.hullTypes",
+            "$.composition.maxTechLevel",
+        ],
+        {"turn": 1, "player_id": player_id},
+        force_inline_ensure=True,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.composition.launcherTypes"].value == {"3": 1}
+    assert result.paths["$.composition.hullTypes"].value == {"15": 1}
+    assert result.paths["$.composition.maxTechLevel"].value == {
+        "hulls": 1,
+        "engines": 3,
+        "launchers": 3,
+        "beams": 2,
+    }
 
 
 def test_materialized_tree_includes_meta_host_turn(sample_turn):
