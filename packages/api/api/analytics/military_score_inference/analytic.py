@@ -18,6 +18,11 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
+from api.analytics.military_score_inference.host_turn_targets import (
+    functional_host_turn_target_from_segment_payload,
+    host_turn_functional_target_to_wire_dict,
+    host_turn_targets_from_wire_event,
+)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_split_inference,
@@ -494,6 +499,11 @@ def _try_accelerated_backfill_inference(
             "solutionCount": solution_count,
             "isComplete": segment_status != STATUS_TIME_LIMITED,
             "solutions": solutions_raw if isinstance(solutions_raw, list) else [],
+            "hostTurnTargets": [
+                host_turn_functional_target_to_wire_dict(
+                    functional_host_turn_target_from_segment_payload(segment_payload),
+                ),
+            ],
             "diagnostics": build_inference_solver_diagnostics(
                 turn=turn.settings.turn,
                 observation=segment_observation,
@@ -518,6 +528,10 @@ def _segment_payload_for_host_turn(
     *,
     host_turn: int,
 ) -> dict[str, object] | None:
+    for target in host_turn_targets_from_wire_event(split_payload):
+        if target.host_turn == host_turn:
+            return host_turn_functional_target_to_wire_dict(target)
+
     diagnostics = split_payload.get("diagnostics")
     if not isinstance(diagnostics, dict):
         return None

@@ -105,7 +105,7 @@ Display default: highest **inference solution rank weight** option set. Row expa
 
 ### 4.2 Inferred row placeholders
 
-When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutions: create **two** inferred rows with unknown specs. Refine as solutions stream in. Fleet refinement currently reads accelerated segment solutions from **scores** row `diagnostics`, pending [#151](https://github.com/SteveDraper/Planets-Console/issues/151) (uniform host-turn scores export).
+When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutions: create **two** inferred rows with unknown specs. Refine as solutions stream in. Fleet refinement queries **scores** at the scoreboard turn for each placeholder `builtTurn` and applies top-level **`$.solutions`** only (no reads of **`$.diagnostics`**). On the first reliable accelerated shell turn, `builtTurn < shellTurn` placeholders resolve from backfill rows (`scores@(builtTurn + 1)`); same-turn placeholders use `scores@shellTurn`. Placeholder metadata (targets, homeworld baselines, accelerated-shell gating) is consumed via `api.analytics.scores.placeholder_targets`.
 
 ### 4.3 Observation-inference merge
 
@@ -121,13 +121,13 @@ When a sighting arrives:
 
 Sequential host ship id allocation: if turn `N-1` had `X` ships globally and turn `N` had `Y` builds, `maxId <= X + Y` (refine when sighting fixes id).
 
-On the first reliable accelerated row (`turn == acceleratedturns`), apply **segment-aware** bounds when tightening inferred rows on that shell turn:
+On the first reliable accelerated row (`turn == acceleratedturns`), apply **built-turn-aware** bounds when tightening inferred rows on that shell turn:
 
 | Row kind | Id bound source |
 |----------|-----------------|
 | Homeworld starting inventory | Global ship count after each player receives starting ships (`players * (baseline freighters + baseline warships)`) |
-| Accelerated window segment (`accel_window`) | Global ship total at end of host turn `N-2` (prior totals from row `N` before reported host-turn deltas) |
-| Reported host-turn segment (`reported_host_turn`) | Current shell-turn bound (`total - net + builds` on row `N`) |
+| Inferred row with `builtTurn < shellTurn - 1` (accelerated window host turn) | Global ship total at end of host turn `N-2` (prior totals from row `N` before reported host-turn deltas) |
+| Inferred row with `builtTurn == shellTurn - 1` (reported host turn on row `N`) | Current shell-turn bound (`total - net + builds` on row `N`) |
 | Normal scoreboard-delta rows | Current shell-turn bound |
 
 Missing or stale bounds are not re-tightened to a looser value when a row already has a tighter `lte` bound.

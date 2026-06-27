@@ -10,7 +10,7 @@ Player-facing UX for inspecting ranked build-inference explanations from the Sco
 
 When build inference is enabled and a scoreboard row holds at least one exact explanation, the player opens a modal to compare ranked alternatives: what actions might explain the row's scoreboard deltas, how each alternative sums to the observed military change, and how plausible each alternative is relative to the others.
 
-The modal is **not** a developer diagnostics surface. Equality strings, raw 2× scale, full `accelerated_segments` arrays, priority-point constraint notes, and spectator delta-source notes belong in the Scores diagnostics panel.
+The modal is **not** a developer diagnostics surface. Equality strings, raw 2× scale, full `accelerated_segments` / `hostTurnTargets` arrays, priority-point constraint notes, and spectator delta-source notes belong in the Scores diagnostics panel.
 
 ---
 

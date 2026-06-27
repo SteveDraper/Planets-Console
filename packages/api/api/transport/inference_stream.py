@@ -59,6 +59,7 @@ def inference_complete_event(
     is_complete: bool = True,
     diagnostics: dict[str, object] | None = None,
     solutions: list[dict[str, object]] | None = None,
+    host_turn_targets: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -71,6 +72,8 @@ def inference_complete_event(
         payload["solutions"] = solutions
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
+    if host_turn_targets is not None:
+        payload["hostTurnTargets"] = host_turn_targets
     return payload
 
 

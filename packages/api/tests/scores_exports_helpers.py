@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.export_precedence import ScoresExportResolutionContext
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -50,6 +51,29 @@ def perspective(sample_turn) -> int:
 
 def first_player_id(sample_turn) -> int:
     return sample_turn.scores[0].ownerid
+
+
+def minimal_scores_export_resolution_context(
+    sample_turn,
+    *,
+    scoreboard_turn: int = 1,
+    player_id: int | None = None,
+) -> ScoresExportResolutionContext:
+    """Context for unit tests that do not exercise functional host-turn backfill.
+
+    scoreboard_turn defaults to 1 so scoreboard_host_turn is None and functional
+    resolution is skipped unless a test overrides scoreboard_turn.
+    """
+    pid = player_id if player_id is not None else first_player_id(sample_turn)
+    score = next((row for row in sample_turn.scores if row.ownerid == pid), None)
+    return ScoresExportResolutionContext(
+        scoreboard_turn=scoreboard_turn,
+        turn=sample_turn,
+        player_id=pid,
+        load_scoreboard_turn=lambda _: None,
+        get_persisted_row=None,
+        player_score=score,
+    )
 
 
 def stream_scope_for_turn(

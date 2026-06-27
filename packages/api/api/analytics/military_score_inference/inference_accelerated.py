@@ -16,6 +16,10 @@ from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
 )
+from api.analytics.military_score_inference.host_turn_targets import (
+    functional_host_turn_target_from_segment_payload,
+    host_turn_functional_target_to_wire_dict,
+)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
@@ -49,6 +53,23 @@ from api.models.game import TurnInfo
 from api.models.player import Score
 
 AcceleratedSegmentArtifacts = tuple[InferenceObservation, ActionCatalog | None]
+
+
+def payload_with_host_turn_targets(
+    payload: dict[str, object],
+    segment_payloads: list[dict[str, object]],
+) -> dict[str, object]:
+    if not segment_payloads:
+        return payload
+    return {
+        **payload,
+        "hostTurnTargets": [
+            host_turn_functional_target_to_wire_dict(
+                functional_host_turn_target_from_segment_payload(segment),
+            )
+            for segment in segment_payloads
+        ],
+    }
 
 
 @dataclass(frozen=True)
@@ -279,15 +300,18 @@ def run_accelerated_split_inference(
     )
 
     return (
-        inference_result_to_api_payload(
-            primary_result,
-            reported_catalog,
-            reported_observation,
-            turn,
-            reported_problem,
-            policy_steps_attempted=reported_policy_steps,
-            step_diagnostics=reported_step_diagnostics,
-            extra_diagnostics={"accelerated_segments": segment_payloads},
+        payload_with_host_turn_targets(
+            inference_result_to_api_payload(
+                primary_result,
+                reported_catalog,
+                reported_observation,
+                turn,
+                reported_problem,
+                policy_steps_attempted=reported_policy_steps,
+                step_diagnostics=reported_step_diagnostics,
+                extra_diagnostics={"accelerated_segments": segment_payloads},
+            ),
+            segment_payloads,
         ),
         reported_observation,
         reported_catalog,
@@ -343,18 +367,22 @@ def build_accelerated_split_stream_row_complete(
             "accelerated_segments": segment_payloads,
         },
     )
-    return RowComplete(
-        result=result,
-        wire_payload=build_row_complete_wire_payload(
+    api_payload = payload_with_host_turn_targets(
+        inference_result_to_api_payload(
             result,
-            observation=reported.observation,
-            turn=turn,
-            catalog=reported.catalog,
-            problem=reported.problem,
+            reported.catalog,
+            reported.observation,
+            turn,
+            reported.problem,
             policy_steps_attempted=reported.policy_steps_attempted,
             step_diagnostics=reported.step_diagnostics,
             extra_diagnostics={"accelerated_segments": segment_payloads},
         ),
+        segment_payloads,
+    )
+    return RowComplete(
+        result=result,
+        wire_payload=row_complete_wire_payload_from_api_payload(api_payload),
     )
 
 
@@ -397,14 +425,15 @@ def build_accelerated_backfill_stream_row_complete(
             "accelerated_segments": segment_payloads,
         },
     )
-    return RowComplete(
-        result=result,
-        wire_payload=build_row_complete_wire_payload(
+    target_payload = target.payload
+    segment_payloads_for_targets = [target_payload] if target_payload is not None else []
+    api_payload = payload_with_host_turn_targets(
+        inference_result_to_api_payload(
             result,
-            observation=target.observation,
-            turn=source_turn,
-            catalog=target.catalog,
-            problem=target.problem,
+            target.catalog,
+            target.observation,
+            source_turn,
+            target.problem,
             policy_steps_attempted=target.policy_steps_attempted,
             step_diagnostics=target.step_diagnostics,
             extra_diagnostics={
@@ -415,4 +444,9 @@ def build_accelerated_backfill_stream_row_complete(
                 "accelerated_segments": segment_payloads,
             },
         ),
+        segment_payloads_for_targets,
+    )
+    return RowComplete(
+        result=result,
+        wire_payload=row_complete_wire_payload_from_api_payload(api_payload),
     )

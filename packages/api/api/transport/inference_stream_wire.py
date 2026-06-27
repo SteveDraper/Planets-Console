@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from api.analytics.military_score_inference.host_turn_targets import (
+    host_turn_functional_target_to_wire_dict,
+    host_turn_functional_targets_from_wire_list,
+)
 from api.analytics.military_score_inference.inference_api_payload import (
     serialize_solutions_with_arithmetic,
 )
@@ -24,6 +28,15 @@ from api.transport.inference_stream import (
 )
 
 
+def _wire_host_turn_targets(
+    host_turn_targets: object,
+) -> list[dict[str, object]] | None:
+    parsed = host_turn_functional_targets_from_wire_list(host_turn_targets)
+    if parsed is None:
+        return None
+    return [host_turn_functional_target_to_wire_dict(target) for target in parsed]
+
+
 def inference_api_payload_to_wire_complete(
     payload: dict[str, object],
 ) -> dict[str, object]:
@@ -37,6 +50,7 @@ def inference_api_payload_to_wire_complete(
         is_complete=bool(payload.get("isComplete", True)),
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
+        host_turn_targets=_wire_host_turn_targets(payload.get("hostTurnTargets")),
     )
 
 
@@ -47,6 +61,11 @@ def row_complete_to_complete_wire_event(
     turn: TurnInfo,
 ) -> dict[str, object]:
     payload = event.wire_payload
+    wire_targets = None
+    if payload.host_turn_targets is not None:
+        wire_targets = [
+            host_turn_functional_target_to_wire_dict(target) for target in payload.host_turn_targets
+        ]
     return inference_complete_event(
         status=payload.status,
         summary=payload.summary,
@@ -54,6 +73,7 @@ def row_complete_to_complete_wire_event(
         is_complete=payload.is_complete,
         diagnostics=payload.diagnostics,
         solutions=payload.solutions,
+        host_turn_targets=wire_targets,
     )
 
 

@@ -37,7 +37,6 @@ def tighten_inferred_ship_id_bounds(
             turn,
             shell_turn=shell_turn,
             built_turn=_known_built_turn(record),
-            segment_id=_segment_id_from_event(event),
             is_starting_inventory=_is_homeworld_starting_inventory_event(event),
         )
         if max_bound is None:
@@ -95,11 +94,6 @@ def _scoreboard_acquisition_event(
         if warship_delta > 0 or freighter_delta > 0:
             return event
     return None
-
-
-def _segment_id_from_event(event: FleetEvidenceEvent) -> str | None:
-    segment_id = event.payload.get("segmentId")
-    return segment_id if isinstance(segment_id, str) else None
 
 
 def _is_homeworld_starting_inventory_event(event: FleetEvidenceEvent) -> bool:
