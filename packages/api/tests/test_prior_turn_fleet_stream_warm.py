@@ -16,6 +16,12 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetShipRecordFields,
 )
+from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
+from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.fleet_torp_overlay import (
+    FleetLauncherBeliefSet,
+    FleetTorpOverlay,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -28,19 +34,13 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     controller_for_scope,
     reset_inference_table_stream_registry_for_tests,
 )
-from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
-from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.fleet_torp_overlay import (
-    FleetLauncherBeliefSet,
-    FleetTorpOverlay,
-)
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
     resolve_prior_turn_fleet_torp_overlay,
     schedule_background_prior_turn_fleet_warm,
 )
-from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
@@ -400,9 +400,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     assert applied.overlay is not None
     assert applied.overlay.belief_set.torp_ids == frozenset({4})
 
-    second_complete = next(
-        event for event in reversed(events) if event.get("type") == "complete"
-    )
+    second_complete = next(event for event in reversed(events) if event.get("type") == "complete")
     second_diagnostics = second_complete.get("diagnostics")
     assert isinstance(second_diagnostics, dict)
     assert second_diagnostics.get("fleetTorpInputStatus") == "applied"
@@ -475,9 +473,7 @@ def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
         sample_turn,
         load_scoreboard_turn=ctx.load_turn,
     )
-    torp_step = next(
-        step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes"
-    )
+    torp_step = next(step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes")
     empty_torp_catalog = build_action_catalog_from_turn(
         observation,
         sample_turn,
