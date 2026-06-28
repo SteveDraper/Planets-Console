@@ -7,10 +7,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.belief_set_components import component_ids_for_record_on_axis
 from api.analytics.fleet.export_scope import ledgers_for_scope
-from api.analytics.fleet.field_constraints import known_positive_component_id
 from api.analytics.fleet.types import (
-    FleetBuildOptionSet,
     FleetShipRecord,
     FleetTurnSnapshot,
 )
@@ -21,13 +20,6 @@ from api.concepts.turn_component_catalog import (
     torpedos_by_id,
 )
 from api.models.game import TurnInfo
-
-_OPTION_SET_COMPONENT_ATTRS: dict[str, str] = {
-    "hull": "hull_id",
-    "engine": "engine_id",
-    "beams": "beam_id",
-    "launchers": "torp_id",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,31 +40,6 @@ _COMPOSITION_AXIS_SPECS: tuple[_CompositionAxisSpec, ...] = (
 
 class _TechLevelComponent(Protocol):
     techlevel: int
-
-
-def _positive_option_component_id(option_set: FleetBuildOptionSet, attr: str) -> int | None:
-    raw = getattr(option_set, attr)
-    if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
-        return None
-    return raw
-
-
-def _component_ids_for_record_on_axis(
-    record: FleetShipRecord,
-    axis: _CompositionAxisSpec,
-) -> set[int]:
-    """Belief-set ids for one axis: known field plus union of build option sets."""
-    ids: set[int] = set()
-    field = getattr(record.fields, axis.field_name)
-    known_id = known_positive_component_id(field)
-    if known_id is not None:
-        ids.add(known_id)
-    option_attr = _OPTION_SET_COMPONENT_ATTRS[axis.field_name]
-    for option_set in record.build_option_sets:
-        option_id = _positive_option_component_id(option_set, option_attr)
-        if option_id is not None:
-            ids.add(option_id)
-    return ids
 
 
 def _increment_histogram(histogram: dict[str, int], component_id: int) -> None:
@@ -143,7 +110,7 @@ def build_fleet_composition_branch(
     for record in _active_records_for_scope(snapshot, scope):
         for axis in _COMPOSITION_AXIS_SPECS:
             histogram = histograms[axis.histogram_output_key]
-            for component_id in _component_ids_for_record_on_axis(record, axis):
+            for component_id in component_ids_for_record_on_axis(record, axis.field_name):
                 _increment_histogram(histogram, component_id)
 
     catalogs: dict[str, dict[int, _TechLevelComponent]] = {
