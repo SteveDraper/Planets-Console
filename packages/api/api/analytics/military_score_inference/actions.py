@@ -24,7 +24,8 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     FleetTorpOverlayDiagnostics,
     admitted_torp_ids_for_policy_step,
     effective_fleet_torp_overlay,
-    merge_fleet_torp_overlay_diagnostics,
+    apply_torp_misalignment_penalties_to_catalog,
+    build_fleet_torp_overlay_diagnostics,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
@@ -304,8 +305,12 @@ def build_action_catalog(
         if overflow_band is not None:
             tier_overflow_by_action_id[action.id] = overflow_band
 
-    probability_buckets, fleet_overlay_diagnostics = merge_fleet_torp_overlay_diagnostics(
+    probability_buckets = apply_torp_misalignment_penalties_to_catalog(
         probability_buckets,
+        overlay=resolved_overlay,
+        tuning=fleet_tuning,
+    )
+    fleet_overlay_diagnostics = build_fleet_torp_overlay_diagnostics(
         overlay=resolved_overlay,
         tuning=fleet_tuning,
         policy_step=resolved_policy_step,

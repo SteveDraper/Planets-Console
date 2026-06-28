@@ -35,7 +35,8 @@ __all__ = [
     "effective_fleet_torp_overlay",
     "launcher_belief_set_from_composition",
     "launcher_belief_set_from_fleet_records",
-    "merge_fleet_torp_overlay_diagnostics",
+    "apply_torp_misalignment_penalties_to_catalog",
+    "build_fleet_torp_overlay_diagnostics",
     "torp_load_action_id",
 ]
 
@@ -201,47 +202,44 @@ def apply_torp_misalignment_penalty_to_buckets(
     return tuple(adjusted)
 
 
-def merge_fleet_torp_overlay_diagnostics(
+def apply_torp_misalignment_penalties_to_catalog(
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]],
     *,
     overlay: FleetTorpOverlay,
     tuning: FleetInferenceTuning,
-    policy_step: InferenceTierPolicyStep,
-    admitted_torp_ids: frozenset[int],
-) -> tuple[dict[str, tuple[ProbabilityBucket, ...]], FleetTorpOverlayDiagnostics]:
+) -> dict[str, tuple[ProbabilityBucket, ...]]:
     if not overlay.enabled or tuning.torp_misalignment_log_penalty <= 0:
-        diagnostics = FleetTorpOverlayDiagnostics(
-            applied=overlay.enabled,
-            enabled=overlay.enabled,
-            belief_set_torp_ids=tuple(sorted(overlay.belief_set.torp_ids)),
-            admitted_torp_ids=tuple(sorted(admitted_torp_ids)),
-            policy_step_id=policy_step.id,
-            escape_tier_used=policy_step.id == TORP_ESCAPE_TIER_STEP_ID,
-            torp_misalignment_log_penalty=tuning.torp_misalignment_log_penalty,
-        )
-        return probability_buckets, diagnostics
+        return probability_buckets
 
     belief_ids = overlay.belief_set.torp_ids
     penalty = tuning.torp_misalignment_log_penalty
-    merged = dict(probability_buckets)
-    for action_id in list(merged.keys()):
+    adjusted = dict(probability_buckets)
+    for action_id in list(adjusted.keys()):
         if not is_torp_load_action_id(action_id):
             continue
         torp_id = int(action_id.removeprefix(SHIP_TORPS_LOADED_ACTION_PREFIX))
         if torp_id in belief_ids:
             continue
-        merged[action_id] = apply_torp_misalignment_penalty_to_buckets(
-            merged[action_id],
+        adjusted[action_id] = apply_torp_misalignment_penalty_to_buckets(
+            adjusted[action_id],
             penalty=penalty,
         )
+    return adjusted
 
-    diagnostics = FleetTorpOverlayDiagnostics(
-        applied=True,
-        enabled=True,
-        belief_set_torp_ids=tuple(sorted(belief_ids)),
+
+def build_fleet_torp_overlay_diagnostics(
+    *,
+    overlay: FleetTorpOverlay,
+    tuning: FleetInferenceTuning,
+    policy_step: InferenceTierPolicyStep,
+    admitted_torp_ids: frozenset[int],
+) -> FleetTorpOverlayDiagnostics:
+    return FleetTorpOverlayDiagnostics(
+        applied=overlay.enabled,
+        enabled=overlay.enabled,
+        belief_set_torp_ids=tuple(sorted(overlay.belief_set.torp_ids)),
         admitted_torp_ids=tuple(sorted(admitted_torp_ids)),
         policy_step_id=policy_step.id,
         escape_tier_used=policy_step.id == TORP_ESCAPE_TIER_STEP_ID,
-        torp_misalignment_log_penalty=penalty,
+        torp_misalignment_log_penalty=tuning.torp_misalignment_log_penalty,
     )
-    return merged, diagnostics
