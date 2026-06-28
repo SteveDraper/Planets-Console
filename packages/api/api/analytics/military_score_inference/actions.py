@@ -19,6 +19,13 @@ from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
     turn_catalog_context_for_policy_step,
 )
+from api.analytics.military_score_inference.fleet_torp_overlay import (
+    FleetTorpOverlay,
+    FleetTorpOverlayDiagnostics,
+    admitted_torp_ids_for_policy_step,
+    effective_fleet_torp_overlay,
+    merge_fleet_torp_overlay_diagnostics,
+)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -47,6 +54,7 @@ from api.analytics.military_score_inference.ship_build_combos import (
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     compute_aggregate_admission_caps,
+    resolve_fleet_inference_tuning,
     resolve_tier_policies,
 )
 from api.concepts.races import (
@@ -78,6 +86,7 @@ class ActionCatalog:
     admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
     prior_weights_diagnostics: PriorWeightsDiagnostics | None = None
+    fleet_torp_overlay_diagnostics: FleetTorpOverlayDiagnostics | None = None
 
     @property
     def catalog_size(self) -> int:
@@ -98,6 +107,8 @@ class ActionCatalog:
         }
         if self.prior_weights_diagnostics is not None:
             payload["priorWeights"] = self.prior_weights_diagnostics.to_payload()
+        if self.fleet_torp_overlay_diagnostics is not None:
+            payload["fleetTorpOverlay"] = self.fleet_torp_overlay_diagnostics.to_payload()
         return payload
 
 
@@ -146,6 +157,7 @@ def build_action_catalog_from_turn(
     policy_step_index: int = 0,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     prior_weights_base_dir: Path | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step
     if resolved_policy_step is None:
@@ -189,6 +201,7 @@ def build_action_catalog_from_turn(
         policy_step=resolved_policy_step,
         policy_step_index=policy_step_index,
         policy_steps=resolve_tier_policies(),
+        fleet_torp_overlay=fleet_torp_overlay,
     )
 
 
@@ -225,12 +238,20 @@ def build_action_catalog(
     policy_step: InferenceTierPolicyStep | None = None,
     policy_step_index: int = 0,
     policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
     if turn is not None and player is None:
         player = player_by_id(turn, observation.player_id)
     prior_diagnostics = prior_catalog.diagnostics
+    resolved_overlay = effective_fleet_torp_overlay(fleet_torp_overlay)
+    fleet_tuning = resolve_fleet_inference_tuning()
+    admitted_torp_ids = admitted_torp_ids_for_policy_step(
+        policy_step=resolved_policy_step,
+        eligible_torp_ids=eligible_torp_ids,
+        overlay=resolved_overlay,
+    )
 
     aggregate_actions, probability_buckets = build_aggregate_actions(
         observation,
@@ -239,6 +260,7 @@ def build_action_catalog(
         eligible_torp_ids,
         resolved_policy_step.aggregate_allowlist,
         prior_catalog,
+        admitted_torp_ids=admitted_torp_ids,
     )
     kept_actions: list[CandidateAction] = list(aggregate_actions)
     if turn is not None and player is not None:
@@ -272,6 +294,14 @@ def build_action_catalog(
         if overflow_band is not None:
             tier_overflow_by_action_id[action.id] = overflow_band
 
+    probability_buckets, fleet_overlay_diagnostics = merge_fleet_torp_overlay_diagnostics(
+        probability_buckets,
+        overlay=resolved_overlay,
+        tuning=fleet_tuning,
+        policy_step=resolved_policy_step,
+        admitted_torp_ids=admitted_torp_ids,
+    )
+
     ship_build_combos = generate_ship_build_combos(
         observation,
         hulls_by_id=hulls_by_id,
@@ -298,6 +328,7 @@ def build_action_catalog(
         admission_caps_by_action_id=admission_caps_by_action_id,
         tier_overflow_by_action_id=tier_overflow_by_action_id,
         prior_weights_diagnostics=prior_diagnostics,
+        fleet_torp_overlay_diagnostics=fleet_overlay_diagnostics,
     )
 
 

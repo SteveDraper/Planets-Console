@@ -4,11 +4,10 @@
 #
 # Fleet-informed torp admission + ranking (#87, section 8.8): early torp tiers use
 # belief-set ids only; inference torp escape tier (penultimate step, alpha > 0) admits
-# all eligible torp types. Tunables (loaded when #87 lands):
-#
-# fleetInferenceTuning:
-#   torpMisalignmentLogPenalty: <int>
-#   componentTechGapLogPenaltyPerLevel: <int>   # #156
+# all eligible torp types.
+fleetInferenceTuning:
+  torpMisalignmentLogPenalty: 50
+  # componentTechGapLogPenaltyPerLevel: <int>   # #156
 version: 1
 
 # Solver magnitude bins for aggregate-action ranking (not per tier step).
@@ -197,6 +196,28 @@ steps:
     maxSeeds: 5
 
   - id: admit_starbase_defense_posts
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      ship_torps_per_type: 40
+      planet_defense_posts_added_total: 16
+      starbase_defense_posts_added_total: 5
+      starbase_fighters_added_total: 50
+      ship_fighters_added_total: 20
+      fighter_transfers_per_direction: 50
+    alpha: 30
+    maxSeeds: 5
+
+  - id: torp_escape_tier
     filters:
       hulls:
         all: true

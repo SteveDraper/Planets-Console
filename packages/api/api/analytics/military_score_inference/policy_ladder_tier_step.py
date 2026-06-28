@@ -347,6 +347,7 @@ def run_policy_ladder_tier_step(
         policy_step=policy_step,
         policy_step_index=step_index,
         resolved_mask=state.resolved_mask,
+        fleet_torp_overlay=state.fleet_torp_overlay,
     )
     state.catalog = catalog
     current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)
