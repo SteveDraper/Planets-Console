@@ -54,6 +54,9 @@ describe('canOpenInferenceDetail', () => {
     expect(
       canOpenInferenceDetail(detail({ displayStatus: 'success', solutionCount: 0 }))
     ).toBe(false)
+    expect(canOpenInferenceDetail(detail({ displayStatus: 'failure', isComplete: true }))).toBe(
+      true
+    )
   })
 })
 

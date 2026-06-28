@@ -264,6 +264,10 @@ export function InferenceDetailModal({
           </p>
         ) : null}
 
+        {detail.solutions.length === 0 && detail.summary.trim().length > 0 ? (
+          <p className="text-xs text-slate-300">{detail.summary}</p>
+        ) : null}
+
         <div className="flex flex-col gap-3">
           {detail.solutions.map((solution, index) => (
             <SolutionSection key={`solution-${index}`} solution={solution} index={index} />

@@ -127,6 +127,32 @@ describe('ScoresTableView', () => {
     expect(screen.getByText('100')).toBeInTheDocument()
   })
 
+  it('opens inference detail modal when failure icon is clicked', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'failure',
+              status: 'no_exact_solution',
+              summary: 'No feasible build explanation found',
+              solutionCount: 0,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+            },
+          ],
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText('No feasible build explanation found'))
+    expect(screen.getByRole('dialog')).toHaveTextContent('No feasible build explanation found')
+  })
+
   it('opens inference detail modal when success icon is clicked', () => {
     render(
       <ScoresTableView
