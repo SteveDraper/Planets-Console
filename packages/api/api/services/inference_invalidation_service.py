@@ -86,8 +86,11 @@ class InferenceInvalidationService:
     ) -> None:
         """Drop scores@N inference rows and reschedule when fleet@(N-1) is persisted."""
         host_turn = fleet_turn + 1
-        self._persistence.delete_host_turn_document(game_id, perspective, host_turn)
-        reschedule_all_inference_rows(self._scope(game_id, perspective, host_turn))
+        self._persistence.invalidate_for_turn_write(game_id, perspective, host_turn)
+        reschedule_all_inference_rows(
+            self._scope(game_id, perspective, host_turn),
+            force_schedule=True,
+        )
 
     def bind_scheduler(self, scheduler: InferenceRowScheduler) -> None:
         self._scheduler = scheduler
