@@ -43,12 +43,15 @@ def build_aggregate_actions(
     eligible_torp_ids: frozenset[int],
     aggregate_allowlist: dict[str, int],
     prior_catalog: PriorWeightsCatalog,
+    *,
+    admitted_torp_ids: frozenset[int] | None = None,
 ) -> tuple[list[CandidateAction], dict[str, tuple[ProbabilityBucket, ...]]]:
     actions: list[CandidateAction] = []
     probability_buckets: dict[str, tuple[ProbabilityBucket, ...]] = {}
     fighter_transfer_upper_bound = _fighter_transfer_upper_bound(observation, config)
+    torp_ids_for_slots = eligible_torp_ids if admitted_torp_ids is None else admitted_torp_ids
 
-    for slot in iter_aggregate_action_slots(eligible_torp_ids=eligible_torp_ids):
+    for slot in iter_aggregate_action_slots(eligible_torp_ids=torp_ids_for_slots):
         _append_slot_catalog_action(
             actions,
             probability_buckets,

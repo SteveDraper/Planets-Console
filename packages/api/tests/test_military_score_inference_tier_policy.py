@@ -31,7 +31,7 @@ from api.analytics.military_score_inference.tier_policy import (
 )
 from api.models.components import Engine
 
-from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.military_score_inference import _observation, legacy_fleet_torp_overlay
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -172,12 +172,12 @@ def test_policy_loader_rejects_missing_final_alpha_zero():
 
 def test_overlay_hook_accepts_none_and_returns_yaml_steps():
     steps = resolve_tier_policies(overlay=None)
-    assert len(steps) == 8
+    assert len(steps) == 9
 
 
 def test_overlay_parameter_is_accepted_without_merge():
     steps = resolve_tier_policies(overlay=TierPolicyOverlay())
-    assert len(steps) == 8
+    assert len(steps) == 9
 
 
 def test_early_step_uses_tech_level_bands_not_lowest_component_id(sample_turn):
@@ -297,6 +297,7 @@ def test_ship_torpedoes_admitted_after_full_components_with_caps(sample_turn):
         observation,
         sample_turn,
         policy_step=torp_step,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
     action_ids = {action.id for action in catalog.aggregate_actions}
     assert "planet_defense_posts_added_total" not in action_ids
@@ -317,6 +318,7 @@ def test_slack_admitted_on_later_steps_with_caps(sample_turn):
         observation,
         sample_turn,
         policy_step=defense_step,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
     planet_action = next(
         action
@@ -353,6 +355,7 @@ def test_restricted_activetorps_limits_ship_torpedo_aggregate_actions(sample_tur
         observation,
         turn,
         policy_step=torp_step,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
 
     torp_action_ids = {
@@ -615,11 +618,11 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
     result, catalog, _, attempted, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
 
-    assert policy_steps[4].id in attempted
-    assert policy_steps[-1].id in attempted
-    assert catalog.policy_step_id == policy_steps[-1].id
+    assert "admit_ship_torpedoes" in attempted
+    assert "full_components_planet_defense" in attempted
     assert result.status == STATUS_EXACT
 
 

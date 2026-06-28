@@ -1,4 +1,7 @@
-"""Fleet export composition branch: component histograms and max tech levels."""
+"""Fleet export composition branch: component histograms and max tech levels.
+
+Full belief-set composition (build option set unions on inferred rows) is #133 scope.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +11,9 @@ from typing import Protocol
 
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.export_scope import ledgers_for_scope
+from api.analytics.fleet.field_constraints import known_positive_component_id
 from api.analytics.fleet.types import (
     FleetFieldConstraint,
-    FleetFieldKnown,
     FleetShipRecord,
     FleetTurnSnapshot,
 )
@@ -43,20 +46,11 @@ class _TechLevelComponent(Protocol):
     techlevel: int
 
 
-def _known_positive_component_id(field: FleetFieldConstraint) -> int | None:
-    if not isinstance(field, FleetFieldKnown):
-        return None
-    value = field.value
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        return None
-    return value
-
-
 def _increment_component_histogram(
     histogram: dict[str, int],
     field: FleetFieldConstraint,
 ) -> None:
-    component_id = _known_positive_component_id(field)
+    component_id = known_positive_component_id(field)
     if component_id is None:
         return
     key = str(component_id)
@@ -135,7 +129,7 @@ def build_fleet_composition_branch(
         for axis in _COMPOSITION_AXIS_SPECS:
             field = getattr(record.fields, axis.field_name)
             if axis.histogram_output_key is None:
-                component_id = _known_positive_component_id(field)
+                component_id = known_positive_component_id(field)
                 if component_id is not None:
                     engine_ids.append(component_id)
             else:

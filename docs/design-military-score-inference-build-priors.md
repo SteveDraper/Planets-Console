@@ -78,7 +78,7 @@ All tables below live **inside** one category file. Every family splits on **inf
 | **Component conditional** | `(hull_category, ship_limit_band)` | Race-agnostic (pooled) |
 | **Aggregate histogram** | `(action_id, ship_limit_band)` | Rolled into solver buckets at load (see section 7) |
 
-Race does **not** cross into component conditionals in v1. Fleet-informed per-player skew is **#87**, not static priors.
+Race does **not** cross into component conditionals in v1. Fleet-informed per-player skew is **#87** / **#156** (runtime overlay on static priors), not static prior assets.
 
 Glossary: `CONTEXT.md` -- **Inference hull marginal prior**, **Inference conditional component prior**, **Inference aggregate prior**, **Inference ship-limit band**.
 
@@ -345,7 +345,7 @@ Per **inference prior player-host-turn**, single traversal over aggregate action
 1. Compute inventory delta per action (0 when none).
 2. Increment `histogram[delta]` for `(action_id, ship_limit_band)` -- including **`0:`** for zero-delta samples.
 
-**Unconditional marginal (v1):** do **not** condition on asset ownership or per-action feasibility at mining time. Sample every aggregate action on every non-adjunct unit. The solver applies the same static prior whenever an action enters the catalog (tier allowlist + residual bounds -- not ownership). Runtime conditioning is **#87**, not mining.
+**Unconditional marginal (v1):** do **not** condition on asset ownership or per-action feasibility at mining time. Sample every aggregate action on every non-adjunct unit. The solver applies the same static prior whenever an action enters the catalog (tier allowlist + residual bounds -- not ownership). Runtime fleet conditioning is **#87** / **#156**, not mining.
 
 **Histogram keys:** raw observed positive integer deltas (loader buckets via `magnitude_bin_index` at catalog build; miner does not pre-bin). Fighter transfers (`fighters_starbase_to_ship`, `fighters_ship_to_starbase`): occurrence-only 2-bin histograms (`0:` and `1:` for any positive transfer); use `_fighter_transfer_counts` logic from corpus ground truth. Emit `histogram:` only; no `counts:` shape.
 
@@ -405,7 +405,7 @@ No log conversion in miner (loader owns Laplace conversion).
 ## 12. Out of scope (#86)
 
 - Offline mining pipeline (follow-on ticket)
-- Per-player fleet-informed overlay (#87)
+- Per-player fleet-informed overlay (**#87** torp slice, **#156** tech-gap follow-on)
 - Corpus top-K hardening (#65)
 - Changing CP-SAT constraint model
 
@@ -415,7 +415,8 @@ No log conversion in miner (loader owns Laplace conversion).
 |--------|------|
 | **#86** | Asset schema, loaders, hand-seed `standard`, catalog integration |
 | **#92** | Pattern-driven miner, per-category patterns YAML (e.g. `prior_mining_patterns_standard.yaml`), `loadall`, incremental `prior_weights_{category}.yaml` |
-| **#87** | Fleet-informed runtime overlay on static priors |
+| **#87** | Fleet-informed **torp load** overlay (admission + misalignment prior) |
+| **#156** | Fleet-informed **component tech-gap prior** on ship builds |
 | **#65** | Top-K regression after priors stabilize |
 | **#64** | Regression ground truth (inventory diff) -- not prior mining |
 

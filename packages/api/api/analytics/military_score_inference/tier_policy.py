@@ -1,4 +1,8 @@
-"""YAML inference search tier policy load, validation, and optional overlay hook."""
+"""YAML inference search tier policy load, validation, and optional overlay hook.
+
+Fleet-informed ranking tunables (``fleetInferenceTuning``) and torp escape-tier admission
+are specified in design-military-score-build-inference-implementation.md section 8.8 (#87, #156).
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,8 @@ FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
 FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
 
 DEFAULT_MAX_SEEDS = 5
+
+TORP_ESCAPE_TIER_STEP_ID = "torp_escape_tier"
 
 # ``all: true`` widens eligibility on that axis. It does **not** mean "every component id
 # in the turn catalog regardless of player state."
@@ -120,6 +126,11 @@ class InferenceTierPolicyStep:
 @dataclass(frozen=True)
 class SolverThresholds:
     ship_only_exact_early_stop_min_plausibility: int
+
+
+@dataclass(frozen=True)
+class FleetInferenceTuning:
+    torp_misalignment_log_penalty: int
 
 
 def default_tier_policy_path() -> Path:
@@ -453,6 +464,33 @@ def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
 _default_solver_thresholds: SolverThresholds | None = None
 
 
+def parse_fleet_inference_tuning(document: dict[str, Any]) -> FleetInferenceTuning:
+    raw_tuning = document.get("fleetInferenceTuning")
+    if not isinstance(raw_tuning, dict):
+        raise ValueError("tier policy must contain fleetInferenceTuning mapping")
+    penalty = raw_tuning.get("torpMisalignmentLogPenalty")
+    if not isinstance(penalty, int) or penalty < 0:
+        raise ValueError(
+            "tier policy fleetInferenceTuning.torpMisalignmentLogPenalty must be a "
+            "non-negative integer"
+        )
+    return FleetInferenceTuning(torp_misalignment_log_penalty=penalty)
+
+
+_default_fleet_inference_tuning: FleetInferenceTuning | None = None
+
+
+def resolve_fleet_inference_tuning(base_path: Path | None = None) -> FleetInferenceTuning:
+    global _default_fleet_inference_tuning
+    if base_path is None and _default_fleet_inference_tuning is not None:
+        return _default_fleet_inference_tuning
+    policy_path = default_tier_policy_path() if base_path is None else base_path
+    parsed = parse_fleet_inference_tuning(load_tier_policy_document(policy_path))
+    if base_path is None:
+        _default_fleet_inference_tuning = parsed
+    return parsed
+
+
 def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds:
     global _default_solver_thresholds
     if base_path is None and _default_solver_thresholds is not None:
@@ -475,6 +513,24 @@ def parse_tier_policy_steps(document: dict[str, Any]) -> tuple[InferenceTierPoli
     return steps
 
 
+def _validate_production_escape_tier(steps: tuple[InferenceTierPolicyStep, ...]) -> None:
+    from api.analytics.military_score_inference.aggregate_action_registry import (
+        SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
+    )
+
+    if len(steps) < 2:
+        return
+    if not any(SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY in step.aggregate_allowlist for step in steps):
+        return
+    if steps[-2].id != TORP_ESCAPE_TIER_STEP_ID:
+        raise ValueError(
+            f"penultimate policy step must be {TORP_ESCAPE_TIER_STEP_ID!r} "
+            "(inference torp escape tier)"
+        )
+    if steps[-2].alpha == 0:
+        raise ValueError(f"{TORP_ESCAPE_TIER_STEP_ID} must have alpha > 0")
+
+
 def resolve_tier_policies(
     base_path: Path | None = None,
     overlay: TierPolicyOverlay | None = None,
@@ -486,7 +542,18 @@ def resolve_tier_policies(
     """
     del overlay
     policy_path = default_tier_policy_path() if base_path is None else base_path
-    return parse_tier_policy_steps(load_tier_policy_document(policy_path))
+    steps = parse_tier_policy_steps(load_tier_policy_document(policy_path))
+    if base_path is None:
+        _validate_production_escape_tier(steps)
+    return steps
+
+
+def torp_escape_tier_index(steps: tuple[InferenceTierPolicyStep, ...]) -> int | None:
+    """Index of the torp escape tier step, or None when the ladder has no escape tier."""
+    for index, step in enumerate(steps):
+        if step.id == TORP_ESCAPE_TIER_STEP_ID:
+            return index
+    return None
 
 
 def compute_aggregate_admission_caps(

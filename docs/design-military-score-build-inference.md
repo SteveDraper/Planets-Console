@@ -424,7 +424,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Policy overlay | Hook in #77; merge semantics in #78; signal sources out of scope |
 | Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
 | Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
-| Fleet priors | Deferred; **inference tier policy overlay** (#78), not hard exclusion |
+| Fleet-informed ranking | **#87** torp admission + misalignment prior; **#156** component tech-gap prior; tunables in `fleetInferenceTuning` (tier policy YAML). **#78** tier policy overlay is catalog widening only (parallel axis). Absent fleet overlay == empty belief set. |
 | SPA streaming (#71) | One multiplexed **inference table stream** per shell scope |
 | Cross-row scheduling (#71) | **Inference row scheduler**: FIFO tier jobs, default 4 workers (configurable) |
 | Global pause (#71) | Freeze/resume all rows on current scope while stream connected; cleared on disconnect |

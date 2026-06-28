@@ -638,7 +638,9 @@ Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that 
 
 #### 8.5.6 Runtime overlay (#78, follow-on)
 
-**Fleet-informed tier promotion** and other external signals merge via **inference tier policy overlay** at resolve time (append tech levels, bump aggregate caps, etc.). #77 defines the hook (`overlay=None`); #78 implements merge semantics. Overlay producers (fleet histogram, prior builds, UI) are out of scope for both tickets.
+External signals that **widen the catalog** (append component tech levels, bump aggregate caps, etc.) merge via **inference tier policy overlay** at resolve time. #77 defines the hook (`overlay=None`); #78 implements merge semantics. Overlay producers (UI settings, etc.) are out of scope for #78.
+
+**Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not the tier policy overlay. Do not route torp misalignment penalties or belief-set torp admission through `TierPolicyOverlay`.
 
 ### 8.6 Score-equivalent combos (solver-side merge)
 
@@ -656,6 +658,49 @@ Do not treat score-equivalent combos as interchangeable in the UI ranking solely
 ### 8.7 Inference tier policy overlay (#78)
 
 Solver-side merge of `TierPolicyOverlay` into the resolved policy list before catalog build. Deterministic precedence per constraint type (document augment vs replace). No production caller required in #78. See `CONTEXT.md` **Inference tier policy overlay**.
+
+### 8.8 Inference fleet overlay (#87, #156)
+
+Per-player, per-solve overlay on top of **inference build prior** (#86) weights and torp catalog admission. Glossary: `CONTEXT.md` (**Inference fleet launcher belief set**, **Inference aggregate admission**, **Inference torp escape tier**, **Inference torp misalignment penalty**, **Inference component tech-gap prior**, **Inference fleet inference tuning**). Production input: prior-turn fleet `$.composition` export ([#133](https://github.com/SteveDraper/Planets-Console/issues/133), [design-fleet-analytic.md](design-fleet-analytic.md)); until fleet ships, synthetic fixtures only.
+
+**Tuning** (`tier_policy.yaml`):
+
+```yaml
+fleetInferenceTuning:
+  torpMisalignmentLogPenalty: <int>              # #87
+  componentTechGapLogPenaltyPerLevel: <int>     # #156
+```
+
+#### 8.8.1 Belief set
+
+**Inference fleet launcher belief set** = torp ids fitted on ships the player is believed to own at prior turn:
+
+- **Fleet observed ship** rows with known launchers
+- **Fleet inferred acquisition** rows from prior-turn scores (required)
+- Ambiguous rows: **union** of launcher ids across all **fleet build option set** tuples
+
+Empty when no active row has a positive launcher id in any option set. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
+
+#### 8.8.2 Torp aggregate (#87)
+
+Two coordinated mechanisms address combinatorial `ship_torps_loaded_{id}` noise:
+
+| Mechanism | Effect |
+|-----------|--------|
+| **Inference aggregate admission** | On early torp-admitting tiers (`admit_ship_torpedoes` through `admit_starbase_defense_posts`): materialize torp-load actions for belief-set ids only, or **none** when belief set empty |
+| **Inference torp escape tier** | New penultimate ladder step (`alpha > 0`): first admit all `eligible_torp_ids` |
+| **Inference torp misalignment penalty** | Log down-weight on active non-belief torp bins (`fleetInferenceTuning.torpMisalignmentLogPenalty`); same penalty on all types when belief set was empty and types appear on escape tier |
+
+`full_catalog_exact` remains the final exact pass. Prior merge is log-additive on #86 weights. Mild penalty for low-rank-only launcher alternates inside the belief set: deferred.
+
+#### 8.8.3 Ship-build tech gap (#156)
+
+Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over component ids on that axis from the same belief-set rows (union across option sets). Sum `componentTechGapLogPenaltyPerLevel * max(0, component_tech - ceiling)` on each ship build combo. No positive fleet histogram boosts beyond #86.
+
+#### 8.8.4 Integration
+
+- Optional overlay input on `build_action_catalog` / `build_inference_problem` (parallel seam to `TierPolicyOverlay` in #78)
+- Diagnostics: belief-set summary, escape tier used, tuning constants loaded
 
 ---
 
@@ -1093,7 +1138,7 @@ Candidates:
 - prior inventory and resource bounds,
 - per-location defense post and fighter attribution,
 - production-queue priority-point effects on ship builds,
-- fleet-histogram priors for tier ordering and combo weights.
+- fleet-informed inference overlay (#87 torp slice, #156 tech-gap prior; section 8.8).
 
 Each addition should include tests showing both new feasible explanations and cases where the new action removes a previous false unsat.
 

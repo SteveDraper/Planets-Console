@@ -463,22 +463,31 @@ if prior.paths["$.meta.searchStatus"].value != "complete":
 top_build = prior.paths["$.solutions[0]"].value  # full top explanation when present
 ```
 
-### Inference priors overlay (#87)
+### Inference fleet overlay (#87, #156)
+
+Prior-turn fleet export at `(turn - 1, player_id)` supplies **belief-set** component histograms for scores inference. Glossary: `CONTEXT.md` (**Inference fleet launcher belief set**, **Inference component tech-gap prior**).
 
 ```python
 composition = ctx.query(
     "fleet",
     paths=[
-        "$.composition.launcherTypes",
+        "$.composition.launcherTypes",   # #87 belief set
+        "$.composition.hullTypes",     # #156 ceilings
+        "$.composition.engineTypes",
         "$.composition.beamTypes",
-        "$.composition.hullTypes",
         "$.composition.maxTechLevel",
     ],
     scope={"turn": turn - 1, "player_id": player_id},
 )
 ```
 
-Fleet `$.composition` summarizes **known** fitted components on **active** ledger rows (histograms keyed by stringified host component id) plus `maxTechLevel` per axis (`hulls`, `engines`, `launchers`, `beams`) from the turn component catalog. Unknown or option-set-only rows are omitted from histograms; `torpedoTypesLoaded` stays empty until loaded-torp evidence is persisted on records.
+**#87 (torp slice):** derive **inference fleet launcher belief set** from `launcherTypes` (sighted + inferred option-set union). Drives **inference aggregate admission** on early torp tiers and **inference torp misalignment penalty** (`fleetInferenceTuning.torpMisalignmentLogPenalty` in tier policy YAML). Empty histogram: no early torp admission; all types strongly down-weighted at **inference torp escape tier**. Absent overlay behaves like empty belief set (not legacy full admission).
+
+**#156 (follow-on):** per-axis tech ceilings from the same composition rows; **inference component tech-gap prior** via `fleetInferenceTuning.componentTechGapLogPenaltyPerLevel`. No positive histogram boosts beyond **inference build prior** (#86).
+
+Production wiring: **#133**. Parallel axis: **#78** **inference tier policy overlay** (catalog filter widening only).
+
+See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.8.
 
 ---
 

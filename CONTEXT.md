@@ -449,7 +449,7 @@ Per **inference search tier**, the set of aggregate actions permitted at that st
 _Avoid_: noisy action list, tier catalog
 
 **Inference tier policy**:
-The declarative record for one **inference search tier** on the unified ladder -- constraints on the full action catalog (ship-build component filters such as permitted tech levels, **tier aggregate allowlist** and caps, military-score band tolerance `alpha` in 2x units, seed budget). Later tiers loosen constraints; the final tier uses `alpha = 0`. Policies are loaded from a static asset (YAML); runtime parameter injection (e.g. fleet-known launcher/torp types) is a follow-on overlay on that base.
+The declarative record for one **inference search tier** on the unified ladder -- constraints on the full action catalog (ship-build component filters such as permitted tech levels, **tier aggregate allowlist** and caps, military-score band tolerance `alpha` in 2x units, seed budget). Later tiers loosen constraints; the final tier uses `alpha = 0`. Policies are loaded from a static asset (YAML). Optional **inference tier policy overlay** (#78) widens filters at resolve time. Fleet-informed torp admission and ranking tunables live in the same YAML file under `fleetInferenceTuning` (**#87**, **#156**; section 8.8 of implementation doc) -- distinct merge path from `TierPolicyOverlay`.
 _Avoid_: tier config, search phase
 
 **Inference catalog constraint**:
@@ -509,8 +509,44 @@ Static YAML ladder under `assets/analytics/scores/` (repo root). Defines ordered
 _Avoid_: tier_policy.yaml (filename in prose only when citing path)
 
 **Inference build prior**:
-Population-level weights that feed **inference solution rank weight** via additive log-probability composition at catalog-build time. The **inference build prior asset** (selected by **inference game category**) stores **un-normalized empirical count distributions**; a runtime step converts counts to integer log-probability weights when the catalog is built for a solve. Ship builds compose as `log P(hull) + log P(components | hull category) + optional sparse overrides`; aggregate actions use histogram-derived magnitude-bin distributions. Within each asset, partition keys: **inference ship-limit band** on all families; **race** modifiers on hull marginals only. Distinct from **inference tier policy overlay** (fleet-informed runtime adjustments, #87).
+Population-level weights that feed **inference solution rank weight** via additive log-probability composition at catalog-build time. The **inference build prior asset** (selected by **inference game category**) stores **un-normalized empirical count distributions**; a runtime step converts counts to integer log-probability weights when the catalog is built for a solve. Ship builds compose as `log P(hull) + log P(components | hull category) + optional sparse overrides`; aggregate actions use histogram-derived magnitude-bin distributions. Within each asset, partition keys: **inference ship-limit band** on all families; **race** modifiers on hull marginals only. Distinct from **inference fleet probability overlay** (#87) and **inference tier policy overlay** (#78).
 _Avoid_: probability score, prior_weights.yaml (filename in prose only when citing path)
+
+**Inference fleet probability overlay** (#87):
+Per-player, per-solve adjustments merged on top of **inference build prior** weights at catalog-build time (log-additive). Primary use: suppress **inference torpedo load noise** via **inference torp misalignment penalty** on `ship_torps_loaded_{id}` when torp id ∉ **inference fleet launcher belief set**; also **inference component tech-gap prior** on ship-build combos. Does not replace static priors or change hard constraints. Works with **inference aggregate admission** (belief-set narrowing on early torp tiers). Distinct from **inference tier policy overlay** (#78) though tuning constants for fleet torp ranking may live in the **inference tier policy asset** YAML for operator convenience.
+_Avoid_: fleet prior (unqualified), fleet penalty channel
+
+**Inference torp misalignment penalty**:
+Fixed log-space down-weight (v1: one constant for all non-belief torp types) applied to active `ship_torps_loaded_{id}` bins when the torp id is outside the **inference fleet launcher belief set**. Also applies to every torp type when the belief set is empty and types appear on **inference torp escape tier**. Tunable via **`fleetInferenceTuning.torpMisalignmentLogPenalty`** in the **inference tier policy asset** YAML. Goal: non-belief torp padding ranks below plausible ship-build explanations in top-K unless it is the only feasible closure.
+_Avoid_: per-torp-type penalty table (v1), distance-aware torp penalty (v1)
+
+**Inference fleet inference tuning**:
+Operator-tunable ranking constants in the **inference tier policy asset** YAML (`fleetInferenceTuning` block). v1 fields: `torpMisalignmentLogPenalty` (**inference torp misalignment penalty**, #87), `componentTechGapLogPenaltyPerLevel` (**inference component tech-gap prior**, #156). Colocated with the ladder for easy tuning without a second asset.
+_Avoid_: overlay YAML file, hardcoded solver constants
+
+**Inference fleet launcher alignment**:
+The rule that aggregate torpedo-load explanations should prefer torpedo types fitted on ships the player is believed to own -- from **fleet observed ship** sightings and **fleet inferred acquisition** rows (scores inference), not sightings alone. `torpedoid` / launcher type on a fitted ship is the alignment key. Loading a torp type with no matching launchers in that belief set is very unlikely but not impossible. When the belief set is empty (no launcher-fitted ships yet), early tiers admit no torp-load actions and the **inference fleet probability overlay** applies the same strong down-weight to every torp type when they unlock on a later escape tier. When non-empty, early torp-admitting tiers materialize only belief-set types; others unlock on escape tier with strong down-weight. Ambiguous **fleet build option set** rows are handled separately (see grilling / #87); they are not excluded just because launchers are not **known** from a sighting.
+_Avoid_: torp compatibility filter (generic), turn-1 special case, known-sighting-only launcher histogram
+
+**Inference fleet launcher belief set**:
+The torpedo type ids counted as "in fleet" for **inference fleet launcher alignment** and **inference aggregate admission** -- derived from prior-turn fleet exports feeding #87. Includes launcher types on inferred builds (scores-held solutions), not only **known** launchers from direct sightings. For ambiguous **fleet build option set** rows, the belief set is the **union** of launcher/torp ids across all option sets on active rows (consistent tuples only, no per-field Cartesian product). Empty when no active row carries a positive launcher/torp type in any option set.
+_Avoid_: launcherTypes (wire field name in prose unless citing path), known-only fleet composition, top-1 option set only
+
+**Inference fleet launcher option ambiguity** (#87):
+When top-K inference yields multiple **fleet build option set**s on one row, early torp admission uses the full belief-set **union**; types outside the union defer to escape tier and receive strong prior down-weight. Types inside the union keep population prior; types appearing only in non-top-rank alternates may receive an optional mild log down-weight vs top-default option sets. Top-1-only admission is not used.
+_Avoid_: reconcile before overlay, independent per-field launcher unions
+
+**Inference component tech-gap prior**:
+Fleet-informed log-prior reduction on ship-build combo components whose catalog **techlevel** exceeds the per-axis fleet ceiling derived from the **inference fleet launcher belief set** generalized to all component axes. For each axis (`hulls`, `engines`, `beams`, `launchers`): collect component ids from active rows (sightings plus all **fleet build option set** tuples on inferred rows), take the max `techlevel` in the turn catalog as the ceiling; omit an axis with no ids (no gap penalty on that axis). Penalty sums per fitted component: `componentTechGapLogPenaltyPerLevel * max(0, component_tech - ceiling)` from **`fleetInferenceTuning`** in the **inference tier policy asset**. No positive histogram boosts beyond **inference build prior**.
+_Avoid_: tech unlock prior, fleet histogram boost, hull-id ceiling (use tech level)
+
+**Inference aggregate admission** (fleet-informed, #87):
+On **inference search tier** steps that admit template torpedo-load actions (`ship_torps_per_type`), restrict which `ship_torps_loaded_{id}` catalog members are materialized to torpedo types in the **inference fleet launcher belief set**. Empty belief set: early torp-admitting tiers materialize **none**; **inference torp escape tier** admits all `eligible_torp_ids`. Non-empty: early tiers admit belief-set types only; non-belief types unlock on escape tier. Absent overlay behaves like empty belief set. Belief set includes inferred launcher types from scores, not sightings-only.
+_Avoid_: torp allowlist (without "inference"), turn-1 fallback to full admission
+
+**Inference torp escape tier**:
+The **inference search tier** policy step (penultimate on the ladder, still `alpha > 0`) where non-belief torpedo types first enter the catalog alongside belief-set types -- before `full_catalog_exact`. Unlocks torp-load explanations that need types outside the **inference fleet launcher belief set** while band retry remains available. Distinct from the first torp-admitting tiers (belief-set only or none when belief set empty).
+_Avoid_: full_catalog_exact as first non-belief unlock
 
 **Game category** (`api.concepts.game_category.GameCategory`):
 Immutable label for a class of games (e.g. campaign, standard, epic, blitz) derived from loaded game settings via `GameCategory.from_game_settings()`. Used among other consumers to select which **inference build prior asset** the console loads. Ordered predicates in Core (first match wins): `campaignmode` → campaign; else `endturn <= 30` → blitz; else `shiplimit >= 500` → epic; else standard. Categories have stable unique identifiers; once defined they do not change meaning. If no asset exists for the resolved category, fall back to the `standard` asset. Separate assets per category avoid runtime cross-partition overhead.
