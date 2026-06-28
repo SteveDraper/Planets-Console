@@ -76,6 +76,15 @@ def _stream_scope(sample_turn) -> InferenceStreamScope:
     )
 
 
+def _end_open_table_stream(
+    scope: InferenceStreamScope,
+    scheduler: InferenceRowScheduler,
+) -> None:
+    controller = controller_for_scope(scope)
+    if controller is not None:
+        controller.end_stream(scheduler)
+
+
 def _schedule_player_row(
     scheduler: InferenceRowScheduler,
     sample_turn,
@@ -477,7 +486,7 @@ def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integr
     ]
     assert len(cached_other_events) == 1
 
-    scheduler.begin_scope(scope)
+    _end_open_table_stream(scope, scheduler)
     thread.join(timeout=2.0)
 
 
@@ -529,7 +538,7 @@ def test_all_cached_replay_keeps_stream_open_for_recompute_cases_1_and_2_integra
     for player_id in player_ids:
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
 
-    scheduler.begin_scope(scope)
+    _end_open_table_stream(scope, scheduler)
     thread.join(timeout=2.0)
 
 
@@ -585,7 +594,7 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
         ]
         assert len(post_invalidation_completes) == 2
 
-    scheduler.begin_scope(_stream_scope(first_turn))
+    _end_open_table_stream(_stream_scope(first_turn), scheduler)
     thread.join(timeout=2.0)
 
 
@@ -656,7 +665,7 @@ def test_turn_stored_reschedule_uses_refreshed_host_turn(
     assert after_observation.military_delta_2x == 2 * updated_militarychange
     assert after_observation.military_delta_2x != before_observation.military_delta_2x
 
-    scheduler.begin_scope(_stream_scope(sample_turn))
+    _end_open_table_stream(_stream_scope(sample_turn), scheduler)
     thread.join(timeout=2.0)
 
 
@@ -699,5 +708,5 @@ def test_recompute_force_schedules_immediate_path_players(
 
     _wait_until(lambda: len(_run_ids_for_players(scheduler, player_ids)) == len(player_ids))
 
-    scheduler.begin_scope(_stream_scope(first_turn))
+    _end_open_table_stream(_stream_scope(first_turn), scheduler)
     thread.join(timeout=2.0)

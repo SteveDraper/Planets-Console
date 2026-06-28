@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.inference_path import (
 )
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    TableStreamScopeAlreadyActive,
     get_inference_row_scheduler,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -35,7 +36,12 @@ from api.analytics.military_score_inference.inference_stream_session import (
 )
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.transport.inference_stream import inference_complete_event, inference_global_pause_event
+from api.transport.inference_stream import (
+    TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
+    inference_complete_event,
+    inference_error_event,
+    inference_global_pause_event,
+)
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 _MULTiplexWaitSeconds = 0.05
@@ -355,7 +361,11 @@ def iter_scores_table_inference_events(
         turn_number=turn_number,
     )
     scheduler = scheduler or get_inference_row_scheduler()
-    stream_token = scheduler.begin_scope(stream_scope)
+    try:
+        stream_token = scheduler.begin_scope(stream_scope)
+    except TableStreamScopeAlreadyActive:
+        yield inference_error_event(TABLE_STREAM_ALREADY_ACTIVE_DETAIL)
+        return
     pause_status = scheduler.global_pause_status(stream_scope)
     yield inference_global_pause_event(paused=bool(pause_status.get("paused")))
 
