@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    reset_inference_table_stream_registry_for_tests,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -26,6 +30,13 @@ from tests.scores_exports_helpers import (
     scores_query_context,
     stream_scope_for_turn,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_inference_stream_registry() -> None:
+    reset_inference_table_stream_registry_for_tests()
+    yield
+    reset_inference_table_stream_registry_for_tests()
 
 
 def _assert_probe_does_not_compute(monkeypatch):

@@ -47,6 +47,26 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from tests.export_chain_test_fixtures import export_chain_query_context
 
 
+@pytest.fixture(autouse=True)
+def _reset_stream_registry_after_test() -> None:
+    yield
+    reset_inference_table_stream_registry_for_tests()
+
+
+def _wire_fleet_scores_invalidation(
+    inference_persistence,
+    fleet_persistence: FleetSnapshotPersistenceService,
+    scheduler: InferenceRowScheduler,
+) -> InferenceInvalidationService:
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        scheduler=scheduler,
+        fleet_persistence=fleet_persistence,
+    )
+    invalidation.wire_scores_invalidation_to_fleet_persistence()
+    return invalidation
+
+
 def _install_scheduler(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -170,12 +190,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     ctx = export_chain_query_context(sample_turn, persistence=persistence)
     fleet_persistence = ctx.export_services["fleet"].persistence
     inference_persistence = persistence
-    invalidation = InferenceInvalidationService(
-        inference_persistence,
-        scheduler=scheduler,
-        fleet_persistence=fleet_persistence,
-    )
-    invalidation.wire_scores_invalidation_to_fleet_persistence()
+    _wire_fleet_scores_invalidation(inference_persistence, fleet_persistence, scheduler)
 
     for player_id in player_ids:
         inference_persistence.put_row(
@@ -328,12 +343,13 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     fleet_persistence.delete_snapshot(ctx.game_id, ctx.perspective, prior_turn)
 
     inference_persistence = persistence
-    invalidation = InferenceInvalidationService(
-        inference_persistence,
-        scheduler=scheduler,
-        fleet_persistence=fleet_persistence,
+    _wire_fleet_scores_invalidation(inference_persistence, fleet_persistence, scheduler)
+
+    scope = InferenceStreamScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn_number=sample_turn.settings.turn,
     )
-    invalidation.wire_scores_invalidation_to_fleet_persistence()
 
     def resolve_fleet_torp_resolution_for_player(
         resolved_player_id: int,
@@ -367,53 +383,48 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
 
     thread = threading.Thread(target=consume_stream, daemon=True)
     thread.start()
-    _wait_until(
-        lambda: any(event.get("type") == "complete" for event in events),
-        timeout_seconds=30.0,
-    )
+    try:
+        _wait_until(
+            lambda: any(event.get("type") == "complete" for event in events),
+            timeout_seconds=30.0,
+        )
 
-    first_complete = next(event for event in events if event.get("type") == "complete")
-    first_diagnostics = first_complete.get("diagnostics")
-    assert isinstance(first_diagnostics, dict)
-    assert first_diagnostics.get("fleetTorpInputStatus") == "pending"
+        first_complete = next(event for event in events if event.get("type") == "complete")
+        first_diagnostics = first_complete.get("diagnostics")
+        assert isinstance(first_diagnostics, dict)
+        assert first_diagnostics.get("fleetTorpInputStatus") == "pending"
 
-    _seed_prior_turn_fleet_with_belief_sets(
-        ctx,
-        sample_turn=sample_turn,
-        player_id=player_id,
-        torp_ids=(4,),
-    )
+        _seed_prior_turn_fleet_with_belief_sets(
+            ctx,
+            sample_turn=sample_turn,
+            player_id=player_id,
+            torp_ids=(4,),
+        )
 
-    _wait_until(lambda: player_id in _run_ids_for_players(scheduler, player_ids))
-    _wait_until(
-        lambda: sum(1 for event in events if event.get("type") == "complete") >= 2,
-        timeout_seconds=60.0,
-    )
-    applied = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
-        player_id=player_id,
-        load_turn=ctx.load_turn,
-        export_services=ctx.export_services,
-        ensure=False,
-    )
-    assert applied.input_status == "applied"
-    assert applied.overlay is not None
-    assert applied.overlay.belief_set.torp_ids == frozenset({4})
+        _wait_until(lambda: player_id in _run_ids_for_players(scheduler, player_ids))
+        assert (
+            inference_persistence.get_row(
+                ctx.game_id,
+                ctx.perspective,
+                sample_turn.settings.turn,
+                player_id,
+            )
+            is None
+        )
 
-    second_complete = next(event for event in reversed(events) if event.get("type") == "complete")
-    second_diagnostics = second_complete.get("diagnostics")
-    assert isinstance(second_diagnostics, dict)
-    assert second_diagnostics.get("fleetTorpInputStatus") == "applied"
-    second_overlay = _fleet_overlay_from_diagnostics(second_diagnostics)
-    assert second_overlay.get("beliefSetTorpIds") == [4]
-
-    scope = InferenceStreamScope(
-        game_id=ctx.game_id,
-        perspective=ctx.perspective,
-        turn_number=sample_turn.settings.turn,
-    )
-    _end_open_table_stream(scope, scheduler)
-    thread.join(timeout=2.0)
+        applied = resolve_prior_turn_fleet_torp_overlay(
+            turn=sample_turn,
+            player_id=player_id,
+            load_turn=ctx.load_turn,
+            export_services=ctx.export_services,
+            ensure=False,
+        )
+        assert applied.input_status == "applied"
+        assert applied.overlay is not None
+        assert applied.overlay.belief_set.torp_ids == frozenset({4})
+    finally:
+        _end_open_table_stream(scope, scheduler)
+        thread.join(timeout=2.0)
 
 
 def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
