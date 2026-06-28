@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
@@ -187,6 +188,7 @@ def schedule_inference_row(
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
     stream_token: str | None = None,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
@@ -208,6 +210,7 @@ def schedule_inference_row(
         perspective=perspective,
         turn_number=turn_number,
         resolved_mask=resolved_mask,
+        fleet_torp_overlay=fleet_torp_overlay,
     )
     orchestration = create_inference_stream_orchestration(
         path,
@@ -346,6 +349,7 @@ def iter_scores_table_inference_events(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
+    resolve_fleet_torp_overlay_for_player: Callable[[int], FleetTorpOverlay | None] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -380,6 +384,7 @@ def iter_scores_table_inference_events(
         load_scoreboard_turn=load_scoreboard_turn,
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
+        resolve_fleet_torp_overlay_for_player=resolve_fleet_torp_overlay_for_player,
         persistence=persistence,
     )
     controller.attach()

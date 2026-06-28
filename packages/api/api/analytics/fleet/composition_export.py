@@ -1,7 +1,4 @@
-"""Fleet export composition branch: component histograms and max tech levels.
-
-Full belief-set composition (build option set unions on inferred rows) is #133 scope.
-"""
+"""Fleet export composition branch: component histograms and max tech levels."""
 
 from __future__ import annotations
 
@@ -13,7 +10,7 @@ from api.analytics.export_types import ExportScope
 from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.field_constraints import known_positive_component_id
 from api.analytics.fleet.types import (
-    FleetFieldConstraint,
+    FleetBuildOptionSet,
     FleetShipRecord,
     FleetTurnSnapshot,
 )
@@ -25,20 +22,27 @@ from api.concepts.turn_component_catalog import (
 )
 from api.models.game import TurnInfo
 
+_OPTION_SET_COMPONENT_ATTRS: dict[str, str] = {
+    "hull": "hull_id",
+    "engine": "engine_id",
+    "beams": "beam_id",
+    "launchers": "torp_id",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class _CompositionAxisSpec:
     field_name: str
-    histogram_output_key: str | None
+    histogram_output_key: str
     max_tech_key: str
     catalog_key: str
 
 
 _COMPOSITION_AXIS_SPECS: tuple[_CompositionAxisSpec, ...] = (
     _CompositionAxisSpec("hull", "hullTypes", "hulls", "hulls"),
+    _CompositionAxisSpec("engine", "engineTypes", "engines", "engines"),
     _CompositionAxisSpec("beams", "beamTypes", "beams", "beams"),
     _CompositionAxisSpec("launchers", "launcherTypes", "launchers", "launchers"),
-    _CompositionAxisSpec("engine", None, "engines", "engines"),
 )
 
 
@@ -46,13 +50,32 @@ class _TechLevelComponent(Protocol):
     techlevel: int
 
 
-def _increment_component_histogram(
-    histogram: dict[str, int],
-    field: FleetFieldConstraint,
-) -> None:
-    component_id = known_positive_component_id(field)
-    if component_id is None:
-        return
+def _positive_option_component_id(option_set: FleetBuildOptionSet, attr: str) -> int | None:
+    raw = getattr(option_set, attr)
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
+        return None
+    return raw
+
+
+def _component_ids_for_record_on_axis(
+    record: FleetShipRecord,
+    axis: _CompositionAxisSpec,
+) -> set[int]:
+    """Belief-set ids for one axis: known field plus union of build option sets."""
+    ids: set[int] = set()
+    field = getattr(record.fields, axis.field_name)
+    known_id = known_positive_component_id(field)
+    if known_id is not None:
+        ids.add(known_id)
+    option_attr = _OPTION_SET_COMPONENT_ATTRS[axis.field_name]
+    for option_set in record.build_option_sets:
+        option_id = _positive_option_component_id(option_set, option_attr)
+        if option_id is not None:
+            ids.add(option_id)
+    return ids
+
+
+def _increment_histogram(histogram: dict[str, int], component_id: int) -> None:
     key = str(component_id)
     histogram[key] = histogram.get(key, 0) + 1
 
@@ -83,19 +106,10 @@ def _active_records_for_scope(
     return records
 
 
-def _component_ids_for_axis(
-    axis: _CompositionAxisSpec,
-    histograms: dict[str, dict[str, int]],
-    engine_ids: list[int],
-) -> Iterable[int]:
-    if axis.histogram_output_key is None:
-        return engine_ids
-    return (int(key) for key in histograms[axis.histogram_output_key])
-
-
 def _empty_fleet_composition_branch() -> dict[str, object]:
     return {
         "hullTypes": {},
+        "engineTypes": {},
         "beamTypes": {},
         "launcherTypes": {},
         "torpedoTypesLoaded": {},
@@ -114,26 +128,23 @@ def build_fleet_composition_branch(
     When ``scope.player_id`` is unset, returns an empty branch rather than
     aggregating across all players. Unscoped composition paths are rejected at
     query time; this keeps materialized trees safe for unscoped meta reads.
+
+    Belief-set histograms union known fitted component ids with every fleet build
+    option set on active rows (consistent tuples only, no per-field Cartesian
+    product).
     """
     if scope.player_id is None:
         return _empty_fleet_composition_branch()
 
     histograms: dict[str, dict[str, int]] = {
-        axis.histogram_output_key: {}
-        for axis in _COMPOSITION_AXIS_SPECS
-        if axis.histogram_output_key is not None
+        axis.histogram_output_key: {} for axis in _COMPOSITION_AXIS_SPECS
     }
-    engine_ids: list[int] = []
 
     for record in _active_records_for_scope(snapshot, scope):
         for axis in _COMPOSITION_AXIS_SPECS:
-            field = getattr(record.fields, axis.field_name)
-            if axis.histogram_output_key is None:
-                component_id = known_positive_component_id(field)
-                if component_id is not None:
-                    engine_ids.append(component_id)
-            else:
-                _increment_component_histogram(histograms[axis.histogram_output_key], field)
+            histogram = histograms[axis.histogram_output_key]
+            for component_id in _component_ids_for_record_on_axis(record, axis):
+                _increment_histogram(histogram, component_id)
 
     catalogs: dict[str, dict[int, _TechLevelComponent]] = {
         "hulls": hulls_by_id(turn),
@@ -145,7 +156,7 @@ def build_fleet_composition_branch(
     max_tech_level: dict[str, int] = {}
     for axis in _COMPOSITION_AXIS_SPECS:
         if axis_max := _max_tech_level(
-            _component_ids_for_axis(axis, histograms, engine_ids),
+            (int(key) for key in histograms[axis.histogram_output_key]),
             catalogs[axis.catalog_key],
         ):
             max_tech_level[axis.max_tech_key] = axis_max

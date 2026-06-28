@@ -76,6 +76,7 @@ def _outcome_after_ladder_complete(
                 enqueue_continuation=True,
                 next_ladder_state=orchestration.new_ladder_state(
                     resolved_mask=run.session.resolved_mask,
+                    fleet_torp_overlay=run.session.fleet_torp_overlay,
                 ),
             )
         if advance.row_complete is not None:

@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
 )
+from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.host_turn_targets import (
     functional_host_turn_target_from_segment_payload,
     host_turn_functional_target_to_wire_dict,
@@ -96,6 +97,7 @@ def run_accelerated_segment_policy_ladder(
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
 ) -> AcceleratedSegmentResult:
     """Run the policy ladder for one accelerated segment."""
     observation = observation_from_accelerated_segment(score, turn, segment)
@@ -112,6 +114,7 @@ def run_accelerated_segment_policy_ladder(
         cancel_token=cancel_token,
         on_admitted=on_admitted,
         resolved_mask=resolved_mask,
+        fleet_torp_overlay=fleet_torp_overlay,
     )
     return AcceleratedSegmentResult(
         segment=segment,
@@ -222,6 +225,7 @@ def run_accelerated_split_inference(
     *,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
 ) -> tuple[
     dict[str, object],
     InferenceObservation,
@@ -250,6 +254,7 @@ def run_accelerated_split_inference(
             max_solutions=20,
             time_limit_seconds=per_segment_time,
             resolved_mask=resolved_mask,
+            fleet_torp_overlay=fleet_torp_overlay,
         )
         if segment.is_streaming_target:
             reported_observation = ladder_result.observation

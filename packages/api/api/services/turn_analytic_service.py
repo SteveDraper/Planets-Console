@@ -182,6 +182,7 @@ class TurnAnalyticService:
             player_id,
             load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
             resolved_mask=resolved_mask,
+            export_services=self._turn_export_services(game_id, perspective),
         )
 
     def iter_scores_table_inference_stream(
@@ -191,6 +192,9 @@ class TurnAnalyticService:
         turn_number: int,
         player_ids: tuple[int, ...],
     ):
+        from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+            resolve_prior_turn_fleet_torp_overlay,
+        )
         from api.analytics.scores import iter_scores_table_inference_stream
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
@@ -202,6 +206,18 @@ class TurnAnalyticService:
                 player_id,
             )
 
+        export_services = self._turn_export_services(game_id, perspective)
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+
+        def resolve_fleet_torp_overlay_for_player(player_id: int):
+            return resolve_prior_turn_fleet_torp_overlay(
+                turn=turn,
+                player_id=player_id,
+                load_turn=load_turn,
+                export_services=export_services,
+                ensure=False,
+            )
+
         def reload_host_turn() -> TurnInfo:
             return self._turns.get_turn_info(game_id, perspective, turn_number)
 
@@ -210,9 +226,10 @@ class TurnAnalyticService:
             player_ids,
             game_id=game_id,
             perspective=perspective,
-            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
+            load_scoreboard_turn=load_turn,
             reload_host_turn=reload_host_turn,
             resolve_mask_for_player=resolve_mask_for_player,
+            resolve_fleet_torp_overlay_for_player=resolve_fleet_torp_overlay_for_player,
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
         )

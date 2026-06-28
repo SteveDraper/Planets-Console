@@ -219,34 +219,44 @@ _MAX_TECH_LEVEL_SCHEMA: dict[str, Any] = {
 _COMPOSITION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
-        "Per-player aggregated fleet composition derived from the acquisition ledger. Counts "
-        "only active ship records with known component fields; unknown or option-set-only rows "
-        "are omitted."
+        "Per-player aggregated fleet composition derived from the acquisition ledger. "
+        "Belief-set histograms count active rows using known fitted component fields "
+        "and the union of fleet build option sets on inferred rows."
     ),
     "properties": {
         "hullTypes": {
             **_COMPOSITION_HISTOGRAM_SCHEMA,
             "description": (
-                "Histogram of known hull types on active ships. Keys are host hull ids as "
-                "strings; values are ship counts. Rows with unknown, bounded, options, or region "
-                "hull constraints are excluded."
+                "Belief-set hull histogram on active ships. Keys are host hull ids as "
+                "strings; values are ship counts. Includes known hull constraints and "
+                "hull ids from fleet build option sets; bounded, options, and region-only "
+                "constraints contribute no ids until resolved."
+            ),
+        },
+        "engineTypes": {
+            **_COMPOSITION_HISTOGRAM_SCHEMA,
+            "description": (
+                "Belief-set engine histogram on active ships. Keys are host engine ids as "
+                "strings; values are ship counts. Includes known engine constraints and "
+                "engine ids from fleet build option sets."
             ),
         },
         "beamTypes": {
             **_COMPOSITION_HISTOGRAM_SCHEMA,
             "description": (
-                "Histogram of known fitted beam weapon types on active ships. Keys are host beam "
-                "ids as strings; values are ship counts. Rows with unknown, bounded, options, or "
-                "region beam constraints are excluded. Known zero (no beams) is excluded."
+                "Belief-set beam histogram on active ships. Keys are host beam ids as "
+                "strings; values are ship counts. Includes known positive beam constraints "
+                "and beam ids from fleet build option sets. Known zero (no beams) is "
+                "excluded."
             ),
         },
         "launcherTypes": {
             **_COMPOSITION_HISTOGRAM_SCHEMA,
             "description": (
-                "Histogram of known fitted torpedo-tube types on active ships. Keys are host "
-                "torpedo ids as strings; values are ship counts. Rows with unknown, bounded, "
-                "options, or region launcher constraints are excluded. Known zero (no tubes) is "
-                "excluded."
+                "Belief-set launcher/torp histogram on active ships. Keys are host torpedo "
+                "ids as strings; values are ship counts. Includes known positive launcher "
+                "constraints and torp ids from fleet build option sets. Feeds scores "
+                "inference fleet torp overlay (#87). Known zero (no tubes) is excluded."
             ),
         },
         "torpedoTypesLoaded": {
