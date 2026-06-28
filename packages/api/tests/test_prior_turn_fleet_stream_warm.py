@@ -28,11 +28,18 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     controller_for_scope,
     reset_inference_table_stream_registry_for_tests,
 )
+from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
+from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.fleet_torp_overlay import (
+    FleetLauncherBeliefSet,
+    FleetTorpOverlay,
+)
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
     resolve_prior_turn_fleet_torp_overlay,
     schedule_background_prior_turn_fleet_warm,
 )
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -60,6 +67,13 @@ def _install_scheduler(
         _get_scheduler,
     )
     return scheduler
+
+
+def _fleet_overlay_from_diagnostics(diagnostics: object) -> dict[str, object]:
+    assert isinstance(diagnostics, dict)
+    fleet_overlay = diagnostics.get("fleetTorpOverlay")
+    assert isinstance(fleet_overlay, dict)
+    return fleet_overlay
 
 
 def _wait_until(
@@ -371,6 +385,10 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     )
 
     _wait_until(lambda: player_id in _run_ids_for_players(scheduler, player_ids))
+    _wait_until(
+        lambda: sum(1 for event in events if event.get("type") == "complete") >= 2,
+        timeout_seconds=60.0,
+    )
     applied = resolve_prior_turn_fleet_torp_overlay(
         turn=sample_turn,
         player_id=player_id,
@@ -382,6 +400,15 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     assert applied.overlay is not None
     assert applied.overlay.belief_set.torp_ids == frozenset({4})
 
+    second_complete = next(
+        event for event in reversed(events) if event.get("type") == "complete"
+    )
+    second_diagnostics = second_complete.get("diagnostics")
+    assert isinstance(second_diagnostics, dict)
+    assert second_diagnostics.get("fleetTorpInputStatus") == "applied"
+    second_overlay = _fleet_overlay_from_diagnostics(second_diagnostics)
+    assert second_overlay.get("beliefSetTorpIds") == [4]
+
     scope = InferenceStreamScope(
         game_id=ctx.game_id,
         perspective=ctx.perspective,
@@ -389,6 +416,84 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     )
     _end_open_table_stream(scope, scheduler)
     thread.join(timeout=2.0)
+
+
+def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
+    sample_turn,
+    persistence,
+):
+    """Scores row inference: fleet overlay changes torp admission diagnostics."""
+    from api.analytics.scores.inference import get_scores_row_inference
+
+    player_id = sample_turn.scores[0].ownerid
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    belief_torp_ids = (1, 2)
+    _seed_prior_turn_fleet_with_belief_sets(
+        ctx,
+        sample_turn=sample_turn,
+        player_id=player_id,
+        torp_ids=belief_torp_ids,
+    )
+
+    empty_overlay = FleetTorpOverlay(belief_set=FleetLauncherBeliefSet(frozenset()))
+    fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
+        turn=sample_turn,
+        player_id=player_id,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        ensure=False,
+    )
+    assert fleet_resolution.overlay is not None
+
+    empty_inference = get_scores_row_inference(
+        sample_turn,
+        player_id,
+        load_scoreboard_turn=ctx.load_turn,
+        fleet_torp_overlay=empty_overlay,
+        fleet_torp_input_status="applied",
+    )
+    belief_inference = get_scores_row_inference(
+        sample_turn,
+        player_id,
+        load_scoreboard_turn=ctx.load_turn,
+        fleet_torp_overlay=fleet_resolution.overlay,
+        fleet_torp_input_status="applied",
+    )
+
+    empty_diag = _fleet_overlay_from_diagnostics(empty_inference["diagnostics"])
+    belief_diag = _fleet_overlay_from_diagnostics(belief_inference["diagnostics"])
+    assert empty_diag.get("beliefSetTorpIds") == []
+    assert belief_diag.get("beliefSetTorpIds") == list(belief_torp_ids)
+
+    observation = build_inference_observation(
+        score,
+        sample_turn,
+        load_scoreboard_turn=ctx.load_turn,
+    )
+    torp_step = next(
+        step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes"
+    )
+    empty_torp_catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=torp_step,
+        fleet_torp_overlay=empty_overlay,
+    )
+    belief_torp_catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=torp_step,
+        fleet_torp_overlay=fleet_resolution.overlay,
+    )
+    assert empty_torp_catalog.fleet_torp_overlay_diagnostics is not None
+    assert belief_torp_catalog.fleet_torp_overlay_diagnostics is not None
+    assert empty_torp_catalog.fleet_torp_overlay_diagnostics.admitted_torp_ids == ()
+    assert belief_torp_catalog.fleet_torp_overlay_diagnostics.admitted_torp_ids == belief_torp_ids
 
 
 def test_get_scores_row_inference_emits_applied_fleet_torp_input_status(

@@ -137,4 +137,5 @@ def test_resolve_prior_turn_overlay_uses_export_services(sample_turn, persistenc
 
     assert resolution.overlay is not None
     assert resolution.overlay.enabled is True
+    assert resolution.overlay.belief_set.torp_ids == frozenset({10})
     assert resolution.input_status == "applied"
