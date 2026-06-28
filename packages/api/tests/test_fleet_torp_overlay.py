@@ -29,9 +29,11 @@ from api.analytics.military_score_inference.models import (
     ShipBuildCombo,
 )
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
+from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import (
     TORP_ESCAPE_TIER_STEP_ID,
+    InferenceTierPolicyStep,
     resolve_fleet_inference_tuning,
     resolve_tier_policies,
 )
@@ -53,6 +55,27 @@ def _torp_step():
 
 def _escape_step():
     return next(step for step in resolve_tier_policies() if step.id == TORP_ESCAPE_TIER_STEP_ID)
+
+
+def _torp_action_ids(catalog: ActionCatalog) -> set[str]:
+    return {
+        action.id
+        for action in catalog.aggregate_actions
+        if action.id.startswith("ship_torps_loaded_")
+    }
+
+
+def _torp_and_escape_step_indices() -> tuple[
+    tuple[InferenceTierPolicyStep, ...], int, int
+]:
+    policy_steps = resolve_tier_policies()
+    torp_step_index = next(
+        index for index, step in enumerate(policy_steps) if step.id == "admit_ship_torpedoes"
+    )
+    escape_step_index = next(
+        index for index, step in enumerate(policy_steps) if step.id == TORP_ESCAPE_TIER_STEP_ID
+    )
+    return policy_steps, torp_step_index, escape_step_index
 
 
 def test_belief_set_from_composition_histogram():
@@ -279,6 +302,76 @@ def test_ranking_ship_build_beats_belief_torp_beats_non_belief_torp():
     assert second.actions and second.actions[0].action_id == belief_torp.id
     assert third.actions and third.actions[0].action_id == non_belief_torp.id
     assert top.objective_value >= second.objective_value >= third.objective_value
+
+
+def test_solve_with_policy_ladder_fleet_torp_overlay_belief_set(sample_turn):
+    """Full ladder walk: empty belief defers torps until escape; belief admits early."""
+    observation = _observation(military_delta_2x=500)
+    policy_steps, torp_step_index, escape_step_index = _torp_and_escape_step_indices()
+    torp_step = policy_steps[torp_step_index]
+    escape_step = policy_steps[escape_step_index]
+
+    empty_overlay = FleetTorpOverlay(
+        belief_set=FleetLauncherBeliefSet(frozenset()),
+        enabled=True,
+    )
+    _, final_catalog, _, attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        fleet_torp_overlay=empty_overlay,
+        time_limit_seconds=60.0,
+    )
+
+    assert "admit_ship_torpedoes" in attempted
+    assert TORP_ESCAPE_TIER_STEP_ID in attempted
+
+    early_catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=torp_step,
+        policy_step_index=torp_step_index,
+        fleet_torp_overlay=empty_overlay,
+    )
+    assert not _torp_action_ids(early_catalog)
+    assert early_catalog.fleet_torp_overlay_diagnostics is not None
+    assert early_catalog.fleet_torp_overlay_diagnostics.belief_set_torp_ids == ()
+
+    escape_catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=escape_step,
+        policy_step_index=escape_step_index,
+        fleet_torp_overlay=empty_overlay,
+    )
+    assert _torp_action_ids(escape_catalog)
+    assert escape_catalog.fleet_torp_overlay_diagnostics is not None
+    assert escape_catalog.fleet_torp_overlay_diagnostics.escape_tier_used is True
+
+    assert final_catalog is not None
+    assert _torp_action_ids(final_catalog)
+
+    belief_torp_id = 1
+    belief_overlay = FleetTorpOverlay.from_torp_ids(frozenset({belief_torp_id}))
+    _, _, _, belief_attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        fleet_torp_overlay=belief_overlay,
+        time_limit_seconds=60.0,
+    )
+    assert "admit_ship_torpedoes" in belief_attempted
+
+    belief_early_catalog = build_action_catalog_from_turn(
+        observation,
+        sample_turn,
+        policy_step=torp_step,
+        policy_step_index=torp_step_index,
+        fleet_torp_overlay=belief_overlay,
+    )
+    assert _torp_action_ids(belief_early_catalog) == {torp_load_action_id(belief_torp_id)}
+    assert belief_early_catalog.fleet_torp_overlay_diagnostics is not None
+    assert belief_early_catalog.fleet_torp_overlay_diagnostics.admitted_torp_ids == (
+        belief_torp_id,
+    )
 
 
 def test_admitted_torp_ids_respects_option_set_union():
