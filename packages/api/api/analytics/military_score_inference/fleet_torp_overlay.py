@@ -20,10 +20,10 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
 )
 from api.analytics.military_score_inference.models import ProbabilityBucket
 from api.analytics.military_score_inference.tier_policy import (
-    EARLY_TORP_ADMITTING_STEP_IDS,
     TORP_ESCAPE_TIER_STEP_ID,
     FleetInferenceTuning,
     InferenceTierPolicyStep,
+    torp_escape_tier_index,
 )
 
 __all__ = [
@@ -152,6 +152,8 @@ def torp_load_action_id(torp_id: int) -> str:
 def admitted_torp_ids_for_policy_step(
     *,
     policy_step: InferenceTierPolicyStep,
+    policy_step_index: int,
+    policy_steps: tuple[InferenceTierPolicyStep, ...],
     eligible_torp_ids: frozenset[int],
     overlay: FleetTorpOverlay,
 ) -> frozenset[int]:
@@ -161,13 +163,19 @@ def admitted_torp_ids_for_policy_step(
     if not overlay.enabled:
         return eligible_torp_ids
 
-    if policy_step.id == TORP_ESCAPE_TIER_STEP_ID or policy_step.alpha == 0:
+    if policy_step.alpha == 0:
         return eligible_torp_ids
 
-    if policy_step.id in EARLY_TORP_ADMITTING_STEP_IDS:
+    escape_index = torp_escape_tier_index(policy_steps)
+    if escape_index is not None and policy_step_index < escape_index:
         if overlay.belief_set.is_empty:
             return frozenset()
         return overlay.belief_set.torp_ids & eligible_torp_ids
+
+    if policy_step.id == TORP_ESCAPE_TIER_STEP_ID or (
+        escape_index is not None and policy_step_index > escape_index
+    ):
+        return eligible_torp_ids
 
     return frozenset()
 

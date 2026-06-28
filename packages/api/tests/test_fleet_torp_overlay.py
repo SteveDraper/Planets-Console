@@ -284,9 +284,15 @@ def test_ranking_ship_build_beats_belief_torp_beats_non_belief_torp():
 def test_admitted_torp_ids_respects_option_set_union():
     belief = FleetLauncherBeliefSet(frozenset({4, 8}))
     overlay = FleetTorpOverlay(belief_set=belief)
+    policy_steps = resolve_tier_policies()
     torp_step = _torp_step()
+    torp_step_index = next(
+        index for index, step in enumerate(policy_steps) if step.id == torp_step.id
+    )
     admitted = admitted_torp_ids_for_policy_step(
         policy_step=torp_step,
+        policy_step_index=torp_step_index,
+        policy_steps=policy_steps,
         eligible_torp_ids=frozenset({1, 2, 3, 4, 8}),
         overlay=overlay,
     )

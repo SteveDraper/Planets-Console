@@ -247,8 +247,19 @@ def build_action_catalog(
     prior_diagnostics = prior_catalog.diagnostics
     resolved_overlay = effective_fleet_torp_overlay(fleet_torp_overlay)
     fleet_tuning = resolve_fleet_inference_tuning()
+    policy_ladder = policy_steps or resolve_tier_policies()
+    admission_step_index = next(
+        (
+            index
+            for index, step in enumerate(policy_ladder)
+            if step.id == resolved_policy_step.id
+        ),
+        policy_step_index,
+    )
     admitted_torp_ids = admitted_torp_ids_for_policy_step(
         policy_step=resolved_policy_step,
+        policy_step_index=admission_step_index,
+        policy_steps=policy_ladder,
         eligible_torp_ids=eligible_torp_ids,
         overlay=resolved_overlay,
     )
@@ -273,7 +284,6 @@ def build_action_catalog(
             )
         )
 
-    policy_ladder = policy_steps or resolve_tier_policies()
     ranking_heuristics = InferenceRankingHeuristics()
     admission_caps_raw = compute_aggregate_admission_caps(policy_ladder, policy_step_index)
     admission_caps_by_action_id: dict[str, int] = {}
