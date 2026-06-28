@@ -12,7 +12,6 @@ from api.analytics.military_score_inference.component_eligibility import (
     eligible_component_ids_for_filter,
     turn_catalog_context_for_policy_step,
 )
-from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
@@ -32,9 +31,7 @@ from api.analytics.military_score_inference.tier_policy import (
 )
 from api.models.components import Engine
 
-from tests.fixtures.military_score_inference import _observation
-
-_LEGACY_FLEET_TORP_OVERLAY = FleetTorpOverlay.disabled()
+from tests.fixtures.military_score_inference import _observation, legacy_fleet_torp_overlay
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -300,7 +297,7 @@ def test_ship_torpedoes_admitted_after_full_components_with_caps(sample_turn):
         observation,
         sample_turn,
         policy_step=torp_step,
-        fleet_torp_overlay=_LEGACY_FLEET_TORP_OVERLAY,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
     action_ids = {action.id for action in catalog.aggregate_actions}
     assert "planet_defense_posts_added_total" not in action_ids
@@ -321,7 +318,7 @@ def test_slack_admitted_on_later_steps_with_caps(sample_turn):
         observation,
         sample_turn,
         policy_step=defense_step,
-        fleet_torp_overlay=_LEGACY_FLEET_TORP_OVERLAY,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
     planet_action = next(
         action
@@ -358,7 +355,7 @@ def test_restricted_activetorps_limits_ship_torpedo_aggregate_actions(sample_tur
         observation,
         turn,
         policy_step=torp_step,
-        fleet_torp_overlay=_LEGACY_FLEET_TORP_OVERLAY,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
 
     torp_action_ids = {
@@ -621,7 +618,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
     result, catalog, _, attempted, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
-        fleet_torp_overlay=_LEGACY_FLEET_TORP_OVERLAY,
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
 
     assert "admit_ship_torpedoes" in attempted

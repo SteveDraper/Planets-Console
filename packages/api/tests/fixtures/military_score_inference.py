@@ -5,11 +5,22 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "api" / "storage" / "assets"
+
+
+def legacy_fleet_torp_overlay() -> FleetTorpOverlay:
+    """Return a disabled fleet torp overlay for pre-#87 catalog behavior.
+
+    Tier-policy and legacy-admission tests pass this explicitly so they opt out of
+    the production default empty-belief overlay while still exercising ladder
+    steps that admit torpedoes without fleet-informed beliefs.
+    """
+    return FleetTorpOverlay.disabled()
 
 
 def _observation(

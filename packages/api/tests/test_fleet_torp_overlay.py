@@ -38,15 +38,11 @@ from api.analytics.military_score_inference.tier_policy import (
     resolve_tier_policies,
 )
 
-from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.military_score_inference import _observation, legacy_fleet_torp_overlay
 from tests.fixtures.military_score_inference_prior_weights import (
     minimal_prior_catalog,
     probability_buckets_for_test_action,
 )
-
-
-def _legacy_overlay() -> FleetTorpOverlay:
-    return FleetTorpOverlay.disabled()
 
 
 def _torp_step():
@@ -171,7 +167,7 @@ def test_disabled_overlay_matches_legacy_torp_admission(sample_turn):
         _observation(military_delta_2x=500),
         sample_turn,
         policy_step=torp_step,
-        fleet_torp_overlay=_legacy_overlay(),
+        fleet_torp_overlay=legacy_fleet_torp_overlay(),
     )
     torp_actions = [
         action for action in catalog.aggregate_actions if action.id.startswith("ship_torps_loaded_")
