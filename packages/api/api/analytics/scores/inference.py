@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
@@ -21,7 +21,6 @@ def get_scores_row_inference(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
-    export_services: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
@@ -44,6 +43,5 @@ def get_scores_row_inference(
             load_scoreboard_turn=load_scoreboard_turn,
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
-            export_services=export_services,
         )
     return {"playerId": player_id, **inference}

@@ -1,7 +1,5 @@
 """Scores analytic integration for military score build inference."""
 
-from collections.abc import Mapping
-
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
     observation_deltas_from_score,
@@ -55,9 +53,6 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
-from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
-    resolve_prior_turn_fleet_torp_overlay,
-)
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
@@ -72,26 +67,6 @@ __all__ = [
     "prior_turn_score_data_available",
     "run_inference_with_artifacts",
 ]
-
-
-def _resolved_fleet_torp_overlay(
-    turn: TurnInfo,
-    player_id: int,
-    *,
-    load_scoreboard_turn: ScoreboardTurnLoader | None,
-    fleet_torp_overlay: FleetTorpOverlay | None,
-    export_services: Mapping[str, object] | None,
-) -> FleetTorpOverlay | None:
-    if fleet_torp_overlay is not None:
-        return fleet_torp_overlay
-    if load_scoreboard_turn is None:
-        return None
-    return resolve_prior_turn_fleet_torp_overlay(
-        turn=turn,
-        player_id=player_id,
-        load_turn=load_scoreboard_turn,
-        export_services=export_services,
-    )
 
 
 def build_inference_observation(
@@ -431,7 +406,6 @@ def run_inference_with_artifacts(
     load_scoreboard_turn: ScoreboardTurnLoader | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
-    export_services: Mapping[str, object] | None = None,
     time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     """Run inference once; return API payload plus observation and catalog for re-checks.
@@ -451,14 +425,6 @@ def run_inference_with_artifacts(
         catalog=catalog,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-    resolved_fleet_overlay = _resolved_fleet_torp_overlay(
-        turn,
-        score.ownerid,
-        load_scoreboard_turn=load_scoreboard_turn,
-        fleet_torp_overlay=fleet_torp_overlay,
-        export_services=export_services,
-    )
-
     if path == InferencePath.NO_PRIOR_TURN:
         return _no_prior_turn_inference_result(turn, resolved_observation)
     if path == InferencePath.ACCELERATED_BACKFILL:
@@ -468,7 +434,7 @@ def run_inference_with_artifacts(
             resolved_observation,
             load_scoreboard_turn=load_scoreboard_turn,
             resolved_mask=resolved_mask,
-            fleet_torp_overlay=resolved_fleet_overlay,
+            fleet_torp_overlay=fleet_torp_overlay,
         )
     return _run_solver_inference_path(
         path,
@@ -478,7 +444,7 @@ def run_inference_with_artifacts(
         catalog=catalog,
         accelerated_segments=accelerated_segments,
         resolved_mask=resolved_mask,
-        fleet_torp_overlay=resolved_fleet_overlay,
+        fleet_torp_overlay=fleet_torp_overlay,
         time_limit_seconds=time_limit_seconds,
     )
 

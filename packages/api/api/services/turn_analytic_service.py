@@ -168,6 +168,9 @@ class TurnAnalyticService:
         turn_number: int,
         player_id: int,
     ) -> dict[str, object]:
+        from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+            resolve_prior_turn_fleet_torp_overlay,
+        )
         from api.analytics.scores import get_scores_row_inference
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
@@ -177,12 +180,19 @@ class TurnAnalyticService:
             turn_number,
             player_id,
         )
+        load_scoreboard_turn = self._load_scoreboard_turn(game_id, perspective)
+        export_services = self._turn_export_services(game_id, perspective)
         return get_scores_row_inference(
             turn,
             player_id,
-            load_scoreboard_turn=self._load_scoreboard_turn(game_id, perspective),
+            load_scoreboard_turn=load_scoreboard_turn,
             resolved_mask=resolved_mask,
-            export_services=self._turn_export_services(game_id, perspective),
+            fleet_torp_overlay=resolve_prior_turn_fleet_torp_overlay(
+                turn=turn,
+                player_id=player_id,
+                load_turn=load_scoreboard_turn,
+                export_services=export_services,
+            ),
         )
 
     def iter_scores_table_inference_stream(
