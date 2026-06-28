@@ -28,8 +28,8 @@ from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import (
     TORP_ESCAPE_TIER_STEP_ID,
@@ -61,9 +61,7 @@ def _torp_action_ids(catalog: ActionCatalog) -> set[str]:
     }
 
 
-def _torp_and_escape_step_indices() -> tuple[
-    tuple[InferenceTierPolicyStep, ...], int, int
-]:
+def _torp_and_escape_step_indices() -> tuple[tuple[InferenceTierPolicyStep, ...], int, int]:
     policy_steps = resolve_tier_policies()
     torp_step_index = next(
         index for index, step in enumerate(policy_steps) if step.id == "admit_ship_torpedoes"

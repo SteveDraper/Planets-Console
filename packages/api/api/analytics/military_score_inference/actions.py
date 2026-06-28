@@ -23,9 +23,9 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     FleetTorpOverlay,
     FleetTorpOverlayDiagnostics,
     admitted_torp_ids_for_policy_step,
-    effective_fleet_torp_overlay,
     apply_torp_misalignment_penalties_to_catalog,
     build_fleet_torp_overlay_diagnostics,
+    effective_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
@@ -250,11 +250,7 @@ def build_action_catalog(
     fleet_tuning = resolve_fleet_inference_tuning()
     policy_ladder = policy_steps or resolve_tier_policies()
     admission_step_index = next(
-        (
-            index
-            for index, step in enumerate(policy_ladder)
-            if step.id == resolved_policy_step.id
-        ),
+        (index for index, step in enumerate(policy_ladder) if step.id == resolved_policy_step.id),
         policy_step_index,
     )
     admitted_torp_ids = admitted_torp_ids_for_policy_step(
