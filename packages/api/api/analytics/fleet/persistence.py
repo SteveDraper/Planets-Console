@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import (
@@ -14,6 +15,8 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import StorageBackend
+
+OnSnapshotPersistedCallback = Callable[[int, int, int], None]
 
 
 class FleetSnapshotPersistenceService:
@@ -44,8 +47,14 @@ class FleetSnapshotPersistenceService:
     deploys that change materialization semantics re-chain without a turn reload.
     """
 
-    def __init__(self, storage: StorageBackend) -> None:
+    def __init__(
+        self,
+        storage: StorageBackend,
+        *,
+        on_snapshot_persisted: OnSnapshotPersistedCallback | None = None,
+    ) -> None:
         self._storage = storage
+        self._on_snapshot_persisted = on_snapshot_persisted
         self._invalidation_generation: dict[tuple[int, int], int] = {}
         self._generation_lock = threading.Lock()
 
@@ -110,6 +119,16 @@ class FleetSnapshotPersistenceService:
             self.document_key(game_id, perspective, turn_number),
             fleet_turn_snapshot_to_json(snapshot),
         )
+        if self._on_snapshot_persisted is not None:
+            self._on_snapshot_persisted(game_id, perspective, turn_number)
+
+    @property
+    def on_snapshot_persisted(self) -> OnSnapshotPersistedCallback | None:
+        return self._on_snapshot_persisted
+
+    @on_snapshot_persisted.setter
+    def on_snapshot_persisted(self, callback: OnSnapshotPersistedCallback | None) -> None:
+        self._on_snapshot_persisted = callback
 
     def delete_snapshot(
         self,

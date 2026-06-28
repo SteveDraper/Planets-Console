@@ -22,6 +22,9 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     attach_inference_table_stream,
     detach_inference_table_stream,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    PriorTurnFleetTorpResolution,
+)
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
@@ -45,6 +48,9 @@ class InferenceTableStreamController:
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
     reload_host_turn: Callable[[], TurnInfo] | None = None
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None
+    resolve_fleet_torp_resolution_for_player: (
+        Callable[[int], PriorTurnFleetTorpResolution] | None
+    ) = None
     persistence: InferenceRowPersistenceService | None = None
     scheduled_rows: dict[int, ScheduledInferenceRow] = field(default_factory=dict)
     pending_wire_events: list[dict[str, object]] = field(default_factory=list)
@@ -78,6 +84,11 @@ class InferenceTableStreamController:
             if self.resolve_mask_for_player is not None
             else None
         )
+        fleet_resolution = (
+            self.resolve_fleet_torp_resolution_for_player(player_id)
+            if self.resolve_fleet_torp_resolution_for_player is not None
+            else PriorTurnFleetTorpResolution(overlay=None, input_status="unavailable")
+        )
         return schedule_inference_row(
             self.scheduler,
             score=score,
@@ -87,6 +98,8 @@ class InferenceTableStreamController:
             perspective=self.perspective,
             load_scoreboard_turn=self.load_scoreboard_turn,
             resolved_mask=resolved_mask,
+            fleet_torp_overlay=fleet_resolution.overlay,
+            fleet_torp_input_status=fleet_resolution.input_status,
             stream_token=self.stream_token,
         )
 
@@ -183,3 +196,11 @@ class InferenceTableStreamController:
 
     def detach(self) -> None:
         detach_inference_table_stream(self.stream_token)
+
+    def end_stream(self, scheduler: InferenceRowScheduler) -> None:
+        """Tear down this stream's scheduler scope (safe while the generator runs elsewhere)."""
+        scheduler.end_inference_stream(
+            self.scope,
+            tuple(row.session for row in self.current_scheduled_rows()),
+            stream_token=self.stream_token,
+        )

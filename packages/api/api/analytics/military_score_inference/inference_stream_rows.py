@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
@@ -21,6 +22,7 @@ from api.analytics.military_score_inference.inference_path import (
 )
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    TableStreamScopeAlreadyActive,
     get_inference_row_scheduler,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -33,9 +35,18 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    FleetTorpInputStatus,
+    PriorTurnFleetTorpResolution,
+)
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.transport.inference_stream import inference_complete_event, inference_global_pause_event
+from api.transport.inference_stream import (
+    TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
+    inference_complete_event,
+    inference_error_event,
+    inference_global_pause_event,
+)
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 _MULTiplexWaitSeconds = 0.05
@@ -181,6 +192,8 @@ def schedule_inference_row(
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
+    fleet_torp_input_status: FleetTorpInputStatus | None = None,
     stream_token: str | None = None,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
@@ -202,6 +215,8 @@ def schedule_inference_row(
         perspective=perspective,
         turn_number=turn_number,
         resolved_mask=resolved_mask,
+        fleet_torp_overlay=fleet_torp_overlay,
+        fleet_torp_input_status=fleet_torp_input_status,
     )
     orchestration = create_inference_stream_orchestration(
         path,
@@ -340,6 +355,8 @@ def iter_scores_table_inference_events(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
+    resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
+    | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -355,7 +372,11 @@ def iter_scores_table_inference_events(
         turn_number=turn_number,
     )
     scheduler = scheduler or get_inference_row_scheduler()
-    stream_token = scheduler.begin_scope(stream_scope)
+    try:
+        stream_token = scheduler.begin_scope(stream_scope)
+    except TableStreamScopeAlreadyActive:
+        yield inference_error_event(TABLE_STREAM_ALREADY_ACTIVE_DETAIL)
+        return
     pause_status = scheduler.global_pause_status(stream_scope)
     yield inference_global_pause_event(paused=bool(pause_status.get("paused")))
 
@@ -370,6 +391,7 @@ def iter_scores_table_inference_events(
         load_scoreboard_turn=load_scoreboard_turn,
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
+        resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
         persistence=persistence,
     )
     controller.attach()

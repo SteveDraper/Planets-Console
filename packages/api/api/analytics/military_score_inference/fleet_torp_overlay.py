@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
-from api.analytics.fleet.field_constraints import known_positive_component_id
+from api.analytics.fleet.belief_set_components import launcher_component_ids_from_records
 from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
@@ -106,18 +106,7 @@ def launcher_belief_set_from_fleet_records(
     records: Iterable[FleetShipRecord],
 ) -> FleetLauncherBeliefSet:
     """Union launcher/torp ids from known fields and all fleet build option sets."""
-    torp_ids: set[int] = set()
-    for record in records:
-        if record.disposition != "active":
-            continue
-        known_launcher = known_positive_component_id(record.fields.launchers)
-        if known_launcher is not None:
-            torp_ids.add(known_launcher)
-        for option_set in record.build_option_sets:
-            torp_id = option_set.torp_id
-            if torp_id is not None and torp_id > 0:
-                torp_ids.add(torp_id)
-    return FleetLauncherBeliefSet(frozenset(torp_ids))
+    return FleetLauncherBeliefSet(launcher_component_ids_from_records(records))
 
 
 def launcher_belief_set_from_composition(composition: dict[str, object]) -> FleetLauncherBeliefSet:

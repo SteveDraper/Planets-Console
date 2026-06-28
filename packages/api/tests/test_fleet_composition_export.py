@@ -6,6 +6,7 @@ from api.analytics.export_types import ExportScope
 from api.analytics.fleet.composition_export import build_fleet_composition_branch
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
+    FleetBuildOptionSet,
     FleetFieldKnown,
     FleetFieldUnknown,
     FleetShipRecord,
@@ -123,6 +124,7 @@ def test_build_composition_returns_empty_when_unscoped():
     composition = build_fleet_composition_branch(snapshot, scope, turn=turn)
     assert composition == {
         "hullTypes": {},
+        "engineTypes": {},
         "beamTypes": {},
         "launcherTypes": {},
         "torpedoTypesLoaded": {},
@@ -192,3 +194,53 @@ def test_build_composition_excludes_known_zero_beams_and_launchers():
     assert composition["hullTypes"] == {"15": 1}
     assert composition["beamTypes"] == {}
     assert composition["launcherTypes"] == {}
+
+
+def test_build_composition_unions_build_option_sets_on_inferred_rows():
+    turn = single_ship_turn(
+        turn_number=1,
+        ship_id=1,
+        owner_id=8,
+        x=100,
+        y=100,
+        hull_id=15,
+        engine_id=3,
+        beam_id=3,
+        torpedoid=3,
+    )
+    composition = _composition_for_records(
+        [
+            FleetShipRecord(
+                record_id="inferred-launchers",
+                disposition="active",
+                fields=FleetShipRecordFields(
+                    launchers=FleetFieldUnknown(),
+                ),
+                build_option_sets=[
+                    FleetBuildOptionSet(torp_id=4, label="Mk IV default"),
+                    FleetBuildOptionSet(torp_id=8, label="Mk VIII alt"),
+                ],
+            ),
+            FleetShipRecord(
+                record_id="known-and-options",
+                disposition="active",
+                fields=FleetShipRecordFields(
+                    hull=FleetFieldKnown(15),
+                    engine=FleetFieldKnown(3),
+                    launchers=FleetFieldKnown(6),
+                ),
+                build_option_sets=[
+                    FleetBuildOptionSet(
+                        hull_id=13,
+                        engine_id=9,
+                        torp_id=8,
+                        label="alternate build",
+                    ),
+                ],
+            ),
+        ],
+        turn=turn,
+    )
+    assert composition["launcherTypes"] == {"4": 1, "6": 1, "8": 2}
+    assert composition["hullTypes"] == {"13": 1, "15": 1}
+    assert composition["engineTypes"] == {"3": 1, "9": 1}

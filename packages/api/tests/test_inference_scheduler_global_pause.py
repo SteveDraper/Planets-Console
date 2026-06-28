@@ -5,6 +5,7 @@ from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    TableStreamScopeAlreadyActive,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -147,7 +148,7 @@ def test_new_scope_invalidates_retained_pause_state(sample_turn):
     assert status["activeScope"]["turn"] == scope_b.turn_number
 
 
-def test_begin_scope_preempts_reconnect_for_same_scope(sample_turn):
+def test_begin_scope_rejects_second_stream_for_same_scope(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     scope = InferenceStreamScope(
@@ -159,12 +160,13 @@ def test_begin_scope_preempts_reconnect_for_same_scope(sample_turn):
     first_token = scheduler.begin_scope(scope)
     scheduler.enqueue_tier_ladder(session)
 
-    second_token = scheduler.begin_scope(scope)
+    with pytest.raises(TableStreamScopeAlreadyActive):
+        scheduler.begin_scope(scope)
 
-    assert second_token != first_token
-    assert session.cancel_token.is_cancelled()
+    assert scheduler.owns_table_stream(first_token)
+    assert not session.cancel_token.is_cancelled()
     status = scheduler.global_pause_status(scope)
-    assert status["activeSessionCount"] == 0
+    assert status["activeSessionCount"] == 1
 
 
 def test_begin_scope_succeeds_after_end_inference_stream(sample_turn):

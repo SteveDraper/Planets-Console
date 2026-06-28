@@ -34,6 +34,7 @@ def build_service_stack(
         fleet_persistence=fleet_persistence,
     )
     inference_invalidation.wire_fleet_invalidation_to_persistence()
+    inference_invalidation.wire_scores_invalidation_to_fleet_persistence()
 
     def on_held_solutions_updated(session) -> None:
         inference_invalidation.on_inference_evidence_updated(

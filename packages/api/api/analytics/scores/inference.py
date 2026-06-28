@@ -8,8 +8,12 @@ from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
 )
+from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    FleetTorpInputStatus,
+)
 from api.models.game import TurnInfo
 
 
@@ -19,6 +23,8 @@ def get_scores_row_inference(
     *,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
+    fleet_torp_input_status: FleetTorpInputStatus | None = None,
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
@@ -40,5 +46,7 @@ def get_scores_row_inference(
             turn,
             load_scoreboard_turn=load_scoreboard_turn,
             resolved_mask=resolved_mask,
+            fleet_torp_overlay=fleet_torp_overlay,
+            fleet_torp_input_status=fleet_torp_input_status,
         )
     return {"playerId": player_id, **inference}

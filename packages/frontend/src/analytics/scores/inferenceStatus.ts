@@ -22,9 +22,15 @@ export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): stri
 }
 
 export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolean {
-  return (
+  if (
     (detail.displayStatus === 'success' || detail.displayStatus === 'paused') &&
     detail.solutionCount > 0
+  ) {
+    return true
+  }
+  return (
+    detail.isComplete &&
+    (detail.displayStatus === 'failure' || detail.displayStatus === 'stopped')
   )
 }
 

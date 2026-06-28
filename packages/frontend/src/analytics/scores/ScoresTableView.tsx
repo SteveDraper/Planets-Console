@@ -94,13 +94,16 @@ function InferenceStatusCell({
   if (detail.displayStatus === 'stopped') {
     return (
       <div className="inline-flex items-center gap-1">
-        <span
+        <button
+          type="button"
           title={label}
           aria-label={label}
-          className="inline-flex items-center justify-center p-1 text-slate-400"
+          onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
+          disabled={!canOpenInferenceDetail(detail)}
+          className="inline-flex items-center justify-center rounded p-1 text-slate-400 hover:bg-white/10 disabled:cursor-default disabled:opacity-60"
         >
           <Octagon className="h-4 w-4" aria-hidden />
-        </span>
+        </button>
         {hullCatalogButton}
       </div>
     )
@@ -108,13 +111,16 @@ function InferenceStatusCell({
 
   return (
     <div className="inline-flex items-center gap-1">
-      <span
+      <button
+        type="button"
         title={label}
         aria-label={label}
-        className="inline-flex items-center justify-center p-1 text-red-400"
+        onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
+        disabled={!canOpenInferenceDetail(detail)}
+        className="inline-flex items-center justify-center rounded p-1 text-red-400 hover:bg-white/10 disabled:cursor-default disabled:opacity-60"
       >
         <X className="h-4 w-4" aria-hidden />
-      </span>
+      </button>
       {hullCatalogButton}
     </div>
   )

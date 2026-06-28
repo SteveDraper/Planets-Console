@@ -29,10 +29,15 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun, TierJob
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.errors import ValidationError
+from api.errors import PlanetsConsoleError, ValidationError
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
+
+
+class TableStreamScopeAlreadyActive(PlanetsConsoleError):
+    """Another NDJSON table stream already owns this turn scope."""
+
 
 # Re-exported for scheduler tests that construct tier jobs directly.
 _TierJob = TierJob
@@ -82,8 +87,8 @@ class InferenceRowScheduler:
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._condition:
             if self._active_scope == scope and self._has_active_table_stream:
-                self._preempt_table_stream_for_scope_locked()
-            elif self._active_scope != scope:
+                raise TableStreamScopeAlreadyActive()
+            if self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
             stream_token = str(uuid.uuid4())
@@ -251,12 +256,14 @@ class InferenceRowScheduler:
         if orchestration is not None:
             run.ladder_state = orchestration.new_ladder_state(
                 resolved_mask=session.resolved_mask,
+                fleet_torp_overlay=session.fleet_torp_overlay,
             )
         else:
             policy_steps = tuple(resolve_tier_policies(None))
             run.ladder_state = PolicyLadderState(
                 policy_steps=policy_steps,
                 resolved_mask=session.resolved_mask,
+                fleet_torp_overlay=session.fleet_torp_overlay,
             )
         self._enqueue_job(TierJob(session=session))
 
@@ -287,16 +294,6 @@ class InferenceRowScheduler:
         while self._work_queue:
             job = self._work_queue.popleft()
             self._get_or_create_run(job.session).hold_job(job)
-
-    def _preempt_table_stream_for_scope_locked(self) -> None:
-        """Cancel in-flight table-stream work so a reconnect can replace the active stream."""
-        self._globally_paused = False
-        for run in list(self._runs.values()):
-            run.session.cancel_token.cancel()
-        self._runs.clear()
-        while self._work_queue:
-            job = self._work_queue.popleft()
-            job.session.cancel_token.cancel()
 
     def _invalidate_retained_state_locked(self) -> None:
         self._has_active_table_stream = False

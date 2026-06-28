@@ -78,6 +78,7 @@ def test_materialized_tree_turn_one_empty_composition(sample_turn):
     tree, _scope = materialize_fleet_tree(ctx, player_id, turn=1)
     assert tree["composition"] == {
         "hullTypes": {},
+        "engineTypes": {},
         "beamTypes": {},
         "launcherTypes": {},
         "torpedoTypesLoaded": {},

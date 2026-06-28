@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentResult,
@@ -91,10 +92,12 @@ class InferenceStreamOrchestration:
         self,
         *,
         resolved_mask: ResolvedHullCatalogMask | None = None,
+        fleet_torp_overlay: FleetTorpOverlay | None = None,
     ) -> PolicyLadderState:
         return PolicyLadderState(
             policy_steps=tuple(resolve_tier_policies(None)),
             resolved_mask=resolved_mask,
+            fleet_torp_overlay=fleet_torp_overlay,
         )
 
     def record_segment_ladder_complete(

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    reset_inference_table_stream_registry_for_tests,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
 from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -26,6 +30,13 @@ from tests.scores_exports_helpers import (
     scores_query_context,
     stream_scope_for_turn,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_inference_stream_registry() -> None:
+    reset_inference_table_stream_registry_for_tests()
+    yield
+    reset_inference_table_stream_registry_for_tests()
 
 
 def _assert_probe_does_not_compute(monkeypatch):
@@ -195,6 +206,25 @@ def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
     assert row.status in {STATUS_EXACT, "no_exact_solution"}
 
 
+def test_ensure_prior_turn_sync_passes_fleet_torp_input_status(sample_turn, persistence):
+    from api.analytics.scores.inference import get_scores_row_inference as real_inference
+
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
+    captured: dict[str, object] = {}
+
+    def capture_and_run(*args, **kwargs):
+        captured.update(kwargs)
+        return real_inference(*args, **kwargs)
+
+    with patch(
+        "api.analytics.scores.exports.get_scores_row_inference",
+        side_effect=capture_and_run,
+    ):
+        EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    assert captured.get("fleet_torp_input_status") == "applied"
+
+
 def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, persistence):
     ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
@@ -278,6 +308,40 @@ def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence
     EXPORT_CATALOG.ensure_export(ctx, scope)
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is not None
+
+
+def test_ensure_current_turn_scheduler_passes_fleet_torp_input_status(
+    sample_turn,
+    persistence,
+):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = first_player_id(sample_turn)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
+    captured: dict[str, object] = {}
+
+    def capture_and_schedule(*args, **kwargs):
+        captured.update(kwargs)
+        return schedule_inference_row(*args, **kwargs)
+
+    with patch(
+        "api.analytics.scores.exports.schedule_inference_row",
+        side_effect=capture_and_schedule,
+    ):
+        EXPORT_CATALOG.ensure_export(ctx, scope)
+
+    assert captured.get("fleet_torp_input_status") == "applied"
 
 
 def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):

@@ -9,6 +9,9 @@ from api.analytics.military_score_inference.inference_scheduler import Inference
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    PriorTurnFleetTorpResolution,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
@@ -80,6 +83,8 @@ def iter_scores_table_inference_stream(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
+    resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
+    | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -92,6 +97,7 @@ def iter_scores_table_inference_stream(
         load_scoreboard_turn=load_scoreboard_turn,
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
+        resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
         persistence=persistence,
         scheduler=scheduler,
     )

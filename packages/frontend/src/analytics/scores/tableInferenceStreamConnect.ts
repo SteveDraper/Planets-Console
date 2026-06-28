@@ -6,8 +6,12 @@ export const TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
   'An inference table stream is already active for this scope.'
 
 const STREAM_RETRY_INITIAL_MS = 50
-const STREAM_RETRY_MAX_ATTEMPTS = 10
-const STREAM_RETRY_MAX_DELAY_MS = 500
+const STREAM_RETRY_MAX_ATTEMPTS = 15
+const STREAM_RETRY_MAX_DELAY_MS = 1000
+
+const STREAM_INCOMPLETE_RETRY_INITIAL_MS = 250
+const STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS = 3
+const STREAM_INCOMPLETE_RETRY_MAX_DELAY_MS = 2000
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -28,10 +32,6 @@ export type TableInferenceStreamConnectResult =
   | 'aborted'
   | 'conflict_exhausted'
   | 'incomplete_exhausted'
-
-const STREAM_INCOMPLETE_RETRY_INITIAL_MS = 50
-const STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS = 10
-const STREAM_INCOMPLETE_RETRY_MAX_DELAY_MS = 500
 
 export async function connectTableInferenceStream(
   scope: AnalyticShellScope,

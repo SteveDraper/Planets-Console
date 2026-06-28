@@ -35,10 +35,14 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    controller_for_scope,
+)
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
+from api.transport.inference_stream import TABLE_STREAM_ALREADY_ACTIVE_DETAIL
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -207,12 +211,12 @@ def test_multiplex_delivers_all_queued_completes_before_scope_deactivation(sampl
     assert complete_player_ids == {row.player_id for row in rows}
 
 
-def test_stream_preempt_persists_complete_before_first_connection_drains_in_flight_row(
+def test_stream_conflict_does_not_preempt_first_connection_while_rows_compute(
     sample_turn,
     monkeypatch,
     memory_backend,
 ):
-    """Persist can succeed while the preempted stream still shows in-progress for other rows."""
+    """Persist succeeds while a duplicate connect is rejected and the first stream runs."""
     persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = _install_workerless_scheduler(
         monkeypatch,
@@ -275,9 +279,21 @@ def test_stream_preempt_persists_complete_before_first_connection_drains_in_flig
         persistence=persistence,
         scheduler=scheduler,
     )
-    assert next(replacement) == {"type": "globalPause", "paused": False}
+    assert next(replacement) == {
+        "type": "error",
+        "detail": TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
+    }
     replacement.close()
 
+    controller = controller_for_scope(
+        InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=turn_number,
+        )
+    )
+    assert controller is not None
+    controller.end_stream(scheduler)
     thread.join(timeout=2.0)
     assert not stream_error
 
@@ -348,12 +364,12 @@ def test_progress_without_terminal_complete_when_scope_deactivates_mid_row(sampl
     assert list(stream) == []
 
 
-def test_stream_preempt_leaves_in_flight_row_without_persisted_terminal_state(
+def test_stream_disconnect_leaves_in_flight_row_without_persisted_terminal_state(
     sample_turn,
     monkeypatch,
     memory_backend,
 ):
-    """Preempt before terminal: in-flight row is cancelled without persistence."""
+    """Disconnect before terminal: in-flight row is cancelled without persistence."""
     persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = _install_workerless_scheduler(
         monkeypatch,
@@ -382,16 +398,15 @@ def test_stream_preempt_leaves_in_flight_row_without_persisted_terminal_state(
     thread.start()
     _wait_until(lambda: len(scheduler._runs) == len(player_ids))
 
-    replacement = iter_scores_table_inference_events(
-        sample_turn,
-        player_ids,
-        game_id=628580,
-        perspective=1,
-        persistence=persistence,
-        scheduler=scheduler,
+    controller = controller_for_scope(
+        InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=turn_number,
+        )
     )
-    next(replacement)
-    replacement.close()
+    assert controller is not None
+    controller.end_stream(scheduler)
     thread.join(timeout=2.0)
 
     assert persistence.get_row(628580, 1, turn_number, target_player_id) is None
@@ -487,6 +502,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
             diagnostics=_diagnostics(turn=turn_number, player_id=player_id),
         ),
     )
+    scheduler.end_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
 
     replay = iter_scores_table_inference_events(
         sample_turn,
