@@ -2,20 +2,17 @@
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
-from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
-from api.analytics.fleet.compute_services import (
-    build_ephemeral_fleet_compute_services,
-    resolve_fleet_compute_services,
-)
 from api.analytics.fleet.constants import ANALYTIC_ID
-from api.analytics.fleet.exports import EXPORT_CATALOG
-from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 from api.analytics.registration import TurnAnalyticRegistration
 from api.models.game import TurnInfo
 
 
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
     """Return the fleet acquisition ledger for the shell turn."""
+    from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+    from api.analytics.fleet.compute_services import resolve_fleet_compute_services
+    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
+
     services = resolve_fleet_compute_services(ctx)
     snapshot = get_or_materialize_fleet_snapshot(
         services.persistence,
@@ -30,6 +27,8 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
 
 def get_fleet(turn: TurnInfo) -> dict:
     """Convenience entry for tests and direct callers without durable persistence."""
+    from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+
     return invoke_analytic_compute(
         compute_fleet,
         turn,
@@ -37,8 +36,14 @@ def get_fleet(turn: TurnInfo) -> dict:
     )
 
 
+def _load_fleet_export_catalog():
+    from api.analytics.fleet.exports import EXPORT_CATALOG
+
+    return EXPORT_CATALOG
+
+
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_fleet,
-    export_catalog=EXPORT_CATALOG,
+    export_catalog_loader=_load_fleet_export_catalog,
 )

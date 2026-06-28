@@ -13,6 +13,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
+from api.analytics.fleet.field_constraints import known_positive_component_id
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
     SHIP_TORPS_PER_TYPE_ALLOWLIST_KEY,
@@ -100,33 +102,19 @@ def effective_fleet_torp_overlay(overlay: FleetTorpOverlay | None) -> FleetTorpO
     return overlay
 
 
-def _known_positive_component_id(field: object) -> int | None:
-    from api.analytics.fleet.types import FleetFieldKnown
-
-    if not isinstance(field, FleetFieldKnown):
-        return None
-    value = field.value
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        return None
-    return value
-
-
 def launcher_belief_set_from_fleet_records(
-    records: Iterable[object],
+    records: Iterable[FleetShipRecord],
 ) -> FleetLauncherBeliefSet:
     """Union launcher/torp ids from known fields and all fleet build option sets."""
     torp_ids: set[int] = set()
     for record in records:
-        if getattr(record, "disposition", None) != "active":
+        if record.disposition != "active":
             continue
-        fields = getattr(record, "fields", None)
-        if fields is None:
-            continue
-        known_launcher = _known_positive_component_id(getattr(fields, "launchers", None))
+        known_launcher = known_positive_component_id(record.fields.launchers)
         if known_launcher is not None:
             torp_ids.add(known_launcher)
-        for option_set in getattr(record, "build_option_sets", ()):
-            torp_id = getattr(option_set, "torp_id", None)
+        for option_set in record.build_option_sets:
+            torp_id = option_set.torp_id
             if torp_id is not None and torp_id > 0:
                 torp_ids.add(torp_id)
     return FleetLauncherBeliefSet(frozenset(torp_ids))
