@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.composition_export import build_fleet_composition_branch
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet.export_scope import ledgers_for_scope
+from api.analytics.fleet.types import FleetShipRecord, FleetTurnSnapshot
 from api.analytics.military_score_inference.fleet_torp_overlay import (
     FleetTorpOverlay,
-    launcher_belief_set_from_composition,
+    launcher_belief_set_from_fleet_records,
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
@@ -19,41 +20,72 @@ from api.models.game import TurnInfo
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
-FLEET_COMPOSITION_LAUNCHER_PATH = "$.composition.launcherTypes"
 
-
-def _launcher_types_from_persisted_fleet(
-    export_services: Mapping[str, object],
+def _resolve_fleet_services(
     *,
-    game_id: int,
-    perspective: int,
-    prior_turn: int,
-    player_id: int,
-    prior_turn_info: TurnInfo,
-) -> dict[str, object] | None:
-    """Read launcher histogram from a persisted fleet snapshot without export ensure."""
-    from api.analytics.fleet.compute_services import FleetComputeServices
+    query_context: AnalyticQueryContext | None,
+    export_services: Mapping[str, object] | None,
+):
+    from api.analytics.fleet.compute_services import FleetComputeServices, resolve_fleet_services
 
+    if query_context is not None:
+        return resolve_fleet_services(query_context)
+    if export_services is None:
+        return None
     fleet_services = export_services.get(FLEET_ANALYTIC_ID)
-    if not isinstance(fleet_services, FleetComputeServices):
-        return None
-    persistence = fleet_services.persistence
-    if not persistence.has_snapshot(game_id, perspective, prior_turn):
-        return None
-    snapshot = persistence.get_snapshot(game_id, perspective, prior_turn)
-    if snapshot is None:
-        return None
-    scope = ExportScope(
-        game_id=game_id,
-        perspective=perspective,
-        turn=prior_turn,
-        player_id=player_id,
+    if isinstance(fleet_services, FleetComputeServices):
+        return fleet_services
+    return None
+
+
+def _load_prior_turn_fleet_snapshot(
+    *,
+    scope: ExportScope,
+    query_context: AnalyticQueryContext | None,
+    export_services: Mapping[str, object] | None,
+    ensure: bool,
+    turn: TurnInfo,
+    load_turn: Callable[[int], TurnInfo | None],
+) -> FleetTurnSnapshot | None:
+    """Load prior-turn fleet snapshot from persistence or via export ensure."""
+    fleet_services = _resolve_fleet_services(
+        query_context=query_context,
+        export_services=export_services,
     )
-    composition = build_fleet_composition_branch(snapshot, scope, turn=prior_turn_info)
-    launcher_types = composition.get("launcherTypes")
-    if not isinstance(launcher_types, dict):
+    if fleet_services is None:
         return None
-    return launcher_types
+
+    persistence = fleet_services.persistence
+    if ensure:
+        from api.analytics.fleet.exports import ensure_fleet_export
+
+        ctx = query_context
+        if ctx is None:
+            if export_services is None:
+                return None
+            ctx = make_analytic_query_context(
+                turn,
+                TurnAnalyticsOptions(),
+                load_turn=load_turn,
+                export_services=export_services,
+            )
+        if not ensure_fleet_export(ctx, scope):
+            return None
+
+    if not persistence.has_snapshot(scope.game_id, scope.perspective, scope.turn):
+        return None
+    return persistence.get_snapshot(scope.game_id, scope.perspective, scope.turn)
+
+
+def _overlay_from_snapshot(
+    snapshot: FleetTurnSnapshot,
+    scope: ExportScope,
+) -> FleetTorpOverlay:
+    records: list[FleetShipRecord] = []
+    for ledger in ledgers_for_scope(snapshot, scope):
+        records.extend(ledger.records)
+    belief = launcher_belief_set_from_fleet_records(records)
+    return FleetTorpOverlay(belief_set=belief)
 
 
 def resolve_prior_turn_fleet_torp_overlay(
@@ -82,46 +114,22 @@ def resolve_prior_turn_fleet_torp_overlay(
     if prior_turn_info is None:
         return None
 
-    launcher_types: dict[str, object] | None = None
-    if not ensure and export_services is not None:
-        launcher_types = _launcher_types_from_persisted_fleet(
-            export_services,
-            game_id=turn.game.id,
-            perspective=turn.player.id,
-            prior_turn=prior_turn,
-            player_id=player_id,
-            prior_turn_info=prior_turn_info,
-        )
-    else:
-        ctx = query_context
-        if ctx is None:
-            if export_services is None:
-                return None
-            ctx = make_analytic_query_context(
-                turn,
-                TurnAnalyticsOptions(),
-                load_turn=load_turn,
-                export_services=export_services,
-            )
+    scope = ExportScope(
+        game_id=turn.game.id,
+        perspective=turn.player.id,
+        turn=prior_turn,
+        player_id=player_id,
+    )
 
-        result = ctx.query(
-            FLEET_ANALYTIC_ID,
-            [FLEET_COMPOSITION_LAUNCHER_PATH],
-            scope_overrides={"turn": prior_turn, "player_id": player_id},
-        )
-        if result.status != "ok":
-            return None
-
-        path_result = result.paths.get(FLEET_COMPOSITION_LAUNCHER_PATH)
-        if path_result is None or path_result.kind != "value":
-            return None
-
-        raw_launcher_types = path_result.value
-        if isinstance(raw_launcher_types, dict):
-            launcher_types = raw_launcher_types
-
-    if launcher_types is None:
+    snapshot = _load_prior_turn_fleet_snapshot(
+        scope=scope,
+        query_context=query_context,
+        export_services=export_services,
+        ensure=ensure,
+        turn=turn,
+        load_turn=load_turn,
+    )
+    if snapshot is None:
         return None
 
-    belief = launcher_belief_set_from_composition({"launcherTypes": launcher_types})
-    return FleetTorpOverlay(belief_set=belief)
+    return _overlay_from_snapshot(snapshot, scope)
