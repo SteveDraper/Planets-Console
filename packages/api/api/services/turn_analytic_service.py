@@ -60,6 +60,7 @@ class TurnAnalyticService:
                 fleet_persistence=self._fleet_persistence,
             )
             self._inference_invalidation.wire_fleet_invalidation_to_persistence()
+            self._inference_invalidation.wire_scores_invalidation_to_fleet_persistence()
         self._inference_scheduler = inference_scheduler
 
     def _load_scoreboard_turn(
@@ -182,17 +183,19 @@ class TurnAnalyticService:
         )
         load_scoreboard_turn = self._load_scoreboard_turn(game_id, perspective)
         export_services = self._turn_export_services(game_id, perspective)
+        fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
+            turn=turn,
+            player_id=player_id,
+            load_turn=load_scoreboard_turn,
+            export_services=export_services,
+        )
         return get_scores_row_inference(
             turn,
             player_id,
             load_scoreboard_turn=load_scoreboard_turn,
             resolved_mask=resolved_mask,
-            fleet_torp_overlay=resolve_prior_turn_fleet_torp_overlay(
-                turn=turn,
-                player_id=player_id,
-                load_turn=load_scoreboard_turn,
-                export_services=export_services,
-            ),
+            fleet_torp_overlay=fleet_resolution.overlay,
+            fleet_torp_input_status=fleet_resolution.input_status,
         )
 
     def iter_scores_table_inference_stream(
@@ -203,7 +206,9 @@ class TurnAnalyticService:
         player_ids: tuple[int, ...],
     ):
         from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+            PriorTurnFleetTorpResolution,
             resolve_prior_turn_fleet_torp_overlay,
+            schedule_background_prior_turn_fleet_warm,
         )
         from api.analytics.scores import iter_scores_table_inference_stream
 
@@ -219,7 +224,15 @@ class TurnAnalyticService:
         export_services = self._turn_export_services(game_id, perspective)
         load_turn = self._load_scoreboard_turn(game_id, perspective)
 
-        def resolve_fleet_torp_overlay_for_player(player_id: int):
+        schedule_background_prior_turn_fleet_warm(
+            turn=turn,
+            load_turn=load_turn,
+            export_services=export_services,
+        )
+
+        def resolve_fleet_torp_resolution_for_player(
+            player_id: int,
+        ) -> PriorTurnFleetTorpResolution:
             return resolve_prior_turn_fleet_torp_overlay(
                 turn=turn,
                 player_id=player_id,
@@ -239,7 +252,7 @@ class TurnAnalyticService:
             load_scoreboard_turn=load_turn,
             reload_host_turn=reload_host_turn,
             resolve_mask_for_player=resolve_mask_for_player,
-            resolve_fleet_torp_overlay_for_player=resolve_fleet_torp_overlay_for_player,
+            resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
         )

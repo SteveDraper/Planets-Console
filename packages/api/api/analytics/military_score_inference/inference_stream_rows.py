@@ -35,6 +35,10 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    FleetTorpInputStatus,
+    PriorTurnFleetTorpResolution,
+)
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.transport.inference_stream import (
@@ -189,6 +193,7 @@ def schedule_inference_row(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    fleet_torp_input_status: FleetTorpInputStatus | None = None,
     stream_token: str | None = None,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
@@ -211,6 +216,7 @@ def schedule_inference_row(
         turn_number=turn_number,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        fleet_torp_input_status=fleet_torp_input_status,
     )
     orchestration = create_inference_stream_orchestration(
         path,
@@ -349,7 +355,8 @@ def iter_scores_table_inference_events(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     reload_host_turn: Callable[[], TurnInfo] | None = None,
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
-    resolve_fleet_torp_overlay_for_player: Callable[[int], FleetTorpOverlay | None] | None = None,
+    resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
+    | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -384,7 +391,7 @@ def iter_scores_table_inference_events(
         load_scoreboard_turn=load_scoreboard_turn,
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
-        resolve_fleet_torp_overlay_for_player=resolve_fleet_torp_overlay_for_player,
+        resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
         persistence=persistence,
     )
     controller.attach()

@@ -71,6 +71,24 @@ class InferenceInvalidationService:
             return
         self._persistence.on_row_persisted = self.on_inference_evidence_updated
 
+    def wire_scores_invalidation_to_fleet_persistence(self) -> None:
+        """Register scores inference invalidation when fleet snapshots are persisted."""
+        if self._fleet_persistence is None:
+            self._fleet_persistence.on_snapshot_persisted = None
+            return
+        self._fleet_persistence.on_snapshot_persisted = self.on_fleet_snapshot_persisted
+
+    def on_fleet_snapshot_persisted(
+        self,
+        game_id: int,
+        perspective: int,
+        fleet_turn: int,
+    ) -> None:
+        """Drop scores@N inference rows and reschedule when fleet@(N-1) is persisted."""
+        host_turn = fleet_turn + 1
+        self._persistence.delete_host_turn_document(game_id, perspective, host_turn)
+        reschedule_all_inference_rows(self._scope(game_id, perspective, host_turn))
+
     def bind_scheduler(self, scheduler: InferenceRowScheduler) -> None:
         self._scheduler = scheduler
 

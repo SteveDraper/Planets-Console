@@ -219,7 +219,7 @@ def _run_prior_turn_sync_ensure(
             player_id=inputs.player_id,
             load_turn=load_scoreboard_turn,
             query_context=ctx,
-        ),
+        ).overlay,
     )
     status = str(inference.get("status", ""))
     if services.persistence is not None and is_persistable_inference_status(status):
@@ -305,7 +305,7 @@ def _ensure_current_turn_scheduler(
             player_id=inputs.player_id,
             load_turn=ctx.load_turn,
             query_context=ctx,
-        ),
+        ).overlay,
         stream_token=inputs.stream_token,
     )
     return True

@@ -14,6 +14,9 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    fleet_torp_input_status_diagnostics,
+)
 from api.analytics.military_score_inference.row_complete_factory import (
     row_complete_from_ladder_finalize,
     row_complete_stopped,
@@ -95,6 +98,9 @@ def _outcome_after_ladder_complete(
             step_diagnostics,
             observation=observation,
             turn=turn,
+            extra_diagnostics=fleet_torp_input_status_diagnostics(
+                run.session.fleet_torp_input_status,
+            ),
         ),
     )
 

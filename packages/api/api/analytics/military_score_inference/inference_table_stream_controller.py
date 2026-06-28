@@ -6,7 +6,6 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -22,6 +21,9 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     attach_inference_table_stream,
     detach_inference_table_stream,
+)
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    PriorTurnFleetTorpResolution,
 )
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -46,7 +48,9 @@ class InferenceTableStreamController:
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
     reload_host_turn: Callable[[], TurnInfo] | None = None
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None
-    resolve_fleet_torp_overlay_for_player: Callable[[int], FleetTorpOverlay | None] | None = None
+    resolve_fleet_torp_resolution_for_player: (
+        Callable[[int], PriorTurnFleetTorpResolution] | None
+    ) = None
     persistence: InferenceRowPersistenceService | None = None
     scheduled_rows: dict[int, ScheduledInferenceRow] = field(default_factory=dict)
     pending_wire_events: list[dict[str, object]] = field(default_factory=list)
@@ -80,10 +84,10 @@ class InferenceTableStreamController:
             if self.resolve_mask_for_player is not None
             else None
         )
-        fleet_torp_overlay = (
-            self.resolve_fleet_torp_overlay_for_player(player_id)
-            if self.resolve_fleet_torp_overlay_for_player is not None
-            else None
+        fleet_resolution = (
+            self.resolve_fleet_torp_resolution_for_player(player_id)
+            if self.resolve_fleet_torp_resolution_for_player is not None
+            else PriorTurnFleetTorpResolution(overlay=None, input_status="unavailable")
         )
         return schedule_inference_row(
             self.scheduler,
@@ -94,7 +98,8 @@ class InferenceTableStreamController:
             perspective=self.perspective,
             load_scoreboard_turn=self.load_scoreboard_turn,
             resolved_mask=resolved_mask,
-            fleet_torp_overlay=fleet_torp_overlay,
+            fleet_torp_overlay=fleet_resolution.overlay,
+            fleet_torp_input_status=fleet_resolution.input_status,
             stream_token=self.stream_token,
         )
 

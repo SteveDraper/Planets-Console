@@ -27,7 +27,8 @@ def test_resolve_prior_turn_overlay_returns_none_on_first_turn(first_turn):
         load_turn=ctx.load_turn,
         query_context=ctx,
     )
-    assert overlay is None
+    assert overlay.overlay is None
+    assert overlay.input_status == "not_applicable"
 
 
 def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample_turn, persistence):
@@ -37,7 +38,7 @@ def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample
         persistence=persistence,
     )
 
-    overlay = resolve_prior_turn_fleet_torp_overlay(
+    resolution = resolve_prior_turn_fleet_torp_overlay(
         turn=sample_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
@@ -45,7 +46,8 @@ def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample
         ensure=False,
     )
 
-    assert overlay is None
+    assert resolution.overlay is None
+    assert resolution.input_status == "pending"
 
 
 def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn, persistence):
@@ -93,7 +95,7 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
         snapshot,
     )
 
-    overlay = resolve_prior_turn_fleet_torp_overlay(
+    resolution = resolve_prior_turn_fleet_torp_overlay(
         turn=sample_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
@@ -101,19 +103,21 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
         ensure=False,
     )
 
-    assert overlay is not None
-    assert overlay.belief_set.torp_ids == frozenset({4, 8})
+    assert resolution.overlay is not None
+    assert resolution.overlay.belief_set.torp_ids == frozenset({4, 8})
+    assert resolution.input_status == "applied"
 
 
 def test_resolve_prior_turn_overlay_without_export_services_returns_none(sample_turn):
     ctx = export_chain_query_context(sample_turn)
-    overlay = resolve_prior_turn_fleet_torp_overlay(
+    resolution = resolve_prior_turn_fleet_torp_overlay(
         turn=sample_turn,
         player_id=8,
         load_turn=ctx.load_turn,
         export_services=None,
     )
-    assert overlay is None
+    assert resolution.overlay is None
+    assert resolution.input_status == "unavailable"
 
 
 def test_resolve_prior_turn_overlay_uses_export_services(sample_turn, persistence):
@@ -124,12 +128,13 @@ def test_resolve_prior_turn_overlay_uses_export_services(sample_turn, persistenc
     )
     seed_fleet_unwind_through(ctx, through_turn=sample_turn.settings.turn, player_id=player_id)
 
-    overlay = resolve_prior_turn_fleet_torp_overlay(
+    resolution = resolve_prior_turn_fleet_torp_overlay(
         turn=sample_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
     )
 
-    assert overlay is not None
-    assert overlay.enabled is True
+    assert resolution.overlay is not None
+    assert resolution.overlay.enabled is True
+    assert resolution.input_status == "applied"
