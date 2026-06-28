@@ -89,6 +89,37 @@ def _install_scheduler(
     return scheduler
 
 
+def test_on_fleet_snapshot_persisted_only_clears_host_turn_document(
+    memory_backend,
+    persistence,
+):
+    """Persisting fleet@(N-1) invalidates scores@N only, not scores@(N-1)."""
+    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
+    scheduler = InferenceRowScheduler(worker_count=0)
+    invalidation = InferenceInvalidationService(
+        persistence,
+        scheduler=scheduler,
+        fleet_persistence=fleet_persistence,
+    )
+
+    game_id, persp = 628580, 1
+    player_id = 8
+    row = PersistedInferenceRow(
+        status=STATUS_EXACT,
+        summary="cached",
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+    )
+    for host_turn in (110, 111):
+        persistence.put_row(game_id, persp, host_turn, player_id, row)
+
+    invalidation.on_fleet_snapshot_persisted(game_id, persp, fleet_turn=110)
+
+    assert persistence.get_row(game_id, persp, 111, player_id) is None
+    assert persistence.get_row(game_id, persp, 110, player_id) is not None
+
+
 def _fleet_overlay_from_diagnostics(diagnostics: object) -> dict[str, object]:
     assert isinstance(diagnostics, dict)
     fleet_overlay = diagnostics.get("fleetTorpOverlay")

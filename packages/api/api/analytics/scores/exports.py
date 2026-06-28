@@ -209,17 +209,19 @@ def _run_prior_turn_sync_ensure(
     if inputs is None:
         return False
 
+    fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
+        turn=turn,
+        player_id=inputs.player_id,
+        load_turn=load_scoreboard_turn,
+        query_context=ctx,
+    )
     inference = get_scores_row_inference(
         turn,
         inputs.player_id,
         load_scoreboard_turn=load_scoreboard_turn,
         resolved_mask=inputs.resolved_mask,
-        fleet_torp_overlay=resolve_prior_turn_fleet_torp_overlay(
-            turn=turn,
-            player_id=inputs.player_id,
-            load_turn=load_scoreboard_turn,
-            query_context=ctx,
-        ).overlay,
+        fleet_torp_overlay=fleet_resolution.overlay,
+        fleet_torp_input_status=fleet_resolution.input_status,
     )
     status = str(inference.get("status", ""))
     if services.persistence is not None and is_persistable_inference_status(status):
@@ -291,6 +293,12 @@ def _ensure_current_turn_scheduler(
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
 
+    fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
+        turn=turn,
+        player_id=inputs.player_id,
+        load_turn=ctx.load_turn,
+        query_context=ctx,
+    )
     schedule_inference_row(
         services.scheduler,
         score=inputs.score,
@@ -300,12 +308,8 @@ def _ensure_current_turn_scheduler(
         perspective=scope.perspective,
         load_scoreboard_turn=ctx.load_turn,
         resolved_mask=inputs.resolved_mask,
-        fleet_torp_overlay=resolve_prior_turn_fleet_torp_overlay(
-            turn=turn,
-            player_id=inputs.player_id,
-            load_turn=ctx.load_turn,
-            query_context=ctx,
-        ).overlay,
+        fleet_torp_overlay=fleet_resolution.overlay,
+        fleet_torp_input_status=fleet_resolution.input_status,
         stream_token=inputs.stream_token,
     )
     return True
