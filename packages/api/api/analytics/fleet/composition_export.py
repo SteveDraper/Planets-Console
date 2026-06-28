@@ -1,8 +1,6 @@
-"""Fleet export composition branch: belief-set histograms and max tech levels.
+"""Fleet export composition branch: component histograms and max tech levels.
 
-Contract: design-fleet-analytic.md (`$.composition`). Belief-set ids include inferred
-fleet build option sets (union per row), not sightings-only known fields. Current
-materializer may emit known-field histograms only until #133 lands.
+Full belief-set composition (build option set unions on inferred rows) is #133 scope.
 """
 
 from __future__ import annotations
