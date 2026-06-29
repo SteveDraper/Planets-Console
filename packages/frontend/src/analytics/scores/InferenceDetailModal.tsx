@@ -12,11 +12,7 @@ import {
 } from './inferenceConstraints'
 import { InferenceSolutionLineIcon } from './inferenceSolutionLineIcon'
 import { readInferenceRunSummary } from './inferenceRunSummary'
-import {
-  fleetTorpInputAccessibleLabel,
-  readFleetTorpInputStatus,
-  readFleetTorpOverlayBeliefSetTorpIds,
-} from './fleetTorpInputStatus'
+import { FleetTorpInputStatusDetail } from './FleetTorpInputStatusDetail'
 import { isRecord } from './scoresWireParsers'
 import {
   formatSolutionLineItemLabel,
@@ -169,11 +165,6 @@ export function InferenceDetailModal({
   const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
   const constraints = readInferenceConstraints(diagnostics)
   const inferenceRun = readInferenceRunSummary(detail, diagnostics)
-  const fleetTorpInputStatus = readFleetTorpInputStatus(diagnostics)
-  const fleetTorpBeliefSetTorpIds =
-    fleetTorpInputStatus === 'applied'
-      ? readFleetTorpOverlayBeliefSetTorpIds(diagnostics)
-      : null
   const scoreboardTurn = constraints?.turn
   const hostTurn =
     constraints?.hostTurn ??
@@ -263,19 +254,7 @@ export function InferenceDetailModal({
           </section>
         ) : null}
 
-        {fleetTorpInputStatus != null ? (
-          <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
-            <h3 className="text-xs font-medium text-slate-200">Fleet torpedo overlay input</h3>
-            <p className="mt-2 text-xs text-slate-300">
-              {fleetTorpInputAccessibleLabel(fleetTorpInputStatus)}
-            </p>
-            {fleetTorpBeliefSetTorpIds != null && fleetTorpBeliefSetTorpIds.length > 0 ? (
-              <p className="mt-1 text-xs text-slate-400">
-                Belief-set torpedo ids: {fleetTorpBeliefSetTorpIds.join(', ')}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
+        <FleetTorpInputStatusDetail diagnostics={diagnostics} />
 
         {inferenceRun.statusLabel != null || inferenceRun.wallTimeSeconds != null ? (
           <p className="text-xs text-slate-500">
