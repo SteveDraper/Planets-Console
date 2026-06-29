@@ -36,12 +36,39 @@ class PriorTurnFleetTorpResolution:
     input_status: FleetTorpInputStatus
 
 
+_FLEET_TORP_INPUT_STATUSES: frozenset[str] = frozenset(
+    {"not_applicable", "pending", "applied", "unavailable"}
+)
+
+
 def fleet_torp_input_status_diagnostics(
     input_status: FleetTorpInputStatus | None,
 ) -> dict[str, object]:
     if input_status is None:
         return {}
     return {"fleetTorpInputStatus": input_status}
+
+
+def fleet_torp_complete_wire_fields_from_diagnostics(
+    diagnostics: dict[str, object] | None,
+) -> tuple[FleetTorpInputStatus | None, list[int] | None]:
+    """Promote fleet torp functional fields out of diagnostics for wire payloads."""
+    if not diagnostics:
+        return None, None
+
+    input_status: FleetTorpInputStatus | None = None
+    status_raw = diagnostics.get("fleetTorpInputStatus")
+    if isinstance(status_raw, str) and status_raw in _FLEET_TORP_INPUT_STATUSES:
+        input_status = status_raw  # type: ignore[assignment]
+
+    belief_set_torp_ids: list[int] | None = None
+    overlay = diagnostics.get("fleetTorpOverlay")
+    if isinstance(overlay, dict):
+        ids_raw = overlay.get("beliefSetTorpIds")
+        if isinstance(ids_raw, list):
+            belief_set_torp_ids = [torp_id for torp_id in ids_raw if isinstance(torp_id, int)]
+
+    return input_status, belief_set_torp_ids
 
 
 def _resolve_fleet_services(

@@ -1,29 +1,30 @@
+import type { ScoresInferenceRowDetail } from '../../api/bff'
 import { cn } from '../../lib/utils'
 import {
   fleetTorpInputAccessibleLabel,
-  readFleetTorpInputStatus,
-  readFleetTorpOverlayBeliefSetTorpIds,
+  readFleetTorpInputStatusFromDetail,
+  readFleetTorpOverlayBeliefSetTorpIdsFromDetail,
 } from './fleetTorpInputStatus'
 
 type FleetTorpInputStatusDetailProps = {
-  diagnostics: Record<string, unknown>
+  detail: ScoresInferenceRowDetail
   variant?: 'section' | 'inline'
   className?: string
 }
 
 export function FleetTorpInputStatusDetail({
-  diagnostics,
+  detail,
   variant = 'section',
   className,
 }: FleetTorpInputStatusDetailProps) {
-  const status = readFleetTorpInputStatus(diagnostics)
+  const status = readFleetTorpInputStatusFromDetail(detail)
   if (status == null) {
     return null
   }
 
   const label = fleetTorpInputAccessibleLabel(status)
   const beliefSetTorpIds =
-    status === 'applied' ? readFleetTorpOverlayBeliefSetTorpIds(diagnostics) : null
+    status === 'applied' ? readFleetTorpOverlayBeliefSetTorpIdsFromDetail(detail) : null
   const beliefText =
     beliefSetTorpIds != null && beliefSetTorpIds.length > 0
       ? `Belief-set torpedo ids: ${beliefSetTorpIds.join(', ')}`

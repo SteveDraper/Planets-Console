@@ -1,19 +1,11 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
+import type { FleetTorpInputStatus } from '../../api/inferenceStreamEventSchema'
+import { FLEET_TORP_INPUT_STATUSES } from '../../api/inferenceStreamEventSchema'
 import { isRecord } from './scoresWireParsers'
 
-export const FLEET_TORP_INPUT_STATUSES = [
-  'not_applicable',
-  'pending',
-  'applied',
-  'unavailable',
-] as const
+export { FLEET_TORP_INPUT_STATUSES, type FleetTorpInputStatus }
 
-export type FleetTorpInputStatus = (typeof FLEET_TORP_INPUT_STATUSES)[number]
-
-export function readFleetTorpInputStatus(
-  diagnostics: Record<string, unknown>
-): FleetTorpInputStatus | null {
-  const value = diagnostics.fleetTorpInputStatus
+export function parseFleetTorpInputStatus(value: unknown): FleetTorpInputStatus | null {
   if (
     typeof value === 'string' &&
     (FLEET_TORP_INPUT_STATUSES as readonly string[]).includes(value)
@@ -21,6 +13,13 @@ export function readFleetTorpInputStatus(
     return value as FleetTorpInputStatus
   }
   return null
+}
+
+/** Diagnostics-only reader for debug panels; functional UI paths use detail first-class fields. */
+export function readFleetTorpInputStatusFromDiagnostics(
+  diagnostics: Record<string, unknown>
+): FleetTorpInputStatus | null {
+  return parseFleetTorpInputStatus(diagnostics.fleetTorpInputStatus)
 }
 
 export function fleetTorpInputAccessibleLabel(status: FleetTorpInputStatus): string {
@@ -36,7 +35,8 @@ export function fleetTorpInputAccessibleLabel(status: FleetTorpInputStatus): str
   }
 }
 
-export function readFleetTorpOverlayBeliefSetTorpIds(
+/** Diagnostics-only reader for debug panels; functional UI paths use detail first-class fields. */
+export function readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics(
   diagnostics: Record<string, unknown>
 ): number[] | null {
   const overlay = diagnostics.fleetTorpOverlay
@@ -57,8 +57,17 @@ export function fleetTorpInputShowsTableIndicator(status: FleetTorpInputStatus):
 export function readFleetTorpInputStatusFromDetail(
   detail: ScoresInferenceRowDetail
 ): FleetTorpInputStatus | null {
-  const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
-  return readFleetTorpInputStatus(diagnostics)
+  return parseFleetTorpInputStatus(detail.fleetTorpInputStatus)
+}
+
+export function readFleetTorpOverlayBeliefSetTorpIdsFromDetail(
+  detail: ScoresInferenceRowDetail
+): number[] | null {
+  const ids = detail.fleetTorpOverlayBeliefSetTorpIds
+  if (ids == null) {
+    return null
+  }
+  return ids.filter((id): id is number => typeof id === 'number')
 }
 
 export function countFleetTorpPendingRows(details: ScoresInferenceRowDetail[]): number {

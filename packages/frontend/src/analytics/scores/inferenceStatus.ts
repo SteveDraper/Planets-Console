@@ -1,9 +1,8 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
 import {
   fleetTorpInputAccessibleLabel,
-  readFleetTorpInputStatus,
+  readFleetTorpInputStatusFromDetail,
 } from './fleetTorpInputStatus'
-import { isRecord } from './scoresWireParsers'
 
 export type InferenceDisplayStatus = ScoresInferenceRowDetail['displayStatus']
 
@@ -28,9 +27,9 @@ function baseInferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string 
 
 function combineInferenceAccessibleLabel(
   inferenceLabel: string,
-  diagnostics: Record<string, unknown>
+  detail: ScoresInferenceRowDetail
 ): string {
-  const fleetStatus = readFleetTorpInputStatus(diagnostics)
+  const fleetStatus = readFleetTorpInputStatusFromDetail(detail)
   if (fleetStatus == null || fleetStatus === 'not_applicable') {
     return inferenceLabel
   }
@@ -38,8 +37,7 @@ function combineInferenceAccessibleLabel(
 }
 
 export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string {
-  const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
-  return combineInferenceAccessibleLabel(baseInferenceAccessibleLabel(detail), diagnostics)
+  return combineInferenceAccessibleLabel(baseInferenceAccessibleLabel(detail), detail)
 }
 
 export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolean {

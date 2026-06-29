@@ -22,6 +22,9 @@ from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    fleet_torp_complete_wire_fields_from_diagnostics,
+)
 from api.models.game import TurnInfo
 
 STATUS_NO_PRIOR_TURN = "no_prior_turn"
@@ -154,7 +157,10 @@ def inference_api_payload(
     observation: InferenceObservation | None = None,
     catalog: ActionCatalog | None = None,
 ) -> dict[str, object]:
-    return {
+    fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
+        fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
+    )
+    payload: dict[str, object] = {
         "status": status,
         "summary": summary,
         "solutionCount": len(solutions),
@@ -169,6 +175,11 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
+    if fleet_torp_input_status is not None:
+        payload["fleetTorpInputStatus"] = fleet_torp_input_status
+    if fleet_torp_overlay_belief_set_torp_ids is not None:
+        payload["fleetTorpOverlayBeliefSetTorpIds"] = fleet_torp_overlay_belief_set_torp_ids
+    return payload
 
 
 def _serialize_solution_actions(

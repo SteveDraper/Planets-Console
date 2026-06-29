@@ -88,6 +88,14 @@ def _shape_inference_detail(
             "solutions": inference.get("solutions", []),
             "diagnostics": inference.get("diagnostics", {}),
         }
+        fleet_torp_input_status = inference.get("fleetTorpInputStatus")
+        if isinstance(fleet_torp_input_status, str):
+            shaped["fleetTorpInputStatus"] = fleet_torp_input_status
+        belief_set_torp_ids = inference.get("fleetTorpOverlayBeliefSetTorpIds")
+        if isinstance(belief_set_torp_ids, list):
+            shaped["fleetTorpOverlayBeliefSetTorpIds"] = [
+                torp_id for torp_id in belief_set_torp_ids if isinstance(torp_id, int)
+            ]
     if isinstance(player_id, int):
         shaped["playerId"] = player_id
     return shaped

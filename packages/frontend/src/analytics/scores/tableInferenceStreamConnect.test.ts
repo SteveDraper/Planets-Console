@@ -8,6 +8,7 @@ import {
   TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
   connectTableInferenceStream,
   connectTableInferenceStreamUntilComplete,
+  resetLastFleetTorpInputStatusForTests,
 } from './tableInferenceStreamConnect'
 
 const scope = {
@@ -19,6 +20,7 @@ const scope = {
 describe('connectTableInferenceStream', () => {
   beforeEach(() => {
     useScoresInferenceRevisionStore.getState().resetRevisions()
+    resetLastFleetTorpInputStatusForTests()
   })
   it('retries when the scope-level stream conflict error is returned', async () => {
     const fetchSpy = vi
@@ -102,14 +104,18 @@ describe('connectTableInferenceStream', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
-  it('bumps scores inference revision on solution and complete stream events', async () => {
+  it('bumps scores inference revision on complete but not on every solution', async () => {
     vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
       async (_scope, _playerIds, handlers) => {
         handlers.onEvent({
           type: 'progress',
           playerId: 8,
-          status: 'searching',
-          summary: 'still running',
+          policyStepId: 'early_game_bands',
+        })
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [],
         })
         handlers.onEvent({
           type: 'solution',
@@ -133,7 +139,49 @@ describe('connectTableInferenceStream', () => {
       onEvent: () => {},
     })
 
-    expect(scoresInferenceRevisionForScope(scope)).toBe(2)
+    expect(scoresInferenceRevisionForScope(scope)).toBe(1)
+  })
+
+  it('bumps scores inference revision on solution when fleet torp status changes', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [],
+          fleetTorpInputStatus: 'pending',
+        })
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [],
+          fleetTorpInputStatus: 'pending',
+        })
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [],
+          fleetTorpInputStatus: 'applied',
+        })
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'done',
+          solutionCount: 1,
+          isComplete: true,
+          fleetTorpInputStatus: 'applied',
+        })
+      }
+    )
+
+    const controller = new AbortController()
+    await connectTableInferenceStream(scope, [8], {
+      signal: controller.signal,
+      onEvent: () => {},
+    })
+
+    expect(scoresInferenceRevisionForScope(scope)).toBe(3)
   })
 
   it('does not bump scores inference revision on scope-level stream conflict errors', async () => {

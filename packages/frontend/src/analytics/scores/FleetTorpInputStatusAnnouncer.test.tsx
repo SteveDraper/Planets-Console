@@ -55,7 +55,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
         inferenceByRow={[
           inferenceRow({
             playerId: 1,
-            diagnostics: { fleetTorpInputStatus: 'not_applicable' },
+            fleetTorpInputStatus: 'not_applicable',
           }),
         ]}
       />
@@ -65,7 +65,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
       <FleetTorpInputStatusAnnouncer
         analyticScope={scopeA}
         inferenceByRow={[
-          inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'pending' } }),
+          inferenceRow({ playerId: 1, fleetTorpInputStatus: 'pending' }),
         ]}
       />
     )
@@ -83,7 +83,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
       <FleetTorpInputStatusAnnouncer
         analyticScope={scopeA}
         inferenceByRow={[
-          inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'pending' } }),
+          inferenceRow({ playerId: 1, fleetTorpInputStatus: 'pending' }),
         ]}
       />
     )
@@ -96,7 +96,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
       <FleetTorpInputStatusAnnouncer
         analyticScope={scopeA}
         inferenceByRow={[
-          inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'applied' } }),
+          inferenceRow({ playerId: 1, fleetTorpInputStatus: 'applied' }),
         ]}
       />
     )
@@ -110,7 +110,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
 
   it('does not announce again when status is unchanged', async () => {
     const pendingLabel = fleetTorpInputAccessibleLabel('pending')
-    const row = inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'pending' } })
+    const row = inferenceRow({ playerId: 1, fleetTorpInputStatus: 'pending' })
     const { rerender } = render(
       <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[row]} />
     )
@@ -135,11 +135,11 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     const appliedLabel = fleetTorpInputAccessibleLabel('applied')
     const pendingRow = inferenceRow({
       playerId: 1,
-      diagnostics: { fleetTorpInputStatus: 'pending' },
+      fleetTorpInputStatus: 'pending',
     })
     const appliedRow = inferenceRow({
       playerId: 1,
-      diagnostics: { fleetTorpInputStatus: 'applied' },
+      fleetTorpInputStatus: 'applied',
     })
     const { rerender } = render(
       <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[pendingRow]} />
@@ -177,7 +177,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
       <FleetTorpInputStatusAnnouncer
         analyticScope={scopeA}
         inferenceByRow={[
-          inferenceRow({ diagnostics: { fleetTorpInputStatus: 'pending' } }),
+          inferenceRow({ fleetTorpInputStatus: 'pending' }),
         ]}
       />
     )

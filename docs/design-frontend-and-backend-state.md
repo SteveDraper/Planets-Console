@@ -19,7 +19,7 @@ Stores are **in-memory** unless a store explicitly adds persistence middleware. 
 | **Enabled analytics** | `packages/frontend/src/stores/enabledAnalytics.ts` | Persisted sidebar master enable toggles (`planets-console-enabled-analytics`; default none enabled). |
 | **Stellar Cartography layers** | `packages/frontend/src/stores/stellarCartographyLayers.ts` | Persisted per-layer map visibility toggles for the Stellar Cartography analytic (`planets-console-stellar-cartography-layers`; default all on). |
 | **Display preferences** | `packages/frontend/src/stores/displayPreferences.ts` | Player/sector list label modes (persisted). |
-| **Scores inference revision** | `packages/frontend/src/stores/scoresInferenceRevision.ts` | Monotonic per-scope revision bumped when the scores inference NDJSON stream emits `solution` or `complete` for any player. Downstream analytics (e.g. fleet table) include this counter in TanStack Query keys so they refetch without scores UI calling `invalidateQueries` for other analytics. |
+| **Scores inference revision** | `packages/frontend/src/stores/scoresInferenceRevision.ts` | Monotonic per-scope revision bumped when the scores inference NDJSON stream emits `complete` for any player, or `solution` only when first-class `fleetTorpInputStatus` changes vs the last known value for that scope. Downstream analytics (e.g. fleet table) include this counter in TanStack Query keys so they refetch without scores UI calling `invalidateQueries` for other analytics. |
 
 **When to use Zustand:** identity or shell context needed in **multiple** places (header, main area, mutations), or **`getState()`** from outside React (e.g. inside a mutation callback).
 

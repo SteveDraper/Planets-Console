@@ -4,13 +4,17 @@ import {
   fleetTorpInputAccessibleLabel,
   fleetTorpInputScopeBannerText,
   fleetTorpInputShowsTableIndicator,
-  readFleetTorpInputStatus,
-  readFleetTorpOverlayBeliefSetTorpIds,
+  parseFleetTorpInputStatus,
+  readFleetTorpInputStatusFromDetail,
+  readFleetTorpInputStatusFromDiagnostics,
+  readFleetTorpOverlayBeliefSetTorpIdsFromDetail,
+  readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics,
 } from './fleetTorpInputStatus'
 import type { ScoresInferenceRowDetail } from '../../api/bff'
 
 function rowDetail(
-  fleetTorpInputStatus: string | undefined
+  fleetTorpInputStatus: string | undefined,
+  beliefSetTorpIds?: number[]
 ): ScoresInferenceRowDetail {
   return {
     displayStatus: 'success',
@@ -19,8 +23,9 @@ function rowDetail(
     solutionCount: 1,
     isComplete: true,
     solutions: [],
-    diagnostics:
-      fleetTorpInputStatus != null ? { fleetTorpInputStatus } : {},
+    diagnostics: {},
+    ...(fleetTorpInputStatus != null ? { fleetTorpInputStatus: fleetTorpInputStatus as never } : {}),
+    ...(beliefSetTorpIds != null ? { fleetTorpOverlayBeliefSetTorpIds: beliefSetTorpIds } : {}),
   }
 }
 
@@ -33,22 +38,45 @@ describe('fleetTorpInputAccessibleLabel', () => {
   })
 })
 
-describe('readFleetTorpInputStatus', () => {
+describe('parseFleetTorpInputStatus', () => {
   it('parses known wire values and rejects unknown', () => {
-    expect(readFleetTorpInputStatus({ fleetTorpInputStatus: 'pending' })).toBe('pending')
-    expect(readFleetTorpInputStatus({ fleetTorpInputStatus: 'applied' })).toBe('applied')
-    expect(readFleetTorpInputStatus({ fleetTorpInputStatus: 'bogus' })).toBeNull()
+    expect(parseFleetTorpInputStatus('pending')).toBe('pending')
+    expect(parseFleetTorpInputStatus('applied')).toBe('applied')
+    expect(parseFleetTorpInputStatus('bogus')).toBeNull()
   })
 })
 
-describe('readFleetTorpOverlayBeliefSetTorpIds', () => {
+describe('readFleetTorpInputStatusFromDiagnostics', () => {
+  it('reads fleet torp status from diagnostics for debug panels', () => {
+    expect(
+      readFleetTorpInputStatusFromDiagnostics({ fleetTorpInputStatus: 'pending' })
+    ).toBe('pending')
+  })
+})
+
+describe('readFleetTorpInputStatusFromDetail', () => {
+  it('reads first-class fleet torp status from row detail', () => {
+    expect(readFleetTorpInputStatusFromDetail(rowDetail('pending'))).toBe('pending')
+    expect(readFleetTorpInputStatusFromDetail(rowDetail(undefined))).toBeNull()
+  })
+})
+
+describe('readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics', () => {
   it('reads beliefSetTorpIds from fleetTorpOverlay diagnostics', () => {
     expect(
-      readFleetTorpOverlayBeliefSetTorpIds({
+      readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics({
         fleetTorpOverlay: { beliefSetTorpIds: [4, 8] },
       })
     ).toEqual([4, 8])
-    expect(readFleetTorpOverlayBeliefSetTorpIds({})).toBeNull()
+    expect(readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics({})).toBeNull()
+  })
+})
+
+describe('readFleetTorpOverlayBeliefSetTorpIdsFromDetail', () => {
+  it('reads first-class belief set torp ids from row detail', () => {
+    expect(
+      readFleetTorpOverlayBeliefSetTorpIdsFromDetail(rowDetail('applied', [4, 8]))
+    ).toEqual([4, 8])
   })
 })
 

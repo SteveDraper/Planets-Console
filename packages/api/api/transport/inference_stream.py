@@ -62,6 +62,8 @@ def inference_complete_event(
     diagnostics: dict[str, object] | None = None,
     solutions: list[dict[str, object]] | None = None,
     host_turn_targets: list[dict[str, object]] | None = None,
+    fleet_torp_input_status: str | None = None,
+    fleet_torp_overlay_belief_set_torp_ids: list[int] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -76,6 +78,10 @@ def inference_complete_event(
         payload["diagnostics"] = diagnostics
     if host_turn_targets is not None:
         payload["hostTurnTargets"] = host_turn_targets
+    if fleet_torp_input_status is not None:
+        payload["fleetTorpInputStatus"] = fleet_torp_input_status
+    if fleet_torp_overlay_belief_set_torp_ids is not None:
+        payload["fleetTorpOverlayBeliefSetTorpIds"] = fleet_torp_overlay_belief_set_torp_ids
     return payload
 
 

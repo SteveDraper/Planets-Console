@@ -67,6 +67,28 @@ def test_row_complete_to_complete_wire_event_includes_solutions(sample_turn) -> 
     assert wire["solutions"][0]["actions"][0]["actionId"] == "action_a"
 
 
+def test_row_complete_to_complete_wire_event_promotes_fleet_torp_fields() -> None:
+    from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
+
+    promoted = inference_api_payload_to_wire_complete(
+        {
+            "status": "exact",
+            "summary": "Best: one build",
+            "solutionCount": 1,
+            "isComplete": True,
+            "solutions": [],
+            "diagnostics": {
+                "fleetTorpInputStatus": "applied",
+                "fleetTorpOverlay": {"beliefSetTorpIds": [4, 8]},
+            },
+        }
+    )
+
+    assert promoted["fleetTorpInputStatus"] == "applied"
+    assert promoted["fleetTorpOverlayBeliefSetTorpIds"] == [4, 8]
+    assert promoted["diagnostics"]["fleetTorpInputStatus"] == "applied"
+
+
 def test_stream_inference_ndjson_yields_error_line_on_failure() -> None:
     def failing_loader():
         raise RuntimeError("simulated defect")

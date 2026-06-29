@@ -19,6 +19,9 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.models.game import TurnInfo
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    fleet_torp_complete_wire_fields_from_diagnostics,
+)
 from api.transport.inference_stream import (
     inference_complete_event,
     inference_error_event,
@@ -26,6 +29,28 @@ from api.transport.inference_stream import (
     inference_progress_event,
     inference_solution_event,
 )
+
+
+def _complete_event_fleet_torp_wire_fields(
+    *,
+    diagnostics: dict[str, object] | None,
+    fleet_torp_input_status: object | None = None,
+    fleet_torp_overlay_belief_set_torp_ids: object | None = None,
+) -> tuple[str | None, list[int] | None]:
+    if fleet_torp_input_status is not None or fleet_torp_overlay_belief_set_torp_ids is not None:
+        status = (
+            str(fleet_torp_input_status) if fleet_torp_input_status is not None else None
+        )
+        belief_ids: list[int] | None = None
+        if isinstance(fleet_torp_overlay_belief_set_torp_ids, list):
+            belief_ids = [
+                torp_id
+                for torp_id in fleet_torp_overlay_belief_set_torp_ids
+                if isinstance(torp_id, int)
+            ]
+        return status, belief_ids
+
+    return fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
 
 
 def _wire_host_turn_targets(
@@ -43,14 +68,26 @@ def inference_api_payload_to_wire_complete(
     """Shape a scores row inference API payload into a terminal wire ``complete`` event."""
     wire_solutions = payload.get("solutions")
     diagnostics = payload.get("diagnostics")
+    diagnostics_dict = diagnostics if isinstance(diagnostics, dict) else None
+    fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
+        _complete_event_fleet_torp_wire_fields(
+            diagnostics=diagnostics_dict,
+            fleet_torp_input_status=payload.get("fleetTorpInputStatus"),
+            fleet_torp_overlay_belief_set_torp_ids=payload.get(
+                "fleetTorpOverlayBeliefSetTorpIds"
+            ),
+        )
+    )
     return inference_complete_event(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
         solution_count=int(payload.get("solutionCount", 0)),
         is_complete=bool(payload.get("isComplete", True)),
-        diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        diagnostics=diagnostics_dict,
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
         host_turn_targets=_wire_host_turn_targets(payload.get("hostTurnTargets")),
+        fleet_torp_input_status=fleet_torp_input_status,
+        fleet_torp_overlay_belief_set_torp_ids=fleet_torp_overlay_belief_set_torp_ids,
     )
 
 
@@ -66,6 +103,9 @@ def row_complete_to_complete_wire_event(
         wire_targets = [
             host_turn_functional_target_to_wire_dict(target) for target in payload.host_turn_targets
         ]
+    fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
+        fleet_torp_complete_wire_fields_from_diagnostics(payload.diagnostics)
+    )
     return inference_complete_event(
         status=payload.status,
         summary=payload.summary,
@@ -74,6 +114,8 @@ def row_complete_to_complete_wire_event(
         diagnostics=payload.diagnostics,
         solutions=payload.solutions,
         host_turn_targets=wire_targets,
+        fleet_torp_input_status=fleet_torp_input_status,
+        fleet_torp_overlay_belief_set_torp_ids=fleet_torp_overlay_belief_set_torp_ids,
     )
 
 
