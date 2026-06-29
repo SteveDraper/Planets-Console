@@ -3,7 +3,7 @@ import * as bff from '../../api/bff'
 import {
   scoresInferenceRevisionForScope,
   useScoresInferenceRevisionStore,
-} from '../../shell/scoresInferenceRevision'
+} from '../../stores/scoresInferenceRevision'
 import {
   TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
   connectTableInferenceStream,

@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { AnalyticShellScope, TableDataResponse } from '../../api/bff'
 import {
   bumpScoresInferenceRevision,
   useScoresInferenceRevisionStore,
-} from '../../shell/scoresInferenceRevision'
+} from '../../stores/scoresInferenceRevision'
 import { useFleetTableQuery } from './useFleetTableQuery'
 
 vi.mock('../../api/bff', async (importOriginal) => {
@@ -43,20 +43,18 @@ describe('useFleetTableQuery', () => {
   it('refetches when scores inference revision bumps for the same scope', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-    const { rerender } = renderHook(
-      ({ activeScope, enabled }) => useFleetTableQuery(activeScope, enabled),
-      {
-        wrapper: createWrapper(client),
-        initialProps: { activeScope: scope, enabled: true },
-      }
-    )
+    renderHook(({ activeScope, enabled }) => useFleetTableQuery(activeScope, enabled), {
+      wrapper: createWrapper(client),
+      initialProps: { activeScope: scope, enabled: true },
+    })
 
     await waitFor(() => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
     })
 
-    bumpScoresInferenceRevision(scope)
-    rerender({ activeScope: scope, enabled: true })
+    act(() => {
+      bumpScoresInferenceRevision(scope)
+    })
 
     await waitFor(() => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(2)

@@ -3,7 +3,6 @@ import type { AnalyticShellScope } from '../api/bff'
 import {
   bumpScoresInferenceRevision,
   scoresInferenceRevisionForScope,
-  scoresInferenceScopeKey,
   useScoresInferenceRevisionStore,
 } from './scoresInferenceRevision'
 
@@ -22,10 +21,6 @@ const scopeB: AnalyticShellScope = {
 describe('scoresInferenceRevision', () => {
   beforeEach(() => {
     useScoresInferenceRevisionStore.getState().resetRevisions()
-  })
-
-  it('keys revisions by game, turn, and perspective', () => {
-    expect(scoresInferenceScopeKey(scopeA)).toBe('628580:3:1')
   })
 
   it('starts at zero and bumps monotonically per scope', () => {

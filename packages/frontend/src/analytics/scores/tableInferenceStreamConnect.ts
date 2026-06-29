@@ -1,7 +1,7 @@
 import type { AnalyticShellScope } from '../../api/bff'
 import { fetchScoresTableInferenceStream } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
-import { bumpScoresInferenceRevision } from '../../shell/scoresInferenceRevision'
+import { bumpScoresInferenceRevision } from '../../stores/scoresInferenceRevision'
 
 export const TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
   'An inference table stream is already active for this scope.'

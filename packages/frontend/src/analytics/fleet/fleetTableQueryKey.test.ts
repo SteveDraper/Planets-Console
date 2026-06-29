@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { AnalyticShellScope } from '../../api/bff'
 import {
   bumpScoresInferenceRevision,
+  scoresInferenceRevisionForScope,
   useScoresInferenceRevisionStore,
-} from '../../shell/scoresInferenceRevision'
+} from '../../stores/scoresInferenceRevision'
 import { fleetTableQueryKey } from './fleetTableQueryKey'
 
 const scope: AnalyticShellScope = {
@@ -28,9 +29,9 @@ describe('fleetTableQueryKey', () => {
   })
 
   it('changes when scores inference revision bumps for the same scope', () => {
-    const initialKey = fleetTableQueryKey(scope, 0)
+    const initialKey = fleetTableQueryKey(scope, scoresInferenceRevisionForScope(scope))
     bumpScoresInferenceRevision(scope)
-    const nextKey = fleetTableQueryKey(scope, 1)
+    const nextKey = fleetTableQueryKey(scope, scoresInferenceRevisionForScope(scope))
 
     expect(nextKey).not.toEqual(initialKey)
     expect(nextKey[4]).toBe(1)
