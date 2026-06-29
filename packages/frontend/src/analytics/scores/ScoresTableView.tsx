@@ -170,7 +170,10 @@ export function ScoresTableView({
           {fleetTorpScopeBanner}
         </p>
       ) : null}
-      <FleetTorpInputStatusAnnouncer inferenceByRow={inferenceByRow} />
+      <FleetTorpInputStatusAnnouncer
+        analyticScope={analyticScope}
+        inferenceByRow={inferenceByRow}
+      />
       <div className="max-h-[calc(100dvh-14rem)] overflow-auto overscroll-contain">
         <table className="min-w-full border-separate border-spacing-0 text-sm">
           <thead>

@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { ScoresInferenceRowDetail } from '../../api/bff'
+import type { AnalyticShellScope, ScoresInferenceRowDetail } from '../../api/bff'
 import { FleetTorpInputStatusAnnouncer } from './FleetTorpInputStatusAnnouncer'
 import { fleetTorpInputAccessibleLabel } from './fleetTorpInputStatus'
 
@@ -8,6 +8,18 @@ function flushAnimationFrame(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve())
   })
+}
+
+const scopeA: AnalyticShellScope = {
+  gameId: '628580',
+  turn: 3,
+  perspective: 1,
+}
+
+const scopeB: AnalyticShellScope = {
+  gameId: '628580',
+  turn: 4,
+  perspective: 1,
 }
 
 function inferenceRow(
@@ -27,7 +39,7 @@ function inferenceRow(
 
 describe('FleetTorpInputStatusAnnouncer', () => {
   it('always mounts an aria-live status region', () => {
-    render(<FleetTorpInputStatusAnnouncer inferenceByRow={[]} />)
+    render(<FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[]} />)
     const region = screen.getByRole('status')
     expect(region).toHaveAttribute('aria-live', 'polite')
     expect(region).toHaveAttribute('aria-atomic', 'true')
@@ -39,6 +51,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     const pendingLabel = fleetTorpInputAccessibleLabel('pending')
     const { rerender } = render(
       <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
         inferenceByRow={[
           inferenceRow({
             playerId: 1,
@@ -50,6 +63,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
 
     rerender(
       <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
         inferenceByRow={[
           inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'pending' } }),
         ]}
@@ -67,6 +81,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     const appliedLabel = fleetTorpInputAccessibleLabel('applied')
     const { rerender } = render(
       <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
         inferenceByRow={[
           inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'pending' } }),
         ]}
@@ -79,6 +94,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
 
     rerender(
       <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
         inferenceByRow={[
           inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'applied' } }),
         ]}
@@ -95,7 +111,9 @@ describe('FleetTorpInputStatusAnnouncer', () => {
   it('does not announce again when status is unchanged', async () => {
     const pendingLabel = fleetTorpInputAccessibleLabel('pending')
     const row = inferenceRow({ playerId: 1, diagnostics: { fleetTorpInputStatus: 'pending' } })
-    const { rerender } = render(<FleetTorpInputStatusAnnouncer inferenceByRow={[row]} />)
+    const { rerender } = render(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[row]} />
+    )
 
     await act(async () => {
       await flushAnimationFrame()
@@ -103,7 +121,7 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     const region = screen.getByRole('status')
     expect(region).toHaveTextContent(pendingLabel)
 
-    rerender(<FleetTorpInputStatusAnnouncer inferenceByRow={[{ ...row }]} />)
+    rerender(<FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[{ ...row }]} />)
 
     await act(async () => {
       await flushAnimationFrame()
@@ -112,9 +130,52 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     expect(region).toHaveTextContent(pendingLabel)
   })
 
+  it('isolates transition memory per analytic scope', async () => {
+    const pendingLabel = fleetTorpInputAccessibleLabel('pending')
+    const appliedLabel = fleetTorpInputAccessibleLabel('applied')
+    const pendingRow = inferenceRow({
+      playerId: 1,
+      diagnostics: { fleetTorpInputStatus: 'pending' },
+    })
+    const appliedRow = inferenceRow({
+      playerId: 1,
+      diagnostics: { fleetTorpInputStatus: 'applied' },
+    })
+    const { rerender } = render(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[pendingRow]} />
+    )
+
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(pendingLabel)
+
+    rerender(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeB} inferenceByRow={[appliedRow]} />
+    )
+
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent(pendingLabel)
+
+    rerender(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeB} inferenceByRow={[pendingRow]} />
+    )
+
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent(pendingLabel)
+    expect(screen.getByRole('status')).not.toHaveTextContent(appliedLabel)
+  })
+
   it('ignores rows without playerId', async () => {
     render(
       <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
         inferenceByRow={[
           inferenceRow({ diagnostics: { fleetTorpInputStatus: 'pending' } }),
         ]}

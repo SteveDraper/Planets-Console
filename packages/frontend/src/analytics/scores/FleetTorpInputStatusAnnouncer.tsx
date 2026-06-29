@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ScoresInferenceRowDetail } from '../../api/bff'
+import type { AnalyticShellScope, ScoresInferenceRowDetail } from '../../api/bff'
+import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import {
   fleetTorpInputAccessibleLabel,
   readFleetTorpInputStatusFromDetail,
@@ -27,14 +28,20 @@ function announcementForTransition(
   return null
 }
 
+function transitionKey(scope: AnalyticShellScope, playerId: number): string {
+  return `${analyticScopeKey(scope)}:${playerId}`
+}
+
 type FleetTorpInputStatusAnnouncerProps = {
+  analyticScope: AnalyticShellScope
   inferenceByRow: ScoresInferenceRowDetail[]
 }
 
 export function FleetTorpInputStatusAnnouncer({
+  analyticScope,
   inferenceByRow,
 }: FleetTorpInputStatusAnnouncerProps) {
-  const previousStatusesRef = useRef<Map<number, FleetTorpInputStatus | null>>(new Map())
+  const previousStatusesRef = useRef<Map<string, FleetTorpInputStatus | null>>(new Map())
   const [announcement, setAnnouncement] = useState('')
 
   useEffect(() => {
@@ -45,13 +52,14 @@ export function FleetTorpInputStatusAnnouncer({
         continue
       }
       const nextStatus = readFleetTorpInputStatusFromDetail(detail)
-      const previousStatus = previousStatusesRef.current.get(playerId) ?? null
+      const key = transitionKey(analyticScope, playerId)
+      const previousStatus = previousStatusesRef.current.get(key) ?? null
       if (nextStatus != null) {
         const text = announcementForTransition(previousStatus, nextStatus)
         if (text != null) {
           announcements.push(text)
         }
-        previousStatusesRef.current.set(playerId, nextStatus)
+        previousStatusesRef.current.set(key, nextStatus)
       }
     }
 
@@ -65,7 +73,7 @@ export function FleetTorpInputStatusAnnouncer({
       setAnnouncement(text)
     })
     return () => cancelAnimationFrame(frameId)
-  }, [inferenceByRow])
+  }, [analyticScope, inferenceByRow])
 
   return (
     <div
