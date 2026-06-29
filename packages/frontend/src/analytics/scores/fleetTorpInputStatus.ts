@@ -76,14 +76,3 @@ export function fleetTorpInputScopeBannerText(pendingCount: number): string | nu
   }
   return `Prior-turn fleet data is still loading for ${pendingCount} players. Provisional build explanations may update when fleet@(N-1) is available.`
 }
-
-export function combineInferenceAccessibleLabel(
-  inferenceLabel: string,
-  diagnostics: Record<string, unknown>
-): string {
-  const fleetStatus = readFleetTorpInputStatus(diagnostics)
-  if (fleetStatus == null || fleetStatus === 'not_applicable') {
-    return inferenceLabel
-  }
-  return `${inferenceLabel}. ${fleetTorpInputAccessibleLabel(fleetStatus)}`
-}

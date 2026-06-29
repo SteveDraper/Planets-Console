@@ -1,5 +1,8 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
-import { combineInferenceAccessibleLabel } from './fleetTorpInputStatus'
+import {
+  fleetTorpInputAccessibleLabel,
+  readFleetTorpInputStatus,
+} from './fleetTorpInputStatus'
 import { isRecord } from './scoresWireParsers'
 
 export type InferenceDisplayStatus = ScoresInferenceRowDetail['displayStatus']
@@ -21,6 +24,17 @@ function baseInferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string 
     return detail.summary || 'Build inference halted'
   }
   return detail.summary || 'No build inference result'
+}
+
+function combineInferenceAccessibleLabel(
+  inferenceLabel: string,
+  diagnostics: Record<string, unknown>
+): string {
+  const fleetStatus = readFleetTorpInputStatus(diagnostics)
+  if (fleetStatus == null || fleetStatus === 'not_applicable') {
+    return inferenceLabel
+  }
+  return `${inferenceLabel}. ${fleetTorpInputAccessibleLabel(fleetStatus)}`
 }
 
 export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string {

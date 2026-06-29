@@ -28,6 +28,22 @@ describe('inferenceAccessibleLabel', () => {
       'Best: built one ship'
     )
   })
+
+  it('appends fleet torp context for non-not_applicable statuses', () => {
+    const base = detail({ summary: 'Best: one build' })
+    expect(
+      inferenceAccessibleLabel({
+        ...base,
+        diagnostics: { fleetTorpInputStatus: 'pending' },
+      })
+    ).toContain('pending')
+    expect(
+      inferenceAccessibleLabel({
+        ...base,
+        diagnostics: { fleetTorpInputStatus: 'not_applicable' },
+      })
+    ).toBe('Best: one build')
+  })
 })
 
 describe('canOpenInferenceDetail', () => {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  combineInferenceAccessibleLabel,
   countFleetTorpPendingRows,
   fleetTorpInputAccessibleLabel,
   fleetTorpInputScopeBannerText,
@@ -82,17 +81,5 @@ describe('countFleetTorpPendingRows', () => {
         rowDetail(undefined),
       ])
     ).toBe(1)
-  })
-})
-
-describe('combineInferenceAccessibleLabel', () => {
-  it('appends fleet torp context for non-not_applicable statuses', () => {
-    const base = 'Best: one build'
-    expect(
-      combineInferenceAccessibleLabel(base, { fleetTorpInputStatus: 'pending' })
-    ).toContain('pending')
-    expect(
-      combineInferenceAccessibleLabel(base, { fleetTorpInputStatus: 'not_applicable' })
-    ).toBe(base)
   })
 })
