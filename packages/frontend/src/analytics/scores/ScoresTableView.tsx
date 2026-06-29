@@ -11,7 +11,7 @@ import { HullCatalogMaskDialog } from './HullCatalogMaskDialog'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
 import { FleetTorpInputStatusAnnouncer } from './FleetTorpInputStatusAnnouncer'
-import { FleetTorpInputStatusIndicator } from './FleetTorpInputStatusIndicator'
+import { InferenceCellChrome } from './InferenceCellChrome'
 import {
   countFleetTorpPendingRows,
   fleetTorpInputScopeBannerText,
@@ -52,11 +52,6 @@ function InferenceStatusCell({
   const playerId = detail.playerId
   const showHullCatalog = typeof playerId === 'number'
   const fleetTorpStatus = readFleetTorpInputStatusFromDetail(detail)
-  const fleetTorpIndicator =
-    fleetTorpStatus != null ? (
-      <FleetTorpInputStatusIndicator status={fleetTorpStatus} />
-    ) : null
-
   const hullCatalogButton =
     showHullCatalog ? (
       <button
@@ -71,10 +66,15 @@ function InferenceStatusCell({
       </button>
     ) : null
 
+  const chromeProps = {
+    fleetTorpStatus,
+    hullCatalogButton,
+  }
+
   if (isIncompleteInferenceRow(detail)) {
     const activelySearching = isActivelySearchingInference(detail, isGloballyPaused)
     return (
-      <div className="inline-flex items-center gap-1">
+      <InferenceCellChrome {...chromeProps}>
         <InferenceSolutionCountBadge
           count={detail.solutionCount}
           isSearching={activelySearching}
@@ -83,15 +83,13 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
-        {fleetTorpIndicator}
-        {hullCatalogButton}
-      </div>
+      </InferenceCellChrome>
     )
   }
 
   if (detail.displayStatus === 'success' && detail.solutionCount > 0) {
     return (
-      <div className="inline-flex items-center gap-1">
+      <InferenceCellChrome {...chromeProps}>
         <InferenceSolutionCountBadge
           count={detail.solutionCount}
           isSearching={false}
@@ -99,15 +97,13 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
-        {fleetTorpIndicator}
-        {hullCatalogButton}
-      </div>
+      </InferenceCellChrome>
     )
   }
 
   if (detail.displayStatus === 'stopped') {
     return (
-      <div className="inline-flex items-center gap-1">
+      <InferenceCellChrome {...chromeProps}>
         <button
           type="button"
           title={label}
@@ -118,14 +114,12 @@ function InferenceStatusCell({
         >
           <Octagon className="h-4 w-4" aria-hidden />
         </button>
-        {fleetTorpIndicator}
-        {hullCatalogButton}
-      </div>
+      </InferenceCellChrome>
     )
   }
 
   return (
-    <div className="inline-flex items-center gap-1">
+    <InferenceCellChrome {...chromeProps}>
       <button
         type="button"
         title={label}
@@ -136,9 +130,7 @@ function InferenceStatusCell({
       >
         <X className="h-4 w-4" aria-hidden />
       </button>
-      {fleetTorpIndicator}
-      {hullCatalogButton}
-    </div>
+    </InferenceCellChrome>
   )
 }
 
