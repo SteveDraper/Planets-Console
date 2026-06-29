@@ -19,3 +19,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: full inference-corpus or OR-Tools solver integration (excluded from make ci; run make test_api_full)",
+]
