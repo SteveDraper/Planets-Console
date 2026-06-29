@@ -1,6 +1,7 @@
 import type { AnalyticShellScope } from '../../api/bff'
 import { fetchScoresTableInferenceStream } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
+import { bumpScoresInferenceRevision } from '../../shell/scoresInferenceRevision'
 
 export const TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
   'An inference table stream is already active for this scope.'
@@ -25,6 +26,10 @@ function isScopeLevelStreamConflict(event: InferenceStreamEvent): boolean {
     event.playerId == null &&
     event.detail === TABLE_STREAM_ALREADY_ACTIVE_DETAIL
   )
+}
+
+function shouldBumpScoresInferenceRevision(event: InferenceStreamEvent): boolean {
+  return event.type === 'solution' || event.type === 'complete'
 }
 
 export type TableInferenceStreamConnectResult =
@@ -55,6 +60,9 @@ export async function connectTableInferenceStream(
           if (isScopeLevelStreamConflict(event)) {
             scopeConflict = true
             return
+          }
+          if (shouldBumpScoresInferenceRevision(event)) {
+            bumpScoresInferenceRevision(scope)
           }
           handlers.onEvent(event)
         },
