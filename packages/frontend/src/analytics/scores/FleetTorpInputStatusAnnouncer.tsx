@@ -2,31 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail } from '../../api/bff'
 import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import {
-  fleetTorpInputAccessibleLabel,
+  fleetTorpInputAnnouncementForTransition,
   readFleetTorpInputStatusFromDetail,
   type FleetTorpInputStatus,
 } from './fleetTorpInputStatus'
-
-// Announce entering pending, applied (only from pending), or unavailable; other
-// transitions (including not_applicable) are silent so table cells own steady-state labels.
-function announcementForTransition(
-  previous: FleetTorpInputStatus | null,
-  next: FleetTorpInputStatus
-): string | null {
-  if (previous === next) {
-    return null
-  }
-  if (next === 'applied' && previous === 'pending') {
-    return fleetTorpInputAccessibleLabel('applied')
-  }
-  if (next === 'pending' && previous !== 'pending') {
-    return fleetTorpInputAccessibleLabel('pending')
-  }
-  if (next === 'unavailable' && previous !== 'unavailable') {
-    return fleetTorpInputAccessibleLabel('unavailable')
-  }
-  return null
-}
 
 function transitionKey(scope: AnalyticShellScope, playerId: number): string {
   return `${analyticScopeKey(scope)}:${playerId}`
@@ -55,7 +34,7 @@ export function FleetTorpInputStatusAnnouncer({
       const key = transitionKey(analyticScope, playerId)
       const previousStatus = previousStatusesRef.current.get(key) ?? null
       if (nextStatus != null) {
-        const text = announcementForTransition(previousStatus, nextStatus)
+        const text = fleetTorpInputAnnouncementForTransition(previousStatus, nextStatus)
         if (text != null) {
           announcements.push(text)
         }

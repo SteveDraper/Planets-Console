@@ -1,6 +1,7 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
 import {
   fleetTorpInputAccessibleLabel,
+  fleetTorpInputAppendsToInferenceAccessibleLabel,
   readFleetTorpInputStatusFromDetail,
 } from './fleetTorpInputStatus'
 
@@ -30,7 +31,7 @@ function combineInferenceAccessibleLabel(
   detail: ScoresInferenceRowDetail
 ): string {
   const fleetStatus = readFleetTorpInputStatusFromDetail(detail)
-  if (fleetStatus == null || fleetStatus === 'not_applicable') {
+  if (fleetStatus == null || !fleetTorpInputAppendsToInferenceAccessibleLabel(fleetStatus)) {
     return inferenceLabel
   }
   return `${inferenceLabel}. ${fleetTorpInputAccessibleLabel(fleetStatus)}`

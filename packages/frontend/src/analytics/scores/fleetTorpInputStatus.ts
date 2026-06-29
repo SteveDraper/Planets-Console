@@ -22,6 +22,38 @@ export function readFleetTorpInputStatusFromDiagnostics(
   return parseFleetTorpInputStatus(diagnostics.fleetTorpInputStatus)
 }
 
+type FleetTorpInputStatusPresentation = {
+  showsTableIndicator: boolean
+  appendsToInferenceAccessibleLabel: boolean
+  announceOnEnterFrom: 'any' | 'pending_only' | 'never'
+}
+
+const FLEET_TORP_INPUT_STATUS_PRESENTATION: Record<
+  FleetTorpInputStatus,
+  FleetTorpInputStatusPresentation
+> = {
+  not_applicable: {
+    showsTableIndicator: false,
+    appendsToInferenceAccessibleLabel: false,
+    announceOnEnterFrom: 'never',
+  },
+  pending: {
+    showsTableIndicator: true,
+    appendsToInferenceAccessibleLabel: true,
+    announceOnEnterFrom: 'any',
+  },
+  applied: {
+    showsTableIndicator: false,
+    appendsToInferenceAccessibleLabel: true,
+    announceOnEnterFrom: 'pending_only',
+  },
+  unavailable: {
+    showsTableIndicator: true,
+    appendsToInferenceAccessibleLabel: true,
+    announceOnEnterFrom: 'any',
+  },
+}
+
 export function fleetTorpInputAccessibleLabel(status: FleetTorpInputStatus): string {
   switch (status) {
     case 'not_applicable':
@@ -51,7 +83,30 @@ export function readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics(
 }
 
 export function fleetTorpInputShowsTableIndicator(status: FleetTorpInputStatus): boolean {
-  return status === 'pending' || status === 'unavailable'
+  return FLEET_TORP_INPUT_STATUS_PRESENTATION[status].showsTableIndicator
+}
+
+export function fleetTorpInputAppendsToInferenceAccessibleLabel(
+  status: FleetTorpInputStatus
+): boolean {
+  return FLEET_TORP_INPUT_STATUS_PRESENTATION[status].appendsToInferenceAccessibleLabel
+}
+
+export function fleetTorpInputAnnouncementForTransition(
+  previous: FleetTorpInputStatus | null,
+  next: FleetTorpInputStatus
+): string | null {
+  if (previous === next) {
+    return null
+  }
+  const { announceOnEnterFrom } = FLEET_TORP_INPUT_STATUS_PRESENTATION[next]
+  if (announceOnEnterFrom === 'never') {
+    return null
+  }
+  if (announceOnEnterFrom === 'pending_only' && previous !== 'pending') {
+    return null
+  }
+  return fleetTorpInputAccessibleLabel(next)
 }
 
 export function readFleetTorpInputStatusFromDetail(

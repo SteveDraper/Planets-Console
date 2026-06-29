@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   countFleetTorpPendingRows,
   fleetTorpInputAccessibleLabel,
+  fleetTorpInputAnnouncementForTransition,
+  fleetTorpInputAppendsToInferenceAccessibleLabel,
   fleetTorpInputScopeBannerText,
   fleetTorpInputShowsTableIndicator,
   parseFleetTorpInputStatus,
@@ -86,6 +88,36 @@ describe('fleetTorpInputShowsTableIndicator', () => {
     expect(fleetTorpInputShowsTableIndicator('unavailable')).toBe(true)
     expect(fleetTorpInputShowsTableIndicator('applied')).toBe(false)
     expect(fleetTorpInputShowsTableIndicator('not_applicable')).toBe(false)
+  })
+})
+
+describe('fleetTorpInputAppendsToInferenceAccessibleLabel', () => {
+  it('appends for pending, applied, and unavailable only', () => {
+    expect(fleetTorpInputAppendsToInferenceAccessibleLabel('pending')).toBe(true)
+    expect(fleetTorpInputAppendsToInferenceAccessibleLabel('applied')).toBe(true)
+    expect(fleetTorpInputAppendsToInferenceAccessibleLabel('unavailable')).toBe(true)
+    expect(fleetTorpInputAppendsToInferenceAccessibleLabel('not_applicable')).toBe(false)
+  })
+})
+
+describe('fleetTorpInputAnnouncementForTransition', () => {
+  it('announces entering pending, applied from pending, and unavailable', () => {
+    expect(
+      fleetTorpInputAnnouncementForTransition('not_applicable', 'pending')
+    ).toBe(fleetTorpInputAccessibleLabel('pending'))
+    expect(fleetTorpInputAnnouncementForTransition('pending', 'applied')).toBe(
+      fleetTorpInputAccessibleLabel('applied')
+    )
+    expect(
+      fleetTorpInputAnnouncementForTransition('pending', 'unavailable')
+    ).toBe(fleetTorpInputAccessibleLabel('unavailable'))
+  })
+
+  it('is silent for unchanged status and non-announced transitions', () => {
+    expect(fleetTorpInputAnnouncementForTransition('pending', 'pending')).toBeNull()
+    expect(fleetTorpInputAnnouncementForTransition(null, 'not_applicable')).toBeNull()
+    expect(fleetTorpInputAnnouncementForTransition('not_applicable', 'applied')).toBeNull()
+    expect(fleetTorpInputAnnouncementForTransition('unavailable', 'unavailable')).toBeNull()
   })
 })
 
