@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { AnalyticShellScope } from '../api/bff'
+import type { FleetTorpInputStatus } from '../api/inferenceStreamEventSchema'
 
 export type ScoresPlayerInferenceDiagnostics = {
   playerId: number
@@ -11,6 +12,8 @@ export type ScoresPlayerInferenceDiagnostics = {
   actionCatalog?: Record<string, unknown>
   solver?: Record<string, unknown>
   diagnostics: Record<string, unknown>
+  fleetTorpInputStatus?: FleetTorpInputStatus
+  fleetTorpOverlayBeliefSetTorpIds?: number[]
 }
 
 export type ScoresAnalyticDiagnostics = {

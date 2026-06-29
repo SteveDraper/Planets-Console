@@ -53,6 +53,8 @@ function playerDiagnosticsFromRow(
     actionCatalog: readSection(diagnostics, 'actionCatalog'),
     solver: readSection(diagnostics, 'solver'),
     diagnostics,
+    fleetTorpInputStatus: detail.fleetTorpInputStatus,
+    fleetTorpOverlayBeliefSetTorpIds: detail.fleetTorpOverlayBeliefSetTorpIds,
   }
 }
 
