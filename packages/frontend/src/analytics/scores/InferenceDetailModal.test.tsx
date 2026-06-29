@@ -331,6 +331,26 @@ describe('InferenceDetailModal', () => {
     expect(screen.getByText('Solution 2 · Plausibility 80')).toBeInTheDocument()
   })
 
+  it('shows fleet torpedo overlay input status and belief set torp ids', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          diagnostics: {
+            fleetTorpInputStatus: 'applied',
+            fleetTorpOverlay: { beliefSetTorpIds: [4, 8] },
+          },
+        })}
+      />
+    )
+
+    expect(screen.getByText('Fleet torpedo overlay input')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('persisted fleet snapshot')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Belief-set torpedo ids: 4, 8')
+  })
+
   it('calls onClose from the close button', () => {
     const onClose = vi.fn()
     render(

@@ -395,7 +395,7 @@ Inference is fetched **per scoreboard row** at the solver layer. Three wire path
 
 **Batch (current):** `GET .../scores/inference?playerId=...` returns one JSON payload when the row solve completes or hits the time budget.
 
-**Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). Terminal `complete` events include the same `solutions` array shape when the row finishes; the consumer replaces local held state from the terminal payload (authoritative final top-K). The dashed-zero badge transitions to a solid count when the first `solution` arrives with `solutions.length >= 1`; the badge and modal track `solutions.length` while search continues.
+**Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). Terminal `complete` events include the same `solutions` array shape when the row finishes; the consumer replaces local held state from the terminal payload (authoritative final top-K). Terminal `complete` diagnostics may include **`fleetTorpInputStatus`** when fleet overlay wiring is active (section 8.8.5). On stream connect, background warm for `fleet@(host_turn - 1)` may run in parallel with row scheduling. The dashed-zero badge transitions to a solid count when the first `solution` arrives with `solutions.length >= 1`; the badge and modal track `solutions.length` while search continues.
 
 **Stream disconnect:** when the table stream ends (client `AbortSignal`, refresh, network loss, disable build inference, or natural completion after all rows finish), the server cancels all row runs for that connection and clears **inference global pause**. Reopening the table stream on the same scope **recalculates from scratch** (no server-side ladder or pause state preserved across disconnect).
 
@@ -661,7 +661,7 @@ Solver-side merge of `TierPolicyOverlay` into the resolved policy list before ca
 
 ### 8.8 Inference fleet overlay (#87, #156)
 
-Per-player, per-solve overlay on top of **inference build prior** (#86) weights and torp catalog admission. Glossary: `CONTEXT.md` (**Inference fleet launcher belief set**, **Inference aggregate admission**, **Inference torp escape tier**, **Inference torp misalignment penalty**, **Inference component tech-gap prior**, **Inference fleet inference tuning**). Production input: prior-turn fleet `$.composition` export ([#133](https://github.com/SteveDraper/Planets-Console/issues/133), [design-fleet-analytic.md](design-fleet-analytic.md)); until fleet ships, synthetic fixtures only.
+Per-player, per-solve overlay on top of **inference build prior** (#86) weights and torp catalog admission. Glossary: `CONTEXT.md` (**Inference fleet launcher belief set**, **Inference aggregate admission**, **Inference torp escape tier**, **Inference torp misalignment penalty**, **Inference component tech-gap prior**, **Inference fleet inference tuning**, **Inference fleet torp input status**). Production input: prior-turn fleet `$.composition` export ([#133](https://github.com/SteveDraper/Planets-Console/issues/133), [design-fleet-analytic.md](design-fleet-analytic.md)); resolved via `resolve_prior_turn_fleet_torp_overlay` and wired into scores inference (batch, export ensure, and table stream).
 
 **Tuning** (`tier_policy.yaml`):
 
@@ -700,7 +700,31 @@ Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over componen
 #### 8.8.4 Integration
 
 - Optional overlay input on `build_action_catalog` / `build_inference_problem` (parallel seam to `TierPolicyOverlay` in #78)
-- Diagnostics: belief-set summary, escape tier used, tuning constants loaded
+- Diagnostics: belief-set summary, escape tier used, tuning constants loaded; `fleetTorpOverlay` on complete payloads when catalog diagnostics are emitted
+
+#### 8.8.5 Production wiring, stream warm, and input-status UX (#133, #158)
+
+**Resolver:** `resolve_prior_turn_fleet_torp_overlay` loads `fleet@(host_turn - 1)` with `ensure=False` on the inference table stream (read persisted snapshot only; no blocking export ensure on that path). Batch inference and scores export ensure may still materialize fleet@(N−1) synchronously via ensure dependencies.
+
+**Background warm:** on table-stream connect, `schedule_background_prior_turn_fleet_warm` kicks off non-blocking gap-fill for `fleet@(host_turn - 1)` when that snapshot is missing. Warm routes through the same `get_or_materialize_fleet_snapshot` entry point as other callers; see [design-fleet-analytic.md](design-fleet-analytic.md) section 5.1 for concurrent gap-fill behavior and Phase 1/2 mitigation.
+
+**Invalidation reschedule:** when `fleet@(N - 1)` is persisted, scores inference rows at host turn *N* are dropped and open table-stream rows for that scope are rescheduled (`force_schedule`) so overlay input can move from provisional to authoritative without a full stream reconnect.
+
+**Wire diagnostics (`complete` events):**
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `diagnostics.fleetTorpInputStatus` | `not_applicable` \| `pending` \| `applied` \| `unavailable` | Whether prior-turn fleet overlay input was authoritative when the row completed |
+| `diagnostics.fleetTorpOverlay.beliefSetTorpIds` | `number[]` (when applied) | Torp ids in the belief set used for admission / misalignment |
+
+| Status | When |
+|--------|------|
+| `not_applicable` | Host turn 1 (no prior turn) |
+| `pending` | Prior-turn RST exists but `fleet@(host_turn - 1)` snapshot not yet available at schedule time |
+| `applied` | Overlay read from persisted prior-turn fleet snapshot |
+| `unavailable` | Fleet export services not available for this scope |
+
+**SPA UX (#158):** when any row reports `pending`, show a scope banner and a non-blocking ship icon on the build-inference badge; surface status in the inference detail modal and Diagnostics scores tab; `aria-live` announces transitions (e.g. `pending` → `applied`). **Acceptable:** if another caller (fleet table, export ensure) finishes gap-fill before the first `complete` with `pending`, rows may go straight to `applied` and the banner never appears.
 
 ---
 

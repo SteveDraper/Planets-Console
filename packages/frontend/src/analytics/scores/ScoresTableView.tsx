@@ -10,6 +10,13 @@ import { InferenceRecomputeControl } from './InferenceRecomputeControl'
 import { HullCatalogMaskDialog } from './HullCatalogMaskDialog'
 import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
+import { FleetTorpInputStatusAnnouncer } from './FleetTorpInputStatusAnnouncer'
+import { FleetTorpInputStatusIndicator } from './FleetTorpInputStatusIndicator'
+import {
+  countFleetTorpPendingRows,
+  fleetTorpInputScopeBannerText,
+  readFleetTorpInputStatusFromDetail,
+} from './fleetTorpInputStatus'
 import {
   canOpenInferenceDetail,
   inferenceAccessibleLabel,
@@ -44,6 +51,11 @@ function InferenceStatusCell({
   const label = inferenceAccessibleLabel(detail)
   const playerId = detail.playerId
   const showHullCatalog = typeof playerId === 'number'
+  const fleetTorpStatus = readFleetTorpInputStatusFromDetail(detail)
+  const fleetTorpIndicator =
+    fleetTorpStatus != null ? (
+      <FleetTorpInputStatusIndicator status={fleetTorpStatus} />
+    ) : null
 
   const hullCatalogButton =
     showHullCatalog ? (
@@ -71,6 +83,7 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
+        {fleetTorpIndicator}
         {hullCatalogButton}
       </div>
     )
@@ -86,6 +99,7 @@ function InferenceStatusCell({
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
         />
+        {fleetTorpIndicator}
         {hullCatalogButton}
       </div>
     )
@@ -104,6 +118,7 @@ function InferenceStatusCell({
         >
           <Octagon className="h-4 w-4" aria-hidden />
         </button>
+        {fleetTorpIndicator}
         {hullCatalogButton}
       </div>
     )
@@ -121,6 +136,7 @@ function InferenceStatusCell({
       >
         <X className="h-4 w-4" aria-hidden />
       </button>
+      {fleetTorpIndicator}
       {hullCatalogButton}
     </div>
   )
@@ -151,9 +167,18 @@ export function ScoresTableView({
 
   const showGlobalPauseControl =
     data.includeBuildInference && globalInferencePause != null
+  const fleetTorpScopeBanner = fleetTorpInputScopeBannerText(
+    countFleetTorpPendingRows(inferenceByRow)
+  )
 
   return (
     <>
+      {fleetTorpScopeBanner != null ? (
+        <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">
+          {fleetTorpScopeBanner}
+        </p>
+      ) : null}
+      <FleetTorpInputStatusAnnouncer inferenceByRow={inferenceByRow} />
       <div className="max-h-[calc(100dvh-14rem)] overflow-auto overscroll-contain">
         <table className="min-w-full border-separate border-spacing-0 text-sm">
           <thead>
