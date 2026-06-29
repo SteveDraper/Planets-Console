@@ -6,6 +6,8 @@ import {
   type FleetTorpInputStatus,
 } from './fleetTorpInputStatus'
 
+// Announce entering pending, applied (only from pending), or unavailable; other
+// transitions (including not_applicable) are silent so table cells own steady-state labels.
 function announcementForTransition(
   previous: FleetTorpInputStatus | null,
   next: FleetTorpInputStatus
@@ -37,8 +39,11 @@ export function FleetTorpInputStatusAnnouncer({
 
   useEffect(() => {
     const announcements: string[] = []
-    for (const [index, detail] of inferenceByRow.entries()) {
-      const playerId = detail.playerId ?? index
+    for (const detail of inferenceByRow) {
+      const playerId = detail.playerId
+      if (playerId == null) {
+        continue
+      }
       const nextStatus = readFleetTorpInputStatusFromDetail(detail)
       const previousStatus = previousStatusesRef.current.get(playerId) ?? null
       if (nextStatus != null) {
@@ -50,17 +55,25 @@ export function FleetTorpInputStatusAnnouncer({
       }
     }
 
-    if (announcements.length > 0) {
-      setAnnouncement(announcements.join(' '))
+    if (announcements.length === 0) {
+      return
     }
+
+    const text = announcements.join(' ')
+    setAnnouncement('')
+    const frameId = requestAnimationFrame(() => {
+      setAnnouncement(text)
+    })
+    return () => cancelAnimationFrame(frameId)
   }, [inferenceByRow])
 
-  if (announcement.length === 0) {
-    return null
-  }
-
   return (
-    <div className="sr-only" aria-live="polite" aria-atomic="true">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="sr-only"
+    >
       {announcement}
     </div>
   )
