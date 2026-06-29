@@ -136,10 +136,14 @@ ENSURE_DEPENDENCIES = (
 
 | Provider | Typical dependency |
 |----------|-------------------|
-| **scores** @ *N* | **fleet** @ *N−1*, same `player_id` (wired when fleet analytic ships; **empty in #93 scores slice**) |
-| **fleet** @ *N* | **scores** @ *N*, same `player_id` (future) |
+| **scores** @ *N* | **fleet** @ *N−1*, same `player_id` (wired in scores `exports.py`) |
+| **fleet** @ *N* | **scores** @ *N*, same `player_id` |
 
 Probe and ensure unwind follow these edges. Cross-turn scopes differ, so unwind is **not** a cycle (see below).
+
+### Concurrent fleet gap-fill (scores stream + ensure)
+
+The scores `fleet` @ *N*−1 ensure edge, fleet table export, and inference **background warm** on table-stream connect can all invoke `get_or_materialize_fleet_snapshot` for overlapping turn ranges on the same `(gameId, perspective)`. They are not semantic conflicts when materialization inputs match; see [design-fleet-analytic.md](design-fleet-analytic.md) section 5.1. Export ensure may finish `fleet@(N - 1)` before the stream's first `complete` with `fleetTorpInputStatus: pending` -- acceptable per section 8.8.5 of [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md). Planned coordination: [#161](https://github.com/SteveDraper/Planets-Console/issues/161).
 
 ### Ensure dependency target validation
 

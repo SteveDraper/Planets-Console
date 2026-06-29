@@ -532,6 +532,10 @@ _Avoid_: torp compatibility filter (generic), turn-1 special case, known-sightin
 The torpedo type ids counted as "in fleet" for **inference fleet launcher alignment** and **inference aggregate admission** -- derived from prior-turn fleet exports feeding #87. Includes launcher types on inferred builds (scores-held solutions), not only **known** launchers from direct sightings. For ambiguous **fleet build option set** rows, the belief set is the **union** of launcher/torp ids across all option sets on active rows (consistent tuples only, no per-field Cartesian product). Empty when no active row carries a positive launcher/torp type in any option set.
 _Avoid_: launcherTypes (wire field name in prose unless citing path), known-only fleet composition, top-1 option set only
 
+**Fleet gap-fill coordinator** (planned, #161):
+Per-`(gameId, perspective)` singleflight around multi-turn fleet snapshot materialization so concurrent callers (fleet table, scores ensure, inference background warm) share one in-flight chain instead of independent retry loops. Exposes an **epoch** aligned with fleet invalidation generation; waiters block with a generous timeout or retry when epoch bumps. Phase 1 mitigation (shipped): return cached target snapshot after invalidation retries if another path already persisted it; warm treats `ConflictError` as success when `fleet@(host_turn - 1)` exists. See [design-fleet-analytic.md](docs/design-fleet-analytic.md) section 5.1.
+_Avoid_: semantic merge of competing fleet snapshots, cross-process locking
+
 **Inference fleet launcher option ambiguity** (#87):
 When top-K inference yields multiple **fleet build option set**s on one row, early torp admission uses the full belief-set **union**; types outside the union defer to escape tier and receive strong prior down-weight. Types inside the union keep population prior; types appearing only in non-top-rank alternates may receive an optional mild log down-weight vs top-default option sets. Top-1-only admission is not used.
 _Avoid_: reconcile before overlay, independent per-field launcher unions

@@ -690,6 +690,34 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
     assert persistence.invalidation_generation(628580, 1) == 3
 
 
+def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(persistence, load_turn):
+    """After invalidation retries, return a peer-written snapshot instead of ConflictError."""
+    from api.analytics.fleet.chain import _FleetSnapshotInvalidated
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    winner = ensure_fleet_baseline(628580, 1, turn_111)
+    persistence.put_snapshot(628580, 1, 111, winner)
+
+    with patch(
+        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
+        side_effect=_FleetSnapshotInvalidated,
+    ):
+        result = get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_111,
+            load_turn=load_turn,
+        )
+
+    assert result == winner
+
+
 def test_put_snapshot_stamps_current_materialization_version(persistence, load_turn):
     turn = load_turn(111)
     assert turn is not None

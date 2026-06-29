@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
+
+logger = logging.getLogger(__name__)
 
 FleetTorpInputStatus = Literal["not_applicable", "pending", "applied", "unavailable"]
 
@@ -205,17 +208,41 @@ def schedule_background_prior_turn_fleet_warm(
 
     def warm_prior_turn_fleet() -> None:
         from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+        from api.errors import ConflictError
+
+        persistence = fleet_services.persistence
+        game_id = fleet_services.game_id
+        perspective = fleet_services.perspective
+
+        def prior_turn_snapshot_available() -> bool:
+            return persistence.has_snapshot(game_id, perspective, prior_turn)
 
         try:
             get_or_materialize_fleet_snapshot(
-                fleet_services.persistence,
-                fleet_services.game_id,
-                fleet_services.perspective,
+                persistence,
+                game_id,
+                perspective,
                 prior_turn_info,
                 load_turn=fleet_services.load_turn,
                 inference_materialization=fleet_services.inference_materialization,
             )
+        except ConflictError:
+            if prior_turn_snapshot_available():
+                return
+            logger.warning(
+                "Background prior-turn fleet warm failed for game %s perspective %s turn %s",
+                game_id,
+                perspective,
+                prior_turn,
+            )
         except OSError, ValueError, KeyError:
-            return
+            if prior_turn_snapshot_available():
+                return
+            logger.warning(
+                "Background prior-turn fleet warm failed for game %s perspective %s turn %s",
+                game_id,
+                perspective,
+                prior_turn,
+            )
 
     threading.Thread(target=warm_prior_turn_fleet, daemon=True).start()
