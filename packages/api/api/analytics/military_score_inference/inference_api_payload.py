@@ -13,6 +13,9 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionShipBuild,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    fleet_torp_complete_wire_fields_from_diagnostics,
+)
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
@@ -21,9 +24,6 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
-)
-from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
-    fleet_torp_complete_wire_fields_from_diagnostics,
 )
 from api.models.game import TurnInfo
 

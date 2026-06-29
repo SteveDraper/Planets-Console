@@ -18,10 +18,10 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
     TierProgress,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.models.game import TurnInfo
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     fleet_torp_complete_wire_fields_from_diagnostics,
 )
+from api.models.game import TurnInfo
 from api.transport.inference_stream import (
     inference_complete_event,
     inference_error_event,
@@ -38,9 +38,7 @@ def _complete_event_fleet_torp_wire_fields(
     fleet_torp_overlay_belief_set_torp_ids: object | None = None,
 ) -> tuple[str | None, list[int] | None]:
     if fleet_torp_input_status is not None or fleet_torp_overlay_belief_set_torp_ids is not None:
-        status = (
-            str(fleet_torp_input_status) if fleet_torp_input_status is not None else None
-        )
+        status = str(fleet_torp_input_status) if fleet_torp_input_status is not None else None
         belief_ids: list[int] | None = None
         if isinstance(fleet_torp_overlay_belief_set_torp_ids, list):
             belief_ids = [
@@ -73,9 +71,7 @@ def inference_api_payload_to_wire_complete(
         _complete_event_fleet_torp_wire_fields(
             diagnostics=diagnostics_dict,
             fleet_torp_input_status=payload.get("fleetTorpInputStatus"),
-            fleet_torp_overlay_belief_set_torp_ids=payload.get(
-                "fleetTorpOverlayBeliefSetTorpIds"
-            ),
+            fleet_torp_overlay_belief_set_torp_ids=payload.get("fleetTorpOverlayBeliefSetTorpIds"),
         )
     )
     return inference_complete_event(
