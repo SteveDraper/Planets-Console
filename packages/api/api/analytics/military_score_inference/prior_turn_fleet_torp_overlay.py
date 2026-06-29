@@ -226,16 +226,7 @@ def schedule_background_prior_turn_fleet_warm(
                 load_turn=fleet_services.load_turn,
                 inference_materialization=fleet_services.inference_materialization,
             )
-        except ConflictError:
-            if prior_turn_snapshot_available():
-                return
-            logger.warning(
-                "Background prior-turn fleet warm failed for game %s perspective %s turn %s",
-                game_id,
-                perspective,
-                prior_turn,
-            )
-        except OSError, ValueError, KeyError:
+        except ConflictError, OSError, ValueError, KeyError:
             if prior_turn_snapshot_available():
                 return
             logger.warning(
