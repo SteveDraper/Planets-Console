@@ -163,6 +163,18 @@ When scoreboard implies fewer ships than **active** rows:
 | **Materialization version** | Each persisted snapshot stores `materializationVersion` (integer, current code constant `FLEET_MATERIALIZATION_VERSION`). Bump conservatively when materialization semantics change for the same RST + scores inputs (chain rules, inferred acquisition ingest, observation-inference merge). On read, missing or stale versions delete that snapshot and count as a cache miss; gap-fill re-materializes with current logic. Does not replace input-driven invalidation (turn reload, scores row changes) |
 | **Invalidation generation** | Each `(gameId, perspective)` has a monotonic counter bumped on every fleet snapshot invalidation. Multi-turn gap-fill records the counter at chain start and aborts (then retries from a fresh anchor, bounded max retries) when the counter advances mid-materialization. Invalidation callbacks only bump the counter and delete stored snapshots; they do not block on an in-progress gap-fill |
 
+### 5.1 Gap-fill concurrency and `ConflictError`
+
+Gap-fill is **deterministic** for a given anchor, stored RST sequence, and scores inference materialization inputs. Each `put_snapshot` writes a **complete** fleet snapshot for that turn (not a provisional approximation level). The system does **not** compare competing writers byte-for-byte or pick a semantic winner when two paths materialize the same turn.
+
+**What `ConflictError` means:** after `GAP_FILL_MAX_RETRIES` invalidation aborts, gap-fill raises `ConflictError` when the target-turn snapshot is **still missing**. This is a **coherence / liveness** failure ("too many mid-chain invalidation bumps"), not evidence that two writers produced different fleet ledgers. The generation guard exists to prevent **torn chains** (e.g. persisting turn 6 after turn 5 was invalidated mid-flight).
+
+**Concurrent callers:** multiple entry points can start independent gap-fill chains for the same `(gameId, perspective)` -- fleet table export, scores export ensure (`fleet` @ *N*−1), and scores inference **background warm** on table-stream connect. They share storage and the invalidation-generation counter but do not coordinate in-flight work today. One path may complete (e.g. fleet@4--7) while another exhausts retries and logs `ConflictError` even though the cache is already populated.
+
+**Phase 1 (shipped):** before raising `ConflictError`, and after each invalidation abort, re-read the target-turn cache; return the persisted snapshot if another path already finished. Background warm treats `ConflictError` as success when `fleet@(host_turn - 1)` exists; logs a warning only when the snapshot is still missing.
+
+**Phase 2 (planned, [#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** per-perspective **fleet gap-fill coordinator** (singleflight) so at most one active chain runs per scope; waiters share work to `max(requested_turn)` with a generous timeout; coordinator exposes an **epoch** aligned with invalidation generation so waiters retry together instead of N independent retry loops.
+
 ---
 
 ## 6. Analytic exports
@@ -339,7 +351,6 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 - **Fleet reconciliation correction** UI (representation required; UI deferred)
 - Report message parsing
 - Starbase region overlays on map
-- **Scores inference fleet overlay** consumer (#87, #133) -- fleet exports belief-set inputs; not producer
 - Wandering Tribes fleet-at-spawn special case
 
 ---
@@ -348,12 +359,14 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 
 | Feature | Use |
 |---------|-----|
+| **Scores** **#133** | Production consumer for **inference fleet launcher belief set** from prior-turn `$.composition`; stream warm, invalidation reschedule, `fleetTorpInputStatus` UX -- [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.8.5 |
 | **Homeworld locator** | SB / planet positions for **region** constraints on inferred builds |
 | **Scores** **#87** | **Inference fleet launcher belief set** from `$.composition` (torp admission + misalignment prior); see below |
 | **Scores** **#156** | Per-axis tech ceilings from same `$.composition` rows (**inference component tech-gap prior**) |
 | **Scores** **#78** | Optional **inference tier policy overlay** (component filter widening); parallel axis, not torp ranking |
 | Reports ingest | Strong evidence for loss/trade row selection |
 | Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain |
+| **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) | Single in-flight materialization per perspective; see section 5.1 |
 
 ### `$.composition` export branch (#154)
 

@@ -2,6 +2,7 @@ import { ClipboardCopy } from 'lucide-react'
 import type { ScoresAnalyticDiagnostics } from '../../stores/analyticDiagnostics'
 import { cn } from '../../lib/utils'
 import { DiagnosticsJsonBlock } from './DiagnosticsJsonBlock'
+import { FleetTorpInputStatusDetail } from '../../analytics/scores/FleetTorpInputStatusDetail'
 
 type DiagnosticsScoresTabProps = {
   snapshot: ScoresAnalyticDiagnostics | null
@@ -62,6 +63,10 @@ export function DiagnosticsScoresTab({ snapshot, onCopy }: DiagnosticsScoresTabP
                 Player {player.playerId} · Turn {player.turn} · {player.status}
               </p>
               <p className="mt-1 text-xs text-slate-300">{player.summary}</p>
+              <FleetTorpInputStatusDetail
+                diagnostics={player.diagnostics}
+                variant="inline"
+              />
             </div>
             <button
               type="button"

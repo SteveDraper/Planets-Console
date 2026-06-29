@@ -12,6 +12,7 @@ import {
 } from './inferenceConstraints'
 import { InferenceSolutionLineIcon } from './inferenceSolutionLineIcon'
 import { readInferenceRunSummary } from './inferenceRunSummary'
+import { FleetTorpInputStatusDetail } from './FleetTorpInputStatusDetail'
 import { isRecord } from './scoresWireParsers'
 import {
   formatSolutionLineItemLabel,
@@ -252,6 +253,8 @@ export function InferenceDetailModal({
             </dl>
           </section>
         ) : null}
+
+        <FleetTorpInputStatusDetail diagnostics={diagnostics} />
 
         {inferenceRun.statusLabel != null || inferenceRun.wallTimeSeconds != null ? (
           <p className="text-xs text-slate-500">

@@ -1,8 +1,13 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
+import {
+  fleetTorpInputAccessibleLabel,
+  readFleetTorpInputStatus,
+} from './fleetTorpInputStatus'
+import { isRecord } from './scoresWireParsers'
 
 export type InferenceDisplayStatus = ScoresInferenceRowDetail['displayStatus']
 
-export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string {
+function baseInferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string {
   if (detail.displayStatus === 'success') {
     if (!detail.isComplete && detail.solutionCount > 0) {
       return `${detail.summary || 'Held explanations'}; search continuing`
@@ -19,6 +24,22 @@ export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): stri
     return detail.summary || 'Build inference halted'
   }
   return detail.summary || 'No build inference result'
+}
+
+function combineInferenceAccessibleLabel(
+  inferenceLabel: string,
+  diagnostics: Record<string, unknown>
+): string {
+  const fleetStatus = readFleetTorpInputStatus(diagnostics)
+  if (fleetStatus == null || fleetStatus === 'not_applicable') {
+    return inferenceLabel
+  }
+  return `${inferenceLabel}. ${fleetTorpInputAccessibleLabel(fleetStatus)}`
+}
+
+export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string {
+  const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
+  return combineInferenceAccessibleLabel(baseInferenceAccessibleLabel(detail), diagnostics)
 }
 
 export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolean {

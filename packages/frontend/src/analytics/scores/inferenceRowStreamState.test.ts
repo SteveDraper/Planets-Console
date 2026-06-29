@@ -145,6 +145,33 @@ describe('reduceRowStreamState', () => {
     })
   })
 
+  it('updates fleet torp diagnostics when a second complete event arrives', () => {
+    const firstComplete = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'exact',
+      summary: 'Provisional',
+      solutionCount: 1,
+      isComplete: true,
+      diagnostics: { fleetTorpInputStatus: 'pending' },
+    })
+    const secondComplete = reduceRowStreamState(firstComplete, {
+      type: 'complete',
+      status: 'exact',
+      summary: 'Authoritative',
+      solutionCount: 1,
+      isComplete: true,
+      diagnostics: {
+        fleetTorpInputStatus: 'applied',
+        fleetTorpOverlay: { beliefSetTorpIds: [4] },
+      },
+    })
+
+    expect(secondComplete.diagnostics).toMatchObject({
+      fleetTorpInputStatus: 'applied',
+      fleetTorpOverlay: { beliefSetTorpIds: [4] },
+    })
+  })
+
   it('preserves held solutions on complete events without solutions payload', () => {
     const withSolution = reduceRowStreamState(initialRowStreamState(), {
       type: 'solution',

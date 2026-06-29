@@ -304,9 +304,20 @@ def get_or_materialize_fleet_snapshot(
                 coherence=coherence,
             )
         except _FleetSnapshotInvalidated:
+            cached_after_invalidation = persistence.get_snapshot(
+                game_id,
+                perspective,
+                turn_number,
+            )
+            if cached_after_invalidation is not None:
+                return cached_after_invalidation
             if attempt + 1 >= GAP_FILL_MAX_RETRIES:
                 break
             continue
+
+    cached_after_retries = persistence.get_snapshot(game_id, perspective, turn_number)
+    if cached_after_retries is not None:
+        return cached_after_retries
 
     raise ConflictError(
         f"fleet snapshot gap-fill for game {game_id} perspective {perspective} "

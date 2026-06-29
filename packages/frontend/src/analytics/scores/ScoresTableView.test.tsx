@@ -315,6 +315,36 @@ describe('ScoresTableView', () => {
     expect(badge.className).toContain('border-dashed')
   })
 
+  it('shows scope banner when any row has pending fleet torp input', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)', '']],
+          inferenceByRow: [
+            {
+              displayStatus: 'success',
+              status: 'exact',
+              summary: 'Best: one build',
+              solutionCount: 1,
+              isComplete: true,
+              solutions: [],
+              diagnostics: { fleetTorpInputStatus: 'pending' },
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(
+      screen.getByText(/Prior-turn fleet data is still loading for one player/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByLabelText(/Best: one build\. Prior-turn fleet torpedo overlay pending/)
+    ).toBeInTheDocument()
+  })
+
   it('scrolls the table body in a bounded region with a sticky header row', () => {
     const { container } = render(
       <ScoresTableView
