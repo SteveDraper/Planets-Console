@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { FleetTorpInputStatusIndicator } from './FleetTorpInputStatusIndicator'
-import type { FleetTorpInputStatus } from './fleetTorpInputStatus'
+import {
+  fleetTorpInputShowsTableIndicator,
+  type FleetTorpInputStatus,
+} from './fleetTorpInputStatus'
 
 type InferenceCellChromeProps = {
   children: ReactNode
@@ -16,7 +19,7 @@ export function InferenceCellChrome({
   return (
     <div className="inline-flex items-center gap-1">
       {children}
-      {fleetTorpStatus != null ? (
+      {fleetTorpStatus != null && fleetTorpInputShowsTableIndicator(fleetTorpStatus) ? (
         <FleetTorpInputStatusIndicator status={fleetTorpStatus} />
       ) : null}
       {hullCatalogButton}
