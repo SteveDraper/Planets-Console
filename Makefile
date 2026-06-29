@@ -1,11 +1,15 @@
-.PHONY: test lint ci typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_server test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe
+.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
-# `test` runs lint and unit tests. `ci` also runs the full frontend `tsc -b` (see `typecheck_frontend`).
+# `test` runs lint and unit tests (API fast suite; see `test_api_full` for solver/corpus integration).
+# `ci` also runs the full frontend `tsc -b` (see `typecheck_frontend`).
 test: lint test_bff test_api test_server test_scripts test_frontend
 
-# Everything CI should run: Python lint, committed schema slice freshness, frontend typecheck, then all test suites.
+# Fast PR/iteration loop: lint, schema checks, typecheck, tests excluding @pytest.mark.slow API cases.
 ci: lint check_frontend_api_slices check_frontend_api_no_monolithic_schema typecheck_frontend test_bff test_api test_server test_scripts test_frontend
+
+# Full validation including slow OR-Tools / inference-corpus integration tests (`test_api_full`).
+ci_full: lint check_frontend_api_slices check_frontend_api_no_monolithic_schema typecheck_frontend test_bff test_api_full test_server test_scripts test_frontend
 
 # Regenerate checked-in artefacts from source (BFF OpenAPI -> frontend TypeScript types).
 generate: generate_frontend_api
@@ -38,6 +42,10 @@ test_bff:
 	PYTHONPATH=packages/bff:packages/api uv run python -m pytest packages/bff/tests
 
 test_api:
+	uv sync --extra dev
+	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests -m "not slow"
+
+test_api_full:
 	uv sync --extra dev
 	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests
 

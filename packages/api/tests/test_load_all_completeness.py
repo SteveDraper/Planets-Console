@@ -18,14 +18,34 @@ from tests.inference_corpus.storage_loader import (
 )
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+_MINIMAL_GAME_ID = 900_001
+_MINIMAL_LATEST_TURN = 5
+_MINIMAL_PLAYER_COUNT = 2
+
+
+def _minimal_game_info_payload() -> dict:
+    with (ASSETS_DIR / "game_info_sample.json").open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    active_players = [player for player in payload["players"] if player["status"] == 1][
+        :_MINIMAL_PLAYER_COUNT
+    ]
+    for index, player in enumerate(active_players, start=1):
+        player["id"] = index
+    payload["game"]["id"] = _MINIMAL_GAME_ID
+    payload["game"]["turn"] = _MINIMAL_LATEST_TURN
+    payload["players"] = active_players
+    return payload
+
+
+def _minimal_turn_payload(turn_number: int) -> dict:
+    return {"settings": {"turn": turn_number}, "game": {"turn": turn_number}}
 
 
 def _put_turn(storage, game_id: int, perspective: int, turn_number: int) -> None:
-    with (ASSETS_DIR / "turn_sample.json").open(encoding="utf-8") as handle:
-        payload = json.load(handle)
-    payload["settings"]["turn"] = turn_number
-    payload["game"]["turn"] = turn_number
-    storage.put(f"games/{game_id}/{perspective}/turns/{turn_number}", payload)
+    storage.put(
+        f"games/{game_id}/{perspective}/turns/{turn_number}",
+        _minimal_turn_payload(turn_number),
+    )
 
 
 def test_prior_mining_accepts_missing_only_final_turn(tmp_path: Path) -> None:
@@ -33,8 +53,7 @@ def test_prior_mining_accepts_missing_only_final_turn(tmp_path: Path) -> None:
     turn_load = make_turn_load_service(storage)
     game_service = make_game_service(storage)
 
-    with (ASSETS_DIR / "game_info_sample.json").open(encoding="utf-8") as handle:
-        info_payload = json.load(handle)
+    info_payload = _minimal_game_info_payload()
     latest_turn = info_payload["game"]["turn"]
     player_count = len(info_payload["players"])
     game_id = info_payload["game"]["id"]
@@ -55,8 +74,7 @@ def test_prior_mining_rejects_missing_non_final_turn(tmp_path: Path) -> None:
     turn_load = make_turn_load_service(storage)
     game_service = make_game_service(storage)
 
-    with (ASSETS_DIR / "game_info_sample.json").open(encoding="utf-8") as handle:
-        info_payload = json.load(handle)
+    info_payload = _minimal_game_info_payload()
     latest_turn = info_payload["game"]["turn"]
     player_count = len(info_payload["players"])
     game_id = info_payload["game"]["id"]

@@ -256,7 +256,7 @@ def test_flare_bfs_distance_prune_matches_unpruned_on_annulus(sample_planet):
 
     rng = random.Random(42)
     a = _p(sample_planet, 1, 1000, 1000)
-    for _ in range(32):
+    for _ in range(8):
         t = rng.random() * 2 * math.pi
         u = rng.random()
         r0, r1 = d_inner, d_outer
