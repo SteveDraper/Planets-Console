@@ -114,7 +114,7 @@ def test_legacy_monolithic_document_migrates_on_read(persistence, memory_backend
     loaded = persistence.get_ledger(628580, 1, 111, 8)
     assert loaded is not None
     assert loaded.ledger == sample_ledger
-    assert loaded.provenance.is_final is True
+    assert loaded.provenance.is_final is False
 
     stored = memory_backend.get(persistence.document_key(628580, 1, 111))
     assert isinstance(stored, dict)
@@ -135,8 +135,8 @@ def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledge
     upgraded = upgrade_legacy_fleet_turn_document(legacy_document)
     assert "players" not in upgraded
     assert upgraded[FLEET_LEDGERS_KEY]["8"]["provenance"] == {
-        "turnEvidenceAtN": True,
-        "priorLedgerAtNMinus1": True,
+        "turnEvidenceAtN": False,
+        "priorLedgerAtNMinus1": False,
     }
 
 

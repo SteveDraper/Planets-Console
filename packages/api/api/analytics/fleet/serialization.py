@@ -634,7 +634,11 @@ def persisted_fleet_ledger_to_json(persisted: PersistedFleetLedger) -> dict[str,
 
 
 def upgrade_legacy_fleet_turn_document(data: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade monolithic ``players`` wire to in-document ``ledgers/{playerId}`` keys."""
+    """Upgrade monolithic ``players`` wire to in-document ``ledgers/{playerId}`` keys.
+
+    Migrated entries use default (non-final) provenance: the monolithic path never
+    recorded materialization closure, so migration must not claim ensure-closed legs.
+    """
     version = fleet_materialization_version_from_json(data)
     ledgers: dict[str, Any] = {}
     for player_wire in _require_object_list(
@@ -645,7 +649,7 @@ def upgrade_legacy_fleet_turn_document(data: dict[str, Any]) -> dict[str, Any]:
         ledgers[str(ledger.player_id)] = persisted_fleet_ledger_to_json(
             PersistedFleetLedger(
                 ledger=ledger,
-                provenance=_LEGACY_FINAL_PROVENANCE,
+                provenance=FleetMaterializationProvenance(),
                 materialization_version=version,
             ),
         )
