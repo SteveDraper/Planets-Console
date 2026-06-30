@@ -45,33 +45,23 @@ function fleetTorpInputStatusFromStreamEvent(
   return null
 }
 
-function noteFleetTorpInputStatus(scopeKey: string, status: string | null): void {
-  if (status != null) {
-    lastFleetTorpInputStatusByScopeKey.set(scopeKey, status)
-  }
-}
-
 export function shouldBumpScoresInferenceRevision(
   event: InferenceStreamEvent,
   scopeKey: string
 ): boolean {
-  if (event.type === 'complete') {
-    noteFleetTorpInputStatus(scopeKey, fleetTorpInputStatusFromStreamEvent(event))
-    return true
+  if (event.type !== 'complete' && event.type !== 'solution') {
+    return false
   }
-  if (event.type === 'solution') {
-    const status = fleetTorpInputStatusFromStreamEvent(event)
-    if (status == null) {
-      return false
-    }
-    const previousStatus = lastFleetTorpInputStatusByScopeKey.get(scopeKey) ?? null
-    if (status === previousStatus) {
-      return false
-    }
-    lastFleetTorpInputStatusByScopeKey.set(scopeKey, status)
-    return true
+  const status = fleetTorpInputStatusFromStreamEvent(event)
+  if (status == null) {
+    return false
   }
-  return false
+  const previousStatus = lastFleetTorpInputStatusByScopeKey.get(scopeKey) ?? null
+  if (status === previousStatus) {
+    return false
+  }
+  lastFleetTorpInputStatusByScopeKey.set(scopeKey, status)
+  return true
 }
 
 export type TableInferenceStreamConnectResult =
