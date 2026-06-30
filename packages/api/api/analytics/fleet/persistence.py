@@ -188,6 +188,14 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
     ) -> bool:
+        """Return whether a usable fleet turn snapshot is stored for this scope.
+
+        Delegates to ``get_snapshot`` -- not a cheap key-exists probe. A call may
+        validate wire shape, upgrade legacy monolithic documents to the
+        ``ledgers/`` layout, prune stale per-player ledger entries, delete the
+        turn document when nothing usable remains, write storage, and bump
+        invalidation generation when stale data is removed.
+        """
         return self.get_snapshot(game_id, perspective, turn_number) is not None
 
     def put_snapshot(

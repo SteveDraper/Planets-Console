@@ -114,6 +114,33 @@ def test_has_final_ledger_requires_both_provenance_flags(persistence, sample_led
     assert persistence.has_final_ledger(628580, 1, 111, 8) is True
 
 
+def test_legacy_monolithic_document_migrates_on_has_snapshot(
+    persistence,
+    memory_backend,
+    sample_ledger,
+):
+    legacy_document = {
+        "analyticId": "fleet",
+        "gameId": 628580,
+        "perspective": 1,
+        "turn": 111,
+        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
+        "players": [persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=sample_ledger))["ledger"]],
+    }
+    memory_backend.put(
+        persistence.document_key(628580, 1, 111),
+        legacy_document,
+    )
+
+    assert persistence.has_snapshot(628580, 1, 111) is True
+
+    stored = memory_backend.get(persistence.document_key(628580, 1, 111))
+    assert isinstance(stored, dict)
+    assert "players" not in stored
+    assert FLEET_LEDGERS_KEY in stored
+    assert "8" in stored[FLEET_LEDGERS_KEY]
+
+
 def test_legacy_monolithic_document_migrates_on_read(persistence, memory_backend, sample_ledger):
     legacy_document = {
         "analyticId": "fleet",
