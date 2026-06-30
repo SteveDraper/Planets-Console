@@ -120,6 +120,7 @@ def domain_event_to_wire_events(
     *,
     observation: InferenceObservation,
     turn: TurnInfo,
+    fleet_torp_input_status: str | None = None,
 ) -> list[dict[str, object]]:
     """Convert one scheduler domain event into zero or more NDJSON wire dicts."""
     if isinstance(event, HeldSolutionsUpdated):
@@ -137,6 +138,7 @@ def domain_event_to_wire_events(
                 scoreboard_delta_source=(
                     wire_observation.scoreboard_delta_source if segment_id is not None else None
                 ),
+                fleet_torp_input_status=fleet_torp_input_status,
             )
         ]
 

@@ -21,6 +21,7 @@ def inference_solution_event(
     *,
     segment_id: str | None = None,
     scoreboard_delta_source: str | None = None,
+    fleet_torp_input_status: str | None = None,
 ) -> dict[str, object]:
     """Emit the full held top-K for one row after a new signature is admitted."""
     payload: dict[str, object] = {"type": "solution", "solutions": solutions}
@@ -28,6 +29,8 @@ def inference_solution_event(
         payload["segmentId"] = segment_id
     if scoreboard_delta_source is not None:
         payload["scoreboardDeltaSource"] = scoreboard_delta_source
+    if fleet_torp_input_status is not None:
+        payload["fleetTorpInputStatus"] = fleet_torp_input_status
     return payload
 
 
