@@ -1,25 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   initialRowStreamState,
-  playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  stablePlayerIdsKey,
 } from './inferenceRowStreamState'
-
-describe('stablePlayerIdsKey', () => {
-  it('sorts ids so order changes do not alter the key', () => {
-    expect(stablePlayerIdsKey([9, 8])).toBe('8,9')
-    expect(stablePlayerIdsKey([8, 9])).toBe('8,9')
-  })
-})
-
-describe('playerIdsFromStableKey', () => {
-  it('round-trips sorted player ids', () => {
-    expect(playerIdsFromStableKey('8,9')).toEqual([8, 9])
-    expect(playerIdsFromStableKey('')).toEqual([])
-  })
-})
 
 describe('reduceRowStreamState', () => {
   it('replaces held solutions wholesale on solution events', () => {

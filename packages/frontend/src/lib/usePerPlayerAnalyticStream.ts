@@ -3,13 +3,7 @@ import type { AnalyticShellScope } from '../api/bff'
 import { analyticScopeKey } from './analyticScopeKey'
 import type { AnalyticTableStreamConnectResult } from './analyticTableStreamConnect'
 import { errorDetailFromUnknown } from './queryRetry'
-
-function playerIdsFromStableKey(playerIdsKey: string): number[] {
-  if (playerIdsKey.length === 0) {
-    return []
-  }
-  return playerIdsKey.split(',').map((part) => Number(part))
-}
+import { playerIdsFromStableKey } from './stablePlayerIdsKey'
 
 type StreamErrorEvent = {
   type: string

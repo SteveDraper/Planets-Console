@@ -5,13 +5,13 @@ import {
   usePerPlayerAnalyticStream,
   type PerPlayerAnalyticStreamPolicy,
 } from '../../lib/usePerPlayerAnalyticStream'
+import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
 import {
   failureDetail,
   initialRowStreamState,
   pendingDetail,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  stablePlayerIdsKey,
   type RowStreamState,
 } from './inferenceRowStreamState'
 import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'

@@ -5,9 +5,7 @@ import {
   usePerPlayerAnalyticStream,
   type PerPlayerAnalyticStreamPolicy,
 } from '../../lib/usePerPlayerAnalyticStream'
-import {
-  stablePlayerIdsKey,
-} from '../scores/inferenceRowStreamState'
+import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
 import { connectFleetTableStreamUntilComplete } from './fleetTableStreamConnect'
 import {
   fleetPlayerStreamSliceFromState,
