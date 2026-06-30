@@ -57,17 +57,31 @@ def _fleet_snapshot_for_scope(
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
 
 
-def is_fleet_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+def is_fleet_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Probe/ensure hook: final only when per-player provenance is (true, true)."""
+    if scope.player_id is None:
+        return True
+
     services = resolve_fleet_services(ctx)
-    return services.persistence.has_snapshot(
+    if ctx.load_turn(scope.turn) is None:
+        return True
+
+    return services.persistence.has_final_ledger(
         services.game_id,
         services.perspective,
         scope.turn,
+        scope.player_id,
     )
 
 
+def is_fleet_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    if scope.player_id is None:
+        return False
+    return is_fleet_export_ensure_satisfied(ctx, scope)
+
+
 def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    if is_fleet_export_persisted(ctx, scope):
+    if is_fleet_export_ensure_satisfied(ctx, scope):
         return True
 
     turn = ctx.load_turn(scope.turn)
@@ -76,7 +90,7 @@ def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
 
     _fleet_snapshot_for_scope(ctx, scope, turn=turn)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-    return is_fleet_export_persisted(ctx, scope)
+    return is_fleet_export_ensure_satisfied(ctx, scope)
 
 
 def _scores_search_status_for_scope(
@@ -146,4 +160,5 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     ensure_export=ensure_fleet_export,
     materialize_export_tree=materialize_fleet_export_tree,
     is_persisted=is_fleet_export_persisted,
+    is_ensure_satisfied=is_fleet_export_ensure_satisfied,
 )

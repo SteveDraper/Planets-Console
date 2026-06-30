@@ -19,8 +19,10 @@ from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetFieldKnown,
+    FleetMaterializationProvenance,
     FleetShipRecord,
     FleetTurnSnapshot,
+    PersistedFleetLedger,
 )
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
@@ -692,18 +694,43 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
     assert persistence.invalidation_generation(628580, 1) == 3
 
 
+def _put_provenance_final_snapshot(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    turn,
+) -> FleetTurnSnapshot:
+    baseline = ensure_fleet_baseline(game_id, perspective, turn)
+    for ledger in baseline.players:
+        persistence.put_ledger(
+            game_id,
+            perspective,
+            turn.settings.turn,
+            ledger.player_id,
+            PersistedFleetLedger(
+                ledger=ledger,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
+    snapshot = persistence.get_snapshot(game_id, perspective, turn.settings.turn)
+    assert snapshot is not None
+    return snapshot
+
+
 def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(persistence, load_turn):
     """After invalidation retries, return a peer-written snapshot instead of ConflictError."""
     from api.analytics.fleet.chain import _FleetSnapshotInvalidated
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
-    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
 
     turn_111 = load_turn(111)
     assert turn_111 is not None
-    winner = ensure_fleet_baseline(628580, 1, turn_111)
-    persistence.put_snapshot(628580, 1, 111, winner)
+    winner = _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
 
     with patch(
         "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",

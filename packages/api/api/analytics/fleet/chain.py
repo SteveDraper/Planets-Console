@@ -223,6 +223,47 @@ def _snapshot_has_all_roster_players(snapshot: FleetTurnSnapshot, turn: TurnInfo
     return roster_ids <= present_ids
 
 
+def _snapshot_is_provenance_final_for_all_roster_players(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    turn: TurnInfo,
+) -> bool:
+    """True when every roster player has an ensure-final ledger at this turn."""
+    for player_id in _roster_player_ids(turn):
+        if not persistence.has_final_ledger(game_id, perspective, turn_number, player_id):
+            return False
+    return True
+
+
+def _is_fleet_ledger_cache_hit(persisted: PersistedFleetLedger) -> bool:
+    """Return whether a cached per-player ledger may short-circuit gap-fill."""
+    return persisted.provenance.is_final
+
+
+def _is_fleet_snapshot_cache_hit(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    turn: TurnInfo,
+    snapshot: FleetTurnSnapshot | None,
+) -> bool:
+    """Return whether a cached turn snapshot may short-circuit gap-fill."""
+    return (
+        snapshot is not None
+        and _snapshot_has_all_roster_players(snapshot, turn)
+        and _snapshot_is_provenance_final_for_all_roster_players(
+            persistence,
+            game_id,
+            perspective,
+            turn_number,
+            turn,
+        )
+    )
+
+
 def _materialize_and_persist_player_turn(
     coherence: _GapFillCoherence,
     *,
@@ -276,7 +317,7 @@ def _materialize_fleet_ledger_chain_for_player(
     turn_number = turn.settings.turn
 
     existing = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-    if existing is not None:
+    if existing is not None and _is_fleet_ledger_cache_hit(existing):
         return existing
 
     loaded_turns: dict[int, TurnInfo | None] = {}
@@ -453,7 +494,7 @@ def get_or_materialize_fleet_ledger_for_player(
     """Return a cached ledger or materialize turn T for one player."""
     turn_number = turn.settings.turn
     cached = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-    if cached is not None:
+    if cached is not None and _is_fleet_ledger_cache_hit(cached):
         return cached
 
     for attempt in range(GAP_FILL_MAX_RETRIES):
@@ -483,7 +524,9 @@ def get_or_materialize_fleet_ledger_for_player(
                 turn_number,
                 player_id,
             )
-            if cached_after_invalidation is not None:
+            if cached_after_invalidation is not None and _is_fleet_ledger_cache_hit(
+                cached_after_invalidation
+            ):
                 return cached_after_invalidation
             if attempt + 1 >= GAP_FILL_MAX_RETRIES:
                 break
@@ -495,7 +538,7 @@ def get_or_materialize_fleet_ledger_for_player(
         turn_number,
         player_id,
     )
-    if cached_after_retries is not None:
+    if cached_after_retries is not None and _is_fleet_ledger_cache_hit(cached_after_retries):
         return cached_after_retries
 
     raise ConflictError(
@@ -517,7 +560,7 @@ def get_or_materialize_fleet_snapshot(
     """Return a cached snapshot or materialize turn T from T-1 plus turn-T delta."""
     turn_number = turn.settings.turn
     cached = persistence.get_snapshot(game_id, perspective, turn_number)
-    if cached is not None and _snapshot_has_all_roster_players(cached, turn):
+    if _is_fleet_snapshot_cache_hit(persistence, game_id, perspective, turn_number, turn, cached):
         return cached
 
     for attempt in range(GAP_FILL_MAX_RETRIES):
@@ -543,8 +586,13 @@ def get_or_materialize_fleet_snapshot(
                 perspective,
                 turn_number,
             )
-            if cached_after_invalidation is not None and _snapshot_has_all_roster_players(
-                cached_after_invalidation, turn
+            if _is_fleet_snapshot_cache_hit(
+                persistence,
+                game_id,
+                perspective,
+                turn_number,
+                turn,
+                cached_after_invalidation,
             ):
                 return cached_after_invalidation
             if attempt + 1 >= GAP_FILL_MAX_RETRIES:
@@ -552,9 +600,8 @@ def get_or_materialize_fleet_snapshot(
             continue
 
     cached_after_retries = persistence.get_snapshot(game_id, perspective, turn_number)
-    if cached_after_retries is not None and _snapshot_has_all_roster_players(
-        cached_after_retries,
-        turn,
+    if _is_fleet_snapshot_cache_hit(
+        persistence, game_id, perspective, turn_number, turn, cached_after_retries
     ):
         return cached_after_retries
 

@@ -310,10 +310,11 @@ def test_ensure_fleet_export_materializes_snapshot_when_missing(sample_turn, per
 
     EXPORT_CATALOG.ensure_export(ctx, scope)
 
-    assert fleet_services.persistence.has_snapshot(
+    assert fleet_services.persistence.has_final_ledger(
         GAME_ID,
         perspective(sample_turn),
         turn_number,
+        player_id,
     )
 
 
