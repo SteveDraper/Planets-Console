@@ -9,7 +9,7 @@ export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 
 export type FleetPlayerStreamSlice = {
   playerName?: string
-  records?: FleetTableRecord[]
+  records?: readonly FleetTableRecord[]
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -163,7 +163,7 @@ export function mergeFleetPlayerWithStreamSlice(
   fallbackPlayerName: string
 ): {
   playerName: string
-  records: FleetTableRecord[]
+  records: readonly FleetTableRecord[]
   discrepancy?: FleetCountDiscrepancy
   streamError: string | null
 } {

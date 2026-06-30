@@ -2,20 +2,11 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AnalyticShellScope } from '../../api/bff'
 import * as bff from '../../api/bff'
-import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetTableStream } from './useFleetTableStream'
 import type { FleetTableRecord } from './fleetTableWireSchema'
-
-type StreamHandlers = Parameters<typeof bff.fetchFleetTableStream>[2]
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
-}
 
 const scope: AnalyticShellScope = {
   gameId: '628580',
