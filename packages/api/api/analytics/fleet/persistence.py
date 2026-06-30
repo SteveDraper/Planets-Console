@@ -107,10 +107,14 @@ class FleetSnapshotPersistenceService:
                 "persisted fleet ledger player_id "
                 f"{persisted.ledger.player_id} does not match key player_id {player_id}",
             )
-        persisted.materialization_version = FLEET_MATERIALIZATION_VERSION
+        to_store = PersistedFleetLedger(
+            ledger=persisted.ledger,
+            provenance=persisted.provenance,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+        )
         document = self._load_or_create_document(game_id, perspective, turn_number)
         ledgers = self._ledgers_object(document)
-        ledgers[str(player_id)] = persisted_fleet_ledger_to_json(persisted)
+        ledgers[str(player_id)] = persisted_fleet_ledger_to_json(to_store)
         self._write_document(game_id, perspective, turn_number, document)
         if self._on_snapshot_persisted is not None:
             self._on_snapshot_persisted(game_id, perspective, turn_number)

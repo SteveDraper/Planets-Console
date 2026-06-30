@@ -57,6 +57,23 @@ def sample_ledger():
     )
 
 
+def test_put_ledger_does_not_mutate_caller_persisted_ledger(persistence, sample_ledger):
+    persisted = PersistedFleetLedger(
+        ledger=sample_ledger,
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=False,
+        ),
+        materialization_version=0,
+    )
+    persistence.put_ledger(628580, 1, 111, 8, persisted)
+
+    assert persisted.materialization_version == 0
+    loaded = persistence.get_ledger(628580, 1, 111, 8)
+    assert loaded is not None
+    assert loaded.materialization_version == FLEET_MATERIALIZATION_VERSION
+
+
 def test_put_ledger_round_trip(persistence, sample_ledger):
     persisted = PersistedFleetLedger(
         ledger=sample_ledger,
