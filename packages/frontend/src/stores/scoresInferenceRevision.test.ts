@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { AnalyticShellScope } from '../api/bff'
 import {
   bumpScoresInferenceRevision,
-  noteFleetTorpInputStatusChangeAndShouldBumpRevision,
+  clearBumpMemoryForScope,
+  noteSolutionEvidenceChangeAndShouldBumpRevision,
   scoresInferenceRevisionForScope,
   useScoresInferenceRevisionStore,
 } from './scoresInferenceRevision'
@@ -17,6 +18,11 @@ const scopeB: AnalyticShellScope = {
   gameId: '628580',
   turn: 4,
   perspective: 1,
+}
+
+const heldSolution = {
+  objectiveValue: 100,
+  actions: [{ actionId: 'build_fighters', label: 'Fighters', count: 10 }],
 }
 
 describe('scoresInferenceRevision', () => {
@@ -43,28 +49,57 @@ describe('scoresInferenceRevision', () => {
     expect(scoresInferenceRevisionForScope(scopeB)).toBe(1)
   })
 
-  it('tracks fleet torp status changes per scope for revision bumps', () => {
+  it('bumps on first held solutions per player and deduplicates repeats', () => {
     expect(
-      noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeA, 'pending')
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [], null)
     ).toBe(true)
     expect(
-      noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeA, 'pending')
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [], null)
     ).toBe(false)
     expect(
-      noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeA, 'applied')
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [heldSolution], null)
     ).toBe(true)
-    expect(noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeA, null)).toBe(false)
     expect(
-      noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeB, 'pending')
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [heldSolution], null)
+    ).toBe(false)
+  })
+
+  it('tracks fleet torp status changes per player within scope', () => {
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [], 'pending')
+    ).toBe(true)
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [], 'pending')
+    ).toBe(false)
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [], 'applied')
+    ).toBe(true)
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 6, [], 'pending')
+    ).toBe(true)
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeB, 8, [], 'pending')
     ).toBe(true)
   })
 
-  it('clears fleet torp status memory when revisions reset', () => {
-    noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeA, 'pending')
+  it('clears per-player bump memory for a scope on reconnect', () => {
+    noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [heldSolution], 'pending')
+    clearBumpMemoryForScope(scopeA)
+
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [heldSolution], 'pending')
+    ).toBe(true)
+    expect(
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 6, [], 'pending')
+    ).toBe(true)
+  })
+
+  it('clears bump memory when revisions reset', () => {
+    noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [heldSolution], 'pending')
     useScoresInferenceRevisionStore.getState().resetRevisions()
 
     expect(
-      noteFleetTorpInputStatusChangeAndShouldBumpRevision(scopeA, 'pending')
+      noteSolutionEvidenceChangeAndShouldBumpRevision(scopeA, 8, [heldSolution], 'pending')
     ).toBe(true)
   })
 })

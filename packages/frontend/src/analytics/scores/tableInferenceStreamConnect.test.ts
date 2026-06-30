@@ -102,7 +102,7 @@ describe('connectTableInferenceStream', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
-  it('does not bump scores inference revision on complete or solution without fleet torp status', async () => {
+  it('bumps scores inference revision on held solution changes and every complete', async () => {
     vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
       async (_scope, _playerIds, handlers) => {
         handlers.onEvent({
@@ -121,6 +121,11 @@ describe('connectTableInferenceStream', () => {
           solutions: [],
         })
         handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [{ objectiveValue: 1, actions: [] }],
+        })
+        handlers.onEvent({
           type: 'complete',
           playerId: 8,
           status: 'exact',
@@ -137,7 +142,7 @@ describe('connectTableInferenceStream', () => {
       onEvent: () => {},
     })
 
-    expect(scoresInferenceRevisionForScope(scope)).toBe(0)
+    expect(scoresInferenceRevisionForScope(scope)).toBe(3)
   })
 
   it('bumps scores inference revision on solution when fleet torp status changes', async () => {
@@ -179,7 +184,7 @@ describe('connectTableInferenceStream', () => {
       onEvent: () => {},
     })
 
-    expect(scoresInferenceRevisionForScope(scope)).toBe(2)
+    expect(scoresInferenceRevisionForScope(scope)).toBe(3)
   })
 
   it('does not bump scores inference revision on scope-level stream conflict errors', async () => {
@@ -207,6 +212,6 @@ describe('connectTableInferenceStream', () => {
       onEvent: () => {},
     })
 
-    expect(scoresInferenceRevisionForScope(scope)).toBe(0)
+    expect(scoresInferenceRevisionForScope(scope)).toBe(1)
   })
 })
