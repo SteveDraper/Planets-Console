@@ -12,7 +12,9 @@ from api.analytics.fleet.fleet_table_stream_registry import (
     detach_fleet_table_stream,
 )
 from api.analytics.fleet.fleet_table_stream_rows import (
+    CachedCompletePlayerAdmission,
     PlayerAdmissionDispatch,
+    PlayerStreamAdmission,
     resolve_player_stream_admission,
     schedule_fleet_player_run,
     tag_fleet_table_stream_event,
@@ -52,13 +54,11 @@ class FleetTableStreamController:
         with self.stream_lock:
             self.scheduled_players[player_id] = row
 
-    def _dispatch_player_admission(
+    def dispatch_player_admission(
         self,
         player_id: int,
-        admission,
+        admission: PlayerStreamAdmission,
     ) -> PlayerAdmissionDispatch:
-        from api.analytics.fleet.fleet_table_stream_rows import CachedCompletePlayerAdmission
-
         if isinstance(admission, CachedCompletePlayerAdmission):
             return PlayerAdmissionDispatch(
                 wire_events=tuple(
@@ -81,7 +81,7 @@ class FleetTableStreamController:
         return PlayerAdmissionDispatch(scheduled_player=scheduled)
 
     def _register_admitted_schedule(self, player_id: int, admission) -> bool:
-        dispatch = self._dispatch_player_admission(player_id, admission)
+        dispatch = self.dispatch_player_admission(player_id, admission)
         if dispatch.schedule_failed:
             return False
         if dispatch.wire_events:

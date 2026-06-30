@@ -268,31 +268,6 @@ def iter_fleet_table_stream_events(
     )
     controller.attach()
 
-    def dispatch_player_admission(
-        player_id: int,
-        admission: PlayerStreamAdmission,
-    ) -> PlayerAdmissionDispatch:
-        if isinstance(admission, CachedCompletePlayerAdmission):
-            return PlayerAdmissionDispatch(
-                wire_events=tuple(
-                    tag_fleet_table_stream_event(event, player_id=player_id)
-                    for event in admission.events
-                ),
-            )
-        scheduled = schedule_fleet_player_run(
-            scheduler,
-            turn=turn,
-            player_id=player_id,
-            game_id=game_id,
-            perspective=perspective,
-            fleet_services=fleet_services,
-            persistence=persistence,
-            stream_token=stream_token,
-        )
-        if scheduled is None:
-            return PlayerAdmissionDispatch(schedule_failed=True)
-        return PlayerAdmissionDispatch(scheduled_player=scheduled)
-
     try:
         for player_id in player_ids:
             if not scheduler.owns_table_stream(stream_token):
@@ -305,7 +280,7 @@ def iter_fleet_table_stream_events(
                 turn_number=turn_number,
                 player_id=player_id,
             )
-            dispatch = dispatch_player_admission(player_id, admission)
+            dispatch = controller.dispatch_player_admission(player_id, admission)
             if dispatch.schedule_failed:
                 return
 
