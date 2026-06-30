@@ -33,6 +33,17 @@ Logical path: `games/{gameId}/{perspective}/turns/{hostTurn}/analytics/scores/in
 
 Hull catalog mask overrides remain game-global at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.
 
+## Fleet ledger persistence (ADR 0004)
+
+Logical path: `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet` with in-document keys `ledgers/{playerId}`.
+
+- **Provenance:** each ledger stores **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1)`; both `true` before ensure treats the scope as final.
+- **Migration:** legacy monolithic snapshot shape (all players at document root) upgraded on read to per-ledger keys.
+- **Invalidation:** scores inference row persist for player P at host *H* clears P's fleet ledgers at turns `>= H`; turn `put` at *T* clears all players at turns `>= T`.
+- **Stream:** fleet table NDJSON stream (F7.5) delivers per-player ledger updates; see [design-fleet-analytic.md](../design-fleet-analytic.md) section 15.
+
+Supersedes monolithic fleet snapshot semantics for new writes. See [ADR 0004](0004-fleet-per-player-persistence-and-ensure-provenance.md).
+
 ## Considered options
 
 - **Recompute on every request** — simple but too slow for multi-turn evidence accumulation and repeated map loads.

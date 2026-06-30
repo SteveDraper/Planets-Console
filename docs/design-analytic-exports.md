@@ -29,7 +29,7 @@ Non-goals (v1 / #93):
 - Nested HTTP **export query** routes (in-process `ctx.query(...)` only; MCP adapter later).
 - Server knowledge of SPA sidebar enablement.
 - BFF JSONPath export-query endpoints.
-- **Truncated pseudo-baseline unwind** (fast mode with neutral priors at turn *N−K*) -- deferred until **analytic export ensure provenance** and invalidation are designed.
+- **Truncated pseudo-baseline unwind** (fast mode with neutral priors at turn *N−K*) -- deferred; per-player **fleet materialization provenance** (ADR 0004) is prerequisite; truncation marker is a follow-on on top of provenance flags.
 - **Homeworld locator exports** -- ship with homeworld analytic (**#33**).
 - **Fleet analytic** and other consumers -- separate features after framework + provider slices land.
 
@@ -140,6 +140,8 @@ ENSURE_DEPENDENCIES = (
 | **fleet** @ *N* | **scores** @ *N*, same `player_id` |
 
 Probe and ensure unwind follow these edges. Cross-turn scopes differ, so unwind is **not** a cycle (see below).
+
+**Fleet ensure-final gate (ADR 0004):** for `fleet@N` + `player_id`, `is_ensure_satisfied` is `true` only when that player's persisted ledger has **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1) = (true, true)`. File existence or partial gap-fill is insufficient. One player final does not imply all players final at the same turn document.
 
 ### Concurrent fleet gap-fill (scores stream + ensure)
 
@@ -506,7 +508,7 @@ No second implementation path.
 
 ### Deferred: truncated pseudo-baseline
 
-Stopping unwind at turn *N−K* with neutral priors/empty fleet may return faster approximate results. **Not in #93.** Requires **analytic export ensure provenance** on persisted rows and invalidation when deeper history is later ensured -- separate design/ADR.
+Stopping unwind at turn *N−K* with neutral priors/empty fleet may return faster approximate results. **Not in initial F7 work.** [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md) defines per-player provenance for fleet; truncated unwind adds an explicit truncation marker on top. Invalidation when deeper history is later ensured remains required for any fast mode.
 
 ---
 
@@ -534,4 +536,4 @@ Must cover: probe step counts, threshold policy, inline vs background ensure, un
 | **#93b** | [#109](https://github.com/SteveDraper/Planets-Console/issues/109) | BFF export ensure orchestration (probe + background job NDJSON stream) |
 | **#93c** | [#110](https://github.com/SteveDraper/Planets-Console/issues/110) | `connections/exports.py` -- concept-shim reference |
 | **#93d** | [#111](https://github.com/SteveDraper/Planets-Console/issues/111) | `scores/exports.py` -- `$.solutions`, `$.meta`, scheduler/persistence; **`ENSURE_DEPENDENCIES = ()`** until fleet ships |
-| **Follow-on** | Homeworld exports (**#33**); [fleet analytic](design-fleet-analytic.md) + Scores fleet@N−1 edge; truncated unwind + provenance ADR |
+| **Follow-on** | Homeworld exports (**#33**); [fleet analytic](design-fleet-analytic.md) F7 per-player provenance ([ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md)); truncated unwind after provenance ships |
