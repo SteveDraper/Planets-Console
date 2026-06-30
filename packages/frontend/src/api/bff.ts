@@ -27,6 +27,7 @@ import {
   type FleetTableStreamEvent,
 } from './parseFleetTableStreamEvent'
 import type { FleetTorpInputStatus } from './inferenceStreamEventSchema'
+import { fetchAnalyticTableNdjsonStream } from './fetchAnalyticTableNdjsonStream'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
 
@@ -824,26 +825,14 @@ export async function fetchScoresTableInferenceStream(
   const path = '/bff/analytics/scores/inference/table-stream'
   const params = analyticScopeParams(scope)
   params.set('playerIds', playerIds.join(','))
-  const qs = `?${params.toString()}`
-  const endpointLabel = `GET ${path}`
-  const r = await bffRequest(
-    `${path}${qs}`,
-    { signal: handlers.signal, cache: 'no-store' },
-    endpointLabel
+  await fetchAnalyticTableNdjsonStream(
+    bffRequest,
+    withEndpointIfGeneric,
+    path,
+    params,
+    parseInferenceStreamEvent,
+    handlers
   )
-  if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
-  }
-  if (!r.body) {
-    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
-  }
-
-  await readNdjsonStream(r.body, (line) => {
-    const event = parseInferenceStreamEvent(line)
-    if (event) {
-      handlers.onEvent(event)
-    }
-  })
 }
 
 export async function fetchFleetTableStream(
@@ -857,26 +846,14 @@ export async function fetchFleetTableStream(
   const path = '/bff/analytics/fleet/table-stream'
   const params = analyticScopeParams(scope)
   params.set('playerIds', playerIds.join(','))
-  const qs = `?${params.toString()}`
-  const endpointLabel = `GET ${path}`
-  const r = await bffRequest(
-    `${path}${qs}`,
-    { signal: handlers.signal, cache: 'no-store' },
-    endpointLabel
+  await fetchAnalyticTableNdjsonStream(
+    bffRequest,
+    withEndpointIfGeneric,
+    path,
+    params,
+    parseFleetTableStreamEvent,
+    handlers
   )
-  if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
-  }
-  if (!r.body) {
-    throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
-  }
-
-  await readNdjsonStream(r.body, (line) => {
-    const event = parseFleetTableStreamEvent(line)
-    if (event) {
-      handlers.onEvent(event)
-    }
-  })
 }
 
 export async function fetchAnalyticMap(
