@@ -53,15 +53,16 @@ class InferenceInvalidationService:
         game_id: int,
         perspective: int,
         host_turn: int,
-        _player_id: int,
+        player_id: int,
     ) -> set[int]:
-        """Drop fleet snapshots at turns >= host_turn after scores inference evidence changes."""
+        """Drop one player's fleet ledgers at turns >= host_turn after scores evidence changes."""
         if self._fleet_persistence is None:
             return set()
-        return self._fleet_persistence.invalidate_for_turn_write(
+        return self._fleet_persistence.invalidate_player_ledgers_from_turn(
             game_id,
             perspective,
             host_turn,
+            player_id,
         )
 
     def wire_fleet_invalidation_to_persistence(self) -> None:

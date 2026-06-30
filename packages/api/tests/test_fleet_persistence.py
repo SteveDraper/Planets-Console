@@ -316,6 +316,76 @@ def test_invalidate_for_turn_write_drops_snapshots_at_and_after_turn(persistence
     assert persistence.get_snapshot(628580, 1, 112) is None
 
 
+def test_invalidate_player_ledgers_from_turn_drops_only_target_player(persistence):
+    player_8 = FleetAcquisitionLedger(player_id=8)
+    player_3 = FleetAcquisitionLedger(player_id=3)
+    for turn_number in (110, 111, 112):
+        persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            8,
+            PersistedFleetLedger(ledger=player_8),
+        )
+        persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            3,
+            PersistedFleetLedger(ledger=player_3),
+        )
+    assert persistence.invalidation_generation(628580, 1) == 0
+    cleared = persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8)
+    assert cleared == {111, 112}
+    assert persistence.invalidation_generation(628580, 1) == 1
+    assert persistence.get_ledger(628580, 1, 110, 8) is not None
+    assert persistence.get_ledger(628580, 1, 110, 3) is not None
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
+    assert persistence.get_ledger(628580, 1, 112, 8) is None
+    assert persistence.get_ledger(628580, 1, 111, 3) is not None
+    assert persistence.get_ledger(628580, 1, 112, 3) is not None
+
+
+def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backend):
+    fleet_persistence, inference_persistence, _, _ = _wired_fleet_inference_services(memory_backend)
+    player_8 = FleetAcquisitionLedger(player_id=8)
+    player_3 = FleetAcquisitionLedger(player_id=3)
+    for turn_number in (111, 112):
+        fleet_persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            8,
+            PersistedFleetLedger(ledger=player_8),
+        )
+        fleet_persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            3,
+            PersistedFleetLedger(ledger=player_3),
+        )
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    inference_persistence.put_row(
+        628580,
+        1,
+        111,
+        8,
+        PersistedInferenceRow(
+            status="exact",
+            summary="updated",
+            solution_count=1,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    assert fleet_persistence.get_ledger(628580, 1, 111, 8) is None
+    assert fleet_persistence.get_ledger(628580, 1, 112, 8) is None
+    assert fleet_persistence.get_ledger(628580, 1, 111, 3) is not None
+    assert fleet_persistence.get_ledger(628580, 1, 112, 3) is not None
+
+
 def test_turn_store_invalidates_fleet_snapshots(memory_backend):
     _, turns, _, _, _ = build_service_stack(memory_backend)
     persistence = FleetSnapshotPersistenceService(memory_backend)
@@ -477,7 +547,13 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
             ],
         ),
     )
-    assert fleet_persistence.get_snapshot(628580, 1, 111) is None
+    assert fleet_persistence.get_ledger(628580, 1, 111, 8) is None
+    other_player_ids = [
+        player_id
+        for player_id in fleet_persistence.list_ledger_player_ids(628580, 1, 111)
+        if player_id != 8
+    ]
+    assert other_player_ids
 
     rematerialized = get_or_materialize_fleet_snapshot(
         fleet_persistence,
@@ -534,7 +610,7 @@ def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
     assert scheduler._on_held_solutions_updated is not None
     scheduler._on_held_solutions_updated(scheduled.session)
 
-    assert fleet_persistence.get_snapshot(628580, 1, turn_number) is None
+    assert fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is None
 
 
 def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memory_backend):
