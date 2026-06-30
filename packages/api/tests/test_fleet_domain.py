@@ -15,10 +15,14 @@ from api.analytics.fleet.serialization import (
     fleet_evidence_event_to_json,
     fleet_field_constraint_from_json,
     fleet_field_constraint_to_json,
+    fleet_materialization_provenance_from_json,
+    fleet_materialization_provenance_to_json,
     fleet_ship_record_from_json,
     fleet_ship_record_to_json,
     fleet_turn_snapshot_from_json,
     fleet_turn_snapshot_to_json,
+    persisted_fleet_ledger_from_json,
+    persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -33,11 +37,13 @@ from api.analytics.fleet.types import (
     FleetFieldRegionStarbaseCoord,
     FleetFieldUnknown,
     FleetLastSeen,
+    FleetMaterializationProvenance,
     FleetPossiblyLost,
     FleetRowQualifiers,
     FleetShipRecord,
     FleetShipRecordFields,
     FleetTurnSnapshot,
+    PersistedFleetLedger,
 )
 from api.errors import ValidationError
 
@@ -186,6 +192,31 @@ def test_fleet_count_discrepancy_round_trip():
     restored = fleet_count_discrepancy_from_json(wire)
     assert restored == discrepancy
     assert fleet_count_discrepancy_to_json(restored) == wire
+
+
+def test_fleet_materialization_provenance_round_trip():
+    provenance = FleetMaterializationProvenance(
+        turn_evidence_at_n=True,
+        prior_ledger_at_n_minus_1=False,
+    )
+    wire = fleet_materialization_provenance_to_json(provenance)
+    restored = fleet_materialization_provenance_from_json(wire)
+    assert restored == provenance
+    assert restored.is_final is False
+
+
+def test_persisted_fleet_ledger_round_trip():
+    persisted = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=8, player_name="koshling"),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
+    )
+    wire = persisted_fleet_ledger_to_json(persisted)
+    restored = persisted_fleet_ledger_from_json(wire)
+    assert restored == persisted
 
 
 def test_fleet_turn_snapshot_round_trip():

@@ -173,6 +173,29 @@ class FleetAcquisitionLedger:
     discrepancy: FleetCountDiscrepancy | None = None
 
 
+@dataclass(frozen=True)
+class FleetMaterializationProvenance:
+    """Per-player closure flags for fleet@N materialization legs."""
+
+    turn_evidence_at_n: bool = False
+    prior_ledger_at_n_minus_1: bool = False
+
+    @property
+    def is_final(self) -> bool:
+        return self.turn_evidence_at_n and self.prior_ledger_at_n_minus_1
+
+
+@dataclass
+class PersistedFleetLedger:
+    """One player's fleet acquisition ledger at a turn, plus cache metadata."""
+
+    ledger: FleetAcquisitionLedger
+    provenance: FleetMaterializationProvenance = field(
+        default_factory=FleetMaterializationProvenance,
+    )
+    materialization_version: int = 0
+
+
 @dataclass
 class FleetTurnSnapshot:
     analytic_id: str = ANALYTIC_ID
