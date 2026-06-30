@@ -123,6 +123,24 @@ def _cached_stream_admission(
     return CachedCompleteRowAdmission(event=cached)
 
 
+def gather_scores_materialization_probe_snapshot(
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+) -> ScoresInferenceSnapshot:
+    """Lightweight scores snapshot for fleet materialization provenance (no export context)."""
+    persisted_row = _load_persisted_row(services, scope)
+    stream_scope = scores_inference_stream_scope(scope)
+    pause_status = services.scheduler.global_pause_status(stream_scope)
+    return ScoresInferenceSnapshot(
+        persisted_row=persisted_row,
+        stream_admission=_cached_stream_admission(services, scope),
+        ensure_sync_admission=None,
+        scheduler_run=_scheduler_row_run(services, scope),
+        globally_paused=bool(pause_status.get("paused")),
+    )
+
+
 def gather_scores_ensure_probe_snapshot(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
