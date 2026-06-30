@@ -172,6 +172,35 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     expect(screen.getByRole('status')).not.toHaveTextContent(appliedLabel)
   })
 
+  it('announces scope-level pending when any row becomes pending', async () => {
+    const pendingLabel = fleetTorpInputAccessibleLabel('pending')
+    const { rerender } = render(
+      <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
+        inferenceByRow={[
+          inferenceRow({ playerId: 1, fleetTorpInputStatus: 'applied' }),
+          inferenceRow({ playerId: 2, fleetTorpInputStatus: 'not_applicable' }),
+        ]}
+      />
+    )
+
+    rerender(
+      <FleetTorpInputStatusAnnouncer
+        analyticScope={scopeA}
+        inferenceByRow={[
+          inferenceRow({ playerId: 1, fleetTorpInputStatus: 'applied' }),
+          inferenceRow({ playerId: 2, fleetTorpInputStatus: 'pending' }),
+        ]}
+      />
+    )
+
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent(pendingLabel)
+  })
+
   it('ignores rows without playerId', async () => {
     render(
       <FleetTorpInputStatusAnnouncer

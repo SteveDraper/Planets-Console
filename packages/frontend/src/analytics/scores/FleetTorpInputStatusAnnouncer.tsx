@@ -2,14 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail } from '../../api/bff'
 import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import {
+  aggregateFleetTorpInputStatusForScope,
   fleetTorpInputAnnouncementForTransition,
-  readFleetTorpInputStatusFromDetail,
   type FleetTorpInputStatus,
 } from './fleetTorpInputStatus'
-
-function transitionKey(scope: AnalyticShellScope, playerId: number): string {
-  return `${analyticScopeKey(scope)}:${playerId}`
-}
 
 type FleetTorpInputStatusAnnouncerProps = {
   analyticScope: AnalyticShellScope
@@ -24,29 +20,19 @@ export function FleetTorpInputStatusAnnouncer({
   const [announcement, setAnnouncement] = useState('')
 
   useEffect(() => {
-    const announcements: string[] = []
-    for (const detail of inferenceByRow) {
-      const playerId = detail.playerId
-      if (playerId == null) {
-        continue
-      }
-      const nextStatus = readFleetTorpInputStatusFromDetail(detail)
-      const key = transitionKey(analyticScope, playerId)
-      const previousStatus = previousStatusesRef.current.get(key) ?? null
-      if (nextStatus != null) {
-        const text = fleetTorpInputAnnouncementForTransition(previousStatus, nextStatus)
-        if (text != null) {
-          announcements.push(text)
-        }
-        previousStatusesRef.current.set(key, nextStatus)
-      }
-    }
+    const scopeKey = analyticScopeKey(analyticScope)
+    const nextStatus = aggregateFleetTorpInputStatusForScope(inferenceByRow)
+    const previousStatus = previousStatusesRef.current.get(scopeKey) ?? null
+    const text =
+      nextStatus != null
+        ? fleetTorpInputAnnouncementForTransition(previousStatus, nextStatus)
+        : null
+    previousStatusesRef.current.set(scopeKey, nextStatus)
 
-    if (announcements.length === 0) {
+    if (text == null) {
       return
     }
 
-    const text = announcements.join(' ')
     setAnnouncement('')
     const frameId = requestAnimationFrame(() => {
       setAnnouncement(text)

@@ -131,6 +131,30 @@ export function countFleetTorpPendingRows(details: ScoresInferenceRowDetail[]): 
   ).length
 }
 
+/** Scope-level fleet torp status: most urgent status across rows (pending > unavailable > applied > not_applicable). */
+export function aggregateFleetTorpInputStatusForScope(
+  details: ScoresInferenceRowDetail[]
+): FleetTorpInputStatus | null {
+  const statuses = details
+    .filter((detail) => detail.playerId != null)
+    .map(readFleetTorpInputStatusFromDetail)
+    .filter((status): status is FleetTorpInputStatus => status != null)
+
+  if (statuses.length === 0) {
+    return null
+  }
+  if (statuses.some((status) => status === 'pending')) {
+    return 'pending'
+  }
+  if (statuses.some((status) => status === 'unavailable')) {
+    return 'unavailable'
+  }
+  if (statuses.some((status) => status === 'applied')) {
+    return 'applied'
+  }
+  return 'not_applicable'
+}
+
 export function fleetTorpInputScopeBannerText(pendingCount: number): string | null {
   if (pendingCount <= 0) {
     return null

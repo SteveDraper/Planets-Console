@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  aggregateFleetTorpInputStatusForScope,
   countFleetTorpPendingRows,
   fleetTorpInputAccessibleLabel,
   fleetTorpInputAnnouncementForTransition,
@@ -16,7 +17,8 @@ import type { ScoresInferenceRowDetail } from '../../api/bff'
 
 function rowDetail(
   fleetTorpInputStatus: string | undefined,
-  beliefSetTorpIds?: number[]
+  beliefSetTorpIds?: number[],
+  playerId?: number
 ): ScoresInferenceRowDetail {
   return {
     displayStatus: 'success',
@@ -26,6 +28,7 @@ function rowDetail(
     isComplete: true,
     solutions: [],
     diagnostics: {},
+    ...(playerId != null ? { playerId } : {}),
     ...(fleetTorpInputStatus != null ? { fleetTorpInputStatus: fleetTorpInputStatus as never } : {}),
     ...(beliefSetTorpIds != null ? { fleetTorpOverlayBeliefSetTorpIds: beliefSetTorpIds } : {}),
   }
@@ -141,5 +144,52 @@ describe('countFleetTorpPendingRows', () => {
         rowDetail(undefined),
       ])
     ).toBe(1)
+  })
+})
+
+describe('aggregateFleetTorpInputStatusForScope', () => {
+  it('returns null when no rows have status', () => {
+    expect(aggregateFleetTorpInputStatusForScope([rowDetail(undefined)])).toBeNull()
+    expect(aggregateFleetTorpInputStatusForScope([])).toBeNull()
+  })
+
+  it('ignores rows without playerId', () => {
+    expect(aggregateFleetTorpInputStatusForScope([rowDetail('pending')])).toBeNull()
+  })
+
+  it('prefers pending over other statuses', () => {
+    expect(
+      aggregateFleetTorpInputStatusForScope([
+        rowDetail('applied', undefined, 1),
+        rowDetail('pending', undefined, 2),
+      ])
+    ).toBe('pending')
+  })
+
+  it('prefers unavailable over applied and not_applicable', () => {
+    expect(
+      aggregateFleetTorpInputStatusForScope([
+        rowDetail('applied', undefined, 1),
+        rowDetail('unavailable', undefined, 2),
+      ])
+    ).toBe('unavailable')
+  })
+
+  it('returns applied when no pending or unavailable rows', () => {
+    expect(
+      aggregateFleetTorpInputStatusForScope([
+        rowDetail('applied', undefined, 1),
+        rowDetail('not_applicable', undefined, 2),
+      ])
+    ).toBe('applied')
+  })
+
+  it('returns not_applicable when all rows are not_applicable', () => {
+    expect(
+      aggregateFleetTorpInputStatusForScope([
+        rowDetail('not_applicable', undefined, 1),
+        rowDetail('not_applicable', undefined, 2),
+      ])
+    ).toBe('not_applicable')
   })
 })
