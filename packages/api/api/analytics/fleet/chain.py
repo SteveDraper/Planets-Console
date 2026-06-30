@@ -560,9 +560,7 @@ def get_or_materialize_fleet_snapshot(
     """Return a cached snapshot or materialize turn T from T-1 plus turn-T delta."""
     turn_number = turn.settings.turn
     cached = persistence.get_snapshot(game_id, perspective, turn_number)
-    if _is_fleet_snapshot_cache_hit(
-        persistence, game_id, perspective, turn_number, turn, cached
-    ):
+    if _is_fleet_snapshot_cache_hit(persistence, game_id, perspective, turn_number, turn, cached):
         return cached
 
     for attempt in range(GAP_FILL_MAX_RETRIES):
