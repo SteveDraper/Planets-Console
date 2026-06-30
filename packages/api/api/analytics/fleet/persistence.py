@@ -7,9 +7,9 @@ from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import (
-    _LEGACY_FINAL_PROVENANCE,
     fleet_materialization_version_from_json,
     fleet_turn_snapshot_from_json,
+    fleet_turn_snapshot_to_json,
     is_current_fleet_materialization_version,
     is_legacy_fleet_turn_document,
     persisted_fleet_ledger_from_json,
@@ -207,18 +207,12 @@ class FleetSnapshotPersistenceService:
             raise ValidationError(
                 f"fleet snapshot turn {snapshot.turn} does not match key turn_number {turn_number}"
             )
-        document = self._load_or_create_document(game_id, perspective, turn_number)
-        ledgers = self._ledgers_object(document)
-        ledgers.clear()
-        for player_ledger in snapshot.players:
-            ledgers[str(player_ledger.player_id)] = persisted_fleet_ledger_to_json(
-                PersistedFleetLedger(
-                    ledger=player_ledger,
-                    provenance=_LEGACY_FINAL_PROVENANCE,
-                    materialization_version=FLEET_MATERIALIZATION_VERSION,
-                ),
-            )
-        self._write_document(game_id, perspective, turn_number, document)
+        self._write_document(
+            game_id,
+            perspective,
+            turn_number,
+            fleet_turn_snapshot_to_json(snapshot),
+        )
         if self._on_snapshot_persisted is not None:
             self._on_snapshot_persisted(game_id, perspective, turn_number)
 
