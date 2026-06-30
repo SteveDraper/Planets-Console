@@ -123,19 +123,20 @@ def _cached_stream_admission(
     return CachedCompleteRowAdmission(event=cached)
 
 
-def gather_scores_ensure_probe_snapshot(
-    ctx: AnalyticQueryContext,
+def _gather_scores_probe_snapshot(
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo | None,
+    *,
+    ensure_sync_admission: ImmediateRowAdmission | None,
 ) -> ScoresInferenceSnapshot:
-    """Lightweight snapshot for export probe walks: persistence and scheduler lookups only."""
+    """Shared probe gather: cached stream admission only, no live inference."""
     persisted_row = _load_persisted_row(services, scope)
     if turn is None:
         return ScoresInferenceSnapshot(
             persisted_row=persisted_row,
             stream_admission=None,
-            ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
+            ensure_sync_admission=ensure_sync_admission,
             scheduler_run=None,
             globally_paused=False,
         )
@@ -145,9 +146,38 @@ def gather_scores_ensure_probe_snapshot(
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
         stream_admission=_cached_stream_admission(services, scope),
-        ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
+        ensure_sync_admission=ensure_sync_admission,
         scheduler_run=_scheduler_row_run(services, scope),
         globally_paused=bool(pause_status.get("paused")),
+    )
+
+
+def gather_scores_materialization_probe_snapshot(
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo,
+) -> ScoresInferenceSnapshot:
+    """Lightweight scores snapshot for fleet materialization provenance (no export context)."""
+    return _gather_scores_probe_snapshot(
+        services,
+        scope,
+        turn,
+        ensure_sync_admission=None,
+    )
+
+
+def gather_scores_ensure_probe_snapshot(
+    ctx: AnalyticQueryContext,
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo | None,
+) -> ScoresInferenceSnapshot:
+    """Lightweight snapshot for export probe walks: persistence and scheduler lookups only."""
+    return _gather_scores_probe_snapshot(
+        services,
+        scope,
+        turn,
+        ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
     )
 
 

@@ -25,6 +25,7 @@ from api.analytics.scores.placeholder_targets import (
     should_seed_homeworld_starting_inventory,
 )
 from api.models.game import TurnInfo
+from api.models.player import Score
 
 SCOREBOARD_SOURCE = "scoreboard"
 
@@ -38,32 +39,29 @@ def ingest_turn_inferred_acquisitions(
     inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
     """Create scoreboard placeholders and optionally refine them from held solutions."""
-    snapshot = _create_scoreboard_placeholders(snapshot, turn)
-    if inference_materialization is not None:
-        from api.analytics.fleet.inferred_acquisition_refine import (
-            refine_inferred_acquisitions_from_scores,
-        )
-
-        snapshot = refine_inferred_acquisitions_from_scores(
-            snapshot,
+    for ledger in snapshot.players:
+        ingest_player_inferred_acquisitions(
+            ledger,
             turn,
+            game_id=snapshot.game_id,
+            perspective=snapshot.perspective,
             inference_materialization=inference_materialization,
         )
     return snapshot
 
 
-def _create_scoreboard_placeholders(
-    snapshot: FleetTurnSnapshot,
+def ingest_player_inferred_acquisitions(
+    ledger: FleetAcquisitionLedger,
     turn: TurnInfo,
-) -> FleetTurnSnapshot:
-    """Create inferred placeholder rows for positive scoreboard warship/freighter deltas."""
+    *,
+    game_id: int,
+    perspective: int,
+    inference_materialization: FleetInferenceMaterialization | None = None,
+) -> None:
+    """Create scoreboard placeholders and optionally refine them for one player ledger."""
     turn_number = turn.settings.turn
-    ledgers_by_player_id = {ledger.player_id: ledger for ledger in snapshot.players}
-
-    for score in iter_current_turn_scores(turn):
-        ledger = ledgers_by_player_id.get(score.ownerid)
-        if ledger is None:
-            continue
+    score = _score_for_player(turn, ledger.player_id)
+    if score is not None:
         if should_seed_homeworld_starting_inventory(turn):
             _ensure_homeworld_starting_inventory_rows(
                 ledger,
@@ -71,16 +69,33 @@ def _create_scoreboard_placeholders(
                 shell_turn=turn_number,
             )
         targets = scoreboard_placeholder_targets(score, turn)
-        if targets is None:
-            continue
-        for target in targets:
-            _ensure_placeholder_target_rows(
-                ledger,
-                target=target,
-                shell_turn=turn_number,
-            )
+        if targets is not None:
+            for target in targets:
+                _ensure_placeholder_target_rows(
+                    ledger,
+                    target=target,
+                    shell_turn=turn_number,
+                )
 
-    return snapshot
+    if inference_materialization is not None:
+        from api.analytics.fleet.inferred_acquisition_refine import (
+            refine_player_inferred_acquisitions_from_scores,
+        )
+
+        refine_player_inferred_acquisitions_from_scores(
+            ledger,
+            turn,
+            game_id=game_id,
+            perspective=perspective,
+            inference_materialization=inference_materialization,
+        )
+
+
+def _score_for_player(turn: TurnInfo, player_id: int) -> Score | None:
+    for score in iter_current_turn_scores(turn):
+        if score.ownerid == player_id:
+            return score
+    return None
 
 
 def _ensure_homeworld_starting_inventory_rows(

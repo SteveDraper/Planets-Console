@@ -5,8 +5,8 @@ from __future__ import annotations
 import uuid
 
 from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
-from api.analytics.fleet.scoreboard_counts import compute_max_ship_id_bound
 from api.analytics.fleet.serialization import append_fleet_evidence_event
+from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetAlibi,
@@ -30,25 +30,35 @@ TURN_SHIPS_SOURCE = "turnInfo.ships"
 def ingest_turn_ship_observations(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
+    *,
+    turn_context: FleetTurnContext | None = None,
 ) -> FleetTurnSnapshot:
     """Apply turn-T ship sightings to every player ledger in the snapshot."""
+    resolved_context = (
+        turn_context if turn_context is not None else FleetTurnContext.from_turn(turn)
+    )
+    for ledger in snapshot.players:
+        ingest_player_ship_observations(ledger, resolved_context)
+    return snapshot
+
+
+def ingest_player_ship_observations(
+    ledger: FleetAcquisitionLedger,
+    turn_context: FleetTurnContext,
+) -> None:
+    """Apply turn-T ship sightings and id-bound tightening for one player ledger."""
+    turn = turn_context.turn
     turn_number = turn.settings.turn
-    ledgers_by_player_id = {ledger.player_id: ledger for ledger in snapshot.players}
-    max_ship_id_bound = compute_max_ship_id_bound(turn)
 
     for ship in turn.ships:
         if ship.turnkilled != 0:
             continue
-        ledger = ledgers_by_player_id.get(ship.ownerid)
-        if ledger is None:
+        if ship.ownerid != ledger.player_id:
             continue
         _ingest_ship_sighting(ledger, ship, turn, turn_number=turn_number)
 
-    if max_ship_id_bound is not None:
-        for ledger in snapshot.players:
-            tighten_inferred_ship_id_bounds(ledger, turn, shell_turn=turn_number)
-
-    return snapshot
+    if turn_context.max_ship_id_bound is not None:
+        tighten_inferred_ship_id_bounds(ledger, turn, shell_turn=turn_number)
 
 
 def _ingest_ship_sighting(
