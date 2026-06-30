@@ -8,7 +8,6 @@ import {
   TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
   connectTableInferenceStream,
   connectTableInferenceStreamUntilComplete,
-  resetLastFleetTorpInputStatusForTests,
 } from './tableInferenceStreamConnect'
 
 const scope = {
@@ -20,7 +19,6 @@ const scope = {
 describe('connectTableInferenceStream', () => {
   beforeEach(() => {
     useScoresInferenceRevisionStore.getState().resetRevisions()
-    resetLastFleetTorpInputStatusForTests()
   })
   it('retries when the scope-level stream conflict error is returned', async () => {
     const fetchSpy = vi

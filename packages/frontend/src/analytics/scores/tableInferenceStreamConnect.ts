@@ -1,8 +1,11 @@
 import type { AnalyticShellScope } from '../../api/bff'
 import { fetchScoresTableInferenceStream } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
-import { analyticScopeKey } from '../../lib/analyticScopeKey'
-import { bumpScoresInferenceRevision } from '../../stores/scoresInferenceRevision'
+import {
+  bumpScoresInferenceRevision,
+  clearLastFleetTorpInputStatusForScope,
+  noteFleetTorpInputStatusChangeAndShouldBumpRevision,
+} from '../../stores/scoresInferenceRevision'
 import { parseFleetTorpInputStatus } from './fleetTorpInputStatus'
 
 export const TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
@@ -15,12 +18,6 @@ const STREAM_RETRY_MAX_DELAY_MS = 1000
 const STREAM_INCOMPLETE_RETRY_INITIAL_MS = 250
 const STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS = 3
 const STREAM_INCOMPLETE_RETRY_MAX_DELAY_MS = 2000
-
-const lastFleetTorpInputStatusByScopeKey = new Map<string, string | null>()
-
-export function resetLastFleetTorpInputStatusForTests(): void {
-  lastFleetTorpInputStatusByScopeKey.clear()
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -47,21 +44,15 @@ function fleetTorpInputStatusFromStreamEvent(
 
 export function shouldBumpScoresInferenceRevision(
   event: InferenceStreamEvent,
-  scopeKey: string
+  scope: AnalyticShellScope
 ): boolean {
   if (event.type !== 'complete' && event.type !== 'solution') {
     return false
   }
-  const status = fleetTorpInputStatusFromStreamEvent(event)
-  if (status == null) {
-    return false
-  }
-  const previousStatus = lastFleetTorpInputStatusByScopeKey.get(scopeKey) ?? null
-  if (status === previousStatus) {
-    return false
-  }
-  lastFleetTorpInputStatusByScopeKey.set(scopeKey, status)
-  return true
+  return noteFleetTorpInputStatusChangeAndShouldBumpRevision(
+    scope,
+    fleetTorpInputStatusFromStreamEvent(event)
+  )
 }
 
 export type TableInferenceStreamConnectResult =
@@ -78,8 +69,6 @@ export async function connectTableInferenceStream(
     onEvent: (event: InferenceStreamEvent) => void
   }
 ): Promise<TableInferenceStreamConnectResult> {
-  const scopeKey = analyticScopeKey(scope)
-
   for (let attempt = 0; attempt < STREAM_RETRY_MAX_ATTEMPTS; attempt += 1) {
     if (handlers.signal.aborted) {
       return 'aborted'
@@ -95,7 +84,7 @@ export async function connectTableInferenceStream(
             scopeConflict = true
             return
           }
-          if (shouldBumpScoresInferenceRevision(event, scopeKey)) {
+          if (shouldBumpScoresInferenceRevision(event, scope)) {
             bumpScoresInferenceRevision(scope)
           }
           handlers.onEvent(event)
@@ -131,6 +120,8 @@ export async function connectTableInferenceStreamUntilComplete(
     hasPendingRows: () => boolean
   }
 ): Promise<TableInferenceStreamConnectResult> {
+  clearLastFleetTorpInputStatusForScope(scope)
+
   for (let attempt = 0; attempt < STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS; attempt += 1) {
     if (handlers.signal.aborted) {
       return 'aborted'
