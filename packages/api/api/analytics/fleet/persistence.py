@@ -5,7 +5,11 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
-from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import (
+    ANALYTIC_ID,
+    FLEET_LEDGERS_KEY,
+    FLEET_MATERIALIZATION_VERSION,
+)
 from api.analytics.fleet.serialization import (
     fleet_materialization_version_from_json,
     fleet_turn_snapshot_from_json,

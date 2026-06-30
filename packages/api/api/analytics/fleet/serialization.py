@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import (
+    ANALYTIC_ID,
+    FLEET_LEDGERS_KEY,
+    FLEET_MATERIALIZATION_VERSION,
+)
 from api.analytics.fleet.types import (
     FLEET_BOUNDED_OPERATORS,
     FLEET_EVIDENCE_EVENT_KINDS,
@@ -587,7 +591,9 @@ def is_legacy_fleet_turn_document(data: dict[str, Any]) -> bool:
     return FLEET_LEDGERS_KEY not in data and "players" in data
 
 
-def fleet_materialization_provenance_from_json(data: dict[str, Any]) -> FleetMaterializationProvenance:
+def fleet_materialization_provenance_from_json(
+    data: dict[str, Any],
+) -> FleetMaterializationProvenance:
     turn_evidence_at_n = data.get("turnEvidenceAtN", False)
     prior_ledger_at_n_minus_1 = data.get("priorLedgerAtNMinus1", False)
     if not isinstance(turn_evidence_at_n, bool):

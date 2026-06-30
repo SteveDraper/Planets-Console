@@ -764,8 +764,7 @@ def test_missing_materialization_version_is_deleted_on_read(persistence, load_tu
         "perspective": 1,
         "turn": 111,
         "players": [
-            fleet_acquisition_ledger_to_json(player_ledger)
-            for player_ledger in snapshot.players
+            fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
         ],
     }
     memory_backend.put(

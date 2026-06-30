@@ -22,10 +22,13 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
-from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+def _legacy_player_wire(ledger: FleetAcquisitionLedger) -> dict:
+    return persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=ledger))["ledger"]
 
 
 @pytest.fixture
@@ -125,7 +128,7 @@ def test_legacy_monolithic_document_migrates_on_has_snapshot(
         "perspective": 1,
         "turn": 111,
         "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=sample_ledger))["ledger"]],
+        "players": [_legacy_player_wire(sample_ledger)],
     }
     memory_backend.put(
         persistence.document_key(628580, 1, 111),
@@ -148,7 +151,7 @@ def test_legacy_monolithic_document_migrates_on_read(persistence, memory_backend
         "perspective": 1,
         "turn": 111,
         "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=sample_ledger))["ledger"]],
+        "players": [_legacy_player_wire(sample_ledger)],
     }
     memory_backend.put(
         persistence.document_key(628580, 1, 111),
@@ -174,7 +177,7 @@ def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledge
         "perspective": 1,
         "turn": 111,
         "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=sample_ledger))["ledger"]],
+        "players": [_legacy_player_wire(sample_ledger)],
     }
     upgraded = upgrade_legacy_fleet_turn_document(legacy_document)
     assert "players" not in upgraded
