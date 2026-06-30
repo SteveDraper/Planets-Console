@@ -187,6 +187,78 @@ describe('connectTableInferenceStream', () => {
     expect(scoresInferenceRevisionForScope(scope)).toBe(3)
   })
 
+  it('bumps scores inference revision for each player complete in a multi-player stream', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          status: 'exact',
+          summary: 'player 8 done',
+          solutionCount: 1,
+          isComplete: true,
+          fleetTorpInputStatus: 'applied',
+        })
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 6,
+          status: 'exact',
+          summary: 'player 6 done',
+          solutionCount: 1,
+          isComplete: true,
+          fleetTorpInputStatus: 'applied',
+        })
+      }
+    )
+
+    const controller = new AbortController()
+    await connectTableInferenceStream(scope, [8, 6], {
+      signal: controller.signal,
+      onEvent: () => {},
+    })
+
+    expect(scoresInferenceRevisionForScope(scope)).toBe(2)
+  })
+
+  it('bumps scores inference revision per player on first fleet torp status at solution time', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [],
+          fleetTorpInputStatus: 'pending',
+        })
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 6,
+          solutions: [],
+          fleetTorpInputStatus: 'pending',
+        })
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 8,
+          solutions: [],
+          fleetTorpInputStatus: 'pending',
+        })
+        handlers.onEvent({
+          type: 'solution',
+          playerId: 6,
+          solutions: [],
+          fleetTorpInputStatus: 'pending',
+        })
+      }
+    )
+
+    const controller = new AbortController()
+    await connectTableInferenceStream(scope, [8, 6], {
+      signal: controller.signal,
+      onEvent: () => {},
+    })
+
+    expect(scoresInferenceRevisionForScope(scope)).toBe(2)
+  })
+
   it('does not bump scores inference revision on scope-level stream conflict errors', async () => {
     vi.spyOn(bff, 'fetchScoresTableInferenceStream')
       .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
