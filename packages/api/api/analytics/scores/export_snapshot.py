@@ -123,21 +123,46 @@ def _cached_stream_admission(
     return CachedCompleteRowAdmission(event=cached)
 
 
+def _gather_scores_probe_snapshot(
+    services: ScoresExportContext,
+    scope: ExportScope,
+    turn: TurnInfo | None,
+    *,
+    ensure_sync_admission: ImmediateRowAdmission | None,
+) -> ScoresInferenceSnapshot:
+    """Shared probe gather: cached stream admission only, no live inference."""
+    persisted_row = _load_persisted_row(services, scope)
+    if turn is None:
+        return ScoresInferenceSnapshot(
+            persisted_row=persisted_row,
+            stream_admission=None,
+            ensure_sync_admission=ensure_sync_admission,
+            scheduler_run=None,
+            globally_paused=False,
+        )
+
+    stream_scope = scores_inference_stream_scope(scope)
+    pause_status = services.scheduler.global_pause_status(stream_scope)
+    return ScoresInferenceSnapshot(
+        persisted_row=persisted_row,
+        stream_admission=_cached_stream_admission(services, scope),
+        ensure_sync_admission=ensure_sync_admission,
+        scheduler_run=_scheduler_row_run(services, scope),
+        globally_paused=bool(pause_status.get("paused")),
+    )
+
+
 def gather_scores_materialization_probe_snapshot(
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo,
 ) -> ScoresInferenceSnapshot:
     """Lightweight scores snapshot for fleet materialization provenance (no export context)."""
-    persisted_row = _load_persisted_row(services, scope)
-    stream_scope = scores_inference_stream_scope(scope)
-    pause_status = services.scheduler.global_pause_status(stream_scope)
-    return ScoresInferenceSnapshot(
-        persisted_row=persisted_row,
-        stream_admission=_cached_stream_admission(services, scope),
+    return _gather_scores_probe_snapshot(
+        services,
+        scope,
+        turn,
         ensure_sync_admission=None,
-        scheduler_run=_scheduler_row_run(services, scope),
-        globally_paused=bool(pause_status.get("paused")),
     )
 
 
@@ -148,24 +173,11 @@ def gather_scores_ensure_probe_snapshot(
     turn: TurnInfo | None,
 ) -> ScoresInferenceSnapshot:
     """Lightweight snapshot for export probe walks: persistence and scheduler lookups only."""
-    persisted_row = _load_persisted_row(services, scope)
-    if turn is None:
-        return ScoresInferenceSnapshot(
-            persisted_row=persisted_row,
-            stream_admission=None,
-            ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
-            scheduler_run=None,
-            globally_paused=False,
-        )
-
-    stream_scope = scores_inference_stream_scope(scope)
-    pause_status = services.scheduler.global_pause_status(stream_scope)
-    return ScoresInferenceSnapshot(
-        persisted_row=persisted_row,
-        stream_admission=_cached_stream_admission(services, scope),
+    return _gather_scores_probe_snapshot(
+        services,
+        scope,
+        turn,
         ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
-        scheduler_run=_scheduler_row_run(services, scope),
-        globally_paused=bool(pause_status.get("paused")),
     )
 
 
