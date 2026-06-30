@@ -1,25 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   initialRowStreamState,
-  playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  stablePlayerIdsKey,
 } from './inferenceRowStreamState'
-
-describe('stablePlayerIdsKey', () => {
-  it('sorts ids so order changes do not alter the key', () => {
-    expect(stablePlayerIdsKey([9, 8])).toBe('8,9')
-    expect(stablePlayerIdsKey([8, 9])).toBe('8,9')
-  })
-})
-
-describe('playerIdsFromStableKey', () => {
-  it('round-trips sorted player ids', () => {
-    expect(playerIdsFromStableKey('8,9')).toEqual([8, 9])
-    expect(playerIdsFromStableKey('')).toEqual([])
-  })
-})
 
 describe('reduceRowStreamState', () => {
   it('replaces held solutions wholesale on solution events', () => {
@@ -189,5 +173,18 @@ describe('reduceRowStreamState', () => {
 
     expect(complete.heldSolutions).toHaveLength(1)
     expect(complete.heldSolutions[0]?.actions[0]?.actionId).toBe('a1')
+  })
+
+  it('marks failure from error events', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'error',
+      playerId: 8,
+      detail: 'stream ended early',
+    })
+
+    expect(next.isComplete).toBe(true)
+    expect(next.status).toBe('fetch_error')
+    expect(next.summary).toBe('stream ended early')
+    expect(rowDetailFromStreamState(8, next).displayStatus).toBe('failure')
   })
 })

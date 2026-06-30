@@ -35,6 +35,7 @@ type FleetPlayerTableTileProps = {
   records: readonly FleetTableRecord[]
   discrepancy?: FleetCountDiscrepancy
   componentCatalog?: FleetComponentCatalog
+  streamError?: string | null
 }
 
 const columnHelper = createColumnHelper<FleetTableRecord>()
@@ -76,6 +77,7 @@ export function FleetPlayerTableTile({
   records,
   discrepancy,
   componentCatalog = EMPTY_FLEET_COMPONENT_CATALOG,
+  streamError = null,
 }: FleetPlayerTableTileProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
@@ -194,6 +196,11 @@ export function FleetPlayerTableTile({
               discrepancy.scoreboardImpliedCount,
               discrepancy.hostTurn
             )}
+          </p>
+        ) : null}
+        {streamError != null ? (
+          <p role="alert" className="mt-1 text-xs text-red-400">
+            {streamError}
           </p>
         ) : null}
       </header>

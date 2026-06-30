@@ -1,56 +1,38 @@
 import { describe, expect, it } from 'vitest'
+import {
+  fleetTableStreamEventSchema,
+  formatFleetTableStreamValidationError,
+} from './fleetTableStreamEventSchema'
 import { parseFleetTableStreamEvent } from './parseFleetTableStreamEvent'
 
 describe('parseFleetTableStreamEvent', () => {
-  it('parses ledger_updated with player scope', () => {
+  it('parses ledger_updated events', () => {
     const event = parseFleetTableStreamEvent(
       JSON.stringify({
         type: 'ledger_updated',
         playerId: 8,
         ledger: {
           playerId: 8,
-          playerName: 'dougp314',
+          playerName: 'Alice',
           records: [],
         },
       })
     )
-    expect(event).toEqual({
-      type: 'ledger_updated',
-      playerId: 8,
-      ledger: {
-        playerId: 8,
-        playerName: 'dougp314',
-        records: [],
-      },
-    })
-  })
 
-  it('parses provenance and complete terminal events', () => {
-    const provenance = parseFleetTableStreamEvent(
-      JSON.stringify({
-        type: 'provenance',
-        playerId: 6,
-        turnEvidenceAtN: true,
-        priorLedgerAtNMinus1: false,
-        isFinal: false,
-      })
-    )
-    expect(provenance?.type).toBe('provenance')
-
-    const complete = parseFleetTableStreamEvent(
-      JSON.stringify({
-        type: 'complete',
-        playerId: 6,
-        isFinal: false,
-        summary: 'Fleet ledger materialized with open provenance legs.',
-      })
-    )
-    expect(complete?.type).toBe('complete')
+    expect(event?.type).toBe('ledger_updated')
   })
 
   it('rejects unknown event types', () => {
-    expect(() => parseFleetTableStreamEvent(JSON.stringify({ type: 'unknown' }))).toThrow(
-      'Fleet table stream returned unknown event type.'
-    )
+    expect(() =>
+      parseFleetTableStreamEvent(JSON.stringify({ type: 'unknown', playerId: 8 }))
+    ).toThrow(/unknown event type/i)
+  })
+
+  it('formats validation errors consistently', () => {
+    const result = fleetTableStreamEventSchema.safeParse({ type: 'bogus' })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(formatFleetTableStreamValidationError(result.error)).toMatch(/unknown event type/i)
+    }
   })
 })

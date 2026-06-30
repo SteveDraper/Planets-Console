@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
-import { errorDetailFromUnknown } from '../../lib/queryRetry'
-import { analyticScopeKey } from '../../lib/analyticScopeKey'
+import {
+  usePerPlayerAnalyticStream,
+  type PerPlayerAnalyticStreamPolicy,
+} from '../../lib/usePerPlayerAnalyticStream'
+import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
 import {
   failureDetail,
   initialRowStreamState,
   pendingDetail,
-  playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  stablePlayerIdsKey,
   type RowStreamState,
 } from './inferenceRowStreamState'
 import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'
@@ -23,6 +24,56 @@ export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
 }
 
+function createScoresInferenceStreamPolicy(
+  onGlobalPauseChangeRef: MutableRefObject<((paused: boolean) => void) | undefined>
+): PerPlayerAnalyticStreamPolicy<
+  InferenceStreamEvent,
+  RowStreamState,
+  ScoresInferenceRowDetail
+> {
+  return {
+    initialRefState: () => initialRowStreamState(),
+    reduceRefState: (current, event) => reduceRowStreamState(current, event),
+    isRefStateComplete: (state) => state.isComplete,
+    publishedFromRefState: (playerId, state) => rowDetailFromStreamState(playerId, state),
+    seedPublishedOnNewConnection: (playerIds) => {
+      const initialDetails = new Map<number, ScoresInferenceRowDetail>()
+      for (const playerId of playerIds) {
+        initialDetails.set(playerId, pendingDetail(playerId))
+      }
+      return initialDetails
+    },
+    streamFailureEvent: (playerId, summary) => ({
+      type: 'error',
+      playerId,
+      detail: summary,
+    }),
+    routeStreamEvent: (event, { applyToAllPlayers }) => {
+      if (event.type === 'globalPause') {
+        onGlobalPauseChangeRef.current?.(event.paused)
+        applyToAllPlayers(event)
+        return true
+      }
+      return false
+    },
+    onConnectionCleared: () => {
+      onGlobalPauseChangeRef.current?.(false)
+    },
+    onConnectionTeardown: () => {
+      onGlobalPauseChangeRef.current?.(false)
+    },
+    connectUntilComplete: (scope, playerIds, handlers) =>
+      connectTableInferenceStreamUntilComplete(scope, playerIds, {
+        signal: handlers.signal,
+        onEvent: handlers.onEvent,
+        hasPendingRows: handlers.hasPending,
+      }),
+    conflictExhaustedMessage: 'Build inference could not reconnect to the table stream.',
+    incompleteExhaustedMessage:
+      'Build inference stream ended before all scoreboard rows completed.',
+  }
+}
+
 export function useScoresInferenceByRow(
   tableData: TableDataResponse | undefined,
   scope: AnalyticShellScope | null,
@@ -31,6 +82,7 @@ export function useScoresInferenceByRow(
 ): UseScoresInferenceByRowResult {
   const { onGlobalPauseChange } = options
   const inferenceByRowStubs = tableData?.inferenceByRow
+
   const playerIdsKey = useMemo(() => {
     if (!enabled || inferenceByRowStubs == null) {
       return ''
@@ -40,177 +92,21 @@ export function useScoresInferenceByRow(
       .filter((id): id is number => typeof id === 'number')
     return stablePlayerIdsKey(playerIds)
   }, [enabled, inferenceByRowStubs])
-  const scopeKey = scope != null ? analyticScopeKey(scope) : null
-  const connectionKey =
-    enabled && scopeKey != null && playerIdsKey.length > 0 ? `${scopeKey}:${playerIdsKey}` : null
 
-  const [detailsByPlayerId, setDetailsByPlayerId] = useState<
-    Map<number, ScoresInferenceRowDetail>
-  >(new Map())
-  const tableAbortControllerRef = useRef<AbortController | null>(null)
-  const rowStreamStateRef = useRef<Map<number, RowStreamState>>(new Map())
-  const connectionKeyRef = useRef<string | null>(null)
-  const scopeRef = useRef(scope)
-  scopeRef.current = scope
-
-  const publishPlayerState = useCallback((playerId: number) => {
-    const state = rowStreamStateRef.current.get(playerId)
-    if (state == null) {
-      return
-    }
-    setDetailsByPlayerId((previous) => {
-      const next = new Map(previous)
-      next.set(playerId, rowDetailFromStreamState(playerId, state))
-      return next
-    })
-  }, [])
-
-  const applyStreamEvent = useCallback(
-    (playerId: number, event: InferenceStreamEvent) => {
-      const current = rowStreamStateRef.current.get(playerId) ?? initialRowStreamState()
-      const next = reduceRowStreamState(current, event)
-      rowStreamStateRef.current.set(playerId, next)
-      publishPlayerState(playerId)
-    },
-    [publishPlayerState]
-  )
-
-  const applyGlobalPauseEvent = useCallback(
-    (event: Extract<InferenceStreamEvent, { type: 'globalPause' }>) => {
-      onGlobalPauseChange?.(event.paused)
-      for (const playerId of rowStreamStateRef.current.keys()) {
-        applyStreamEvent(playerId, event)
-      }
-    },
-    [applyStreamEvent, onGlobalPauseChange]
-  )
-
-  const handleTableStreamEvent = useCallback(
-    (event: InferenceStreamEvent) => {
-      if (event.type === 'globalPause') {
-        applyGlobalPauseEvent(event)
-        return
-      }
-      if (event.type === 'error' && event.playerId == null) {
-        for (const playerId of rowStreamStateRef.current.keys()) {
-          applyStreamEvent(playerId, { ...event, playerId })
-        }
-        return
-      }
-      const playerId = 'playerId' in event ? event.playerId : undefined
-      if (typeof playerId !== 'number') {
-        return
-      }
-      applyStreamEvent(playerId, event)
-    },
-    [applyGlobalPauseEvent, applyStreamEvent]
-  )
-  const handleTableStreamEventRef = useRef(handleTableStreamEvent)
-  handleTableStreamEventRef.current = handleTableStreamEvent
   const onGlobalPauseChangeRef = useRef(onGlobalPauseChange)
   onGlobalPauseChangeRef.current = onGlobalPauseChange
 
-  useEffect(() => {
-    if (connectionKey == null) {
-      connectionKeyRef.current = null
-      setDetailsByPlayerId(new Map())
-      rowStreamStateRef.current = new Map()
-      onGlobalPauseChangeRef.current?.(false)
-      return
-    }
+  const policy = useMemo(
+    () => createScoresInferenceStreamPolicy(onGlobalPauseChangeRef),
+    []
+  )
 
-    const activeScope = scopeRef.current
-    if (activeScope == null) {
-      return
-    }
-
-    const isNewConnection = connectionKeyRef.current !== connectionKey
-    connectionKeyRef.current = connectionKey
-    const playerIds = playerIdsFromStableKey(playerIdsKey)
-
-    tableAbortControllerRef.current?.abort()
-
-    if (isNewConnection) {
-      const initialStates = new Map<number, RowStreamState>()
-      for (const playerId of playerIds) {
-        initialStates.set(playerId, initialRowStreamState())
-      }
-      rowStreamStateRef.current = initialStates
-
-      const initialDetails = new Map<number, ScoresInferenceRowDetail>()
-      for (const playerId of playerIds) {
-        initialDetails.set(playerId, pendingDetail(playerId))
-      }
-      setDetailsByPlayerId(initialDetails)
-    }
-
-    const controller = new AbortController()
-    tableAbortControllerRef.current = controller
-
-    const markIncompleteRowsFailed = (summary: string) => {
-      setDetailsByPlayerId((previous) => {
-        const next = new Map(previous)
-        for (const playerId of playerIds) {
-          if (next.get(playerId)?.isComplete) {
-            continue
-          }
-          next.set(playerId, failureDetail(playerId, summary))
-        }
-        return next
-      })
-    }
-
-    void connectTableInferenceStreamUntilComplete(activeScope, playerIds, {
-      signal: controller.signal,
-      onEvent: (event) => handleTableStreamEventRef.current(event),
-      hasPendingRows: () => {
-        for (const playerId of playerIds) {
-          const state = rowStreamStateRef.current.get(playerId)
-          if (state == null || !state.isComplete) {
-            return true
-          }
-        }
-        return false
-      },
-    })
-      .then((result) => {
-        if (controller.signal.aborted) {
-          return
-        }
-        if (result === 'conflict_exhausted') {
-          markIncompleteRowsFailed(
-            'Build inference could not reconnect to the table stream.'
-          )
-          return
-        }
-        if (result === 'incomplete_exhausted') {
-          markIncompleteRowsFailed(
-            'Build inference stream ended before all scoreboard rows completed.'
-          )
-        }
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) {
-          return
-        }
-        setDetailsByPlayerId((previous) => {
-          const next = new Map(previous)
-          for (const playerId of playerIds) {
-            if (next.get(playerId)?.isComplete) {
-              continue
-            }
-            next.set(playerId, failureDetail(playerId, errorDetailFromUnknown(error)))
-          }
-          return next
-        })
-      })
-
-    return () => {
-      controller.abort()
-      tableAbortControllerRef.current = null
-      onGlobalPauseChangeRef.current?.(false)
-    }
-  }, [connectionKey, playerIdsKey])
+  const { publishedByPlayerId: detailsByPlayerId } = usePerPlayerAnalyticStream({
+    scope,
+    enabled,
+    playerIdsKey,
+    policy,
+  })
 
   if (!enabled || tableData?.inferenceByRow == null) {
     return { inferenceByRow: undefined }

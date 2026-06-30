@@ -4,6 +4,7 @@ import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { FleetTableView } from './FleetTableView'
 import { parseFleetTableWire, type FleetTableWire } from './fleetTableWireSchema'
 import { useFleetTableQuery } from './useFleetTableQuery'
+import { useFleetTableStream } from './useFleetTableStream'
 
 type FleetAnalyticTableTileProps = {
   analyticScope: AnalyticShellScope | null
@@ -36,6 +37,13 @@ export function FleetAnalyticTableTile({
     [data]
   )
 
+  const streamEnabled =
+    fetchEnabled &&
+    analyticScope != null &&
+    parsedFleetTable != null &&
+    parsedFleetTable.ok
+  const { streamPlayersById } = useFleetTableStream(analyticScope, streamEnabled)
+
   if (analyticScope == null) {
     return (
       <div className="p-4 text-sm text-gray-400">
@@ -62,5 +70,7 @@ export function FleetAnalyticTableTile({
     )
   }
 
-  return <FleetTableView data={parsedFleetTable.data} />
+  return (
+    <FleetTableView data={parsedFleetTable.data} streamPlayersById={streamPlayersById} />
+  )
 }
