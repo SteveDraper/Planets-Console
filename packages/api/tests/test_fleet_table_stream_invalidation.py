@@ -262,8 +262,10 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     thread = threading.Thread(target=consume_stream, daemon=True)
     thread.start()
     _wait_until(
-        lambda: controller_for_scope(_stream_scope(sample_turn)) is not None
-        and len(scheduler._runs) == 0
+        lambda: (
+            controller_for_scope(_stream_scope(sample_turn)) is not None
+            and len(scheduler._runs) == 0
+        )
     )
 
     target_player_id, other_player_id = player_ids
