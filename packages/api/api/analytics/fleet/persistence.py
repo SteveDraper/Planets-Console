@@ -269,16 +269,19 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
     ) -> set[int]:
         """Drop fleet snapshots at turns >= turn_number for one perspective."""
-        cleared: set[int] = set()
-        for stored_turn in self._stored_turn_numbers(game_id, perspective):
-            if stored_turn < turn_number:
-                continue
+
+        def invalidate_turn(stored_turn: int) -> bool:
             if not self._document_exists(game_id, perspective, stored_turn):
-                continue
+                return False
             self.delete_snapshot(game_id, perspective, stored_turn)
-            cleared.add(stored_turn)
-        self._bump_invalidation_generation(game_id, perspective)
-        return cleared
+            return True
+
+        return self._invalidate_stored_turns_from(
+            game_id,
+            perspective,
+            turn_number,
+            invalidate_turn,
+        )
 
     def invalidate_player_ledgers_from_turn(
         self,
@@ -288,18 +291,37 @@ class FleetSnapshotPersistenceService:
         player_id: int,
     ) -> set[int]:
         """Drop one player's fleet ledgers at turns >= turn_number for one perspective."""
+
+        def invalidate_turn(stored_turn: int) -> bool:
+            document = self._load_document(game_id, perspective, stored_turn)
+            if document is None:
+                return False
+            ledgers = self._ledgers_object(document)
+            if str(player_id) not in ledgers:
+                return False
+            self._delete_ledger_entry(game_id, perspective, stored_turn, player_id)
+            return True
+
+        return self._invalidate_stored_turns_from(
+            game_id,
+            perspective,
+            turn_number,
+            invalidate_turn,
+        )
+
+    def _invalidate_stored_turns_from(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        invalidate_turn: Callable[[int], bool],
+    ) -> set[int]:
         cleared: set[int] = set()
         for stored_turn in self._stored_turn_numbers(game_id, perspective):
             if stored_turn < turn_number:
                 continue
-            document = self._load_document(game_id, perspective, stored_turn)
-            if document is None:
-                continue
-            ledgers = self._ledgers_object(document)
-            if str(player_id) not in ledgers:
-                continue
-            self._delete_ledger_entry(game_id, perspective, stored_turn, player_id)
-            cleared.add(stored_turn)
+            if invalidate_turn(stored_turn):
+                cleared.add(stored_turn)
         self._bump_invalidation_generation(game_id, perspective)
         return cleared
 
