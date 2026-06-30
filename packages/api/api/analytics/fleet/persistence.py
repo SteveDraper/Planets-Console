@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from api.analytics.fleet.constants import ANALYTIC_ID, FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import (
+    _LEGACY_FINAL_PROVENANCE,
     fleet_materialization_version_from_json,
     fleet_turn_snapshot_from_json,
     is_current_fleet_materialization_version,
@@ -16,7 +17,6 @@ from api.analytics.fleet.serialization import (
     upgrade_legacy_fleet_turn_document,
 )
 from api.analytics.fleet.types import (
-    FleetMaterializationProvenance,
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
@@ -24,11 +24,6 @@ from api.errors import NotFoundError, ValidationError
 from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
-
-_LEGACY_FINAL_PROVENANCE = FleetMaterializationProvenance(
-    turn_evidence_at_n=True,
-    prior_ledger_at_n_minus_1=True,
-)
 
 
 class FleetSnapshotPersistenceService:
