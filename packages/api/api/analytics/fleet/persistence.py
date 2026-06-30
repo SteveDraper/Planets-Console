@@ -40,17 +40,16 @@ class FleetSnapshotPersistenceService:
     **fleet acquisition ledger** plus **fleet materialization provenance** and
     ``materializationVersion``.
 
-    Scores-invalidation coupling (F2.x): when scores inference rows are cleared
-    for host turn *H*, fleet snapshots at turns ``>= H`` for the same perspective
-    must be re-materialized so build evidence and reconciliation stay aligned.
-    ``InferenceInvalidationService.on_inference_evidence_updated`` performs that
-    invalidation when inference rows are persisted or held solutions stream in.
-    Fleet turn-document invalidation (``invalidate_for_turn_write``) is independent
-    of scores pair-aware invalidation (turn *T* and *T-1*); both hooks run from
+    Scores-invalidation coupling (F2.x): when scores inference evidence updates
+    for player P at host turn *H*, ``InferenceInvalidationService`` drops P's
+    ledgers at fleet turns ``>= H`` via ``invalidate_player_ledgers_from_turn``.
+    Turn document replace at *T* clears all players via
+    ``invalidate_for_turn_write``. Scores pair-aware invalidation (turn *T* and
+    *T-1*) is independent of fleet invalidation; both scores hooks run from
     ``on_turn_stored`` today.
 
     **Invalidation generation:** Each ``(game_id, perspective)`` pair has a
-    monotonic counter bumped on every ``invalidate_for_turn_write`` call. Gap-fill
+    monotonic counter bumped on every fleet invalidation call. Gap-fill
     in ``get_or_materialize_fleet_snapshot`` records the generation at chain start
     and aborts (then retries from a fresh anchor) when the counter advances during
     multi-turn materialization. Invalidation does not block on gap-fill; concurrent
@@ -277,6 +276,29 @@ class FleetSnapshotPersistenceService:
             if not self._document_exists(game_id, perspective, stored_turn):
                 continue
             self.delete_snapshot(game_id, perspective, stored_turn)
+            cleared.add(stored_turn)
+        self._bump_invalidation_generation(game_id, perspective)
+        return cleared
+
+    def invalidate_player_ledgers_from_turn(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> set[int]:
+        """Drop one player's fleet ledgers at turns >= turn_number for one perspective."""
+        cleared: set[int] = set()
+        for stored_turn in self._stored_turn_numbers(game_id, perspective):
+            if stored_turn < turn_number:
+                continue
+            document = self._load_document(game_id, perspective, stored_turn)
+            if document is None:
+                continue
+            ledgers = self._ledgers_object(document)
+            if str(player_id) not in ledgers:
+                continue
+            self._delete_ledger_entry(game_id, perspective, stored_turn, player_id)
             cleared.add(stored_turn)
         self._bump_invalidation_generation(game_id, perspective)
         return cleared
