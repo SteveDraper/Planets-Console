@@ -570,6 +570,8 @@ def test_get_scores_row_inference_emits_applied_fleet_torp_input_status(
     diagnostics = inference.get("diagnostics")
     assert isinstance(diagnostics, dict)
     assert diagnostics.get("fleetTorpInputStatus") == "applied"
+    assert inference.get("fleetTorpInputStatus") == "applied"
+    assert inference.get("fleetTorpOverlayBeliefSetTorpIds") == [4, 8]
     fleet_overlay = diagnostics.get("fleetTorpOverlay")
     assert isinstance(fleet_overlay, dict)
     assert fleet_overlay.get("beliefSetTorpIds") == [4, 8]

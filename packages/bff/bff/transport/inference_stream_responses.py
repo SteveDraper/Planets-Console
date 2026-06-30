@@ -12,6 +12,7 @@ class InferenceStreamSolutionEvent(BaseModel):
     solutions: list[dict[str, Any]]
     segmentId: str | None = None
     scoreboardDeltaSource: str | None = None
+    fleetTorpInputStatus: str | None = None
 
 
 class InferenceStreamProgressEvent(BaseModel):
@@ -31,6 +32,8 @@ class InferenceStreamCompleteEvent(BaseModel):
     isComplete: bool = True
     solutions: list[dict[str, Any]] | None = None
     diagnostics: dict[str, Any] | None = None
+    fleetTorpInputStatus: str | None = None
+    fleetTorpOverlayBeliefSetTorpIds: list[int] | None = None
 
 
 class InferenceStreamErrorEvent(BaseModel):

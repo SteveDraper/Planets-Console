@@ -1,19 +1,11 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
+import type { FleetTorpInputStatus } from '../../api/inferenceStreamEventSchema'
+import { FLEET_TORP_INPUT_STATUSES } from '../../api/inferenceStreamEventSchema'
 import { isRecord } from './scoresWireParsers'
 
-export const FLEET_TORP_INPUT_STATUSES = [
-  'not_applicable',
-  'pending',
-  'applied',
-  'unavailable',
-] as const
+export { FLEET_TORP_INPUT_STATUSES, type FleetTorpInputStatus }
 
-export type FleetTorpInputStatus = (typeof FLEET_TORP_INPUT_STATUSES)[number]
-
-export function readFleetTorpInputStatus(
-  diagnostics: Record<string, unknown>
-): FleetTorpInputStatus | null {
-  const value = diagnostics.fleetTorpInputStatus
+export function parseFleetTorpInputStatus(value: unknown): FleetTorpInputStatus | null {
   if (
     typeof value === 'string' &&
     (FLEET_TORP_INPUT_STATUSES as readonly string[]).includes(value)
@@ -21,6 +13,45 @@ export function readFleetTorpInputStatus(
     return value as FleetTorpInputStatus
   }
   return null
+}
+
+/** Diagnostics-only reader for debug panels; functional UI paths use detail first-class fields. */
+export function readFleetTorpInputStatusFromDiagnostics(
+  diagnostics: Record<string, unknown>
+): FleetTorpInputStatus | null {
+  return parseFleetTorpInputStatus(diagnostics.fleetTorpInputStatus)
+}
+
+type FleetTorpInputStatusPresentation = {
+  showsTableIndicator: boolean
+  appendsToInferenceAccessibleLabel: boolean
+  announceOnEnterFrom: 'any' | 'pending_only' | 'never'
+}
+
+const FLEET_TORP_INPUT_STATUS_PRESENTATION: Record<
+  FleetTorpInputStatus,
+  FleetTorpInputStatusPresentation
+> = {
+  not_applicable: {
+    showsTableIndicator: false,
+    appendsToInferenceAccessibleLabel: false,
+    announceOnEnterFrom: 'never',
+  },
+  pending: {
+    showsTableIndicator: true,
+    appendsToInferenceAccessibleLabel: true,
+    announceOnEnterFrom: 'any',
+  },
+  applied: {
+    showsTableIndicator: false,
+    appendsToInferenceAccessibleLabel: true,
+    announceOnEnterFrom: 'pending_only',
+  },
+  unavailable: {
+    showsTableIndicator: true,
+    appendsToInferenceAccessibleLabel: true,
+    announceOnEnterFrom: 'any',
+  },
 }
 
 export function fleetTorpInputAccessibleLabel(status: FleetTorpInputStatus): string {
@@ -36,7 +67,8 @@ export function fleetTorpInputAccessibleLabel(status: FleetTorpInputStatus): str
   }
 }
 
-export function readFleetTorpOverlayBeliefSetTorpIds(
+/** Diagnostics-only reader for debug panels; functional UI paths use detail first-class fields. */
+export function readFleetTorpOverlayBeliefSetTorpIdsFromDiagnostics(
   diagnostics: Record<string, unknown>
 ): number[] | null {
   const overlay = diagnostics.fleetTorpOverlay
@@ -51,20 +83,76 @@ export function readFleetTorpOverlayBeliefSetTorpIds(
 }
 
 export function fleetTorpInputShowsTableIndicator(status: FleetTorpInputStatus): boolean {
-  return status === 'pending' || status === 'unavailable'
+  return FLEET_TORP_INPUT_STATUS_PRESENTATION[status].showsTableIndicator
+}
+
+export function fleetTorpInputAppendsToInferenceAccessibleLabel(
+  status: FleetTorpInputStatus
+): boolean {
+  return FLEET_TORP_INPUT_STATUS_PRESENTATION[status].appendsToInferenceAccessibleLabel
+}
+
+export function fleetTorpInputAnnouncementForTransition(
+  previous: FleetTorpInputStatus | null,
+  next: FleetTorpInputStatus
+): string | null {
+  if (previous === next) {
+    return null
+  }
+  const { announceOnEnterFrom } = FLEET_TORP_INPUT_STATUS_PRESENTATION[next]
+  if (announceOnEnterFrom === 'never') {
+    return null
+  }
+  if (announceOnEnterFrom === 'pending_only' && previous !== 'pending') {
+    return null
+  }
+  return fleetTorpInputAccessibleLabel(next)
 }
 
 export function readFleetTorpInputStatusFromDetail(
   detail: ScoresInferenceRowDetail
 ): FleetTorpInputStatus | null {
-  const diagnostics = isRecord(detail.diagnostics) ? detail.diagnostics : {}
-  return readFleetTorpInputStatus(diagnostics)
+  return parseFleetTorpInputStatus(detail.fleetTorpInputStatus)
+}
+
+export function readFleetTorpOverlayBeliefSetTorpIdsFromDetail(
+  detail: ScoresInferenceRowDetail
+): number[] | null {
+  const ids = detail.fleetTorpOverlayBeliefSetTorpIds
+  if (ids == null) {
+    return null
+  }
+  return ids.filter((id): id is number => typeof id === 'number')
 }
 
 export function countFleetTorpPendingRows(details: ScoresInferenceRowDetail[]): number {
   return details.filter(
     (detail) => readFleetTorpInputStatusFromDetail(detail) === 'pending'
   ).length
+}
+
+/** Scope-level fleet torp status: most urgent status across rows (pending > unavailable > applied > not_applicable). */
+export function aggregateFleetTorpInputStatusForScope(
+  details: ScoresInferenceRowDetail[]
+): FleetTorpInputStatus | null {
+  const statuses = details
+    .filter((detail) => detail.playerId != null)
+    .map(readFleetTorpInputStatusFromDetail)
+    .filter((status): status is FleetTorpInputStatus => status != null)
+
+  if (statuses.length === 0) {
+    return null
+  }
+  if (statuses.some((status) => status === 'pending')) {
+    return 'pending'
+  }
+  if (statuses.some((status) => status === 'unavailable')) {
+    return 'unavailable'
+  }
+  if (statuses.some((status) => status === 'applied')) {
+    return 'applied'
+  }
+  return 'not_applicable'
 }
 
 export function fleetTorpInputScopeBannerText(pendingCount: number): string | null {

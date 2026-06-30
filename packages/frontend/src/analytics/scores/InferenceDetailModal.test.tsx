@@ -338,10 +338,8 @@ describe('InferenceDetailModal', () => {
         onClose={vi.fn()}
         racePlayer="Federation (alice)"
         detail={detail({
-          diagnostics: {
-            fleetTorpInputStatus: 'applied',
-            fleetTorpOverlay: { beliefSetTorpIds: [4, 8] },
-          },
+          fleetTorpInputStatus: 'applied',
+          fleetTorpOverlayBeliefSetTorpIds: [4, 8],
         })}
       />
     )

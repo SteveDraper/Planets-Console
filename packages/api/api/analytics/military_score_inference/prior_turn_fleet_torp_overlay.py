@@ -36,12 +36,62 @@ class PriorTurnFleetTorpResolution:
     input_status: FleetTorpInputStatus
 
 
+_FLEET_TORP_INPUT_STATUSES: frozenset[str] = frozenset(
+    {"not_applicable", "pending", "applied", "unavailable"}
+)
+
+
 def fleet_torp_input_status_diagnostics(
     input_status: FleetTorpInputStatus | None,
 ) -> dict[str, object]:
     if input_status is None:
         return {}
     return {"fleetTorpInputStatus": input_status}
+
+
+def _validated_fleet_torp_input_status(raw: object | None) -> FleetTorpInputStatus | None:
+    if isinstance(raw, str) and raw in _FLEET_TORP_INPUT_STATUSES:
+        return raw  # type: ignore[assignment]
+    return None
+
+
+def _filtered_belief_set_torp_ids(raw: object | None) -> list[int] | None:
+    if isinstance(raw, list):
+        return [torp_id for torp_id in raw if isinstance(torp_id, int)]
+    return None
+
+
+def fleet_torp_complete_wire_fields(
+    *,
+    diagnostics: dict[str, object] | None,
+    fleet_torp_input_status: object | None = None,
+    fleet_torp_overlay_belief_set_torp_ids: object | None = None,
+) -> tuple[FleetTorpInputStatus | None, list[int] | None]:
+    """Promote fleet torp functional fields for wire payloads with shared validation."""
+    if fleet_torp_input_status is not None or fleet_torp_overlay_belief_set_torp_ids is not None:
+        return (
+            _validated_fleet_torp_input_status(fleet_torp_input_status),
+            _filtered_belief_set_torp_ids(fleet_torp_overlay_belief_set_torp_ids),
+        )
+
+    if not diagnostics:
+        return None, None
+
+    input_status = _validated_fleet_torp_input_status(diagnostics.get("fleetTorpInputStatus"))
+
+    belief_set_torp_ids: list[int] | None = None
+    overlay = diagnostics.get("fleetTorpOverlay")
+    if isinstance(overlay, dict):
+        belief_set_torp_ids = _filtered_belief_set_torp_ids(overlay.get("beliefSetTorpIds"))
+
+    return input_status, belief_set_torp_ids
+
+
+def fleet_torp_complete_wire_fields_from_diagnostics(
+    diagnostics: dict[str, object] | None,
+) -> tuple[FleetTorpInputStatus | None, list[int] | None]:
+    """Promote fleet torp functional fields out of diagnostics for wire payloads."""
+    return fleet_torp_complete_wire_fields(diagnostics=diagnostics)
 
 
 def _resolve_fleet_services(

@@ -4,6 +4,15 @@
 
 import { z } from 'zod'
 
+export const FLEET_TORP_INPUT_STATUSES = [
+  'not_applicable',
+  'pending',
+  'applied',
+  'unavailable',
+] as const
+
+export const fleetTorpInputStatusSchema = z.enum(FLEET_TORP_INPUT_STATUSES)
+
 const inferenceSolutionActionSchema = z.object({
   actionId: z.string(),
   label: z.string(),
@@ -38,6 +47,7 @@ export const inferenceStreamSolutionEventSchema = inferenceStreamPlayerScopeSche
   solutions: z.array(inferenceStreamSolutionPayloadSchema),
   segmentId: z.string().optional(),
   scoreboardDeltaSource: z.string().optional(),
+  fleetTorpInputStatus: fleetTorpInputStatusSchema.optional(),
 })
 
 export const inferenceStreamProgressEventSchema = inferenceStreamPlayerScopeSchema.extend({
@@ -57,6 +67,8 @@ export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSche
   isComplete: z.boolean(),
   solutions: z.array(inferenceStreamSolutionPayloadSchema).optional(),
   diagnostics: z.record(z.string(), z.unknown()).optional(),
+  fleetTorpInputStatus: fleetTorpInputStatusSchema.optional(),
+  fleetTorpOverlayBeliefSetTorpIds: z.array(z.number().int()).optional(),
 })
 
 export const inferenceStreamErrorEventSchema = inferenceStreamPlayerScopeSchema.extend({
@@ -76,6 +88,8 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
   inferenceStreamErrorEventSchema,
   inferenceStreamGlobalPauseEventSchema,
 ])
+
+export type FleetTorpInputStatus = z.infer<typeof fleetTorpInputStatusSchema>
 
 export type InferenceStreamSolutionPayload = z.infer<typeof inferenceStreamSolutionPayloadSchema>
 export type InferenceStreamEvent = z.infer<typeof inferenceStreamEventSchema>

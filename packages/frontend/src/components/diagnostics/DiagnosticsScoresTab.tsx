@@ -1,8 +1,29 @@
 import { ClipboardCopy } from 'lucide-react'
-import type { ScoresAnalyticDiagnostics } from '../../stores/analyticDiagnostics'
+import type { ScoresInferenceRowDetail } from '../../api/bff'
+import type {
+  ScoresAnalyticDiagnostics,
+  ScoresPlayerInferenceDiagnostics,
+} from '../../stores/analyticDiagnostics'
 import { cn } from '../../lib/utils'
 import { DiagnosticsJsonBlock } from './DiagnosticsJsonBlock'
 import { FleetTorpInputStatusDetail } from '../../analytics/scores/FleetTorpInputStatusDetail'
+
+function inferenceDetailFromDiagnosticsPlayer(
+  player: ScoresPlayerInferenceDiagnostics
+): ScoresInferenceRowDetail {
+  return {
+    playerId: player.playerId,
+    displayStatus: 'success',
+    status: player.status,
+    summary: player.summary,
+    solutionCount: 0,
+    isComplete: true,
+    solutions: [],
+    diagnostics: player.diagnostics,
+    fleetTorpInputStatus: player.fleetTorpInputStatus,
+    fleetTorpOverlayBeliefSetTorpIds: player.fleetTorpOverlayBeliefSetTorpIds,
+  }
+}
 
 type DiagnosticsScoresTabProps = {
   snapshot: ScoresAnalyticDiagnostics | null
@@ -64,7 +85,7 @@ export function DiagnosticsScoresTab({ snapshot, onCopy }: DiagnosticsScoresTabP
               </p>
               <p className="mt-1 text-xs text-slate-300">{player.summary}</p>
               <FleetTorpInputStatusDetail
-                diagnostics={player.diagnostics}
+                detail={inferenceDetailFromDiagnosticsPlayer(player)}
                 variant="inline"
               />
             </div>

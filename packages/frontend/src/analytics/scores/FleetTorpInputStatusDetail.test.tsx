@@ -1,20 +1,36 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import type { ScoresInferenceRowDetail } from '../../api/bff'
 import { FleetTorpInputStatusDetail } from './FleetTorpInputStatusDetail'
 
+function detail(
+  overrides: Partial<ScoresInferenceRowDetail> = {}
+): ScoresInferenceRowDetail {
+  return {
+    displayStatus: 'success',
+    status: 'exact',
+    summary: 'Best: one build',
+    solutionCount: 1,
+    isComplete: true,
+    solutions: [],
+    diagnostics: {},
+    ...overrides,
+  }
+}
+
 describe('FleetTorpInputStatusDetail', () => {
-  it('returns null when diagnostics omit fleet torp input status', () => {
-    const { container } = render(<FleetTorpInputStatusDetail diagnostics={{}} />)
+  it('returns null when detail omits fleet torp input status', () => {
+    const { container } = render(<FleetTorpInputStatusDetail detail={detail()} />)
     expect(container).toBeEmptyDOMElement()
   })
 
   it('renders section variant with label and belief-set torp ids', () => {
     render(
       <FleetTorpInputStatusDetail
-        diagnostics={{
+        detail={detail({
           fleetTorpInputStatus: 'applied',
-          fleetTorpOverlay: { beliefSetTorpIds: [4, 8] },
-        }}
+          fleetTorpOverlayBeliefSetTorpIds: [4, 8],
+        })}
       />
     )
 
@@ -27,10 +43,10 @@ describe('FleetTorpInputStatusDetail', () => {
     render(
       <FleetTorpInputStatusDetail
         variant="inline"
-        diagnostics={{
+        detail={detail({
           fleetTorpInputStatus: 'applied',
-          fleetTorpOverlay: { beliefSetTorpIds: [4, 8] },
-        }}
+          fleetTorpOverlayBeliefSetTorpIds: [4, 8],
+        })}
       />
     )
 

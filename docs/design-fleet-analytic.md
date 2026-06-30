@@ -7,10 +7,11 @@ Related:
 - [Adding a turn analytic](design-adding-a-turn-analytic.md)
 - [Analytic exports](design-analytic-exports.md) -- cross-analytic queries, ensure dependencies, `fleet` / `scores` unwind chain
 - [Military score build inference](design-military-score-build-inference.md) -- `shipBuilds` source for **fleet inferred acquisition**
-- [Analytic persistence ADR](adr/0002-analytic-persistence.md) -- **fleet turn snapshot** paths
+- [Analytic persistence ADR](adr/0002-analytic-persistence.md) -- turn-scoped analytic paths
+- [Fleet per-player persistence ADR](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md) -- **fleet ledger persistence**, **fleet materialization provenance**, table stream
 - [Homeworld locator](design-homeworld-locator-analytic.md) -- future starbase region constraints (follow-on)
 
-GitHub: parent epic [#114](https://github.com/SteveDraper/Planets-Console/issues/114); child slices [#115](https://github.com/SteveDraper/Planets-Console/issues/115)--[#128](https://github.com/SteveDraper/Planets-Console/issues/128); follow-ons [#129](https://github.com/SteveDraper/Planets-Console/issues/129)--[#134](https://github.com/SteveDraper/Planets-Console/issues/134).
+GitHub: parent epic [#114](https://github.com/SteveDraper/Planets-Console/issues/114); child slices [#115](https://github.com/SteveDraper/Planets-Console/issues/115)--[#128](https://github.com/SteveDraper/Planets-Console/issues/128); follow-ons [#129](https://github.com/SteveDraper/Planets-Console/issues/129)--[#134](https://github.com/SteveDraper/Planets-Console/issues/134); **F7** per-player persistence/provenance/stream [#163](https://github.com/SteveDraper/Planets-Console/issues/163)--[#169](https://github.com/SteveDraper/Planets-Console/issues/169) ([ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md)).
 
 ---
 
@@ -150,22 +151,28 @@ When scoreboard implies fewer ships than **active** rows:
 
 ## 5. Persistence
 
-**Fleet turn snapshot** at logical path:
+**Fleet ledger persistence** (per **Player**) at turn scope. Logical document:
 
 `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`
 
+In-document keys: `ledgers/{playerId}` -- each entry is one **fleet acquisition ledger** plus **fleet materialization provenance** and `materializationVersion`. See [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
+
 | Rule | Detail |
 |------|--------|
-| **Chain** | Materialize turn `T` from snapshot `T-1` + evidence on turn `T` only |
-| **Baseline** | Turn 1: empty ledger or sightings-only seed |
-| **Events** | Copied forward; new events appended; corrections add events at `T` without erasing `T-1` |
-| **Invalidation** | Turn document replace at `T`: drop fleet snapshots `>= T` at that **perspective**; re-chain. Scores inference invalidation: re-chain from first affected host turn (exact coupling in implementation ticket) |
-| **Materialization version** | Each persisted snapshot stores `materializationVersion` (integer, current code constant `FLEET_MATERIALIZATION_VERSION`). Bump conservatively when materialization semantics change for the same RST + scores inputs (chain rules, inferred acquisition ingest, observation-inference merge). On read, missing or stale versions delete that snapshot and count as a cache miss; gap-fill re-materializes with current logic. Does not replace input-driven invalidation (turn reload, scores row changes) |
-| **Invalidation generation** | Each `(gameId, perspective)` has a monotonic counter bumped on every fleet snapshot invalidation. Multi-turn gap-fill records the counter at chain start and aborts (then retries from a fresh anchor, bounded max retries) when the counter advances mid-materialization. Invalidation callbacks only bump the counter and delete stored snapshots; they do not block on an in-progress gap-fill |
+| **Grain** | One ledger per `player_id` per turn; not one monolithic all-players blob for ensure semantics |
+| **Chain** | Materialize turn `T` for player P from P's ledger at `T-1` + evidence on turn `T` for P only |
+| **Baseline** | Turn 1: empty ledger or sightings-only seed per **Player** |
+| **Provenance** | Per ledger: `(turnEvidenceAtN, priorLedgerAtNMinus1)`. Both `true` --> persisted ledger is **final** for ensure/probe. Either `false` --> scope needs further ensure work |
+| **Events** | Copied forward per player; new events appended; corrections add events at `T` without erasing `T-1` |
+| **Invalidation** | Turn document replace at `T`: drop all fleet ledgers at turns `>= T` at that **perspective**. Scores inference evidence update for player P at host *H*: drop P's ledgers at fleet turns `>= H` |
+| **Materialization version** | Per ledger entry. Bump conservatively when materialization semantics change. Stale version --> treat as cache miss for that player |
+| **Invalidation generation** | Per `(gameId, perspective)` counter bumped on fleet invalidation; gap-fill aborts mid-chain when generation advances (see section 5.1) |
+| **Migration** | Legacy monolithic snapshot (all players at document root) upgraded on read to `ledgers/{playerId}` keys |
+| **Shared turn context** | Global id-bound inputs from RST scoreboard totals are read once per turn; not stored as a cross-player mutable ledger |
 
 ### 5.1 Gap-fill concurrency and `ConflictError`
 
-Gap-fill is **deterministic** for a given anchor, stored RST sequence, and scores inference materialization inputs. Each `put_snapshot` writes a **complete** fleet snapshot for that turn (not a provisional approximation level). The system does **not** compare competing writers byte-for-byte or pick a semantic winner when two paths materialize the same turn.
+Gap-fill is **deterministic** for a given anchor, stored RST sequence, and scores inference materialization inputs per **Player**. Each `put_ledger` writes one player's ledger for that turn with honest **fleet materialization provenance** -- partial provenance is allowed on disk but must not be treated as ensure-final. The system does **not** compare competing writers byte-for-byte or pick a semantic winner when two paths materialize the same player turn.
 
 **What `ConflictError` means:** after `GAP_FILL_MAX_RETRIES` invalidation aborts, gap-fill raises `ConflictError` when the target-turn snapshot is **still missing**. This is a **coherence / liveness** failure ("too many mid-chain invalidation bumps"), not evidence that two writers produced different fleet ledgers. The generation guard exists to prevent **torn chains** (e.g. persisting turn 6 after turn 5 was invalidated mid-flight).
 
@@ -193,7 +200,7 @@ Wire **scores** provider edge (currently empty in #93d):
 EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
 ```
 
-Export tree mirrors ledger: per-player records, discrepancies, `meta.searchStatus` when scores materialization incomplete. See [design-analytic-exports.md](design-analytic-exports.md) for query examples.
+Export tree mirrors ledger: per-player records, discrepancies, `meta.searchStatus` when scores materialization incomplete for the scoped `player_id`. `is_ensure_satisfied` for `fleet@N` requires per-player provenance `(true, true)`, not merely a stored document. See [design-analytic-exports.md](design-analytic-exports.md) and [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
 
 ---
 
@@ -365,8 +372,10 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | **Scores** **#156** | Per-axis tech ceilings from same `$.composition` rows (**inference component tech-gap prior**) |
 | **Scores** **#78** | Optional **inference tier policy overlay** (component filter widening); parallel axis, not torp ranking |
 | Reports ingest | Strong evidence for loss/trade row selection |
-| Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain |
-| **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) | Single in-flight materialization per perspective; see section 5.1 |
+| Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain; per-player provenance drives missing-step sets |
+| **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) | Single in-flight materialization per perspective (align with per-player chains in F7); see section 5.1 |
+| **Fleet F7** (ADR 0004) | Per-player persistence, provenance, table stream -- [#163](https://github.com/SteveDraper/Planets-Console/issues/163) epic; section 15 |
+| **#143** | Neutral scores-inference revision for fleet refetch; superseded for refinement updates once F7 stream ships |
 
 ### `$.composition` export branch (#154)
 
@@ -384,3 +393,21 @@ Per-player, scoped by `player_id`. Materialized from active `FleetShipRecord` ro
 | `$.composition.maxTechLevel` | `{ "hulls"?, "engines"?, "launchers"?, "beams"? }` | Max `techlevel` from turn catalog over ids present in the matching type histogram for that axis |
 
 Unknown-only, bounded-only, and region field constraints contribute no ids until resolved to known or option-set tuples. Known zero for beams/launchers (no fitted weapons) is excluded. Turn 1 baseline: empty histograms and `{}` `maxTechLevel` (scores inference treats absent overlay like empty belief set).
+
+---
+
+## 15. Per-player persistence, provenance, and stream (F7)
+
+Parent epic and slices implement [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md). Shippable phases; each slice includes tests and doc updates.
+
+| Slice | Issue | Deliverable |
+|-------|-------|-------------|
+| **F7 epic** | [#163](https://github.com/SteveDraper/Planets-Console/issues/163) | ADR 0004, design docs, slice tracking |
+| **F7.1** | [#164](https://github.com/SteveDraper/Planets-Console/issues/164) | Per-player `ledgers/{playerId}` persistence, provenance wire types, legacy snapshot migration, unit tests |
+| **F7.2** | [#165](https://github.com/SteveDraper/Planets-Console/issues/165) | Per-player materialization chain; honest provenance on write; shared turn-context reads for id bounds |
+| **F7.3** | [#166](https://github.com/SteveDraper/Planets-Console/issues/166) | Ensure/probe `is_ensure_satisfied` and fleet export gates use provenance; fleet compute does not short-circuit on partial ledgers |
+| **F7.4** | [#167](https://github.com/SteveDraper/Planets-Console/issues/167) | Per-player invalidation when scores rows change; turn-reload hooks |
+| **F7.5** | [#168](https://github.com/SteveDraper/Planets-Console/issues/168) | Fleet table NDJSON stream (Core scheduler + BFF); event schema and integration tests |
+| **F7.6** | [#169](https://github.com/SteveDraper/Planets-Console/issues/169) | Frontend per-player stream connect; tile-level updates; reduce dependence on [#143](https://github.com/SteveDraper/Planets-Console/issues/143) revision bump |
+
+**Stream sketch (F7.5):** connect with `playerIds[]`; events tagged with `playerId` -- `ledger_updated`, `record_refined`, `provenance`, `complete`, `error` (exact wire in implementation). Background ensure from [#109](https://github.com/SteveDraper/Planets-Console/issues/109) may share the same per-player outstanding-work queue built from provenance gaps.

@@ -1,6 +1,12 @@
 import type { AnalyticShellScope } from '../../api/bff'
 import { fetchScoresTableInferenceStream } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
+import {
+  bumpScoresInferenceRevision,
+  clearBumpMemoryForScope,
+  noteSolutionEvidenceChangeAndShouldBumpRevision,
+} from '../../stores/scoresInferenceRevision'
+import { parseFleetTorpInputStatus } from './fleetTorpInputStatus'
 
 export const TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
   'An inference table stream is already active for this scope.'
@@ -25,6 +31,24 @@ function isScopeLevelStreamConflict(event: InferenceStreamEvent): boolean {
     event.playerId == null &&
     event.detail === TABLE_STREAM_ALREADY_ACTIVE_DETAIL
   )
+}
+
+export function shouldBumpScoresInferenceRevision(
+  event: InferenceStreamEvent,
+  scope: AnalyticShellScope
+): boolean {
+  if (event.type === 'complete') {
+    return true
+  }
+  if (event.type === 'solution') {
+    return noteSolutionEvidenceChangeAndShouldBumpRevision(
+      scope,
+      event.playerId,
+      event.solutions,
+      parseFleetTorpInputStatus(event.fleetTorpInputStatus)
+    )
+  }
+  return false
 }
 
 export type TableInferenceStreamConnectResult =
@@ -55,6 +79,9 @@ export async function connectTableInferenceStream(
           if (isScopeLevelStreamConflict(event)) {
             scopeConflict = true
             return
+          }
+          if (shouldBumpScoresInferenceRevision(event, scope)) {
+            bumpScoresInferenceRevision(scope)
           }
           handlers.onEvent(event)
         },
@@ -89,6 +116,8 @@ export async function connectTableInferenceStreamUntilComplete(
     hasPendingRows: () => boolean
   }
 ): Promise<TableInferenceStreamConnectResult> {
+  clearBumpMemoryForScope(scope)
+
   for (let attempt = 0; attempt < STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS; attempt += 1) {
     if (handlers.signal.aborted) {
       return 'aborted'

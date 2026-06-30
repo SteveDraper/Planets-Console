@@ -60,6 +60,7 @@ def row_domain_event_to_wire_events(
         event,
         observation=row.session.observation,
         turn=row.session.turn,
+        fleet_torp_input_status=row.session.fleet_torp_input_status,
     )
 
 

@@ -254,7 +254,7 @@ export function InferenceDetailModal({
           </section>
         ) : null}
 
-        <FleetTorpInputStatusDetail diagnostics={diagnostics} />
+        <FleetTorpInputStatusDetail detail={detail} />
 
         {inferenceRun.statusLabel != null || inferenceRun.wallTimeSeconds != null ? (
           <p className="text-xs text-slate-500">

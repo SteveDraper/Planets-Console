@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
+import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import {
   failureDetail,
   initialRowStreamState,
@@ -9,7 +10,6 @@ import {
   playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  stableAnalyticScopeKey,
   stablePlayerIdsKey,
   type RowStreamState,
 } from './inferenceRowStreamState'
@@ -40,7 +40,7 @@ export function useScoresInferenceByRow(
       .filter((id): id is number => typeof id === 'number')
     return stablePlayerIdsKey(playerIds)
   }, [enabled, inferenceByRowStubs])
-  const scopeKey = scope != null ? stableAnalyticScopeKey(scope) : null
+  const scopeKey = scope != null ? analyticScopeKey(scope) : null
   const connectionKey =
     enabled && scopeKey != null && playerIdsKey.length > 0 ? `${scopeKey}:${playerIdsKey}` : null
 

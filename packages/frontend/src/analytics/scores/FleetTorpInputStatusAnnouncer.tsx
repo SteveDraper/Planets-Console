@@ -1,71 +1,44 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ScoresInferenceRowDetail } from '../../api/bff'
+import type { AnalyticShellScope, ScoresInferenceRowDetail } from '../../api/bff'
+import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import {
-  fleetTorpInputAccessibleLabel,
-  readFleetTorpInputStatusFromDetail,
+  aggregateFleetTorpInputStatusForScope,
+  fleetTorpInputAnnouncementForTransition,
   type FleetTorpInputStatus,
 } from './fleetTorpInputStatus'
 
-// Announce entering pending, applied (only from pending), or unavailable; other
-// transitions (including not_applicable) are silent so table cells own steady-state labels.
-function announcementForTransition(
-  previous: FleetTorpInputStatus | null,
-  next: FleetTorpInputStatus
-): string | null {
-  if (previous === next) {
-    return null
-  }
-  if (next === 'applied' && previous === 'pending') {
-    return fleetTorpInputAccessibleLabel('applied')
-  }
-  if (next === 'pending' && previous !== 'pending') {
-    return fleetTorpInputAccessibleLabel('pending')
-  }
-  if (next === 'unavailable' && previous !== 'unavailable') {
-    return fleetTorpInputAccessibleLabel('unavailable')
-  }
-  return null
-}
-
 type FleetTorpInputStatusAnnouncerProps = {
+  analyticScope: AnalyticShellScope
   inferenceByRow: ScoresInferenceRowDetail[]
 }
 
 export function FleetTorpInputStatusAnnouncer({
+  analyticScope,
   inferenceByRow,
 }: FleetTorpInputStatusAnnouncerProps) {
-  const previousStatusesRef = useRef<Map<number, FleetTorpInputStatus | null>>(new Map())
+  const previousStatusesRef = useRef<Map<string, FleetTorpInputStatus | null>>(new Map())
   const [announcement, setAnnouncement] = useState('')
 
   useEffect(() => {
-    const announcements: string[] = []
-    for (const detail of inferenceByRow) {
-      const playerId = detail.playerId
-      if (playerId == null) {
-        continue
-      }
-      const nextStatus = readFleetTorpInputStatusFromDetail(detail)
-      const previousStatus = previousStatusesRef.current.get(playerId) ?? null
-      if (nextStatus != null) {
-        const text = announcementForTransition(previousStatus, nextStatus)
-        if (text != null) {
-          announcements.push(text)
-        }
-        previousStatusesRef.current.set(playerId, nextStatus)
-      }
-    }
+    const scopeKey = analyticScopeKey(analyticScope)
+    const nextStatus = aggregateFleetTorpInputStatusForScope(inferenceByRow)
+    const previousStatus = previousStatusesRef.current.get(scopeKey) ?? null
+    const text =
+      nextStatus != null
+        ? fleetTorpInputAnnouncementForTransition(previousStatus, nextStatus)
+        : null
+    previousStatusesRef.current.set(scopeKey, nextStatus)
 
-    if (announcements.length === 0) {
+    if (text == null) {
       return
     }
 
-    const text = announcements.join(' ')
     setAnnouncement('')
     const frameId = requestAnimationFrame(() => {
       setAnnouncement(text)
     })
     return () => cancelAnimationFrame(frameId)
-  }, [inferenceByRow])
+  }, [analyticScope, inferenceByRow])
 
   return (
     <div

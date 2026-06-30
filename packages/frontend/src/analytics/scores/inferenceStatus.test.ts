@@ -34,13 +34,13 @@ describe('inferenceAccessibleLabel', () => {
     expect(
       inferenceAccessibleLabel({
         ...base,
-        diagnostics: { fleetTorpInputStatus: 'pending' },
+        fleetTorpInputStatus: 'pending',
       })
     ).toContain('pending')
     expect(
       inferenceAccessibleLabel({
         ...base,
-        diagnostics: { fleetTorpInputStatus: 'not_applicable' },
+        fleetTorpInputStatus: 'not_applicable',
       })
     ).toBe('Best: one build')
   })

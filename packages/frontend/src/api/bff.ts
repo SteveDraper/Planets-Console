@@ -22,6 +22,7 @@ import {
   parseInferenceStreamEvent,
   type InferenceStreamEvent,
 } from './parseInferenceStreamEvent'
+import type { FleetTorpInputStatus } from './inferenceStreamEventSchema'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
 
@@ -273,6 +274,8 @@ export type ScoresInferenceRowDetail = {
   isComplete: boolean
   solutions: ScoresInferenceSolution[]
   diagnostics: Record<string, unknown>
+  fleetTorpInputStatus?: FleetTorpInputStatus
+  fleetTorpOverlayBeliefSetTorpIds?: number[]
 }
 
 /** Scores table after per-row inference queries have been merged for display. */

@@ -2,6 +2,7 @@ import type { ScoresInferenceRowDetail, ScoresInferenceSolution } from '../../ap
 import type {
   InferenceStreamEvent,
   InferenceStreamSolutionPayload,
+  FleetTorpInputStatus,
 } from '../../api/inferenceStreamEventSchema'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
@@ -41,6 +42,8 @@ export type RowStreamState = {
   summary: string
   isComplete: boolean
   diagnostics: Record<string, unknown>
+  fleetTorpInputStatus?: FleetTorpInputStatus
+  fleetTorpOverlayBeliefSetTorpIds?: number[]
 }
 
 export function initialRowStreamState(): RowStreamState {
@@ -96,6 +99,12 @@ export function rowDetailFromStreamState(
     isComplete: state.isComplete,
     solutions: state.heldSolutions,
     diagnostics: state.diagnostics,
+    ...(state.fleetTorpInputStatus != null
+      ? { fleetTorpInputStatus: state.fleetTorpInputStatus }
+      : {}),
+    ...(state.fleetTorpOverlayBeliefSetTorpIds != null
+      ? { fleetTorpOverlayBeliefSetTorpIds: state.fleetTorpOverlayBeliefSetTorpIds }
+      : {}),
   }
 }
 
@@ -120,6 +129,20 @@ export function failureDetail(playerId: number, summary: string): ScoresInferenc
     solutions: [],
     diagnostics: {},
   }
+}
+
+function fleetTorpFieldsFromCompleteEvent(
+  event: Extract<InferenceStreamEvent, { type: 'complete' }>
+): Pick<RowStreamState, 'fleetTorpInputStatus' | 'fleetTorpOverlayBeliefSetTorpIds'> {
+  const fields: Pick<RowStreamState, 'fleetTorpInputStatus' | 'fleetTorpOverlayBeliefSetTorpIds'> =
+    {}
+  if (event.fleetTorpInputStatus != null) {
+    fields.fleetTorpInputStatus = event.fleetTorpInputStatus
+  }
+  if (event.fleetTorpOverlayBeliefSetTorpIds != null) {
+    fields.fleetTorpOverlayBeliefSetTorpIds = event.fleetTorpOverlayBeliefSetTorpIds
+  }
+  return fields
 }
 
 export function reduceRowStreamState(
@@ -162,15 +185,21 @@ export function reduceRowStreamState(
   }
 
   if (event.type === 'solution') {
+    const fleetTorpInputStatus =
+      event.fleetTorpInputStatus != null
+        ? { fleetTorpInputStatus: event.fleetTorpInputStatus }
+        : {}
     if (state.isComplete) {
       return {
         ...initialRowStreamState(),
         heldSolutions: streamSolutionsToRowSolutions(event.solutions),
+        ...fleetTorpInputStatus,
       }
     }
     return {
       ...state,
       heldSolutions: streamSolutionsToRowSolutions(event.solutions),
+      ...fleetTorpInputStatus,
     }
   }
 
@@ -181,6 +210,7 @@ export function reduceRowStreamState(
       summary: event.summary,
       isComplete: event.isComplete,
       diagnostics: event.diagnostics ?? {},
+      ...fleetTorpFieldsFromCompleteEvent(event),
       ...(event.solutions != null
         ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
         : {}),
@@ -201,14 +231,6 @@ export function reduceRowStreamState(
 
 export function stablePlayerIdsKey(playerIds: readonly number[]): string {
   return [...playerIds].sort((left, right) => left - right).join(',')
-}
-
-export function stableAnalyticScopeKey(scope: {
-  gameId: string
-  turn: number
-  perspective: number
-}): string {
-  return `${scope.gameId}:${scope.turn}:${scope.perspective}`
 }
 
 export function playerIdsFromStableKey(playerIdsKey: string): number[] {

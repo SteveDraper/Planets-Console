@@ -1,10 +1,9 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { fetchAnalyticTable } from '../../api/bff'
 import type { AnalyticShellScope } from '../../api/bff'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { FleetTableView } from './FleetTableView'
 import { parseFleetTableWire, type FleetTableWire } from './fleetTableWireSchema'
+import { useFleetTableQuery } from './useFleetTableQuery'
 
 type FleetAnalyticTableTileProps = {
   analyticScope: AnalyticShellScope | null
@@ -30,11 +29,7 @@ export function FleetAnalyticTableTile({
   analyticScope,
   fetchEnabled,
 }: FleetAnalyticTableTileProps) {
-  const { data, isPending, error } = useQuery({
-    queryKey: ['analytic', 'fleet', 'table', analyticScope] as const,
-    queryFn: () => fetchAnalyticTable('fleet', analyticScope!),
-    enabled: fetchEnabled,
-  })
+  const { data, isPending, error } = useFleetTableQuery(analyticScope, fetchEnabled)
 
   const parsedFleetTable = useMemo(
     () => (data != null ? parseFleetTableWireResult(data) : null),

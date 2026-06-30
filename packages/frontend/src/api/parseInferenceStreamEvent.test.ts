@@ -113,6 +113,25 @@ describe('parseInferenceStreamEvent', () => {
     }
   })
 
+  it('parses complete events with first-class fleet torp fields', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'complete',
+        status: 'exact',
+        summary: 'Best: built warship',
+        solutionCount: 1,
+        isComplete: true,
+        fleetTorpInputStatus: 'applied',
+        fleetTorpOverlayBeliefSetTorpIds: [4, 8],
+      })
+    )
+    expect(event).toMatchObject({
+      type: 'complete',
+      fleetTorpInputStatus: 'applied',
+      fleetTorpOverlayBeliefSetTorpIds: [4, 8],
+    })
+  })
+
   it('parses global pause events', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({

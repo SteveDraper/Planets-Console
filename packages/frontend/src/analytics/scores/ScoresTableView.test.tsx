@@ -330,7 +330,8 @@ describe('ScoresTableView', () => {
               solutionCount: 1,
               isComplete: true,
               solutions: [],
-              diagnostics: { fleetTorpInputStatus: 'pending' },
+              diagnostics: {},
+              fleetTorpInputStatus: 'pending',
             },
           ],
         })}

@@ -4,7 +4,6 @@ import {
   playerIdsFromStableKey,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  stableAnalyticScopeKey,
   stablePlayerIdsKey,
 } from './inferenceRowStreamState'
 
@@ -12,14 +11,6 @@ describe('stablePlayerIdsKey', () => {
   it('sorts ids so order changes do not alter the key', () => {
     expect(stablePlayerIdsKey([9, 8])).toBe('8,9')
     expect(stablePlayerIdsKey([8, 9])).toBe('8,9')
-  })
-})
-
-describe('stableAnalyticScopeKey', () => {
-  it('keys scope by game, turn, and perspective', () => {
-    expect(
-      stableAnalyticScopeKey({ gameId: '628580', turn: 111, perspective: 1 })
-    ).toBe('628580:111:1')
   })
 })
 
@@ -145,13 +136,14 @@ describe('reduceRowStreamState', () => {
     })
   })
 
-  it('updates fleet torp diagnostics when a second complete event arrives', () => {
+  it('updates fleet torp first-class fields when a second complete event arrives', () => {
     const firstComplete = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
       summary: 'Provisional',
       solutionCount: 1,
       isComplete: true,
+      fleetTorpInputStatus: 'pending',
       diagnostics: { fleetTorpInputStatus: 'pending' },
     })
     const secondComplete = reduceRowStreamState(firstComplete, {
@@ -160,12 +152,17 @@ describe('reduceRowStreamState', () => {
       summary: 'Authoritative',
       solutionCount: 1,
       isComplete: true,
+      fleetTorpInputStatus: 'applied',
+      fleetTorpOverlayBeliefSetTorpIds: [4],
       diagnostics: {
         fleetTorpInputStatus: 'applied',
         fleetTorpOverlay: { beliefSetTorpIds: [4] },
       },
     })
 
+    const detail = rowDetailFromStreamState(8, secondComplete)
+    expect(detail.fleetTorpInputStatus).toBe('applied')
+    expect(detail.fleetTorpOverlayBeliefSetTorpIds).toEqual([4])
     expect(secondComplete.diagnostics).toMatchObject({
       fleetTorpInputStatus: 'applied',
       fleetTorpOverlay: { beliefSetTorpIds: [4] },

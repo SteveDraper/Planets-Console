@@ -153,7 +153,7 @@ The in-process Core facility passed into **turn analytic** computation through w
 _Avoid_: export microservice, cross-analytic REST (v1)
 
 **Analytic export ensure**:
-Idempotent producer step before materialization: bring one **analytic export** scope to the best terminal state available (run inference, read persistence, attach to in-flight scheduler work). Invoked by **analytic query context** `query(...)`, not by ad hoc cross-imports. Ensure scope is typically `(game_id, perspective, turn, player_id)` for row-scoped exports such as **scores** `$.solutions.*`. Does not start duplicate work when the same scope is already in flight. Cross-turn chains unwind one prior turn at a time (turn *N* reads *N−1* only). Large missing-step counts use a background ensure job with progress feedback, not a single blocking HTTP request. Truncated pseudo-baseline unwind is out of scope until **analytic export ensure provenance** and invalidation are designed.
+Idempotent producer step before materialization: bring one **analytic export** scope to the best terminal state available (run inference, read persistence, attach to in-flight scheduler work). Invoked by **analytic query context** `query(...)`, not by ad hoc cross-imports. Ensure scope is typically `(game_id, perspective, turn, player_id)` for row-scoped exports such as **scores** `$.solutions.*`. Does not start duplicate work when the same scope is already in flight. Cross-turn chains unwind one prior turn at a time (turn *N* reads *N−1* only). Large missing-step counts use a background ensure job with progress feedback, not a single blocking HTTP request. Truncated pseudo-baseline unwind is out of scope until **fleet materialization provenance** ships ([ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md)); truncation markers are a follow-on.
 _Avoid_: mutating query (vague), read-only export materializer, user visit order as prerequisite
 
 **Analytic export ensure baseline**:
@@ -412,9 +412,21 @@ _Avoid_: status (generic), deleted flag (implies hard purge)
 The full set of **fleet ship record**s for one **Player**, including non-**active** dispositions and the evidence timeline (built turn, sightings, inference source). Core and **analytic export** materializers own the ledger; the SPA tabular v1 defaults to **`active`** rows only. Map v1 shows **active** records with known or region-constrained position; lost or unknown rows stay off the map unless a follow-on layer requests them.
 _Avoid_: current fleet table (when meaning the filtered view only), ship history log (generic)
 
+**Analytic export ensure provenance**:
+Metadata on persisted analytic output that records which upstream ensure legs were closed when materialization ran, distinct from mere file existence. **Fleet materialization provenance** (ADR 0004) is the first production instance: per `player_id` at `fleet@N`, a pair `(turnEvidenceAtN, priorLedgerAtNMinus1)`; both `true` means ensure may short-circuit that scope. Partial provenance keeps the scope on probe missing-step lists and queues ensure work. Enables deduped outstanding-work sets for background ensure ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)) and truncated pseudo-baseline unwind (future).
+_Avoid_: persisted equals final, snapshot file as ensure gate
+
+**Fleet ledger persistence**:
+Per-**Player** persisted **fleet acquisition ledger** at one `(game_id, perspective, turn)` scope. Stored at in-document key `ledgers/{playerId}` under `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. Carries **fleet materialization provenance** and per-ledger `materializationVersion`. Independent invalidation per player when that player's scores inference evidence changes. See [ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
+_Avoid_: monolithic all-players fleet blob as ensure-final, perspective-wide invalidation for one player's scores update
+
+**Fleet materialization provenance**:
+Per-player pair at `fleet@N`: `turnEvidenceAtN` (turn-*N* RST ingest + `scores@N` ensure-satisfied for that player) and `priorLedgerAtNMinus1` (`fleet@(N-1)` for that player is provenance-final, or turn-1 baseline). Both `true` --> persisted ledger is ensure-final. Either `false` --> probe/ensure continues the dependency walk for that `player_id`. Set honestly at write time. See [ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
+_Avoid_: inferring finality from cache hit, global provenance for all players
+
 **Fleet turn snapshot**:
-Persisted **fleet acquisition ledger** for all **Player**s at one `(game_id, perspective, turn)` scope. Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet` under **turn-scoped analytic persistence**. Materialized by chaining from turn *T-1* snapshot (or empty **fleet ensure baseline** at turn 1) plus evidence applied on turn *T* only. Each snapshot retains **fleet evidence event** history sufficient for later **fleet reconciliation correction** without re-reading prior snapshots' event streams. Turn document replace at *T* invalidates this snapshot and all later turn snapshots at that **perspective**; scores inference invalidation may require re-chain from the first affected host turn.
-_Avoid_: perspective-wide single ledger file, recompute 1..T on every GET
+Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** the document holds per-player **fleet ledger persistence** entries, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* invalidates all players' ledgers at turns `>= T`; scores row updates invalidate per player from the affected host turn.
+_Avoid_: perspective-wide single ledger file as ensure-final, recompute 1..T on every GET
 
 **Fleet ensure baseline**:
 **Analytic export ensure baseline** for **fleet**: turn 1 has implicit empty fleet per **Player** (no prior snapshot). Unwind stops at turn 1; no fleet@turn 0.
