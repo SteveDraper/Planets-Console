@@ -190,4 +190,17 @@ describe('reduceRowStreamState', () => {
     expect(complete.heldSolutions).toHaveLength(1)
     expect(complete.heldSolutions[0]?.actions[0]?.actionId).toBe('a1')
   })
+
+  it('marks failure from error events', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'error',
+      playerId: 8,
+      detail: 'stream ended early',
+    })
+
+    expect(next.isComplete).toBe(true)
+    expect(next.status).toBe('fetch_error')
+    expect(next.summary).toBe('stream ended early')
+    expect(rowDetailFromStreamState(8, next).displayStatus).toBe('failure')
+  })
 })

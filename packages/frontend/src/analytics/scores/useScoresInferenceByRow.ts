@@ -43,16 +43,11 @@ function createScoresInferenceStreamPolicy(
       }
       return initialDetails
     },
-    markIncompleteFailed: (playerIds, previous, summary) => {
-      const next = new Map(previous)
-      for (const playerId of playerIds) {
-        if (next.get(playerId)?.isComplete) {
-          continue
-        }
-        next.set(playerId, failureDetail(playerId, summary))
-      }
-      return next
-    },
+    streamFailureEvent: (playerId, summary) => ({
+      type: 'error',
+      playerId,
+      detail: summary,
+    }),
     routeStreamEvent: (event, { applyToAllPlayers }) => {
       if (event.type === 'globalPause') {
         onGlobalPauseChangeRef.current?.(event.paused)

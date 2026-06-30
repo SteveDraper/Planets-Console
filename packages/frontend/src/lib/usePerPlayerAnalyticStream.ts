@@ -28,11 +28,7 @@ export type PerPlayerAnalyticStreamPolicy<TEvent extends StreamErrorEvent, TRefS
     isRefStateComplete: (state: TRefState) => boolean
     publishedFromRefState: (playerId: number, state: TRefState) => TPublished | null
     seedPublishedOnNewConnection?: (playerIds: number[]) => Map<number, TPublished>
-    markIncompleteFailed: (
-      playerIds: number[],
-      previous: Map<number, TPublished>,
-      summary: string
-    ) => Map<number, TPublished>
+    streamFailureEvent: (playerId: number, summary: string) => TEvent
     routeStreamEvent?: (
       event: TEvent,
       context: PerPlayerStreamEventRouterContext<TEvent>
@@ -158,6 +154,8 @@ export function usePerPlayerAnalyticStream<
   )
   const handleStreamEventRef = useRef(handleStreamEvent)
   handleStreamEventRef.current = handleStreamEvent
+  const applyStreamEventRef = useRef(applyStreamEvent)
+  applyStreamEventRef.current = applyStreamEvent
 
   useEffect(() => {
     const activePolicy = policyRef.current
@@ -196,9 +194,16 @@ export function usePerPlayerAnalyticStream<
     streamAbortControllerRef.current = controller
 
     const markIncompleteFailed = (summary: string) => {
-      setPublishedByPlayerId((previous) =>
-        activePolicy.markIncompleteFailed(playerIds, previous, summary)
-      )
+      for (const playerId of playerIds) {
+        const state = refStateByPlayerId.current.get(playerId)
+        if (state != null && activePolicy.isRefStateComplete(state)) {
+          continue
+        }
+        applyStreamEventRef.current(
+          playerId,
+          activePolicy.streamFailureEvent(playerId, summary)
+        )
+      }
     }
 
     void activePolicy

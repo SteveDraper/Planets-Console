@@ -31,22 +31,11 @@ const fleetTableStreamPolicy: PerPlayerAnalyticStreamPolicy<
   reduceRefState: (current, event) => reduceFleetPlayerStreamState(current, event),
   isRefStateComplete: (state) => state.isComplete,
   publishedFromRefState: (_playerId, state) => fleetPlayerStreamSliceFromState(state),
-  markIncompleteFailed: (playerIds, previous, summary) => {
-    const next = new Map(previous)
-    for (const playerId of playerIds) {
-      const current = next.get(playerId)
-      if (current?.isComplete) {
-        continue
-      }
-      next.set(playerId, {
-        isComplete: true,
-        isFinal: false,
-        summary,
-        error: summary,
-      })
-    }
-    return next
-  },
+  streamFailureEvent: (playerId, summary) => ({
+    type: 'error',
+    playerId,
+    detail: summary,
+  }),
   connectUntilComplete: (scope, playerIds, handlers) =>
     connectFleetTableStreamUntilComplete(scope, playerIds, {
       signal: handlers.signal,

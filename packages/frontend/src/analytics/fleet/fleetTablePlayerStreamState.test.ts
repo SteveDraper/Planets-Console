@@ -100,6 +100,19 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(next.isFinal).toBe(true)
     expect(next.summary).toBe('done')
   })
+
+  it('marks failure from error events', () => {
+    const next = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'error',
+      playerId: 8,
+      detail: 'stream ended early',
+    })
+
+    expect(next.isComplete).toBe(true)
+    expect(next.error).toBe('stream ended early')
+    expect(next.summary).toBe('stream ended early')
+    expect(fleetPlayerStreamSliceFromState(next)?.error).toBe('stream ended early')
+  })
 })
 
 describe('mergeFleetPlayerWithStreamSlice', () => {
