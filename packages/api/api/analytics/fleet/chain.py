@@ -308,7 +308,7 @@ def _materialize_fleet_ledger_chain_for_player(
             )
         return turn_info
 
-    def turn_context(materialize_turn: int, turn_info: TurnInfo) -> FleetTurnContext:
+    def cached_turn_context_for(materialize_turn: int, turn_info: TurnInfo) -> FleetTurnContext:
         if materialize_turn not in turn_context_cache:
             turn_context_cache[materialize_turn] = FleetTurnContext.from_turn(turn_info)
         return turn_context_cache[materialize_turn]
@@ -372,7 +372,7 @@ def _materialize_fleet_ledger_chain_for_player(
                 player_id,
             ),
             turn_info=turn_one,
-            turn_context=turn_context(1, turn_one),
+            turn_context=cached_turn_context_for(1, turn_one),
             game_id=game_id,
             perspective=perspective,
             load_turn=cached_load,
@@ -398,7 +398,7 @@ def _materialize_fleet_ledger_chain_for_player(
             prior_persisted=current_persisted,
             prior_ledger=current_ledger,
             turn_info=turn_info,
-            turn_context=turn_context(materialize_turn, turn_info),
+            turn_context=cached_turn_context_for(materialize_turn, turn_info),
             game_id=game_id,
             perspective=perspective,
             load_turn=cached_load,

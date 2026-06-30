@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.chain import (
@@ -190,11 +191,33 @@ def test_complete_scores_closure_persists_final_provenance_when_prior_final(
     assert persistence.has_final_ledger(628580, 1, 2, player_id) is True
 
 
-def test_turn_context_computes_id_bound_once_per_turn(load_turn):
+def test_turn_context_includes_max_ship_id_bound(load_turn):
     turn = load_turn(111)
     assert turn is not None
     context = FleetTurnContext.from_turn(turn)
     assert context.max_ship_id_bound is not None
+
+
+def test_snapshot_gap_fill_reuses_turn_context_across_players(persistence, load_turn):
+    turn = load_turn(111)
+    assert turn is not None
+    player_count = len(list(iter_turn_players(turn)))
+    assert player_count > 1
+
+    with patch(
+        "api.analytics.fleet.chain.FleetTurnContext.from_turn",
+        wraps=FleetTurnContext.from_turn,
+    ) as from_turn_mock:
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn,
+            load_turn=load_turn,
+        )
+
+    # Turns 110 and 111 are gap-filled once each, shared across roster players.
+    assert from_turn_mock.call_count == 2
 
 
 def test_gap_fill_persists_per_player_ledgers_with_provenance(persistence, load_turn):
