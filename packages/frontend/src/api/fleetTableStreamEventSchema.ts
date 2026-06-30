@@ -4,7 +4,7 @@
 
 import { z } from 'zod'
 import {
-  fleetCountDiscrepancySchema,
+  fleetTablePlayerSchema,
   fleetTableRecordSchema,
 } from '../analytics/fleet/fleetTableWireSchema'
 
@@ -12,17 +12,10 @@ const fleetTableStreamPlayerScopeSchema = z.object({
   playerId: z.number().int().optional(),
 })
 
-const fleetTableStreamLedgerSchema = z.object({
-  playerId: z.number().int(),
-  playerName: z.string(),
-  records: z.array(fleetTableRecordSchema),
-  discrepancy: fleetCountDiscrepancySchema.optional(),
-})
-
 export const fleetTableStreamLedgerUpdatedEventSchema =
   fleetTableStreamPlayerScopeSchema.extend({
     type: z.literal('ledger_updated'),
-    ledger: fleetTableStreamLedgerSchema,
+    ledger: fleetTablePlayerSchema,
   })
 
 export const fleetTableStreamRecordRefinedEventSchema =

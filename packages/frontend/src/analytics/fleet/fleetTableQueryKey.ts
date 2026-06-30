@@ -1,8 +1,5 @@
 import type { AnalyticShellScope } from '../../api/bff'
 
-export function fleetTableQueryKey(
-  analyticScope: AnalyticShellScope | null,
-  scoresInferenceRevision: number
-) {
-  return ['analytic', 'fleet', 'table', analyticScope, scoresInferenceRevision] as const
+export function fleetTableQueryKey(analyticScope: AnalyticShellScope | null) {
+  return ['analytic', 'fleet', 'table', analyticScope] as const
 }

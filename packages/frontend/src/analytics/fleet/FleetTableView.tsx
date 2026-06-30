@@ -1,13 +1,16 @@
 import { useMemo } from 'react'
 import { FleetPlayerTableTile } from './FleetPlayerTableTile'
+import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
+import { mergeFleetPlayerWithStreamSlice } from './fleetTablePlayerStreamState'
 import type { FleetTableWire } from './fleetTableWireSchema'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
 type FleetTableViewProps = {
   data: FleetTableWire
+  streamPlayersById?: Map<number, FleetPlayerStreamSlice>
 }
 
-export function FleetTableView({ data }: FleetTableViewProps) {
+export function FleetTableView({ data, streamPlayersById }: FleetTableViewProps) {
   const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
 
   const playersById = useMemo(
@@ -27,13 +30,20 @@ export function FleetTableView({ data }: FleetTableViewProps) {
     <div className="flex flex-col gap-3 p-4">
       {visiblePlayers.map((player) => {
         const wirePlayer = playersById.get(player.playerId)
+        const streamSlice = streamPlayersById?.get(player.playerId)
+        const merged = mergeFleetPlayerWithStreamSlice(
+          wirePlayer,
+          streamSlice,
+          player.name
+        )
         return (
           <FleetPlayerTableTile
             key={player.playerId}
-            playerName={wirePlayer?.playerName ?? player.name}
-            records={wirePlayer?.records ?? []}
-            discrepancy={wirePlayer?.discrepancy}
+            playerName={merged.playerName}
+            records={merged.records}
+            discrepancy={merged.discrepancy}
             componentCatalog={data.componentCatalog}
+            streamError={merged.streamError}
           />
         )
       })}

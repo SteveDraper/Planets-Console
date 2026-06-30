@@ -40,7 +40,7 @@ describe('useFleetTableQuery', () => {
     } as unknown as TableDataResponse)
   })
 
-  it('refetches when scores inference revision bumps for the same scope', async () => {
+  it('does not refetch when scores inference revision bumps for the same scope', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     renderHook(({ activeScope, enabled }) => useFleetTableQuery(activeScope, enabled), {
@@ -57,7 +57,7 @@ describe('useFleetTableQuery', () => {
     })
 
     await waitFor(() => {
-      expect(fetchAnalyticTable).toHaveBeenCalledTimes(2)
+      expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
     })
   })
 })
