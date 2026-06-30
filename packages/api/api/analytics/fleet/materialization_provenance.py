@@ -1,4 +1,8 @@
-"""Honest fleet materialization provenance from actual materialization inputs."""
+"""Honest fleet materialization provenance from actual materialization inputs.
+
+Provenance resolution assumes turn-N fleet evidence deltas are already applied
+for the player ledger being persisted; see ``resolve_fleet_materialization_provenance``.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +34,15 @@ def resolve_fleet_materialization_provenance(
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None,
 ) -> FleetMaterializationProvenance:
-    """Set provenance flags from legs actually closed at write time."""
+    """Set provenance flags from legs actually closed at write time.
+
+    Caller contract: apply turn-*N* fleet evidence deltas for ``player_id``
+    (scoreboard ingest, ship sightings, ship-id bound tightening, and optional
+    scores refinement, e.g. via ``apply_fleet_turn_delta_for_player``) before
+    calling this function. ``turnEvidenceAtN`` checks RST@*N* availability and
+    ``scores@N`` ensure satisfaction only; ingest and sightings are not
+    re-verified here.
+    """
     prior_ledger_at_n_minus_1 = materialize_turn == 1 or (
         prior_persisted is not None and prior_persisted.provenance.is_final
     )
