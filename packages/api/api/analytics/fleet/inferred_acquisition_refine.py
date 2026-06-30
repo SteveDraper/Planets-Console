@@ -47,33 +47,50 @@ def refine_inferred_acquisitions_from_scores(
     inference_materialization: FleetInferenceMaterialization,
 ) -> FleetTurnSnapshot:
     """Attach fleet build option sets from top-K held solutions to placeholder rows."""
+    for ledger in snapshot.players:
+        refine_player_inferred_acquisitions_from_scores(
+            ledger,
+            turn,
+            game_id=snapshot.game_id,
+            perspective=snapshot.perspective,
+            inference_materialization=inference_materialization,
+        )
+    return snapshot
+
+
+def refine_player_inferred_acquisitions_from_scores(
+    ledger: FleetAcquisitionLedger,
+    turn: TurnInfo,
+    *,
+    game_id: int,
+    perspective: int,
+    inference_materialization: FleetInferenceMaterialization,
+) -> None:
+    """Attach fleet build option sets from top-K held solutions for one player ledger."""
     turn_number = turn.settings.turn
+    if not _ledger_has_placeholders_for_turn(ledger, turn_number):
+        return
     inference = inference_materialization.inference
     load_turn = inference_materialization.load_turn
-    for ledger in snapshot.players:
-        if not _ledger_has_placeholders_for_turn(ledger, turn_number):
+    for built_turn in _distinct_placeholder_built_turns(ledger, turn_number):
+        held = inference.held_inference_for_placeholder(
+            game_id=game_id,
+            perspective=perspective,
+            shell_turn=turn_number,
+            built_turn=built_turn,
+            player_id=ledger.player_id,
+            turn=turn,
+            load_turn=load_turn,
+        )
+        if not held.solutions:
             continue
-        for built_turn in _distinct_placeholder_built_turns(ledger, turn_number):
-            held = inference.held_inference_for_placeholder(
-                game_id=snapshot.game_id,
-                perspective=snapshot.perspective,
-                shell_turn=turn_number,
-                built_turn=built_turn,
-                player_id=ledger.player_id,
-                turn=turn,
-                load_turn=load_turn,
-            )
-            if not held.solutions:
-                continue
-            _refine_player_placeholders_for_built_turn(
-                ledger,
-                shell_turn=turn_number,
-                built_turn=built_turn,
-                solutions=list(held.solutions),
-                search_status=held.search_status,
-            )
-
-    return snapshot
+        _refine_player_placeholders_for_built_turn(
+            ledger,
+            shell_turn=turn_number,
+            built_turn=built_turn,
+            solutions=list(held.solutions),
+            search_status=held.search_status,
+        )
 
 
 def _distinct_placeholder_built_turns(

@@ -8,9 +8,13 @@ from dataclasses import dataclass
 
 from api.analytics.fleet.constants import ANALYTIC_ID, GAP_FILL_MAX_RETRIES
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
-from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
+from api.analytics.fleet.inferred_acquisition_ingest import (
+    ingest_player_inferred_acquisitions,
+    ingest_turn_inferred_acquisitions,
+)
 from api.analytics.fleet.materialization_provenance import resolve_fleet_materialization_provenance
 from api.analytics.fleet.observation_ingest import (
+    ingest_player_ship_observations,
     ingest_turn_ship_observations,
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
@@ -170,20 +174,15 @@ def apply_fleet_turn_delta_for_player(
 ) -> FleetAcquisitionLedger:
     """Apply turn-T fleet evidence deltas for one player ledger."""
     turn = turn_context.turn
-    snapshot = FleetTurnSnapshot(
-        analytic_id=ANALYTIC_ID,
+    ingest_player_inferred_acquisitions(
+        ledger,
+        turn,
         game_id=game_id,
         perspective=perspective,
-        turn=turn.settings.turn,
-        players=[copy.deepcopy(ledger)],
-    )
-    snapshot = apply_fleet_turn_delta(
-        snapshot,
-        turn,
         inference_materialization=inference_materialization,
-        turn_context=turn_context,
     )
-    return snapshot.players[0]
+    ingest_player_ship_observations(ledger, turn_context)
+    return ledger
 
 
 def _find_chain_anchor_for_player(
