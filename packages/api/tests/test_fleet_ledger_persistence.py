@@ -94,6 +94,24 @@ def test_put_ledger_round_trip(persistence, sample_ledger):
     assert loaded.materialization_version == FLEET_MATERIALIZATION_VERSION
 
 
+def test_put_snapshot_stamps_non_final_provenance_per_ledger(persistence, sample_ledger):
+    snapshot = FleetTurnSnapshot(
+        analytic_id="fleet",
+        game_id=628580,
+        perspective=1,
+        turn=111,
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
+        players=[sample_ledger],
+    )
+    persistence.put_snapshot(628580, 1, 111, snapshot)
+
+    loaded = persistence.get_ledger(628580, 1, 111, 8)
+    assert loaded is not None
+    assert loaded.ledger == sample_ledger
+    assert loaded.provenance.is_final is False
+    assert persistence.has_final_ledger(628580, 1, 111, 8) is False
+
+
 def test_has_final_ledger_requires_both_provenance_flags(persistence, sample_ledger):
     partial = PersistedFleetLedger(
         ledger=sample_ledger,

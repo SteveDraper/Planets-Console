@@ -130,6 +130,13 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> bool:
+        """Return whether a usable fleet ledger is stored for this player scope.
+
+        Delegates to ``get_ledger`` -- not a cheap key-exists probe. A call may
+        upgrade legacy monolithic documents to the ``ledgers/`` layout, delete
+        stale ledger entries, write storage, and bump invalidation generation
+        when stale data is removed.
+        """
         return self.get_ledger(game_id, perspective, turn_number, player_id) is not None
 
     def has_final_ledger(

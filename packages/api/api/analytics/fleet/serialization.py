@@ -580,12 +580,6 @@ def _fleet_turn_snapshot_players_to_json(
     return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players]
 
 
-_LEGACY_FINAL_PROVENANCE = FleetMaterializationProvenance(
-    turn_evidence_at_n=True,
-    prior_ledger_at_n_minus_1=True,
-)
-
-
 def is_legacy_fleet_turn_document(data: dict[str, Any]) -> bool:
     """Return whether ``data`` uses the monolithic ``players`` array wire shape."""
     return FLEET_LEDGERS_KEY not in data and "players" in data
@@ -674,7 +668,7 @@ def _fleet_turn_snapshot_ledgers_to_json(snapshot: FleetTurnSnapshot) -> dict[st
         ledgers[str(player_ledger.player_id)] = persisted_fleet_ledger_to_json(
             PersistedFleetLedger(
                 ledger=player_ledger,
-                provenance=_LEGACY_FINAL_PROVENANCE,
+                provenance=FleetMaterializationProvenance(),
                 materialization_version=snapshot.materialization_version,
             ),
         )
