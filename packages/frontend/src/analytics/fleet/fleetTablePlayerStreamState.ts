@@ -5,9 +5,12 @@ import type {
   FleetTableRecord,
 } from './fleetTableWireSchema'
 
+export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
+
 export type FleetPlayerStreamSlice = {
   playerName?: string
   records?: FleetTableRecord[]
+  discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
   isFinal: boolean
@@ -18,7 +21,8 @@ export type FleetPlayerStreamSlice = {
 export type FleetPlayerStreamState = {
   playerName: string | null
   records: FleetTableRecord[] | null
-  discrepancy: FleetCountDiscrepancy | undefined | null
+  discrepancyOverlay: FleetDiscrepancyOverlay
+  discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
   isFinal: boolean
   summary: string
@@ -29,7 +33,7 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
   return {
     playerName: null,
     records: null,
-    discrepancy: null,
+    discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
     summary: '',
@@ -56,10 +60,12 @@ export function reduceFleetPlayerStreamState(
 ): FleetPlayerStreamState {
   if (event.type === 'ledger_updated') {
     const ledger = event.ledger
+    const hasDiscrepancy = ledger.discrepancy != null
     return {
       ...state,
       playerName: ledger.playerName,
       records: [...ledger.records],
+      discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
       discrepancy: ledger.discrepancy,
       error: null,
     }
@@ -109,7 +115,7 @@ export function fleetPlayerStreamSliceFromState(
   if (
     state.records == null &&
     state.playerName == null &&
-    state.discrepancy == null &&
+    state.discrepancyOverlay === 'inherit' &&
     state.error == null &&
     !state.isComplete
   ) {
@@ -117,6 +123,7 @@ export function fleetPlayerStreamSliceFromState(
   }
 
   const slice: FleetPlayerStreamSlice = {
+    discrepancyOverlay: state.discrepancyOverlay,
     isComplete: state.isComplete,
     isFinal: state.isFinal,
     summary: state.summary,
@@ -129,13 +136,25 @@ export function fleetPlayerStreamSliceFromState(
   if (state.records != null) {
     slice.records = state.records
   }
-  if (state.discrepancy != null) {
+  if (state.discrepancyOverlay === 'set' && state.discrepancy != null) {
     slice.discrepancy = state.discrepancy
-  } else if (state.discrepancy === undefined && state.records != null) {
-    slice.discrepancy = undefined
   }
 
   return slice
+}
+
+function resolveFleetDiscrepancy(
+  streamSlice: FleetPlayerStreamSlice | undefined,
+  baseDiscrepancy: FleetCountDiscrepancy | undefined
+): FleetCountDiscrepancy | undefined {
+  switch (streamSlice?.discrepancyOverlay) {
+    case 'set':
+      return streamSlice.discrepancy
+    case 'clear':
+      return undefined
+    default:
+      return baseDiscrepancy
+  }
 }
 
 export function mergeFleetPlayerWithStreamSlice(
@@ -150,10 +169,7 @@ export function mergeFleetPlayerWithStreamSlice(
 } {
   const playerName = streamSlice?.playerName ?? basePlayer?.playerName ?? fallbackPlayerName
   const records = streamSlice?.records ?? basePlayer?.records ?? []
-  const discrepancy =
-    streamSlice != null && 'discrepancy' in streamSlice
-      ? streamSlice.discrepancy
-      : basePlayer?.discrepancy
+  const discrepancy = resolveFleetDiscrepancy(streamSlice, basePlayer?.discrepancy)
 
   return {
     playerName,

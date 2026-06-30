@@ -69,7 +69,21 @@ describe('reduceFleetPlayerStreamState', () => {
 
     expect(next.records).toEqual([refinedRecord])
     expect(next.playerName).toBe('Alice')
+    expect(next.discrepancyOverlay).toBe('set')
     expect(next.discrepancy).toEqual(ledgerPlayer.discrepancy)
+  })
+
+  it('clears discrepancy overlay when ledger has none', () => {
+    const event: FleetTableStreamEvent = {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: { ...ledgerPlayer, discrepancy: undefined },
+    }
+
+    const next = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), event)
+
+    expect(next.discrepancyOverlay).toBe('clear')
+    expect(next.discrepancy).toBeUndefined()
   })
 
   it('upserts a single record from record_refined', () => {
@@ -116,19 +130,31 @@ describe('reduceFleetPlayerStreamState', () => {
 })
 
 describe('mergeFleetPlayerWithStreamSlice', () => {
+  const restDiscrepancy = {
+    hostTurn: 111,
+    activeRowCount: 2,
+    scoreboardImpliedCount: 1,
+  }
+
   const basePlayer: FleetTablePlayer = {
     playerId: 8,
     playerName: 'Alice REST',
     records: [baseRecord],
+    discrepancy: restDiscrepancy,
   }
+
+  const streamSliceBase = {
+    records: [refinedRecord],
+    isComplete: true,
+    isFinal: true,
+    summary: 'ok',
+    error: null,
+  } as const
 
   it('prefers stream records over REST when present', () => {
     const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
-      records: [refinedRecord],
-      isComplete: true,
-      isFinal: true,
-      summary: 'ok',
-      error: null,
+      ...streamSliceBase,
+      discrepancyOverlay: 'inherit',
     }, 'Alice shell')
 
     expect(merged.records).toEqual([refinedRecord])
@@ -141,10 +167,76 @@ describe('mergeFleetPlayerWithStreamSlice', () => {
     expect(merged.records).toEqual([baseRecord])
     expect(merged.playerName).toBe('Alice REST')
   })
+
+  it('inherits REST discrepancy when stream overlay is inherit', () => {
+    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
+      ...streamSliceBase,
+      discrepancyOverlay: 'inherit',
+    }, 'Alice shell')
+
+    expect(merged.discrepancy).toEqual(restDiscrepancy)
+  })
+
+  it('uses stream discrepancy when overlay is set', () => {
+    const streamDiscrepancy = {
+      hostTurn: 99,
+      activeRowCount: 3,
+      scoreboardImpliedCount: 2,
+    }
+
+    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
+      ...streamSliceBase,
+      discrepancyOverlay: 'set',
+      discrepancy: streamDiscrepancy,
+    }, 'Alice shell')
+
+    expect(merged.discrepancy).toEqual(streamDiscrepancy)
+  })
+
+  it('omits discrepancy when stream overlay is clear', () => {
+    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
+      ...streamSliceBase,
+      discrepancyOverlay: 'clear',
+    }, 'Alice shell')
+
+    expect(merged.discrepancy).toBeUndefined()
+  })
 })
 
 describe('fleetPlayerStreamSliceFromState', () => {
   it('returns null for untouched initial state', () => {
     expect(fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState())).toBeNull()
+  })
+
+  it('publishes set overlay and discrepancy from ledger state', () => {
+    const state = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: ledgerPlayer,
+    })
+
+    expect(fleetPlayerStreamSliceFromState(state)).toEqual({
+      playerName: 'Alice',
+      records: [refinedRecord],
+      discrepancyOverlay: 'set',
+      discrepancy: ledgerPlayer.discrepancy,
+      isComplete: false,
+      isFinal: false,
+      summary: '',
+      error: null,
+    })
+  })
+
+  it('publishes clear overlay when ledger has no discrepancy', () => {
+    const state = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: { ...ledgerPlayer, discrepancy: undefined },
+    })
+
+    const slice = fleetPlayerStreamSliceFromState(state)
+
+    expect(slice?.discrepancyOverlay).toBe('clear')
+    expect(slice).not.toHaveProperty('discrepancy')
   })
 })
