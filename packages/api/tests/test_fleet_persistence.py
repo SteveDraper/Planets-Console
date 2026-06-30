@@ -13,8 +13,9 @@ from api.analytics.fleet.chain import (
     ensure_fleet_baseline,
     get_or_materialize_fleet_snapshot,
 )
-from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetFieldKnown,
@@ -731,13 +732,15 @@ def test_put_snapshot_stamps_current_materialization_version(persistence, load_t
 
 
 def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn, memory_backend):
-    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
-
     turn = load_turn(111)
     assert turn is not None
     snapshot = ensure_fleet_baseline(628580, 1, turn)
     stale_payload = fleet_turn_snapshot_to_json(snapshot)
-    stale_payload["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
+    ledger_wire = stale_payload[FLEET_LEDGERS_KEY]
+    for player_key in ledger_wire:
+        player_entry = ledger_wire[player_key]
+        if isinstance(player_entry, dict):
+            player_entry["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
     memory_backend.put(
         persistence.document_key(628580, 1, 111),
         stale_payload,
@@ -750,13 +753,20 @@ def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn
 
 
 def test_missing_materialization_version_is_deleted_on_read(persistence, load_turn, memory_backend):
-    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
+    from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 
     turn = load_turn(111)
     assert turn is not None
     snapshot = ensure_fleet_baseline(628580, 1, turn)
-    legacy_payload = fleet_turn_snapshot_to_json(snapshot)
-    del legacy_payload["materializationVersion"]
+    legacy_payload = {
+        "analyticId": "fleet",
+        "gameId": 628580,
+        "perspective": 1,
+        "turn": 111,
+        "players": [
+            fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
+        ],
+    }
     memory_backend.put(
         persistence.document_key(628580, 1, 111),
         legacy_payload,
@@ -767,8 +777,6 @@ def test_missing_materialization_version_is_deleted_on_read(persistence, load_tu
 
 
 def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memory_backend):
-    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
-
     turn_110 = load_turn(110)
     assert turn_110 is not None
     stale_anchor = ensure_fleet_baseline(628580, 1, turn_110)
@@ -776,7 +784,11 @@ def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memo
         FleetShipRecord(record_id="stale-rec", disposition="active"),
     )
     stale_payload = fleet_turn_snapshot_to_json(stale_anchor)
-    stale_payload["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
+    ledger_wire = stale_payload[FLEET_LEDGERS_KEY]
+    for player_key in ledger_wire:
+        player_entry = ledger_wire[player_key]
+        if isinstance(player_entry, dict):
+            player_entry["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
     memory_backend.put(
         persistence.document_key(628580, 1, 110),
         stale_payload,

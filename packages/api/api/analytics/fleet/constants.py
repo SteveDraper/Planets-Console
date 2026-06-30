@@ -2,6 +2,8 @@
 
 ANALYTIC_ID = "fleet"
 
+FLEET_LEDGERS_KEY = "ledgers"
+
 # Bounded retries when gap-fill is aborted by concurrent fleet snapshot invalidation.
 GAP_FILL_MAX_RETRIES = 10
 
@@ -9,4 +11,4 @@ GAP_FILL_MAX_RETRIES = 10
 # materialization output would change for the same stored RST + scores inputs
 # (chain/gap-fill rules, inferred acquisition ingest, observation-inference merge).
 # Missing or stale versions on read are deleted and re-materialized on next access.
-FLEET_MATERIALIZATION_VERSION = 4
+FLEET_MATERIALIZATION_VERSION = 5
