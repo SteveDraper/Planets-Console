@@ -124,7 +124,7 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     monkeypatch,
     memory_backend,
 ):
-    """After every player replays from cache, evidence invalidation reschedules on the open stream."""
+    """All-cached replay: evidence invalidation reschedules on the open stream."""
     reset_fleet_table_stream_registry_for_tests()
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
