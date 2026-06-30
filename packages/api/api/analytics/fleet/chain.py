@@ -92,8 +92,6 @@ def ensure_fleet_baseline_for_player(
     perspective: int,
     turn: TurnInfo,
     player_id: int,
-    *,
-    baseline_turn_number: int | None = None,
 ) -> FleetAcquisitionLedger:
     """Return an empty fleet ledger for one player at the fleet ensure baseline."""
     for player in iter_turn_players(turn):
@@ -353,7 +351,6 @@ def _materialize_fleet_ledger_chain_for_player(
                 perspective,
                 first_rst_turn,
                 player_id,
-                baseline_turn_number=1,
             ),
             first_rst_turn,
         )
