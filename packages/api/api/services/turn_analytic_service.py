@@ -257,6 +257,31 @@ class TurnAnalyticService:
             scheduler=self._inference_scheduler_instance(),
         )
 
+    def iter_fleet_table_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+    ):
+        from api.analytics.fleet import iter_fleet_table_stream
+        from api.analytics.fleet.fleet_table_stream_scheduler import (
+            get_fleet_table_stream_scheduler,
+        )
+
+        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        export_services = self._turn_export_services(game_id, perspective)
+        fleet_services = export_services[FLEET_ANALYTIC_ID]
+        return iter_fleet_table_stream(
+            turn,
+            player_ids,
+            game_id=game_id,
+            perspective=perspective,
+            fleet_services=fleet_services,
+            persistence=self._fleet_persistence,
+            scheduler=get_fleet_table_stream_scheduler(),
+        )
+
     def _inference_scheduler_instance(self) -> InferenceRowScheduler:
         if self._inference_scheduler is not None:
             return self._inference_scheduler

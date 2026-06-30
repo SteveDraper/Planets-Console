@@ -9,6 +9,13 @@ from bff.config import get_config
 from bff.errors import BFFError, BFFValidationError, make_http_exception_handler
 from bff.routers import analytics, diagnostics, games, shell
 from bff.strip_bff_prefix import StripBffPrefixWhenRootApp
+from bff.transport.fleet_table_stream_responses import (
+    FleetTableStreamCompleteEvent,
+    FleetTableStreamErrorEvent,
+    FleetTableStreamLedgerUpdatedEvent,
+    FleetTableStreamProvenanceEvent,
+    FleetTableStreamRecordRefinedEvent,
+)
 from bff.transport.game_responses import (
     LoadAllProgressUpdate,
     LoadAllStreamCompleteEvent,
@@ -57,6 +64,11 @@ def build_openapi_schema() -> dict:
         InferenceStreamProgressEvent,
         InferenceStreamCompleteEvent,
         InferenceStreamErrorEvent,
+        FleetTableStreamLedgerUpdatedEvent,
+        FleetTableStreamRecordRefinedEvent,
+        FleetTableStreamProvenanceEvent,
+        FleetTableStreamCompleteEvent,
+        FleetTableStreamErrorEvent,
     ):
         _merge_model_json_schema(openapi_schema, model)
     app.openapi_schema = openapi_schema
