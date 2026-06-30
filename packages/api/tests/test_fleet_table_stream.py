@@ -51,7 +51,21 @@ def _events_for_players(
         persistence=resolved_services.persistence,
         scheduler=scheduler,
     )
-    return list(stream)
+    events: list[dict[str, object]] = []
+    expected_players = set(player_ids)
+    finished_players: set[int] = set()
+    try:
+        for event in stream:
+            events.append(event)
+            if event.get("type") in ("complete", "error") and isinstance(
+                event.get("playerId"), int
+            ):
+                finished_players.add(event["playerId"])
+            if finished_players == expected_players:
+                break
+    finally:
+        stream.close()
+    return events
 
 
 def test_fleet_table_stream_reconnect_returns_conflict_while_active(sample_turn):

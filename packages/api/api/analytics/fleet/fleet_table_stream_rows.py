@@ -180,8 +180,13 @@ def iter_multiplexed_fleet_table_events(
 
     pending_run_ids = refresh_pending_run_ids()
 
-    while pending_run_ids or (is_stream_active is not None and is_stream_active()):
-        if not pending_run_ids and not (is_stream_active is not None and is_stream_active()):
+    def should_continue() -> bool:
+        if is_stream_active is not None:
+            return is_stream_active()
+        return bool(pending_run_ids)
+
+    while should_continue():
+        if is_stream_active is not None and not is_stream_active():
             return
         if pending_events_provider is not None:
             for event in pending_events_provider():
@@ -314,7 +319,7 @@ def iter_fleet_table_stream_events(
                     finished_run_ids=controller.finished_run_ids,
                 )
 
-        if player_ids and controller.current_scheduled_players():
+        if player_ids:
             try:
                 yield from iter_multiplexed_fleet_table_events(
                     controller.current_scheduled_players(),
