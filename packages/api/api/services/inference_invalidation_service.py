@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
+from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -58,12 +60,22 @@ class InferenceInvalidationService:
         """Drop one player's fleet ledgers at turns >= host_turn after scores evidence changes."""
         if self._fleet_persistence is None:
             return set()
-        return self._fleet_persistence.invalidate_player_ledgers_from_turn(
+        cleared_turns = self._fleet_persistence.invalidate_player_ledgers_from_turn(
             game_id,
             perspective,
             host_turn,
             player_id,
         )
+        for fleet_turn in cleared_turns:
+            reschedule_fleet_table_player(
+                FleetTableStreamScope(
+                    game_id=game_id,
+                    perspective=perspective,
+                    turn_number=fleet_turn,
+                ),
+                player_id,
+            )
+        return cleared_turns
 
     def wire_fleet_invalidation_to_persistence(self) -> None:
         """Register fleet snapshot invalidation on inference row persistence writes."""

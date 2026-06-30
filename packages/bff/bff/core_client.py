@@ -253,6 +253,20 @@ class CoreClient:
             player_ids,
         )
 
+    def iter_fleet_table_stream(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+    ):
+        yield from self._analytics.iter_fleet_table_stream(
+            game_id,
+            perspective,
+            turn_number,
+            player_ids,
+        )
+
     def get_inference_hull_catalog_mask(
         self,
         game_id: int,

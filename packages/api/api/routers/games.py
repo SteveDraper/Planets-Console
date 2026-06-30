@@ -28,6 +28,7 @@ from api.transport.connections_options import (
     WARP_SPEED_QUERY,
     FlareConnectionMode,
 )
+from api.transport.fleet_table_stream import stream_fleet_table_ndjson
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
 from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_ndjson
@@ -146,6 +147,33 @@ def get_scores_table_inference_stream(
     return StreamingResponse(
         stream_inference_ndjson(
             lambda: analytics.iter_scores_table_inference_stream(
+                game_id,
+                perspective,
+                turn_number,
+                parsed_player_ids,
+            )
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/fleet/table-stream")
+def get_fleet_table_stream(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_ids: str = Query(
+        ...,
+        alias="playerIds",
+        description="Comma-separated fleet player ids",
+    ),
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> StreamingResponse:
+    """Stream fleet table materialization for requested players (NDJSON)."""
+    parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
+    return StreamingResponse(
+        stream_fleet_table_ndjson(
+            lambda: analytics.iter_fleet_table_stream(
                 game_id,
                 perspective,
                 turn_number,

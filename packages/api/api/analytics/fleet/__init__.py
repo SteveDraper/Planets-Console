@@ -42,6 +42,30 @@ def _load_fleet_export_catalog():
     return EXPORT_CATALOG
 
 
+def iter_fleet_table_stream(
+    turn: TurnInfo,
+    player_ids: tuple[int, ...],
+    *,
+    game_id: int,
+    perspective: int,
+    fleet_services,
+    persistence,
+    scheduler=None,
+):
+    """Yield NDJSON wire events for fleet table materialization on one stream."""
+    from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
+
+    yield from iter_fleet_table_stream_events(
+        turn,
+        player_ids,
+        game_id=game_id,
+        perspective=perspective,
+        fleet_services=fleet_services,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+
+
 REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_fleet,
