@@ -36,8 +36,8 @@ def _reset_storage():
         )
     )
     yield
-    clear_backend_cache()
     clear_core_client_cache()
+    clear_backend_cache()
 
 
 def test_list_games_empty_when_no_games_path():

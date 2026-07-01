@@ -426,6 +426,13 @@ class InferenceRowScheduler:
                 self._broadcast_global_pause_locked(paused=False)
                 self._condition.notify_all()
 
+    def shutdown(self) -> None:
+        """Stop worker threads; safe for test teardown after dropping a service stack."""
+        with self._condition:
+            self._shutdown = True
+            self._invalidate_retained_state_locked()
+            self._condition.notify_all()
+
     def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
         run = self._runs.get(session.run_id)
         if run is None:
@@ -495,4 +502,6 @@ def reset_inference_row_scheduler_for_tests() -> None:
     """Drop the process-wide scheduler (tests only)."""
     global _scheduler
     with _scheduler_lock:
+        if _scheduler is not None:
+            _scheduler.shutdown()
         _scheduler = None
