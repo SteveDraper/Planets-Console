@@ -11,8 +11,11 @@ from dataclasses import dataclass, field
 from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.serialization import (
-    fleet_acquisition_ledger_to_json,
     fleet_ship_record_to_json,
+)
+from api.analytics.fleet.table_wire import (
+    fleet_acquisition_ledger_to_table_wire,
+    fleet_ship_record_to_table_wire,
 )
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, PersistedFleetLedger
 from api.analytics.turn_roster import iter_turn_players
@@ -78,7 +81,7 @@ def _wire_provenance(persisted: PersistedFleetLedger) -> dict[str, object]:
 def wire_cached_player_events(persisted: PersistedFleetLedger) -> tuple[dict[str, object], ...]:
     """Replay terminal stream events for an ensure-final cached ledger."""
     return (
-        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_json(persisted.ledger)),
+        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_table_wire(persisted.ledger)),
         _wire_provenance(persisted),
         fleet_complete_event(
             is_final=True,
@@ -99,9 +102,11 @@ def wire_materialized_player_events(
     for record_id, record in after_records.items():
         prior = before_records.get(record_id)
         if prior is not None and _record_refined(prior, record):
-            events.append(fleet_record_refined_event(record=fleet_ship_record_to_json(record)))
+            events.append(
+                fleet_record_refined_event(record=fleet_ship_record_to_table_wire(record))
+            )
     events.append(
-        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_json(persisted.ledger))
+        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_table_wire(persisted.ledger))
     )
     events.append(_wire_provenance(persisted))
     summary = (

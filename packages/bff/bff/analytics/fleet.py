@@ -1,6 +1,7 @@
 """BFF Fleet analytic handlers."""
 
 from api.analytics.catalog import catalog_entry
+from api.analytics.fleet.table_wire import fleet_acquisition_ledger_to_table_wire_json
 from api.diagnostics import Diagnostics
 from api.models.game import TurnInfo
 
@@ -15,39 +16,8 @@ from bff.analytics.models import (
 ANALYTIC_ID = "fleet"
 
 
-def _shape_table_record(record: dict[str, object]) -> dict[str, object]:
-    """Shape one core fleet ship record for the SPA table wire (no evidence events)."""
-    shaped: dict[str, object] = {
-        "recordId": record.get("recordId"),
-        "disposition": record.get("disposition", "active"),
-    }
-    if "qualifiers" in record:
-        shaped["qualifiers"] = record["qualifiers"]
-    if "fields" in record:
-        shaped["fields"] = record["fields"]
-    if "buildOptionSets" in record:
-        shaped["buildOptionSets"] = record["buildOptionSets"]
-    if "displayDefaultOptionSetIndex" in record:
-        shaped["displayDefaultOptionSetIndex"] = record["displayDefaultOptionSetIndex"]
-    if "lastSeen" in record:
-        shaped["lastSeen"] = record["lastSeen"]
-    return shaped
-
-
 def _shape_table_player(player: dict[str, object]) -> dict[str, object]:
-    shaped: dict[str, object] = {
-        "playerId": player.get("playerId"),
-        "playerName": player.get("playerName", ""),
-        "records": [
-            _shape_table_record(record)
-            for record in player.get("records", [])
-            if isinstance(record, dict)
-        ],
-    }
-    discrepancy = player.get("discrepancy")
-    if discrepancy is not None:
-        shaped["discrepancy"] = discrepancy
-    return shaped
+    return fleet_acquisition_ledger_to_table_wire_json(player)
 
 
 def component_catalog_wire(turn: TurnInfo) -> dict[str, dict[str, str]]:
