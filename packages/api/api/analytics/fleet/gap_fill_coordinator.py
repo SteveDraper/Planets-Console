@@ -20,10 +20,6 @@ from api.analytics.fleet.chain import (
     active_gap_fill_coherence,
     gap_fill_coherence_scope,
 )
-from api.analytics.fleet.gap_fill_deferred_notifications import (
-    complete_snapshot_turn_numbers,
-    emit_deferred_fleet_snapshot_notifications,
-)
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
@@ -31,6 +27,10 @@ from api.analytics.fleet.constants import (
     GAP_FILL_MAX_RETRIES,
 )
 from api.analytics.fleet.exports import ensure_fleet_export
+from api.analytics.fleet.gap_fill_deferred_notifications import (
+    complete_snapshot_turn_numbers,
+    emit_deferred_fleet_snapshot_notifications,
+)
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
@@ -408,13 +408,11 @@ class FleetGapFillCoordinator:
 
                             materialized_via_export = False
                             if query_ctx is not None:
-                                materialized_via_export = (
-                                    self._forward_unwind_via_export_ensure(
-                                        query_ctx,
-                                        gap_start,
-                                        current_target,
-                                        load_turn,
-                                    )
+                                materialized_via_export = self._forward_unwind_via_export_ensure(
+                                    query_ctx,
+                                    gap_start,
+                                    current_target,
+                                    load_turn,
                                 )
 
                             if not materialized_via_export:

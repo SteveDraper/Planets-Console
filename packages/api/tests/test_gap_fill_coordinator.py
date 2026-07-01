@@ -694,9 +694,7 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
     assert leader_result.turn == 112
     assert waiter_result.turn == 112
     assert persistence.get_snapshot(628580, 1, 112) is not None
-    assert leader_unwind_calls == 1, (
-        f"expected one leader unwind, got {leader_unwind_calls}"
-    )
+    assert leader_unwind_calls == 1, f"expected one leader unwind, got {leader_unwind_calls}"
     assert materialize_calls <= 2, (
         f"expected at most one invalidation retry on the chain, got {materialize_calls}"
     )
