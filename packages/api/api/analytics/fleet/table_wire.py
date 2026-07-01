@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from api.analytics.fleet.serialization import (
-    fleet_acquisition_ledger_to_json,
-    fleet_ship_record_to_json,
-)
-from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
+from typing import TYPE_CHECKING
 
-
-def fleet_ship_record_to_table_wire(record: FleetShipRecord) -> dict[str, object]:
-    """Shape one ship record for the SPA table wire (no evidence events)."""
-    return fleet_ship_record_to_table_wire_json(fleet_ship_record_to_json(record))
+if TYPE_CHECKING:
+    from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
 
 
 def fleet_ship_record_to_table_wire_json(record: dict[str, object]) -> dict[str, object]:
@@ -33,8 +27,17 @@ def fleet_ship_record_to_table_wire_json(record: dict[str, object]) -> dict[str,
     return shaped
 
 
+def fleet_ship_record_to_table_wire(record: FleetShipRecord) -> dict[str, object]:
+    """Shape one ship record for the SPA table wire (no evidence events)."""
+    from api.analytics.fleet.serialization import fleet_ship_record_to_json
+
+    return fleet_ship_record_to_table_wire_json(fleet_ship_record_to_json(record))
+
+
 def fleet_acquisition_ledger_to_table_wire(ledger: FleetAcquisitionLedger) -> dict[str, object]:
     """Shape one player ledger for the SPA table wire."""
+    from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
+
     return fleet_acquisition_ledger_to_table_wire_json(fleet_acquisition_ledger_to_json(ledger))
 
 
