@@ -68,7 +68,7 @@ Materialize `fleet@N` for player P by:
 
 **Shared turn context** (global scoreboard totals for id bounds, accelerated homeworld seeding inputs) is computed once per `(game, perspective, turn)` from RST and read by all per-player materializers. It is not a mutable cross-player ledger.
 
-Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) scope becomes per `(gameId, perspective, playerId)` (or coordinates per-player chains under one perspective lock).
+Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) singleflight is keyed per `(gameId, perspective, playerId)` ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)). A perspective-wide lock that batch-materializes all roster players when one player is requested is **not** acceptable: it violates per-player ensure scope and the compute node model in [design-analytic-exports.md](../design-analytic-exports.md).
 
 ### 5. Per-player invalidation
 
@@ -78,7 +78,7 @@ Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issu
 | Turn document replace at *T* | Drop all fleet ledgers at turns `>= T` |
 | Hull mask / recompute (scores) | Existing per-player scores hooks; fleet follows scores row clears for P |
 
-Invalidation generation counter remains per `(gameId, perspective)` unless coordinator work splits epochs per player (implementation detail of #161 follow-on).
+Invalidation generation counter remains per `(gameId, perspective)` unless coordinator work splits epochs per player (implementation detail of [#179](https://github.com/SteveDraper/Planets-Console/issues/179) if needed).
 
 ### 6. Fleet table NDJSON stream (scores-shaped)
 
@@ -107,6 +107,6 @@ Still **out of scope** for v1 of this ADR. Per-player provenance enables a futur
 - ADR 0002 gains a fleet ledger persistence cross-reference (monolithic path superseded for new writes).
 - Tests: per-player provenance gates on probe/ensure; partial persist --> not final; migration from legacy snapshot; invalidation per player; stream event contracts.
 - **#143** neutral revision bump may shrink or close once fleet stream owns refinement-driven tile updates.
-- **#161** coordinator should align with per-player materialization scope.
+- **#161** coordinator provides singleflight and forward unwind; **#179** narrows scope to per-player materialization and ensure paths.
 
 See also: [ADR 0002](0002-analytic-persistence.md), [design-fleet-analytic.md](../design-fleet-analytic.md), [design-analytic-exports.md](../design-analytic-exports.md), **CONTEXT.md** (**Fleet ledger persistence**, **Fleet materialization provenance**, **Analytic export ensure provenance**).

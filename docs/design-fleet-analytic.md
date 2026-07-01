@@ -170,17 +170,40 @@ In-document keys: `ledgers/{playerId}` -- each entry is one **fleet acquisition 
 | **Migration** | Legacy monolithic snapshot (all players at document root) upgraded on read to `ledgers/{playerId}` keys |
 | **Shared turn context** | Global id-bound inputs from RST scoreboard totals are read once per turn; not stored as a cross-player mutable ledger |
 
-### 5.1 Gap-fill concurrency and `ConflictError`
+### 5.1 Gap-fill scope, concurrency, and `ConflictError`
 
 Gap-fill is **deterministic** for a given anchor, stored RST sequence, and scores inference materialization inputs per **Player**. Each `put_ledger` writes one player's ledger for that turn with honest **fleet materialization provenance** -- partial provenance is allowed on disk but must not be treated as ensure-final. The system does **not** compare competing writers byte-for-byte or pick a semantic winner when two paths materialize the same player turn.
 
-**What `ConflictError` means:** after `GAP_FILL_MAX_RETRIES` invalidation aborts, gap-fill raises `ConflictError` when the target-turn snapshot is **still missing**. This is a **coherence / liveness** failure ("too many mid-chain invalidation bumps"), not evidence that two writers produced different fleet ledgers. The generation guard exists to prevent **torn chains** (e.g. persisting turn 6 after turn 5 was invalidated mid-flight).
+#### 5.1.1 Player-scoped unwind (target)
 
-**Concurrent callers:** multiple entry points can start independent gap-fill chains for the same `(gameId, perspective)` -- fleet table export, scores export ensure (`fleet` @ *N*−1), and scores inference **background warm** on table-stream connect. They share storage and the invalidation-generation counter but do not coordinate in-flight work today. One path may complete (e.g. fleet@4--7) while another exhausts retries and logs `ConflictError` even though the cache is already populated.
+A fleet materialization request is scoped to **one compute node** `(fleet, game_id, perspective, turn, player_id)` -- see [design-analytic-exports.md](design-analytic-exports.md) **Compute node model**. Gap fill for player P from turn `M` through `N` unwinds only P's ensure subgraph, forward by turn:
 
-**Phase 1 (shipped):** before raising `ConflictError`, and after each invalidation abort, re-read the target-turn cache; return the persisted snapshot if another path already finished. Background warm treats `ConflictError` as success when `fleet@(host_turn - 1)` exists; logs a warning only when the snapshot is still missing.
+```text
+scores@M,P → fleet@M,P → scores@(M+1),P → fleet@(M+1),P → … → scores@N,P → fleet@N,P
+```
 
-**Phase 2 (planned, [#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** per-perspective **fleet gap-fill coordinator** (singleflight) so at most one active chain runs per scope; waiters share work to `max(requested_turn)` with a generous timeout; coordinator exposes an **epoch** aligned with invalidation generation so waiters retry together instead of N independent retry loops.
+| Entry point | Scope |
+|-------------|--------|
+| `ensure_fleet_export(ctx, scope)` | `scope.player_id` only |
+| `get_or_materialize_fleet_ledger_for_player(P, …)` | P only |
+| Fleet table stream tile job | That tile's `player_id` only |
+| `get_or_materialize_fleet_snapshot` | **Fan-out helper** for callers that explicitly need every roster player at one turn (e.g. `compute_fleet` table wire). Must loop N player nodes internally -- not the implementation path for single-player ensure |
+
+**Must not:** when any caller requests one player, materialize other roster players, require all-roster ensure-final before short-circuiting one player, or loop `iter_turn_players` inside a single-player coordinator unwind. Implementation: [#179](https://github.com/SteveDraper/Planets-Console/issues/179).
+
+**Shared turn context** (`FleetTurnContext` id bounds from RST totals) may be computed once per turn and reused across player materializers on the same turn; it is read-only and not a cross-player dependency.
+
+#### 5.1.2 Concurrency and `ConflictError`
+
+**What `ConflictError` means:** after `GAP_FILL_MAX_RETRIES` invalidation aborts, gap-fill raises `ConflictError` when the target **player ledger** is still not ensure-final. This is a **coherence / liveness** failure ("too many mid-chain invalidation bumps"), not evidence that two writers produced different fleet ledgers. The generation guard exists to prevent **torn chains** (e.g. persisting turn 6 after turn 5 was invalidated mid-flight).
+
+**Concurrent callers:** multiple entry points can request the same fleet node `(gameId, perspective, playerId, turn)` -- fleet table stream tile, scores export ensure (`fleet` @ *N*−1), and scores inference **background warm**. They share storage and the per-perspective invalidation-generation counter.
+
+**Phase 1 (shipped):** before raising `ConflictError`, and after each invalidation abort, re-read the target player's ledger cache; return it if another path already finished. Background warm treats `ConflictError` as success when the requested player's `fleet@(host_turn - 1)` ledger is ensure-final.
+
+**Phase 2 ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** **fleet gap-fill coordinator** (singleflight) with forward scores↔fleet unwind via export ensure; deferred snapshot notifications; epoch aligned with invalidation generation.
+
+**Phase 2b ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)):** narrow coordinator dedupe to `(gameId, perspective, playerId)`; per-player gap-start and cache-hit gates; ensure path uses per-player materialization only. Waiters for the same player share one in-flight unwind to `max(requested_turn)`; requests for different players do not block each other.
 
 ---
 
@@ -373,7 +396,7 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | **Scores** **#78** | Optional **inference tier policy overlay** (component filter widening); parallel axis, not torp ranking |
 | Reports ingest | Strong evidence for loss/trade row selection |
 | Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain; per-player provenance drives missing-step sets |
-| **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) | Single in-flight materialization per perspective (align with per-player chains in F7); see section 5.1 |
+| **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161), scope [#179](https://github.com/SteveDraper/Planets-Console/issues/179)) | Singleflight per `(gameId, perspective, playerId)`; forward unwind; see section 5.1 |
 | **Fleet F7** (ADR 0004) | Per-player persistence, provenance, table stream -- [#163](https://github.com/SteveDraper/Planets-Console/issues/163) epic; section 15 |
 | **#143** | Neutral scores-inference revision for fleet refetch; superseded for refinement updates once F7 stream ships |
 

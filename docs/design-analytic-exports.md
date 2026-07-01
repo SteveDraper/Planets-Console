@@ -143,9 +143,28 @@ Probe and ensure unwind follow these edges. Cross-turn scopes differ, so unwind 
 
 **Fleet ensure-final gate (ADR 0004):** for `fleet@N` + `player_id`, `is_ensure_satisfied` is `true` only when that player's persisted ledger has **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1) = (true, true)`. File existence or partial gap-fill is insufficient. One player final does not imply all players final at the same turn document.
 
+### Compute node model
+
+Each **analytic export ensure** step is one **compute node**:
+
+```text
+(analytic_id, game_id, perspective, turn, player_id)
+```
+
+| Rule | Detail |
+|------|--------|
+| **Node inputs** | Turn data the analytic loads for that turn; plus ancestor nodes reached only via declared `ENSURE_DEPENDENCIES` at the same `player_id` |
+| **No cross-player edges** | `fleet@N` depends on `scores@N` and (transitively) `fleet@(N-1)` for the **same** `player_id` only |
+| **DAG unwind** | `walk_dependency_tree` / `ensure_declared_dependencies` topologically ensure ancestors before self; gap turns `M..N` compute **forward** by turn |
+| **Dedup** | Walk dedupes `pending_ensure` by `(analytic_id, scope)`; in-flight materialization singleflight is per node (fleet: [#179](https://github.com/SteveDraper/Planets-Console/issues/179)) |
+| **Shared read-only inputs** | Global RST-derived inputs (e.g. fleet id bounds via `FleetTurnContext`) are not graph edges; cache once per turn inside a player unwind |
+| **Batch callers** | A caller that needs all roster players (e.g. fleet table compute wire) fans out to N independent nodes -- it must not widen a single-player request into an all-roster materialization |
+
+Ensure scope in v1 is already `(game_id, perspective, turn, player_id)` for row-scoped exports. **Fleet materialization** must match that grain on the ensure and gap-fill paths ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)); perspective-wide snapshot materialization is not a valid shortcut for one-player ensure.
+
 ### Concurrent fleet gap-fill (scores stream + ensure)
 
-The scores `fleet` @ *N*−1 ensure edge, fleet table export, and inference **background warm** on table-stream connect can all invoke `get_or_materialize_fleet_snapshot` for overlapping turn ranges on the same `(gameId, perspective)`. They are not semantic conflicts when materialization inputs match; see [design-fleet-analytic.md](design-fleet-analytic.md) section 5.1. Export ensure may finish `fleet@(N - 1)` before the stream's first `complete` with `fleetTorpInputStatus: pending` -- acceptable per section 8.8.5 of [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md). Planned coordination: [#161](https://github.com/SteveDraper/Planets-Console/issues/161).
+Multiple callers can request overlapping fleet nodes for the same `(gameId, perspective, playerId)` and turn range -- fleet table stream tile, scores export ensure (`fleet` @ *N*−1), and inference **background warm**. They are not semantic conflicts when materialization inputs match; see [design-fleet-analytic.md](design-fleet-analytic.md) section 5.1. Export ensure may finish `fleet@(N - 1)` before the stream's first `complete` with `fleetTorpInputStatus: pending` -- acceptable per section 8.8.5 of [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md). Coordination: [#161](https://github.com/SteveDraper/Planets-Console/issues/161) (singleflight, forward unwind); per-player scope: [#179](https://github.com/SteveDraper/Planets-Console/issues/179).
 
 ### Ensure dependency target validation
 
