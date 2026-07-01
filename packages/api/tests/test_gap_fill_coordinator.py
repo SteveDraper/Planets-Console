@@ -296,9 +296,7 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
         )
 
     fleet_turns = [
-        turn
-        for analytic_id, turn, _player_id in ensure_events
-        if analytic_id == "fleet"
+        turn for analytic_id, turn, _player_id in ensure_events if analytic_id == "fleet"
     ]
     assert fleet_turns
     assert min(fleet_turns) <= 111
@@ -332,6 +330,7 @@ def test_gap_fill_forward_unwind_refines_intermediate_turn_build_option_sets(
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.turn_roster import iter_turn_players
     from api.serialization.inference_row_persistence import PersistedInferenceRow
+
     from tests.scores_exports_helpers import ship_build_wire
     from tests.test_fleet_persistence import (
         _inference_materialization_for_fleet,
