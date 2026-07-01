@@ -75,6 +75,12 @@ class UpstreamPlanetsError(CoreAPIError):
     http_error: int = 502
 
 
+class FleetMaterializationTimeoutError(CoreAPIError):
+    """Coordinated fleet gap-fill did not complete within the waiter timeout."""
+
+    http_error: int = 504
+
+
 def make_http_exception_handler(
     root_exception_cls: Type[PlanetsConsoleError],
 ) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:

@@ -1,0 +1,322 @@
+"""Tests for fleet gap-fill coordinator singleflight and forward unwind."""
+
+from __future__ import annotations
+
+import copy
+import json
+import threading
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.types import FleetTurnSnapshot
+from api.errors import FleetMaterializationTimeoutError
+from api.serialization.turn import turn_info_from_json
+from api.storage.memory_asset import MemoryAssetBackend
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+@pytest.fixture(autouse=True)
+def _reset_coordinators():
+    reset_coordinators()
+    yield
+    reset_coordinators()
+
+
+@pytest.fixture
+def memory_backend():
+    backend = MemoryAssetBackend(initial={})
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        backend.put("games/628580/info", json.load(f))
+    with open(ASSETS_DIR / "turn_sample.json") as f:
+        turn_rst = json.load(f)
+        backend.put("games/628580/1/turns/111", turn_rst)
+        for turn_number in (110, 112):
+            turn_data = copy.deepcopy(turn_rst)
+            turn_data["settings"]["turn"] = turn_number
+            turn_data["game"]["turn"] = turn_number
+            backend.put(f"games/628580/1/turns/{turn_number}", turn_data)
+    return backend
+
+
+@pytest.fixture
+def persistence(memory_backend):
+    return FleetSnapshotPersistenceService(memory_backend)
+
+
+@pytest.fixture
+def load_turn(memory_backend):
+    def _load(turn_number: int):
+        key = f"games/628580/1/turns/{turn_number}"
+        try:
+            data = memory_backend.get(key)
+        except Exception:
+            return None
+        if data is None:
+            return None
+        return turn_info_from_json(data)
+
+    return _load
+
+
+def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence, load_turn):
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_111 = load_turn(111)
+    turn_112 = load_turn(112)
+    assert turn_111 is not None and turn_112 is not None
+
+    materialize_calls = 0
+    original_chain = __import__(
+        "api.analytics.fleet.gap_fill_coordinator",
+        fromlist=["_materialize_fleet_snapshot_chain"],
+    )._materialize_fleet_snapshot_chain
+
+    def counting_chain(*args, **kwargs):
+        nonlocal materialize_calls
+        materialize_calls += 1
+        return original_chain(*args, **kwargs)
+
+    results: dict[int, object] = {}
+    errors: dict[int, BaseException] = {}
+
+    def materialize_to(turn_number: int) -> None:
+        turn = load_turn(turn_number)
+        assert turn is not None
+        try:
+            results[turn_number] = get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors[turn_number] = exc
+
+    with patch(
+        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+        side_effect=counting_chain,
+    ):
+        threads = [
+            threading.Thread(target=materialize_to, args=(111,)),
+            threading.Thread(target=materialize_to, args=(112,)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+    assert not errors
+    assert results[111] is not None
+    assert results[112] is not None
+    assert materialize_calls >= 1
+
+
+def test_coordinator_waiter_times_out_when_leader_never_finishes(persistence, load_turn):
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+
+    started = threading.Event()
+    release_leader = threading.Event()
+
+    original_unwind = coordinator_for(
+        persistence,
+        628580,
+        1,
+    )._run_leader_unwind
+
+    def blocking_unwind(*args, **kwargs):
+        started.set()
+        assert release_leader.wait(timeout=5)
+        return original_unwind(*args, **kwargs)
+
+    errors: list[BaseException] = []
+
+    def wait_for_snapshot() -> None:
+        try:
+            get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator.GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC",
+            0.2,
+        ),
+        patch.object(
+            coordinator_for(persistence, 628580, 1),
+            "_run_leader_unwind",
+            side_effect=blocking_unwind,
+        ),
+    ):
+        leader = threading.Thread(
+            target=lambda: get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            ),
+        )
+        waiter = threading.Thread(target=wait_for_snapshot)
+        leader.start()
+        assert started.wait(timeout=5)
+        waiter.start()
+        waiter.join(timeout=5)
+        release_leader.set()
+        leader.join(timeout=5)
+
+    assert waiter.is_alive() is False
+    assert any(isinstance(error, FleetMaterializationTimeoutError) for error in errors)
+
+
+def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    from tests.test_fleet_persistence import (
+        _inference_materialization_for_fleet,
+        _put_provenance_final_snapshot,
+        _seed_scores_rows_for_all_players,
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    ensured_turns: list[int] = []
+    original_ensure = __import__(
+        "api.analytics.fleet.exports",
+        fromlist=["ensure_fleet_export"],
+    ).ensure_fleet_export
+
+    def tracking_ensure(query_ctx, scope):
+        ensured_turns.append(scope.turn)
+        return original_ensure(query_ctx, scope)
+
+    with patch(
+        "api.analytics.fleet.gap_fill_coordinator.ensure_fleet_export",
+        side_effect=tracking_ensure,
+    ):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_112,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+        )
+
+    assert ensured_turns
+    assert min(ensured_turns) <= 111
+    assert max(ensured_turns) >= 111
+
+
+def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, load_turn):
+    """Waiter blocked on inflight work retries with the leader after invalidation bumps epoch."""
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+
+    leader_mid_chain = threading.Event()
+    waiter_joined = threading.Event()
+    release_leader = threading.Event()
+    original_put_ledger = persistence.put_ledger
+    mid_chain_puts = 0
+
+    def hooked_put_ledger(*args, **kwargs):
+        nonlocal mid_chain_puts
+        turn_number = args[2]
+        original_put_ledger(*args, **kwargs)
+        if turn_number == 111 and mid_chain_puts == 0:
+            mid_chain_puts += 1
+            leader_mid_chain.set()
+            assert release_leader.wait(timeout=5)
+
+    persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
+
+    leader_result: FleetTurnSnapshot | None = None
+    waiter_result: FleetTurnSnapshot | None = None
+    errors: list[BaseException] = []
+
+    def run_leader() -> None:
+        nonlocal leader_result
+        try:
+            leader_result = get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_waiter() -> None:
+        nonlocal waiter_result
+        assert leader_mid_chain.wait(timeout=5)
+        waiter_joined.set()
+        try:
+            waiter_result = get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    leader = threading.Thread(target=run_leader)
+    waiter = threading.Thread(target=run_waiter)
+    leader.start()
+    waiter.start()
+    assert waiter_joined.wait(timeout=5)
+    persistence.invalidate_for_turn_write(628580, 1, 111)
+    release_leader.set()
+    leader.join(timeout=30)
+    waiter.join(timeout=30)
+
+    assert not errors
+    assert leader_result is not None
+    assert waiter_result is not None
+    assert leader_result.turn == 112
+    assert waiter_result.turn == 112
+    assert persistence.get_snapshot(628580, 1, 112) is not None

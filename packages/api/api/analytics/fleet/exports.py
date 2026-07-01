@@ -52,6 +52,7 @@ def _fleet_snapshot_for_scope(
             resolved_turn,
             load_turn=services.load_turn,
             inference_materialization=services.inference_materialization,
+            query_context=ctx,
         )
 
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)

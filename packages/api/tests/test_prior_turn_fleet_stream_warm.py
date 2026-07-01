@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
+from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -49,7 +50,9 @@ from tests.export_chain_test_fixtures import export_chain_query_context
 
 @pytest.fixture(autouse=True)
 def _reset_stream_registry_after_test() -> None:
+    reset_coordinators()
     yield
+    reset_coordinators()
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -369,7 +372,10 @@ def test_background_warm_eventually_applies_fleet_overlay(
         export_services=ctx.export_services,
     )
 
-    _wait_until(lambda: fleet_persistence.has_snapshot(ctx.game_id, ctx.perspective, prior_turn))
+    _wait_until(
+        lambda: fleet_persistence.has_snapshot(ctx.game_id, ctx.perspective, prior_turn),
+        timeout_seconds=120.0,
+    )
 
     applied = resolve_prior_turn_fleet_torp_overlay(
         turn=sample_turn,

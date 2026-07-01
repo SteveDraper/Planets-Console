@@ -258,7 +258,7 @@ def schedule_background_prior_turn_fleet_warm(
 
     def warm_prior_turn_fleet() -> None:
         from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
-        from api.errors import ConflictError
+        from api.errors import ConflictError, FleetMaterializationTimeoutError
 
         persistence = fleet_services.persistence
         game_id = fleet_services.game_id
@@ -276,7 +276,7 @@ def schedule_background_prior_turn_fleet_warm(
                 load_turn=fleet_services.load_turn,
                 inference_materialization=fleet_services.inference_materialization,
             )
-        except ConflictError, OSError, ValueError, KeyError:
+        except ConflictError, FleetMaterializationTimeoutError, OSError, ValueError, KeyError:
             if prior_turn_snapshot_available():
                 return
             logger.warning(

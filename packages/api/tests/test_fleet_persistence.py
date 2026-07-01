@@ -14,6 +14,7 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
 from api.analytics.fleet.types import (
@@ -32,6 +33,16 @@ from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+# Coordinator registry reset is called in coordinator-focused tests.
+
+
+@pytest.fixture(autouse=True)
+def _reset_fleet_gap_fill_coordinators():
+    reset_coordinators()
+    yield
+    reset_coordinators()
 
 
 @pytest.fixture
@@ -678,7 +689,10 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
-    sync = threading.Barrier(2)
+    hook_at_first_barrier = threading.Event()
+    main_released_first_barrier = threading.Event()
+    hook_at_second_barrier = threading.Event()
+    main_released_second_barrier = threading.Event()
     attempt_puts: list[list[int]] = []
     current_attempt_puts: list[int] = []
     mid_chain_intercepted = False
@@ -705,12 +719,14 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
         if turn_number == 111 and not mid_chain_intercepted:
             mid_chain_intercepted = True
             assert persistence.get_snapshot(628580, 1, 112) is None
-            sync.wait()
+            hook_at_first_barrier.set()
+            assert main_released_first_barrier.wait(timeout=5)
             persistence.invalidate_for_turn_write(628580, 1, 111)
             assert persistence.get_snapshot(628580, 1, 112) is None
             attempt_puts.append(list(current_attempt_puts))
             current_attempt_puts.clear()
-            sync.wait()
+            hook_at_second_barrier.set()
+            assert main_released_second_barrier.wait(timeout=5)
 
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
 
@@ -732,10 +748,13 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
 
     gap_fill_thread = threading.Thread(target=run_gap_fill)
     gap_fill_thread.start()
-    sync.wait()
-    sync.wait()
-    gap_fill_thread.join()
+    assert hook_at_first_barrier.wait(timeout=5)
+    main_released_first_barrier.set()
+    assert hook_at_second_barrier.wait(timeout=5)
+    main_released_second_barrier.set()
+    gap_fill_thread.join(timeout=5)
 
+    assert not gap_fill_thread.is_alive()
     assert gap_fill_error is None
     assert snapshot is not None
     assert attempt_puts[0] == [111]
@@ -772,7 +791,7 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
 
     persistence.put_ledger = put_ledger_that_invalidates  # type: ignore[method-assign]
 
-    with patch("api.analytics.fleet.chain.GAP_FILL_MAX_RETRIES", 3):
+    with patch("api.analytics.fleet.gap_fill_coordinator.GAP_FILL_MAX_RETRIES", 3):
         with pytest.raises(ConflictError, match="exceeded 3 invalidation retries"):
             get_or_materialize_fleet_snapshot(
                 persistence,
@@ -867,7 +886,7 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     winner = _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
 
     with patch(
-        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
+        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
         side_effect=_FleetSnapshotInvalidated,
     ):
         result = get_or_materialize_fleet_snapshot(
