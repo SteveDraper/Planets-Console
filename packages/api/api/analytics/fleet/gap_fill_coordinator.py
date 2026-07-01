@@ -396,28 +396,26 @@ class FleetGapFillCoordinator:
                             load_turn,
                         )
                         if gap_start <= current_target:
-                            if inference_materialization is not None:
-                                if query_ctx is None:
-                                    raise ConflictError(
-                                        "fleet gap-fill requires query context when "
-                                        "inference materialization is configured for "
-                                        f"game {self._game_id} perspective "
-                                        f"{self._perspective}"
+                            if inference_materialization is not None and query_ctx is None:
+                                raise ConflictError(
+                                    "fleet gap-fill requires query context when "
+                                    "inference materialization is configured for "
+                                    f"game {self._game_id} perspective "
+                                    f"{self._perspective}"
+                                )
+
+                            materialized_via_export = False
+                            if query_ctx is not None:
+                                materialized_via_export = (
+                                    self._forward_unwind_via_export_ensure(
+                                        query_ctx,
+                                        gap_start,
+                                        current_target,
+                                        load_turn,
                                     )
-                                self._forward_unwind_via_export_ensure(
-                                    query_ctx,
-                                    gap_start,
-                                    current_target,
-                                    load_turn,
                                 )
-                            elif query_ctx is not None:
-                                self._forward_unwind_via_export_ensure(
-                                    query_ctx,
-                                    gap_start,
-                                    current_target,
-                                    load_turn,
-                                )
-                            else:
+
+                            if not materialized_via_export:
                                 target_turn_info = load_turn(current_target)
                                 if target_turn_info is None:
                                     if current_target == turn.settings.turn:
@@ -434,7 +432,7 @@ class FleetGapFillCoordinator:
                                     self._perspective,
                                     target_turn_info,
                                     load_turn=load_turn,
-                                    inference_materialization=None,
+                                    inference_materialization=inference_materialization,
                                     coherence=coherence,
                                 )
                     materialized_target = current_target
@@ -551,7 +549,8 @@ class FleetGapFillCoordinator:
         gap_start: int,
         target_turn: int,
         load_turn: Callable[[int], TurnInfo | None],
-    ) -> None:
+    ) -> bool:
+        """Return True when every gap turn has a persisted snapshot after export ensure."""
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
             if turn_info is None:
@@ -567,6 +566,22 @@ class FleetGapFillCoordinator:
                     player_id=player.id,
                 )
                 ensure_fleet_export(query_ctx, scope)
+
+        for materialize_turn in range(gap_start, target_turn + 1):
+            turn_info = load_turn(materialize_turn)
+            if turn_info is None:
+                raise NotFoundError(
+                    f"fleet forward unwind requires stored turn {materialize_turn} "
+                    f"for game {self._game_id} perspective {self._perspective}"
+                )
+            snapshot = self._persistence.get_snapshot(
+                self._game_id,
+                self._perspective,
+                materialize_turn,
+            )
+            if snapshot is None:
+                return False
+        return True
 
 
 _registry_lock = threading.Lock()
