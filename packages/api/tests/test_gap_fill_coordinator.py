@@ -571,3 +571,132 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
     assert leader_result.turn == 112
     assert waiter_result.turn == 112
     assert persistence.get_snapshot(628580, 1, 112) is not None
+
+
+def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
+    persistence,
+    load_turn,
+):
+    """Invalidation mid-chain with waiters retries once, not N independent gap-fill storms."""
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+
+    leader_mid_chain = threading.Event()
+    waiter_joined = threading.Event()
+    release_leader = threading.Event()
+    original_put_ledger = persistence.put_ledger
+    mid_chain_puts = 0
+
+    def hooked_put_ledger(*args, **kwargs):
+        nonlocal mid_chain_puts
+        turn_number = args[2]
+        original_put_ledger(*args, **kwargs)
+        if turn_number == 111 and mid_chain_puts == 0:
+            mid_chain_puts += 1
+            leader_mid_chain.set()
+            assert release_leader.wait(timeout=5)
+
+    persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
+
+    coordinator = coordinator_for(persistence, 628580, 1)
+    original_chain = __import__(
+        "api.analytics.fleet.gap_fill_coordinator",
+        fromlist=["_materialize_fleet_snapshot_chain"],
+    )._materialize_fleet_snapshot_chain
+    original_run_leader = coordinator._run_leader_unwind
+
+    materialize_calls = 0
+    leader_unwind_calls = 0
+
+    def counting_chain(*args, **kwargs):
+        nonlocal materialize_calls
+        materialize_calls += 1
+        return original_chain(*args, **kwargs)
+
+    def counting_run_leader(
+        inflight,
+        turn,
+        *,
+        load_turn,
+        inference_materialization,
+        query_context,
+        materialize_player_id,
+    ):
+        nonlocal leader_unwind_calls
+        leader_unwind_calls += 1
+        return original_run_leader(
+            inflight,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+            materialize_player_id=materialize_player_id,
+        )
+
+    leader_result: FleetTurnSnapshot | None = None
+    waiter_result: FleetTurnSnapshot | None = None
+    errors: list[BaseException] = []
+
+    def run_leader() -> None:
+        nonlocal leader_result
+        try:
+            leader_result = get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_waiter() -> None:
+        nonlocal waiter_result
+        assert leader_mid_chain.wait(timeout=5)
+        waiter_joined.set()
+        try:
+            waiter_result = get_or_materialize_fleet_snapshot(
+                persistence,
+                628580,
+                1,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+            side_effect=counting_chain,
+        ),
+        patch.object(coordinator, "_run_leader_unwind", side_effect=counting_run_leader),
+    ):
+        leader_thread = threading.Thread(target=run_leader)
+        waiter_thread = threading.Thread(target=run_waiter)
+        leader_thread.start()
+        waiter_thread.start()
+        assert waiter_joined.wait(timeout=5)
+        persistence.invalidate_for_turn_write(628580, 1, 111)
+        release_leader.set()
+        leader_thread.join(timeout=30)
+        waiter_thread.join(timeout=30)
+
+    assert not errors
+    assert leader_result is not None
+    assert waiter_result is not None
+    assert leader_result.turn == 112
+    assert waiter_result.turn == 112
+    assert persistence.get_snapshot(628580, 1, 112) is not None
+    assert leader_unwind_calls == 1, (
+        f"expected one leader unwind, got {leader_unwind_calls}"
+    )
+    assert materialize_calls <= 2, (
+        f"expected at most one invalidation retry on the chain, got {materialize_calls}"
+    )
