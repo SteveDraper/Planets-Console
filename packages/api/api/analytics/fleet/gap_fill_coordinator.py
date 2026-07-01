@@ -407,12 +407,16 @@ class FleetGapFillCoordinator:
                                 )
 
                             materialized_via_export = False
-                            if query_ctx is not None:
+                            if _can_forward_unwind_via_export(
+                                query_ctx,
+                                inference_materialization,
+                            ):
                                 materialized_via_export = self._forward_unwind_via_export_ensure(
                                     query_ctx,
                                     gap_start,
                                     current_target,
                                     load_turn,
+                                    inference_materialization=inference_materialization,
                                 )
 
                             if not materialized_via_export:
@@ -549,8 +553,12 @@ class FleetGapFillCoordinator:
         gap_start: int,
         target_turn: int,
         load_turn: Callable[[int], TurnInfo | None],
+        *,
+        inference_materialization: FleetInferenceMaterialization | None,
     ) -> bool:
         """Return True when every gap turn has a persisted snapshot after export ensure."""
+        from api.analytics.fleet.chain import _run_materialize_on_active_coherence
+
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
             if turn_info is None:
@@ -579,7 +587,34 @@ class FleetGapFillCoordinator:
                 self._perspective,
                 materialize_turn,
             )
-            if snapshot is None:
+            if _is_fleet_snapshot_cache_hit(
+                self._persistence,
+                self._game_id,
+                self._perspective,
+                materialize_turn,
+                turn_info,
+                snapshot,
+            ):
+                continue
+            _run_materialize_on_active_coherence(
+                self._persistence,
+                self._game_id,
+                self._perspective,
+                turn_info,
+                load_turn=load_turn,
+                inference_materialization=inference_materialization,
+                materialize_player_id=None,
+            )
+
+        for materialize_turn in range(gap_start, target_turn + 1):
+            if (
+                self._persistence.get_snapshot(
+                    self._game_id,
+                    self._perspective,
+                    materialize_turn,
+                )
+                is None
+            ):
                 return False
         return True
 
@@ -606,6 +641,18 @@ def reset_coordinators() -> None:
     """Clear the process-wide coordinator registry (tests only)."""
     with _registry_lock:
         _coordinators.clear()
+
+
+def _can_forward_unwind_via_export(
+    query_ctx: AnalyticQueryContext | None,
+    inference_materialization: FleetInferenceMaterialization | None,
+) -> bool:
+    """Forward export ensure needs scores coupling or inference materialization."""
+    if query_ctx is None:
+        return False
+    if inference_materialization is not None:
+        return True
+    return "scores" in query_ctx.export_services
 
 
 def _resolve_query_context(

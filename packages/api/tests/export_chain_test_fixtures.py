@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from api.analytics.export_context import make_analytic_query_context
-from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.chain import (
+    _GapFillCoherence,
+    _materialize_fleet_snapshot_chain,
+    gap_fill_coherence_scope,
+)
 from api.analytics.fleet.compute_services import (
     FleetComputeServices,
     build_ephemeral_fleet_compute_services,
@@ -100,11 +104,23 @@ def seed_fleet_unwind_through(
                 solutions=[],
             ),
         )
-        get_or_materialize_fleet_snapshot(
+        generation = fleet_services.persistence.invalidation_generation(
+            ctx.game_id,
+            ctx.perspective,
+        )
+        coherence = _GapFillCoherence(
             fleet_services.persistence,
             ctx.game_id,
             ctx.perspective,
-            turn,
-            load_turn=ctx.load_turn,
-            inference_materialization=fleet_services.inference_materialization,
+            generation,
         )
+        with gap_fill_coherence_scope(coherence):
+            _materialize_fleet_snapshot_chain(
+                fleet_services.persistence,
+                ctx.game_id,
+                ctx.perspective,
+                turn,
+                load_turn=ctx.load_turn,
+                inference_materialization=fleet_services.inference_materialization,
+                coherence=coherence,
+            )

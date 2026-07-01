@@ -240,7 +240,7 @@ def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
         player_id,
     )
     assert loaded is not None
-    assert loaded.provenance.is_final is False
+    assert loaded.provenance.is_final is True
 
 
 def test_ensure_fleet_export_succeeds_when_provenance_final(sample_turn, persistence):
