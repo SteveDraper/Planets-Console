@@ -102,23 +102,51 @@ def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence
         except BaseException as exc:
             errors[turn_number] = exc
 
-    with patch(
-        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
-        side_effect=counting_chain,
+    leader_ready = threading.Event()
+    release_leader = threading.Event()
+    coordinator = coordinator_for(persistence, 628580, 1)
+    original_run_leader = coordinator._run_leader_unwind
+
+    def gated_run_leader(
+        inflight,
+        turn,
+        *,
+        load_turn,
+        inference_materialization,
+        query_context,
+        materialize_player_id,
     ):
-        threads = [
-            threading.Thread(target=materialize_to, args=(111,)),
-            threading.Thread(target=materialize_to, args=(112,)),
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=10)
+        leader_ready.set()
+        assert release_leader.wait(timeout=5)
+        return original_run_leader(
+            inflight,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+            materialize_player_id=materialize_player_id,
+        )
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+            side_effect=counting_chain,
+        ),
+        patch.object(coordinator, "_run_leader_unwind", side_effect=gated_run_leader),
+    ):
+        leader_thread = threading.Thread(target=materialize_to, args=(111,))
+        waiter_thread = threading.Thread(target=materialize_to, args=(112,))
+        leader_thread.start()
+        assert leader_ready.wait(timeout=5)
+        waiter_thread.start()
+        release_leader.set()
+        leader_thread.join(timeout=10)
+        waiter_thread.join(timeout=10)
 
     assert not errors
     assert results[111] is not None
     assert results[112] is not None
-    assert materialize_calls >= 1
+    assert materialize_calls == 1
 
 
 def test_coordinator_waiter_times_out_when_leader_never_finishes(persistence, load_turn):
