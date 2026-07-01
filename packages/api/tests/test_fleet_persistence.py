@@ -690,9 +690,17 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
         turn_number: int,
         player_id: int,
         persisted,
+        **kwargs,
     ) -> None:
         nonlocal mid_chain_intercepted
-        original_put_ledger(game_id, perspective, turn_number, player_id, persisted)
+        original_put_ledger(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+            **kwargs,
+        )
         current_attempt_puts.append(turn_number)
         if turn_number == 111 and not mid_chain_intercepted:
             mid_chain_intercepted = True
