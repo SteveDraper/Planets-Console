@@ -690,9 +690,17 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
         turn_number: int,
         player_id: int,
         persisted,
+        **kwargs,
     ) -> None:
         nonlocal mid_chain_intercepted
-        original_put_ledger(game_id, perspective, turn_number, player_id, persisted)
+        original_put_ledger(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+            **kwargs,
+        )
         current_attempt_puts.append(turn_number)
         if turn_number == 111 and not mid_chain_intercepted:
             mid_chain_intercepted = True
@@ -750,8 +758,16 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
         turn_number: int,
         player_id: int,
         persisted,
+        **kwargs,
     ) -> None:
-        original_put_ledger(game_id, perspective, turn_number, player_id, persisted)
+        original_put_ledger(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+            **kwargs,
+        )
         persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
 
     persistence.put_ledger = put_ledger_that_invalidates  # type: ignore[method-assign]
@@ -794,6 +810,48 @@ def _put_provenance_final_snapshot(
     snapshot = persistence.get_snapshot(game_id, perspective, turn.settings.turn)
     assert snapshot is not None
     return snapshot
+
+
+def _inference_materialization_for_fleet(memory_backend, load_turn):
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.scores.export_services import ScoresExportContext
+
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    return (
+        inference_persistence,
+        FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
+    )
+
+
+def _seed_scores_rows_for_all_players(
+    inference_persistence: InferenceRowPersistenceService,
+    turn,
+) -> None:
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.turn_roster import iter_turn_players
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    for player in iter_turn_players(turn):
+        inference_persistence.put_row(
+            628580,
+            1,
+            turn.settings.turn,
+            player.id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary=f"cached-{player.id}",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+        )
 
 
 def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(persistence, load_turn):
@@ -915,3 +973,96 @@ def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memo
     assert rematerialized_110 is not None
     assert rematerialized_110.materialization_version == FLEET_MATERIALIZATION_VERSION
     assert all(record.record_id != "stale-rec" for record in rematerialized_110.players[0].records)
+
+
+def test_gap_fill_defers_snapshot_notify_until_chain_completes(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Per-player put_ledger during gap-fill must not notify; flush runs after the chain."""
+    from api.analytics.turn_roster import iter_turn_players
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+
+    callback_turns: list[int] = []
+    persistence.on_snapshot_persisted = lambda _g, _p, turn_number: callback_turns.append(
+        turn_number
+    )
+
+    put_ledger_calls = 0
+    original_put_ledger = persistence.put_ledger
+
+    def counting_put_ledger(*args, **kwargs):
+        nonlocal put_ledger_calls
+        put_ledger_calls += 1
+        return original_put_ledger(*args, **kwargs)
+
+    persistence.put_ledger = counting_put_ledger  # type: ignore[method-assign]
+
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_111,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    assert snapshot.turn == 111
+    roster_size = len(list(iter_turn_players(turn_111)))
+    assert roster_size > 1
+    assert put_ledger_calls >= roster_size
+    assert callback_turns == [111]
+
+
+def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """After gap-fill, newly complete fleet@(T-1) invalidates scores@T (not mid-chain)."""
+    from api.analytics.turn_roster import iter_turn_players
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=persistence,
+    )
+    invalidation.wire_scores_invalidation_to_fleet_persistence()
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    assert snapshot.turn == 112
+    for player in iter_turn_players(turn_112):
+        assert inference_persistence.get_row(628580, 1, 112, player.id) is None

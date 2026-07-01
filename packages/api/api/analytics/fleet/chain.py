@@ -55,6 +55,7 @@ class _GapFillCoherence:
             turn_number,
             player_id,
             persisted,
+            snapshot_complete_roster=None,
         )
         self._assert_unchanged()
 
@@ -215,6 +216,60 @@ def _first_stored_rst_turn(
 
 def _roster_player_ids(turn: TurnInfo) -> list[int]:
     return [player.id for player in iter_turn_players(turn)]
+
+
+def _complete_snapshot_turn_numbers(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    through_turn: int,
+    load_turn: Callable[[int], TurnInfo | None],
+) -> frozenset[int]:
+    """Return fleet turn numbers through ``through_turn`` with ensure-final snapshots."""
+    complete: set[int] = set()
+    for turn_number in range(1, through_turn + 1):
+        turn_info = load_turn(turn_number)
+        if turn_info is None:
+            continue
+        snapshot = persistence.get_snapshot(game_id, perspective, turn_number)
+        if _is_fleet_snapshot_cache_hit(
+            persistence,
+            game_id,
+            perspective,
+            turn_number,
+            turn_info,
+            snapshot,
+        ):
+            complete.add(turn_number)
+    return frozenset(complete)
+
+
+def _emit_deferred_fleet_snapshot_notifications(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    *,
+    complete_before: frozenset[int],
+    through_turn: int,
+    load_turn: Callable[[int], TurnInfo | None],
+) -> None:
+    """Notify scores consumers after gap-fill; never mid-chain.
+
+    Interim correctness policy before fleet gap-fill coordinator (#161): each
+    ``get_or_materialize_*`` call emits ``on_snapshot_persisted`` once per turn
+    that became ensure-final during that call, after the chain succeeds.
+    """
+    if persistence.on_snapshot_persisted is None:
+        return
+    complete_after = _complete_snapshot_turn_numbers(
+        persistence,
+        game_id,
+        perspective,
+        through_turn,
+        load_turn,
+    )
+    for fleet_turn in sorted(complete_after - complete_before):
+        persistence.on_snapshot_persisted(game_id, perspective, fleet_turn)
 
 
 def _snapshot_has_all_roster_players(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> bool:
@@ -497,6 +552,14 @@ def get_or_materialize_fleet_ledger_for_player(
     if cached is not None and _is_fleet_ledger_cache_hit(cached):
         return cached
 
+    complete_before = _complete_snapshot_turn_numbers(
+        persistence,
+        game_id,
+        perspective,
+        turn_number,
+        load_turn,
+    )
+
     for attempt in range(GAP_FILL_MAX_RETRIES):
         coherence = _GapFillCoherence(
             persistence,
@@ -506,7 +569,7 @@ def get_or_materialize_fleet_ledger_for_player(
         )
         turn_context_cache: dict[int, FleetTurnContext] = {}
         try:
-            return _materialize_fleet_ledger_chain_for_player(
+            persisted = _materialize_fleet_ledger_chain_for_player(
                 persistence,
                 game_id,
                 perspective,
@@ -517,6 +580,15 @@ def get_or_materialize_fleet_ledger_for_player(
                 coherence=coherence,
                 turn_context_cache=turn_context_cache,
             )
+            _emit_deferred_fleet_snapshot_notifications(
+                persistence,
+                game_id,
+                perspective,
+                complete_before=complete_before,
+                through_turn=turn_number,
+                load_turn=load_turn,
+            )
+            return persisted
         except _FleetSnapshotInvalidated:
             cached_after_invalidation = persistence.get_ledger(
                 game_id,
@@ -563,6 +635,14 @@ def get_or_materialize_fleet_snapshot(
     if _is_fleet_snapshot_cache_hit(persistence, game_id, perspective, turn_number, turn, cached):
         return cached
 
+    complete_before = _complete_snapshot_turn_numbers(
+        persistence,
+        game_id,
+        perspective,
+        turn_number,
+        load_turn,
+    )
+
     for attempt in range(GAP_FILL_MAX_RETRIES):
         coherence = _GapFillCoherence(
             persistence,
@@ -571,7 +651,7 @@ def get_or_materialize_fleet_snapshot(
             persistence.invalidation_generation(game_id, perspective),
         )
         try:
-            return _materialize_fleet_snapshot_chain(
+            snapshot = _materialize_fleet_snapshot_chain(
                 persistence,
                 game_id,
                 perspective,
@@ -580,6 +660,15 @@ def get_or_materialize_fleet_snapshot(
                 inference_materialization=inference_materialization,
                 coherence=coherence,
             )
+            _emit_deferred_fleet_snapshot_notifications(
+                persistence,
+                game_id,
+                perspective,
+                complete_before=complete_before,
+                through_turn=turn_number,
+                load_turn=load_turn,
+            )
+            return snapshot
         except _FleetSnapshotInvalidated:
             cached_after_invalidation = persistence.get_snapshot(
                 game_id,

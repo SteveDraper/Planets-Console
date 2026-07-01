@@ -89,11 +89,19 @@ def _install_scheduler(
     return scheduler
 
 
-def test_on_fleet_snapshot_persisted_only_clears_host_turn_document(
+def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
     memory_backend,
     persistence,
 ):
-    """Persisting fleet@(N-1) invalidates scores@N only, not scores@(N-1)."""
+    """Persisting fleet@(N-1) always drops scores@N cache; reschedule needs an open stream."""
+    from unittest.mock import MagicMock
+
+    from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+    from api.analytics.military_score_inference.inference_table_stream_registry import (
+        attach_inference_table_stream,
+        reset_inference_table_stream_registry_for_tests,
+    )
+
     fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
     scheduler = InferenceRowScheduler(worker_count=0)
     invalidation = InferenceInvalidationService(
@@ -118,6 +126,23 @@ def test_on_fleet_snapshot_persisted_only_clears_host_turn_document(
 
     assert persistence.get_row(game_id, persp, 111, player_id) is None
     assert persistence.get_row(game_id, persp, 110, player_id) is not None
+
+    persistence.put_row(game_id, persp, 111, player_id, row)
+
+    try:
+        scope = InferenceStreamScope(game_id=game_id, perspective=persp, turn_number=111)
+        controller = MagicMock()
+        controller.scope = scope
+        controller.player_ids = (player_id,)
+        controller.reschedule_all_rows = MagicMock(return_value=True)
+        attach_inference_table_stream(controller)
+
+        invalidation.on_fleet_snapshot_persisted(game_id, persp, fleet_turn=110)
+
+        assert persistence.get_row(game_id, persp, 111, player_id) is None
+        controller.reschedule_all_rows.assert_called_once()
+    finally:
+        reset_inference_table_stream_registry_for_tests()
 
 
 def _fleet_overlay_from_diagnostics(diagnostics: object) -> dict[str, object]:

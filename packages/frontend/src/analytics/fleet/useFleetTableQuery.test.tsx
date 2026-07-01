@@ -60,4 +60,35 @@ describe('useFleetTableQuery', () => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
     })
   })
+
+  it('refetches after scores inference revision when the initial load returned 409', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    vi.mocked(fetchAnalyticTable)
+      .mockRejectedValueOnce(new Error('409 — GET /bff/analytics/fleet/table'))
+      .mockResolvedValueOnce({
+        analyticId: 'fleet',
+      } as unknown as TableDataResponse)
+
+    const { result } = renderHook(
+      ({ activeScope, enabled }) => useFleetTableQuery(activeScope, enabled),
+      {
+        wrapper: createWrapper(client),
+        initialProps: { activeScope: scope, enabled: true },
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true)
+      expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      bumpScoresInferenceRevision(scope)
+    })
+
+    await waitFor(() => {
+      expect(fetchAnalyticTable).toHaveBeenCalledTimes(2)
+      expect(result.current.isSuccess).toBe(true)
+    })
+  })
 })

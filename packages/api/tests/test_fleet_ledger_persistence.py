@@ -259,3 +259,45 @@ def test_delete_ledger_removes_one_player_entry(persistence, sample_ledger):
 
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
+
+
+def test_put_ledger_notifies_snapshot_persisted_only_when_roster_is_final(persistence):
+    callback_turns: list[int] = []
+
+    def on_snapshot_persisted(_game_id: int, _perspective: int, turn_number: int) -> None:
+        callback_turns.append(turn_number)
+
+    persistence.on_snapshot_persisted = on_snapshot_persisted
+    roster = frozenset({3, 8})
+    final = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=3, player_name="other"),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    persistence.put_ledger(
+        628580,
+        1,
+        111,
+        3,
+        final,
+        snapshot_complete_roster=roster,
+    )
+    assert callback_turns == []
+
+    persistence.put_ledger(
+        628580,
+        1,
+        111,
+        8,
+        PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(player_id=8, player_name="koshling"),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+        snapshot_complete_roster=roster,
+    )
+    assert callback_turns == [111]
