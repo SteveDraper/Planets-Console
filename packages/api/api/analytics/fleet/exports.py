@@ -89,6 +89,9 @@ def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if turn is None:
         return True
 
+    if ctx.ensure_declared_dependencies(ANALYTIC_ID, scope) is not None:
+        return is_fleet_export_ensure_satisfied(ctx, scope)
+
     _fleet_snapshot_for_scope(ctx, scope, turn=turn)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     return is_fleet_export_ensure_satisfied(ctx, scope)

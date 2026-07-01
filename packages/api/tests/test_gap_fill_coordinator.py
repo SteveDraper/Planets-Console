@@ -226,7 +226,6 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
     from tests.test_fleet_persistence import (
         _inference_materialization_for_fleet,
         _put_provenance_final_snapshot,
-        _seed_scores_rows_for_all_players,
     )
 
     turn_110 = load_turn(110)
@@ -237,26 +236,55 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
     assert turn_112 is not None
     turn_111 = load_turn(111)
     assert turn_111 is not None
-    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+    _, inference_materialization = _inference_materialization_for_fleet(
         memory_backend,
         load_turn,
     )
-    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
-    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
 
-    ensured_turns: list[int] = []
-    original_ensure = __import__(
+    from api.analytics.export_context import AnalyticQueryContext
+    from api.analytics.export_dependency_walk import DependencyWalkResult
+
+    ensure_events: list[tuple[str, int, int | None]] = []
+    fleet_exports = __import__(
         "api.analytics.fleet.exports",
         fromlist=["ensure_fleet_export"],
-    ).ensure_fleet_export
+    )
+    original_fleet_ensure = fleet_exports.ensure_fleet_export
 
-    def tracking_ensure(query_ctx, scope):
-        ensured_turns.append(scope.turn)
-        return original_ensure(query_ctx, scope)
+    def tracking_ensure_declared_dependencies(self, analytic_id, scope):
+        walk_outcome = self._walk_export_dependencies(
+            analytic_id,
+            scope,
+            catch_ensure_cycle=False,
+        )
+        if not isinstance(walk_outcome, DependencyWalkResult):
+            return walk_outcome
+        for dependency_id, dependency_scope, catalog in walk_outcome.pending_ensure:
+            if dependency_id == analytic_id and dependency_scope == scope:
+                break
+            if catalog.ensure_export is None:
+                continue
+            ensure_events.append(
+                (dependency_id, dependency_scope.turn, dependency_scope.player_id),
+            )
+            catalog.ensure_export(self, dependency_scope)
+        return None
 
-    with patch(
-        "api.analytics.fleet.gap_fill_coordinator.ensure_fleet_export",
-        side_effect=tracking_ensure,
+    def tracking_fleet_ensure(query_ctx, scope):
+        result = original_fleet_ensure(query_ctx, scope)
+        ensure_events.append(("fleet", scope.turn, scope.player_id))
+        return result
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator.ensure_fleet_export",
+            side_effect=tracking_fleet_ensure,
+        ),
+        patch.object(
+            AnalyticQueryContext,
+            "ensure_declared_dependencies",
+            tracking_ensure_declared_dependencies,
+        ),
     ):
         get_or_materialize_fleet_snapshot(
             persistence,
@@ -267,9 +295,32 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
             inference_materialization=inference_materialization,
         )
 
-    assert ensured_turns
-    assert min(ensured_turns) <= 111
-    assert max(ensured_turns) >= 111
+    fleet_turns = [
+        turn
+        for analytic_id, turn, _player_id in ensure_events
+        if analytic_id == "fleet"
+    ]
+    assert fleet_turns
+    assert min(fleet_turns) <= 111
+    assert max(fleet_turns) >= 111
+
+    gap_turns = range(min(fleet_turns), max(fleet_turns) + 1)
+    for event_index, (analytic_id, turn, player_id) in enumerate(ensure_events):
+        if analytic_id != "fleet" or turn not in gap_turns:
+            continue
+        prior_scores = [
+            index
+            for index, (dependency_id, dependency_turn, dependency_player_id) in enumerate(
+                ensure_events[:event_index],
+            )
+            if dependency_id == "scores"
+            and dependency_turn == turn
+            and dependency_player_id == player_id
+        ]
+        assert prior_scores, (
+            f"expected scores ensure before fleet ensure at turn {turn} "
+            f"for player {player_id}; events={ensure_events}"
+        )
 
 
 def test_gap_fill_forward_unwind_refines_intermediate_turn_build_option_sets(
