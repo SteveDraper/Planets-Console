@@ -244,6 +244,102 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
     assert max(ensured_turns) >= 111
 
 
+def test_gap_fill_forward_unwind_refines_intermediate_turn_build_option_sets(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Gap M..N: intermediate turn scoreboard placeholders get non-empty buildOptionSets."""
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.turn_roster import iter_turn_players
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+    from tests.scores_exports_helpers import ship_build_wire
+    from tests.test_fleet_persistence import (
+        _inference_materialization_for_fleet,
+        _put_provenance_final_snapshot,
+        _seed_scores_rows_for_all_players,
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_111 = load_turn(111)
+    turn_112 = load_turn(112)
+    assert turn_111 is not None and turn_112 is not None
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+    for player in iter_turn_players(turn_111):
+        if player.id == 8:
+            inference_persistence.put_row(
+                628580,
+                1,
+                111,
+                player.id,
+                PersistedInferenceRow(
+                    status=STATUS_EXACT,
+                    summary="one cruiser",
+                    solution_count=1,
+                    is_complete=True,
+                    solutions=[
+                        {
+                            "objectiveValue": 55,
+                            "actions": [],
+                            "shipBuilds": [
+                                ship_build_wire(
+                                    combo_id="combo-13",
+                                    label="Cruiser",
+                                    hull_id=13,
+                                    engine_id=9,
+                                )
+                            ],
+                        }
+                    ],
+                ),
+            )
+        else:
+            inference_persistence.put_row(
+                628580,
+                1,
+                111,
+                player.id,
+                PersistedInferenceRow(
+                    status=STATUS_EXACT,
+                    summary=f"cached-{player.id}",
+                    solution_count=0,
+                    is_complete=True,
+                    solutions=[],
+                ),
+            )
+
+    assert persistence.get_snapshot(628580, 1, 111) is None
+
+    get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    intermediate = persistence.get_snapshot(628580, 1, 111)
+    assert intermediate is not None
+    koshling = next(ledger for ledger in intermediate.players if ledger.player_id == 8)
+    placeholders = [
+        record
+        for record in koshling.records
+        if any(event.kind == "scoreboard_delta" for event in record.events)
+    ]
+    assert placeholders
+    assert all(len(record.build_option_sets) > 0 for record in placeholders)
+    assert placeholders[0].build_option_sets[0].hull_id == 13
+
+
 def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, load_turn):
     """Waiter blocked on inflight work retries with the leader after invalidation bumps epoch."""
     from api.analytics.fleet.chain import ensure_fleet_baseline
