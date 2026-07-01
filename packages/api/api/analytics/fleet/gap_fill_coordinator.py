@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
-    _complete_snapshot_turn_numbers,
-    _emit_deferred_fleet_snapshot_notifications,
     _find_gap_start_turn,
     _FleetSnapshotInvalidated,
     _GapFillCoherence,
@@ -21,6 +19,10 @@ from api.analytics.fleet.chain import (
     _run_materialize_on_active_coherence,
     active_gap_fill_coherence,
     gap_fill_coherence_scope,
+)
+from api.analytics.fleet.gap_fill_deferred_notifications import (
+    complete_snapshot_turn_numbers,
+    emit_deferred_fleet_snapshot_notifications,
 )
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import (
@@ -367,7 +369,7 @@ class FleetGapFillCoordinator:
         while True:
             target_turn = inflight.target_turn
             if complete_before is None:
-                complete_before = _complete_snapshot_turn_numbers(
+                complete_before = complete_snapshot_turn_numbers(
                     self._persistence,
                     self._game_id,
                     self._perspective,
@@ -485,7 +487,7 @@ class FleetGapFillCoordinator:
                 continue
 
             assert complete_before is not None
-            _emit_deferred_fleet_snapshot_notifications(
+            emit_deferred_fleet_snapshot_notifications(
                 self._persistence,
                 self._game_id,
                 self._perspective,
