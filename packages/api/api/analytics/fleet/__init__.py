@@ -21,6 +21,7 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
         ctx.turn,
         load_turn=services.load_turn,
         inference_materialization=services.inference_materialization,
+        query_context=ctx.exports,
     )
     return fleet_turn_snapshot_to_compute_wire(snapshot)
 
