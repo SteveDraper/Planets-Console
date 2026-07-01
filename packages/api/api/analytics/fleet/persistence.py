@@ -104,6 +104,8 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
         persisted: PersistedFleetLedger,
+        *,
+        snapshot_complete_roster: frozenset[int] | None = None,
     ) -> None:
         if persisted.ledger.player_id != player_id:
             raise ValidationError(
@@ -119,8 +121,12 @@ class FleetSnapshotPersistenceService:
         ledgers = self._ledgers_object(document)
         ledgers[str(player_id)] = persisted_fleet_ledger_to_json(to_store)
         self._write_document(game_id, perspective, turn_number, document)
-        if self._on_snapshot_persisted is not None:
-            self._on_snapshot_persisted(game_id, perspective, turn_number)
+        self._notify_snapshot_persisted_if_complete(
+            game_id,
+            perspective,
+            turn_number,
+            snapshot_complete_roster=snapshot_complete_roster,
+        )
 
     def has_ledger(
         self,
@@ -235,8 +241,55 @@ class FleetSnapshotPersistenceService:
             turn_number,
             fleet_turn_snapshot_to_json(snapshot),
         )
-        if self._on_snapshot_persisted is not None:
+        self._notify_snapshot_persisted_if_complete(
+            game_id,
+            perspective,
+            turn_number,
+            snapshot_complete_roster=None,
+            force=True,
+        )
+
+    def _notify_snapshot_persisted_if_complete(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        snapshot_complete_roster: frozenset[int] | None,
+        force: bool = False,
+    ) -> None:
+        if self._on_snapshot_persisted is None:
+            return
+        if force:
             self._on_snapshot_persisted(game_id, perspective, turn_number)
+            return
+        if snapshot_complete_roster is None:
+            return
+        if not self._roster_has_final_ledgers(
+            game_id,
+            perspective,
+            turn_number,
+            snapshot_complete_roster,
+        ):
+            return
+        self._on_snapshot_persisted(game_id, perspective, turn_number)
+
+    def _roster_has_final_ledgers(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        roster_player_ids: frozenset[int],
+    ) -> bool:
+        for roster_player_id in roster_player_ids:
+            if not self.has_final_ledger(
+                game_id,
+                perspective,
+                turn_number,
+                roster_player_id,
+            ):
+                return False
+        return True
 
     @property
     def on_snapshot_persisted(self) -> OnSnapshotPersistedCallback | None:
