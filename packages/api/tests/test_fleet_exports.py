@@ -276,10 +276,17 @@ def test_query_meta_search_status_path(sample_turn, persistence):
 
 def test_ensure_fleet_export_materializes_snapshot_when_missing(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
-    turn_number = sample_turn.settings.turn
-    ctx = export_chain_query_context(
+    turn_number = 8
+    host_turn = replace(
         sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    stored_turns = turn_chain_through(host_turn)
+    ctx = export_chain_query_context(
+        host_turn,
         persistence=persistence,
+        stored_turns=stored_turns,
         seed_fleet_prerequisites_for=player_id,
     )
     fleet_services = resolve_fleet_services(ctx)
@@ -291,7 +298,7 @@ def test_ensure_fleet_export_materializes_snapshot_when_missing(sample_turn, per
     )
     put_persisted_row(
         persistence,
-        sample_turn,
+        host_turn,
         player_id,
         PersistedInferenceRow(
             status=STATUS_EXACT,

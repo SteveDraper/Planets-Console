@@ -245,15 +245,18 @@ def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
 
 def test_ensure_fleet_export_succeeds_when_provenance_final(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
-    turn_number = sample_turn.settings.turn
+    turn_number = 8
+    stored_turns = _turn_chain_through(sample_turn, through_turn=turn_number)
+    host_turn = stored_turns[turn_number]
     ctx = export_chain_query_context(
-        sample_turn,
+        host_turn,
         persistence=persistence,
+        stored_turns=stored_turns,
         seed_fleet_prerequisites_for=player_id,
     )
     put_persisted_row(
         persistence,
-        sample_turn,
+        host_turn,
         player_id,
         PersistedInferenceRow(
             status=STATUS_EXACT,
