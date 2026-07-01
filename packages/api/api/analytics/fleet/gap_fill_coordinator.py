@@ -396,7 +396,21 @@ class FleetGapFillCoordinator:
                             load_turn,
                         )
                         if gap_start <= current_target:
-                            if query_ctx is not None:
+                            if inference_materialization is not None:
+                                if query_ctx is None:
+                                    raise ConflictError(
+                                        "fleet gap-fill requires query context when "
+                                        "inference materialization is configured for "
+                                        f"game {self._game_id} perspective "
+                                        f"{self._perspective}"
+                                    )
+                                self._forward_unwind_via_export_ensure(
+                                    query_ctx,
+                                    gap_start,
+                                    current_target,
+                                    load_turn,
+                                )
+                            elif query_ctx is not None:
                                 self._forward_unwind_via_export_ensure(
                                     query_ctx,
                                     gap_start,
@@ -420,7 +434,7 @@ class FleetGapFillCoordinator:
                                     self._perspective,
                                     target_turn_info,
                                     load_turn=load_turn,
-                                    inference_materialization=inference_materialization,
+                                    inference_materialization=None,
                                     coherence=coherence,
                                 )
                     materialized_target = current_target

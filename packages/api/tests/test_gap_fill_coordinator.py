@@ -13,7 +13,7 @@ from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetTurnSnapshot
-from api.errors import FleetMaterializationTimeoutError
+from api.errors import ConflictError, FleetMaterializationTimeoutError
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -417,6 +417,83 @@ def test_gap_fill_forward_unwind_refines_intermediate_turn_build_option_sets(
     assert placeholders
     assert all(len(record.build_option_sets) > 0 for record in placeholders)
     assert placeholders[0].build_option_sets[0].hull_id == 13
+
+
+def test_gap_fill_with_inference_never_uses_legacy_chain_path(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Inference gap-fill must use forward unwind, not gather-only legacy chain."""
+    from tests.test_fleet_persistence import (
+        _inference_materialization_for_fleet,
+        _put_provenance_final_snapshot,
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    _, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+
+    with patch(
+        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+        side_effect=AssertionError(
+            "legacy chain path must not run when inference materialization is set",
+        ),
+    ):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_112,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+        )
+
+
+def test_gap_fill_with_inference_fails_when_query_context_unresolved(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Gap-fill with inference must not silently fall back when query context is missing."""
+    from tests.test_fleet_persistence import (
+        _inference_materialization_for_fleet,
+        _put_provenance_final_snapshot,
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    _, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator._resolve_query_context",
+            return_value=None,
+        ),
+        pytest.raises(ConflictError, match="requires query context"),
+    ):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_112,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+        )
 
 
 def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, load_turn):
