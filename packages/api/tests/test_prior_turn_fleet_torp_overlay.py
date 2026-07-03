@@ -22,6 +22,20 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.errors import ConflictError
 
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
+from tests.fleet_chain_test_turns import HOST_TURN
+from tests.fleet_exports_helpers import host_turn_at
+
+
+def _host_turn_context(sample_turn, persistence, *, seed_player_ids: int | None = None):
+    host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
+    kwargs: dict[str, object] = {
+        "persistence": persistence,
+        "stored_turns": stored_turns,
+    }
+    if seed_player_ids is not None:
+        kwargs["seed_fleet_prerequisites_for"] = seed_player_ids
+    ctx = export_chain_query_context(host_turn, **kwargs)
+    return host_turn, ctx
 
 
 def test_resolve_prior_turn_overlay_returns_none_on_first_turn(first_turn):
@@ -38,13 +52,10 @@ def test_resolve_prior_turn_overlay_returns_none_on_first_turn(first_turn):
 
 def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample_turn, persistence):
     player_id = 8
-    ctx = export_chain_query_context(
-        sample_turn,
-        persistence=persistence,
-    )
+    host_turn, ctx = _host_turn_context(sample_turn, persistence)
 
     resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
@@ -57,16 +68,16 @@ def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample
 
 def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn, persistence):
     player_id = 8
-    prior_turn = sample_turn.settings.turn - 1
-    prior_turn_obj = replace(
+    host_turn, ctx = _host_turn_context(
         sample_turn,
-        settings=replace(sample_turn.settings, turn=prior_turn),
-        game=replace(sample_turn.game, turn=prior_turn),
+        persistence,
+        seed_player_ids=player_id,
     )
-    ctx = export_chain_query_context(
-        sample_turn,
-        persistence=persistence,
-        seed_fleet_prerequisites_for=player_id,
+    prior_turn = HOST_TURN - 1
+    prior_turn_obj = replace(
+        host_turn,
+        settings=replace(host_turn.settings, turn=prior_turn),
+        game=replace(host_turn.game, turn=prior_turn),
     )
     fleet_services = ctx.export_services["fleet"]
     snapshot = get_or_materialize_fleet_snapshot(
@@ -101,7 +112,7 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
     )
 
     resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
@@ -114,9 +125,10 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
 
 
 def test_resolve_prior_turn_overlay_without_export_services_returns_none(sample_turn):
-    ctx = export_chain_query_context(sample_turn)
+    host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
+    ctx = export_chain_query_context(host_turn, stored_turns=stored_turns)
     resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=8,
         load_turn=ctx.load_turn,
         export_services=None,
@@ -127,14 +139,11 @@ def test_resolve_prior_turn_overlay_without_export_services_returns_none(sample_
 
 def test_resolve_prior_turn_overlay_uses_export_services(sample_turn, persistence):
     player_id = 8
-    ctx = export_chain_query_context(
-        sample_turn,
-        persistence=persistence,
-    )
-    seed_fleet_unwind_through(ctx, through_turn=sample_turn.settings.turn, player_id=player_id)
+    host_turn, ctx = _host_turn_context(sample_turn, persistence)
+    seed_fleet_unwind_through(ctx, through_turn=HOST_TURN, player_id=player_id)
 
     resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
@@ -165,8 +174,12 @@ def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
     monkeypatch,
     caplog,
 ):
-    fleet_services = build_ephemeral_fleet_compute_services(sample_turn)
-    prior_turn = sample_turn.settings.turn - 1
+    host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
+    fleet_services = build_ephemeral_fleet_compute_services(
+        host_turn,
+        stored_turns=stored_turns,
+    )
+    prior_turn = HOST_TURN - 1
     prior_turn_info = fleet_services.load_turn(prior_turn)
     assert prior_turn_info is not None
     fleet_services.persistence.put_snapshot(
@@ -187,7 +200,7 @@ def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
 
     with caplog.at_level(logging.WARNING):
         schedule_background_prior_turn_fleet_warm(
-            turn=sample_turn,
+            turn=host_turn,
             load_turn=fleet_services.load_turn,
             export_services={"fleet": fleet_services},
         )
@@ -200,7 +213,11 @@ def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
     monkeypatch,
     caplog,
 ):
-    fleet_services = build_ephemeral_fleet_compute_services(sample_turn)
+    host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
+    fleet_services = build_ephemeral_fleet_compute_services(
+        host_turn,
+        stored_turns=stored_turns,
+    )
 
     def raise_conflict(*_args, **_kwargs):
         raise ConflictError("fleet snapshot gap-fill exceeded invalidation retries")
@@ -213,7 +230,7 @@ def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
 
     with caplog.at_level(logging.WARNING):
         schedule_background_prior_turn_fleet_warm(
-            turn=sample_turn,
+            turn=host_turn,
             load_turn=fleet_services.load_turn,
             export_services={"fleet": fleet_services},
         )

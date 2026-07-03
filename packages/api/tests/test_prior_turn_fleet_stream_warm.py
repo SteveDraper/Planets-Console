@@ -46,9 +46,8 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
-
-HOST_TURN = 8
 
 
 @pytest.fixture(autouse=True)
