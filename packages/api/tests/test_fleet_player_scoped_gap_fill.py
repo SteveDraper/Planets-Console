@@ -5,13 +5,18 @@ from __future__ import annotations
 import copy
 import json
 import threading
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
-from api.analytics.fleet.exports import ensure_fleet_export
+from api.analytics.fleet.chain import (
+    _materialize_fleet_ledger_chain_for_player,
+    get_or_materialize_fleet_ledger_for_player,
+)
+from api.analytics.fleet.compute_services import turn_chain_through
+from api.analytics.fleet.exports import EXPORT_CATALOG, ensure_fleet_export
 from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.solver import STATUS_EXACT
@@ -19,9 +24,11 @@ from api.analytics.turn_roster import iter_turn_players
 from api.errors import FleetMaterializationTimeoutError
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_persistence import (
     _inference_materialization_for_fleet,
     _put_provenance_final_snapshot,
@@ -142,6 +149,96 @@ def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
     assert ledger_calls
     assert all(call_player_id == player_id for call_player_id in ledger_calls)
     assert other_player_id not in ledger_calls
+
+
+def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
+    """Dependency walk and forward unwind both ensure fleet@T,P once; materialize once."""
+    player_id = first_player_id(sample_turn)
+    turn_number = 8
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    host_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    stored_turns = turn_chain_through(host_turn)
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=inference_persistence,
+        stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    put_persisted_row(
+        inference_persistence,
+        host_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+
+    fleet_ensure_calls: list[tuple[int, int | None]] = []
+    materialize_calls: list[tuple[int, int]] = []
+    original_ensure = ensure_fleet_export
+    original_materialize = _materialize_fleet_ledger_chain_for_player
+
+    def tracking_ensure(query_ctx, scope):
+        fleet_ensure_calls.append((scope.turn, scope.player_id))
+        return original_ensure(query_ctx, scope)
+
+    def counting_materialize(
+        persistence_service,
+        game_id,
+        perspective_id,
+        materialize_player_id,
+        turn,
+        **kwargs,
+    ):
+        materialize_calls.append((turn.settings.turn, materialize_player_id))
+        return original_materialize(
+            persistence_service,
+            game_id,
+            perspective_id,
+            materialize_player_id,
+            turn,
+            **kwargs,
+        )
+
+    ctx.export_registry = {
+        **ctx.export_registry,
+        "fleet": replace(EXPORT_CATALOG, ensure_export=tracking_ensure),
+    }
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator.ensure_fleet_export",
+            side_effect=tracking_ensure,
+        ),
+        patch(
+            "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
+            side_effect=counting_materialize,
+        ),
+    ):
+        result = ctx.query(
+            "fleet",
+            ["$.players"],
+            {"turn": turn_number, "player_id": player_id},
+            force_inline_ensure=True,
+        )
+
+    assert result.status == "ok"
+    target_ensure_calls = [
+        call for call in fleet_ensure_calls if call == (turn_number, player_id)
+    ]
+    assert len(target_ensure_calls) == 2
+    target_materialize_calls = [
+        call for call in materialize_calls if call == (turn_number, player_id)
+    ]
+    assert len(target_materialize_calls) == 1
 
 
 def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_turn, memory_backend):
