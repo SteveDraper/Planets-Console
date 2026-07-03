@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from unittest.mock import patch
 
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import EnsureDependency, ExportScope
@@ -18,6 +19,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.fleet_exports_helpers import (
     export_chain_query_context,
+    host_turn_at,
     materialize_fleet_tree,
     turn_with_score_delta,
 )
@@ -158,10 +160,16 @@ def test_query_composition_launcher_types_path():
 
 def test_materialized_tree_includes_meta_host_turn(sample_turn):
     player_id = first_player_id(sample_turn)
-    ctx = export_chain_query_context(sample_turn)
-    tree, scope = materialize_fleet_tree(ctx, player_id)
-    assert scope.turn == sample_turn.settings.turn
-    assert tree["meta"]["hostTurn"] == sample_turn.settings.turn
+    turn_one = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+        game=replace(sample_turn.game, turn=1),
+        ships=[],
+    )
+    ctx = export_chain_query_context(turn_one, stored_turns={1: turn_one})
+    tree, scope = materialize_fleet_tree(ctx, player_id, turn=1)
+    assert scope.turn == 1
+    assert tree["meta"]["hostTurn"] == 1
     assert isinstance(tree["players"], list)
     assert tree["players"][0]["playerId"] == player_id
 
@@ -169,17 +177,33 @@ def test_materialized_tree_includes_meta_host_turn(sample_turn):
 def test_materialized_tree_surfaces_not_started_scores_status(sample_turn):
     reset_inference_row_scheduler_for_tests()
     player_id = first_player_id(sample_turn)
-    ctx = export_chain_query_context(sample_turn, scheduler=InferenceRowScheduler(worker_count=0))
-    tree, _scope = materialize_fleet_tree(ctx, player_id)
+    turn_one = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=1),
+        game=replace(sample_turn.game, turn=1),
+        ships=[],
+    )
+    ctx = export_chain_query_context(
+        turn_one,
+        stored_turns={1: turn_one},
+        scheduler=InferenceRowScheduler(worker_count=0),
+    )
+    with patch(
+        "api.analytics.fleet.exports._scores_search_status_for_scope",
+        return_value=("not_started", 0),
+    ):
+        tree, _scope = materialize_fleet_tree(ctx, player_id, turn=1)
     assert tree["meta"]["searchStatus"] == "not_started"
     assert "solutionsHeld" not in tree["meta"]
 
 
 def test_materialized_tree_surfaces_complete_scores_status(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
+    turn_number = 8
+    host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
     put_persisted_row(
         persistence,
-        sample_turn,
+        host_turn,
         player_id,
         PersistedInferenceRow(
             status=STATUS_EXACT,
@@ -188,25 +212,39 @@ def test_materialized_tree_surfaces_complete_scores_status(sample_turn, persiste
             is_complete=True,
             solutions=[],
         ),
+        host_turn=turn_number,
     )
-    ctx = export_chain_query_context(sample_turn, persistence=persistence)
-    tree, _scope = materialize_fleet_tree(ctx, player_id)
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    tree, _scope = materialize_fleet_tree(ctx, player_id, turn=turn_number)
     assert tree["meta"]["searchStatus"] == "complete"
     assert "solutionsHeld" not in tree["meta"]
 
 
-def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn):
+def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = first_player_id(sample_turn)
+    turn_number = 8
+    host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
     schedule_row_with_ladder(
         scheduler,
-        sample_turn,
+        host_turn,
         player_id,
         merged_solutions=[],
     )
-    ctx = export_chain_query_context(sample_turn, scheduler=scheduler)
-    tree, _scope = materialize_fleet_tree(ctx, player_id)
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    tree, _scope = materialize_fleet_tree(ctx, player_id, turn=turn_number)
     assert tree["meta"]["searchStatus"] == "in_progress"
 
 
@@ -232,14 +270,16 @@ def test_materialized_tree_includes_placeholder_records_with_incomplete_search(s
     ledger = tree["players"][0]
     assert len(ledger["records"]) == 2
     assert all(record["fields"]["hull"]["kind"] == "unknown" for record in ledger["records"])
-    assert tree["meta"]["searchStatus"] == "not_started"
+    assert tree["meta"]["searchStatus"] == "in_progress"
 
 
 def test_query_meta_search_status_path(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
+    turn_number = 8
+    host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
     put_persisted_row(
         persistence,
-        sample_turn,
+        host_turn,
         player_id,
         PersistedInferenceRow(
             status=STATUS_EXACT,
@@ -261,12 +301,18 @@ def test_query_meta_search_status_path(sample_turn, persistence):
                 }
             ],
         ),
+        host_turn=turn_number,
     )
-    ctx = export_chain_query_context(sample_turn, persistence=persistence)
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=player_id,
+    )
     result = ctx.query(
         "fleet",
         ["$.meta.searchStatus", "$.meta.solutionsHeld"],
-        {"player_id": player_id},
+        {"turn": turn_number, "player_id": player_id},
         force_inline_ensure=True,
     )
     assert result.status == "ok"
@@ -327,10 +373,12 @@ def test_ensure_fleet_export_materializes_snapshot_when_missing(sample_turn, per
 
 def test_probe_and_walk_report_fleet_depends_on_scores_same_turn(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
-    turn_number = sample_turn.settings.turn
+    turn_number = 8
+    host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
     ctx = export_chain_query_context(
-        sample_turn,
+        host_turn,
         persistence=persistence,
+        stored_turns=stored_turns,
         seed_fleet_prerequisites_for=player_id,
     )
     scope = ExportScope(
@@ -367,12 +415,13 @@ def test_probe_and_walk_report_fleet_depends_on_scores_same_turn(sample_turn, pe
 
 def test_ensure_fleet_export_no_op_when_turn_not_stored(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
-    stored_turns = turn_chain_through(sample_turn)
+    turn_number = 8
+    host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
     missing_turn = 999
     assert missing_turn not in stored_turns
 
     ctx = export_chain_query_context(
-        sample_turn,
+        host_turn,
         persistence=persistence,
         stored_turns=stored_turns,
     )
