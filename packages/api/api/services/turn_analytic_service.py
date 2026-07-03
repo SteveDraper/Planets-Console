@@ -228,6 +228,7 @@ class TurnAnalyticService:
             turn=turn,
             load_turn=load_turn,
             export_services=export_services,
+            player_ids=player_ids,
         )
 
         def resolve_fleet_torp_resolution_for_player(

@@ -175,18 +175,24 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
     )
 
     with patch(
-        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
-        side_effect=AssertionError("must not gap-fill when only partial cache exists"),
-    ):
-        with pytest.raises(AssertionError, match="must not gap-fill"):
-            get_or_materialize_fleet_snapshot(
-                fleet_services.persistence,
-                GAME_ID,
-                perspective(sample_turn),
-                turn,
-                load_turn=ctx.load_turn,
-                inference_materialization=fleet_services.inference_materialization,
-            )
+        "api.analytics.fleet.chain._is_fleet_snapshot_cache_hit",
+        return_value=False,
+    ) as cache_hit_mock:
+        snapshot = get_or_materialize_fleet_snapshot(
+            fleet_services.persistence,
+            GAME_ID,
+            perspective(sample_turn),
+            turn,
+            load_turn=ctx.load_turn,
+            inference_materialization=fleet_services.inference_materialization,
+        )
+
+    from api.analytics.turn_roster import iter_turn_players
+
+    cache_hit_mock.assert_called()
+    assert snapshot is not None
+    roster_ids = {player.id for player in iter_turn_players(turn)}
+    assert roster_ids <= {ledger.player_id for ledger in snapshot.players}
 
 
 def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(

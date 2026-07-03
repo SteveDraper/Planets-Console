@@ -277,6 +277,23 @@ def _find_gap_start_turn(
     return target_turn + 1
 
 
+def _find_gap_start_turn_for_player(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    target_turn: int,
+    load_turn: Callable[[int], TurnInfo | None],
+) -> int:
+    """Return the first turn in ``1..target_turn`` lacking ensure-final ledger for P."""
+    for turn_number in range(1, target_turn + 1):
+        if load_turn(turn_number) is None:
+            continue
+        if not persistence.has_final_ledger(game_id, perspective, turn_number, player_id):
+            return turn_number
+    return target_turn + 1
+
+
 def _snapshot_has_all_roster_players(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> bool:
     roster_ids = set(_roster_player_ids(turn))
     present_ids = {ledger.player_id for ledger in snapshot.players}
@@ -594,8 +611,7 @@ def get_or_materialize_fleet_ledger_for_player(
     """Return a cached ledger or materialize turn T for one player."""
     from api.analytics.fleet.gap_fill_coordinator import coordinator_for
 
-    return coordinator_for(persistence, game_id, perspective).materialize_ledger_for_player(
-        player_id,
+    return coordinator_for(persistence, game_id, perspective, player_id).materialize_ledger(
         turn,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
@@ -613,12 +629,36 @@ def get_or_materialize_fleet_snapshot(
     inference_materialization: FleetInferenceMaterialization | None = None,
     query_context: AnalyticQueryContext | None = None,
 ) -> FleetTurnSnapshot:
-    """Return a cached snapshot or materialize turn T from T-1 plus turn-T delta."""
-    from api.analytics.fleet.gap_fill_coordinator import coordinator_for
-
-    return coordinator_for(persistence, game_id, perspective).materialize_snapshot(
+    """Return a cached snapshot or fan out per-player materialization for turn T."""
+    turn_number = turn.settings.turn
+    cached = persistence.get_snapshot(game_id, perspective, turn_number)
+    if _is_fleet_snapshot_cache_hit(
+        persistence,
+        game_id,
+        perspective,
+        turn_number,
         turn,
-        load_turn=load_turn,
-        inference_materialization=inference_materialization,
-        query_context=query_context,
-    )
+        cached,
+    ):
+        assert cached is not None
+        return cached
+
+    for player_id in _roster_player_ids(turn):
+        get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            game_id,
+            perspective,
+            player_id,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+        )
+
+    snapshot = persistence.get_snapshot(game_id, perspective, turn_number)
+    if snapshot is None or not _snapshot_has_all_roster_players(snapshot, turn):
+        raise ConflictError(
+            f"fleet snapshot gap-fill produced incomplete document "
+            f"for game {game_id} perspective {perspective} turn {turn_number}"
+        )
+    return snapshot

@@ -9,10 +9,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.chain import (
+    get_or_materialize_fleet_ledger_for_player,
+    get_or_materialize_fleet_snapshot,
+)
 from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.types import FleetTurnSnapshot
+from api.analytics.fleet.types import PersistedFleetLedger
+from api.analytics.turn_roster import iter_turn_players
 from api.errors import ConflictError, FleetMaterializationTimeoutError
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
@@ -63,6 +67,10 @@ def load_turn(memory_backend):
     return _load
 
 
+def _first_player_id(turn) -> int:
+    return next(iter_turn_players(turn)).id
+
+
 def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence, load_turn):
     from api.analytics.fleet.chain import ensure_fleet_baseline
 
@@ -73,12 +81,13 @@ def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence
     turn_111 = load_turn(111)
     turn_112 = load_turn(112)
     assert turn_111 is not None and turn_112 is not None
+    player_id = _first_player_id(turn_111)
 
     materialize_calls = 0
     original_chain = __import__(
         "api.analytics.fleet.gap_fill_coordinator",
-        fromlist=["_materialize_fleet_snapshot_chain"],
-    )._materialize_fleet_snapshot_chain
+        fromlist=["_materialize_fleet_ledger_chain_for_player"],
+    )._materialize_fleet_ledger_chain_for_player
 
     def counting_chain(*args, **kwargs):
         nonlocal materialize_calls
@@ -92,10 +101,11 @@ def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence
         turn = load_turn(turn_number)
         assert turn is not None
         try:
-            results[turn_number] = get_or_materialize_fleet_snapshot(
+            results[turn_number] = get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn,
                 load_turn=load_turn,
             )
@@ -104,7 +114,7 @@ def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence
 
     leader_ready = threading.Event()
     release_leader = threading.Event()
-    coordinator = coordinator_for(persistence, 628580, 1)
+    coordinator = coordinator_for(persistence, 628580, 1, player_id)
     original_run_leader = coordinator._run_leader_unwind
 
     def gated_run_leader(
@@ -114,7 +124,6 @@ def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence
         load_turn,
         inference_materialization,
         query_context,
-        materialize_player_id,
     ):
         leader_ready.set()
         assert release_leader.wait(timeout=5)
@@ -124,12 +133,11 @@ def test_coordinator_singleflight_satisfies_concurrent_turn_requests(persistence
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
-            materialize_player_id=materialize_player_id,
         )
 
     with (
         patch(
-            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
             side_effect=counting_chain,
         ),
         patch.object(coordinator, "_run_leader_unwind", side_effect=gated_run_leader),
@@ -157,6 +165,7 @@ def test_coordinator_waiter_times_out_when_leader_never_finishes(persistence, lo
     persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
     turn_112 = load_turn(112)
     assert turn_112 is not None
+    player_id = _first_player_id(turn_112)
 
     started = threading.Event()
     release_leader = threading.Event()
@@ -165,6 +174,7 @@ def test_coordinator_waiter_times_out_when_leader_never_finishes(persistence, lo
         persistence,
         628580,
         1,
+        player_id,
     )._run_leader_unwind
 
     def blocking_unwind(*args, **kwargs):
@@ -174,12 +184,13 @@ def test_coordinator_waiter_times_out_when_leader_never_finishes(persistence, lo
 
     errors: list[BaseException] = []
 
-    def wait_for_snapshot() -> None:
+    def wait_for_ledger() -> None:
         try:
-            get_or_materialize_fleet_snapshot(
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn_112,
                 load_turn=load_turn,
             )
@@ -192,21 +203,22 @@ def test_coordinator_waiter_times_out_when_leader_never_finishes(persistence, lo
             0.2,
         ),
         patch.object(
-            coordinator_for(persistence, 628580, 1),
+            coordinator_for(persistence, 628580, 1, player_id),
             "_run_leader_unwind",
             side_effect=blocking_unwind,
         ),
     ):
         leader = threading.Thread(
-            target=lambda: get_or_materialize_fleet_snapshot(
+            target=lambda: get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn_112,
                 load_turn=load_turn,
             ),
         )
-        waiter = threading.Thread(target=wait_for_snapshot)
+        waiter = threading.Thread(target=wait_for_ledger)
         leader.start()
         assert started.wait(timeout=5)
         waiter.start()
@@ -440,11 +452,20 @@ def test_gap_fill_with_inference_never_uses_legacy_chain_path(
         load_turn,
     )
 
-    with patch(
-        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
-        side_effect=AssertionError(
-            "legacy chain path must not run when inference materialization is set",
-        ),
+    from api.analytics.fleet.gap_fill_coordinator import FleetGapFillCoordinator
+
+    original_forward_unwind = FleetGapFillCoordinator._forward_unwind_via_export_ensure
+    forward_unwind_calls = 0
+
+    def tracking_forward_unwind(self, *args, **kwargs):
+        nonlocal forward_unwind_calls
+        forward_unwind_calls += 1
+        return original_forward_unwind(self, *args, **kwargs)
+
+    with patch.object(
+        FleetGapFillCoordinator,
+        "_forward_unwind_via_export_ensure",
+        tracking_forward_unwind,
     ):
         get_or_materialize_fleet_snapshot(
             persistence,
@@ -454,6 +475,8 @@ def test_gap_fill_with_inference_never_uses_legacy_chain_path(
             load_turn=load_turn,
             inference_materialization=inference_materialization,
         )
+
+    assert forward_unwind_calls >= 1
 
 
 def test_gap_fill_with_inference_fails_when_query_context_unresolved(
@@ -505,6 +528,7 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
+    player_id = _first_player_id(turn_112)
 
     leader_mid_chain = threading.Event()
     waiter_joined = threading.Event()
@@ -523,17 +547,18 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
 
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
 
-    leader_result: FleetTurnSnapshot | None = None
-    waiter_result: FleetTurnSnapshot | None = None
+    leader_result: PersistedFleetLedger | None = None
+    waiter_result: PersistedFleetLedger | None = None
     errors: list[BaseException] = []
 
     def run_leader() -> None:
         nonlocal leader_result
         try:
-            leader_result = get_or_materialize_fleet_snapshot(
+            leader_result = get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn_112,
                 load_turn=load_turn,
             )
@@ -545,10 +570,11 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
         assert leader_mid_chain.wait(timeout=5)
         waiter_joined.set()
         try:
-            waiter_result = get_or_materialize_fleet_snapshot(
+            waiter_result = get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn_112,
                 load_turn=load_turn,
             )
@@ -568,9 +594,9 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
     assert not errors
     assert leader_result is not None
     assert waiter_result is not None
-    assert leader_result.turn == 112
-    assert waiter_result.turn == 112
-    assert persistence.get_snapshot(628580, 1, 112) is not None
+    assert leader_result.ledger.player_id == player_id
+    assert waiter_result.ledger.player_id == player_id
+    assert persistence.get_ledger(628580, 1, 112, player_id) is not None
 
 
 def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
@@ -586,6 +612,7 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
+    player_id = _first_player_id(turn_112)
 
     leader_mid_chain = threading.Event()
     waiter_joined = threading.Event()
@@ -604,11 +631,11 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
 
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
 
-    coordinator = coordinator_for(persistence, 628580, 1)
+    coordinator = coordinator_for(persistence, 628580, 1, player_id)
     original_chain = __import__(
         "api.analytics.fleet.gap_fill_coordinator",
-        fromlist=["_materialize_fleet_snapshot_chain"],
-    )._materialize_fleet_snapshot_chain
+        fromlist=["_materialize_fleet_ledger_chain_for_player"],
+    )._materialize_fleet_ledger_chain_for_player
     original_run_leader = coordinator._run_leader_unwind
 
     materialize_calls = 0
@@ -626,7 +653,6 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
         load_turn,
         inference_materialization,
         query_context,
-        materialize_player_id,
     ):
         nonlocal leader_unwind_calls
         leader_unwind_calls += 1
@@ -636,20 +662,20 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
-            materialize_player_id=materialize_player_id,
         )
 
-    leader_result: FleetTurnSnapshot | None = None
-    waiter_result: FleetTurnSnapshot | None = None
+    leader_result: PersistedFleetLedger | None = None
+    waiter_result: PersistedFleetLedger | None = None
     errors: list[BaseException] = []
 
     def run_leader() -> None:
         nonlocal leader_result
         try:
-            leader_result = get_or_materialize_fleet_snapshot(
+            leader_result = get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn_112,
                 load_turn=load_turn,
             )
@@ -661,10 +687,11 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
         assert leader_mid_chain.wait(timeout=5)
         waiter_joined.set()
         try:
-            waiter_result = get_or_materialize_fleet_snapshot(
+            waiter_result = get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
+                player_id,
                 turn_112,
                 load_turn=load_turn,
             )
@@ -673,7 +700,7 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
 
     with (
         patch(
-            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
             side_effect=counting_chain,
         ),
         patch.object(coordinator, "_run_leader_unwind", side_effect=counting_run_leader),
@@ -691,9 +718,9 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
     assert not errors
     assert leader_result is not None
     assert waiter_result is not None
-    assert leader_result.turn == 112
-    assert waiter_result.turn == 112
-    assert persistence.get_snapshot(628580, 1, 112) is not None
+    assert leader_result.ledger.player_id == player_id
+    assert waiter_result.ledger.player_id == player_id
+    assert persistence.get_ledger(628580, 1, 112, player_id) is not None
     assert leader_unwind_calls == 1, f"expected one leader unwind, got {leader_unwind_calls}"
     assert materialize_calls <= 2, (
         f"expected at most one invalidation retry on the chain, got {materialize_calls}"

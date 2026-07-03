@@ -152,9 +152,33 @@ def _load_prior_turn_fleet_snapshot(
         if not ensure_fleet_export(ctx, scope):
             return None
 
-    if not persistence.has_snapshot(scope.game_id, scope.perspective, scope.turn):
+    if scope.player_id is None:
+        if not persistence.has_snapshot(scope.game_id, scope.perspective, scope.turn):
+            return None
+        return persistence.get_snapshot(scope.game_id, scope.perspective, scope.turn)
+
+    if not persistence.has_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        scope.player_id,
+    ):
         return None
-    return persistence.get_snapshot(scope.game_id, scope.perspective, scope.turn)
+    persisted = persistence.get_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        scope.player_id,
+    )
+    if persisted is None:
+        return None
+    return FleetTurnSnapshot(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        players=[persisted.ledger],
+    )
 
 
 def _overlay_from_snapshot(
@@ -231,10 +255,11 @@ def schedule_background_prior_turn_fleet_warm(
     turn: TurnInfo,
     load_turn: Callable[[int], TurnInfo | None],
     export_services: Mapping[str, object] | None,
+    player_ids: tuple[int, ...],
 ) -> None:
-    """Kick off non-blocking materialization of fleet@(host_turn - 1) for table streams."""
+    """Kick off non-blocking per-player materialization of fleet@(host_turn - 1)."""
     host_turn = turn.settings.turn
-    if host_turn <= 1:
+    if host_turn <= 1 or not player_ids:
         return
 
     fleet_services = _resolve_fleet_services(
@@ -249,11 +274,15 @@ def schedule_background_prior_turn_fleet_warm(
     if prior_turn_info is None:
         return
 
-    if fleet_services.persistence.has_snapshot(
-        fleet_services.game_id,
-        fleet_services.perspective,
-        prior_turn,
-    ):
+    persistence = fleet_services.persistence
+    game_id = fleet_services.game_id
+    perspective = fleet_services.perspective
+    players_needing_warm = tuple(
+        player_id
+        for player_id in player_ids
+        if not persistence.has_final_ledger(game_id, perspective, prior_turn, player_id)
+    )
+    if not players_needing_warm:
         return
 
     query_context = make_analytic_query_context(
@@ -263,35 +292,39 @@ def schedule_background_prior_turn_fleet_warm(
         export_services=export_services,
     )
 
-    def warm_prior_turn_fleet() -> None:
-        from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+    def warm_prior_turn_fleet_for_player(player_id: int) -> None:
+        from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
         from api.errors import ConflictError, FleetMaterializationTimeoutError
 
-        persistence = fleet_services.persistence
-        game_id = fleet_services.game_id
-        perspective = fleet_services.perspective
-
-        def prior_turn_snapshot_available() -> bool:
-            return persistence.has_snapshot(game_id, perspective, prior_turn)
+        def prior_turn_ledger_available() -> bool:
+            return persistence.has_final_ledger(game_id, perspective, prior_turn, player_id)
 
         try:
-            get_or_materialize_fleet_snapshot(
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 game_id,
                 perspective,
+                player_id,
                 prior_turn_info,
                 load_turn=fleet_services.load_turn,
                 inference_materialization=fleet_services.inference_materialization,
                 query_context=query_context,
             )
         except ConflictError, FleetMaterializationTimeoutError, OSError, ValueError, KeyError:
-            if prior_turn_snapshot_available():
+            if prior_turn_ledger_available():
                 return
             logger.warning(
-                "Background prior-turn fleet warm failed for game %s perspective %s turn %s",
+                "Background prior-turn fleet warm failed for game %s perspective %s "
+                "player %s turn %s",
                 game_id,
                 perspective,
+                player_id,
                 prior_turn,
             )
 
-    threading.Thread(target=warm_prior_turn_fleet, daemon=True).start()
+    for player_id in players_needing_warm:
+        threading.Thread(
+            target=warm_prior_turn_fleet_for_player,
+            args=(player_id,),
+            daemon=True,
+        ).start()

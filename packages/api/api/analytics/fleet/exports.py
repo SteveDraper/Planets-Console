@@ -8,7 +8,10 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
-from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.chain import (
+    get_or_materialize_fleet_ledger_for_player,
+    get_or_materialize_fleet_snapshot,
+)
 from api.analytics.fleet.composition_export import build_fleet_composition_branch
 from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
@@ -45,6 +48,24 @@ def _fleet_snapshot_for_scope(
         raise ValidationError(f"Turn {scope.turn} is not stored")
 
     def gather() -> FleetTurnSnapshot:
+        if scope.player_id is not None:
+            persisted = get_or_materialize_fleet_ledger_for_player(
+                services.persistence,
+                services.game_id,
+                services.perspective,
+                scope.player_id,
+                resolved_turn,
+                load_turn=services.load_turn,
+                inference_materialization=services.inference_materialization,
+                query_context=ctx,
+            )
+            return FleetTurnSnapshot(
+                analytic_id=ANALYTIC_ID,
+                game_id=services.game_id,
+                perspective=services.perspective,
+                turn=scope.turn,
+                players=[persisted.ledger],
+            )
         return get_or_materialize_fleet_snapshot(
             services.persistence,
             services.game_id,

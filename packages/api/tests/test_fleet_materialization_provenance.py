@@ -216,8 +216,8 @@ def test_snapshot_gap_fill_reuses_turn_context_across_players(persistence, load_
             load_turn=load_turn,
         )
 
-    # Turns 110 and 111 are gap-filled once each, shared across roster players.
-    assert from_turn_mock.call_count == 2
+    # Each player gap-fills with its own chain; turn context is built per turn per chain.
+    assert from_turn_mock.call_count == 2 * player_count
 
 
 def test_gap_fill_persists_per_player_ledgers_with_provenance(persistence, load_turn):
