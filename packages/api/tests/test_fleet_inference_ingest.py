@@ -529,20 +529,10 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = sample_turn.scores[0].ownerid
-    turn = replace(
-        sample_turn,
-        ships=[],
-        scores=[
-            replace(
-                score,
-                turn=sample_turn.settings.turn,
-                ownerid=player_id,
-                shipchange=1,
-                freighterchange=0,
-            )
-            for score in sample_turn.scores
-            if score.ownerid == player_id
-        ],
+    turn = _turn_with_score_delta(
+        turn_number=5,
+        owner_id=player_id,
+        shipchange=1,
     )
     schedule_row_with_ladder(
         scheduler,
@@ -571,21 +561,25 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
     )
     from api.analytics.compute_context import invoke_analytic_compute
     from api.analytics.fleet import ANALYTIC_ID, compute_fleet
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 
+    scores_services = ScoresExportContext(
+        persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        scheduler=scheduler,
+    )
     services = build_ephemeral_fleet_compute_services(
         turn,
         perspective=perspective(turn),
-        inference=FleetInferenceSupport(
-            scores_services=ScoresExportContext(
-                persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-                scheduler=scheduler,
-            ),
-        ),
+        inference=FleetInferenceSupport(scores_services=scores_services),
     )
     payload = invoke_analytic_compute(
         compute_fleet,
         turn,
-        export_services={ANALYTIC_ID: services},
+        load_turn=services.load_turn,
+        export_services={
+            SCORES_ANALYTIC_ID: scores_services,
+            ANALYTIC_ID: services,
+        },
     )
     record = next(
         rec
