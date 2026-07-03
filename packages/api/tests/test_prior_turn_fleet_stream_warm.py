@@ -170,6 +170,20 @@ def _wait_until(
     raise AssertionError("condition not met before timeout")
 
 
+def _run_warm_synchronously(monkeypatch: pytest.MonkeyPatch) -> None:
+    def immediate_thread(*, target, daemon=True):
+        class _ImmediateThread:
+            def start(self) -> None:
+                target()
+
+        return _ImmediateThread()
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.prior_turn_fleet_torp_overlay.threading.Thread",
+        immediate_thread,
+    )
+
+
 def _run_ids_for_players(
     scheduler: InferenceRowScheduler,
     player_ids: tuple[int, ...],
@@ -389,16 +403,14 @@ def test_background_warm_eventually_applies_fleet_overlay(
     assert pending.input_status == "pending"
     assert pending.overlay is None
 
+    _run_warm_synchronously(monkeypatch)
     schedule_background_prior_turn_fleet_warm(
         turn=host_turn,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
     )
 
-    _wait_until(
-        lambda: fleet_persistence.has_snapshot(ctx.game_id, ctx.perspective, prior_turn),
-        timeout_seconds=30.0,
-    )
+    assert fleet_persistence.has_snapshot(ctx.game_id, ctx.perspective, prior_turn)
 
     applied = resolve_prior_turn_fleet_torp_overlay(
         turn=host_turn,
