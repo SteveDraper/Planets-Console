@@ -1,6 +1,5 @@
 """Unit tests for BFF analytics routes. Verify response shape and map node coordinates."""
 
-import copy
 import json
 import math
 from pathlib import Path
@@ -12,11 +11,17 @@ from api.storage import clear_backend_cache, get_storage
 from bff.analytics import ANALYTICS_LIST
 from bff.app import app
 from bff.core_client import clear_core_client_cache
+from export_chain_test_fixtures import seed_storage_analytics_fixture
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
-SCOPE_QS = "gameId=628580&turn=111&perspective=1"
+GAME_ID = 628580
+PERSPECTIVE = 1
+HOST_TURN = 6
+INFERENCE_PLAYER_ID = 8
+
+SCOPE_QS = f"gameId={GAME_ID}&turn={HOST_TURN}&perspective={PERSPECTIVE}"
 
 REPO_PACKAGES_DIR = Path(__file__).resolve().parents[2]
 ASSETS_DIR = REPO_PACKAGES_DIR / "api" / "api" / "storage" / "assets"
@@ -35,18 +40,16 @@ def _setup_storage_for_core_calls():
         )
     )
     storage = get_storage()
-    with open(ASSETS_DIR / "game_info_sample.json") as f:
-        storage.put("games/628580/info", json.load(f))
-    with open(ASSETS_DIR / "turn_sample.json") as f:
-        turn_rst = json.load(f)
-        for turn_number in range(1, 112):
-            turn_data = copy.deepcopy(turn_rst)
-            turn_data["settings"]["turn"] = turn_number
-            turn_data["game"]["turn"] = turn_number
-            storage.put(f"games/628580/1/turns/{turn_number}", turn_data)
+    seed_storage_analytics_fixture(
+        storage,
+        assets_dir=ASSETS_DIR,
+        host_turn=HOST_TURN,
+        game_id=GAME_ID,
+        perspective=PERSPECTIVE,
+    )
     yield
-    clear_backend_cache()
     clear_core_client_cache()
+    clear_backend_cache()
 
 
 def test_list_analytics_returns_analytics_list():
@@ -115,19 +118,19 @@ def test_scores_table_with_build_inference_adds_column_and_player_stubs():
     assert data["includeBuildInference"] is True
     assert data["columns"][-1] == "Build inference"
     assert len(data["rows"][0]) == len(data["columns"]) - 1
-    assert data["inferenceByRow"][0] == {"playerId": 8}
+    assert data["inferenceByRow"][0] == {"playerId": INFERENCE_PLAYER_ID}
 
 
 def test_scores_inference_returns_row_detail():
-    response = client.get(f"/analytics/scores/inference?{SCOPE_QS}&playerId=8")
+    response = client.get(f"/analytics/scores/inference?{SCOPE_QS}&playerId={INFERENCE_PLAYER_ID}")
     assert response.status_code == 200
     inference = response.json()
     assert inference["displayStatus"] in {"success", "failure", "pending"}
     assert isinstance(inference["summary"], str)
     assert "status" in inference
     assert "diagnostics" in inference
-    assert inference["playerId"] == 8
-    assert inference["diagnostics"]["turn"] == 111
+    assert inference["playerId"] == INFERENCE_PLAYER_ID
+    assert inference["diagnostics"]["turn"] == HOST_TURN
     assert "constraints" in inference["diagnostics"]
     assert "actionCatalog" in inference["diagnostics"]
     assert "solver" in inference["diagnostics"]
@@ -233,7 +236,7 @@ def test_stellar_cartography_map_returns_overlay_circles_and_wormhole_edges():
     """Stellar Cartography map returns overlay geometry and deduped wormhole edges."""
     storage = get_storage()
     with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
-        storage.put("games/628580/1/turns/111", json.load(f))
+        storage.put(f"games/{GAME_ID}/{PERSPECTIVE}/turns/{HOST_TURN}", json.load(f))
     response = client.get(f"/analytics/stellar-cartography/map?{SCOPE_QS}")
     assert response.status_code == 200
     data = response.json()
@@ -287,7 +290,7 @@ def test_fleet_table_returns_players_with_observed_records():
     assert len(players) == 4
     assert players[0]["playerName"] == "koshling"
     koshling = next(player for player in players if player["playerId"] == 8)
-    assert len(koshling["records"]) == 5
+    assert len(koshling["records"]) == 4
     first_record = koshling["records"][0]
     assert first_record["disposition"] == "active"
     assert "events" not in first_record

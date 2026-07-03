@@ -17,7 +17,7 @@ export function useFleetTableQuery(
   fetchEnabled: boolean
 ) {
   const inferenceRevision = useScoresInferenceRevision(analyticScope)
-  const previousInferenceRevisionRef = useRef(inferenceRevision)
+  const revisionAtLastConflictRefetchRef = useRef<number | null>(null)
 
   const query = useQuery({
     queryKey: fleetTableQueryKey(analyticScope),
@@ -27,18 +27,25 @@ export function useFleetTableQuery(
 
   useEffect(() => {
     if (!fetchEnabled || analyticScope == null) {
-      previousInferenceRevisionRef.current = inferenceRevision
+      revisionAtLastConflictRefetchRef.current = null
       return
     }
-    if (inferenceRevision === previousInferenceRevisionRef.current) {
+
+    if (query.isSuccess) {
+      revisionAtLastConflictRefetchRef.current = null
       return
     }
-    previousInferenceRevisionRef.current = inferenceRevision
+
     if (!query.isError || !isFleetGapFillConflictError(query.error) || query.isFetching) {
       return
     }
 
+    if (revisionAtLastConflictRefetchRef.current === inferenceRevision) {
+      return
+    }
+
     const timeoutId = window.setTimeout(() => {
+      revisionAtLastConflictRefetchRef.current = inferenceRevision
       void query.refetch()
     }, FLEET_CONFLICT_REFETCH_DEBOUNCE_MS)
 
@@ -52,6 +59,7 @@ export function useFleetTableQuery(
     query.error,
     query.isError,
     query.isFetching,
+    query.isSuccess,
     query.refetch,
   ])
 

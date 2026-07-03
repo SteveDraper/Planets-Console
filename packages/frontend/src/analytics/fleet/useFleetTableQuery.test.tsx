@@ -91,4 +91,72 @@ describe('useFleetTableQuery', () => {
       expect(result.current.isSuccess).toBe(true)
     })
   })
+
+  it('refetches after 409 when inference revision bumped during the in-flight fetch', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let resolveFirstFetch: (() => void) | undefined
+    const firstFetchGate = new Promise<void>((resolve) => {
+      resolveFirstFetch = resolve
+    })
+
+    vi.mocked(fetchAnalyticTable)
+      .mockImplementationOnce(async () => {
+        await firstFetchGate
+        throw new Error('409 — GET /bff/analytics/fleet/table')
+      })
+      .mockResolvedValueOnce({
+        analyticId: 'fleet',
+      } as unknown as TableDataResponse)
+
+    const { result } = renderHook(
+      ({ activeScope, enabled }) => useFleetTableQuery(activeScope, enabled),
+      {
+        wrapper: createWrapper(client),
+        initialProps: { activeScope: scope, enabled: true },
+      }
+    )
+
+    await waitFor(() => {
+      expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      bumpScoresInferenceRevision(scope)
+    })
+
+    await act(async () => {
+      resolveFirstFetch?.()
+    })
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true)
+    })
+
+    await waitFor(() => {
+      expect(fetchAnalyticTable).toHaveBeenCalledTimes(2)
+      expect(result.current.isSuccess).toBe(true)
+    })
+  })
+
+  it('refetches once on initial 409 without waiting for another inference revision bump', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    vi.mocked(fetchAnalyticTable)
+      .mockRejectedValueOnce(new Error('409 — GET /bff/analytics/fleet/table'))
+      .mockResolvedValueOnce({
+        analyticId: 'fleet',
+      } as unknown as TableDataResponse)
+
+    const { result } = renderHook(
+      ({ activeScope, enabled }) => useFleetTableQuery(activeScope, enabled),
+      {
+        wrapper: createWrapper(client),
+        initialProps: { activeScope: scope, enabled: true },
+      }
+    )
+
+    await waitFor(() => {
+      expect(fetchAnalyticTable).toHaveBeenCalledTimes(2)
+      expect(result.current.isSuccess).toBe(true)
+    })
+  })
 })

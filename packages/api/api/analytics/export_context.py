@@ -342,6 +342,27 @@ class AnalyticQueryContext:
                 return "invalid_scope"
         return None
 
+    def ensure_declared_dependencies(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+    ) -> UnavailableReason | None:
+        """Ensure declared export dependencies for one scope before self-ensure."""
+        walk_outcome = self._walk_export_dependencies(
+            analytic_id,
+            scope,
+            catch_ensure_cycle=False,
+        )
+        if not isinstance(walk_outcome, DependencyWalkResult):
+            return walk_outcome
+        for dependency_id, dependency_scope, catalog in walk_outcome.pending_ensure:
+            if dependency_id == analytic_id and dependency_scope == scope:
+                break
+            if catalog.ensure_export is None:
+                continue
+            catalog.ensure_export(self, dependency_scope)
+        return None
+
     def _apply_pending_ensure(
         self,
         pending_ensure: list[tuple[str, ExportScope, AnalyticExportCatalog]],

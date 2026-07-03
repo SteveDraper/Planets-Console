@@ -380,6 +380,8 @@ _core_client_singleton: CoreClient | None = None
 def clear_core_client_cache() -> None:
     """Drop the cached client (tests after ``clear_backend_cache`` / config change)."""
     global _core_client_singleton
+    if _core_client_singleton is not None:
+        _core_client_singleton._analytics.shutdown_background_workers()
     _core_client_singleton = None
 
 

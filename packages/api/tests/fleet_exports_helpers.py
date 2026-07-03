@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.exports import EXPORT_CATALOG
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -13,9 +14,20 @@ from tests.scores_exports_helpers import first_player_id
 __all__ = [
     "export_chain_query_context",
     "first_player_id",
+    "host_turn_at",
     "materialize_fleet_tree",
     "turn_with_score_delta",
 ]
+
+
+def host_turn_at(sample_turn, turn_number: int):
+    """Host turn snapshot and stored 1..turn_number chain for export tests."""
+    host_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    return host_turn, turn_chain_through(host_turn)
 
 
 def materialize_fleet_tree(ctx, player_id: int, *, turn: int | None = None):

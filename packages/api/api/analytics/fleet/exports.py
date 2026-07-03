@@ -52,6 +52,7 @@ def _fleet_snapshot_for_scope(
             resolved_turn,
             load_turn=services.load_turn,
             inference_materialization=services.inference_materialization,
+            query_context=ctx,
         )
 
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
@@ -87,6 +88,9 @@ def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return True
+
+    if ctx.ensure_declared_dependencies(ANALYTIC_ID, scope) is not None:
+        return is_fleet_export_ensure_satisfied(ctx, scope)
 
     _fleet_snapshot_for_scope(ctx, scope, turn=turn)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)

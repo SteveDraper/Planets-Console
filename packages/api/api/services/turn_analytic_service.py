@@ -291,6 +291,10 @@ class TurnAnalyticService:
 
         return get_inference_row_scheduler()
 
+    def shutdown_background_workers(self) -> None:
+        if self._inference_scheduler is not None:
+            self._inference_scheduler.shutdown()
+
     def _inference_scheduler_scope(
         self,
         game_id: int,

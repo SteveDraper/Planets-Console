@@ -28,8 +28,8 @@ def _reset():
         )
     )
     yield
-    clear_backend_cache()
     clear_core_client_cache()
+    clear_backend_cache()
 
 
 def test_diagnostics_recent_empty_by_default():
