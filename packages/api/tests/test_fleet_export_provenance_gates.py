@@ -9,9 +9,12 @@ import pytest
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
+    _is_fleet_snapshot_cache_hit,
     _materialize_fleet_ledger_chain_for_player,
+    get_or_materialize_fleet_ledger_for_player,
     get_or_materialize_fleet_snapshot,
 )
+from api.analytics.turn_roster import iter_turn_players
 from api.analytics.fleet.exports import EXPORT_CATALOG
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -174,24 +177,47 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
         _partial_persisted_ledger(player_id),
     )
 
+    perspective_id = perspective(sample_turn)
+    roster_ids = {player.id for player in iter_turn_players(turn)}
+    cached_snapshot = fleet_services.persistence.get_snapshot(
+        GAME_ID,
+        perspective_id,
+        turn_number,
+    )
+    assert (
+        _is_fleet_snapshot_cache_hit(
+            fleet_services.persistence,
+            GAME_ID,
+            perspective_id,
+            turn_number,
+            turn,
+            cached_snapshot,
+        )
+        is False
+    )
+
+    ledger_calls: list[int] = []
+    original_ledger_materialize = get_or_materialize_fleet_ledger_for_player
+
+    def counting_ledger_materialize(*args, **kwargs):
+        ledger_calls.append(kwargs.get("player_id", args[3]))
+        return original_ledger_materialize(*args, **kwargs)
+
     with patch(
-        "api.analytics.fleet.chain._is_fleet_snapshot_cache_hit",
-        return_value=False,
-    ) as cache_hit_mock:
+        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
+        side_effect=counting_ledger_materialize,
+    ):
         snapshot = get_or_materialize_fleet_snapshot(
             fleet_services.persistence,
             GAME_ID,
-            perspective(sample_turn),
+            perspective_id,
             turn,
             load_turn=ctx.load_turn,
             inference_materialization=fleet_services.inference_materialization,
         )
 
-    from api.analytics.turn_roster import iter_turn_players
-
-    cache_hit_mock.assert_called()
+    assert set(ledger_calls) == roster_ids
     assert snapshot is not None
-    roster_ids = {player.id for player in iter_turn_players(turn)}
     assert roster_ids <= {ledger.player_id for ledger in snapshot.players}
 
 
