@@ -14,13 +14,18 @@ from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
 from api.analytics.fleet.exports import ensure_fleet_export
 from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.turn_roster import iter_turn_players
 from api.errors import FleetMaterializationTimeoutError
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.export_chain_test_fixtures import export_chain_query_context
-from tests.test_fleet_persistence import _put_provenance_final_snapshot
+from tests.test_fleet_persistence import (
+    _inference_materialization_for_fleet,
+    _put_provenance_final_snapshot,
+)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -207,6 +212,81 @@ def test_per_player_cache_hit_does_not_require_roster_complete(persistence, load
     )
 
     assert not persistence.has_ledger(628580, 1, 111, roster[1])
+
+
+def test_per_player_prior_turn_materializes_while_other_scores_inference_in_progress(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Incident regression (game 628580 turn 8): fleet 409 while scores stream active.
+
+    Per-player materialization of fleet@(T-1) for one player must succeed without
+    requiring all-roster snapshot finality when other players' scores@T inference is
+    still in progress. Would raise ConflictError under perspective-batch coordinator
+    behavior that waited for full-roster ensure-final before one-player access.
+    """
+    turn_110 = load_turn(110)
+    turn_111 = load_turn(111)
+    turn_112 = load_turn(112)
+    assert turn_110 is not None and turn_111 is not None and turn_112 is not None
+    roster = _roster_ids(turn_112)
+    assert len(roster) > 1
+    player_p, player_q = roster[0], roster[1]
+
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    inference_persistence.put_row(
+        628580,
+        1,
+        112,
+        player_p,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="done-for-p",
+            solution_count=1,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    inference_persistence.put_row(
+        628580,
+        1,
+        112,
+        player_q,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="still-running",
+            solution_count=0,
+            is_complete=False,
+            solutions=[],
+        ),
+    )
+
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert not persistence.has_ledger(628580, 1, 111, player_p)
+    assert not persistence.has_ledger(628580, 1, 111, player_q)
+
+    get_or_materialize_fleet_ledger_for_player(
+        persistence,
+        628580,
+        1,
+        player_p,
+        turn_111,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    assert persistence.has_ledger(628580, 1, 111, player_p)
+    assert not persistence.has_ledger(628580, 1, 111, player_q)
+    snapshot_111 = persistence.get_snapshot(628580, 1, 111)
+    assert snapshot_111 is None or player_q not in {
+        ledger.player_id for ledger in snapshot_111.players
+    }
 
 
 def test_per_player_gap_start_independent(persistence, load_turn):
