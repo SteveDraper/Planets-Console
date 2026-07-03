@@ -46,6 +46,9 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.fleet_exports_helpers import host_turn_at
+
+HOST_TURN = 8
 
 
 @pytest.fixture(autouse=True)
@@ -188,14 +191,31 @@ def _end_open_table_stream(
         controller.end_stream(scheduler)
 
 
+def _host_turn_context(
+    sample_turn,
+    persistence,
+    *,
+    seed_player_ids: int | tuple[int, ...] | None = None,
+):
+    host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
+    kwargs: dict[str, object] = {
+        "persistence": persistence,
+        "stored_turns": stored_turns,
+    }
+    if seed_player_ids is not None:
+        kwargs["seed_fleet_prerequisites_for"] = seed_player_ids
+    ctx = export_chain_query_context(host_turn, **kwargs)
+    return host_turn, ctx
+
+
 def _seed_prior_turn_fleet_with_belief_sets(
     ctx,
     *,
-    sample_turn,
+    host_turn,
     player_id: int,
     torp_ids: tuple[int, ...],
 ) -> FleetSnapshotPersistenceService:
-    prior_turn = sample_turn.settings.turn - 1
+    prior_turn = host_turn.settings.turn - 1
     fleet_services = ctx.export_services["fleet"]
     persistence = fleet_services.persistence
     snapshot = persistence.get_snapshot(ctx.game_id, ctx.perspective, prior_turn)
@@ -203,9 +223,9 @@ def _seed_prior_turn_fleet_with_belief_sets(
         from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 
         prior_turn_obj = replace(
-            sample_turn,
-            settings=replace(sample_turn.settings, turn=prior_turn),
-            game=replace(sample_turn.game, turn=prior_turn),
+            host_turn,
+            settings=replace(host_turn.settings, turn=prior_turn),
+            game=replace(host_turn.game, turn=prior_turn),
         )
         snapshot = get_or_materialize_fleet_snapshot(
             persistence,
@@ -244,9 +264,13 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
-    turn_number = sample_turn.settings.turn
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_ids,
+    )
+    turn_number = HOST_TURN
 
-    ctx = export_chain_query_context(sample_turn, persistence=persistence)
     fleet_persistence = ctx.export_services["fleet"].persistence
     inference_persistence = persistence
     _wire_fleet_scores_invalidation(inference_persistence, fleet_persistence, scheduler)
@@ -270,7 +294,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
         player_id: int,
     ) -> PriorTurnFleetTorpResolution:
         return resolve_prior_turn_fleet_torp_overlay(
-            turn=sample_turn,
+            turn=host_turn,
             player_id=player_id,
             load_turn=ctx.load_turn,
             export_services=ctx.export_services,
@@ -278,7 +302,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
         )
 
     stream = iter_scores_table_inference_events(
-        sample_turn,
+        host_turn,
         player_ids,
         game_id=ctx.game_id,
         perspective=ctx.perspective,
@@ -318,7 +342,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
 
     _seed_prior_turn_fleet_with_belief_sets(
         ctx,
-        sample_turn=sample_turn,
+        host_turn=host_turn,
         player_id=target_player_id,
         torp_ids=(4, 8),
     )
@@ -345,19 +369,19 @@ def test_background_warm_eventually_applies_fleet_overlay(
     monkeypatch,
 ):
     """Background warm materializes fleet@(N-1) so overlay resolves with belief set."""
-    ctx = export_chain_query_context(
-        sample_turn,
-        persistence=persistence,
-        seed_fleet_prerequisites_for=8,
-    )
     player_id = 8
-    prior_turn = sample_turn.settings.turn - 1
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_id,
+    )
+    prior_turn = HOST_TURN - 1
 
     fleet_persistence = ctx.export_services["fleet"].persistence
     fleet_persistence.delete_snapshot(ctx.game_id, ctx.perspective, prior_turn)
 
     pending = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
@@ -367,18 +391,18 @@ def test_background_warm_eventually_applies_fleet_overlay(
     assert pending.overlay is None
 
     schedule_background_prior_turn_fleet_warm(
-        turn=sample_turn,
+        turn=host_turn,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
     )
 
     _wait_until(
         lambda: fleet_persistence.has_snapshot(ctx.game_id, ctx.perspective, prior_turn),
-        timeout_seconds=120.0,
+        timeout_seconds=30.0,
     )
 
     applied = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
@@ -398,10 +422,14 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     scheduler = _install_scheduler(monkeypatch, worker_count=1)
     player_id = sample_turn.scores[0].ownerid
     player_ids = (player_id,)
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_id,
+    )
 
-    ctx = export_chain_query_context(sample_turn, persistence=persistence)
     fleet_persistence = ctx.export_services["fleet"].persistence
-    prior_turn = sample_turn.settings.turn - 1
+    prior_turn = HOST_TURN - 1
     fleet_persistence.delete_snapshot(ctx.game_id, ctx.perspective, prior_turn)
 
     inference_persistence = persistence
@@ -410,14 +438,14 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     scope = InferenceStreamScope(
         game_id=ctx.game_id,
         perspective=ctx.perspective,
-        turn_number=sample_turn.settings.turn,
+        turn_number=HOST_TURN,
     )
 
     def resolve_fleet_torp_resolution_for_player(
         resolved_player_id: int,
     ) -> PriorTurnFleetTorpResolution:
         return resolve_prior_turn_fleet_torp_overlay(
-            turn=sample_turn,
+            turn=host_turn,
             player_id=resolved_player_id,
             load_turn=ctx.load_turn,
             export_services=ctx.export_services,
@@ -425,7 +453,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         )
 
     stream = iter_scores_table_inference_events(
-        sample_turn,
+        host_turn,
         player_ids,
         game_id=ctx.game_id,
         perspective=ctx.perspective,
@@ -458,7 +486,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
 
         _seed_prior_turn_fleet_with_belief_sets(
             ctx,
-            sample_turn=sample_turn,
+            host_turn=host_turn,
             player_id=player_id,
             torp_ids=(4,),
         )
@@ -468,14 +496,14 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
             inference_persistence.get_row(
                 ctx.game_id,
                 ctx.perspective,
-                sample_turn.settings.turn,
+                HOST_TURN,
                 player_id,
             )
             is None
         )
 
         applied = resolve_prior_turn_fleet_torp_overlay(
-            turn=sample_turn,
+            turn=host_turn,
             player_id=player_id,
             load_turn=ctx.load_turn,
             export_services=ctx.export_services,
@@ -498,22 +526,22 @@ def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
 
     player_id = sample_turn.scores[0].ownerid
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    ctx = export_chain_query_context(
+    host_turn, ctx = _host_turn_context(
         sample_turn,
-        persistence=persistence,
-        seed_fleet_prerequisites_for=player_id,
+        persistence,
+        seed_player_ids=player_id,
     )
     belief_torp_ids = (1, 2)
     _seed_prior_turn_fleet_with_belief_sets(
         ctx,
-        sample_turn=sample_turn,
+        host_turn=host_turn,
         player_id=player_id,
         torp_ids=belief_torp_ids,
     )
 
     empty_overlay = FleetTorpOverlay(belief_set=FleetLauncherBeliefSet(frozenset()))
     fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=sample_turn,
+        turn=host_turn,
         player_id=player_id,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
@@ -522,14 +550,14 @@ def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
     assert fleet_resolution.overlay is not None
 
     empty_inference = get_scores_row_inference(
-        sample_turn,
+        host_turn,
         player_id,
         load_scoreboard_turn=ctx.load_turn,
         fleet_torp_overlay=empty_overlay,
         fleet_torp_input_status="applied",
     )
     belief_inference = get_scores_row_inference(
-        sample_turn,
+        host_turn,
         player_id,
         load_scoreboard_turn=ctx.load_turn,
         fleet_torp_overlay=fleet_resolution.overlay,
@@ -543,19 +571,19 @@ def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
 
     observation = build_inference_observation(
         score,
-        sample_turn,
+        host_turn,
         load_scoreboard_turn=ctx.load_turn,
     )
     torp_step = next(step for step in resolve_tier_policies() if step.id == "admit_ship_torpedoes")
     empty_torp_catalog = build_action_catalog_from_turn(
         observation,
-        sample_turn,
+        host_turn,
         policy_step=torp_step,
         fleet_torp_overlay=empty_overlay,
     )
     belief_torp_catalog = build_action_catalog_from_turn(
         observation,
-        sample_turn,
+        host_turn,
         policy_step=torp_step,
         fleet_torp_overlay=fleet_resolution.overlay,
     )
@@ -573,24 +601,24 @@ def test_get_scores_row_inference_emits_applied_fleet_torp_input_status(
     from api.analytics.scores.inference import get_scores_row_inference
 
     player_id = sample_turn.scores[0].ownerid
-    ctx = export_chain_query_context(
+    host_turn, ctx = _host_turn_context(
         sample_turn,
-        persistence=persistence,
-        seed_fleet_prerequisites_for=player_id,
+        persistence,
+        seed_player_ids=player_id,
     )
     _seed_prior_turn_fleet_with_belief_sets(
         ctx,
-        sample_turn=sample_turn,
+        host_turn=host_turn,
         player_id=player_id,
         torp_ids=(4, 8),
     )
 
     inference = get_scores_row_inference(
-        sample_turn,
+        host_turn,
         player_id,
         load_scoreboard_turn=ctx.load_turn,
         fleet_torp_overlay=resolve_prior_turn_fleet_torp_overlay(
-            turn=sample_turn,
+            turn=host_turn,
             player_id=player_id,
             load_turn=ctx.load_turn,
             export_services=ctx.export_services,
