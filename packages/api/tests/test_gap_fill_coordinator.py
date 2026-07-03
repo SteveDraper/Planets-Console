@@ -439,6 +439,7 @@ def test_gap_fill_with_inference_never_uses_legacy_chain_path(
     from tests.test_fleet_persistence import (
         _inference_materialization_for_fleet,
         _put_provenance_final_snapshot,
+        _seed_scores_rows_for_all_players,
     )
 
     turn_110 = load_turn(110)
@@ -447,10 +448,14 @@ def test_gap_fill_with_inference_never_uses_legacy_chain_path(
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
-    _, inference_materialization = _inference_materialization_for_fleet(
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
         memory_backend,
         load_turn,
     )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
 
     from api.analytics.fleet.gap_fill_coordinator import FleetGapFillCoordinator
 
@@ -462,10 +467,18 @@ def test_gap_fill_with_inference_never_uses_legacy_chain_path(
         forward_unwind_calls += 1
         return original_forward_unwind(self, *args, **kwargs)
 
-    with patch.object(
-        FleetGapFillCoordinator,
-        "_forward_unwind_via_export_ensure",
-        tracking_forward_unwind,
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
+            side_effect=AssertionError(
+                "legacy chain path must not run when inference materialization is set",
+            ),
+        ),
+        patch.object(
+            FleetGapFillCoordinator,
+            "_forward_unwind_via_export_ensure",
+            tracking_forward_unwind,
+        ),
     ):
         get_or_materialize_fleet_snapshot(
             persistence,
