@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -24,6 +25,7 @@ from api.analytics.fleet.constants import (
     ANALYTIC_ID,
     GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC,
     GAP_FILL_MAX_RETRIES,
+    GAP_FILL_TARGET_TURN_COLLECT_SEC,
 )
 from api.analytics.fleet.exports import ensure_fleet_export
 from api.analytics.fleet.gap_fill_deferred_notifications import (
@@ -132,10 +134,24 @@ class FleetGapFillCoordinator:
         with self._lock:
             self._reap_abandoned_inflight_locked()
             if self._inflight is not None and self._inflight.event.is_set():
-                self._inflight = None
+                if (
+                    self._inflight.generation != generation
+                    or turn_number <= self._inflight.target_turn
+                ):
+                    self._inflight = None
             if self._inflight is not None and self._inflight.generation == generation:
-                self._inflight.target_turn = max(self._inflight.target_turn, turn_number)
                 inflight = self._inflight
+                extended = turn_number > inflight.target_turn
+                inflight.target_turn = max(inflight.target_turn, turn_number)
+                if (
+                    inflight.event.is_set()
+                    and inflight.error is None
+                    and extended
+                ):
+                    inflight.event.clear()
+                    inflight.result_ledger = None
+                    inflight.leader_thread = threading.current_thread()
+                    is_leader = True
             else:
                 inflight = _InflightMaterialization(
                     target_turn=turn_number,
@@ -167,9 +183,6 @@ class FleetGapFillCoordinator:
             raise
         finally:
             inflight.event.set()
-            with self._lock:
-                if self._inflight is inflight:
-                    self._inflight = None
 
         if inflight.error is not None:
             raise inflight.error
@@ -184,6 +197,25 @@ class FleetGapFillCoordinator:
             return
         self._inflight = None
         inflight.event.set()
+
+    def _collect_target_turn_extensions(
+        self,
+        inflight: _InflightMaterialization,
+    ) -> None:
+        """Wait until concurrent waiters stop raising ``target_turn``."""
+        settle_deadline = time.monotonic() + GAP_FILL_TARGET_TURN_COLLECT_SEC
+        last_target = inflight.target_turn
+        while True:
+            if time.monotonic() >= settle_deadline:
+                return
+            with self._lock:
+                if self._inflight is not inflight:
+                    return
+                current_target = inflight.target_turn
+            if current_target > last_target:
+                last_target = current_target
+                settle_deadline = time.monotonic() + GAP_FILL_TARGET_TURN_COLLECT_SEC
+            threading.Event().wait(0.001)
 
     def _wait_for_inflight(
         self,
@@ -276,6 +308,7 @@ class FleetGapFillCoordinator:
         )
 
         while True:
+            self._collect_target_turn_extensions(inflight)
             target_turn = inflight.target_turn
             if complete_before is None:
                 complete_before = complete_snapshot_turn_numbers(
