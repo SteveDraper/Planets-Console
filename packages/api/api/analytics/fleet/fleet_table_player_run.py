@@ -201,13 +201,6 @@ class FleetLedgerWireProgressTracker:
         self.emitted_progress = True
         return events
 
-    def on_materialization_leg(
-        self,
-        persisted: PersistedFleetLedger,
-        _materialize_turn: int,
-    ) -> None:
-        self.leg_progress_events(persisted)
-
 
 def run_fleet_player_materialization_job(
     session: FleetPlayerStreamSession,
