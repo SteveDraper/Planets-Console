@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { AnalyticShellScope, TableDataResponse } from '../../api/bff'
+import type { AnalyticShellScope } from '../../api/bff'
 import * as bff from '../../api/bff'
 import {
   bumpScoresInferenceRevision,
@@ -18,12 +18,12 @@ vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
   return {
     ...actual,
-    fetchAnalyticTable: vi.fn(),
+    fetchFleetComponentCatalog: vi.fn(),
     fetchFleetTableStream: vi.fn(),
   }
 })
 
-import { fetchAnalyticTable } from '../../api/bff'
+import { fetchFleetComponentCatalog } from '../../api/bff'
 
 const scope: AnalyticShellScope = {
   gameId: '628580',
@@ -69,29 +69,6 @@ const refinedRecord: FleetTableRecord = {
   ],
 }
 
-const fleetWire = {
-  analyticId: 'fleet' as const,
-  defaultActiveOnly: true as const,
-  componentCatalog: {
-    hulls: { '13': 'Cruiser A' },
-    engines: {},
-    beams: {},
-    torpedoes: {},
-  },
-  players: [
-    {
-      playerId: 8,
-      playerName: 'Alice',
-      records: [placeholderRecord],
-    },
-    {
-      playerId: 9,
-      playerName: 'Bob',
-      records: [placeholderRecord],
-    },
-  ],
-}
-
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -111,7 +88,28 @@ describe('FleetAnalyticTableTile stream integration', () => {
       storageAvailablePerspectives: null,
     })
     seedShellViewpoint('Alice')
-    vi.mocked(fetchAnalyticTable).mockResolvedValue(fleetWire as unknown as TableDataResponse)
+    vi.mocked(fetchFleetComponentCatalog).mockResolvedValue({
+      hulls: { '13': 'Cruiser A' },
+      engines: {},
+      beams: {},
+      torpedoes: {},
+    })
+  })
+
+  it('shows all tiles in pending state before any stream event', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    vi.mocked(bff.fetchFleetTableStream).mockImplementation(
+      async () => new Promise(() => {})
+    )
+
+    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+      wrapper: createWrapper(client),
+    })
+
+    expect(await screen.findByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Bob fleet table' })).toBeInTheDocument()
+    expect(screen.getAllByText('Fleet materialization in progress')).toHaveLength(2)
   })
 
   it('updates only the targeted player tile from stream events without REST refetch', async () => {
@@ -120,9 +118,13 @@ describe('FleetAnalyticTableTile stream integration', () => {
     vi.mocked(bff.fetchFleetTableStream).mockImplementation(
       async (_scope, _playerIds, handlers) => {
         handlers.onEvent({
-          type: 'record_refined',
+          type: 'ledger_updated',
           playerId: 9,
-          record: refinedRecord,
+          ledger: {
+            playerId: 9,
+            playerName: 'Bob',
+            records: [refinedRecord],
+          },
         })
         handlers.onEvent({
           type: 'complete',
@@ -144,10 +146,69 @@ describe('FleetAnalyticTableTile stream integration', () => {
 
     const aliceTile = screen.getByRole('region', { name: 'Alice fleet table' })
     expect(within(aliceTile).queryByText('Cruiser A')).not.toBeInTheDocument()
-    expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
+    expect(fetchFleetComponentCatalog).toHaveBeenCalled()
   })
 
-  it('does not refetch REST when scores inference revision bumps', async () => {
+  it('shows partial completion for one player while another remains pending', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    vi.mocked(bff.fetchFleetTableStream).mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'ledger_updated',
+          playerId: 8,
+          ledger: {
+            playerId: 8,
+            playerName: 'Alice',
+            records: [placeholderRecord],
+          },
+        })
+        await new Promise(() => {})
+      }
+    )
+
+    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+      wrapper: createWrapper(client),
+    })
+
+    const aliceTile = await screen.findByRole('region', { name: 'Alice fleet table' })
+    await waitFor(() => {
+      expect(within(aliceTile).getByText('<= 318')).toBeInTheDocument()
+    })
+
+    const bobTile = screen.getByRole('region', { name: 'Bob fleet table' })
+    expect(within(bobTile).getByText('Fleet materialization in progress')).toBeInTheDocument()
+  })
+
+  it('shows error on one tile without hiding others', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    vi.mocked(bff.fetchFleetTableStream).mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'error',
+          playerId: 9,
+          detail: 'Player 9 materialization failed',
+        })
+        handlers.onEvent({
+          type: 'complete',
+          playerId: 8,
+          isFinal: true,
+          summary: 'Alice ok',
+        })
+      }
+    )
+
+    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+      wrapper: createWrapper(client),
+    })
+
+    const bobTile = await screen.findByRole('region', { name: 'Bob fleet table' })
+    expect(within(bobTile).getByText('Player 9 materialization failed')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
+  })
+
+  it('does not refetch catalog when scores inference revision bumps', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     vi.mocked(bff.fetchFleetTableStream).mockImplementation(
@@ -173,14 +234,14 @@ describe('FleetAnalyticTableTile stream integration', () => {
 
     await screen.findByRole('region', { name: 'Alice fleet table' })
 
-    const callsAfterInitialLoad = vi.mocked(fetchAnalyticTable).mock.calls.length
+    const callsAfterInitialLoad = vi.mocked(fetchFleetComponentCatalog).mock.calls.length
 
     act(() => {
       bumpScoresInferenceRevision(scope)
     })
 
     await waitFor(() => {
-      expect(vi.mocked(fetchAnalyticTable).mock.calls.length).toBe(callsAfterInitialLoad)
+      expect(vi.mocked(fetchFleetComponentCatalog).mock.calls.length).toBe(callsAfterInitialLoad)
     })
   })
 })

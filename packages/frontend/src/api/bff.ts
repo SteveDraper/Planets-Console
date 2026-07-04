@@ -6,6 +6,11 @@ import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
 import type { ConnectionsMapParams } from '../analytics/connections/api'
 import { appendScoresTableQueryParams } from '../analytics/scores/api'
 import type { ScoresTableParams } from '../analytics/scores/api'
+import {
+  EMPTY_FLEET_COMPONENT_CATALOG,
+  parseFleetComponentCatalog,
+  type FleetComponentCatalog,
+} from '../analytics/fleet/fleetComponentCatalog'
 import type {
   MapDataResponse,
   StellarCartographySampleResponse,
@@ -854,6 +859,20 @@ export async function fetchFleetTableStream(
     parseFleetTableStreamEvent,
     handlers
   )
+}
+
+export async function fetchFleetComponentCatalog(
+  scope: AnalyticShellScope
+): Promise<FleetComponentCatalog> {
+  const path = '/bff/analytics/fleet/component-catalog'
+  const qs = `?${analyticScopeParams(scope).toString()}`
+  const endpointLabel = `GET ${path}`
+  const response = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  if (!response.ok) {
+    throw new Error(withEndpointIfGeneric(String(response.status), endpointLabel))
+  }
+  const body = (await response.json()) as { componentCatalog?: unknown }
+  return parseFleetComponentCatalog(body.componentCatalog) ?? EMPTY_FLEET_COMPONENT_CATALOG
 }
 
 export async function fetchAnalyticMap(

@@ -10,6 +10,7 @@ import { connectFleetTableStreamUntilComplete } from './fleetTableStreamConnect'
 import {
   fleetPlayerStreamSliceFromState,
   initialFleetPlayerStreamState,
+  pendingFleetPlayerStreamSlice,
   reduceFleetPlayerStreamState,
   type FleetPlayerStreamSlice,
   type FleetPlayerStreamState,
@@ -29,6 +30,13 @@ const fleetTableStreamPolicy: PerPlayerAnalyticStreamPolicy<
   reduceRefState: (current, event) => reduceFleetPlayerStreamState(current, event),
   isRefStateComplete: (state) => state.isComplete,
   publishedFromRefState: (_playerId, state) => fleetPlayerStreamSliceFromState(state),
+  seedPublishedOnNewConnection: (playerIds) => {
+    const initialSlices = new Map<number, FleetPlayerStreamSlice>()
+    for (const playerId of playerIds) {
+      initialSlices.set(playerId, pendingFleetPlayerStreamSlice())
+    }
+    return initialSlices
+  },
   streamFailureEvent: (playerId, summary) => ({
     type: 'error',
     playerId,

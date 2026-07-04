@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { FleetPlayerTableTile } from './FleetPlayerTableTile'
 import { FleetTableView } from './FleetTableView'
+import { pendingFleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
 import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
-import type { FleetComponentCatalog, FleetTableRecord, FleetTableWire } from './fleetTableWireSchema'
+import type { FleetComponentCatalog, FleetTableRecord } from './fleetTableWireSchema'
 
 const testComponentCatalog: FleetComponentCatalog = {
   hulls: { '13': 'Cruiser A', '14': 'Cruiser B' },
@@ -75,29 +75,6 @@ const lostRecord: FleetTableRecord = {
   buildOptionSets: [],
 }
 
-const fleetWire: FleetTableWire = {
-  analyticId: 'fleet',
-  defaultActiveOnly: true,
-  componentCatalog: testComponentCatalog,
-  players: [
-    {
-      playerId: 8,
-      playerName: 'Alice',
-      discrepancy: {
-        hostTurn: 111,
-        activeRowCount: 2,
-        scoreboardImpliedCount: 1,
-      },
-      records: [activeRecord, lostRecord],
-    },
-    {
-      playerId: 9,
-      playerName: 'Bob',
-      records: [],
-    },
-  ],
-}
-
 describe('FleetPlayerTableTile', () => {
   it('renders only active disposition rows', () => {
     render(
@@ -132,8 +109,21 @@ describe('FleetPlayerTableTile', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows pending progress while materializing', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        streamSlice={pendingFleetPlayerStreamSlice()}
+      />
+    )
+
+    expect(screen.getByText('Fleet materialization in progress')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for fleet records.')).toBeInTheDocument()
+  })
+
   it('expands alternate build option sets from the row expander', async () => {
-    const user = userEvent.setup()
+    const user = (await import('@testing-library/user-event')).default.setup()
     render(
       <FleetPlayerTableTile
         playerName="Alice"
@@ -182,7 +172,17 @@ describe('FleetTableView', () => {
   it('sorts the viewpoint player tile first', () => {
     seedShellViewpoint('Bob')
 
-    render(<FleetTableView data={fleetWire} />)
+    const streamPlayersById = new Map([
+      [8, pendingFleetPlayerStreamSlice()],
+      [9, pendingFleetPlayerStreamSlice()],
+    ])
+
+    render(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+      />
+    )
 
     const tiles = screen.getAllByRole('region', { name: /fleet table$/i })
     expect(tiles).toHaveLength(2)
@@ -194,7 +194,17 @@ describe('FleetTableView', () => {
     seedShellViewpoint('Alice')
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
-    render(<FleetTableView data={fleetWire} />)
+    const streamPlayersById = new Map([
+      [8, pendingFleetPlayerStreamSlice()],
+      [9, pendingFleetPlayerStreamSlice()],
+    ])
+
+    render(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+      />
+    )
 
     expect(screen.getByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Bob fleet table' })).not.toBeInTheDocument()

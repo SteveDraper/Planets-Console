@@ -279,6 +279,17 @@ def test_list_analytics_includes_fleet_table_and_map_analytic():
     }
 
 
+def test_fleet_component_catalog_returns_turn_names_without_fleet_compute():
+    response = client.get(f"/analytics/fleet/component-catalog?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "fleet"
+    catalog = data.get("componentCatalog")
+    assert isinstance(catalog, dict)
+    assert isinstance(catalog.get("hulls"), dict)
+    assert len(catalog["hulls"]) > 0
+
+
 def test_fleet_table_returns_players_with_observed_records():
     response = client.get(f"/analytics/fleet/table?{SCOPE_QS}")
     assert response.status_code == 200

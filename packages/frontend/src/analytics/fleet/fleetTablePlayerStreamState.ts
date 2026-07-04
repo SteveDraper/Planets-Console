@@ -1,9 +1,7 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
-import type {
-  FleetCountDiscrepancy,
-  FleetTablePlayer,
-  FleetTableRecord,
-} from './fleetTableWireSchema'
+import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
+
+export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in progress'
 
 export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 
@@ -14,6 +12,7 @@ export type FleetPlayerStreamSlice = {
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
   isFinal: boolean
+  isPending: boolean
   summary: string
   error: string | null
 }
@@ -25,6 +24,7 @@ export type FleetPlayerStreamState = {
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
   isFinal: boolean
+  isPending: boolean
   summary: string
   error: string | null
 }
@@ -36,7 +36,19 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
-    summary: '',
+    isPending: true,
+    summary: FLEET_MATERIALIZATION_PENDING_SUMMARY,
+    error: null,
+  }
+}
+
+export function pendingFleetPlayerStreamSlice(): FleetPlayerStreamSlice {
+  return {
+    discrepancyOverlay: 'inherit',
+    isComplete: false,
+    isFinal: false,
+    isPending: true,
+    summary: FLEET_MATERIALIZATION_PENDING_SUMMARY,
     error: null,
   }
 }
@@ -54,6 +66,19 @@ function upsertRecord(
   return next
 }
 
+function provenanceSummary(event: Extract<FleetTableStreamEvent, { type: 'provenance' }>): string {
+  if (!event.turnEvidenceAtN) {
+    return 'Collecting turn evidence'
+  }
+  if (!event.priorLedgerAtNMinus1) {
+    return 'Building prior ledger'
+  }
+  if (!event.isFinal) {
+    return 'Refining fleet records'
+  }
+  return 'Finalizing fleet ledger'
+}
+
 export function reduceFleetPlayerStreamState(
   state: FleetPlayerStreamState,
   event: FleetTableStreamEvent
@@ -67,6 +92,8 @@ export function reduceFleetPlayerStreamState(
       records: [...ledger.records],
       discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
       discrepancy: ledger.discrepancy,
+      isPending: false,
+      summary: state.isComplete ? state.summary : 'Refining fleet records',
       error: null,
     }
   }
@@ -76,6 +103,7 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       records: upsertRecord(baseRecords, event.record),
+      isPending: false,
       error: null,
     }
   }
@@ -84,6 +112,8 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       isFinal: event.isFinal,
+      isPending: false,
+      summary: state.isComplete ? state.summary : provenanceSummary(event),
     }
   }
 
@@ -92,6 +122,7 @@ export function reduceFleetPlayerStreamState(
       ...state,
       isComplete: true,
       isFinal: event.isFinal,
+      isPending: false,
       summary: event.summary,
       error: null,
     }
@@ -101,6 +132,7 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       isComplete: true,
+      isPending: false,
       error: event.detail,
       summary: event.detail,
     }
@@ -113,6 +145,7 @@ export function fleetPlayerStreamSliceFromState(
   state: FleetPlayerStreamState
 ): FleetPlayerStreamSlice | null {
   if (
+    !state.isPending &&
     state.records == null &&
     state.playerName == null &&
     state.discrepancyOverlay === 'inherit' &&
@@ -126,6 +159,7 @@ export function fleetPlayerStreamSliceFromState(
     discrepancyOverlay: state.discrepancyOverlay,
     isComplete: state.isComplete,
     isFinal: state.isFinal,
+    isPending: state.isPending,
     summary: state.summary,
     error: state.error,
   }
@@ -144,8 +178,7 @@ export function fleetPlayerStreamSliceFromState(
 }
 
 function resolveFleetDiscrepancy(
-  streamSlice: FleetPlayerStreamSlice | undefined,
-  baseDiscrepancy: FleetCountDiscrepancy | undefined
+  streamSlice: FleetPlayerStreamSlice | undefined
 ): FleetCountDiscrepancy | undefined {
   switch (streamSlice?.discrepancyOverlay) {
     case 'set':
@@ -153,12 +186,11 @@ function resolveFleetDiscrepancy(
     case 'clear':
       return undefined
     default:
-      return baseDiscrepancy
+      return undefined
   }
 }
 
-export function mergeFleetPlayerWithStreamSlice(
-  basePlayer: FleetTablePlayer | undefined,
+export function fleetPlayerFromStreamSlice(
   streamSlice: FleetPlayerStreamSlice | undefined,
   fallbackPlayerName: string
 ): {
@@ -166,15 +198,17 @@ export function mergeFleetPlayerWithStreamSlice(
   records: readonly FleetTableRecord[]
   discrepancy?: FleetCountDiscrepancy
   streamError: string | null
+  streamSlice: FleetPlayerStreamSlice | undefined
 } {
-  const playerName = streamSlice?.playerName ?? basePlayer?.playerName ?? fallbackPlayerName
-  const records = streamSlice?.records ?? basePlayer?.records ?? []
-  const discrepancy = resolveFleetDiscrepancy(streamSlice, basePlayer?.discrepancy)
+  const playerName = streamSlice?.playerName ?? fallbackPlayerName
+  const records = streamSlice?.records ?? []
+  const discrepancy = resolveFleetDiscrepancy(streamSlice)
 
   return {
     playerName,
     records,
     ...(discrepancy != null ? { discrepancy } : {}),
     streamError: streamSlice?.error ?? null,
+    streamSlice,
   }
 }

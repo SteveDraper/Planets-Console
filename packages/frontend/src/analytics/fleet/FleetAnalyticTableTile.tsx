@@ -1,9 +1,6 @@
-import { useMemo } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
-import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { FleetTableView } from './FleetTableView'
-import { parseFleetTableWire, type FleetTableWire } from './fleetTableWireSchema'
-import { useFleetTableQuery } from './useFleetTableQuery'
+import { useFleetComponentCatalogQuery } from './useFleetComponentCatalogQuery'
 import { useFleetTableStream } from './useFleetTableStream'
 
 type FleetAnalyticTableTileProps = {
@@ -11,37 +8,12 @@ type FleetAnalyticTableTileProps = {
   fetchEnabled: boolean
 }
 
-type FleetTableParseResult =
-  | { ok: true; data: FleetTableWire }
-  | { ok: false; error: string }
-
-function parseFleetTableWireResult(payload: unknown): FleetTableParseResult {
-  try {
-    return { ok: true, data: parseFleetTableWire(payload) }
-  } catch (parseError) {
-    return {
-      ok: false,
-      error: parseError instanceof Error ? parseError.message : String(parseError),
-    }
-  }
-}
-
 export function FleetAnalyticTableTile({
   analyticScope,
   fetchEnabled,
 }: FleetAnalyticTableTileProps) {
-  const { data, isPending, error } = useFleetTableQuery(analyticScope, fetchEnabled)
-
-  const parsedFleetTable = useMemo(
-    () => (data != null ? parseFleetTableWireResult(data) : null),
-    [data]
-  )
-
-  const streamEnabled =
-    fetchEnabled &&
-    analyticScope != null &&
-    parsedFleetTable != null &&
-    parsedFleetTable.ok
+  const streamEnabled = fetchEnabled && analyticScope != null
+  const componentCatalog = useFleetComponentCatalogQuery(analyticScope, streamEnabled)
   const { streamPlayersById } = useFleetTableStream(analyticScope, streamEnabled)
 
   if (analyticScope == null) {
@@ -51,26 +23,8 @@ export function FleetAnalyticTableTile({
       </div>
     )
   }
-  if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
-  if (error) {
-    return (
-      <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-        Error loading data. {errorDetailFromUnknown(error)}
-      </div>
-    )
-  }
-  if (!data) return null
-
-  if (parsedFleetTable == null || !parsedFleetTable.ok) {
-    return (
-      <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-        Error loading fleet table.{' '}
-        {parsedFleetTable?.ok === false ? parsedFleetTable.error : 'Unknown parse error.'}
-      </div>
-    )
-  }
 
   return (
-    <FleetTableView data={parsedFleetTable.data} streamPlayersById={streamPlayersById} />
+    <FleetTableView componentCatalog={componentCatalog} streamPlayersById={streamPlayersById} />
   )
 }

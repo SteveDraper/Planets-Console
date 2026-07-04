@@ -68,6 +68,57 @@ def _events_for_players(
     return events
 
 
+def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn):
+    reset_fleet_table_stream_scheduler_for_tests()
+    scheduler = FleetTableStreamScheduler(worker_count=0)
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    services.persistence.put_ledger(
+        628580,
+        1,
+        sample_turn.settings.turn,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+    player_ids = (player_id,)
+
+    first = iter_fleet_table_stream_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        fleet_services=services,
+        persistence=services.persistence,
+        scheduler=scheduler,
+    )
+    first.close()
+
+    second = iter_fleet_table_stream_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        fleet_services=services,
+        persistence=services.persistence,
+        scheduler=scheduler,
+    )
+    try:
+        first_event = next(second)
+        assert first_event.get("detail") != TABLE_STREAM_ALREADY_ACTIVE_DETAIL
+    finally:
+        second.close()
+
+
 def test_fleet_table_stream_reconnect_returns_conflict_while_active(sample_turn):
     reset_fleet_table_stream_scheduler_for_tests()
     scheduler = FleetTableStreamScheduler(worker_count=0)

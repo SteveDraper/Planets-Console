@@ -227,8 +227,7 @@ def cleanup_fleet_table_stream_sessions(
     *,
     stream_token: str,
 ) -> None:
-    if sessions:
-        scheduler.end_fleet_table_stream(scope, sessions, stream_token=stream_token)
+    scheduler.end_fleet_table_stream(scope, sessions, stream_token=stream_token)
 
 
 def iter_fleet_table_stream_events(
@@ -295,22 +294,20 @@ def iter_fleet_table_stream_events(
                 )
 
         if player_ids:
-            try:
-                yield from iter_multiplexed_fleet_table_events(
-                    controller.current_scheduled_players(),
-                    tag_player_id=True,
-                    finished_run_ids=controller.finished_run_ids,
-                    is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
-                    player_provider=controller.current_scheduled_players,
-                    pending_events_provider=controller.drain_pending_wire_events,
-                    wake_event=controller.wake_multiplex,
-                )
-            finally:
-                cleanup_fleet_table_stream_sessions(
-                    scheduler,
-                    stream_scope,
-                    tuple(row.session for row in controller.current_scheduled_players()),
-                    stream_token=stream_token,
-                )
+            yield from iter_multiplexed_fleet_table_events(
+                controller.current_scheduled_players(),
+                tag_player_id=True,
+                finished_run_ids=controller.finished_run_ids,
+                is_stream_active=lambda: scheduler.owns_table_stream(stream_token),
+                player_provider=controller.current_scheduled_players,
+                pending_events_provider=controller.drain_pending_wire_events,
+                wake_event=controller.wake_multiplex,
+            )
     finally:
+        cleanup_fleet_table_stream_sessions(
+            scheduler,
+            stream_scope,
+            tuple(row.session for row in controller.current_scheduled_players()),
+            stream_token=stream_token,
+        )
         controller.detach()
