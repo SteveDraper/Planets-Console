@@ -80,7 +80,6 @@ class _GapFillCoherence:
     def put_ledger(
         self,
         turn_number: int,
-        player_id: int,
         persisted: PersistedFleetLedger,
     ) -> None:
         self._assert_unchanged()
@@ -88,7 +87,7 @@ class _GapFillCoherence:
             self.game_id,
             self.perspective,
             turn_number,
-            player_id,
+            self.player_id,
             persisted,
             snapshot_complete_roster=None,
         )
@@ -379,7 +378,7 @@ def _materialize_and_persist_player_turn(
         inference_materialization=inference_materialization,
     )
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
-    coherence.put_ledger(materialize_turn, player_id, persisted)
+    coherence.put_ledger(materialize_turn, persisted)
     return persisted
 
 
