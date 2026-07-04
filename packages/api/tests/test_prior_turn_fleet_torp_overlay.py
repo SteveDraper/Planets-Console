@@ -6,14 +6,19 @@ import logging
 from dataclasses import replace
 
 import pytest
-from api.analytics.fleet.chain import ensure_fleet_baseline, get_or_materialize_fleet_snapshot
+from api.analytics.fleet.chain import (
+    ensure_fleet_baseline_for_player,
+    get_or_materialize_fleet_snapshot,
+)
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetBuildOptionSet,
     FleetFieldUnknown,
+    FleetMaterializationProvenance,
     FleetShipRecord,
     FleetShipRecordFields,
+    PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     resolve_prior_turn_fleet_torp_overlay,
@@ -156,10 +161,10 @@ def test_resolve_prior_turn_overlay_uses_export_services(sample_turn, persistenc
 
 
 def _run_warm_synchronously(monkeypatch: pytest.MonkeyPatch) -> None:
-    def immediate_thread(*, target, daemon=True):
+    def immediate_thread(*, target, args=(), daemon=True):
         class _ImmediateThread:
             def start(self) -> None:
-                target()
+                target(*args)
 
         return _ImmediateThread()
 
@@ -174,6 +179,7 @@ def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
     monkeypatch,
     caplog,
 ):
+    player_id = 8
     host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
     fleet_services = build_ephemeral_fleet_compute_services(
         host_turn,
@@ -182,18 +188,30 @@ def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
     prior_turn = HOST_TURN - 1
     prior_turn_info = fleet_services.load_turn(prior_turn)
     assert prior_turn_info is not None
-    fleet_services.persistence.put_snapshot(
+    fleet_services.persistence.put_ledger(
         fleet_services.game_id,
         fleet_services.perspective,
         prior_turn,
-        ensure_fleet_baseline(fleet_services.game_id, fleet_services.perspective, prior_turn_info),
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(
+                fleet_services.game_id,
+                fleet_services.perspective,
+                prior_turn_info,
+                player_id,
+            ),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
     )
 
     def raise_conflict(*_args, **_kwargs):
         raise ConflictError("fleet snapshot gap-fill exceeded invalidation retries")
 
     monkeypatch.setattr(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_snapshot",
+        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
         raise_conflict,
     )
     _run_warm_synchronously(monkeypatch)
@@ -203,6 +221,7 @@ def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
             turn=host_turn,
             load_turn=fleet_services.load_turn,
             export_services={"fleet": fleet_services},
+            player_ids=(player_id,),
         )
 
     assert "Background prior-turn fleet warm failed" not in caplog.text
@@ -213,6 +232,7 @@ def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
     monkeypatch,
     caplog,
 ):
+    player_id = sample_turn.scores[0].ownerid
     host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
     fleet_services = build_ephemeral_fleet_compute_services(
         host_turn,
@@ -223,7 +243,7 @@ def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
         raise ConflictError("fleet snapshot gap-fill exceeded invalidation retries")
 
     monkeypatch.setattr(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_snapshot",
+        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
         raise_conflict,
     )
     _run_warm_synchronously(monkeypatch)
@@ -233,6 +253,7 @@ def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
             turn=host_turn,
             load_turn=fleet_services.load_turn,
             export_services={"fleet": fleet_services},
+            player_ids=(player_id,),
         )
 
     assert "Background prior-turn fleet warm failed" in caplog.text

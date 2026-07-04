@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import patch
 
-import pytest
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
+    _is_fleet_snapshot_cache_hit,
     _materialize_fleet_ledger_chain_for_player,
+    get_or_materialize_fleet_ledger_for_player,
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.exports import EXPORT_CATALOG
@@ -19,6 +20,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.turn_roster import iter_turn_players
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
@@ -174,19 +176,48 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
         _partial_persisted_ledger(player_id),
     )
 
+    perspective_id = perspective(sample_turn)
+    roster_ids = {player.id for player in iter_turn_players(turn)}
+    cached_snapshot = fleet_services.persistence.get_snapshot(
+        GAME_ID,
+        perspective_id,
+        turn_number,
+    )
+    assert (
+        _is_fleet_snapshot_cache_hit(
+            fleet_services.persistence,
+            GAME_ID,
+            perspective_id,
+            turn_number,
+            turn,
+            cached_snapshot,
+        )
+        is False
+    )
+
+    ledger_calls: list[int] = []
+    original_ledger_materialize = get_or_materialize_fleet_ledger_for_player
+
+    def counting_ledger_materialize(*args, **kwargs):
+        ledger_calls.append(kwargs.get("player_id", args[3]))
+        return original_ledger_materialize(*args, **kwargs)
+
     with patch(
-        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
-        side_effect=AssertionError("must not gap-fill when only partial cache exists"),
+        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
+        side_effect=counting_ledger_materialize,
     ):
-        with pytest.raises(AssertionError, match="must not gap-fill"):
-            get_or_materialize_fleet_snapshot(
-                fleet_services.persistence,
-                GAME_ID,
-                perspective(sample_turn),
-                turn,
-                load_turn=ctx.load_turn,
-                inference_materialization=fleet_services.inference_materialization,
-            )
+        snapshot = get_or_materialize_fleet_snapshot(
+            fleet_services.persistence,
+            GAME_ID,
+            perspective_id,
+            turn,
+            load_turn=ctx.load_turn,
+            inference_materialization=fleet_services.inference_materialization,
+        )
+
+    assert set(ledger_calls) == roster_ids
+    assert snapshot is not None
+    assert roster_ids <= {ledger.player_id for ledger in snapshot.players}
 
 
 def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(

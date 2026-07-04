@@ -171,10 +171,10 @@ def _wait_until(
 
 
 def _run_warm_synchronously(monkeypatch: pytest.MonkeyPatch) -> None:
-    def immediate_thread(*, target, daemon=True):
+    def immediate_thread(*, target, args=(), daemon=True):
         class _ImmediateThread:
             def start(self) -> None:
-                target()
+                target(*args)
 
         return _ImmediateThread()
 
@@ -408,9 +408,15 @@ def test_background_warm_eventually_applies_fleet_overlay(
         turn=host_turn,
         load_turn=ctx.load_turn,
         export_services=ctx.export_services,
+        player_ids=(player_id,),
     )
 
-    assert fleet_persistence.has_snapshot(ctx.game_id, ctx.perspective, prior_turn)
+    assert fleet_persistence.has_final_ledger(
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn,
+        player_id,
+    )
 
     applied = resolve_prior_turn_fleet_torp_overlay(
         turn=host_turn,

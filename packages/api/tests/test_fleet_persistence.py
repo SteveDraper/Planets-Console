@@ -886,7 +886,7 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     winner = _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
 
     with patch(
-        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_snapshot_chain",
+        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
         side_effect=_FleetSnapshotInvalidated,
     ):
         result = get_or_materialize_fleet_snapshot(
