@@ -85,7 +85,7 @@ class InferenceInvalidationService:
         self._persistence.on_row_persisted = self.on_inference_evidence_updated
 
     def wire_scores_invalidation_to_fleet_persistence(self) -> None:
-        """Register scores inference invalidation when fleet snapshots are persisted."""
+        """Register per-player scores row invalidation on fleet ledger persist callbacks."""
         if self._fleet_persistence is None:
             return
         self._fleet_persistence.on_snapshot_persisted = self.on_fleet_snapshot_persisted
