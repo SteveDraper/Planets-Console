@@ -87,6 +87,8 @@ describe('useFleetTableStream', () => {
       },
     }
 
+    let emitRemainingEvents: (() => void) | undefined
+
     vi.spyOn(bff, 'fetchFleetTableStream').mockImplementation(
       async (_scope, _playerIds, handlers) => {
         handlers.onEvent({
@@ -98,32 +100,49 @@ describe('useFleetTableStream', () => {
             records: [firstLegRecord],
           },
         })
-        handlers.onEvent({
-          type: 'provenance',
-          playerId: 8,
-          turnEvidenceAtN: true,
-          priorLedgerAtNMinus1: true,
-          isFinal: false,
-        })
-        handlers.onEvent({
-          type: 'ledger_updated',
-          playerId: 8,
-          ledger: {
-            playerId: 8,
-            playerName: 'Alice',
-            records: [firstLegRecord, secondLegRecord],
-          },
-        })
-        handlers.onEvent({
-          type: 'complete',
-          playerId: 8,
-          isFinal: true,
-          summary: 'Player 8 ok',
+
+        await new Promise<void>((resolve) => {
+          emitRemainingEvents = () => {
+            handlers.onEvent({
+              type: 'provenance',
+              playerId: 8,
+              turnEvidenceAtN: true,
+              priorLedgerAtNMinus1: true,
+              isFinal: false,
+            })
+            handlers.onEvent({
+              type: 'ledger_updated',
+              playerId: 8,
+              ledger: {
+                playerId: 8,
+                playerName: 'Alice',
+                records: [firstLegRecord, secondLegRecord],
+              },
+            })
+            handlers.onEvent({
+              type: 'complete',
+              playerId: 8,
+              isFinal: true,
+              summary: 'Player 8 ok',
+            })
+            resolve()
+          }
         })
       }
     )
 
     const { result } = renderHook(() => useFleetTableStream(scope, true))
+
+    await waitFor(() => {
+      const slice = result.current.streamPlayersById.get(8)
+      expect(slice?.records).toEqual([firstLegRecord])
+      expect(slice?.isComplete).toBe(false)
+      expect(slice?.isPending).toBe(true)
+    })
+
+    await act(async () => {
+      emitRemainingEvents!()
+    })
 
     await waitFor(() => {
       const slice = result.current.streamPlayersById.get(8)
