@@ -2,36 +2,28 @@ import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { AnalyticShellScope, TableDataResponse } from '../../api/bff'
+import type { AnalyticShellScope } from '../../api/bff'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
 import { seedShellViewpoint } from './fleetTestShell'
-import {
-  loadFleetTableWireFixture,
-  zodParseableFleetTableWireCases,
-} from './loadFleetTableWireFixture'
-import { parseFleetTableWire } from './fleetTableWireSchema'
 
 vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
   return {
     ...actual,
-    fetchAnalyticTable: vi.fn(),
+    fetchFleetComponentCatalog: vi.fn(),
+    fetchFleetTableStream: vi.fn(),
   }
 })
 
-import { fetchAnalyticTable } from '../../api/bff'
+import { fetchFleetComponentCatalog, fetchFleetTableStream } from '../../api/bff'
 
 const sampleScope: AnalyticShellScope = {
   gameId: '628580',
   turn: 5,
   perspective: 1,
 }
-
-const goldenFleetTableWire = parseFleetTableWire(
-  zodParseableFleetTableWireCases(loadFleetTableWireFixture().cases)[0]!.expectedTableWire
-)
 
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -51,41 +43,39 @@ describe('FleetAnalyticTableTile', () => {
       storageAvailablePerspectives: null,
     })
     seedShellViewpoint('Alice')
+    vi.mocked(fetchFleetComponentCatalog).mockResolvedValue({
+      hulls: { '13': 'Cruiser A' },
+      engines: {},
+      beams: {},
+      torpedoes: {},
+    })
+    vi.mocked(fetchFleetTableStream).mockImplementation(async () => {})
   })
 
-  it('renders fleet table content when wire is valid', async () => {
+  it('renders visible player tiles immediately in pending state before stream events', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(fetchAnalyticTable).mockResolvedValue(
-      goldenFleetTableWire as unknown as TableDataResponse
-    )
 
     render(
       <FleetAnalyticTableTile analyticScope={sampleScope} fetchEnabled />,
       { wrapper: createWrapper(client) }
     )
 
-    expect(
-      await screen.findByRole('heading', { level: 3, name: 'koshling' })
-    ).toBeInTheDocument()
-    expect(screen.getByText('<= 318')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Bob fleet table' })).toBeInTheDocument()
+    expect(screen.getAllByText('Fleet materialization in progress')).toHaveLength(2)
+    expect(screen.getAllByText('Waiting for fleet records.')).toHaveLength(2)
   })
 
-  it('shows a parse error when fleet table wire is invalid', async () => {
+  it('does not call monolithic fleet table REST', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    vi.mocked(fetchAnalyticTable).mockResolvedValue({
-      analyticId: 'fleet',
-    } as unknown as TableDataResponse)
 
     render(
       <FleetAnalyticTableTile analyticScope={sampleScope} fetchEnabled />,
       { wrapper: createWrapper(client) }
     )
 
-    expect(
-      await screen.findByText(/Error loading fleet table\./)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/Fleet table payload defaultActiveOnly must be true\./)
-    ).toBeInTheDocument()
+    await screen.findByRole('region', { name: 'Alice fleet table' })
+    expect(fetchFleetComponentCatalog).toHaveBeenCalled()
+    expect(fetchFleetTableStream).toHaveBeenCalled()
   })
 })

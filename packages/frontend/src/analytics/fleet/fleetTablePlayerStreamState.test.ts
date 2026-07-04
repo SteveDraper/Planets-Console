@@ -115,6 +115,19 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(next.summary).toBe('done')
   })
 
+  it('updates provenance summary while materializing', () => {
+    const next = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'provenance',
+      playerId: 8,
+      turnEvidenceAtN: false,
+      priorLedgerAtNMinus1: false,
+      isFinal: false,
+    })
+
+    expect(next.summary).toBe('Collecting turn evidence')
+    expect(next.isPending).toBe(false)
+  })
+
   it('marks failure from error events', () => {
     const next = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
       type: 'error',
@@ -147,6 +160,7 @@ describe('mergeFleetPlayerWithStreamSlice', () => {
     records: [refinedRecord],
     isComplete: true,
     isFinal: true,
+    isPending: false,
     summary: 'ok',
     error: null,
   } as const
@@ -204,8 +218,20 @@ describe('mergeFleetPlayerWithStreamSlice', () => {
 })
 
 describe('fleetPlayerStreamSliceFromState', () => {
-  it('returns null for untouched initial state', () => {
-    expect(fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState())).toBeNull()
+  it('returns null for untouched initial state without pending flag', () => {
+    const state = initialFleetPlayerStreamState()
+    expect(fleetPlayerStreamSliceFromState({ ...state, isPending: false })).toBeNull()
+  })
+
+  it('publishes pending slice from initial state', () => {
+    expect(fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState())).toEqual({
+      discrepancyOverlay: 'inherit',
+      isComplete: false,
+      isFinal: false,
+      isPending: true,
+      summary: 'Fleet materialization in progress',
+      error: null,
+    })
   })
 
   it('publishes set overlay and discrepancy from ledger state', () => {
@@ -222,7 +248,8 @@ describe('fleetPlayerStreamSliceFromState', () => {
       discrepancy: ledgerPlayer.discrepancy,
       isComplete: false,
       isFinal: false,
-      summary: '',
+      isPending: false,
+      summary: 'Refining fleet records',
       error: null,
     })
   })

@@ -7,7 +7,7 @@ import {
   useReactTable,
   type ExpandedState,
 } from '@tanstack/react-table'
-import { AlertTriangle, ChevronDown, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Loader2, ShieldCheck } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import {
   EMPTY_FLEET_COMPONENT_CATALOG,
@@ -29,6 +29,12 @@ import {
 } from './fleetRecordComponentDisplay'
 import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
+import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
+import {
+  fleetTileProgressSummary,
+  isFleetTileActivelyMaterializing,
+  isFleetTileMaterializing,
+} from './fleetTileStatus'
 
 type FleetPlayerTableTileProps = {
   playerName: string
@@ -36,6 +42,7 @@ type FleetPlayerTableTileProps = {
   discrepancy?: FleetCountDiscrepancy
   componentCatalog?: FleetComponentCatalog
   streamError?: string | null
+  streamSlice?: FleetPlayerStreamSlice
 }
 
 const columnHelper = createColumnHelper<FleetTableRecord>()
@@ -72,12 +79,35 @@ function FleetStatusIcons({ record }: { record: FleetTableRecord }) {
   )
 }
 
+function FleetTileProgressIndicator({
+  streamSlice,
+}: {
+  streamSlice: FleetPlayerStreamSlice | undefined
+}) {
+  if (!isFleetTileMaterializing(streamSlice)) {
+    return null
+  }
+
+  const summary = fleetTileProgressSummary(streamSlice)
+  const activelyMaterializing = isFleetTileActivelyMaterializing(streamSlice)
+
+  return (
+    <p role="status" className="mt-1 inline-flex items-center gap-1.5 text-xs text-slate-300">
+      {activelyMaterializing ? (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-emerald-400" aria-hidden />
+      ) : null}
+      <span>{summary}</span>
+    </p>
+  )
+}
+
 export function FleetPlayerTableTile({
   playerName,
   records,
   discrepancy,
   componentCatalog = EMPTY_FLEET_COMPONENT_CATALOG,
   streamError = null,
+  streamSlice,
 }: FleetPlayerTableTileProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
@@ -198,6 +228,7 @@ export function FleetPlayerTableTile({
             )}
           </p>
         ) : null}
+        <FleetTileProgressIndicator streamSlice={streamSlice} />
         {streamError != null ? (
           <p role="alert" className="mt-1 text-xs text-red-400">
             {streamError}
@@ -205,7 +236,11 @@ export function FleetPlayerTableTile({
         ) : null}
       </header>
       {activeRecords.length === 0 ? (
-        <p className="px-4 py-3 text-sm text-slate-400">No active fleet records.</p>
+        <p className="px-4 py-3 text-sm text-slate-400">
+          {isFleetTileMaterializing(streamSlice)
+            ? 'Waiting for fleet records.'
+            : 'No active fleet records.'}
+        </p>
       ) : (
         <div className="overflow-auto">
           <table className="min-w-full border-collapse text-sm">

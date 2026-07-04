@@ -56,6 +56,19 @@ describe('useFleetTableStream', () => {
     seedShellViewpoint('Alice')
   })
 
+  it('seeds pending slices for all players on stream connect', async () => {
+    vi.spyOn(bff, 'fetchFleetTableStream').mockImplementation(
+      async () => new Promise(() => {})
+    )
+
+    const { result } = renderHook(() => useFleetTableStream(scope, true))
+
+    await waitFor(() => {
+      expect(result.current.streamPlayersById.get(8)?.isPending).toBe(true)
+      expect(result.current.streamPlayersById.get(9)?.isPending).toBe(true)
+    })
+  })
+
   it('updates visible players independently from stream events', async () => {
     vi.spyOn(bff, 'fetchFleetTableStream').mockImplementation(
       async (_scope, _playerIds, handlers) => {
