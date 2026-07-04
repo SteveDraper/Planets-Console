@@ -258,7 +258,7 @@ def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_tu
 def test_per_player_cache_hit_does_not_require_roster_complete(persistence, load_turn):
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 
-    turn, = require_turns(load_turn, 111)
+    (turn,) = require_turns(load_turn, 111)
     roster = roster_ids(turn)
     player_p = roster[0]
     persistence.put_ledger(

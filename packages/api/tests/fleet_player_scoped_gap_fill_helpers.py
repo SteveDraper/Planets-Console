@@ -41,9 +41,7 @@ def require_turns(
 ) -> tuple[TurnInfo, ...]:
     turns = tuple(load_turn(turn_number) for turn_number in turn_numbers)
     missing = [
-        turn_number
-        for turn_number, turn in zip(turn_numbers, turns, strict=True)
-        if turn is None
+        turn_number for turn_number, turn in zip(turn_numbers, turns, strict=True) if turn is None
     ]
     assert not missing, f"missing turns: {missing}"
     return turns
@@ -61,7 +59,7 @@ def seed_provenance_snapshot(
     *,
     from_turn: int = 109,
 ) -> TurnInfo:
-    turn, = require_turns(load_turn, from_turn)
+    (turn,) = require_turns(load_turn, from_turn)
     _put_provenance_final_snapshot(persistence, GAME_ID, 1, turn)
     return turn
 

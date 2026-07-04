@@ -746,9 +746,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
         if 1 not in player_generations:
             continue
         last_generation_zero_index = max(
-            index
-            for index, generation in enumerate(player_generations)
-            if generation == 0
+            index for index, generation in enumerate(player_generations) if generation == 0
         )
         post_invalidation_generations = player_generations[last_generation_zero_index + 1 :]
         assert post_invalidation_generations
