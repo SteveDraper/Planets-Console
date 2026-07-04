@@ -40,7 +40,6 @@ from api.transport.fleet_table_stream import (
     stream_fleet_table_ndjson,
 )
 
-
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
 
@@ -322,9 +321,7 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
         services=services,
     )
     player_events = [event for event in events if event.get("playerId") == player_id]
-    ledger_updates = [
-        event for event in player_events if event.get("type") == "ledger_updated"
-    ]
+    ledger_updates = [event for event in player_events if event.get("type") == "ledger_updated"]
     complete_events = [event for event in player_events if event.get("type") == "complete"]
 
     assert len(ledger_updates) >= 2
@@ -334,10 +331,7 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
     assert isinstance(first_records, list)
     assert len(first_records) > 0
     complete_index = player_events.index(complete_events[0])
-    assert all(
-        player_events.index(event) < complete_index
-        for event in ledger_updates
-    )
+    assert all(player_events.index(event) < complete_index for event in ledger_updates)
 
 
 def test_wire_ledger_progress_events_use_host_turn_roster_names(sample_turn):
