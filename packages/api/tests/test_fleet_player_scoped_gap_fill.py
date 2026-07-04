@@ -561,7 +561,7 @@ def test_coordinator_same_player_waiters_satisfy_to_max_turn(persistence, load_t
 
 
 def test_coordinator_different_players_separate_dedupe_keys(persistence, load_turn):
-    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    turn_109, turn_110, turn_111, turn_112 = require_turns(load_turn, 109, 110, 111, 112)
     player_p, player_q = two_players_from_turn(turn_112)
     seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
@@ -579,38 +579,47 @@ def test_coordinator_different_players_separate_dedupe_keys(persistence, load_tu
         return original_p_unwind(inflight, turn, **kwargs)
 
     q_started = threading.Event()
+    errors: list[BaseException] = []
 
     def materialize_q() -> None:
         q_started.set()
-        get_or_materialize_fleet_ledger_for_player(
-            persistence,
-            628580,
-            1,
-            player_q,
-            turn_112,
-            load_turn=load_turn,
-        )
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_q,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
 
-    with patch.object(coordinator_p, "_run_leader_unwind", side_effect=gated_p_unwind):
-        thread_p = threading.Thread(
-            target=lambda: get_or_materialize_fleet_ledger_for_player(
+    def materialize_p() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
                 player_p,
                 turn_112,
                 load_turn=load_turn,
-            ),
-        )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with patch.object(coordinator_p, "_run_leader_unwind", side_effect=gated_p_unwind):
+        thread_p = threading.Thread(target=materialize_p)
         thread_q = threading.Thread(target=materialize_q)
         thread_p.start()
         assert leader_p_ready.wait(timeout=5)
         thread_q.start()
         assert q_started.wait(timeout=5)
+        thread_q.join(timeout=30)
         release_p.set()
         thread_p.join(timeout=30)
-        thread_q.join(timeout=30)
 
+    assert not errors, f"thread errors: {errors}"
     assert persistence.has_ledger(628580, 1, 112, player_p)
     assert persistence.has_ledger(628580, 1, 112, player_q)
 
