@@ -2,7 +2,7 @@ import { FleetPlayerTableTile } from './FleetPlayerTableTile'
 import type { FleetComponentCatalog } from './fleetComponentCatalog'
 import { EMPTY_FLEET_COMPONENT_CATALOG } from './fleetComponentCatalog'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
-import { mergeFleetPlayerWithStreamSlice } from './fleetTablePlayerStreamState'
+import { fleetPlayerFromStreamSlice } from './fleetTablePlayerStreamState'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
 type FleetTableViewProps = {
@@ -28,7 +28,7 @@ export function FleetTableView({
     <div className="flex flex-col gap-3 p-4">
       {visiblePlayers.map((player) => {
         const streamSlice = streamPlayersById.get(player.playerId)
-        const merged = mergeFleetPlayerWithStreamSlice(undefined, streamSlice, player.name)
+        const merged = fleetPlayerFromStreamSlice(streamSlice, player.name)
         return (
           <FleetPlayerTableTile
             key={player.playerId}

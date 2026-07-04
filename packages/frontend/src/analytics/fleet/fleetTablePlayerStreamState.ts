@@ -1,9 +1,5 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
-import type {
-  FleetCountDiscrepancy,
-  FleetTablePlayer,
-  FleetTableRecord,
-} from './fleetTableWireSchema'
+import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
 import { FLEET_MATERIALIZATION_PENDING_SUMMARY } from './fleetTileStatus'
 
 export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
@@ -181,8 +177,7 @@ export function fleetPlayerStreamSliceFromState(
 }
 
 function resolveFleetDiscrepancy(
-  streamSlice: FleetPlayerStreamSlice | undefined,
-  baseDiscrepancy: FleetCountDiscrepancy | undefined
+  streamSlice: FleetPlayerStreamSlice | undefined
 ): FleetCountDiscrepancy | undefined {
   switch (streamSlice?.discrepancyOverlay) {
     case 'set':
@@ -190,12 +185,11 @@ function resolveFleetDiscrepancy(
     case 'clear':
       return undefined
     default:
-      return baseDiscrepancy
+      return undefined
   }
 }
 
-export function mergeFleetPlayerWithStreamSlice(
-  basePlayer: FleetTablePlayer | undefined,
+export function fleetPlayerFromStreamSlice(
   streamSlice: FleetPlayerStreamSlice | undefined,
   fallbackPlayerName: string
 ): {
@@ -205,9 +199,9 @@ export function mergeFleetPlayerWithStreamSlice(
   streamError: string | null
   streamSlice: FleetPlayerStreamSlice | undefined
 } {
-  const playerName = streamSlice?.playerName ?? basePlayer?.playerName ?? fallbackPlayerName
-  const records = streamSlice?.records ?? basePlayer?.records ?? []
-  const discrepancy = resolveFleetDiscrepancy(streamSlice, basePlayer?.discrepancy)
+  const playerName = streamSlice?.playerName ?? fallbackPlayerName
+  const records = streamSlice?.records ?? []
+  const discrepancy = resolveFleetDiscrepancy(streamSlice)
 
   return {
     playerName,

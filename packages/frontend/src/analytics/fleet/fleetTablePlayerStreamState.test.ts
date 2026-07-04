@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import {
+  fleetPlayerFromStreamSlice,
   fleetPlayerStreamSliceFromState,
   initialFleetPlayerStreamState,
-  mergeFleetPlayerWithStreamSlice,
   reduceFleetPlayerStreamState,
 } from './fleetTablePlayerStreamState'
 import type { FleetTablePlayer, FleetTableRecord } from './fleetTableWireSchema'
@@ -142,20 +142,7 @@ describe('reduceFleetPlayerStreamState', () => {
   })
 })
 
-describe('mergeFleetPlayerWithStreamSlice', () => {
-  const restDiscrepancy = {
-    hostTurn: 111,
-    activeRowCount: 2,
-    scoreboardImpliedCount: 1,
-  }
-
-  const basePlayer: FleetTablePlayer = {
-    playerId: 8,
-    playerName: 'Alice REST',
-    records: [baseRecord],
-    discrepancy: restDiscrepancy,
-  }
-
+describe('fleetPlayerFromStreamSlice', () => {
   const streamSliceBase = {
     records: [refinedRecord],
     isComplete: true,
@@ -165,30 +152,37 @@ describe('mergeFleetPlayerWithStreamSlice', () => {
     error: null,
   } as const
 
-  it('prefers stream records over REST when present', () => {
-    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
-      ...streamSliceBase,
-      discrepancyOverlay: 'inherit',
-    }, 'Alice shell')
+  it('uses stream records and player name when present', () => {
+    const merged = fleetPlayerFromStreamSlice(
+      {
+        ...streamSliceBase,
+        playerName: 'Alice stream',
+        discrepancyOverlay: 'inherit',
+      },
+      'Alice shell'
+    )
 
     expect(merged.records).toEqual([refinedRecord])
-    expect(merged.playerName).toBe('Alice REST')
+    expect(merged.playerName).toBe('Alice stream')
   })
 
-  it('falls back to REST when stream has no record overlay', () => {
-    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, undefined, 'Alice shell')
+  it('falls back to shell player name and empty records without a stream slice', () => {
+    const merged = fleetPlayerFromStreamSlice(undefined, 'Alice shell')
 
-    expect(merged.records).toEqual([baseRecord])
-    expect(merged.playerName).toBe('Alice REST')
+    expect(merged.records).toEqual([])
+    expect(merged.playerName).toBe('Alice shell')
   })
 
-  it('inherits REST discrepancy when stream overlay is inherit', () => {
-    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
-      ...streamSliceBase,
-      discrepancyOverlay: 'inherit',
-    }, 'Alice shell')
+  it('omits discrepancy when stream overlay is inherit', () => {
+    const merged = fleetPlayerFromStreamSlice(
+      {
+        ...streamSliceBase,
+        discrepancyOverlay: 'inherit',
+      },
+      'Alice shell'
+    )
 
-    expect(merged.discrepancy).toEqual(restDiscrepancy)
+    expect(merged.discrepancy).toBeUndefined()
   })
 
   it('uses stream discrepancy when overlay is set', () => {
@@ -198,20 +192,26 @@ describe('mergeFleetPlayerWithStreamSlice', () => {
       scoreboardImpliedCount: 2,
     }
 
-    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
-      ...streamSliceBase,
-      discrepancyOverlay: 'set',
-      discrepancy: streamDiscrepancy,
-    }, 'Alice shell')
+    const merged = fleetPlayerFromStreamSlice(
+      {
+        ...streamSliceBase,
+        discrepancyOverlay: 'set',
+        discrepancy: streamDiscrepancy,
+      },
+      'Alice shell'
+    )
 
     expect(merged.discrepancy).toEqual(streamDiscrepancy)
   })
 
   it('omits discrepancy when stream overlay is clear', () => {
-    const merged = mergeFleetPlayerWithStreamSlice(basePlayer, {
-      ...streamSliceBase,
-      discrepancyOverlay: 'clear',
-    }, 'Alice shell')
+    const merged = fleetPlayerFromStreamSlice(
+      {
+        ...streamSliceBase,
+        discrepancyOverlay: 'clear',
+      },
+      'Alice shell'
+    )
 
     expect(merged.discrepancy).toBeUndefined()
   })
