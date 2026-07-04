@@ -14,7 +14,7 @@
 
 version: 4
 category: standard  # must match filename stem prior_weights_{category}.yaml
-gameCategoryRulesVersion: 2  # bump when GameCategory.from_game_settings() rules change
+gameCategoryRulesVersion: 4  # bump when GameCategory.from_game_settings() rules change
 
 hulls:
   # Inference ship-limit band: P(hull|category) pseudo-counts keyed by inference hull category.

@@ -1,5 +1,5 @@
 # Inference prior miner discovery config for epic games (#92).
-# Epic: shiplimit >= 500, not campaign, endturn > 30 (GameCategory.from_game_settings).
+# Epic: shiplimit >= 500, not campaign, endturn > 30, exactly 11 players (GameCategory.from_game_info).
 # Authoritative spec: docs/design-military-score-inference-build-priors.md section 10.1
 version: 1
 patterns:

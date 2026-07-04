@@ -29,7 +29,7 @@ def _minimal_prior_weights_document(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "version": 4,
         "category": "standard",
-        "gameCategoryRulesVersion": 2,
+        "gameCategoryRulesVersion": 4,
         "hulls": {
             "before_ship_limit": {"global": {}},
             "after_ship_limit": {"global": {}},
@@ -216,7 +216,7 @@ def test_component_tables_reject_unknown_hull_category():
             {
                 "version": 4,
                 "category": "standard",
-                "gameCategoryRulesVersion": 2,
+                "gameCategoryRulesVersion": 4,
                 "hulls": {
                     "before_ship_limit": {"global": {}},
                     "after_ship_limit": {"global": {}},
@@ -239,7 +239,7 @@ def test_slotfill_rejects_wildcard_key():
             {
                 "version": 4,
                 "category": "standard",
-                "gameCategoryRulesVersion": 2,
+                "gameCategoryRulesVersion": 4,
                 "hulls": {
                     "before_ship_limit": {"global": {}},
                     "after_ship_limit": {"global": {}},
