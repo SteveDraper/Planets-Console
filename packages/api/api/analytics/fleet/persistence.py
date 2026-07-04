@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
@@ -335,9 +335,8 @@ class FleetSnapshotPersistenceService:
 
         cleared: set[int] = set()
         cleared_player_ids: set[int] = set()
-        for stored_turn in self._stored_turn_numbers(game_id, perspective):
-            if stored_turn < turn_number:
-                continue
+        for stored_turn in self._iter_stored_turns_from(game_id, perspective, turn_number):
+            # Turn replace deletes whole documents; raw read avoids legacy upgrade side effects.
             document = self._read_document_raw(game_id, perspective, stored_turn)
             if document is None:
                 continue
@@ -361,6 +360,7 @@ class FleetSnapshotPersistenceService:
         """Drop one player's fleet ledgers at turns >= turn_number for one perspective."""
 
         def invalidate_turn(stored_turn: int) -> bool:
+            # Per-player delete may upgrade legacy layout before removing one ledger entry.
             document = self._load_document(game_id, perspective, stored_turn)
             if document is None:
                 return False
@@ -371,9 +371,7 @@ class FleetSnapshotPersistenceService:
             return True
 
         cleared: set[int] = set()
-        for stored_turn in self._stored_turn_numbers(game_id, perspective):
-            if stored_turn < turn_number:
-                continue
+        for stored_turn in self._iter_stored_turns_from(game_id, perspective, turn_number):
             if invalidate_turn(stored_turn):
                 cleared.add(stored_turn)
         if cleared:
@@ -541,6 +539,18 @@ class FleetSnapshotPersistenceService:
                 if isinstance(player_id, int):
                     player_ids.append(player_id)
         return sorted(set(player_ids))
+
+    def _iter_stored_turns_from(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> Iterator[int]:
+        """Yield stored fleet turn numbers at or after ``turn_number``."""
+
+        for stored_turn in self._stored_turn_numbers(game_id, perspective):
+            if stored_turn >= turn_number:
+                yield stored_turn
 
     def _stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:
         turns_prefix = f"games/{game_id}/{perspective}/turns"
