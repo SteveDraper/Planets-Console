@@ -37,12 +37,10 @@ def test_epic_and_standard_require_exactly_eleven_players(sample_turn):
     assert GameCategory.from_game_settings(epic_settings, player_count=10) == GameCategory.UNKNOWN
     assert GameCategory.from_game_settings(epic_settings, player_count=12) == GameCategory.UNKNOWN
     assert (
-        GameCategory.from_game_settings(standard_settings, player_count=11)
-        == GameCategory.STANDARD
+        GameCategory.from_game_settings(standard_settings, player_count=11) == GameCategory.STANDARD
     )
     assert (
-        GameCategory.from_game_settings(standard_settings, player_count=8)
-        == GameCategory.UNKNOWN
+        GameCategory.from_game_settings(standard_settings, player_count=8) == GameCategory.UNKNOWN
     )
 
 
