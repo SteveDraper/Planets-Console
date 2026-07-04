@@ -88,7 +88,7 @@ class InferenceInvalidationService:
         """Register per-player scores row invalidation on fleet ledger persist callbacks."""
         if self._fleet_persistence is None:
             return
-        self._fleet_persistence.on_snapshot_persisted = self.on_fleet_snapshot_persisted
+        self._fleet_persistence.on_snapshot_persisted = None
         self._fleet_persistence.on_ledger_persisted = self.on_fleet_ledger_persisted
 
     def on_fleet_ledger_persisted(
@@ -112,7 +112,10 @@ class InferenceInvalidationService:
         perspective: int,
         fleet_turn: int,
     ) -> None:
-        """Drop scores@N inference rows and reschedule when fleet@(N-1) is persisted."""
+        """Legacy roster-level invalidation after explicit ``put_snapshot`` only.
+
+        Production scores coupling uses ``on_fleet_ledger_persisted`` per player.
+        """
         host_turn = fleet_turn + 1
         self._persistence.delete_host_turn_document(game_id, perspective, host_turn)
         reschedule_all_inference_rows(

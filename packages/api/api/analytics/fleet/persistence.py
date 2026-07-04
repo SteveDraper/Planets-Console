@@ -113,7 +113,6 @@ class FleetSnapshotPersistenceService:
         player_id: int,
         persisted: PersistedFleetLedger,
         *,
-        snapshot_complete_roster: frozenset[int] | None = None,
         defer_ledger_persisted_notification: bool = False,
     ) -> None:
         if persisted.ledger.player_id != player_id:
@@ -145,12 +144,6 @@ class FleetSnapshotPersistenceService:
                 prior=prior,
                 persisted=to_store,
             )
-        self._notify_snapshot_persisted_if_complete(
-            game_id,
-            perspective,
-            turn_number,
-            snapshot_complete_roster=snapshot_complete_roster,
-        )
 
     def has_ledger(
         self,
@@ -265,13 +258,7 @@ class FleetSnapshotPersistenceService:
             turn_number,
             fleet_turn_snapshot_to_json(snapshot),
         )
-        self._notify_snapshot_persisted_if_complete(
-            game_id,
-            perspective,
-            turn_number,
-            snapshot_complete_roster=None,
-            force=True,
-        )
+        self._notify_snapshot_persisted_legacy(game_id, perspective, turn_number)
 
     def _prior_ledger_for_notification(
         self,
@@ -308,50 +295,20 @@ class FleetSnapshotPersistenceService:
         if prior.materialization_version != persisted.materialization_version:
             self._on_ledger_persisted(game_id, perspective, turn_number, player_id)
 
-    def _notify_snapshot_persisted_if_complete(
+    def _notify_snapshot_persisted_legacy(
         self,
         game_id: int,
         perspective: int,
         turn_number: int,
-        *,
-        snapshot_complete_roster: frozenset[int] | None,
-        force: bool = False,
     ) -> None:
+        """Invoke legacy roster-level callback after explicit ``put_snapshot`` only."""
         if self._on_snapshot_persisted is None:
-            return
-        if force:
-            self._on_snapshot_persisted(game_id, perspective, turn_number)
-            return
-        if snapshot_complete_roster is None:
-            return
-        if not self._roster_has_final_ledgers(
-            game_id,
-            perspective,
-            turn_number,
-            snapshot_complete_roster,
-        ):
             return
         self._on_snapshot_persisted(game_id, perspective, turn_number)
 
-    def _roster_has_final_ledgers(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        roster_player_ids: frozenset[int],
-    ) -> bool:
-        for roster_player_id in roster_player_ids:
-            if not self.has_final_ledger(
-                game_id,
-                perspective,
-                turn_number,
-                roster_player_id,
-            ):
-                return False
-        return True
-
     @property
     def on_snapshot_persisted(self) -> OnSnapshotPersistedCallback | None:
+        """Legacy roster-level callback; production wiring uses ``on_ledger_persisted``."""
         return self._on_snapshot_persisted
 
     @on_snapshot_persisted.setter

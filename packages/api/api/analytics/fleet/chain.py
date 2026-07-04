@@ -89,7 +89,6 @@ class _GapFillCoherence:
             turn_number,
             self.player_id,
             persisted,
-            snapshot_complete_roster=None,
             defer_ledger_persisted_notification=True,
         )
         self._assert_unchanged()
