@@ -87,9 +87,24 @@ class InferenceInvalidationService:
     def wire_scores_invalidation_to_fleet_persistence(self) -> None:
         """Register scores inference invalidation when fleet snapshots are persisted."""
         if self._fleet_persistence is None:
-            self._fleet_persistence.on_snapshot_persisted = None
             return
         self._fleet_persistence.on_snapshot_persisted = self.on_fleet_snapshot_persisted
+        self._fleet_persistence.on_ledger_persisted = self.on_fleet_ledger_persisted
+
+    def on_fleet_ledger_persisted(
+        self,
+        game_id: int,
+        perspective: int,
+        fleet_turn: int,
+        player_id: int,
+    ) -> None:
+        """Drop one player's scores@N inference row when fleet@(N-1) is persisted."""
+        host_turn = fleet_turn + 1
+        self._persistence.delete_row(game_id, perspective, host_turn, player_id)
+        reschedule_inference_row(
+            self._scope(game_id, perspective, host_turn),
+            player_id,
+        )
 
     def on_fleet_snapshot_persisted(
         self,

@@ -29,8 +29,8 @@ from api.analytics.fleet.constants import (
 )
 from api.analytics.fleet.exports import ensure_fleet_export
 from api.analytics.fleet.gap_fill_deferred_notifications import (
-    complete_snapshot_turn_numbers,
-    emit_deferred_fleet_snapshot_notifications,
+    complete_ledger_turn_numbers_for_player,
+    emit_deferred_fleet_ledger_notifications,
 )
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
@@ -383,10 +383,11 @@ class FleetGapFillCoordinator:
             self._collect_target_turn_extensions(inflight)
             target_turn = inflight.target_turn
             if complete_before is None:
-                complete_before = complete_snapshot_turn_numbers(
+                complete_before = complete_ledger_turn_numbers_for_player(
                     self._persistence,
                     self._game_id,
                     self._perspective,
+                    self._player_id,
                     target_turn,
                     load_turn,
                 )
@@ -492,10 +493,11 @@ class FleetGapFillCoordinator:
                 continue
 
             assert complete_before is not None
-            emit_deferred_fleet_snapshot_notifications(
+            emit_deferred_fleet_ledger_notifications(
                 self._persistence,
                 self._game_id,
                 self._perspective,
+                self._player_id,
                 complete_before=complete_before,
                 through_turn=materialized_target,
                 load_turn=load_turn,

@@ -1096,9 +1096,9 @@ def test_gap_fill_defers_snapshot_notify_until_chain_completes(
     )
     _seed_scores_rows_for_all_players(inference_persistence, turn_111)
 
-    callback_turns: list[int] = []
-    persistence.on_snapshot_persisted = lambda _g, _p, turn_number: callback_turns.append(
-        turn_number
+    callback_events: list[tuple[int, int]] = []
+    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callback_events.append(
+        (turn_number, player_id)
     )
 
     put_ledger_calls = 0
@@ -1124,7 +1124,8 @@ def test_gap_fill_defers_snapshot_notify_until_chain_completes(
     roster_size = len(list(iter_turn_players(turn_111)))
     assert roster_size > 1
     assert put_ledger_calls >= roster_size
-    assert callback_turns == [111]
+    assert len(callback_events) == roster_size
+    assert all(turn_number == 111 for turn_number, _ in callback_events)
 
 
 def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
@@ -1167,3 +1168,51 @@ def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
     assert snapshot.turn == 112
     for player in iter_turn_players(turn_112):
         assert inference_persistence.get_row(628580, 1, 112, player.id) is None
+
+
+def test_fleet_ledger_persisted_invalidates_scores_row_for_player_only(
+    persistence,
+    load_turn,
+    memory_backend,
+    monkeypatch,
+):
+    from api.analytics.turn_roster import iter_turn_players
+
+    inference_persistence, _ = _inference_materialization_for_fleet(memory_backend, load_turn)
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    players = list(iter_turn_players(turn_112))
+    player_p = players[0].id
+    player_q = players[1].id
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    rescheduled_players: list[int] = []
+    all_rescheduled: list[None] = []
+
+    def spy_reschedule_row(_scope, player_id, **_kwargs):
+        rescheduled_players.append(player_id)
+
+    def spy_reschedule_all(_scope, **_kwargs):
+        all_rescheduled.append(None)
+
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_inference_row",
+        spy_reschedule_row,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_all_inference_rows",
+        spy_reschedule_all,
+    )
+
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=persistence,
+    )
+    invalidation.wire_scores_invalidation_to_fleet_persistence()
+
+    invalidation.on_fleet_ledger_persisted(628580, 1, 111, player_p)
+
+    assert inference_persistence.get_row(628580, 1, 112, player_p) is None
+    assert inference_persistence.get_row(628580, 1, 112, player_q) is not None
+    assert rescheduled_players == [player_p]
+    assert all_rescheduled == []

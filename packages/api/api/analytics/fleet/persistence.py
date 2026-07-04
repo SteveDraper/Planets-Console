@@ -28,6 +28,7 @@ from api.errors import NotFoundError, ValidationError
 from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
+OnLedgerPersistedCallback = Callable[[int, int, int, int], None]
 
 
 class FleetSnapshotPersistenceService:
@@ -72,9 +73,11 @@ class FleetSnapshotPersistenceService:
         storage: StorageBackend,
         *,
         on_snapshot_persisted: OnSnapshotPersistedCallback | None = None,
+        on_ledger_persisted: OnLedgerPersistedCallback | None = None,
     ) -> None:
         self._storage = storage
         self._on_snapshot_persisted = on_snapshot_persisted
+        self._on_ledger_persisted = on_ledger_persisted
         self._invalidation_generation: dict[tuple[int, int, int], int] = {}
         self._generation_lock = threading.Lock()
 
@@ -111,6 +114,7 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         snapshot_complete_roster: frozenset[int] | None = None,
+        defer_ledger_persisted_notification: bool = False,
     ) -> None:
         if persisted.ledger.player_id != player_id:
             raise ValidationError(
@@ -122,10 +126,25 @@ class FleetSnapshotPersistenceService:
             provenance=persisted.provenance,
             materialization_version=FLEET_MATERIALIZATION_VERSION,
         )
+        prior = self._prior_ledger_for_notification(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
         document = self._load_or_create_document(game_id, perspective, turn_number)
         ledgers = self._ledgers_object(document)
         ledgers[str(player_id)] = persisted_fleet_ledger_to_json(to_store)
         self._write_document(game_id, perspective, turn_number, document)
+        if not defer_ledger_persisted_notification:
+            self._notify_ledger_persisted_if_needed(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+                prior=prior,
+                persisted=to_store,
+            )
         self._notify_snapshot_persisted_if_complete(
             game_id,
             perspective,
@@ -254,6 +273,41 @@ class FleetSnapshotPersistenceService:
             force=True,
         )
 
+    def _prior_ledger_for_notification(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> PersistedFleetLedger | None:
+        document = self._load_document(game_id, perspective, turn_number)
+        if document is None:
+            return None
+        ledger_wire = self._ledger_wire_from_document(document, player_id)
+        if ledger_wire is None:
+            return None
+        return persisted_fleet_ledger_from_json(ledger_wire)
+
+    def _notify_ledger_persisted_if_needed(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        *,
+        prior: PersistedFleetLedger | None,
+        persisted: PersistedFleetLedger,
+    ) -> None:
+        if self._on_ledger_persisted is None:
+            return
+        if not persisted.provenance.is_final:
+            return
+        if prior is None or not prior.provenance.is_final:
+            self._on_ledger_persisted(game_id, perspective, turn_number, player_id)
+            return
+        if prior.materialization_version != persisted.materialization_version:
+            self._on_ledger_persisted(game_id, perspective, turn_number, player_id)
+
     def _notify_snapshot_persisted_if_complete(
         self,
         game_id: int,
@@ -303,6 +357,14 @@ class FleetSnapshotPersistenceService:
     @on_snapshot_persisted.setter
     def on_snapshot_persisted(self, callback: OnSnapshotPersistedCallback | None) -> None:
         self._on_snapshot_persisted = callback
+
+    @property
+    def on_ledger_persisted(self) -> OnLedgerPersistedCallback | None:
+        return self._on_ledger_persisted
+
+    @on_ledger_persisted.setter
+    def on_ledger_persisted(self, callback: OnLedgerPersistedCallback | None) -> None:
+        self._on_ledger_persisted = callback
 
     def delete_snapshot(
         self,
