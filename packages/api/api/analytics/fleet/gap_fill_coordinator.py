@@ -616,6 +616,7 @@ class FleetGapFillCoordinator:
                 materialize_turn,
                 player_id,
             )
+            materialized_via_chain = False
             if persisted is None or not _is_fleet_ledger_cache_hit(persisted):
                 _run_materialize_on_active_coherence(
                     self._persistence,
@@ -626,6 +627,7 @@ class FleetGapFillCoordinator:
                     inference_materialization=inference_materialization,
                     materialize_player_id=player_id,
                 )
+                materialized_via_chain = True
 
             persisted = self._persistence.get_ledger(
                 self._game_id,
@@ -633,7 +635,7 @@ class FleetGapFillCoordinator:
                 materialize_turn,
                 player_id,
             )
-            if persisted is not None:
+            if persisted is not None and not materialized_via_chain:
                 emit_gap_fill_leg_progress(persisted, materialize_turn)
 
             if not self._persistence.has_final_ledger(

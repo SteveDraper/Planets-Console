@@ -333,6 +333,64 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
         )
 
 
+def test_forward_unwind_emits_once_per_leg_when_chain_materializes(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Export unwind must not double-emit leg progress when chain materializes."""
+    from api.analytics.fleet.chain import emit_gap_fill_leg_progress
+
+    from tests.test_fleet_persistence import (
+        _inference_materialization_for_fleet,
+        _put_provenance_final_snapshot,
+        _seed_scores_rows_for_all_players,
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_id = _first_player_id(turn_112)
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    emitted_turns: list[int] = []
+    original_emit = emit_gap_fill_leg_progress
+
+    def tracking_emit(persisted: PersistedFleetLedger, materialize_turn: int) -> None:
+        emitted_turns.append(materialize_turn)
+        original_emit(persisted, materialize_turn)
+
+    with patch(
+        "api.analytics.fleet.chain.emit_gap_fill_leg_progress",
+        side_effect=tracking_emit,
+    ):
+        get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            628580,
+            1,
+            player_id,
+            turn_112,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+        )
+
+    gap_turns = {turn for turn in emitted_turns if 111 <= turn <= 112}
+    assert gap_turns, f"expected gap leg progress emissions, got {emitted_turns}"
+    assert len(emitted_turns) == len(set(emitted_turns)), (
+        f"duplicate leg progress emissions: {emitted_turns}"
+    )
+
+
 def test_gap_fill_forward_unwind_refines_intermediate_turn_build_option_sets(
     persistence,
     load_turn,
