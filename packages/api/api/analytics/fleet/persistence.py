@@ -387,18 +387,6 @@ class FleetSnapshotPersistenceService:
             key = (game_id, perspective, player_id)
             self._invalidation_generation[key] = self._invalidation_generation.get(key, 0) + 1
 
-    def _document_exists(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-    ) -> bool:
-        try:
-            data = self._storage.get(self.document_key(game_id, perspective, turn_number))
-        except NotFoundError:
-            return False
-        return data is not None
-
     def _read_document_raw(
         self,
         game_id: int,
