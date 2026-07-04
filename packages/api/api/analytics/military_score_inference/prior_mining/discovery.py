@@ -124,7 +124,7 @@ def iter_accepted_games_for_pattern(
                 exc,
             )
             continue
-        resolved = GameCategory.from_game_settings(info.settings)
+        resolved = GameCategory.from_game_info(info)
         if resolved != pattern.game_category:
             counters.category_mismatches += 1
             LOGGER.info(

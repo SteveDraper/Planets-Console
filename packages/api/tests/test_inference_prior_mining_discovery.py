@@ -155,6 +155,43 @@ def test_discover_games_for_pattern_skips_loadinfo_upstream_error():
     assert result.games_attempted == (628580,)
 
 
+def test_discover_games_for_pattern_skips_dogfight_with_fewer_than_eleven_players():
+    planets = MagicMock()
+    planets.games_list.return_value = [
+        {
+            "id": 645527,
+            "difficulty": 2.0,
+            "datecreated": "10/26/2024 9:02:31 AM",
+            "dateended": "6/23/2025 2:53:43 PM",
+        }
+    ]
+    info = json.loads(
+        (Path(__file__).resolve().parent / "fixtures/inference_corpus/628580/info.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    info["players"] = info["players"][:8]
+    planets.load_game_info.return_value = info
+
+    from api.analytics.military_score_inference.prior_mining.patterns import PriorMiningPattern
+
+    pattern = PriorMiningPattern(
+        id="epic-test",
+        game_category=GameCategory.EPIC,
+        max_games=1,
+        min_difficulty=1.0,
+        earliest_date="2024-01-01",
+    )
+    result = discover_games_for_pattern(
+        pattern,
+        planets=planets,
+        contributing_game_ids=frozenset(),
+        pattern_contributed_count=0,
+        max_selections=1,
+    )
+    assert result.games_attempted == ()
+
+
 def test_discover_games_for_pattern_skips_already_contributed():
     planets = MagicMock()
     planets.games_list.return_value = [
