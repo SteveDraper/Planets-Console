@@ -533,6 +533,7 @@ class FleetGapFillCoordinator:
     ) -> bool:
         """Return True when every gap turn has ensure-final ledger for this player."""
         player_id = self._player_id
+        all_gap_turns_final = True
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
             if turn_info is None:
@@ -572,8 +573,8 @@ class FleetGapFillCoordinator:
                 materialize_turn,
                 player_id,
             ):
-                return False
-        return True
+                all_gap_turns_final = False
+        return all_gap_turns_final
 
 
 _registry_lock = threading.Lock()
