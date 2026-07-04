@@ -302,3 +302,61 @@ def test_put_ledger_notifies_snapshot_persisted_only_when_roster_is_final(persis
         snapshot_complete_roster=roster,
     )
     assert callback_turns == [111]
+
+
+def _final_provenance() -> FleetMaterializationProvenance:
+    return FleetMaterializationProvenance(
+        turn_evidence_at_n=True,
+        prior_ledger_at_n_minus_1=True,
+    )
+
+
+def test_put_ledger_notifies_on_ensure_final_transition(persistence, sample_ledger):
+    callbacks: list[tuple[int, int]] = []
+    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callbacks.append(
+        (turn_number, player_id)
+    )
+
+    partial = PersistedFleetLedger(
+        ledger=sample_ledger,
+        provenance=FleetMaterializationProvenance(turn_evidence_at_n=True),
+    )
+    persistence.put_ledger(628580, 1, 111, 8, partial)
+    assert callbacks == []
+
+    persistence.put_ledger(
+        628580,
+        1,
+        111,
+        8,
+        PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance()),
+    )
+    assert callbacks == [(111, 8)]
+
+
+def test_put_ledger_notifies_on_final_ledger_version_bump(
+    persistence,
+    memory_backend,
+    sample_ledger,
+):
+    callbacks: list[tuple[int, int]] = []
+    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callbacks.append(
+        (turn_number, player_id)
+    )
+    final = PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance())
+
+    persistence.put_ledger(628580, 1, 111, 8, final)
+    assert callbacks == [(111, 8)]
+
+    persistence.put_ledger(628580, 1, 111, 8, final)
+    assert callbacks == [(111, 8)]
+
+    document = memory_backend.get(persistence.document_key(628580, 1, 111))
+    assert isinstance(document, dict)
+    ledger_wire = document[FLEET_LEDGERS_KEY]["8"]
+    assert isinstance(ledger_wire, dict)
+    ledger_wire["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
+    memory_backend.put(persistence.document_key(628580, 1, 111), document)
+
+    persistence.put_ledger(628580, 1, 111, 8, final)
+    assert callbacks == [(111, 8), (111, 8)]
