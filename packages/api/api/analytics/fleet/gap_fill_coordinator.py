@@ -143,11 +143,7 @@ class FleetGapFillCoordinator:
                 inflight = self._inflight
                 extended = turn_number > inflight.target_turn
                 inflight.target_turn = max(inflight.target_turn, turn_number)
-                if (
-                    inflight.event.is_set()
-                    and inflight.error is None
-                    and extended
-                ):
+                if inflight.event.is_set() and inflight.error is None and extended:
                     inflight.event.clear()
                     inflight.result_ledger = None
                     inflight.leader_thread = threading.current_thread()

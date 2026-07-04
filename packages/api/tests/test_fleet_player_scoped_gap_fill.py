@@ -231,9 +231,7 @@ def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
         )
 
     assert result.status == "ok"
-    target_ensure_calls = [
-        call for call in fleet_ensure_calls if call == (turn_number, player_id)
-    ]
+    target_ensure_calls = [call for call in fleet_ensure_calls if call == (turn_number, player_id)]
     assert len(target_ensure_calls) == 2
     target_materialize_calls = [
         call for call in materialize_calls if call == (turn_number, player_id)

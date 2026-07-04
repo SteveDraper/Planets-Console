@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import patch
 
-import pytest
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
@@ -14,7 +13,6 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_ledger_for_player,
     get_or_materialize_fleet_snapshot,
 )
-from api.analytics.turn_roster import iter_turn_players
 from api.analytics.fleet.exports import EXPORT_CATALOG
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -22,6 +20,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.turn_roster import iter_turn_players
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
