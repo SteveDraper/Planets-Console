@@ -201,9 +201,11 @@ scores@M,P → fleet@M,P → scores@(M+1),P → fleet@(M+1),P → … → scores
 
 **Phase 1 (shipped):** before raising `ConflictError`, and after each invalidation abort, re-read the target player's ledger cache; return it if another path already finished. Background warm treats `ConflictError` as success when the requested player's `fleet@(host_turn - 1)` ledger is ensure-final.
 
-**Phase 2 ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** **fleet gap-fill coordinator** (singleflight) with forward scores↔fleet unwind via export ensure; deferred snapshot notifications; epoch aligned with invalidation generation.
+**Phase 2 ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** **fleet gap-fill coordinator** (singleflight) with forward scores↔fleet unwind via export ensure; deferred per-player ledger notifications; epoch aligned with invalidation generation.
 
 **Phase 2b ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)):** narrow coordinator dedupe to `(gameId, perspective, playerId)`; per-player gap-start and cache-hit gates; ensure path uses per-player materialization only. Waiters for the same player share one in-flight unwind to `max(requested_turn)`; requests for different players do not block each other.
+
+**Scores invalidation coupling ([#182](https://github.com/SteveDraper/Planets-Console/issues/182), [#184](https://github.com/SteveDraper/Planets-Console/issues/184)):** when a player's ensure-final `fleet@(N - 1)` ledger is persisted, scores inference for that player at host turn *N* is dropped and their open table-stream row is rescheduled. Production wiring listens on `on_ledger_persisted` per player after gap-fill deferred flush or immediate `put_ledger`. Roster-level `on_snapshot_persisted` is legacy-only for explicit `put_snapshot` / migration callers; gap-fill, ensure, and single-player materialization must not use it.
 
 ---
 

@@ -262,45 +262,40 @@ def test_delete_ledger_removes_one_player_entry(persistence, sample_ledger):
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
 
 
-def test_put_ledger_notifies_snapshot_persisted_only_when_roster_is_final(persistence):
+def test_put_ledger_does_not_invoke_on_snapshot_persisted(persistence, sample_ledger):
     callback_turns: list[int] = []
 
     def on_snapshot_persisted(_game_id: int, _perspective: int, turn_number: int) -> None:
         callback_turns.append(turn_number)
 
     persistence.on_snapshot_persisted = on_snapshot_persisted
-    roster = frozenset({3, 8})
     final = PersistedFleetLedger(
-        ledger=FleetAcquisitionLedger(player_id=3, player_name="other"),
+        ledger=sample_ledger,
         provenance=FleetMaterializationProvenance(
             turn_evidence_at_n=True,
             prior_ledger_at_n_minus_1=True,
         ),
     )
-    persistence.put_ledger(
-        628580,
-        1,
-        111,
-        3,
-        final,
-        snapshot_complete_roster=roster,
-    )
+    persistence.put_ledger(628580, 1, 111, 8, final)
     assert callback_turns == []
 
-    persistence.put_ledger(
-        628580,
-        1,
-        111,
-        8,
-        PersistedFleetLedger(
-            ledger=FleetAcquisitionLedger(player_id=8, player_name="koshling"),
-            provenance=FleetMaterializationProvenance(
-                turn_evidence_at_n=True,
-                prior_ledger_at_n_minus_1=True,
-            ),
-        ),
-        snapshot_complete_roster=roster,
+
+def test_put_snapshot_still_supports_legacy_snapshot_callback(persistence, sample_ledger):
+    callback_turns: list[int] = []
+
+    def on_snapshot_persisted(_game_id: int, _perspective: int, turn_number: int) -> None:
+        callback_turns.append(turn_number)
+
+    persistence.on_snapshot_persisted = on_snapshot_persisted
+    snapshot = FleetTurnSnapshot(
+        analytic_id="fleet",
+        game_id=628580,
+        perspective=1,
+        turn=111,
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
+        players=[sample_ledger],
     )
+    persistence.put_snapshot(628580, 1, 111, snapshot)
     assert callback_turns == [111]
 
 

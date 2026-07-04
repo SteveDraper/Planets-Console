@@ -1,4 +1,4 @@
-"""Fleet ledger persist -> scores inference invalidation coupling (#182)."""
+"""Fleet ledger persist -> scores inference invalidation coupling (#182, #184)."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from tests.test_fleet_persistence import (
 )
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+API_ROOT = Path(__file__).resolve().parent.parent / "api"
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +68,64 @@ def load_turn(memory_backend):
         return turn_info_from_json(data)
 
     return _load
+
+
+def test_materialize_chain_does_not_invoke_on_snapshot_persisted(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Per-player gap-fill must use ledger notification only, not roster snapshot callback."""
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+
+    snapshot_callback_turns: list[int] = []
+    ledger_callback_events: list[tuple[int, int]] = []
+    persistence.on_snapshot_persisted = lambda _g, _p, turn_number: snapshot_callback_turns.append(
+        turn_number
+    )
+
+    def on_ledger_persisted(_g, _p, turn_number, player_id) -> None:
+        ledger_callback_events.append((turn_number, player_id))
+
+    persistence.on_ledger_persisted = on_ledger_persisted
+
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_111,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    assert snapshot.turn == 111
+    assert snapshot_callback_turns == []
+    assert ledger_callback_events
+    assert all(turn_number == 111 for turn_number, _ in ledger_callback_events)
+
+
+def test_single_player_hot_paths_do_not_reference_on_snapshot_persisted():
+    """Guard: coordinator and chain materialize paths stay on per-player ledger notify."""
+    guarded_modules = (
+        API_ROOT / "analytics" / "fleet" / "chain.py",
+        API_ROOT / "analytics" / "fleet" / "gap_fill_coordinator.py",
+        API_ROOT / "analytics" / "fleet" / "gap_fill_deferred_notifications.py",
+    )
+    for module_path in guarded_modules:
+        source = module_path.read_text(encoding="utf-8")
+        assert "on_snapshot_persisted" not in source, (
+            f"{module_path.name} must not wire roster snapshot notification"
+        )
 
 
 def test_gap_fill_defers_ledger_notify_until_chain_completes(

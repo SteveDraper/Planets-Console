@@ -708,7 +708,7 @@ Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over componen
 
 **Background warm:** on table-stream connect, `schedule_background_prior_turn_fleet_warm` kicks off non-blocking gap-fill for `fleet@(host_turn - 1)` when that snapshot is missing. Warm routes through the same `get_or_materialize_fleet_snapshot` entry point as other callers; see [design-fleet-analytic.md](design-fleet-analytic.md) section 5.1 for concurrent gap-fill behavior and Phase 1/2 mitigation.
 
-**Invalidation reschedule:** when `fleet@(N - 1)` is persisted, scores inference rows at host turn *N* are dropped and open table-stream rows for that scope are rescheduled (`force_schedule`) so overlay input can move from provisional to authoritative without a full stream reconnect.
+**Invalidation reschedule:** when a player's ensure-final `fleet@(N - 1)` ledger is persisted, that player's scores inference row at host turn *N* is dropped and their open table-stream row is rescheduled (`force_schedule`) so overlay input can move from provisional to authoritative without a full stream reconnect. Coupling is per-player via `on_ledger_persisted`, not roster-level snapshot persist.
 
 **Wire diagnostics (`complete` events):**
 

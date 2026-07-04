@@ -14,8 +14,10 @@ from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetBuildOptionSet,
     FleetFieldUnknown,
+    FleetMaterializationProvenance,
     FleetShipRecord,
     FleetShipRecordFields,
+    PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.actions import build_action_catalog_from_turn
 from api.analytics.military_score_inference.analytic import build_inference_observation
@@ -98,7 +100,7 @@ def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
     memory_backend,
     persistence,
 ):
-    """Persisting fleet@(N-1) always drops scores@N cache; reschedule needs an open stream."""
+    """Legacy roster path: on_fleet_snapshot_persisted drops all scores@N rows."""
     from unittest.mock import MagicMock
 
     from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -264,7 +266,21 @@ def _seed_prior_turn_fleet_with_belief_sets(
             ],
         ),
     ]
-    persistence.put_snapshot(ctx.game_id, ctx.perspective, prior_turn, snapshot)
+    target_ledger = next(ledger for ledger in snapshot.players if ledger.player_id == player_id)
+    persistence.delete_ledger(ctx.game_id, ctx.perspective, prior_turn, player_id)
+    persistence.put_ledger(
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn,
+        player_id,
+        PersistedFleetLedger(
+            ledger=target_ledger,
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
     return persistence
 
 
@@ -273,7 +289,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     persistence,
     monkeypatch,
 ):
-    """Fleet@(N-1) persist drops scores@N cache and reschedules open stream rows."""
+    """Fleet@(N-1) persist drops scores@N cache and reschedules the affected player's stream row."""
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
@@ -361,11 +377,15 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     )
 
     _wait_until(lambda: target_player_id in _run_ids_for_players(scheduler, player_ids))
-    for player_id in player_ids:
-        assert (
-            inference_persistence.get_row(ctx.game_id, ctx.perspective, turn_number, player_id)
-            is None
-        )
+    assert (
+        inference_persistence.get_row(ctx.game_id, ctx.perspective, turn_number, target_player_id)
+        is None
+    )
+    other_player_id = player_ids[1]
+    assert (
+        inference_persistence.get_row(ctx.game_id, ctx.perspective, turn_number, other_player_id)
+        is not None
+    )
 
     scope = InferenceStreamScope(
         game_id=ctx.game_id,
