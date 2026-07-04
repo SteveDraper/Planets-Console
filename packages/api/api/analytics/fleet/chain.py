@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 
 FleetMaterializationProgressCallback = Callable[
-    [PersistedFleetLedger, FleetAcquisitionLedger | None, int],
+    [PersistedFleetLedger, int],
     None,
 ]
 
@@ -393,7 +393,6 @@ def _emit_gap_fill_leg_progress(
     *,
     on_progress: FleetMaterializationProgressCallback | None,
     coherence: _GapFillCoherence,
-    before_wire_ledger: FleetAcquisitionLedger | None,
     persisted: PersistedFleetLedger,
     materialize_turn: int,
 ) -> FleetAcquisitionLedger:
@@ -401,7 +400,7 @@ def _emit_gap_fill_leg_progress(
     if resolved_progress is None:
         resolved_progress = coherence.on_progress
     if resolved_progress is not None:
-        resolved_progress(persisted, before_wire_ledger, materialize_turn)
+        resolved_progress(persisted, materialize_turn)
     return persisted.ledger
 
 
@@ -486,23 +485,18 @@ def _materialize_fleet_ledger_chain_for_player(
     start_turn = anchor_turn + 1
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
-    wire_before_ledger = (
-        advance_ledger_to_turn(current_ledger, turn) if current_ledger is not None else None
-    )
 
     def emit_leg_progress(
         persisted_leg: PersistedFleetLedger,
         materialize_turn: int,
     ) -> None:
-        nonlocal wire_before_ledger, current_ledger
+        nonlocal current_ledger
         current_ledger = _emit_gap_fill_leg_progress(
             on_progress=on_progress,
             coherence=coherence,
-            before_wire_ledger=wire_before_ledger,
             persisted=persisted_leg,
             materialize_turn=materialize_turn,
         )
-        wire_before_ledger = advance_ledger_to_turn(current_ledger, turn)
 
     if skip_missing_prefix_rst:
         start_turn = first_stored_rst

@@ -11,7 +11,6 @@ from api.analytics.export_context import AnalyticQueryContext, make_analytic_que
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
     FleetMaterializationProgressCallback,
-    _find_chain_anchor_for_player,
     _find_gap_start_turn_for_player,
     _FleetSnapshotInvalidated,
     _GapFillCoherence,
@@ -19,7 +18,6 @@ from api.analytics.fleet.chain import (
     _materialize_fleet_ledger_chain_for_player,
     _run_materialize_on_active_coherence,
     active_gap_fill_coherence,
-    advance_ledger_to_turn,
     gap_fill_coherence_scope,
 )
 from api.analytics.fleet.compute_services import FleetComputeServices
@@ -36,7 +34,7 @@ from api.analytics.fleet.gap_fill_deferred_notifications import (
 )
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
+from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
 from api.errors import ConflictError, FleetMaterializationTimeoutError, NotFoundError
 from api.models.game import TurnInfo
@@ -57,11 +55,10 @@ def _merge_progress_callback(
 
     def merged(
         persisted: PersistedFleetLedger,
-        wire_before_ledger: FleetAcquisitionLedger | None,
         materialize_turn: int,
     ) -> None:
-        existing(persisted, wire_before_ledger, materialize_turn)
-        incoming(persisted, wire_before_ledger, materialize_turn)
+        existing(persisted, materialize_turn)
+        incoming(persisted, materialize_turn)
 
     return merged
 
@@ -582,17 +579,6 @@ class FleetGapFillCoordinator:
         """Return True when every gap turn has ensure-final ledger for this player."""
         player_id = self._player_id
         all_gap_turns_final = True
-        wire_before_ledger = None
-        if host_turn is not None:
-            _anchor_turn, anchor_persisted = _find_chain_anchor_for_player(
-                self._persistence,
-                self._game_id,
-                self._perspective,
-                player_id,
-                target_turn,
-            )
-            if anchor_persisted is not None:
-                wire_before_ledger = advance_ledger_to_turn(anchor_persisted.ledger, host_turn)
 
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
@@ -634,8 +620,7 @@ class FleetGapFillCoordinator:
                 player_id,
             )
             if persisted is not None and on_progress is not None and host_turn is not None:
-                on_progress(persisted, wire_before_ledger, materialize_turn)
-                wire_before_ledger = advance_ledger_to_turn(persisted.ledger, host_turn)
+                on_progress(persisted, materialize_turn)
 
             if not self._persistence.has_final_ledger(
                 self._game_id,

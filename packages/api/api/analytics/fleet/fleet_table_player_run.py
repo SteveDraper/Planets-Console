@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from api.analytics.fleet.chain import (
+    _find_chain_anchor_for_player,
     advance_ledger_to_turn,
     get_or_materialize_fleet_ledger_for_player,
 )
@@ -89,6 +90,29 @@ def _host_turn_shaped_ledger(
     return advance_ledger_to_turn(persisted.ledger, host_turn)
 
 
+def _initial_wire_before_ledger(
+    *,
+    persistence,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    host_turn: TurnInfo,
+    before_persisted: PersistedFleetLedger | None,
+) -> FleetAcquisitionLedger | None:
+    if before_persisted is not None:
+        return before_persisted.ledger
+    _anchor_turn, anchor_persisted = _find_chain_anchor_for_player(
+        persistence,
+        game_id,
+        perspective,
+        player_id,
+        host_turn.settings.turn,
+    )
+    if anchor_persisted is None:
+        return None
+    return _host_turn_shaped_ledger(anchor_persisted, host_turn)
+
+
 def wire_ledger_progress_events(
     *,
     before: FleetAcquisitionLedger | None,
@@ -156,6 +180,35 @@ def wire_materialized_player_events(
     )
 
 
+@dataclass
+class FleetLedgerWireProgressTracker:
+    """Own host-turn wire-before state for incremental gap-fill stream events."""
+
+    host_turn: TurnInfo
+    wire_before: FleetAcquisitionLedger | None = None
+    emitted_progress: bool = False
+
+    def leg_progress_events(
+        self,
+        persisted: PersistedFleetLedger,
+    ) -> tuple[dict[str, object], ...]:
+        events = wire_ledger_progress_events(
+            before=self.wire_before,
+            persisted=persisted,
+            host_turn=self.host_turn,
+        )
+        self.wire_before = _host_turn_shaped_ledger(persisted, self.host_turn)
+        self.emitted_progress = True
+        return events
+
+    def on_materialization_leg(
+        self,
+        persisted: PersistedFleetLedger,
+        _materialize_turn: int,
+    ) -> None:
+        self.leg_progress_events(persisted)
+
+
 def run_fleet_player_materialization_job(
     session: FleetPlayerStreamSession,
     *,
@@ -182,27 +235,26 @@ def run_fleet_player_materialization_job(
         turn_number,
         player_id,
     )
-    wire_before: FleetAcquisitionLedger | None = (
-        before_persisted.ledger if before_persisted is not None else None
+    progress_tracker = FleetLedgerWireProgressTracker(
+        host_turn=turn,
+        wire_before=_initial_wire_before_ledger(
+            persistence=persistence,
+            game_id=fleet_services.game_id,
+            perspective=fleet_services.perspective,
+            player_id=player_id,
+            host_turn=turn,
+            before_persisted=before_persisted,
+        ),
     )
-    emitted_progress = False
 
     def on_progress(
         persisted_leg: PersistedFleetLedger,
-        prior_wire_ledger: FleetAcquisitionLedger | None,
         _materialize_turn: int,
     ) -> None:
-        nonlocal wire_before, emitted_progress
         if session.cancel_token.is_cancelled():
             return
-        for event in wire_ledger_progress_events(
-            before=prior_wire_ledger,
-            persisted=persisted_leg,
-            host_turn=turn,
-        ):
+        for event in progress_tracker.leg_progress_events(persisted_leg):
             session.event_queue.put(event)
-        wire_before = _host_turn_shaped_ledger(persisted_leg, turn)
-        emitted_progress = True
 
     try:
         persisted = get_or_materialize_fleet_ledger_for_player(
@@ -226,12 +278,12 @@ def run_fleet_player_materialization_job(
     if session.cancel_token.is_cancelled():
         return
 
-    if emitted_progress:
+    if progress_tracker.emitted_progress:
         session.event_queue.put(wire_materialized_complete_event(persisted))
         return
 
     for event in wire_materialized_player_events(
-        before=wire_before,
+        before=progress_tracker.wire_before,
         persisted=persisted,
         host_turn=turn,
     ):

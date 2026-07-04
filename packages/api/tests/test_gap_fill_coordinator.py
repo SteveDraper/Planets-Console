@@ -784,7 +784,6 @@ def test_joiner_on_progress_receives_incremental_events_during_inflight_gap_fill
 
     def joiner_on_progress(
         _persisted: PersistedFleetLedger,
-        _wire_before,
         materialize_turn: int,
     ) -> None:
         with progress_lock:
