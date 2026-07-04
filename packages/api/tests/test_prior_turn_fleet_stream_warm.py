@@ -100,7 +100,7 @@ def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
     memory_backend,
     persistence,
 ):
-    """Legacy roster-level path: on_fleet_snapshot_persisted drops all scores@N rows for the host turn."""
+    """Legacy roster path: on_fleet_snapshot_persisted drops all scores@N rows."""
     from unittest.mock import MagicMock
 
     from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
