@@ -1010,3 +1010,127 @@ def test_invalidation_mid_chain_same_player_waiters_retry_once(persistence, load
         f"expected one Q materialization chain, got {q_materialize_calls}"
     )
     assert coordinator_p is not coordinator_q
+
+
+def test_coordinator_q_unaffected_when_p_epoch_bumps_mid_chain(persistence, load_turn):
+    """Q leader does not re-enter materialize chain when only P's epoch bumps."""
+    turn_109 = load_turn(109)
+    turn_112 = load_turn(112)
+    assert turn_109 is not None and turn_112 is not None
+    roster = _roster_ids(turn_112)
+    assert len(roster) > 1
+    player_p, player_q = roster[0], roster[1]
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+
+    leader_mid_chain = threading.Event()
+    q_started = threading.Event()
+    release_leader = threading.Event()
+    original_put_ledger = persistence.put_ledger
+    mid_chain_puts = 0
+
+    def hooked_put_ledger(*args, **kwargs):
+        nonlocal mid_chain_puts
+        turn_number = args[2]
+        player_id = args[3]
+        original_put_ledger(*args, **kwargs)
+        if player_id == player_p and turn_number == 111 and mid_chain_puts == 0:
+            mid_chain_puts += 1
+            leader_mid_chain.set()
+            assert release_leader.wait(timeout=5)
+
+    persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
+
+    coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
+    original_chain = __import__(
+        "api.analytics.fleet.gap_fill_coordinator",
+        fromlist=["_materialize_fleet_ledger_chain_for_player"],
+    )._materialize_fleet_ledger_chain_for_player
+    original_run_leader_q = coordinator_q._run_leader_unwind
+
+    q_materialize_calls = 0
+    q_leader_unwind_calls = 0
+    q_epoch_at_start: int | None = None
+    errors: list[BaseException] = []
+
+    def counting_chain(*args, **kwargs):
+        nonlocal q_materialize_calls
+        materialize_player_id = args[3]
+        if materialize_player_id == player_q:
+            q_materialize_calls += 1
+        return original_chain(*args, **kwargs)
+
+    def counting_run_leader_q(
+        inflight,
+        turn,
+        *,
+        load_turn,
+        inference_materialization,
+        query_context,
+    ):
+        nonlocal q_leader_unwind_calls, q_epoch_at_start
+        if q_epoch_at_start is None:
+            q_epoch_at_start = coordinator_q.epoch
+        q_leader_unwind_calls += 1
+        return original_run_leader_q(
+            inflight,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+        )
+
+    def run_p_leader() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_p,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_q() -> None:
+        q_started.set()
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_q,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
+            side_effect=counting_chain,
+        ),
+        patch.object(coordinator_q, "_run_leader_unwind", side_effect=counting_run_leader_q),
+    ):
+        p_leader_thread = threading.Thread(target=run_p_leader)
+        p_leader_thread.start()
+        assert leader_mid_chain.wait(timeout=5)
+        q_thread = threading.Thread(target=run_q)
+        q_thread.start()
+        assert q_started.wait(timeout=5)
+        q_epoch_before_invalidation = coordinator_q.epoch
+        persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, player_p)
+        assert coordinator_q.epoch == q_epoch_before_invalidation
+        release_leader.set()
+        p_leader_thread.join(timeout=30)
+        q_thread.join(timeout=30)
+
+    assert not errors
+    assert persistence.get_ledger(628580, 1, 112, player_q) is not None
+    assert q_epoch_at_start is not None
+    assert coordinator_q.epoch == q_epoch_at_start
+    assert q_leader_unwind_calls == 1, f"expected one Q leader unwind, got {q_leader_unwind_calls}"
+    assert q_materialize_calls == 1, (
+        f"expected one Q materialization chain, got {q_materialize_calls}"
+    )
