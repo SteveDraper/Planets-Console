@@ -69,7 +69,8 @@ class _InflightJoin:
 class _InflightSlot:
     """Singleflight slot: join an inflight cycle or start a new leader unwind."""
 
-    def __init__(self) -> None:
+    def __init__(self, inflight_condition: threading.Condition) -> None:
+        self._inflight_condition = inflight_condition
         self._inflight: _InflightMaterialization | None = None
 
     @property
@@ -121,7 +122,10 @@ class _InflightSlot:
         turn_number: int,
     ) -> _InflightJoin:
         extended = turn_number > inflight.target_turn
+        previous_target = inflight.target_turn
         inflight.target_turn = max(inflight.target_turn, turn_number)
+        if inflight.target_turn > previous_target:
+            self._inflight_condition.notify_all()
         if inflight.event.is_set() and inflight.error is None and extended:
             inflight.event.clear()
             inflight.result_ledger = None
@@ -164,8 +168,8 @@ class FleetGapFillCoordinator:
         self._game_id = game_id
         self._perspective = perspective
         self._player_id = player_id
-        self._lock = threading.Lock()
-        self._inflight_slot = _InflightSlot()
+        self._inflight_condition = threading.Condition()
+        self._inflight_slot = _InflightSlot(self._inflight_condition)
 
     @property
     def epoch(self) -> int:
@@ -219,7 +223,7 @@ class FleetGapFillCoordinator:
         query_context: AnalyticQueryContext | None,
     ) -> PersistedFleetLedger:
         turn_number = turn.settings.turn
-        with self._lock:
+        with self._inflight_condition:
             join = self._inflight_slot.join(
                 turn_number,
                 self.epoch,
@@ -255,20 +259,31 @@ class FleetGapFillCoordinator:
         self,
         inflight: _InflightMaterialization,
     ) -> None:
-        """Wait until concurrent waiters stop raising ``target_turn``."""
+        """Wait until concurrent waiters stop raising ``target_turn``.
+
+        Waiters bump ``target_turn`` under ``_inflight_condition`` and notify the
+        leader; the leader waits here (without holding the lock through unwind)
+        until ``target_turn`` is unchanged for ``GAP_FILL_TARGET_TURN_COLLECT_SEC``.
+        """
         settle_deadline = time.monotonic() + GAP_FILL_TARGET_TURN_COLLECT_SEC
         last_target = inflight.target_turn
-        while True:
-            if time.monotonic() >= settle_deadline:
-                return
-            with self._lock:
+        with self._inflight_condition:
+            while True:
+                now = time.monotonic()
+                if now >= settle_deadline:
+                    return
                 if self._inflight_slot.inflight is not inflight:
                     return
+
                 current_target = inflight.target_turn
-            if current_target > last_target:
-                last_target = current_target
-                settle_deadline = time.monotonic() + GAP_FILL_TARGET_TURN_COLLECT_SEC
-            threading.Event().wait(0.001)
+                if current_target > last_target:
+                    last_target = current_target
+                    settle_deadline = now + GAP_FILL_TARGET_TURN_COLLECT_SEC
+
+                remaining = settle_deadline - now
+                if remaining <= 0:
+                    return
+                self._inflight_condition.wait(timeout=remaining)
 
     def _wait_for_inflight(
         self,
