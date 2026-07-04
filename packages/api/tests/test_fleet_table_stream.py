@@ -12,7 +12,10 @@ from api.analytics.fleet.compute_services import (
     FleetComputeServices,
     build_ephemeral_fleet_compute_services,
 )
-from api.analytics.fleet.fleet_table_player_run import wire_ledger_progress_events
+from api.analytics.fleet.fleet_table_player_run import (
+    _initial_wire_before_ledger,
+    wire_ledger_progress_events,
+)
 from api.analytics.fleet.fleet_table_stream_rows import (
     ScheduledFleetPlayer,
     drain_available_multiplex_events,
@@ -363,6 +366,41 @@ def test_wire_ledger_progress_events_use_host_turn_roster_names(sample_turn):
         player.username for player in iter_turn_players(turn_111) if player.id == player_id
     )
     assert ledger_event["ledger"]["playerName"] == expected_name
+
+
+def test_initial_wire_before_ledger_shapes_cached_host_turn(sample_turn, persistence):
+    from dataclasses import replace
+
+    turn_111 = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=111),
+        game=replace(sample_turn.game, turn=111),
+    )
+    player_id = turn_111.scores[0].ownerid
+    baseline = ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id)
+    stale_ledger = replace(baseline, player_name="stale-name")
+    before_persisted = PersistedFleetLedger(
+        ledger=stale_ledger,
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+
+    result = _initial_wire_before_ledger(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        player_id=player_id,
+        host_turn=turn_111,
+        before_persisted=before_persisted,
+    )
+
+    expected_name = next(
+        player.username for player in iter_turn_players(turn_111) if player.id == player_id
+    )
+    assert result is not None
+    assert result.player_name == expected_name
 
 
 def test_multi_player_stream_emits_tagged_terminal_events(sample_turn):

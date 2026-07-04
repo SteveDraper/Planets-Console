@@ -100,7 +100,7 @@ def _initial_wire_before_ledger(
     before_persisted: PersistedFleetLedger | None,
 ) -> FleetAcquisitionLedger | None:
     if before_persisted is not None:
-        return before_persisted.ledger
+        return _host_turn_shaped_ledger(before_persisted, host_turn)
     _anchor_turn, anchor_persisted = _find_chain_anchor_for_player(
         persistence,
         game_id,
