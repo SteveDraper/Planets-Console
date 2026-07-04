@@ -1,6 +1,7 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
-import { FLEET_MATERIALIZATION_PENDING_SUMMARY } from './fleetTileStatus'
+
+export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in progress'
 
 export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 

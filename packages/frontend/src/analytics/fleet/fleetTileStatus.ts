@@ -1,6 +1,7 @@
-import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
-
-export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in progress'
+import {
+  FLEET_MATERIALIZATION_PENDING_SUMMARY,
+  type FleetPlayerStreamSlice,
+} from './fleetTablePlayerStreamState'
 
 export function fleetTileProgressSummary(streamSlice: FleetPlayerStreamSlice | undefined): string {
   if (streamSlice == null) {
