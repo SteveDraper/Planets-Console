@@ -25,9 +25,3 @@ export function isFleetTileMaterializing(streamSlice: FleetPlayerStreamSlice | u
   }
   return true
 }
-
-export function isFleetTileActivelyMaterializing(
-  streamSlice: FleetPlayerStreamSlice | undefined
-): boolean {
-  return isFleetTileMaterializing(streamSlice)
-}
