@@ -55,7 +55,10 @@ class FleetSnapshotPersistenceService:
     Per-player scores invalidation bumps only the target player; turn document replace
     bumps every player who had ledgers dropped at affected turns. Invalidation does not
     block on gap-fill; concurrent invalidation callbacks only bump counters and delete
-    stored snapshots.
+    stored snapshots. ``put_snapshot`` does not bump invalidation generation; per-player
+    counters advance only on read-time stale pruning, legacy document delete, and
+    explicit invalidation methods (``invalidate_for_turn_write``,
+    ``invalidate_player_ledgers_from_turn``).
 
     **Materialization version:** Each persisted ledger entry carries
     ``materializationVersion`` (see ``FLEET_MATERIALIZATION_VERSION``). On read,
