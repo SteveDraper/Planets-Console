@@ -36,12 +36,34 @@ from api.analytics.fleet.gap_fill_deferred_notifications import (
 )
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.types import PersistedFleetLedger
+from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
 from api.errors import ConflictError, FleetMaterializationTimeoutError, NotFoundError
 from api.models.game import TurnInfo
 
 _CoordinatorKey = tuple[int, int, int, int]
+
+
+def _merge_progress_callback(
+    existing: FleetMaterializationProgressCallback | None,
+    incoming: FleetMaterializationProgressCallback | None,
+) -> FleetMaterializationProgressCallback | None:
+    if incoming is None:
+        return existing
+    if existing is None:
+        return incoming
+    if existing is incoming:
+        return existing
+
+    def merged(
+        persisted: PersistedFleetLedger,
+        wire_before_ledger: FleetAcquisitionLedger | None,
+        materialize_turn: int,
+    ) -> None:
+        existing(persisted, wire_before_ledger, materialize_turn)
+        incoming(persisted, wire_before_ledger, materialize_turn)
+
+    return merged
 
 
 @dataclass
@@ -91,7 +113,7 @@ class _InflightSlot:
         self._discard_stale_completed(turn_number, generation)
         existing = self._inflight
         if existing is not None and existing.generation == generation:
-            return self._join_existing(existing, turn_number)
+            return self._join_existing(existing, turn_number, on_progress=on_progress)
         return self._start_new(
             turn_number,
             generation,
@@ -122,7 +144,11 @@ class _InflightSlot:
         self,
         inflight: _InflightMaterialization,
         turn_number: int,
+        *,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> _InflightJoin:
+        if on_progress is not None:
+            inflight.on_progress = _merge_progress_callback(inflight.on_progress, on_progress)
         extended = turn_number > inflight.target_turn
         previous_target = inflight.target_turn
         inflight.target_turn = max(inflight.target_turn, turn_number)
@@ -365,6 +391,7 @@ class FleetGapFillCoordinator:
             load_turn=inflight.load_turn,
             inference_materialization=inflight.inference_materialization,
             query_context=inflight.query_context,
+            on_progress=inflight.on_progress,
         )
 
     def _run_leader_unwind(

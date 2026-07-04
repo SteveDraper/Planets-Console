@@ -738,3 +738,97 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
     assert materialize_calls <= 2, (
         f"expected at most one invalidation retry on the chain, got {materialize_calls}"
     )
+
+
+def test_joiner_on_progress_receives_incremental_events_during_inflight_gap_fill(
+    persistence,
+    load_turn,
+):
+    """Joiner with on_progress receives leg events while waiting on inflight gap-fill."""
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    player_id = _first_player_id(turn_112)
+
+    leader_ready = threading.Event()
+    release_leader = threading.Event()
+    progress_turns: list[int] = []
+    progress_lock = threading.Lock()
+    errors: list[BaseException] = []
+
+    coordinator = coordinator_for(persistence, 628580, 1, player_id)
+    original_run_leader = coordinator._run_leader_unwind
+
+    def gated_run_leader(
+        inflight,
+        turn,
+        *,
+        load_turn,
+        inference_materialization,
+        query_context,
+    ):
+        leader_ready.set()
+        assert release_leader.wait(timeout=5)
+        return original_run_leader(
+            inflight,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+        )
+
+    def joiner_on_progress(
+        _persisted: PersistedFleetLedger,
+        _wire_before,
+        materialize_turn: int,
+    ) -> None:
+        with progress_lock:
+            progress_turns.append(materialize_turn)
+
+    def run_leader() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_id,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_joiner() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_id,
+                turn_112,
+                load_turn=load_turn,
+                on_progress=joiner_on_progress,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with patch.object(coordinator, "_run_leader_unwind", side_effect=gated_run_leader):
+        leader_thread = threading.Thread(target=run_leader)
+        joiner_thread = threading.Thread(target=run_joiner)
+        leader_thread.start()
+        assert leader_ready.wait(timeout=5)
+        joiner_thread.start()
+        release_leader.set()
+        leader_thread.join(timeout=30)
+        joiner_thread.join(timeout=30)
+
+    assert not errors
+    assert len(progress_turns) >= 2
+    assert progress_turns == sorted(progress_turns)
+    assert min(progress_turns) <= 111
+    assert max(progress_turns) >= 112
