@@ -695,14 +695,16 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     turn_112 = load_turn(112)
     assert turn_112 is not None
     sync = threading.Barrier(2)
-    put_generations: list[int] = []
+    put_records: list[tuple[int, int]] = []
     original_put_ledger = persistence.put_ledger
 
     def hooked_put_ledger(*args, **kwargs):
         original_put_ledger(*args, **kwargs)
         player_id = args[3]
-        put_generations.append(persistence.invalidation_generation(628580, 1, player_id))
-        if len(put_generations) == 1:
+        put_records.append(
+            (player_id, persistence.invalidation_generation(628580, 1, player_id)),
+        )
+        if len(put_records) == 1:
             sync.wait()
             sync.wait()
 
@@ -734,8 +736,23 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     assert gap_fill_error is None
     assert snapshot is not None
     assert snapshot.turn == 112
-    assert put_generations[0] == 0
-    assert 1 in put_generations
+    assert put_records[0][1] == 0
+    for player_id in {recorded_player_id for recorded_player_id, _ in put_records}:
+        player_generations = [
+            generation
+            for recorded_player_id, generation in put_records
+            if recorded_player_id == player_id
+        ]
+        if 1 not in player_generations:
+            continue
+        last_generation_zero_index = max(
+            index
+            for index, generation in enumerate(player_generations)
+            if generation == 0
+        )
+        post_invalidation_generations = player_generations[last_generation_zero_index + 1 :]
+        assert post_invalidation_generations
+        assert post_invalidation_generations == [1] * len(post_invalidation_generations)
     assert persistence.get_snapshot(628580, 1, 111) is not None
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
     assert len(snapshot.players[0].records) == 6
