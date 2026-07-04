@@ -83,6 +83,100 @@ def _roster_ids(turn) -> list[int]:
     return [player.id for player in iter_turn_players(turn)]
 
 
+def _ensure_fleet_export_gap_fill_context(
+    sample_turn,
+    memory_backend,
+    *,
+    turn_number: int = 8,
+):
+    """Export-ensure context with per-player prerequisites through T-1 (one-turn gap at T)."""
+    from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
+    from api.analytics.fleet.compute_services import FleetComputeServices, turn_chain_through
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+
+    from tests.scores_exports_helpers import GAME_ID, first_player_id, perspective
+
+    player_id = first_player_id(sample_turn)
+    other_player_id = sample_turn.scores[1].ownerid
+    host_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    stored_turns = turn_chain_through(host_turn)
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
+    persp = perspective(sample_turn)
+    final_provenance = FleetMaterializationProvenance(
+        turn_evidence_at_n=True,
+        prior_ledger_at_n_minus_1=True,
+    )
+
+    for prior_turn in range(1, turn_number):
+        prior_turn_info = stored_turns[prior_turn]
+        put_persisted_row(
+            inference_persistence,
+            prior_turn_info,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seed",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+        )
+        fleet_persistence.put_ledger(
+            GAME_ID,
+            persp,
+            prior_turn,
+            player_id,
+            PersistedFleetLedger(
+                ledger=ensure_fleet_baseline_for_player(
+                    GAME_ID,
+                    persp,
+                    prior_turn_info,
+                    player_id,
+                ),
+                provenance=final_provenance,
+            ),
+        )
+
+    put_persisted_row(
+        inference_persistence,
+        host_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=inference_persistence,
+        stored_turns=stored_turns,
+    )
+    fleet_services = ctx.export_services["fleet"]
+    ctx.export_services["fleet"] = FleetComputeServices(
+        persistence=fleet_persistence,
+        game_id=GAME_ID,
+        perspective=persp,
+        load_turn=stored_turns.get,
+        inference_materialization=fleet_services.inference_materialization,
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=persp,
+        turn=turn_number,
+        player_id=player_id,
+    )
+    return ctx, scope, player_id, other_player_id, fleet_persistence
+
+
 def test_single_player_gap_fill_does_not_materialize_other_players(persistence, load_turn):
     turn_109 = load_turn(109)
     turn_112 = load_turn(112)
@@ -108,30 +202,8 @@ def test_single_player_gap_fill_does_not_materialize_other_players(persistence, 
 
 
 def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
-    from api.analytics.fleet.compute_services import FleetComputeServices, turn_chain_through
-    from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-
-    from tests.scores_exports_helpers import GAME_ID, first_player_id, perspective
-
-    player_id = first_player_id(sample_turn)
-    other_player_id = sample_turn.scores[1].ownerid
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
-    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
-    ctx = export_chain_query_context(sample_turn, persistence=inference_persistence)
-    fleet_services = ctx.export_services["fleet"]
-    ctx.export_services["fleet"] = FleetComputeServices(
-        persistence=fleet_persistence,
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        load_turn=lambda turn_number: turn_chain_through(sample_turn).get(turn_number),
-        inference_materialization=fleet_services.inference_materialization,
-    )
-    scope = ExportScope(
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        turn=sample_turn.settings.turn,
-        player_id=player_id,
+    ctx, scope, player_id, other_player_id, fleet_persistence = (
+        _ensure_fleet_export_gap_fill_context(sample_turn, memory_backend)
     )
     ledger_calls: list[int] = []
     original = get_or_materialize_fleet_ledger_for_player
@@ -144,11 +216,26 @@ def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
         "api.analytics.fleet.exports.get_or_materialize_fleet_ledger_for_player",
         side_effect=tracking_ledger,
     ):
-        ensure_fleet_export(ctx, scope)
+        assert ensure_fleet_export(ctx, scope) is True
 
     assert ledger_calls
-    assert all(call_player_id == player_id for call_player_id in ledger_calls)
+    assert set(ledger_calls) == {player_id}
+    assert len(ledger_calls) <= 2, (
+        f"expected at most two ledger materializations for one-turn gap; got {ledger_calls}"
+    )
     assert other_player_id not in ledger_calls
+    assert fleet_persistence.has_final_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        player_id,
+    )
+    assert not fleet_persistence.has_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        other_player_id,
+    )
 
 
 def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
@@ -240,29 +327,9 @@ def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
 
 
 def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_turn, memory_backend):
-    from api.analytics.fleet.compute_services import FleetComputeServices, turn_chain_through
-    from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-
-    from tests.scores_exports_helpers import GAME_ID, first_player_id, perspective
-
-    player_id = first_player_id(sample_turn)
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
-    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
-    ctx = export_chain_query_context(sample_turn, persistence=inference_persistence)
-    fleet_services = ctx.export_services["fleet"]
-    ctx.export_services["fleet"] = FleetComputeServices(
-        persistence=fleet_persistence,
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        load_turn=lambda turn_number: turn_chain_through(sample_turn).get(turn_number),
-        inference_materialization=fleet_services.inference_materialization,
-    )
-    scope = ExportScope(
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        turn=sample_turn.settings.turn,
-        player_id=player_id,
+    ctx, scope, player_id, _, fleet_persistence = _ensure_fleet_export_gap_fill_context(
+        sample_turn,
+        memory_backend,
     )
 
     def forbid_snapshot(*_args, **_kwargs):
@@ -272,7 +339,14 @@ def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_tu
         "api.analytics.fleet.exports.get_or_materialize_fleet_snapshot",
         side_effect=forbid_snapshot,
     ):
-        ensure_fleet_export(ctx, scope)
+        assert ensure_fleet_export(ctx, scope) is True
+
+    assert fleet_persistence.has_final_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        player_id,
+    )
 
 
 def test_per_player_cache_hit_does_not_require_roster_complete(persistence, load_turn):
