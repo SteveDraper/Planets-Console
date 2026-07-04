@@ -8,7 +8,10 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 
-from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
+from api.analytics.fleet.chain import (
+    advance_ledger_to_turn,
+    get_or_materialize_fleet_ledger_for_player,
+)
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.serialization import (
     fleet_ship_record_to_json,
@@ -78,6 +81,52 @@ def _wire_provenance(persisted: PersistedFleetLedger) -> dict[str, object]:
     )
 
 
+def _host_turn_shaped_ledger(
+    persisted: PersistedFleetLedger,
+    host_turn: TurnInfo,
+) -> FleetAcquisitionLedger:
+    """Shape interim gap-fill ledger for the host-turn fleet table tile."""
+    return advance_ledger_to_turn(persisted.ledger, host_turn)
+
+
+def wire_ledger_progress_events(
+    *,
+    before: FleetAcquisitionLedger | None,
+    persisted: PersistedFleetLedger,
+    host_turn: TurnInfo,
+) -> tuple[dict[str, object], ...]:
+    """Build incremental stream events after one gap-fill leg toward host turn N."""
+    host_shaped = _host_turn_shaped_ledger(persisted, host_turn)
+    before_records = _records_by_id(before)
+    after_records = _records_by_id(host_shaped)
+    events: list[dict[str, object]] = []
+    for record_id, record in after_records.items():
+        prior = before_records.get(record_id)
+        if prior is not None and _record_refined(prior, record):
+            events.append(
+                fleet_record_refined_event(record=fleet_ship_record_to_table_wire(record))
+            )
+    events.append(
+        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_table_wire(host_shaped))
+    )
+    events.append(_wire_provenance(persisted))
+    return tuple(events)
+
+
+def wire_materialized_complete_event(
+    persisted: PersistedFleetLedger,
+) -> dict[str, object]:
+    summary = (
+        "Fleet ledger materialization complete."
+        if persisted.provenance.is_final
+        else "Fleet ledger materialized with open provenance legs."
+    )
+    return fleet_complete_event(
+        is_final=persisted.provenance.is_final,
+        summary=summary,
+    )
+
+
 def wire_cached_player_events(persisted: PersistedFleetLedger) -> tuple[dict[str, object], ...]:
     """Replay terminal stream events for an ensure-final cached ledger."""
     return (
@@ -94,33 +143,17 @@ def wire_materialized_player_events(
     *,
     before: FleetAcquisitionLedger | None,
     persisted: PersistedFleetLedger,
+    host_turn: TurnInfo,
 ) -> tuple[dict[str, object], ...]:
-    """Build wire events after materialization completes for one player."""
-    before_records = _records_by_id(before)
-    after_records = _records_by_id(persisted.ledger)
-    events: list[dict[str, object]] = []
-    for record_id, record in after_records.items():
-        prior = before_records.get(record_id)
-        if prior is not None and _record_refined(prior, record):
-            events.append(
-                fleet_record_refined_event(record=fleet_ship_record_to_table_wire(record))
-            )
-    events.append(
-        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_table_wire(persisted.ledger))
+    """Build terminal wire events after materialization completes for one player."""
+    return (
+        *wire_ledger_progress_events(
+            before=before,
+            persisted=persisted,
+            host_turn=host_turn,
+        ),
+        wire_materialized_complete_event(persisted),
     )
-    events.append(_wire_provenance(persisted))
-    summary = (
-        "Fleet ledger materialization complete."
-        if persisted.provenance.is_final
-        else "Fleet ledger materialized with open provenance legs."
-    )
-    events.append(
-        fleet_complete_event(
-            is_final=persisted.provenance.is_final,
-            summary=summary,
-        )
-    )
-    return tuple(events)
 
 
 def run_fleet_player_materialization_job(
@@ -149,7 +182,27 @@ def run_fleet_player_materialization_job(
         turn_number,
         player_id,
     )
-    before_ledger = before_persisted.ledger if before_persisted is not None else None
+    wire_before: FleetAcquisitionLedger | None = (
+        before_persisted.ledger if before_persisted is not None else None
+    )
+    emitted_progress = False
+
+    def on_progress(
+        persisted_leg: PersistedFleetLedger,
+        prior_wire_ledger: FleetAcquisitionLedger | None,
+        _materialize_turn: int,
+    ) -> None:
+        nonlocal wire_before, emitted_progress
+        if session.cancel_token.is_cancelled():
+            return
+        for event in wire_ledger_progress_events(
+            before=prior_wire_ledger,
+            persisted=persisted_leg,
+            host_turn=turn,
+        ):
+            session.event_queue.put(event)
+        wire_before = _host_turn_shaped_ledger(persisted_leg, turn)
+        emitted_progress = True
 
     try:
         persisted = get_or_materialize_fleet_ledger_for_player(
@@ -160,6 +213,7 @@ def run_fleet_player_materialization_job(
             turn,
             load_turn=fleet_services.load_turn,
             inference_materialization=fleet_services.inference_materialization,
+            on_progress=on_progress,
         )
     except PlanetsConsoleError as exc:
         detail = str(exc) or "Fleet ledger materialization failed"
@@ -172,5 +226,13 @@ def run_fleet_player_materialization_job(
     if session.cancel_token.is_cancelled():
         return
 
-    for event in wire_materialized_player_events(before=before_ledger, persisted=persisted):
+    if emitted_progress:
+        session.event_queue.put(wire_materialized_complete_event(persisted))
+        return
+
+    for event in wire_materialized_player_events(
+        before=wire_before,
+        persisted=persisted,
+        host_turn=turn,
+    ):
         session.event_queue.put(event)

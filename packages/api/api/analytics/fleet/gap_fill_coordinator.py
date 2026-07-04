@@ -6,11 +6,12 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
+    FleetMaterializationProgressCallback,
+    _find_chain_anchor_for_player,
     _find_gap_start_turn_for_player,
     _FleetSnapshotInvalidated,
     _GapFillCoherence,
@@ -18,6 +19,7 @@ from api.analytics.fleet.chain import (
     _materialize_fleet_ledger_chain_for_player,
     _run_materialize_on_active_coherence,
     active_gap_fill_coherence,
+    advance_ledger_to_turn,
     gap_fill_coherence_scope,
 )
 from api.analytics.fleet.compute_services import FleetComputeServices
@@ -39,9 +41,6 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.errors import ConflictError, FleetMaterializationTimeoutError, NotFoundError
 from api.models.game import TurnInfo
 
-if TYPE_CHECKING:
-    pass
-
 _CoordinatorKey = tuple[int, int, int, int]
 
 
@@ -52,6 +51,7 @@ class _InflightMaterialization:
     load_turn: Callable[[int], TurnInfo | None]
     inference_materialization: FleetInferenceMaterialization | None
     query_context: AnalyticQueryContext | None
+    on_progress: FleetMaterializationProgressCallback | None = None
     event: threading.Event = field(default_factory=threading.Event)
     result_ledger: PersistedFleetLedger | None = None
     error: BaseException | None = None
@@ -85,6 +85,7 @@ class _InflightSlot:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None,
         query_context: AnalyticQueryContext | None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> _InflightJoin:
         self._reap_abandoned()
         self._discard_stale_completed(turn_number, generation)
@@ -97,6 +98,7 @@ class _InflightSlot:
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
+            on_progress=on_progress,
         )
 
     def _reap_abandoned(self) -> None:
@@ -141,6 +143,7 @@ class _InflightSlot:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None,
         query_context: AnalyticQueryContext | None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> _InflightJoin:
         inflight = _InflightMaterialization(
             target_turn=turn_number,
@@ -148,6 +151,7 @@ class _InflightSlot:
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
+            on_progress=on_progress,
             leader_thread=threading.current_thread(),
         )
         self._inflight = inflight
@@ -187,6 +191,7 @@ class FleetGapFillCoordinator:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None = None,
         query_context: AnalyticQueryContext | None = None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> PersistedFleetLedger:
         turn_number = turn.settings.turn
         cached = self._persistence.get_ledger(
@@ -216,6 +221,7 @@ class FleetGapFillCoordinator:
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
+            on_progress=on_progress,
         )
 
     def _coordinate(
@@ -225,6 +231,7 @@ class FleetGapFillCoordinator:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None,
         query_context: AnalyticQueryContext | None,
+        on_progress: FleetMaterializationProgressCallback | None,
     ) -> PersistedFleetLedger:
         turn_number = turn.settings.turn
         with self._inflight_condition:
@@ -234,6 +241,7 @@ class FleetGapFillCoordinator:
                 load_turn=load_turn,
                 inference_materialization=inference_materialization,
                 query_context=query_context,
+                on_progress=on_progress,
             )
         inflight = join.inflight
 
@@ -403,6 +411,7 @@ class FleetGapFillCoordinator:
                     self._perspective,
                     self._player_id,
                     generation,
+                    on_progress=inflight.on_progress,
                 )
                 try:
                     with gap_fill_coherence_scope(coherence):
@@ -434,6 +443,8 @@ class FleetGapFillCoordinator:
                                     current_target,
                                     load_turn,
                                     inference_materialization=inference_materialization,
+                                    on_progress=inflight.on_progress,
+                                    host_turn=turn,
                                 )
 
                             if not materialized_via_export:
@@ -461,6 +472,7 @@ class FleetGapFillCoordinator:
                                     inference_materialization=inference_materialization,
                                     coherence=coherence,
                                     turn_context_cache=turn_context_cache,
+                                    on_progress=inflight.on_progress,
                                 )
                     materialized_target = current_target
                     break
@@ -537,10 +549,24 @@ class FleetGapFillCoordinator:
         load_turn: Callable[[int], TurnInfo | None],
         *,
         inference_materialization: FleetInferenceMaterialization | None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
+        host_turn: TurnInfo | None = None,
     ) -> bool:
         """Return True when every gap turn has ensure-final ledger for this player."""
         player_id = self._player_id
         all_gap_turns_final = True
+        wire_before_ledger = None
+        if host_turn is not None:
+            _anchor_turn, anchor_persisted = _find_chain_anchor_for_player(
+                self._persistence,
+                self._game_id,
+                self._perspective,
+                player_id,
+                target_turn,
+            )
+            if anchor_persisted is not None:
+                wire_before_ledger = advance_ledger_to_turn(anchor_persisted.ledger, host_turn)
+
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
             if turn_info is None:
@@ -573,6 +599,16 @@ class FleetGapFillCoordinator:
                     inference_materialization=inference_materialization,
                     materialize_player_id=player_id,
                 )
+
+            persisted = self._persistence.get_ledger(
+                self._game_id,
+                self._perspective,
+                materialize_turn,
+                player_id,
+            )
+            if persisted is not None and on_progress is not None and host_turn is not None:
+                on_progress(persisted, wire_before_ledger, materialize_turn)
+                wire_before_ledger = advance_ledger_to_turn(persisted.ledger, host_turn)
 
             if not self._persistence.has_final_ledger(
                 self._game_id,

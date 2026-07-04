@@ -125,7 +125,7 @@ describe('reduceFleetPlayerStreamState', () => {
     })
 
     expect(next.summary).toBe('Collecting turn evidence')
-    expect(next.isPending).toBe(false)
+    expect(next.isPending).toBe(true)
   })
 
   it('marks failure from error events', () => {
@@ -248,22 +248,49 @@ describe('fleetPlayerStreamSliceFromState', () => {
       discrepancy: ledgerPlayer.discrepancy,
       isComplete: false,
       isFinal: false,
-      isPending: false,
+      isPending: true,
       summary: 'Refining fleet records',
       error: null,
     })
   })
 
-  it('publishes clear overlay when ledger has no discrepancy', () => {
+  it('publishes provenance-only slice before records arrive', () => {
     const state = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
-      type: 'ledger_updated',
+      type: 'provenance',
       playerId: 8,
-      ledger: { ...ledgerPlayer, discrepancy: undefined },
+      turnEvidenceAtN: false,
+      priorLedgerAtNMinus1: false,
+      isFinal: false,
     })
 
-    const slice = fleetPlayerStreamSliceFromState(state)
+    expect(fleetPlayerStreamSliceFromState(state)).toEqual({
+      discrepancyOverlay: 'inherit',
+      isComplete: false,
+      isFinal: false,
+      isPending: true,
+      summary: 'Collecting turn evidence',
+      error: null,
+    })
+  })
 
-    expect(slice?.discrepancyOverlay).toBe('clear')
-    expect(slice).not.toHaveProperty('discrepancy')
+  it('keeps records visible while pending between gap legs', () => {
+    const withRecords = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: ledgerPlayer,
+    })
+    const betweenLegs = reduceFleetPlayerStreamState(withRecords, {
+      type: 'provenance',
+      playerId: 8,
+      turnEvidenceAtN: true,
+      priorLedgerAtNMinus1: true,
+      isFinal: false,
+    })
+
+    const slice = fleetPlayerStreamSliceFromState(betweenLegs)
+
+    expect(slice?.records).toEqual([refinedRecord])
+    expect(slice?.isPending).toBe(true)
+    expect(slice?.summary).toBe('Refining fleet records')
   })
 })

@@ -35,6 +35,12 @@ if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
 
+FleetMaterializationProgressCallback = Callable[
+    [PersistedFleetLedger, FleetAcquisitionLedger | None, int],
+    None,
+]
+
+
 class _FleetSnapshotInvalidated(Exception):
     """Gap-fill observed a concurrent fleet snapshot invalidation."""
 
@@ -76,6 +82,7 @@ class _GapFillCoherence:
     perspective: int
     player_id: int
     generation: int
+    on_progress: FleetMaterializationProgressCallback | None = None
 
     def put_ledger(
         self,
@@ -382,6 +389,22 @@ def _materialize_and_persist_player_turn(
     return persisted
 
 
+def _emit_gap_fill_leg_progress(
+    *,
+    on_progress: FleetMaterializationProgressCallback | None,
+    coherence: _GapFillCoherence,
+    before_wire_ledger: FleetAcquisitionLedger | None,
+    persisted: PersistedFleetLedger,
+    materialize_turn: int,
+) -> FleetAcquisitionLedger:
+    resolved_progress = on_progress
+    if resolved_progress is None:
+        resolved_progress = coherence.on_progress
+    if resolved_progress is not None:
+        resolved_progress(persisted, before_wire_ledger, materialize_turn)
+    return persisted.ledger
+
+
 def _materialize_fleet_ledger_chain_for_player(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -393,6 +416,7 @@ def _materialize_fleet_ledger_chain_for_player(
     inference_materialization: FleetInferenceMaterialization | None,
     coherence: _GapFillCoherence,
     turn_context_cache: dict[int, FleetTurnContext],
+    on_progress: FleetMaterializationProgressCallback | None = None,
 ) -> PersistedFleetLedger:
     """Gap-fill one player's fleet ledger from the latest anchor through turn T."""
     turn_number = turn.settings.turn
@@ -462,6 +486,23 @@ def _materialize_fleet_ledger_chain_for_player(
     start_turn = anchor_turn + 1
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
+    wire_before_ledger = (
+        advance_ledger_to_turn(current_ledger, turn) if current_ledger is not None else None
+    )
+
+    def emit_leg_progress(
+        persisted_leg: PersistedFleetLedger,
+        materialize_turn: int,
+    ) -> None:
+        nonlocal wire_before_ledger, current_ledger
+        current_ledger = _emit_gap_fill_leg_progress(
+            on_progress=on_progress,
+            coherence=coherence,
+            before_wire_ledger=wire_before_ledger,
+            persisted=persisted_leg,
+            materialize_turn=materialize_turn,
+        )
+        wire_before_ledger = advance_ledger_to_turn(current_ledger, turn)
 
     if skip_missing_prefix_rst:
         start_turn = first_stored_rst
@@ -497,7 +538,7 @@ def _materialize_fleet_ledger_chain_for_player(
             load_turn=cached_load,
             inference_materialization=resolved_inference_materialization,
         )
-        current_ledger = current_persisted.ledger
+        emit_leg_progress(current_persisted, 1)
         if turn_number == 1:
             return current_persisted
         start_turn = 2
@@ -523,7 +564,7 @@ def _materialize_fleet_ledger_chain_for_player(
             load_turn=cached_load,
             inference_materialization=resolved_inference_materialization,
         )
-        current_ledger = current_persisted.ledger
+        emit_leg_progress(current_persisted, materialize_turn)
 
     assert current_persisted is not None
     return current_persisted
@@ -617,6 +658,7 @@ def get_or_materialize_fleet_ledger_for_player(
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
     query_context: AnalyticQueryContext | None = None,
+    on_progress: FleetMaterializationProgressCallback | None = None,
 ) -> PersistedFleetLedger:
     """Return a cached ledger or materialize turn T for one player."""
     from api.analytics.fleet.gap_fill_coordinator import coordinator_for
@@ -626,6 +668,7 @@ def get_or_materialize_fleet_ledger_for_player(
         load_turn=load_turn,
         inference_materialization=inference_materialization,
         query_context=query_context,
+        on_progress=on_progress,
     )
 
 

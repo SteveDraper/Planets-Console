@@ -92,7 +92,7 @@ export function reduceFleetPlayerStreamState(
       records: [...ledger.records],
       discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
       discrepancy: ledger.discrepancy,
-      isPending: false,
+      isPending: !state.isComplete,
       summary: state.isComplete ? state.summary : 'Refining fleet records',
       error: null,
     }
@@ -103,7 +103,7 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       records: upsertRecord(baseRecords, event.record),
-      isPending: false,
+      isPending: !state.isComplete,
       error: null,
     }
   }
@@ -112,7 +112,7 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       isFinal: event.isFinal,
-      isPending: false,
+      isPending: !event.isFinal && !state.isComplete,
       summary: state.isComplete ? state.summary : provenanceSummary(event),
     }
   }
@@ -144,13 +144,17 @@ export function reduceFleetPlayerStreamState(
 export function fleetPlayerStreamSliceFromState(
   state: FleetPlayerStreamState
 ): FleetPlayerStreamSlice | null {
+  const hasProgressMetadata =
+    state.summary !== FLEET_MATERIALIZATION_PENDING_SUMMARY || state.isFinal
+
   if (
     !state.isPending &&
     state.records == null &&
     state.playerName == null &&
     state.discrepancyOverlay === 'inherit' &&
     state.error == null &&
-    !state.isComplete
+    !state.isComplete &&
+    !hasProgressMetadata
   ) {
     return null
   }
