@@ -58,6 +58,98 @@ class _InflightMaterialization:
     leader_thread: threading.Thread | None = None
 
 
+@dataclass(frozen=True)
+class _InflightJoin:
+    """Whether the caller should lead gap-fill or wait on an existing inflight cycle."""
+
+    inflight: _InflightMaterialization
+    is_leader: bool
+
+
+class _InflightSlot:
+    """Singleflight slot: join an inflight cycle or start a new leader unwind."""
+
+    def __init__(self) -> None:
+        self._inflight: _InflightMaterialization | None = None
+
+    @property
+    def inflight(self) -> _InflightMaterialization | None:
+        return self._inflight
+
+    def join(
+        self,
+        turn_number: int,
+        generation: int,
+        *,
+        load_turn: Callable[[int], TurnInfo | None],
+        inference_materialization: FleetInferenceMaterialization | None,
+        query_context: AnalyticQueryContext | None,
+    ) -> _InflightJoin:
+        self._reap_abandoned()
+        self._discard_stale_completed(turn_number, generation)
+        existing = self._inflight
+        if existing is not None and existing.generation == generation:
+            return self._join_existing(existing, turn_number)
+        return self._start_new(
+            turn_number,
+            generation,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+        )
+
+    def _reap_abandoned(self) -> None:
+        inflight = self._inflight
+        if inflight is None or inflight.event.is_set():
+            return
+        leader_thread = inflight.leader_thread
+        if leader_thread is not None and leader_thread.is_alive():
+            return
+        self._inflight = None
+        inflight.event.set()
+
+    def _discard_stale_completed(self, turn_number: int, generation: int) -> None:
+        inflight = self._inflight
+        if inflight is None or not inflight.event.is_set():
+            return
+        if inflight.generation != generation or turn_number <= inflight.target_turn:
+            self._inflight = None
+
+    def _join_existing(
+        self,
+        inflight: _InflightMaterialization,
+        turn_number: int,
+    ) -> _InflightJoin:
+        extended = turn_number > inflight.target_turn
+        inflight.target_turn = max(inflight.target_turn, turn_number)
+        if inflight.event.is_set() and inflight.error is None and extended:
+            inflight.event.clear()
+            inflight.result_ledger = None
+            inflight.leader_thread = threading.current_thread()
+            return _InflightJoin(inflight=inflight, is_leader=True)
+        return _InflightJoin(inflight=inflight, is_leader=False)
+
+    def _start_new(
+        self,
+        turn_number: int,
+        generation: int,
+        *,
+        load_turn: Callable[[int], TurnInfo | None],
+        inference_materialization: FleetInferenceMaterialization | None,
+        query_context: AnalyticQueryContext | None,
+    ) -> _InflightJoin:
+        inflight = _InflightMaterialization(
+            target_turn=turn_number,
+            generation=generation,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+            leader_thread=threading.current_thread(),
+        )
+        self._inflight = inflight
+        return _InflightJoin(inflight=inflight, is_leader=True)
+
+
 class FleetGapFillCoordinator:
     """At most one active gap-fill unwind per ``(persistence, game_id, perspective, player_id)``."""
 
@@ -73,7 +165,7 @@ class FleetGapFillCoordinator:
         self._perspective = perspective
         self._player_id = player_id
         self._lock = threading.Lock()
-        self._inflight: _InflightMaterialization | None = None
+        self._inflight_slot = _InflightSlot()
 
     @property
     def epoch(self) -> int:
@@ -127,45 +219,20 @@ class FleetGapFillCoordinator:
         query_context: AnalyticQueryContext | None,
     ) -> PersistedFleetLedger:
         turn_number = turn.settings.turn
-        generation = self.epoch
-        inflight: _InflightMaterialization | None
-        is_leader = False
-
         with self._lock:
-            self._reap_abandoned_inflight_locked()
-            if self._inflight is not None and self._inflight.event.is_set():
-                if (
-                    self._inflight.generation != generation
-                    or turn_number <= self._inflight.target_turn
-                ):
-                    self._inflight = None
-            if self._inflight is not None and self._inflight.generation == generation:
-                inflight = self._inflight
-                extended = turn_number > inflight.target_turn
-                inflight.target_turn = max(inflight.target_turn, turn_number)
-                if inflight.event.is_set() and inflight.error is None and extended:
-                    inflight.event.clear()
-                    inflight.result_ledger = None
-                    inflight.leader_thread = threading.current_thread()
-                    is_leader = True
-            else:
-                inflight = _InflightMaterialization(
-                    target_turn=turn_number,
-                    generation=generation,
-                    load_turn=load_turn,
-                    inference_materialization=inference_materialization,
-                    query_context=query_context,
-                    leader_thread=threading.current_thread(),
-                )
-                self._inflight = inflight
-                is_leader = True
+            join = self._inflight_slot.join(
+                turn_number,
+                self.epoch,
+                load_turn=load_turn,
+                inference_materialization=inference_materialization,
+                query_context=query_context,
+            )
+        inflight = join.inflight
 
-        if not is_leader:
-            assert inflight is not None
+        if not join.is_leader:
             self._wait_for_inflight(inflight, turn_number)
             return self._result_for_request(inflight, turn_number, turn)
 
-        assert inflight is not None
         try:
             self._run_leader_unwind(
                 inflight,
@@ -184,16 +251,6 @@ class FleetGapFillCoordinator:
             raise inflight.error
         return self._result_for_request(inflight, turn_number, turn)
 
-    def _reap_abandoned_inflight_locked(self) -> None:
-        inflight = self._inflight
-        if inflight is None or inflight.event.is_set():
-            return
-        leader_thread = inflight.leader_thread
-        if leader_thread is not None and leader_thread.is_alive():
-            return
-        self._inflight = None
-        inflight.event.set()
-
     def _collect_target_turn_extensions(
         self,
         inflight: _InflightMaterialization,
@@ -205,7 +262,7 @@ class FleetGapFillCoordinator:
             if time.monotonic() >= settle_deadline:
                 return
             with self._lock:
-                if self._inflight is not inflight:
+                if self._inflight_slot.inflight is not inflight:
                     return
                 current_target = inflight.target_turn
             if current_target > last_target:
@@ -460,8 +517,6 @@ class FleetGapFillCoordinator:
         inference_materialization: FleetInferenceMaterialization | None,
     ) -> bool:
         """Return True when every gap turn has ensure-final ledger for this player."""
-        from api.analytics.fleet.chain import _run_materialize_on_active_coherence
-
         player_id = self._player_id
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
@@ -479,33 +534,23 @@ class FleetGapFillCoordinator:
             )
             ensure_fleet_export(query_ctx, scope)
 
-        for materialize_turn in range(gap_start, target_turn + 1):
-            turn_info = load_turn(materialize_turn)
-            if turn_info is None:
-                raise NotFoundError(
-                    f"fleet forward unwind requires stored turn {materialize_turn} "
-                    f"for game {self._game_id} perspective {self._perspective} "
-                    f"player {player_id}"
-                )
             persisted = self._persistence.get_ledger(
                 self._game_id,
                 self._perspective,
                 materialize_turn,
                 player_id,
             )
-            if persisted is not None and _is_fleet_ledger_cache_hit(persisted):
-                continue
-            _run_materialize_on_active_coherence(
-                self._persistence,
-                self._game_id,
-                self._perspective,
-                turn_info,
-                load_turn=load_turn,
-                inference_materialization=inference_materialization,
-                materialize_player_id=player_id,
-            )
+            if persisted is None or not _is_fleet_ledger_cache_hit(persisted):
+                _run_materialize_on_active_coherence(
+                    self._persistence,
+                    self._game_id,
+                    self._perspective,
+                    turn_info,
+                    load_turn=load_turn,
+                    inference_materialization=inference_materialization,
+                    materialize_player_id=player_id,
+                )
 
-        for materialize_turn in range(gap_start, target_turn + 1):
             if not self._persistence.has_final_ledger(
                 self._game_id,
                 self._perspective,
