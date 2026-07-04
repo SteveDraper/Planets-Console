@@ -10,17 +10,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
     _materialize_fleet_ledger_chain_for_player,
     get_or_materialize_fleet_ledger_for_player,
 )
-from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.exports import EXPORT_CATALOG, ensure_fleet_export
 from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.turn_roster import iter_turn_players
 from api.errors import FleetMaterializationTimeoutError
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
@@ -28,10 +26,18 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.fleet_player_scoped_gap_fill_helpers import (
+    ensure_fleet_export_gap_fill_context,
+    install_mid_chain_put_ledger_gate,
+    materialize_chain_from_coordinator_module,
+    require_turns,
+    roster_ids,
+    seed_provenance_snapshot,
+    two_players_from_turn,
+)
 from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_persistence import (
     _inference_materialization_for_fleet,
-    _put_provenance_final_snapshot,
 )
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -47,10 +53,10 @@ def _reset_coordinators():
 @pytest.fixture
 def memory_backend():
     backend = MemoryAssetBackend(initial={})
-    with open(ASSETS_DIR / "game_info_sample.json") as f:
-        backend.put("games/628580/info", json.load(f))
-    with open(ASSETS_DIR / "turn_sample.json") as f:
-        turn_rst = json.load(f)
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        backend.put("games/628580/info", json.load(handle))
+    with open(ASSETS_DIR / "turn_sample.json") as handle:
+        turn_rst = json.load(handle)
         for turn_number in (109, 110, 111, 112):
             turn_data = copy.deepcopy(turn_rst)
             turn_data["settings"]["turn"] = turn_number
@@ -79,113 +85,11 @@ def load_turn(memory_backend):
     return _load
 
 
-def _roster_ids(turn) -> list[int]:
-    return [player.id for player in iter_turn_players(turn)]
-
-
-def _ensure_fleet_export_gap_fill_context(
-    sample_turn,
-    memory_backend,
-    *,
-    turn_number: int = 8,
-):
-    """Export-ensure context with per-player prerequisites through T-1 (one-turn gap at T)."""
-    from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-    from api.analytics.fleet.compute_services import FleetComputeServices, turn_chain_through
-    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
-
-    from tests.scores_exports_helpers import GAME_ID, first_player_id, perspective
-
-    player_id = first_player_id(sample_turn)
-    other_player_id = sample_turn.scores[1].ownerid
-    host_turn = replace(
-        sample_turn,
-        settings=replace(sample_turn.settings, turn=turn_number),
-        game=replace(sample_turn.game, turn=turn_number),
-    )
-    stored_turns = turn_chain_through(host_turn)
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
-    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
-    persp = perspective(sample_turn)
-    final_provenance = FleetMaterializationProvenance(
-        turn_evidence_at_n=True,
-        prior_ledger_at_n_minus_1=True,
-    )
-
-    for prior_turn in range(1, turn_number):
-        prior_turn_info = stored_turns[prior_turn]
-        put_persisted_row(
-            inference_persistence,
-            prior_turn_info,
-            player_id,
-            PersistedInferenceRow(
-                status=STATUS_EXACT,
-                summary="seed",
-                solution_count=0,
-                is_complete=True,
-                solutions=[],
-            ),
-        )
-        fleet_persistence.put_ledger(
-            GAME_ID,
-            persp,
-            prior_turn,
-            player_id,
-            PersistedFleetLedger(
-                ledger=ensure_fleet_baseline_for_player(
-                    GAME_ID,
-                    persp,
-                    prior_turn_info,
-                    player_id,
-                ),
-                provenance=final_provenance,
-            ),
-        )
-
-    put_persisted_row(
-        inference_persistence,
-        host_turn,
-        player_id,
-        PersistedInferenceRow(
-            status=STATUS_EXACT,
-            summary="seed",
-            solution_count=0,
-            is_complete=True,
-            solutions=[],
-        ),
-    )
-
-    ctx = export_chain_query_context(
-        host_turn,
-        persistence=inference_persistence,
-        stored_turns=stored_turns,
-    )
-    fleet_services = ctx.export_services["fleet"]
-    ctx.export_services["fleet"] = FleetComputeServices(
-        persistence=fleet_persistence,
-        game_id=GAME_ID,
-        perspective=persp,
-        load_turn=stored_turns.get,
-        inference_materialization=fleet_services.inference_materialization,
-    )
-    scope = ExportScope(
-        game_id=GAME_ID,
-        perspective=persp,
-        turn=turn_number,
-        player_id=player_id,
-    )
-    return ctx, scope, player_id, other_player_id, fleet_persistence
-
-
 def test_single_player_gap_fill_does_not_materialize_other_players(persistence, load_turn):
-    turn_109 = load_turn(109)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_112 is not None
-    roster = _roster_ids(turn_112)
-    assert len(roster) > 1
-    player_p, player_q = roster[0], roster[1]
+    _, turn_112 = require_turns(load_turn, 109, 112)
+    player_p, player_q = two_players_from_turn(turn_112)
 
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     get_or_materialize_fleet_ledger_for_player(
         persistence,
@@ -203,7 +107,7 @@ def test_single_player_gap_fill_does_not_materialize_other_players(persistence, 
 
 def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
     ctx, scope, player_id, other_player_id, fleet_persistence = (
-        _ensure_fleet_export_gap_fill_context(sample_turn, memory_backend)
+        ensure_fleet_export_gap_fill_context(sample_turn, memory_backend)
     )
     ledger_calls: list[int] = []
     original = get_or_materialize_fleet_ledger_for_player
@@ -240,6 +144,8 @@ def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
 
 def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
     """Dependency walk and forward unwind both ensure fleet@T,P once; materialize once."""
+    from api.analytics.fleet.compute_services import turn_chain_through
+
     player_id = first_player_id(sample_turn)
     turn_number = 8
     inference_persistence = InferenceRowPersistenceService(memory_backend)
@@ -327,7 +233,7 @@ def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
 
 
 def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_turn, memory_backend):
-    ctx, scope, player_id, _, fleet_persistence = _ensure_fleet_export_gap_fill_context(
+    ctx, scope, player_id, _, fleet_persistence = ensure_fleet_export_gap_fill_context(
         sample_turn,
         memory_backend,
     )
@@ -351,11 +257,9 @@ def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_tu
 
 def test_per_player_cache_hit_does_not_require_roster_complete(persistence, load_turn):
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 
-    turn = load_turn(111)
-    assert turn is not None
-    roster = _roster_ids(turn)
+    (turn,) = require_turns(load_turn, 111)
+    roster = roster_ids(turn)
     player_p = roster[0]
     persistence.put_ledger(
         628580,
@@ -395,15 +299,10 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
     still in progress. Would raise ConflictError under perspective-batch coordinator
     behavior that waited for full-roster ensure-final before one-player access.
     """
-    turn_110 = load_turn(110)
-    turn_111 = load_turn(111)
-    turn_112 = load_turn(112)
-    assert turn_110 is not None and turn_111 is not None and turn_112 is not None
-    roster = _roster_ids(turn_112)
-    assert len(roster) > 1
-    player_p, player_q = roster[0], roster[1]
+    turn_110, turn_111, turn_112 = require_turns(load_turn, 110, 111, 112)
+    player_p, player_q = two_players_from_turn(turn_112)
 
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=110)
 
     inference_persistence, inference_materialization = _inference_materialization_for_fleet(
         memory_backend,
@@ -459,15 +358,11 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
 
 
 def test_per_player_gap_start_independent(persistence, load_turn):
-    turn_109 = load_turn(109)
-    turn_110 = load_turn(110)
-    turn_111 = load_turn(111)
-    assert turn_109 is not None and turn_110 is not None and turn_111 is not None
-    roster = _roster_ids(turn_111)
-    player_p, player_q = roster[0], roster[1]
+    turn_109, turn_110, turn_111 = require_turns(load_turn, 109, 110, 111)
+    player_p, player_q = two_players_from_turn(turn_111)
 
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=110)
 
     get_or_materialize_fleet_ledger_for_player(
         persistence,
@@ -487,11 +382,9 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
     from api.analytics.fleet import compute_fleet
     from api.analytics.fleet.compute_services import FleetComputeServices
 
-    turn_109 = load_turn(109)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_112 is not None
-    roster_size = len(_roster_ids(turn_112))
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    roster_size = len(roster_ids(turn_112))
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     fleet_services = FleetComputeServices(
         persistence=persistence,
@@ -523,18 +416,12 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
 
 
 def test_coordinator_two_threads_same_player_share_one_chain(persistence, load_turn):
-    turn_109 = load_turn(109)
-    turn_111 = load_turn(111)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_111 is not None and turn_112 is not None
-    player_id = _roster_ids(turn_112)[0]
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    turn_109, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
+    player_id = roster_ids(turn_112)[0]
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     materialize_calls = 0
-    original_chain = __import__(
-        "api.analytics.fleet.gap_fill_coordinator",
-        fromlist=["_materialize_fleet_ledger_chain_for_player"],
-    )._materialize_fleet_ledger_chain_for_player
+    original_chain = materialize_chain_from_coordinator_module()
 
     def counting_chain(*args, **kwargs):
         nonlocal materialize_calls
@@ -571,12 +458,9 @@ def test_coordinator_two_threads_same_player_share_one_chain(persistence, load_t
 
 
 def test_coordinator_same_player_waiters_satisfy_to_max_turn(persistence, load_turn):
-    turn_109 = load_turn(109)
-    turn_111 = load_turn(111)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_111 is not None and turn_112 is not None
-    player_id = _roster_ids(turn_112)[0]
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    turn_109, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
+    player_id = roster_ids(turn_112)[0]
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     leader_ready = threading.Event()
     release_leader = threading.Event()
@@ -621,12 +505,9 @@ def test_coordinator_same_player_waiters_satisfy_to_max_turn(persistence, load_t
 
 
 def test_coordinator_different_players_separate_dedupe_keys(persistence, load_turn):
-    turn_109 = load_turn(109)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_112 is not None
-    roster = _roster_ids(turn_112)
-    player_p, player_q = roster[0], roster[1]
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    player_p, player_q = two_players_from_turn(turn_112)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     coordinator_p = coordinator_for(persistence, 628580, 1, player_p)
     coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
@@ -679,11 +560,9 @@ def test_coordinator_different_players_separate_dedupe_keys(persistence, load_tu
 
 
 def test_coordinator_waiter_timeout_per_player(persistence, load_turn):
-    turn_109 = load_turn(109)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_112 is not None
-    player_p, player_q = _roster_ids(turn_112)[:2]
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    player_p, player_q = two_players_from_turn(turn_112)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     started = threading.Event()
     release = threading.Event()
@@ -760,13 +639,10 @@ def test_forward_unwind_scores_before_fleet_per_player(
     """Gap M..N for one player: scores@t,P is ensured before fleet@t,P at each gap turn."""
     from api.analytics.export_context import AnalyticQueryContext
 
-    turn_109 = load_turn(109)
-    turn_111 = load_turn(111)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_111 is not None and turn_112 is not None
-    player_p = _roster_ids(turn_112)[0]
+    turn_109, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
+    player_p = roster_ids(turn_112)[0]
 
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     _, inference_materialization = _inference_materialization_for_fleet(
         memory_backend,
@@ -857,41 +733,25 @@ def test_forward_unwind_scores_before_fleet_per_player(
 
 def test_invalidation_mid_chain_same_player_waiters_retry_once(persistence, load_turn):
     """P invalidation aborts P's chain and waiters retry; Q's in-flight chain is unaffected."""
-    from api.analytics.fleet.types import PersistedFleetLedger
-
-    turn_109 = load_turn(109)
-    turn_112 = load_turn(112)
-    assert turn_109 is not None and turn_112 is not None
-    roster = _roster_ids(turn_112)
-    assert len(roster) > 1
-    player_p, player_q = roster[0], roster[1]
-    _put_provenance_final_snapshot(persistence, 628580, 1, turn_109)
+    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    player_p, player_q = two_players_from_turn(turn_112)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
     leader_mid_chain = threading.Event()
     p_waiter_joined = threading.Event()
     q_started = threading.Event()
     release_leader = threading.Event()
-    original_put_ledger = persistence.put_ledger
-    mid_chain_puts = 0
-
-    def hooked_put_ledger(*args, **kwargs):
-        nonlocal mid_chain_puts
-        turn_number = args[2]
-        player_id = args[3]
-        original_put_ledger(*args, **kwargs)
-        if player_id == player_p and turn_number == 111 and mid_chain_puts == 0:
-            mid_chain_puts += 1
-            leader_mid_chain.set()
-            assert release_leader.wait(timeout=5)
-
-    persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
+    install_mid_chain_put_ledger_gate(
+        persistence,
+        player_id=player_p,
+        turn_number=111,
+        leader_mid_chain=leader_mid_chain,
+        release_leader=release_leader,
+    )
 
     coordinator_p = coordinator_for(persistence, 628580, 1, player_p)
     coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
-    original_chain = __import__(
-        "api.analytics.fleet.gap_fill_coordinator",
-        fromlist=["_materialize_fleet_ledger_chain_for_player"],
-    )._materialize_fleet_ledger_chain_for_player
+    original_chain = materialize_chain_from_coordinator_module()
     original_run_leader_p = coordinator_p._run_leader_unwind
 
     p_materialize_calls = 0
@@ -1010,3 +870,113 @@ def test_invalidation_mid_chain_same_player_waiters_retry_once(persistence, load
         f"expected one Q materialization chain, got {q_materialize_calls}"
     )
     assert coordinator_p is not coordinator_q
+
+
+def test_coordinator_q_unaffected_when_p_epoch_bumps_mid_chain(persistence, load_turn):
+    """Q leader does not re-enter materialize chain when only P's epoch bumps."""
+    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    player_p, player_q = two_players_from_turn(turn_112)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
+
+    leader_mid_chain = threading.Event()
+    q_started = threading.Event()
+    release_leader = threading.Event()
+    install_mid_chain_put_ledger_gate(
+        persistence,
+        player_id=player_p,
+        turn_number=111,
+        leader_mid_chain=leader_mid_chain,
+        release_leader=release_leader,
+    )
+
+    coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
+    original_chain = materialize_chain_from_coordinator_module()
+    original_run_leader_q = coordinator_q._run_leader_unwind
+
+    q_materialize_calls = 0
+    q_leader_unwind_calls = 0
+    q_epoch_at_start: int | None = None
+    errors: list[BaseException] = []
+
+    def counting_chain(*args, **kwargs):
+        nonlocal q_materialize_calls
+        materialize_player_id = args[3]
+        if materialize_player_id == player_q:
+            q_materialize_calls += 1
+        return original_chain(*args, **kwargs)
+
+    def counting_run_leader_q(
+        inflight,
+        turn,
+        *,
+        load_turn,
+        inference_materialization,
+        query_context,
+    ):
+        nonlocal q_leader_unwind_calls, q_epoch_at_start
+        if q_epoch_at_start is None:
+            q_epoch_at_start = coordinator_q.epoch
+        q_leader_unwind_calls += 1
+        return original_run_leader_q(
+            inflight,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+        )
+
+    def run_p_leader() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_p,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_q() -> None:
+        q_started.set()
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_q,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with (
+        patch(
+            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
+            side_effect=counting_chain,
+        ),
+        patch.object(coordinator_q, "_run_leader_unwind", side_effect=counting_run_leader_q),
+    ):
+        p_leader_thread = threading.Thread(target=run_p_leader)
+        p_leader_thread.start()
+        assert leader_mid_chain.wait(timeout=5)
+        q_thread = threading.Thread(target=run_q)
+        q_thread.start()
+        assert q_started.wait(timeout=5)
+        q_epoch_before_invalidation = coordinator_q.epoch
+        persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, player_p)
+        assert coordinator_q.epoch == q_epoch_before_invalidation
+        release_leader.set()
+        p_leader_thread.join(timeout=30)
+        q_thread.join(timeout=30)
+
+    assert not errors
+    assert persistence.get_ledger(628580, 1, 112, player_q) is not None
+    assert q_epoch_at_start is not None
+    assert coordinator_q.epoch == q_epoch_at_start
+    assert q_leader_unwind_calls == 1, f"expected one Q leader unwind, got {q_leader_unwind_calls}"
+    assert q_materialize_calls == 1, (
+        f"expected one Q materialization chain, got {q_materialize_calls}"
+    )

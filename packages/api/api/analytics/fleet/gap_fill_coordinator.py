@@ -173,8 +173,12 @@ class FleetGapFillCoordinator:
 
     @property
     def epoch(self) -> int:
-        """Current invalidation generation for this perspective scope."""
-        return self._persistence.invalidation_generation(self._game_id, self._perspective)
+        """Current invalidation generation for this player scope."""
+        return self._persistence.invalidation_generation(
+            self._game_id,
+            self._perspective,
+            self._player_id,
+        )
 
     def materialize_ledger(
         self,
@@ -396,6 +400,7 @@ class FleetGapFillCoordinator:
                     self._persistence,
                     self._game_id,
                     self._perspective,
+                    self._player_id,
                     generation,
                 )
                 try:

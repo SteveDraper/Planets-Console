@@ -74,12 +74,12 @@ class _GapFillCoherence:
     persistence: FleetSnapshotPersistenceService
     game_id: int
     perspective: int
+    player_id: int
     generation: int
 
     def put_ledger(
         self,
         turn_number: int,
-        player_id: int,
         persisted: PersistedFleetLedger,
     ) -> None:
         self._assert_unchanged()
@@ -87,7 +87,7 @@ class _GapFillCoherence:
             self.game_id,
             self.perspective,
             turn_number,
-            player_id,
+            self.player_id,
             persisted,
             snapshot_complete_roster=None,
         )
@@ -95,7 +95,11 @@ class _GapFillCoherence:
 
     def _assert_unchanged(self) -> None:
         if (
-            self.persistence.invalidation_generation(self.game_id, self.perspective)
+            self.persistence.invalidation_generation(
+                self.game_id,
+                self.perspective,
+                self.player_id,
+            )
             != self.generation
         ):
             raise _FleetSnapshotInvalidated()
@@ -374,7 +378,7 @@ def _materialize_and_persist_player_turn(
         inference_materialization=inference_materialization,
     )
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
-    coherence.put_ledger(materialize_turn, player_id, persisted)
+    coherence.put_ledger(materialize_turn, persisted)
     return persisted
 
 
@@ -533,11 +537,18 @@ def _materialize_fleet_snapshot_chain(
     *,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
-    coherence: _GapFillCoherence,
 ) -> FleetTurnSnapshot:
     """Gap-fill fleet ledgers for every roster player through turn T."""
     turn_context_cache: dict[int, FleetTurnContext] = {}
     for player_id in _roster_player_ids(turn):
+        generation = persistence.invalidation_generation(game_id, perspective, player_id)
+        player_coherence = _GapFillCoherence(
+            persistence,
+            game_id,
+            perspective,
+            player_id,
+            generation,
+        )
         _materialize_fleet_ledger_chain_for_player(
             persistence,
             game_id,
@@ -546,7 +557,7 @@ def _materialize_fleet_snapshot_chain(
             turn,
             load_turn=load_turn,
             inference_materialization=inference_materialization,
-            coherence=coherence,
+            coherence=player_coherence,
             turn_context_cache=turn_context_cache,
         )
     snapshot = persistence.get_snapshot(game_id, perspective, turn.settings.turn)
@@ -582,7 +593,6 @@ def _run_materialize_on_active_coherence(
             turn,
             load_turn=load_turn,
             inference_materialization=inference_materialization,
-            coherence=coherence,
         )
     return _materialize_fleet_ledger_chain_for_player(
         persistence,

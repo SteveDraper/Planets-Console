@@ -318,10 +318,10 @@ def test_invalidate_for_turn_write_drops_snapshots_at_and_after_turn(persistence
                 players=[FleetAcquisitionLedger(player_id=8)],
             ),
         )
-    assert persistence.invalidation_generation(628580, 1) == 0
+    assert persistence.invalidation_generation(628580, 1, 8) == 0
     cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
     assert cleared == {111, 112}
-    assert persistence.invalidation_generation(628580, 1) == 1
+    assert persistence.invalidation_generation(628580, 1, 8) == 1
     assert persistence.get_snapshot(628580, 1, 110) is not None
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.get_snapshot(628580, 1, 112) is None
@@ -345,16 +345,75 @@ def test_invalidate_player_ledgers_from_turn_drops_only_target_player(persistenc
             3,
             PersistedFleetLedger(ledger=player_3),
         )
-    assert persistence.invalidation_generation(628580, 1) == 0
+    assert persistence.invalidation_generation(628580, 1, 8) == 0
+    assert persistence.invalidation_generation(628580, 1, 3) == 0
     cleared = persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8)
     assert cleared == {111, 112}
-    assert persistence.invalidation_generation(628580, 1) == 1
+    assert persistence.invalidation_generation(628580, 1, 8) == 1
+    assert persistence.invalidation_generation(628580, 1, 3) == 0
     assert persistence.get_ledger(628580, 1, 110, 8) is not None
     assert persistence.get_ledger(628580, 1, 110, 3) is not None
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.get_ledger(628580, 1, 112, 8) is None
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
     assert persistence.get_ledger(628580, 1, 112, 3) is not None
+
+
+def test_invalidation_bumps_epoch_for_target_player_only(persistence):
+    """invalidate_player_ledgers_from_turn bumps only the target player's generation."""
+    player_8 = FleetAcquisitionLedger(player_id=8)
+    player_3 = FleetAcquisitionLedger(player_id=3)
+    for turn_number in (111, 112):
+        persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            8,
+            PersistedFleetLedger(ledger=player_8),
+        )
+        persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            3,
+            PersistedFleetLedger(ledger=player_3),
+        )
+
+    assert persistence.invalidation_generation(628580, 1, 8) == 0
+    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8)
+    assert persistence.invalidation_generation(628580, 1, 8) == 1
+    assert persistence.invalidation_generation(628580, 1, 3) == 0
+
+
+def test_turn_document_replace_bumps_all_player_epochs(persistence):
+    """invalidate_for_turn_write bumps every player who had ledgers at affected turns."""
+    player_8 = FleetAcquisitionLedger(player_id=8)
+    player_3 = FleetAcquisitionLedger(player_id=3)
+    for turn_number in (110, 111, 112):
+        persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            8,
+            PersistedFleetLedger(ledger=player_8),
+        )
+        persistence.put_ledger(
+            628580,
+            1,
+            turn_number,
+            3,
+            PersistedFleetLedger(ledger=player_3),
+        )
+
+    assert persistence.invalidation_generation(628580, 1, 8) == 0
+    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
+    assert cleared == {111, 112}
+    assert persistence.invalidation_generation(628580, 1, 8) == 1
+    assert persistence.invalidation_generation(628580, 1, 3) == 1
+    assert persistence.get_ledger(628580, 1, 110, 8) is not None
+    assert persistence.get_ledger(628580, 1, 110, 3) is not None
 
 
 def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backend):
@@ -636,13 +695,16 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     turn_112 = load_turn(112)
     assert turn_112 is not None
     sync = threading.Barrier(2)
-    put_generations: list[int] = []
+    put_records: list[tuple[int, int]] = []
     original_put_ledger = persistence.put_ledger
 
     def hooked_put_ledger(*args, **kwargs):
         original_put_ledger(*args, **kwargs)
-        put_generations.append(persistence.invalidation_generation(628580, 1))
-        if len(put_generations) == 1:
+        player_id = args[3]
+        put_records.append(
+            (player_id, persistence.invalidation_generation(628580, 1, player_id)),
+        )
+        if len(put_records) == 1:
             sync.wait()
             sync.wait()
 
@@ -674,8 +736,21 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     assert gap_fill_error is None
     assert snapshot is not None
     assert snapshot.turn == 112
-    assert put_generations[0] == 0
-    assert put_generations[-2:] == [1, 1]
+    assert put_records[0][1] == 0
+    for player_id in {recorded_player_id for recorded_player_id, _ in put_records}:
+        player_generations = [
+            generation
+            for recorded_player_id, generation in put_records
+            if recorded_player_id == player_id
+        ]
+        if 1 not in player_generations:
+            continue
+        last_generation_zero_index = max(
+            index for index, generation in enumerate(player_generations) if generation == 0
+        )
+        post_invalidation_generations = player_generations[last_generation_zero_index + 1 :]
+        assert post_invalidation_generations
+        assert post_invalidation_generations == [1] * len(post_invalidation_generations)
     assert persistence.get_snapshot(628580, 1, 111) is not None
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
     assert len(snapshot.players[0].records) == 6
@@ -791,6 +866,9 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
 
     persistence.put_ledger = put_ledger_that_invalidates  # type: ignore[method-assign]
 
+    from api.analytics.turn_roster import iter_turn_players
+
+    first_player_id = next(iter_turn_players(turn_111)).id
     with patch("api.analytics.fleet.gap_fill_coordinator.GAP_FILL_MAX_RETRIES", 3):
         with pytest.raises(ConflictError, match="exceeded 3 invalidation retries"):
             get_or_materialize_fleet_snapshot(
@@ -802,7 +880,7 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
             )
 
     assert persistence.get_snapshot(628580, 1, 111) is None
-    assert persistence.invalidation_generation(628580, 1) == 3
+    assert persistence.invalidation_generation(628580, 1, first_player_id) == 3
 
 
 def _put_provenance_final_snapshot(
@@ -926,11 +1004,15 @@ def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn
         persistence.document_key(628580, 1, 111),
         stale_payload,
     )
-    generation_before = persistence.invalidation_generation(628580, 1)
+    first_player_id = snapshot.players[0].player_id
+    generation_before = persistence.invalidation_generation(628580, 1, first_player_id)
 
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.has_snapshot(628580, 1, 111) is False
-    assert persistence.invalidation_generation(628580, 1) == generation_before + 1
+    for player_ledger in snapshot.players:
+        assert persistence.invalidation_generation(628580, 1, player_ledger.player_id) == (
+            generation_before + 1
+        )
 
 
 def test_missing_materialization_version_is_deleted_on_read(persistence, load_turn, memory_backend):

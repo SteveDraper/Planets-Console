@@ -78,7 +78,7 @@ Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issu
 | Turn document replace at *T* | Drop all fleet ledgers at turns `>= T` |
 | Hull mask / recompute (scores) | Existing per-player scores hooks; fleet follows scores row clears for P |
 
-Invalidation generation counter remains per `(gameId, perspective)` unless coordinator work splits epochs per player (implementation detail of [#179](https://github.com/SteveDraper/Planets-Console/issues/179) if needed).
+**Invalidation generation:** A monotonic counter per `(gameId, perspective, playerId)` -- the same grain as the gap-fill coordinator ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)). The counter bumps when that player's fleet ledgers are dropped: per-player scores invalidation for P, stale `materializationVersion` prune on read, or turn document replace clearing P's stored ledgers. Gap-fill coordinators record the generation at chain start and abort multi-turn materialization when the counter advances for that player, then retry from a fresh anchor. Per-player scores invalidation bumps only P; turn document replace bumps every player who had ledgers cleared at affected turns. Invalidation does not block on in-flight gap-fill work.
 
 ### 6. Fleet table NDJSON stream (scores-shaped)
 

@@ -9,9 +9,7 @@ from pathlib import Path
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet.chain import (
-    _GapFillCoherence,
     _materialize_fleet_snapshot_chain,
-    gap_fill_coherence_scope,
 )
 from api.analytics.fleet.compute_services import (
     FleetComputeServices,
@@ -132,26 +130,14 @@ def seed_fleet_unwind_through(
                     solutions=[],
                 ),
             )
-        generation = fleet_services.persistence.invalidation_generation(
-            ctx.game_id,
-            ctx.perspective,
-        )
-        coherence = _GapFillCoherence(
+        _materialize_fleet_snapshot_chain(
             fleet_services.persistence,
             ctx.game_id,
             ctx.perspective,
-            generation,
+            turn,
+            load_turn=ctx.load_turn,
+            inference_materialization=fleet_services.inference_materialization,
         )
-        with gap_fill_coherence_scope(coherence):
-            _materialize_fleet_snapshot_chain(
-                fleet_services.persistence,
-                ctx.game_id,
-                ctx.perspective,
-                turn,
-                load_turn=ctx.load_turn,
-                inference_materialization=fleet_services.inference_materialization,
-                coherence=coherence,
-            )
 
 
 def seed_storage_analytics_fixture(

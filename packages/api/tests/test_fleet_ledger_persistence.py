@@ -224,11 +224,12 @@ def test_stale_per_ledger_materialization_version_is_deleted_on_read(
     assert isinstance(ledger_wire, dict)
     ledger_wire["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
     memory_backend.put(persistence.document_key(628580, 1, 111), document)
-    generation_before = persistence.invalidation_generation(628580, 1)
+    generation_before = persistence.invalidation_generation(628580, 1, 8)
 
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.has_ledger(628580, 1, 111, 8) is False
-    assert persistence.invalidation_generation(628580, 1) == generation_before + 1
+    assert persistence.invalidation_generation(628580, 1, 8) == generation_before + 1
+    assert persistence.invalidation_generation(628580, 1, 3) == 0
 
 
 def test_list_ledger_player_ids_returns_sorted_ids(persistence, sample_ledger):
