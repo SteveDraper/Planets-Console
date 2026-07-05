@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
+    build_stopped_row_complete,
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -87,8 +88,8 @@ class InferenceRowScheduler:
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._condition:
             if self._active_scope == scope and self._has_active_table_stream:
-                raise TableStreamScopeAlreadyActive()
-            if self._active_scope != scope:
+                self._preempt_active_table_stream_locked()
+            elif self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
             stream_token = str(uuid.uuid4())
@@ -295,7 +296,8 @@ class InferenceRowScheduler:
             job = self._work_queue.popleft()
             self._get_or_create_run(job.session).hold_job(job)
 
-    def _invalidate_retained_state_locked(self) -> None:
+    def _preempt_active_table_stream_locked(self) -> None:
+        """Cancel in-flight row runs so a reconnect can own this scope."""
         self._has_active_table_stream = False
         self._active_table_stream_token = None
         self._globally_paused = False
@@ -305,6 +307,9 @@ class InferenceRowScheduler:
         while self._work_queue:
             job = self._work_queue.popleft()
             job.session.cancel_token.cancel()
+
+    def _invalidate_retained_state_locked(self) -> None:
+        self._preempt_active_table_stream_locked()
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)
@@ -392,22 +397,17 @@ class InferenceRowScheduler:
             )
         )
 
-    def _try_claim_run_for_finalize(self, session: InferenceRowStreamSession) -> bool:
+    def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._condition:
-            if session.cancel_token.is_cancelled():
-                return False
             run = self._runs.pop(session.run_id, None)
-            if run is None:
-                return False
-            run.clear_held()
-            return True
+            if run is not None:
+                run.clear_held()
 
     def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
-        if not self._try_claim_run_for_finalize(session):
-            return
+        session.event_queue.put(event)
+        self._finalize_row_run(session)
         if self._on_row_complete is not None:
             self._on_row_complete(session, event)
-        session.event_queue.put(event)
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run and purge its queued tier jobs."""
@@ -451,9 +451,10 @@ class InferenceRowScheduler:
         if outcome.row_complete is not None:
             self._emit_row_complete(session, outcome.row_complete)
             return
+        if session.cancel_token.is_cancelled():
+            self._emit_row_complete(session, build_stopped_row_complete(run))
+            return
         with self._condition:
-            if session.cancel_token.is_cancelled():
-                return
             active_run = self._runs.get(session.run_id)
             if active_run is None:
                 return

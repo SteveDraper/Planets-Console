@@ -268,9 +268,6 @@ def run_fleet_player_materialization_job(
         session.event_queue.put(fleet_error_event("Fleet ledger materialization failed"))
         return
 
-    if session.cancel_token.is_cancelled():
-        return
-
     if progress_tracker.emitted_progress:
         session.event_queue.put(wire_materialized_complete_event(persisted))
         return

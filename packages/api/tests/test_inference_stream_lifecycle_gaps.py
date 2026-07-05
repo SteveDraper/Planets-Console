@@ -42,7 +42,6 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
-from api.transport.inference_stream import TABLE_STREAM_ALREADY_ACTIVE_DETAIL
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -211,54 +210,32 @@ def test_multiplex_delivers_all_queued_completes_before_scope_deactivation(sampl
     assert complete_player_ids == {row.player_id for row in rows}
 
 
-def test_stream_conflict_does_not_preempt_first_connection_while_rows_compute(
+def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     sample_turn,
     monkeypatch,
     memory_backend,
 ):
-    """Persist succeeds while a duplicate connect is rejected and the first stream runs."""
+    """Reconnect preempts the prior stream so a duplicate connect can proceed."""
     persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = _install_workerless_scheduler(
         monkeypatch,
         on_row_complete=persistence.persist_row_complete,
     )
-    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
-    completed_player_id, in_flight_player_id = player_ids
-    turn_number = sample_turn.settings.turn
-
-    first_stream = iter_scores_table_inference_events(
-        sample_turn,
-        player_ids,
+    scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
-        persistence=persistence,
-        scheduler=scheduler,
+        turn_number=sample_turn.settings.turn,
     )
-    assert next(first_stream) == {"type": "globalPause", "paused": False}
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    completed_player_id = player_ids[0]
+    in_flight_player_id = player_ids[1]
+    turn_number = sample_turn.settings.turn
 
-    collected: list[dict[str, object]] = []
-    stream_error: list[BaseException] = []
-
-    def consume_first_stream() -> None:
-        try:
-            collected.extend(_collect_stream_events(first_stream))
-        except BaseException as exc:  # pragma: no cover - surfaced via stream_error
-            stream_error.append(exc)
-
-    thread = threading.Thread(target=consume_first_stream, daemon=True)
-    thread.start()
-    _wait_until(lambda: len(scheduler._runs) == len(player_ids))
-
-    completed_session = next(
-        run.session
-        for run in scheduler._runs.values()
-        if run.session.player_id == completed_player_id
-    )
-    in_flight_session = next(
-        run.session
-        for run in scheduler._runs.values()
-        if run.session.player_id == in_flight_player_id
-    )
+    first_token = scheduler.begin_scope(scope)
+    completed_session = _session_for_player(sample_turn, player_id=completed_player_id)
+    in_flight_session = _session_for_player(sample_turn, player_id=in_flight_player_id)
+    scheduler.enqueue_tier_ladder(completed_session, stream_token=first_token)
+    scheduler.enqueue_tier_ladder(in_flight_session, stream_token=first_token)
 
     scheduler._emit_row_complete(
         completed_session,
@@ -267,69 +244,21 @@ def test_stream_conflict_does_not_preempt_first_connection_while_rows_compute(
             diagnostics=_diagnostics(turn=turn_number, player_id=completed_player_id),
         ),
     )
-    in_flight_session.event_queue.put(
-        TierProgress(policy_step_id="early_game_bands", combo_count=2142, held_count=0)
-    )
 
     replacement = iter_scores_table_inference_events(
         sample_turn,
-        player_ids,
+        (),
         game_id=628580,
         perspective=1,
         persistence=persistence,
         scheduler=scheduler,
     )
-    assert next(replacement) == {
-        "type": "error",
-        "detail": TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
-    }
+    assert next(replacement) == {"type": "globalPause", "paused": False}
     replacement.close()
 
-    controller = controller_for_scope(
-        InferenceStreamScope(
-            game_id=628580,
-            perspective=1,
-            turn_number=turn_number,
-        )
-    )
-    assert controller is not None
-    controller.end_stream(scheduler)
-    thread.join(timeout=2.0)
-    assert not stream_error
-
-    completed_events = [
-        event
-        for event in collected
-        if event.get("type") == "complete" and event.get("playerId") == completed_player_id
-    ]
-    in_flight_completes = [
-        event
-        for event in collected
-        if event.get("type") == "complete" and event.get("playerId") == in_flight_player_id
-    ]
-    in_flight_progress = [
-        event
-        for event in collected
-        if event.get("type") == "progress" and event.get("playerId") == in_flight_player_id
-    ]
-
     assert persistence.get_row(628580, 1, turn_number, completed_player_id) is not None
-    assert len(in_flight_completes) == 0
-    assert len(in_flight_progress) >= 0
-
-    replay_stream = iter_scores_table_inference_events(
-        sample_turn,
-        (completed_player_id,),
-        game_id=628580,
-        perspective=1,
-        persistence=persistence,
-        scheduler=scheduler,
-    )
-    replay_events = [next(replay_stream), next(replay_stream)]
-    replay_stream.close()
-    assert replay_events[1]["type"] == "complete"
-    assert replay_events[1]["summary"] == "persisted on backend"
-    assert len(completed_events) in {0, 1}
+    assert in_flight_session.cancel_token.is_cancelled()
+    assert not scheduler.owns_table_stream(first_token)
 
 
 def test_progress_without_terminal_complete_when_scope_deactivates_mid_row(sample_turn):

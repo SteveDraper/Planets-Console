@@ -181,7 +181,7 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
         second.close()
 
 
-def test_fleet_table_stream_reconnect_returns_conflict_while_active(sample_turn):
+def test_fleet_table_stream_reconnect_preempts_active_scope(sample_turn):
     reset_fleet_table_stream_scheduler_for_tests()
     scheduler = FleetTableStreamScheduler(worker_count=0)
     scope = FleetTableStreamScope(
@@ -189,29 +189,14 @@ def test_fleet_table_stream_reconnect_returns_conflict_while_active(sample_turn)
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    stream_token = scheduler.begin_scope(scope)
-    try:
-        services = build_ephemeral_fleet_compute_services(
-            sample_turn,
-            game_id=628580,
-            perspective=1,
-        )
-        replacement = iter_fleet_table_stream_events(
-            sample_turn,
-            (sample_turn.scores[0].ownerid,),
-            game_id=628580,
-            perspective=1,
-            fleet_services=services,
-            persistence=services.persistence,
-            scheduler=scheduler,
-        )
-        assert next(replacement) == {
-            "type": "error",
-            "detail": TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
-        }
-        replacement.close()
-    finally:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+    first_token = scheduler.begin_scope(scope)
+    second_token = scheduler.begin_scope(scope)
+
+    assert second_token != first_token
+    assert not scheduler.owns_table_stream(first_token)
+    assert scheduler.owns_table_stream(second_token)
+
+    scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
 
 
 def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
@@ -222,33 +207,48 @@ def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    stream_token = scheduler.begin_scope(scope)
-    try:
-        services = build_ephemeral_fleet_compute_services(
+    first_token = scheduler.begin_scope(scope)
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    services.persistence.put_ledger(
+        628580,
+        1,
+        sample_turn.settings.turn,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+
+    def replacement_loader():
+        yield from iter_fleet_table_stream_events(
             sample_turn,
+            (player_id,),
             game_id=628580,
             perspective=1,
+            fleet_services=services,
+            persistence=services.persistence,
+            scheduler=scheduler,
         )
 
-        def replacement_loader():
-            yield from iter_fleet_table_stream_events(
-                sample_turn,
-                (sample_turn.scores[0].ownerid,),
-                game_id=628580,
-                perspective=1,
-                fleet_services=services,
-                persistence=services.persistence,
-                scheduler=scheduler,
-            )
+    lines: list[str] = []
+    for line in stream_fleet_table_ndjson(replacement_loader):
+        lines.append(line)
+        payload = json.loads(line)
+        if payload.get("type") == "complete":
+            break
 
-        lines = list(stream_fleet_table_ndjson(replacement_loader))
-        assert len(lines) == 1
-        assert json.loads(lines[0]) == {
-            "type": "error",
-            "detail": TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
-        }
-    finally:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+    assert lines
+    assert json.loads(lines[0]).get("detail") != TABLE_STREAM_ALREADY_ACTIVE_DETAIL
+    assert not scheduler.owns_table_stream(first_token)
 
 
 def test_cached_final_ledger_replays_terminal_events_without_scheduling(sample_turn):
@@ -552,6 +552,73 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
     )
     assert len(events) == 1
     assert events[0]["playerId"] == 8
+
+
+def test_materialization_job_emits_complete_after_progress_when_session_cancelled(
+    persistence,
+    load_turn,
+):
+    """A cancelled session still receives complete after successful gap-fill."""
+    from unittest.mock import patch
+
+    from api.analytics.fleet.chain import ensure_fleet_baseline, ensure_fleet_baseline_for_player
+    from api.analytics.fleet.compute_services import FleetComputeServices
+    from api.analytics.fleet.fleet_table_player_run import (
+        FleetPlayerStreamSession,
+        run_fleet_player_materialization_job,
+    )
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    player_id = turn_112.scores[0].ownerid
+
+    session = FleetPlayerStreamSession(
+        player_id=player_id,
+        turn=turn_112,
+        game_id=628580,
+        perspective=1,
+    )
+    services = FleetComputeServices(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        load_turn=load_turn,
+    )
+    final_persisted = PersistedFleetLedger(
+        ledger=ensure_fleet_baseline_for_player(628580, 1, turn_112, player_id),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+
+    def materialize_with_cancel(*args, on_progress=None, **kwargs):
+        if on_progress is not None:
+            on_progress(final_persisted, 112)
+        session.cancel_token.cancel()
+        return final_persisted
+
+    with patch(
+        "api.analytics.fleet.fleet_table_player_run.get_or_materialize_fleet_ledger_for_player",
+        side_effect=materialize_with_cancel,
+    ):
+        run_fleet_player_materialization_job(
+            session,
+            fleet_services=services,
+            persistence=persistence,
+        )
+
+    events: list[dict[str, object]] = []
+    while not session.event_queue.empty():
+        events.append(session.event_queue.get_nowait())
+
+    assert [event.get("type") for event in events if event.get("type") == "ledger_updated"]
+    assert events[-1]["type"] == "complete"
 
 
 @pytest.mark.slow
