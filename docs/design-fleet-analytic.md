@@ -176,7 +176,7 @@ Gap-fill is **deterministic** for a given anchor, stored RST sequence, and score
 
 #### 5.1.1 Player-scoped unwind (target)
 
-A fleet materialization request is scoped to **one compute node** `(fleet, game_id, perspective, turn, player_id)` -- see [design-analytic-exports.md](design-analytic-exports.md) **Compute node model**. Gap fill for player P from turn `M` through `N` unwinds only P's ensure subgraph, forward by turn:
+A fleet materialization request is scoped to **one compute scope** `(fleet, game_id, perspective, turn, player_id)` -- see [design-compute-orchestrator.md](design-compute-orchestrator.md). Gap fill for player P from turn `M` through `N` unwinds only P's ensure subgraph, forward by turn:
 
 ```text
 scores@M,P → fleet@M,P → scores@(M+1),P → fleet@(M+1),P → … → scores@N,P → fleet@N,P

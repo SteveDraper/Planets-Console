@@ -68,7 +68,7 @@ Materialize `fleet@N` for player P by:
 
 **Shared turn context** (global scoreboard totals for id bounds, accelerated homeworld seeding inputs) is computed once per `(game, perspective, turn)` from RST and read by all per-player materializers. It is not a mutable cross-player ledger.
 
-Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) singleflight is keyed per `(gameId, perspective, playerId)` ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)). A perspective-wide lock that batch-materializes all roster players when one player is requested is **not** acceptable: it violates per-player ensure scope and the compute node model in [design-analytic-exports.md](../design-analytic-exports.md).
+Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)) singleflight is keyed per `(gameId, perspective, playerId)` ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)). A perspective-wide lock that batch-materializes all roster players when one player is requested is **not** acceptable: it violates per-player ensure scope and the [compute orchestrator](../design-compute-orchestrator.md) scope model.
 
 ### 5. Per-player invalidation
 
