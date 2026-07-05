@@ -70,6 +70,21 @@ def _axis_value(
     return export_scope.player_id
 
 
+def compute_scope_to_export_scope(scope: ComputeScope) -> ExportScope:
+    """Map a concrete compute scope to export scope for dependency walks."""
+    if scope.perspective == WILDCARD:
+        raise ValueError("concrete perspective is required for export planning")
+    if scope.turn == WILDCARD:
+        raise ValueError("concrete turn is required for export planning")
+    player_id = None if scope.player_id == WILDCARD else scope.player_id
+    return ExportScope(
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        player_id=player_id,
+    )
+
+
 def normalize_export_scope_to_compute_scope(
     export_scope: ExportScope,
     *,
