@@ -59,8 +59,3 @@ class TableStreamScopeGuard(Generic[ScopeT]):
             self._has_active_table_stream = False
             self._active_table_stream_token = None
         return owns
-
-    def preempt_locked(self, *, on_preempt: Callable[[], None]) -> None:
-        on_preempt()
-        self._has_active_table_stream = False
-        self._active_table_stream_token = None
