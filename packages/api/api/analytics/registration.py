@@ -2,10 +2,17 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.exports.catalog import AnalyticExportCatalog
+
+if TYPE_CHECKING:
+    from api.compute.persistence import PersistencePolicy
+    from api.compute.profile import AnalyticComputeProfile
+    from api.compute.scope import ScopeKeySpec
+    from api.compute.wire import BuildStepJobWireFn, RunStepFn
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
 ExportCatalogLoader = Callable[[], AnalyticExportCatalog]
@@ -19,6 +26,11 @@ class TurnAnalyticRegistration:
     compute: TurnAnalyticHandler
     export_catalog: AnalyticExportCatalog | None = None
     export_catalog_loader: ExportCatalogLoader | None = None
+    scope_key_spec: ScopeKeySpec | None = None
+    compute_profile: AnalyticComputeProfile | None = None
+    persistence_policy: PersistencePolicy | None = None
+    build_step_job_wires: tuple[tuple[str, BuildStepJobWireFn], ...] = ()
+    run_steps: tuple[tuple[str, RunStepFn], ...] = ()
 
 
 def resolve_registration_export_catalog(
