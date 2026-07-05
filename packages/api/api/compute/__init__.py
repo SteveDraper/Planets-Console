@@ -17,12 +17,14 @@ from api.compute.scope import (
 )
 from api.compute.wire import BuildStepJobWireFn, RunStepFn
 
-_REGISTRY_EXPORTS = frozenset({
-    "COMPUTE_REGISTRY",
-    "AnalyticComputeRegistration",
-    "build_compute_registry",
-    "validate_turn_analytic_compute_registration",
-})
+_REGISTRY_EXPORTS = frozenset(
+    {
+        "COMPUTE_REGISTRY",
+        "AnalyticComputeRegistration",
+        "build_compute_registry",
+        "validate_turn_analytic_compute_registration",
+    }
+)
 
 
 def __getattr__(name: str) -> object:
@@ -31,6 +33,7 @@ def __getattr__(name: str) -> object:
 
         return getattr(registry_module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "COMPUTE_REGISTRY",
