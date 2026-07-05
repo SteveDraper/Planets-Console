@@ -2,36 +2,29 @@
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING
 
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.streaming.table_stream.registry import TableStreamRegistry
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_table_stream_controller import (
         InferenceTableStreamController,
     )
 
-_registry_lock = threading.Lock()
-_active_controllers: dict[InferenceStreamScope, InferenceTableStreamController] = {}
+_registry = TableStreamRegistry[InferenceStreamScope, "InferenceTableStreamController"]()
 
 
 def attach_inference_table_stream(controller: InferenceTableStreamController) -> None:
-    with _registry_lock:
-        _active_controllers[controller.scope] = controller
+    _registry.attach(controller.scope, controller)
 
 
 def detach_inference_table_stream(stream_token: str) -> None:
-    with _registry_lock:
-        for scope, controller in list(_active_controllers.items()):
-            if controller.stream_token == stream_token:
-                del _active_controllers[scope]
-                return
+    _registry.detach(stream_token, token_getter=lambda controller: controller.stream_token)
 
 
 def controller_for_scope(scope: InferenceStreamScope) -> InferenceTableStreamController | None:
-    with _registry_lock:
-        return _active_controllers.get(scope)
+    return _registry.controller_for_scope(scope)
 
 
 def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> bool:
@@ -55,5 +48,4 @@ def reschedule_all_inference_rows(
 
 
 def reset_inference_table_stream_registry_for_tests() -> None:
-    with _registry_lock:
-        _active_controllers.clear()
+    _registry.reset_for_tests()

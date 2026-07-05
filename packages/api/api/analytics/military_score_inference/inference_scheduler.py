@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import threading
-import uuid
 from collections import deque
 from collections.abc import Callable
 
@@ -29,14 +28,14 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun, TierJob
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.errors import PlanetsConsoleError, ValidationError
+from api.errors import ValidationError
+from api.streaming.table_stream.errors import TableStreamScopeAlreadyActive
+from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
+
+__all__ = ["InferenceRowScheduler", "TableStreamScopeAlreadyActive", "get_inference_row_scheduler"]
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
-
-
-class TableStreamScopeAlreadyActive(PlanetsConsoleError):
-    """Another NDJSON table stream already owns this turn scope."""
 
 
 # Re-exported for scheduler tests that construct tier jobs directly.
@@ -75,9 +74,7 @@ class InferenceRowScheduler:
         self._worker_count = worker_count
         self._workers: list[threading.Thread] = []
         self._shutdown = False
-        self._active_scope: InferenceStreamScope | None = None
-        self._has_active_table_stream = False
-        self._active_table_stream_token: str | None = None
+        self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._globally_paused = False
         for _ in range(worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -86,23 +83,19 @@ class InferenceRowScheduler:
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._condition:
-            if self._active_scope == scope and self._has_active_table_stream:
-                self._preempt_active_table_stream_locked()
-            elif self._active_scope != scope:
-                self._invalidate_retained_state_locked()
-                self._active_scope = scope
-            stream_token = str(uuid.uuid4())
-            self._has_active_table_stream = True
-            self._active_table_stream_token = stream_token
-            return stream_token
+            return self._scope_guard.begin_scope_locked(
+                scope,
+                on_same_scope_preempt=self._preempt_active_table_stream_locked,
+                on_scope_change=self._invalidate_retained_state_locked,
+            )
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._condition:
-            return self._active_table_stream_token == stream_token
+            return self._scope_guard.owns_table_stream_locked(stream_token)
 
     def active_scope_matches(self, scope: InferenceStreamScope) -> bool:
         with self._condition:
-            return self._active_scope == scope
+            return self._scope_guard.active_scope_matches_locked(scope)
 
     def row_run_for_player(
         self,
@@ -122,7 +115,8 @@ class InferenceRowScheduler:
             return None
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
-        scope_matches = self._active_scope == scope
+        active_scope = self._scope_guard.active_scope
+        scope_matches = active_scope == scope
         return {
             "gameId": scope.game_id,
             "perspective": scope.perspective,
@@ -130,11 +124,11 @@ class InferenceRowScheduler:
             "paused": self._globally_paused and scope_matches,
             "activeScope": (
                 {
-                    "gameId": self._active_scope.game_id,
-                    "perspective": self._active_scope.perspective,
-                    "turn": self._active_scope.turn_number,
+                    "gameId": active_scope.game_id,
+                    "perspective": active_scope.perspective,
+                    "turn": active_scope.turn_number,
                 }
-                if self._active_scope is not None
+                if active_scope is not None
                 else None
             ),
             "heldJobCount": (
@@ -153,7 +147,7 @@ class InferenceRowScheduler:
             return self._global_pause_status_locked(scope)
 
     def _require_active_stream_for_scope_locked(self, scope: InferenceStreamScope) -> None:
-        if not self._has_active_table_stream or self._active_scope != scope:
+        if not self._scope_guard.has_active_table_stream or self._scope_guard.active_scope != scope:
             raise ValidationError(
                 "Global pause requires an active inference table stream for this scope."
             )
@@ -198,15 +192,13 @@ class InferenceRowScheduler:
     ) -> None:
         """Cancel all row runs for a table stream and clear global pause on disconnect."""
         with self._condition:
-            owns_scope = self._active_table_stream_token == stream_token
+            owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 run_id = session.run_id
                 session.cancel_token.cancel()
                 self._purge_queued_jobs_for_run_locked(run_id)
                 self._runs.pop(run_id, None)
-            if owns_scope and self._active_scope == scope:
-                self._has_active_table_stream = False
-                self._active_table_stream_token = None
+            if owns_scope:
                 self._clear_global_pause_for_active_scope_locked(scope)
             self._condition.notify_all()
 
@@ -214,7 +206,7 @@ class InferenceRowScheduler:
         self,
         scope: InferenceStreamScope,
     ) -> None:
-        if self._active_scope != scope:
+        if self._scope_guard.active_scope != scope:
             return
         self._globally_paused = False
         for run in self._runs.values():
@@ -249,7 +241,10 @@ class InferenceRowScheduler:
         stream_token: str | None = None,
     ) -> None:
         with self._condition:
-            if stream_token is not None and self._active_table_stream_token != stream_token:
+            if (
+                stream_token is not None
+                and self._scope_guard.active_table_stream_token != stream_token
+            ):
                 return
         run = self._get_or_create_run(session)
         run.orchestration = orchestration
@@ -297,8 +292,6 @@ class InferenceRowScheduler:
 
     def _preempt_active_table_stream_locked(self) -> None:
         """Cancel in-flight row runs so a reconnect can own this scope."""
-        self._has_active_table_stream = False
-        self._active_table_stream_token = None
         self._globally_paused = False
         for run in list(self._runs.values()):
             run.session.cancel_token.cancel()
@@ -425,7 +418,7 @@ class InferenceRowScheduler:
 
     def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
         with self._condition:
-            if self._active_scope == scope:
+            if self._scope_guard.active_scope == scope:
                 self._clear_global_pause_for_active_scope_locked(scope)
                 self._broadcast_global_pause_locked(paused=False)
                 self._condition.notify_all()

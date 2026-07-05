@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -27,21 +26,14 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.streaming.table_stream.connect import AdmissionDispatch
+from api.streaming.table_stream.controller_base import TableStreamControllerBase
 
 
-@dataclass(frozen=True)
-class RowAdmissionDispatch:
-    wire_events: tuple[dict[str, object], ...] = ()
-    scheduled_row: ScheduledInferenceRow | None = None
-    schedule_failed: bool = False
-
-
-@dataclass
-class InferenceTableStreamController:
+@dataclass(kw_only=True)
+class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenceRow]):
     scope: InferenceStreamScope
-    stream_token: str
     turn: TurnInfo
-    player_ids: tuple[int, ...]
     scheduler: InferenceRowScheduler
     game_id: int
     perspective: int
@@ -52,11 +44,6 @@ class InferenceTableStreamController:
         Callable[[int], PriorTurnFleetTorpResolution] | None
     ) = None
     persistence: InferenceRowPersistenceService | None = None
-    scheduled_rows: dict[int, ScheduledInferenceRow] = field(default_factory=dict)
-    pending_wire_events: list[dict[str, object]] = field(default_factory=list)
-    finished_run_ids: set[str] = field(default_factory=set)
-    stream_lock: threading.Lock = field(default_factory=threading.Lock)
-    wake_multiplex: threading.Event = field(default_factory=threading.Event)
 
     def resolve_row_admission(
         self,
@@ -108,27 +95,13 @@ class InferenceTableStreamController:
         if row is not None:
             self.scheduler.cancel_row_run(row.session.run_id)
 
-    def current_scheduled_rows(self) -> tuple[ScheduledInferenceRow, ...]:
-        with self.stream_lock:
-            return tuple(self.scheduled_rows.values())
-
-    def register_scheduled_row(self, player_id: int, row: ScheduledInferenceRow) -> None:
-        with self.stream_lock:
-            self.scheduled_rows[player_id] = row
-
-    def drain_pending_wire_events(self) -> list[dict[str, object]]:
-        with self.stream_lock:
-            pending = self.pending_wire_events
-            self.pending_wire_events = []
-            return pending
-
     def dispatch_row_admission(
         self,
         player_id: int,
         admission: RowStreamAdmission,
-    ) -> RowAdmissionDispatch:
+    ) -> AdmissionDispatch:
         if isinstance(admission, ImmediateRowAdmission):
-            return RowAdmissionDispatch(
+            return AdmissionDispatch(
                 wire_events=tuple(
                     tag_inference_stream_event(event, player_id=player_id)
                     for event in admission.events
@@ -136,14 +109,14 @@ class InferenceTableStreamController:
             )
         if isinstance(admission, CachedCompleteRowAdmission):
             if admission.event is not None:
-                return RowAdmissionDispatch(
+                return AdmissionDispatch(
                     wire_events=(tag_inference_stream_event(admission.event, player_id=player_id),),
                 )
-            return RowAdmissionDispatch()
+            return AdmissionDispatch()
         scheduled = self.schedule_player_row(player_id)
         if scheduled is None:
-            return RowAdmissionDispatch(schedule_failed=True)
-        return RowAdmissionDispatch(scheduled_row=scheduled)
+            return AdmissionDispatch(schedule_failed=True)
+        return AdmissionDispatch(scheduled=scheduled)
 
     def _register_admitted_schedule(self, player_id: int, admission: RowStreamAdmission) -> bool:
         dispatch = self.dispatch_row_admission(player_id, admission)
@@ -151,9 +124,11 @@ class InferenceTableStreamController:
             return False
         if dispatch.wire_events:
             self.pending_wire_events.extend(dispatch.wire_events)
-        if dispatch.scheduled_row is not None:
-            self.scheduled_rows[player_id] = dispatch.scheduled_row
-            self.finished_run_ids.discard(dispatch.scheduled_row.session.run_id)
+        if dispatch.scheduled is not None:
+            scheduled = dispatch.scheduled
+            assert isinstance(scheduled, ScheduledInferenceRow)
+            self.scheduled_rows[player_id] = scheduled
+            self.finished_run_ids.discard(scheduled.session.run_id)
         return True
 
     def _refresh_host_turn(self) -> None:

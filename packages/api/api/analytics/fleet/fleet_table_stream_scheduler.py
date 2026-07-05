@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import threading
-import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,15 +12,18 @@ from api.analytics.fleet.fleet_table_player_run import (
     FleetPlayerStreamSession,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.errors import PlanetsConsoleError
+from api.streaming.table_stream.errors import TableStreamScopeAlreadyActive
+from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
+
+__all__ = [
+    "FleetTableStreamScheduler",
+    "TableStreamScopeAlreadyActive",
+    "get_fleet_table_stream_scheduler",
+]
 from api.transport.fleet_table_stream import fleet_error_event
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
-
-
-class TableStreamScopeAlreadyActive(PlanetsConsoleError):
-    """Another NDJSON fleet table stream already owns this turn scope."""
 
 
 @dataclass(frozen=True)
@@ -41,9 +43,7 @@ class FleetTableStreamScheduler:
         self._worker_count = worker_count
         self._workers: list[threading.Thread] = []
         self._shutdown = False
-        self._active_scope: FleetTableStreamScope | None = None
-        self._has_active_table_stream = False
-        self._active_table_stream_token: str | None = None
+        self._scope_guard = TableStreamScopeGuard[FleetTableStreamScope]()
         for _ in range(worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
             thread.start()
@@ -51,23 +51,19 @@ class FleetTableStreamScheduler:
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
         with self._condition:
-            if self._active_scope == scope and self._has_active_table_stream:
-                self._preempt_active_table_stream_locked()
-            elif self._active_scope != scope:
-                self._invalidate_retained_state_locked()
-                self._active_scope = scope
-            stream_token = str(uuid.uuid4())
-            self._has_active_table_stream = True
-            self._active_table_stream_token = stream_token
-            return stream_token
+            return self._scope_guard.begin_scope_locked(
+                scope,
+                on_same_scope_preempt=self._preempt_active_table_stream_locked,
+                on_scope_change=self._invalidate_retained_state_locked,
+            )
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._condition:
-            return self._active_table_stream_token == stream_token
+            return self._scope_guard.owns_table_stream_locked(stream_token)
 
     def active_scope_matches(self, scope: FleetTableStreamScope) -> bool:
         with self._condition:
-            return self._active_scope == scope
+            return self._scope_guard.active_scope_matches_locked(scope)
 
     def row_run_for_player(
         self,
@@ -93,7 +89,10 @@ class FleetTableStreamScheduler:
         stream_token: str | None = None,
     ) -> FleetPlayerStreamSession | None:
         with self._condition:
-            if stream_token is not None and self._active_table_stream_token != stream_token:
+            if (
+                stream_token is not None
+                and self._scope_guard.active_table_stream_token != stream_token
+            ):
                 return None
             for existing in self._runs.values():
                 if existing.player_id == session.player_id:
@@ -122,16 +121,13 @@ class FleetTableStreamScheduler:
         stream_token: str,
     ) -> None:
         with self._condition:
-            owns_scope = self._active_table_stream_token == stream_token
+            self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 session.cancel_token.cancel()
                 self._work_queue = deque(
                     job for job in self._work_queue if job.session.run_id != session.run_id
                 )
                 self._runs.pop(session.run_id, None)
-            if owns_scope and self._active_scope == scope:
-                self._has_active_table_stream = False
-                self._active_table_stream_token = None
             self._condition.notify_all()
 
     def _preempt_active_table_stream_locked(self) -> None:
@@ -140,8 +136,6 @@ class FleetTableStreamScheduler:
             session.cancel_token.cancel()
         self._runs.clear()
         self._work_queue.clear()
-        self._has_active_table_stream = False
-        self._active_table_stream_token = None
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()

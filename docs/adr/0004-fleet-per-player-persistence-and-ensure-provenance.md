@@ -108,5 +108,6 @@ Still **out of scope** for v1 of this ADR. Per-player provenance enables a futur
 - Tests: per-player provenance gates on probe/ensure; partial persist --> not final; migration from legacy snapshot; invalidation per player; stream event contracts.
 - **#143** neutral revision bump may shrink or close once fleet stream owns refinement-driven tile updates.
 - **#161** coordinator provides singleflight and forward unwind; **#179** narrows scope to per-player materialization and ensure paths.
+- **Table-stream session framework** (scores + fleet multiplex connect): [ADR 0004 addendum](0004-addendum-table-stream-session-framework.md) ([#175](https://github.com/SteveDraper/Planets-Console/issues/175)).
 
 See also: [ADR 0002](0002-analytic-persistence.md), [design-fleet-analytic.md](../design-fleet-analytic.md), [design-analytic-exports.md](../design-analytic-exports.md), **CONTEXT.md** (**Fleet ledger persistence**, **Fleet materialization provenance**, **Analytic export ensure provenance**).

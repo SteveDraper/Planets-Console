@@ -228,14 +228,15 @@ def test_stale_end_inference_stream_does_not_clear_replacement_stream(sample_tur
 
     new_session = _session_for_turn(sample_turn)
     new_token = "replacement-stream-token"
-    scheduler._active_table_stream_token = new_token
+    scheduler._scope_guard._active_table_stream_token = new_token
+    scheduler._scope_guard._has_active_table_stream = True
     scheduler.enqueue_tier_ladder(new_session)
 
     scheduler.end_inference_stream(scope, (old_session,), stream_token=old_token)
 
     status = scheduler.global_pause_status(scope)
     assert status["activeSessionCount"] == 1
-    assert scheduler._has_active_table_stream is True
+    assert scheduler._scope_guard.has_active_table_stream is True
     assert old_session.cancel_token.is_cancelled()
     assert not new_session.cancel_token.is_cancelled()
 
