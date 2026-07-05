@@ -43,7 +43,7 @@ class FleetTableStreamController(TableStreamControllerBase[ScheduledFleetPlayer]
         self,
         player_id: int,
         admission: PlayerStreamAdmission,
-    ) -> AdmissionDispatch:
+    ) -> AdmissionDispatch[ScheduledFleetPlayer]:
         if isinstance(admission, CachedCompletePlayerAdmission):
             return AdmissionDispatch(
                 wire_events=tuple(

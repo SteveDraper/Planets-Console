@@ -99,7 +99,7 @@ class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenc
         self,
         player_id: int,
         admission: RowStreamAdmission,
-    ) -> AdmissionDispatch:
+    ) -> AdmissionDispatch[ScheduledInferenceRow]:
         if isinstance(admission, ImmediateRowAdmission):
             return AdmissionDispatch(
                 wire_events=tuple(

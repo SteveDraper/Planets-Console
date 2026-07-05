@@ -244,9 +244,8 @@ def schedule_inference_row(
 
 def _inference_multiplex_event_to_wire_events(
     row: ScheduledInferenceRow,
-    raw_event: object,
+    raw_event: InferenceStreamDomainEvent,
 ) -> Iterator[dict[str, object]]:
-    assert isinstance(raw_event, InferenceStreamDomainEvent)
     yield from row_domain_event_to_wire_events(row, raw_event)
 
 
@@ -338,7 +337,11 @@ def iter_scores_table_inference_events(
 
     def policy_factory(
         stream_token: str,
-    ) -> DelegatingTableStreamConnectPolicy[ScheduledInferenceRow]:
+    ) -> DelegatingTableStreamConnectPolicy[
+        ScheduledInferenceRow,
+        RowStreamAdmission,
+        InferenceStreamDomainEvent,
+    ]:
         controller = InferenceTableStreamController(
             scope=stream_scope,
             stream_token=stream_token,

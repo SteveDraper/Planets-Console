@@ -5,11 +5,15 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Generic, Protocol, TypeVar, cast
+from typing import Generic, Protocol
 
-from api.streaming.table_stream.connect import AdmissionDispatch
-
-ScheduledT = TypeVar("ScheduledT")
+from api.streaming.table_stream.connect import (
+    AdmissionDispatch,
+    AdmissionT,
+    EventT,
+    ScheduledT,
+    TableStreamConnectPolicy,
+)
 
 
 class TableStreamConnectController(Protocol[ScheduledT]):
@@ -28,10 +32,13 @@ class TableStreamConnectController(Protocol[ScheduledT]):
 
 
 @dataclass
-class TableStreamConnectPolicyHooks(Generic[ScheduledT]):
-    resolve_admission: Callable[[int], object]
-    dispatch_admission: Callable[[int, object], AdmissionDispatch]
-    multiplex_event_to_wire_events: Callable[[ScheduledT, object], Iterator[dict[str, object]]]
+class TableStreamConnectPolicyHooks(Generic[ScheduledT, AdmissionT, EventT]):
+    resolve_admission: Callable[[int], AdmissionT]
+    dispatch_admission: Callable[[int, AdmissionT], AdmissionDispatch[ScheduledT]]
+    multiplex_event_to_wire_events: Callable[
+        [ScheduledT, EventT],
+        Iterator[dict[str, object]],
+    ]
     tag_event: Callable[[dict[str, object], int], dict[str, object]]
     terminal_types: Callable[[], frozenset[str]]
     end_sessions: Callable[[], None]
@@ -39,10 +46,13 @@ class TableStreamConnectPolicyHooks(Generic[ScheduledT]):
 
 
 @dataclass
-class DelegatingTableStreamConnectPolicy(Generic[ScheduledT]):
+class DelegatingTableStreamConnectPolicy(
+    Generic[ScheduledT, AdmissionT, EventT],
+    TableStreamConnectPolicy[ScheduledT, AdmissionT, EventT],
+):
     controller: TableStreamConnectController[ScheduledT]
     owns_table_stream_fn: Callable[[], bool]
-    hooks: TableStreamConnectPolicyHooks[ScheduledT]
+    hooks: TableStreamConnectPolicyHooks[ScheduledT, AdmissionT, EventT]
 
     def preamble_events(self) -> tuple[dict[str, object], ...]:
         return self.hooks.preamble_events()
@@ -56,17 +66,21 @@ class DelegatingTableStreamConnectPolicy(Generic[ScheduledT]):
     def owns_table_stream(self) -> bool:
         return self.owns_table_stream_fn()
 
-    def resolve_admission(self, player_id: int) -> object:
+    def resolve_admission(self, player_id: int) -> AdmissionT:
         return self.hooks.resolve_admission(player_id)
 
-    def dispatch_admission(self, player_id: int, admission: object) -> AdmissionDispatch:
+    def dispatch_admission(
+        self,
+        player_id: int,
+        admission: AdmissionT,
+    ) -> AdmissionDispatch[ScheduledT]:
         return self.hooks.dispatch_admission(player_id, admission)
 
     def current_scheduled_rows(self) -> tuple[ScheduledT, ...]:
         return self.controller.current_scheduled_rows()
 
-    def register_scheduled_row(self, player_id: int, scheduled: object) -> None:
-        self.controller.register_scheduled_row(player_id, cast(ScheduledT, scheduled))
+    def register_scheduled_row(self, player_id: int, scheduled: ScheduledT) -> None:
+        self.controller.register_scheduled_row(player_id, scheduled)
 
     def finished_run_ids(self) -> set[str]:
         return self.controller.finished_run_ids
@@ -79,10 +93,10 @@ class DelegatingTableStreamConnectPolicy(Generic[ScheduledT]):
 
     def multiplex_event_to_wire_events(
         self,
-        row: object,
-        raw_event: object,
+        row: ScheduledT,
+        raw_event: EventT,
     ) -> Iterator[dict[str, object]]:
-        return self.hooks.multiplex_event_to_wire_events(cast(ScheduledT, row), raw_event)
+        return self.hooks.multiplex_event_to_wire_events(row, raw_event)
 
     def tag_event(self, event: dict[str, object], player_id: int) -> dict[str, object]:
         return self.hooks.tag_event(event, player_id)

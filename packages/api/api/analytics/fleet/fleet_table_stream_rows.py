@@ -131,9 +131,8 @@ def schedule_fleet_player_run(
 
 def _fleet_multiplex_event_to_wire_events(
     row: ScheduledFleetPlayer,
-    raw_event: object,
+    raw_event: dict[str, object],
 ) -> Iterator[dict[str, object]]:
-    assert isinstance(raw_event, dict)
     yield raw_event
 
 
@@ -218,7 +217,11 @@ def iter_fleet_table_stream_events(
 
     def policy_factory(
         stream_token: str,
-    ) -> DelegatingTableStreamConnectPolicy[ScheduledFleetPlayer]:
+    ) -> DelegatingTableStreamConnectPolicy[
+        ScheduledFleetPlayer,
+        PlayerStreamAdmission,
+        dict[str, object],
+    ]:
         controller = FleetTableStreamController(
             scope=stream_scope,
             stream_token=stream_token,

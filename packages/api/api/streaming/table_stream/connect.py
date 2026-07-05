@@ -5,22 +5,26 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events,
     iter_multiplexed_stream_events,
 )
 
+ScheduledT = TypeVar("ScheduledT")
+AdmissionT = TypeVar("AdmissionT")
+EventT = TypeVar("EventT")
+
 
 @dataclass(frozen=True)
-class AdmissionDispatch:
+class AdmissionDispatch(Generic[ScheduledT]):
     wire_events: tuple[dict[str, object], ...] = ()
-    scheduled: object | None = None
+    scheduled: ScheduledT | None = None
     schedule_failed: bool = False
 
 
-class TableStreamConnectPolicy(Protocol):
+class TableStreamConnectPolicy(Protocol[ScheduledT, AdmissionT, EventT]):
     def preamble_events(self) -> tuple[dict[str, object], ...]: ...
 
     def attach(self) -> None: ...
@@ -29,13 +33,17 @@ class TableStreamConnectPolicy(Protocol):
 
     def owns_table_stream(self) -> bool: ...
 
-    def resolve_admission(self, player_id: int) -> object: ...
+    def resolve_admission(self, player_id: int) -> AdmissionT: ...
 
-    def dispatch_admission(self, player_id: int, admission: object) -> AdmissionDispatch: ...
+    def dispatch_admission(
+        self,
+        player_id: int,
+        admission: AdmissionT,
+    ) -> AdmissionDispatch[ScheduledT]: ...
 
-    def current_scheduled_rows(self) -> tuple[object, ...]: ...
+    def current_scheduled_rows(self) -> tuple[ScheduledT, ...]: ...
 
-    def register_scheduled_row(self, player_id: int, scheduled: object) -> None: ...
+    def register_scheduled_row(self, player_id: int, scheduled: ScheduledT) -> None: ...
 
     def finished_run_ids(self) -> set[str]: ...
 
@@ -45,8 +53,8 @@ class TableStreamConnectPolicy(Protocol):
 
     def multiplex_event_to_wire_events(
         self,
-        row: object,
-        raw_event: object,
+        row: ScheduledT,
+        raw_event: EventT,
     ) -> Iterator[dict[str, object]]: ...
 
     def tag_event(self, event: dict[str, object], player_id: int) -> dict[str, object]: ...
@@ -57,7 +65,7 @@ class TableStreamConnectPolicy(Protocol):
 
 
 def iter_table_stream_connect(
-    policy: TableStreamConnectPolicy,
+    policy: TableStreamConnectPolicy[ScheduledT, AdmissionT, EventT],
     player_ids: tuple[int, ...],
 ) -> Iterator[dict[str, object]]:
     """Admission loop, immediate yield, multiplex, and guaranteed scope teardown."""
@@ -108,7 +116,10 @@ def iter_table_stream_connect(
 def iter_table_stream_connect_with_scope(
     *,
     begin_scope: Callable[[], str],
-    policy_factory: Callable[[str], TableStreamConnectPolicy],
+    policy_factory: Callable[
+        [str],
+        TableStreamConnectPolicy[ScheduledT, AdmissionT, EventT],
+    ],
     player_ids: tuple[int, ...],
 ) -> Iterator[dict[str, object]]:
     """Begin scheduler scope, then run shared connect orchestration."""

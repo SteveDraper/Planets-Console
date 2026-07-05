@@ -10,26 +10,29 @@ from typing import Protocol, TypeVar
 _DEFAULT_MULTIPLEX_WAIT_SECONDS = 0.05
 
 
-class MultiplexSession(Protocol):
+EventT = TypeVar("EventT")
+
+
+class MultiplexSession(Protocol[EventT]):
     run_id: str
-    event_queue: queue.Queue[object]
+    event_queue: queue.Queue[EventT]
     cancel_token: object
 
 
-class ScheduledStreamRow(Protocol):
+class ScheduledStreamRow(Protocol[EventT]):
     player_id: int
-    session: MultiplexSession
-
-
-ScheduledRowT = TypeVar("ScheduledRowT", bound=ScheduledStreamRow)
+    session: MultiplexSession[EventT]
 
 
 def drain_available_multiplex_events(
-    rows: tuple[ScheduledRowT, ...],
+    rows: tuple[ScheduledStreamRow[EventT], ...],
     *,
     tag_player_id: bool,
     finished_run_ids: set[str],
-    event_to_wire_events: Callable[[ScheduledRowT, object], Iterator[dict[str, object]]],
+    event_to_wire_events: Callable[
+        [ScheduledStreamRow[EventT], EventT],
+        Iterator[dict[str, object]],
+    ],
     tag_event: Callable[[dict[str, object], int], dict[str, object]] | None = None,
     terminal_types: frozenset[str] = frozenset({"complete", "error"}),
 ) -> Iterator[dict[str, object]]:
@@ -51,15 +54,18 @@ def drain_available_multiplex_events(
 
 
 def iter_multiplexed_stream_events(
-    rows: tuple[ScheduledRowT, ...],
+    rows: tuple[ScheduledStreamRow[EventT], ...],
     *,
     tag_player_id: bool,
     finished_run_ids: set[str] | None = None,
     is_stream_active: Callable[[], bool] | None = None,
-    row_provider: Callable[[], tuple[ScheduledRowT, ...]] | None = None,
+    row_provider: Callable[[], tuple[ScheduledStreamRow[EventT], ...]] | None = None,
     pending_events_provider: Callable[[], list[dict[str, object]]] | None = None,
     wake_event: threading.Event | None = None,
-    event_to_wire_events: Callable[[ScheduledRowT, object], Iterator[dict[str, object]]],
+    event_to_wire_events: Callable[
+        [ScheduledStreamRow[EventT], EventT],
+        Iterator[dict[str, object]],
+    ],
     tag_event: Callable[[dict[str, object], int], dict[str, object]] | None = None,
     terminal_types: frozenset[str] = frozenset({"complete", "error"}),
     multiplex_wait_seconds: float = _DEFAULT_MULTIPLEX_WAIT_SECONDS,
@@ -72,7 +78,7 @@ def iter_multiplexed_stream_events(
     """
     finished = finished_run_ids if finished_run_ids is not None else set()
 
-    def active_rows() -> tuple[ScheduledRowT, ...]:
+    def active_rows() -> tuple[ScheduledStreamRow[EventT], ...]:
         if row_provider is not None:
             return row_provider()
         return rows
@@ -84,7 +90,7 @@ def iter_multiplexed_stream_events(
             return bool(is_cancelled())
         return False
 
-    def finish_cancelled_run(row: ScheduledRowT) -> None:
+    def finish_cancelled_run(row: ScheduledStreamRow[EventT]) -> None:
         if session_is_cancelled(row.session):
             pending_run_ids.discard(row.session.run_id)
             finished.add(row.session.run_id)
