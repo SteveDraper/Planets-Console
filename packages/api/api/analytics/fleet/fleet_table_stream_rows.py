@@ -36,12 +36,6 @@ _TERMINAL_EVENT_TYPES = frozenset({"complete", "error"})
 
 
 @dataclass(frozen=True)
-class ImmediatePlayerAdmission:
-    kind: Literal["immediate"] = "immediate"
-    events: tuple[dict[str, object], ...] = ()
-
-
-@dataclass(frozen=True)
 class CachedCompletePlayerAdmission:
     kind: Literal["cached"] = "cached"
     events: tuple[dict[str, object], ...] = ()
@@ -52,9 +46,7 @@ class SchedulePlayerAdmission:
     kind: Literal["schedule"] = "schedule"
 
 
-PlayerStreamAdmission = (
-    ImmediatePlayerAdmission | CachedCompletePlayerAdmission | SchedulePlayerAdmission
-)
+PlayerStreamAdmission = CachedCompletePlayerAdmission | SchedulePlayerAdmission
 
 
 def tag_fleet_table_stream_event(
