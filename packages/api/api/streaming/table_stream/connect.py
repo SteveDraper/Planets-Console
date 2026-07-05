@@ -130,5 +130,4 @@ def iter_table_stream_connect_with_scope(
         policy = policy_factory(stream_token)
         yield from iter_table_stream_connect(policy, player_ids)
     finally:
-        if policy is None:
-            end_scope(stream_token)
+        end_scope(stream_token)
