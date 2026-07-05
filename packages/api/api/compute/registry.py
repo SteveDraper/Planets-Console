@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from api.analytics.registration import TurnAnalyticRegistration, _require_non_empty_string
+from api.analytics.registration import TurnAnalyticRegistration
+from api.validation import require_non_empty_string
 from api.compute.persistence import PersistencePolicy
 from api.compute.profile import VALID_COMPUTE_BACKENDS, AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ScopeKeySpec
@@ -32,7 +33,7 @@ def _mapping_from_pairs(
 ) -> dict[str, object]:
     mapped: dict[str, object] = {}
     for key, value in pairs:
-        _require_non_empty_string(key, field=field, analytic_id=analytic_id, subject="compute")
+        require_non_empty_string(key, field=field, analytic_id=analytic_id, subject="compute")
         if key in mapped:
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} duplicate {field} step_kind: {key!r}"
@@ -51,7 +52,7 @@ def _check_persistence_policy(policy: object, *, analytic_id: str) -> None:
 
 
 def _validate_compute_step_spec(step: ComputeStepSpec, *, analytic_id: str) -> None:
-    _require_non_empty_string(
+    require_non_empty_string(
         step.step_kind, field="step_kind", analytic_id=analytic_id, subject="compute"
     )
     if step.backend not in VALID_COMPUTE_BACKENDS:
