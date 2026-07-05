@@ -53,12 +53,8 @@ class ComputeHandle:
 
     @property
     def state(self) -> NodeState:
-        if self.is_waiter and self._node.state == "running":
+        if self.is_waiter and self._node.state not in {"complete", "failed"}:
             return "attach_inflight"
-        if self.is_waiter and self._node.state == "complete":
-            return "complete"
-        if self.is_waiter and self._node.state == "failed":
-            return "failed"
         return self._node.state
 
     @property

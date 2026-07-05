@@ -213,6 +213,49 @@ def test_blocked_nodes_are_not_ready_until_dependencies_complete(sample_turn):
     assert pool_submissions == [SHARED_ID]
 
 
+def test_attach_inflight_while_leader_not_terminal(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
+
+    ready_orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=thread_registry,
+        pool_submitter=None,
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    ready_leader = ready_orchestrator.submit(ComputeRequest(scope=shared_scope))
+    ready_waiter = ready_orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert ready_orchestrator.nodes[shared_scope].state == "ready"
+    assert ready_leader.state == "ready"
+    assert ready_waiter.state == "attach_inflight"
+
+    diamond_registry = build_compute_registry(
+        (
+            _thread_compute_registration(ROOT_ID),
+            _thread_compute_registration(BRANCH_B_ID),
+            _thread_compute_registration(BRANCH_C_ID),
+            _thread_compute_registration(SHARED_ID),
+        )
+    )
+    deps_orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=diamond_registry,
+        pool_submitter=lambda _node, _step: None,
+    )
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    deps_leader = deps_orchestrator.submit(ComputeRequest(scope=root_scope))
+    deps_waiter = deps_orchestrator.submit(ComputeRequest(scope=root_scope))
+
+    assert deps_orchestrator.nodes[root_scope].state == "waiting_deps"
+    assert deps_leader.state == "waiting_deps"
+    assert deps_waiter.state == "attach_inflight"
+
+
 def test_attach_inflight_does_not_double_pool_workers(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,
