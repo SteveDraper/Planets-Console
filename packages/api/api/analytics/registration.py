@@ -55,11 +55,17 @@ def resolve_registration_export_catalog(
 _VALID_ANALYTIC_TYPES = frozenset({"base", "selectable"})
 
 
-def _require_non_empty_string(value: str, *, field: str, analytic_id: str | None = None) -> None:
+def _require_non_empty_string(
+    value: str,
+    *,
+    field: str,
+    analytic_id: str | None = None,
+    subject: str = "catalog entry",
+) -> None:
     if value and value.strip():
         return
     prefix = f"Turn analytic {analytic_id!r} " if analytic_id is not None else "Turn analytic "
-    raise RuntimeError(f"{prefix}catalog entry {field} must be a non-empty string, got {value!r}")
+    raise RuntimeError(f"{prefix}{subject} {field} must be a non-empty string, got {value!r}")
 
 
 def validate_turn_analytic_registrations(

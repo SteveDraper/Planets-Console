@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.registration import TurnAnalyticRegistration, _require_non_empty_string
 from api.compute.persistence import PersistencePolicy
 from api.compute.profile import VALID_COMPUTE_BACKENDS, AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ScopeKeySpec
@@ -24,14 +24,6 @@ class AnalyticComputeRegistration:
     run_step: Mapping[str, RunStepFn]
 
 
-def _require_non_empty_string(value: str, *, field: str, analytic_id: str) -> None:
-    if value and value.strip():
-        return
-    raise RuntimeError(
-        f"Turn analytic {analytic_id!r} compute {field} must be a non-empty string, got {value!r}"
-    )
-
-
 def _mapping_from_pairs(
     pairs: tuple[tuple[str, object], ...],
     *,
@@ -40,7 +32,7 @@ def _mapping_from_pairs(
 ) -> dict[str, object]:
     mapped: dict[str, object] = {}
     for key, value in pairs:
-        _require_non_empty_string(key, field=field, analytic_id=analytic_id)
+        _require_non_empty_string(key, field=field, analytic_id=analytic_id, subject="compute")
         if key in mapped:
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} duplicate {field} step_kind: {key!r}"
@@ -59,7 +51,9 @@ def _check_persistence_policy(policy: object, *, analytic_id: str) -> None:
 
 
 def _validate_compute_step_spec(step: ComputeStepSpec, *, analytic_id: str) -> None:
-    _require_non_empty_string(step.step_kind, field="step_kind", analytic_id=analytic_id)
+    _require_non_empty_string(
+        step.step_kind, field="step_kind", analytic_id=analytic_id, subject="compute"
+    )
     if step.backend not in VALID_COMPUTE_BACKENDS:
         raise RuntimeError(
             f"Turn analytic {analytic_id!r} compute step {step.step_kind!r} has unknown "
