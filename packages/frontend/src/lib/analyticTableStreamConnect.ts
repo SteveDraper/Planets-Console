@@ -92,7 +92,7 @@ export async function connectAnalyticTableStreamUntilComplete<TEvent extends Str
       return 'aborted'
     }
 
-    const result = await connectAnalyticTableStream(scope, playerIds, {
+    await connectAnalyticTableStream(scope, playerIds, {
       fetchStream,
       signal,
       onEvent,

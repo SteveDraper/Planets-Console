@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as bff from '../../api/bff'
-import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
-import {
-  connectFleetTableStream,
-  connectFleetTableStreamUntilComplete,
-} from './fleetTableStreamConnect'
+import { connectFleetTableStreamUntilComplete } from './fleetTableStreamConnect'
 
 const scope = {
   gameId: '628580',
