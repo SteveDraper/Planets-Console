@@ -7,12 +7,6 @@ from api.compute.profile import (
     ComputeBackend,
     ComputeStepSpec,
 )
-from api.compute.registry import (
-    COMPUTE_REGISTRY,
-    AnalyticComputeRegistration,
-    build_compute_registry,
-    validate_turn_analytic_compute_registration,
-)
 from api.compute.scope import (
     WILDCARD,
     ComputeScope,
@@ -22,6 +16,21 @@ from api.compute.scope import (
     normalize_export_scope_to_compute_scope,
 )
 from api.compute.wire import BuildStepJobWireFn, RunStepFn
+
+_REGISTRY_EXPORTS = frozenset({
+    "COMPUTE_REGISTRY",
+    "AnalyticComputeRegistration",
+    "build_compute_registry",
+    "validate_turn_analytic_compute_registration",
+})
+
+
+def __getattr__(name: str) -> object:
+    if name in _REGISTRY_EXPORTS:
+        from api.compute import registry as registry_module
+
+        return getattr(registry_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "COMPUTE_REGISTRY",

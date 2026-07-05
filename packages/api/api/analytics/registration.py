@@ -108,3 +108,7 @@ def validate_turn_analytic_registrations(
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} must set export_catalog or export_catalog_loader"
             )
+
+        from api.compute.registry import validate_turn_analytic_compute_registration
+
+        validate_turn_analytic_compute_registration(registration)

@@ -176,6 +176,13 @@ def _production_compute_registrations() -> tuple[TurnAnalyticRegistration, ...]:
     return TURN_ANALYTIC_REGISTRATIONS
 
 
-COMPUTE_REGISTRY: dict[str, AnalyticComputeRegistration] = build_compute_registry(
-    _production_compute_registrations()
-)
+_COMPUTE_REGISTRY: dict[str, AnalyticComputeRegistration] | None = None
+
+
+def __getattr__(name: str) -> object:
+    global _COMPUTE_REGISTRY
+    if name == "COMPUTE_REGISTRY":
+        if _COMPUTE_REGISTRY is None:
+            _COMPUTE_REGISTRY = build_compute_registry(_production_compute_registrations())
+        return _COMPUTE_REGISTRY
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
