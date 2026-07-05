@@ -346,3 +346,65 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
     assert orchestrator.nodes[root_scope].state == "failed"
     assert orchestrator.nodes[branch_b_scope].error is shared_failure
     assert orchestrator.nodes[root_scope].error is shared_failure
+
+
+def test_leader_handle_exposes_error_after_inline_failure(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    inline_failure = RuntimeError("inline step failed")
+
+    def failing_run_step(_job):
+        raise inline_failure
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", failing_run_step),),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "failed"
+    assert handle.error is inline_failure
+
+
+def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
+    pool_failure = RuntimeError("pool step failed")
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=thread_registry,
+        pool_submitter=lambda _node, _step: None,
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    assert handle.state == "running"
+
+    orchestrator.complete_pool_step(shared_scope, error=pool_failure)
+
+    assert handle.state == "failed"
+    assert handle.error is pool_failure

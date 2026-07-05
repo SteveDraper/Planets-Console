@@ -41,7 +41,15 @@ class ComputeHandle:
     scope: ComputeScope
     _node: ComputeNodeRun
     is_waiter: bool = False
-    error: BaseException | None = None
+    _waiter_error: BaseException | None = field(default=None, compare=False)
+
+    @property
+    def error(self) -> BaseException | None:
+        if self.is_waiter:
+            return self._waiter_error
+        if self._node.state == "failed":
+            return self._node.error
+        return None
 
     @property
     def state(self) -> NodeState:
@@ -315,7 +323,7 @@ class ComputeOrchestrator:
         node.state = "complete"
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:
-            waiter.error = None
+            waiter._waiter_error = None
         node.waiters.clear()
         self._on_dependency_terminal(node.scope)
 
@@ -326,7 +334,7 @@ class ComputeOrchestrator:
         node.error = error
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:
-            waiter.error = error
+            waiter._waiter_error = error
         node.waiters.clear()
         self._on_dependency_terminal(node.scope)
 
