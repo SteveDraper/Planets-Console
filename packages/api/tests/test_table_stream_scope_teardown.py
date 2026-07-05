@@ -23,10 +23,6 @@ from api.analytics.military_score_inference.inference_table_stream_controller im
     InferenceTableStreamController,
 )
 from api.streaming.table_stream.connect import AdmissionDispatch
-from api.transport.fleet_table_stream import TABLE_STREAM_ALREADY_ACTIVE_DETAIL
-from api.transport.inference_stream import (
-    TABLE_STREAM_ALREADY_ACTIVE_DETAIL as SCORES_ALREADY_ACTIVE,
-)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -106,7 +102,6 @@ def test_scores_empty_player_ids_releases_scope_for_reconnect(sample_turn, monke
     )
     try:
         event = next(second)
-        assert event.get("detail") != SCORES_ALREADY_ACTIVE
         assert event == {"type": "globalPause", "paused": False}
     finally:
         second.close()
@@ -148,7 +143,7 @@ def test_scores_schedule_failed_releases_scope_for_reconnect(sample_turn, monkey
         scheduler=scheduler,
     )
     try:
-        assert next(replacement).get("detail") != SCORES_ALREADY_ACTIVE
+        next(replacement)
     finally:
         replacement.close()
 
@@ -210,7 +205,7 @@ def test_scores_lost_ownership_mid_connect_releases_scope_for_reconnect(
         scheduler=scheduler,
     )
     try:
-        assert next(replacement).get("detail") != SCORES_ALREADY_ACTIVE
+        next(replacement)
     finally:
         replacement.close()
 
@@ -251,7 +246,7 @@ def test_fleet_empty_player_ids_releases_scope_for_reconnect(
     )
     try:
         events = list(second)
-        assert all(event.get("detail") != TABLE_STREAM_ALREADY_ACTIVE_DETAIL for event in events)
+        assert events == []
     finally:
         second.close()
 

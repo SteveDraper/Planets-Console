@@ -17,7 +17,6 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup) |
 | `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, `finished_run_ids`, scheduled-row map) |
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
-| `errors.py` | `TableStreamScopeAlreadyActive` |
 
 Per-analytic code keeps:
 
@@ -29,6 +28,7 @@ Per-analytic code keeps:
 
 ## Boundaries (explicitly not unified)
 
+- Same-scope reconnect **preempts** the prior stream token via `TableStreamScopeGuard`; there is no reject-and-retry contract.
 - Wire event schemas and Zod/BFF contracts
 - Scheduler classes (`InferenceRowScheduler`, `FleetTableStreamScheduler`)
 - Domain materialization / tier inference jobs

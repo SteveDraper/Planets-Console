@@ -12,12 +12,10 @@ from api.analytics.fleet.fleet_table_player_run import (
     FleetPlayerStreamSession,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.streaming.table_stream.errors import TableStreamScopeAlreadyActive
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 
 __all__ = [
     "FleetTableStreamScheduler",
-    "TableStreamScopeAlreadyActive",
     "get_fleet_table_stream_scheduler",
 ]
 from api.transport.fleet_table_stream import fleet_error_event

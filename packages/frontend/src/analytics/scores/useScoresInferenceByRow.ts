@@ -68,7 +68,6 @@ function createScoresInferenceStreamPolicy(
         onEvent: handlers.onEvent,
         hasPendingRows: handlers.hasPending,
       }),
-    conflictExhaustedMessage: 'Build inference could not reconnect to the table stream.',
     incompleteExhaustedMessage:
       'Build inference stream ended before all scoreboard rows completed.',
   }

@@ -7,9 +7,6 @@ import {
   type AnalyticTableStreamConnectResult,
 } from '../../lib/analyticTableStreamConnect'
 
-export const FLEET_TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
-  'A fleet table stream is already active for this scope.'
-
 export type FleetTableStreamConnectResult = AnalyticTableStreamConnectResult
 
 export async function connectFleetTableStream(
@@ -21,7 +18,6 @@ export async function connectFleetTableStream(
   }
 ): Promise<FleetTableStreamConnectResult> {
   return connectAnalyticTableStream(scope, playerIds, {
-    conflictAlreadyActiveDetail: FLEET_TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
     fetchStream: fetchFleetTableStream,
     signal: handlers.signal,
     onEvent: handlers.onEvent,
@@ -38,7 +34,6 @@ export async function connectFleetTableStreamUntilComplete(
   }
 ): Promise<FleetTableStreamConnectResult> {
   return connectAnalyticTableStreamUntilComplete(scope, playerIds, {
-    conflictAlreadyActiveDetail: FLEET_TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
     fetchStream: fetchFleetTableStream,
     signal: handlers.signal,
     onEvent: handlers.onEvent,

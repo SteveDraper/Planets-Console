@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 _FLEET_TABLE_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
-TABLE_STREAM_ALREADY_ACTIVE_DETAIL = "A fleet table stream is already active for this scope."
-
 
 def fleet_ledger_updated_event(*, ledger: dict[str, object]) -> dict[str, object]:
     return {"type": "ledger_updated", "ledger": ledger}

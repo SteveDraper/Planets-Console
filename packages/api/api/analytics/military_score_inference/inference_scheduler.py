@@ -29,10 +29,9 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.row_run import RowRun, TierJob
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.errors import ValidationError
-from api.streaming.table_stream.errors import TableStreamScopeAlreadyActive
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 
-__all__ = ["InferenceRowScheduler", "TableStreamScopeAlreadyActive", "get_inference_row_scheduler"]
+__all__ = ["InferenceRowScheduler", "get_inference_row_scheduler"]
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25

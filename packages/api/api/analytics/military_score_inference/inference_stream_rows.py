@@ -49,9 +49,7 @@ from api.streaming.table_stream.multiplex import (
     iter_multiplexed_stream_events,
 )
 from api.transport.inference_stream import (
-    TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
     inference_complete_event,
-    inference_error_event,
     inference_global_pause_event,
 )
 from api.transport.inference_stream_wire import domain_event_to_wire_events
@@ -425,7 +423,6 @@ def iter_scores_table_inference_events(
 
     yield from iter_table_stream_connect_with_scope(
         begin_scope=lambda: resolved_scheduler.begin_scope(stream_scope),
-        on_scope_already_active=lambda: inference_error_event(TABLE_STREAM_ALREADY_ACTIVE_DETAIL),
         policy_factory=policy_factory,
         player_ids=player_ids,
     )

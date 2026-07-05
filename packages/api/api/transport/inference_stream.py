@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 _INFERENCE_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
-TABLE_STREAM_ALREADY_ACTIVE_DETAIL = "An inference table stream is already active for this scope."
-
 
 def inference_solution_event(
     solutions: list[dict[str, object]],

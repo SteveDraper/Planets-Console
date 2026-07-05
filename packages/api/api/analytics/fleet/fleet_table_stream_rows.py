@@ -30,10 +30,6 @@ from api.streaming.table_stream.multiplex import (
 from api.streaming.table_stream.multiplex import (
     iter_multiplexed_stream_events,
 )
-from api.transport.fleet_table_stream import (
-    TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
-    fleet_error_event,
-)
 
 _TERMINAL_EVENT_TYPES = frozenset({"complete", "error"})
 
@@ -315,7 +311,6 @@ def iter_fleet_table_stream_events(
 
     yield from iter_table_stream_connect_with_scope(
         begin_scope=lambda: resolved_scheduler.begin_scope(stream_scope),
-        on_scope_already_active=lambda: fleet_error_event(TABLE_STREAM_ALREADY_ACTIVE_DETAIL),
         policy_factory=policy_factory,
         player_ids=player_ids,
     )

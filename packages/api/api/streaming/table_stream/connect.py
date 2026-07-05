@@ -108,18 +108,10 @@ def iter_table_stream_connect(
 def iter_table_stream_connect_with_scope(
     *,
     begin_scope: Callable[[], str],
-    on_scope_already_active: Callable[[], dict[str, object]],
     policy_factory: Callable[[str], TableStreamConnectPolicy],
     player_ids: tuple[int, ...],
 ) -> Iterator[dict[str, object]]:
     """Begin scheduler scope, then run shared connect orchestration."""
-    from api.streaming.table_stream.errors import TableStreamScopeAlreadyActive
-
-    try:
-        stream_token = begin_scope()
-    except TableStreamScopeAlreadyActive:
-        yield on_scope_already_active()
-        return
-
+    stream_token = begin_scope()
     policy = policy_factory(stream_token)
     yield from iter_table_stream_connect(policy, player_ids)
