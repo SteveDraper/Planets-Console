@@ -10,7 +10,6 @@ from collections.abc import Callable
 
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
-    build_stopped_row_complete,
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -397,17 +396,22 @@ class InferenceRowScheduler:
             )
         )
 
-    def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
+    def _try_claim_run_for_finalize(self, session: InferenceRowStreamSession) -> bool:
         with self._condition:
+            if session.cancel_token.is_cancelled():
+                return False
             run = self._runs.pop(session.run_id, None)
-            if run is not None:
-                run.clear_held()
+            if run is None:
+                return False
+            run.clear_held()
+            return True
 
     def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
-        session.event_queue.put(event)
-        self._finalize_row_run(session)
+        if not self._try_claim_run_for_finalize(session):
+            return
         if self._on_row_complete is not None:
             self._on_row_complete(session, event)
+        session.event_queue.put(event)
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run and purge its queued tier jobs."""
@@ -451,10 +455,9 @@ class InferenceRowScheduler:
         if outcome.row_complete is not None:
             self._emit_row_complete(session, outcome.row_complete)
             return
-        if session.cancel_token.is_cancelled():
-            self._emit_row_complete(session, build_stopped_row_complete(run))
-            return
         with self._condition:
+            if session.cancel_token.is_cancelled():
+                return
             active_run = self._runs.get(session.run_id)
             if active_run is None:
                 return
