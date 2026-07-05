@@ -13,9 +13,6 @@ import {
 } from '../../stores/scoresInferenceRevision'
 import { parseFleetTorpInputStatus } from './fleetTorpInputStatus'
 
-export const TABLE_STREAM_ALREADY_ACTIVE_DETAIL =
-  'An inference table stream is already active for this scope.'
-
 export function shouldBumpScoresInferenceRevision(
   event: InferenceStreamEvent,
   scope: AnalyticShellScope
@@ -54,7 +51,6 @@ export async function connectTableInferenceStream(
   }
 ): Promise<TableInferenceStreamConnectResult> {
   return connectAnalyticTableStream(scope, playerIds, {
-    conflictAlreadyActiveDetail: TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
     fetchStream: fetchScoresTableInferenceStream,
     signal: handlers.signal,
     onEvent: handlers.onEvent,
@@ -72,7 +68,6 @@ export async function connectTableInferenceStreamUntilComplete(
   }
 ): Promise<TableInferenceStreamConnectResult> {
   return connectAnalyticTableStreamUntilComplete(scope, playerIds, {
-    conflictAlreadyActiveDetail: TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
     fetchStream: fetchScoresTableInferenceStream,
     signal: handlers.signal,
     onEvent: handlers.onEvent,

@@ -38,7 +38,6 @@ from api.analytics.turn_roster import iter_turn_players
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.fleet_table_stream import (
-    TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
     fleet_complete_event,
     stream_fleet_table_ndjson,
 )
@@ -176,7 +175,7 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
     )
     try:
         first_event = next(second)
-        assert first_event.get("detail") != TABLE_STREAM_ALREADY_ACTIVE_DETAIL
+        assert first_event.get("type") != "error"
     finally:
         second.close()
 
@@ -247,7 +246,6 @@ def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
             break
 
     assert lines
-    assert json.loads(lines[0]).get("detail") != TABLE_STREAM_ALREADY_ACTIVE_DETAIL
     assert not scheduler.owns_table_stream(first_token)
 
 

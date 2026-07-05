@@ -48,7 +48,6 @@ const fleetTableStreamPolicy: PerPlayerAnalyticStreamPolicy<
       onEvent: handlers.onEvent,
       hasPendingPlayers: handlers.hasPending,
     }),
-  conflictExhaustedMessage: 'Fleet table stream could not reconnect for this scope.',
   incompleteExhaustedMessage:
     'Fleet table stream ended before all visible players completed.',
 }

@@ -5,7 +5,6 @@ import {
   useScoresInferenceRevisionStore,
 } from '../../stores/scoresInferenceRevision'
 import {
-  TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
   connectTableInferenceStream,
   connectTableInferenceStreamUntilComplete,
 } from './tableInferenceStreamConnect'
@@ -19,39 +18,6 @@ const scope = {
 describe('connectTableInferenceStream', () => {
   beforeEach(() => {
     useScoresInferenceRevisionStore.getState().resetRevisions()
-  })
-  it('retries when the scope-level stream conflict error is returned', async () => {
-    const fetchSpy = vi
-      .spyOn(bff, 'fetchScoresTableInferenceStream')
-      .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
-        handlers.onEvent({
-          type: 'error',
-          detail: TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
-        })
-      })
-      .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
-        handlers.onEvent({
-          type: 'complete',
-          playerId: 8,
-          status: 'exact',
-          summary: 'ok',
-          solutionCount: 1,
-          isComplete: true,
-        })
-      })
-
-    const events: unknown[] = []
-    const controller = new AbortController()
-    const result = await connectTableInferenceStream(scope, [8], {
-      signal: controller.signal,
-      onEvent: (event) => {
-        events.push(event)
-      },
-    })
-
-    expect(result).toBe('ok')
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
-    expect(events).toHaveLength(1)
   })
 
   it('reconnects when the stream ends before every row is complete', async () => {
@@ -257,33 +223,5 @@ describe('connectTableInferenceStream', () => {
     })
 
     expect(scoresInferenceRevisionForScope(scope)).toBe(2)
-  })
-
-  it('does not bump scores inference revision on scope-level stream conflict errors', async () => {
-    vi.spyOn(bff, 'fetchScoresTableInferenceStream')
-      .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
-        handlers.onEvent({
-          type: 'error',
-          detail: TABLE_STREAM_ALREADY_ACTIVE_DETAIL,
-        })
-      })
-      .mockImplementationOnce(async (_scope, _playerIds, handlers) => {
-        handlers.onEvent({
-          type: 'complete',
-          playerId: 8,
-          status: 'exact',
-          summary: 'ok',
-          solutionCount: 1,
-          isComplete: true,
-        })
-      })
-
-    const controller = new AbortController()
-    await connectTableInferenceStream(scope, [8], {
-      signal: controller.signal,
-      onEvent: () => {},
-    })
-
-    expect(scoresInferenceRevisionForScope(scope)).toBe(1)
   })
 })

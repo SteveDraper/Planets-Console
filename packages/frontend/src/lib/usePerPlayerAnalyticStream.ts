@@ -38,7 +38,6 @@ export type PerPlayerAnalyticStreamPolicy<TEvent extends StreamErrorEvent, TRefS
         hasPending: () => boolean
       }
     ) => Promise<AnalyticTableStreamConnectResult>
-    conflictExhaustedMessage: string
     incompleteExhaustedMessage: string
   }
 
@@ -216,10 +215,6 @@ export function usePerPlayerAnalyticStream<
       })
       .then((result) => {
         if (controller.signal.aborted) {
-          return
-        }
-        if (result === 'conflict_exhausted') {
-          markIncompleteFailed(activePolicy.conflictExhaustedMessage)
           return
         }
         if (result === 'incomplete_exhausted') {
