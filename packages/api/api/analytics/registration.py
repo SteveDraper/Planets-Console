@@ -2,10 +2,18 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.validation import require_non_empty_string
+
+if TYPE_CHECKING:
+    from api.compute.persistence import PersistencePolicy
+    from api.compute.profile import AnalyticComputeProfile
+    from api.compute.scope import ScopeKeySpec
+    from api.compute.wire import BuildStepJobWireFn, RunStepFn
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
 ExportCatalogLoader = Callable[[], AnalyticExportCatalog]
@@ -19,6 +27,11 @@ class TurnAnalyticRegistration:
     compute: TurnAnalyticHandler
     export_catalog: AnalyticExportCatalog | None = None
     export_catalog_loader: ExportCatalogLoader | None = None
+    scope_key_spec: ScopeKeySpec | None = None
+    compute_profile: AnalyticComputeProfile | None = None
+    persistence_policy: PersistencePolicy | None = None
+    build_step_job_wires: tuple[tuple[str, BuildStepJobWireFn], ...] = ()
+    run_steps: tuple[tuple[str, RunStepFn], ...] = ()
 
 
 def resolve_registration_export_catalog(
@@ -43,13 +56,6 @@ def resolve_registration_export_catalog(
 _VALID_ANALYTIC_TYPES = frozenset({"base", "selectable"})
 
 
-def _require_non_empty_string(value: str, *, field: str, analytic_id: str | None = None) -> None:
-    if value and value.strip():
-        return
-    prefix = f"Turn analytic {analytic_id!r} " if analytic_id is not None else "Turn analytic "
-    raise RuntimeError(f"{prefix}catalog entry {field} must be a non-empty string, got {value!r}")
-
-
 def validate_turn_analytic_registrations(
     registrations: tuple[TurnAnalyticRegistration, ...],
 ) -> None:
@@ -60,11 +66,11 @@ def validate_turn_analytic_registrations(
     for registration in registrations:
         entry = registration.catalog_entry
         analytic_id = entry.id
-        _require_non_empty_string(analytic_id, field="id")
+        require_non_empty_string(analytic_id, field="id")
         if analytic_id in seen_ids:
             raise RuntimeError(f"Duplicate turn analytic registration id: {analytic_id!r}")
         seen_ids.add(analytic_id)
-        _require_non_empty_string(entry.name, field="name", analytic_id=analytic_id)
+        require_non_empty_string(entry.name, field="name", analytic_id=analytic_id)
         if entry.type not in _VALID_ANALYTIC_TYPES:
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} catalog entry type must be 'base' or "
@@ -96,3 +102,7 @@ def validate_turn_analytic_registrations(
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} must set export_catalog or export_catalog_loader"
             )
+
+        from api.compute.registry import validate_turn_analytic_compute_registration
+
+        validate_turn_analytic_compute_registration(registration)

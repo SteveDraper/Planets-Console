@@ -5,6 +5,7 @@ Analytics use generic HTTP routes but keep per-analytic implementation in layer-
 Related docs:
 
 - [Adding a turn analytic](design-adding-a-turn-analytic.md) -- step-by-step checklist for new analytics
+- [Compute orchestrator](design-compute-orchestrator.md) -- unified Core compute scheduling (ADR 0005)
 - [Analytic exports](design-analytic-exports.md) -- cross-analytic queries, JSONPath, materializers
 - [Connections analytic](design-connections-analytic.md) -- reference for a map analytic with query params
 - [Frontend/backend state](design-frontend-and-backend-state.md) -- shell context and turn ensure gating
@@ -31,7 +32,7 @@ Related docs:
   - `registry.py` -- `TURN_ANALYTIC_REGISTRATIONS` (aligned to the catalog), derived `TURN_ANALYTICS` handler map, `get_turn_analytic` dispatch
   - `compute_context.py` -- `AnalyticComputeContext` and `invoke_analytic_compute` for context-first handlers (`turn`, `options`, `diagnostics`, and later `query`)
 
-`TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry.
+`TurnAnalyticService` loads `TurnInfo`, builds `TurnAnalyticsOptions`, and delegates to `get_turn_analytic(...)` in the registry. Long-term, batch compute routes through the [**compute orchestrator**](design-compute-orchestrator.md) (phase 2); export ensure and table streams migrate first ([#190](https://github.com/SteveDraper/Planets-Console/issues/190)).
 
 **Shared catalog:** `TURN_ANALYTIC_CATALOG` in `catalog.py` is the single declarative source of truth for analytic ids, SPA metadata, and order; it imports no Core compute, so BFF and `catalog_entry()` read it without pulling in the compute graph. Core **turn analytic registration** objects (`TURN_ANALYTIC_REGISTRATIONS`) reference catalog entries and bundle compute handlers plus an export-catalog placeholder; `registry.py` derives only the `TURN_ANALYTICS` handler map and aligns registrations to the catalog with `tuple_aligned_with_turn_analytic_catalog` -- the same helper the BFF uses for its descriptors. BFF attaches table/map shaping via `AnalyticDescriptor.from_catalog_entry(...)`. The alignment helper validates each layer's keys against the catalog and preserves catalog order at import; a missing or extra registration/descriptor raises `RuntimeError` on startup. Core handlers and BFF descriptors remain registered separately (cross-layer); within Core, the handler map is derived from one registration tuple.
 

@@ -178,6 +178,27 @@ def test_validate_turn_analytic_registrations_rejects_non_callable_compute():
         validate_turn_analytic_registrations((_registration_for_validation(compute=object()),))
 
 
+def test_validate_turn_analytic_registrations_rejects_invalid_compute_profile():
+    from api.analytics.registration import (
+        TurnAnalyticRegistration,
+        validate_turn_analytic_registrations,
+    )
+    from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
+
+    base = _registration_for_validation()
+    registration = TurnAnalyticRegistration(
+        catalog_entry=base.catalog_entry,
+        compute=base.compute,
+        export_catalog=base.export_catalog,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="scope_key_spec"):
+        validate_turn_analytic_registrations((registration,))
+
+
 def test_validate_turn_analytic_registrations_rejects_mismatched_export_catalog_id():
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.exports.empty import empty_export_catalog_for

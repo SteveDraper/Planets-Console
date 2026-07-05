@@ -549,8 +549,20 @@ Provenance label on scores inference `complete` diagnostics (`diagnostics.fleetT
 _Avoid_: conflating with build-inference row pending/searching, treating `ConflictError` as two different fleet states
 
 **Analytic compute node**:
-One unit of analytic export ensure / materialization work keyed by `(analytic_id, game_id, perspective, turn, player_id)`. A node uses turn data loaded for that scope plus ancestor nodes from declared **analytic export ensure dependencies** (same `player_id` only). Orchestration unwinds the DAG forward by turn for gap fill; shared read-only turn inputs (e.g. fleet id bounds) are not graph edges. Batch callers fan out to N nodes; a single-player request must not widen to the full roster. See [design-analytic-exports.md](docs/design-analytic-exports.md) **Compute node model**; fleet scope fix [#179](https://github.com/SteveDraper/Planets-Console/issues/179).
+One DAG vertex of analytic work at a **compute scope** (see **Compute scope**). For row-scoped exports this is typically `(analytic_id, game_id, perspective, turn, player_id)`. Execution scheduling, parallelism, and step continuations are defined in [design-compute-orchestrator.md](docs/design-compute-orchestrator.md) ([#190](https://github.com/SteveDraper/Planets-Console/issues/190)).
 _Avoid_: perspective-batch materialization for one-player ensure, treating all-roster snapshot completeness as one player's cache hit
+
+**Compute scope**:
+Canonical identity for one cacheable orchestrator work unit: `analytic_id`, `game_id`, and per-analytic scope axes (`perspective`, `turn`, `player_id`, each concrete or **WILDCARD**), plus optional sorted **parameters** fingerprint (e.g. connection options). Declared per analytic via `ScopeKeySpec` on registration. Export `ExportScope` is the row-scoped projection used by cross-analytic query. See [design-compute-orchestrator.md](docs/design-compute-orchestrator.md).
+_Avoid_: using nullable axes alone without WILDCARD semantics; duplicating connection options in memo keys outside declared parameter_fields
+
+**Compute orchestrator**:
+Core API unified execution layer: dependency DAG from `ENSURE_DEPENDENCIES`, singleflight (`attach_inflight`), declarative step backends (`inline`, `thread`, `interpreter`, `process`), global priority pool, job wire with explicit dependency outputs, epoch-checked persist coordination. Analytics own persistence policy hooks. North-star uniform compute API for ensure, streams, table/map compute, BFF, and MCP. [design-compute-orchestrator.md](docs/design-compute-orchestrator.md), [ADR 0005](docs/adr/0005-compute-orchestrator.md).
+_Avoid_: per-analytic worker schedulers as the platform model; `ctx.query()` inside parallel workers; orchestrator-owned persistence schemas
+
+**Compute step**:
+One schedulable pool unit inside a **compute node** (e.g. scores tier job, fleet one-turn materialization leg). Nodes complete after one or more step continuations. Backend declared on `ComputeStepSpec`; not hardcoded in orchestrator.
+_Avoid_: one pool job spanning multiple compute nodes; blocking ensure inside pool workers
 
 **Fleet gap-fill coordinator** (#161, per-player scope #179):
 Per-`(gameId, perspective, playerId)` singleflight around multi-turn fleet ledger materialization so concurrent callers for the **same player** (fleet table tile, scores ensure, inference background warm) share one in-flight unwind instead of independent retry loops. Exposes an **epoch** aligned with fleet invalidation generation (per perspective); waiters for that player block with a generous timeout or retry when epoch bumps. Forward unwind runs `scores@t,P` before `fleet@t,P` for each gap turn. Requests for different players do not share one chain. Phase 1 mitigation (shipped): return cached target ledger after invalidation retries if another path already persisted it. See [design-fleet-analytic.md](docs/design-fleet-analytic.md) section 5.1.

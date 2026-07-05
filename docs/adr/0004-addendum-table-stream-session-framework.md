@@ -30,7 +30,7 @@ Per-analytic code keeps:
 
 - Same-scope reconnect **preempts** the prior stream token via `TableStreamScopeGuard`; there is no reject-and-retry contract.
 - Wire event schemas and Zod/BFF contracts
-- Scheduler classes (`InferenceRowScheduler`, `FleetTableStreamScheduler`)
+- Scheduler classes (`InferenceRowScheduler`, `FleetTableStreamScheduler`) worker dequeue loops -- superseded by [compute orchestrator](../design-compute-orchestrator.md) ([#190](https://github.com/SteveDraper/Planets-Console/issues/190))
 - Domain materialization / tier inference jobs
 - Cross-analytic imports between `analytics/fleet` and `analytics/military_score_inference`
 
