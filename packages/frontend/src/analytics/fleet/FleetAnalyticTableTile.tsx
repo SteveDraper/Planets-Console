@@ -1,5 +1,6 @@
-import type { AnalyticShellScope } from '../../api/bff'
 import { FleetTableView } from './FleetTableView'
+import type { AnalyticShellScope } from '../../api/bff'
+import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { useFleetComponentCatalogQuery } from './useFleetComponentCatalogQuery'
 import { useFleetTableStream } from './useFleetTableStream'
 
@@ -15,6 +16,7 @@ export function FleetAnalyticTableTile({
   const streamEnabled = fetchEnabled && analyticScope != null
   const componentCatalog = useFleetComponentCatalogQuery(analyticScope, streamEnabled)
   const { streamPlayersById } = useFleetTableStream(analyticScope, streamEnabled)
+  const racePlayerLabels = useTurnRacePlayerLabels(analyticScope, streamEnabled)
 
   if (analyticScope == null) {
     return (
@@ -25,6 +27,10 @@ export function FleetAnalyticTableTile({
   }
 
   return (
-    <FleetTableView componentCatalog={componentCatalog} streamPlayersById={streamPlayersById} />
+    <FleetTableView
+      componentCatalog={componentCatalog}
+      streamPlayersById={streamPlayersById}
+      racePlayerLabels={racePlayerLabels}
+    />
   )
 }

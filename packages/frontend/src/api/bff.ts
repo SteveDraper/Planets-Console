@@ -226,6 +226,8 @@ export type TableDataResponse = {
   analyticId: string
   columns: string[]
   rows: string[][]
+  /** Parallel to `rows`; host player id for each scoreboard row when known. */
+  rowPlayerIds?: Array<number | null>
   includeBuildInference?: boolean
   inferenceByRow?: Array<ScoresInferenceRowStub | ScoresInferenceRowDetail>
 }

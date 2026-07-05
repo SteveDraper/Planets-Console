@@ -114,22 +114,26 @@ def table_from_core(core_data: dict, *, include_build_inference: bool = False) -
         columns.append(INFERENCE_COLUMN)
 
     rows: list[list[str]] = []
+    row_player_ids: list[int | None] = []
     inference_by_row: list[dict[str, object]] = []
     for row in core_data.get("rows", []):
         if not isinstance(row, dict):
             continue
+        player_id = row.get("playerId")
         table_row = [
             str(row.get("racePlayer", "")),
             *[_format_score_cell(row.get(field)) for field in TABLE_FIELDS],
         ]
         if include_build_inference:
-            inference_by_row.append(_pending_inference_stub(row.get("playerId")))
+            inference_by_row.append(_pending_inference_stub(player_id))
         rows.append(table_row)
+        row_player_ids.append(player_id if isinstance(player_id, int) else None)
 
     payload: dict[str, object] = {
         "analyticId": ANALYTIC_ID,
         "columns": columns,
         "rows": rows,
+        "rowPlayerIds": row_player_ids,
     }
     if include_build_inference:
         payload["includeBuildInference"] = True

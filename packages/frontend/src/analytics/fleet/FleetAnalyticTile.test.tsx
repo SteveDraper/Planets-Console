@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FleetAnalyticTile } from './FleetAnalyticTile'
@@ -7,7 +8,24 @@ import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 
+vi.mock('../../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/bff')>()
+  return {
+    ...actual,
+    fetchAnalyticTable: vi.fn(),
+  }
+})
+
+import { fetchAnalyticTable } from '../../api/bff'
+
+function createWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  }
+}
+
 function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <FleetAnalyticTile
       name="Fleet"
@@ -16,7 +34,8 @@ function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>>
       depressed
       onToggle={() => {}}
       {...overrides}
-    />
+    />,
+    { wrapper: createWrapper(client) }
   )
 }
 
@@ -32,6 +51,12 @@ describe('FleetAnalyticTile', () => {
       storageAvailablePerspectives: null,
     })
     seedShellViewpoint('Alice')
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'scores',
+      columns: ['Race (player)'],
+      rows: [],
+      rowPlayerIds: [],
+    })
   })
 
   it('hides player checkboxes until expanded', () => {
