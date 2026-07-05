@@ -39,10 +39,6 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
-from api.streaming.table_stream.connect_policy import (
-    DelegatingTableStreamConnectPolicy,
-    TableStreamConnectPolicyHooks,
-)
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
 )
@@ -51,7 +47,6 @@ from api.streaming.table_stream.multiplex import (
 )
 from api.transport.inference_stream import (
     inference_complete_event,
-    inference_global_pause_event,
 )
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
@@ -335,13 +330,11 @@ def iter_scores_table_inference_events(
     )
     resolved_scheduler = scheduler or get_inference_row_scheduler()
 
-    def policy_factory(
-        stream_token: str,
-    ) -> DelegatingTableStreamConnectPolicy[
-        ScheduledInferenceRow,
-        RowStreamAdmission,
-        InferenceStreamDomainEvent,
-    ]:
+    def policy_factory(stream_token: str):
+        from api.analytics.military_score_inference.inference_table_stream_connect_policy import (
+            InferenceTableStreamConnectPolicy,
+        )
+
         controller = InferenceTableStreamController(
             scope=stream_scope,
             stream_token=stream_token,
@@ -356,32 +349,11 @@ def iter_scores_table_inference_events(
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             persistence=persistence,
         )
-        return DelegatingTableStreamConnectPolicy(
+        return InferenceTableStreamConnectPolicy(
             controller=controller,
-            owns_table_stream_fn=lambda: resolved_scheduler.owns_table_stream(stream_token),
-            hooks=TableStreamConnectPolicyHooks(
-                preamble_events=lambda: (
-                    inference_global_pause_event(
-                        paused=bool(
-                            resolved_scheduler.global_pause_status(stream_scope).get("paused")
-                        ),
-                    ),
-                ),
-                resolve_admission=controller.resolve_row_admission,
-                dispatch_admission=controller.dispatch_admission,
-                multiplex_event_to_wire_events=_inference_multiplex_event_to_wire_events,
-                tag_event=lambda event, player_id: tag_inference_stream_event(
-                    event,
-                    player_id=player_id,
-                ),
-                terminal_types=lambda: _TERMINAL_EVENT_TYPES,
-                end_sessions=lambda: cleanup_inference_stream_sessions(
-                    resolved_scheduler,
-                    stream_scope,
-                    tuple(row.session for row in controller.current_scheduled_rows()),
-                    stream_token=stream_token,
-                ),
-            ),
+            scheduler=resolved_scheduler,
+            stream_scope=stream_scope,
+            stream_token=stream_token,
         )
 
     yield from iter_table_stream_connect_with_scope(

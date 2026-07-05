@@ -21,10 +21,6 @@ from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
-from api.streaming.table_stream.connect_policy import (
-    DelegatingTableStreamConnectPolicy,
-    TableStreamConnectPolicyHooks,
-)
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
 )
@@ -207,13 +203,11 @@ def iter_fleet_table_stream_events(
     )
     resolved_scheduler = scheduler or get_fleet_table_stream_scheduler()
 
-    def policy_factory(
-        stream_token: str,
-    ) -> DelegatingTableStreamConnectPolicy[
-        ScheduledFleetPlayer,
-        PlayerStreamAdmission,
-        dict[str, object],
-    ]:
+    def policy_factory(stream_token: str):
+        from api.analytics.fleet.fleet_table_stream_connect_policy import (
+            FleetTableStreamConnectPolicy,
+        )
+
         controller = FleetTableStreamController(
             scope=stream_scope,
             stream_token=stream_token,
@@ -223,31 +217,15 @@ def iter_fleet_table_stream_events(
             fleet_services=fleet_services,
             persistence=persistence,
         )
-        return DelegatingTableStreamConnectPolicy(
+        return FleetTableStreamConnectPolicy(
             controller=controller,
-            owns_table_stream_fn=lambda: resolved_scheduler.owns_table_stream(stream_token),
-            hooks=TableStreamConnectPolicyHooks(
-                resolve_admission=lambda player_id: resolve_player_stream_admission(
-                    persistence,
-                    game_id=game_id,
-                    perspective=perspective,
-                    turn_number=turn_number,
-                    player_id=player_id,
-                ),
-                dispatch_admission=controller.dispatch_admission,
-                multiplex_event_to_wire_events=_fleet_multiplex_event_to_wire_events,
-                tag_event=lambda event, player_id: tag_fleet_table_stream_event(
-                    event,
-                    player_id=player_id,
-                ),
-                terminal_types=lambda: _TERMINAL_EVENT_TYPES,
-                end_sessions=lambda: cleanup_fleet_table_stream_sessions(
-                    resolved_scheduler,
-                    stream_scope,
-                    tuple(row.session for row in controller.current_scheduled_rows()),
-                    stream_token=stream_token,
-                ),
-            ),
+            scheduler=resolved_scheduler,
+            stream_scope=stream_scope,
+            stream_token=stream_token,
+            persistence=persistence,
+            game_id=game_id,
+            perspective=perspective,
+            turn_number=turn_number,
         )
 
     yield from iter_table_stream_connect_with_scope(
