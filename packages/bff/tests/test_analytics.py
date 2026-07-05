@@ -109,6 +109,8 @@ def test_scores_table_returns_scoreboard_columns_and_deltas():
         "2509092 (-53869)",
         "217 (+54)",
     ]
+    assert data["rowPlayerIds"][0] == INFERENCE_PLAYER_ID
+    assert len(data["rowPlayerIds"]) == len(data["rows"])
 
 
 def test_scores_table_with_build_inference_adds_column_and_player_stubs():

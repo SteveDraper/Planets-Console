@@ -87,8 +87,8 @@ class InferenceRowScheduler:
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._condition:
             if self._active_scope == scope and self._has_active_table_stream:
-                raise TableStreamScopeAlreadyActive()
-            if self._active_scope != scope:
+                self._preempt_active_table_stream_locked()
+            elif self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
             stream_token = str(uuid.uuid4())
@@ -295,7 +295,8 @@ class InferenceRowScheduler:
             job = self._work_queue.popleft()
             self._get_or_create_run(job.session).hold_job(job)
 
-    def _invalidate_retained_state_locked(self) -> None:
+    def _preempt_active_table_stream_locked(self) -> None:
+        """Cancel in-flight row runs so a reconnect can own this scope."""
         self._has_active_table_stream = False
         self._active_table_stream_token = None
         self._globally_paused = False
@@ -305,6 +306,9 @@ class InferenceRowScheduler:
         while self._work_queue:
             job = self._work_queue.popleft()
             job.session.cancel_token.cancel()
+
+    def _invalidate_retained_state_locked(self) -> None:
+        self._preempt_active_table_stream_locked()
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)

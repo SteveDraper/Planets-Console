@@ -14,6 +14,7 @@ from api.analytics.fleet.fleet_table_player_run import (
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.errors import PlanetsConsoleError
+from api.transport.fleet_table_stream import fleet_error_event
 
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
@@ -51,8 +52,8 @@ class FleetTableStreamScheduler:
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
         with self._condition:
             if self._active_scope == scope and self._has_active_table_stream:
-                raise TableStreamScopeAlreadyActive()
-            if self._active_scope != scope:
+                self._preempt_active_table_stream_locked()
+            elif self._active_scope != scope:
                 self._invalidate_retained_state_locked()
                 self._active_scope = scope
             stream_token = str(uuid.uuid4())
@@ -133,11 +134,17 @@ class FleetTableStreamScheduler:
                 self._active_table_stream_token = None
             self._condition.notify_all()
 
-    def _invalidate_retained_state_locked(self) -> None:
+    def _preempt_active_table_stream_locked(self) -> None:
+        """Cancel in-flight player runs so a reconnect can own this scope."""
         for session in self._runs.values():
             session.cancel_token.cancel()
         self._runs.clear()
         self._work_queue.clear()
+        self._has_active_table_stream = False
+        self._active_table_stream_token = None
+
+    def _invalidate_retained_state_locked(self) -> None:
+        self._preempt_active_table_stream_locked()
 
     def _worker_loop(self) -> None:
         while True:
@@ -152,7 +159,15 @@ class FleetTableStreamScheduler:
             try:
                 job.materialize(job.session)
             except Exception:
+                if job.session.event_queue.empty():
+                    job.session.event_queue.put(
+                        fleet_error_event("Fleet ledger materialization failed")
+                    )
                 continue
+            if job.session.event_queue.empty():
+                job.session.event_queue.put(
+                    fleet_error_event("Fleet ledger materialization ended without stream events")
+                )
 
 
 _process_scheduler: FleetTableStreamScheduler | None = None

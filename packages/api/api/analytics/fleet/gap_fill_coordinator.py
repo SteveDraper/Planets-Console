@@ -6,11 +6,11 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
+    FleetMaterializationProgressCallback,
     _find_gap_start_turn_for_player,
     _FleetSnapshotInvalidated,
     _GapFillCoherence,
@@ -18,7 +18,9 @@ from api.analytics.fleet.chain import (
     _materialize_fleet_ledger_chain_for_player,
     _run_materialize_on_active_coherence,
     active_gap_fill_coherence,
+    emit_gap_fill_leg_progress,
     gap_fill_coherence_scope,
+    gap_fill_progress_scope,
 )
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import (
@@ -39,10 +41,28 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.errors import ConflictError, FleetMaterializationTimeoutError, NotFoundError
 from api.models.game import TurnInfo
 
-if TYPE_CHECKING:
-    pass
-
 _CoordinatorKey = tuple[int, int, int, int]
+
+
+def _merge_progress_callback(
+    existing: FleetMaterializationProgressCallback | None,
+    incoming: FleetMaterializationProgressCallback | None,
+) -> FleetMaterializationProgressCallback | None:
+    if incoming is None:
+        return existing
+    if existing is None:
+        return incoming
+    if existing is incoming:
+        return existing
+
+    def merged(
+        persisted: PersistedFleetLedger,
+        materialize_turn: int,
+    ) -> None:
+        existing(persisted, materialize_turn)
+        incoming(persisted, materialize_turn)
+
+    return merged
 
 
 @dataclass
@@ -52,6 +72,7 @@ class _InflightMaterialization:
     load_turn: Callable[[int], TurnInfo | None]
     inference_materialization: FleetInferenceMaterialization | None
     query_context: AnalyticQueryContext | None
+    on_progress: FleetMaterializationProgressCallback | None = None
     event: threading.Event = field(default_factory=threading.Event)
     result_ledger: PersistedFleetLedger | None = None
     error: BaseException | None = None
@@ -85,18 +106,20 @@ class _InflightSlot:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None,
         query_context: AnalyticQueryContext | None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> _InflightJoin:
         self._reap_abandoned()
         self._discard_stale_completed(turn_number, generation)
         existing = self._inflight
         if existing is not None and existing.generation == generation:
-            return self._join_existing(existing, turn_number)
+            return self._join_existing(existing, turn_number, on_progress=on_progress)
         return self._start_new(
             turn_number,
             generation,
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
+            on_progress=on_progress,
         )
 
     def _reap_abandoned(self) -> None:
@@ -120,7 +143,11 @@ class _InflightSlot:
         self,
         inflight: _InflightMaterialization,
         turn_number: int,
+        *,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> _InflightJoin:
+        if on_progress is not None:
+            inflight.on_progress = _merge_progress_callback(inflight.on_progress, on_progress)
         extended = turn_number > inflight.target_turn
         previous_target = inflight.target_turn
         inflight.target_turn = max(inflight.target_turn, turn_number)
@@ -141,6 +168,7 @@ class _InflightSlot:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None,
         query_context: AnalyticQueryContext | None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> _InflightJoin:
         inflight = _InflightMaterialization(
             target_turn=turn_number,
@@ -148,6 +176,7 @@ class _InflightSlot:
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
+            on_progress=on_progress,
             leader_thread=threading.current_thread(),
         )
         self._inflight = inflight
@@ -187,6 +216,7 @@ class FleetGapFillCoordinator:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None = None,
         query_context: AnalyticQueryContext | None = None,
+        on_progress: FleetMaterializationProgressCallback | None = None,
     ) -> PersistedFleetLedger:
         turn_number = turn.settings.turn
         cached = self._persistence.get_ledger(
@@ -216,6 +246,7 @@ class FleetGapFillCoordinator:
             load_turn=load_turn,
             inference_materialization=inference_materialization,
             query_context=query_context,
+            on_progress=on_progress,
         )
 
     def _coordinate(
@@ -225,6 +256,7 @@ class FleetGapFillCoordinator:
         load_turn: Callable[[int], TurnInfo | None],
         inference_materialization: FleetInferenceMaterialization | None,
         query_context: AnalyticQueryContext | None,
+        on_progress: FleetMaterializationProgressCallback | None,
     ) -> PersistedFleetLedger:
         turn_number = turn.settings.turn
         with self._inflight_condition:
@@ -234,6 +266,7 @@ class FleetGapFillCoordinator:
                 load_turn=load_turn,
                 inference_materialization=inference_materialization,
                 query_context=query_context,
+                on_progress=on_progress,
             )
         inflight = join.inflight
 
@@ -357,9 +390,28 @@ class FleetGapFillCoordinator:
             load_turn=inflight.load_turn,
             inference_materialization=inflight.inference_materialization,
             query_context=inflight.query_context,
+            on_progress=inflight.on_progress,
         )
 
     def _run_leader_unwind(
+        self,
+        inflight: _InflightMaterialization,
+        turn: TurnInfo,
+        *,
+        load_turn: Callable[[int], TurnInfo | None],
+        inference_materialization: FleetInferenceMaterialization | None,
+        query_context: AnalyticQueryContext | None,
+    ) -> None:
+        with gap_fill_progress_scope(lambda: inflight.on_progress):
+            self._run_leader_unwind_body(
+                inflight,
+                turn,
+                load_turn=load_turn,
+                inference_materialization=inference_materialization,
+                query_context=query_context,
+            )
+
+    def _run_leader_unwind_body(
         self,
         inflight: _InflightMaterialization,
         turn: TurnInfo,
@@ -541,6 +593,7 @@ class FleetGapFillCoordinator:
         """Return True when every gap turn has ensure-final ledger for this player."""
         player_id = self._player_id
         all_gap_turns_final = True
+
         for materialize_turn in range(gap_start, target_turn + 1):
             turn_info = load_turn(materialize_turn)
             if turn_info is None:
@@ -563,6 +616,7 @@ class FleetGapFillCoordinator:
                 materialize_turn,
                 player_id,
             )
+            materialized_via_chain = False
             if persisted is None or not _is_fleet_ledger_cache_hit(persisted):
                 _run_materialize_on_active_coherence(
                     self._persistence,
@@ -573,6 +627,16 @@ class FleetGapFillCoordinator:
                     inference_materialization=inference_materialization,
                     materialize_player_id=player_id,
                 )
+                materialized_via_chain = True
+
+            persisted = self._persistence.get_ledger(
+                self._game_id,
+                self._perspective,
+                materialize_turn,
+                player_id,
+            )
+            if persisted is not None and not materialized_via_chain:
+                emit_gap_fill_leg_progress(persisted, materialize_turn)
 
             if not self._persistence.has_final_ledger(
                 self._game_id,

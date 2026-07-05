@@ -333,6 +333,64 @@ def test_forward_unwind_calls_ensure_fleet_export_per_gap_turn(
         )
 
 
+def test_forward_unwind_emits_once_per_leg_when_chain_materializes(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Export unwind must not double-emit leg progress when chain materializes."""
+    from api.analytics.fleet.chain import emit_gap_fill_leg_progress
+
+    from tests.test_fleet_persistence import (
+        _inference_materialization_for_fleet,
+        _put_provenance_final_snapshot,
+        _seed_scores_rows_for_all_players,
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_id = _first_player_id(turn_112)
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    emitted_turns: list[int] = []
+    original_emit = emit_gap_fill_leg_progress
+
+    def tracking_emit(persisted: PersistedFleetLedger, materialize_turn: int) -> None:
+        emitted_turns.append(materialize_turn)
+        original_emit(persisted, materialize_turn)
+
+    with patch(
+        "api.analytics.fleet.chain.emit_gap_fill_leg_progress",
+        side_effect=tracking_emit,
+    ):
+        get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            628580,
+            1,
+            player_id,
+            turn_112,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+        )
+
+    gap_turns = {turn for turn in emitted_turns if 111 <= turn <= 112}
+    assert gap_turns, f"expected gap leg progress emissions, got {emitted_turns}"
+    assert len(emitted_turns) == len(set(emitted_turns)), (
+        f"duplicate leg progress emissions: {emitted_turns}"
+    )
+
+
 def test_gap_fill_forward_unwind_refines_intermediate_turn_build_option_sets(
     persistence,
     load_turn,
@@ -738,3 +796,96 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
     assert materialize_calls <= 2, (
         f"expected at most one invalidation retry on the chain, got {materialize_calls}"
     )
+
+
+def test_joiner_on_progress_receives_incremental_events_during_inflight_gap_fill(
+    persistence,
+    load_turn,
+):
+    """Joiner with on_progress receives leg events while waiting on inflight gap-fill."""
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    player_id = _first_player_id(turn_112)
+
+    leader_ready = threading.Event()
+    release_leader = threading.Event()
+    progress_turns: list[int] = []
+    progress_lock = threading.Lock()
+    errors: list[BaseException] = []
+
+    coordinator = coordinator_for(persistence, 628580, 1, player_id)
+    original_run_leader = coordinator._run_leader_unwind
+
+    def gated_run_leader(
+        inflight,
+        turn,
+        *,
+        load_turn,
+        inference_materialization,
+        query_context,
+    ):
+        leader_ready.set()
+        assert release_leader.wait(timeout=5)
+        return original_run_leader(
+            inflight,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            query_context=query_context,
+        )
+
+    def joiner_on_progress(
+        _persisted: PersistedFleetLedger,
+        materialize_turn: int,
+    ) -> None:
+        with progress_lock:
+            progress_turns.append(materialize_turn)
+
+    def run_leader() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_id,
+                turn_112,
+                load_turn=load_turn,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_joiner() -> None:
+        try:
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_id,
+                turn_112,
+                load_turn=load_turn,
+                on_progress=joiner_on_progress,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    with patch.object(coordinator, "_run_leader_unwind", side_effect=gated_run_leader):
+        leader_thread = threading.Thread(target=run_leader)
+        joiner_thread = threading.Thread(target=run_joiner)
+        leader_thread.start()
+        assert leader_ready.wait(timeout=5)
+        joiner_thread.start()
+        release_leader.set()
+        leader_thread.join(timeout=30)
+        joiner_thread.join(timeout=30)
+
+    assert not errors
+    assert len(progress_turns) >= 2
+    assert progress_turns == sorted(progress_turns)
+    assert min(progress_turns) <= 111
+    assert max(progress_turns) >= 112

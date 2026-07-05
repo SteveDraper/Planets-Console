@@ -282,10 +282,21 @@ def iter_multiplexed_inference_events(
             return session_provider()
         return sessions
 
+    def finish_cancelled_run(row: ScheduledInferenceRow) -> None:
+        if row.session.cancel_token.is_cancelled():
+            pending_run_ids.discard(row.session.run_id)
+            finished.add(row.session.run_id)
+
     def refresh_pending_run_ids() -> set[str]:
-        return {
-            row.session.run_id for row in active_sessions() if row.session.run_id not in finished
-        }
+        pending: set[str] = set()
+        for row in active_sessions():
+            if row.session.run_id in finished:
+                continue
+            if row.session.cancel_token.is_cancelled():
+                finished.add(row.session.run_id)
+                continue
+            pending.add(row.session.run_id)
+        return pending
 
     pending_run_ids = refresh_pending_run_ids()
     cursor = 0
@@ -314,6 +325,9 @@ def iter_multiplexed_inference_events(
         row = active_rows[cursor % len(active_rows)]
         cursor += 1
         if row.session.run_id not in pending_run_ids:
+            continue
+        if row.session.cancel_token.is_cancelled():
+            finish_cancelled_run(row)
             continue
         try:
             domain_event = row.session.event_queue.get(timeout=_MULTiplexWaitSeconds)

@@ -69,6 +69,88 @@ describe('useFleetTableStream', () => {
     })
   })
 
+  it('shows progressive rows during leg-by-leg gap-fill stream events', async () => {
+    const firstLegRecord: FleetTableRecord = {
+      ...refinedRecord,
+      recordId: 'rec-leg-1',
+      fields: {
+        ...refinedRecord.fields,
+        shipId: { kind: 'known', value: 1 },
+      },
+    }
+    const secondLegRecord: FleetTableRecord = {
+      ...refinedRecord,
+      recordId: 'rec-leg-2',
+      fields: {
+        ...refinedRecord.fields,
+        shipId: { kind: 'known', value: 2 },
+      },
+    }
+
+    let emitRemainingEvents: (() => void) | undefined
+
+    vi.spyOn(bff, 'fetchFleetTableStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'ledger_updated',
+          playerId: 8,
+          ledger: {
+            playerId: 8,
+            playerName: 'Alice',
+            records: [firstLegRecord],
+          },
+        })
+
+        await new Promise<void>((resolve) => {
+          emitRemainingEvents = () => {
+            handlers.onEvent({
+              type: 'provenance',
+              playerId: 8,
+              turnEvidenceAtN: true,
+              priorLedgerAtNMinus1: true,
+              isFinal: false,
+            })
+            handlers.onEvent({
+              type: 'ledger_updated',
+              playerId: 8,
+              ledger: {
+                playerId: 8,
+                playerName: 'Alice',
+                records: [firstLegRecord, secondLegRecord],
+              },
+            })
+            handlers.onEvent({
+              type: 'complete',
+              playerId: 8,
+              isFinal: true,
+              summary: 'Player 8 ok',
+            })
+            resolve()
+          }
+        })
+      }
+    )
+
+    const { result } = renderHook(() => useFleetTableStream(scope, true))
+
+    await waitFor(() => {
+      const slice = result.current.streamPlayersById.get(8)
+      expect(slice?.records).toEqual([firstLegRecord])
+      expect(slice?.isComplete).toBe(false)
+      expect(slice?.isPending).toBe(true)
+    })
+
+    await act(async () => {
+      emitRemainingEvents!()
+    })
+
+    await waitFor(() => {
+      const slice = result.current.streamPlayersById.get(8)
+      expect(slice?.records).toEqual([firstLegRecord, secondLegRecord])
+      expect(slice?.isComplete).toBe(true)
+    })
+  })
+
   it('updates visible players independently from stream events', async () => {
     vi.spyOn(bff, 'fetchFleetTableStream').mockImplementation(
       async (_scope, _playerIds, handlers) => {

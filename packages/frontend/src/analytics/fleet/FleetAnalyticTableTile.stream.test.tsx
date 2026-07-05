@@ -18,12 +18,13 @@ vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
   return {
     ...actual,
+    fetchAnalyticTable: vi.fn(),
     fetchFleetComponentCatalog: vi.fn(),
     fetchFleetTableStream: vi.fn(),
   }
 })
 
-import { fetchFleetComponentCatalog } from '../../api/bff'
+import { fetchAnalyticTable, fetchFleetComponentCatalog } from '../../api/bff'
 
 const scope: AnalyticShellScope = {
   gameId: '628580',
@@ -93,6 +94,12 @@ describe('FleetAnalyticTableTile stream integration', () => {
       engines: {},
       beams: {},
       torpedoes: {},
+    })
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'scores',
+      columns: ['Race (player)'],
+      rows: [],
+      rowPlayerIds: [],
     })
   })
 

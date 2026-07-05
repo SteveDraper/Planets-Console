@@ -35,6 +35,12 @@ if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
 
+FleetMaterializationProgressCallback = Callable[
+    [PersistedFleetLedger, int],
+    None,
+]
+
+
 class _FleetSnapshotInvalidated(Exception):
     """Gap-fill observed a concurrent fleet snapshot invalidation."""
 
@@ -65,6 +71,49 @@ def gap_fill_coherence_scope(coherence: _GapFillCoherence) -> Iterator[None]:
         yield
     finally:
         set_active_gap_fill_coherence(None, token)
+
+
+_active_gap_fill_progress = threading.local()
+
+
+def active_gap_fill_progress_callback() -> FleetMaterializationProgressCallback | None:
+    getter = getattr(_active_gap_fill_progress, "getter", None)
+    if getter is None:
+        return None
+    return getter()
+
+
+def _set_active_gap_fill_progress_getter(
+    getter: Callable[[], FleetMaterializationProgressCallback | None] | None,
+    token: object | None = None,
+) -> object:
+    if token is not None:
+        _active_gap_fill_progress.getter = getter
+        return token
+    previous = getattr(_active_gap_fill_progress, "getter", None)
+    _active_gap_fill_progress.getter = getter
+    return previous
+
+
+@contextmanager
+def gap_fill_progress_scope(
+    callback_getter: Callable[[], FleetMaterializationProgressCallback | None],
+) -> Iterator[None]:
+    token = _set_active_gap_fill_progress_getter(callback_getter)
+    try:
+        yield
+    finally:
+        _set_active_gap_fill_progress_getter(None, token)
+
+
+def emit_gap_fill_leg_progress(
+    persisted: PersistedFleetLedger,
+    materialize_turn: int,
+) -> None:
+    """Notify the active inflight gap-fill callback after one materialized leg."""
+    callback = active_gap_fill_progress_callback()
+    if callback is not None:
+        callback(persisted, materialize_turn)
 
 
 @dataclass
@@ -463,6 +512,14 @@ def _materialize_fleet_ledger_chain_for_player(
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
 
+    def emit_leg_progress(
+        persisted_leg: PersistedFleetLedger,
+        materialize_turn: int,
+    ) -> None:
+        nonlocal current_ledger
+        emit_gap_fill_leg_progress(persisted_leg, materialize_turn)
+        current_ledger = persisted_leg.ledger
+
     if skip_missing_prefix_rst:
         start_turn = first_stored_rst
         assert first_stored_rst is not None
@@ -497,7 +554,7 @@ def _materialize_fleet_ledger_chain_for_player(
             load_turn=cached_load,
             inference_materialization=resolved_inference_materialization,
         )
-        current_ledger = current_persisted.ledger
+        emit_leg_progress(current_persisted, 1)
         if turn_number == 1:
             return current_persisted
         start_turn = 2
@@ -523,7 +580,7 @@ def _materialize_fleet_ledger_chain_for_player(
             load_turn=cached_load,
             inference_materialization=resolved_inference_materialization,
         )
-        current_ledger = current_persisted.ledger
+        emit_leg_progress(current_persisted, materialize_turn)
 
     assert current_persisted is not None
     return current_persisted
@@ -617,6 +674,7 @@ def get_or_materialize_fleet_ledger_for_player(
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
     query_context: AnalyticQueryContext | None = None,
+    on_progress: FleetMaterializationProgressCallback | None = None,
 ) -> PersistedFleetLedger:
     """Return a cached ledger or materialize turn T for one player."""
     from api.analytics.fleet.gap_fill_coordinator import coordinator_for
@@ -626,6 +684,7 @@ def get_or_materialize_fleet_ledger_for_player(
         load_turn=load_turn,
         inference_materialization=inference_materialization,
         query_context=query_context,
+        on_progress=on_progress,
     )
 
 

@@ -6,6 +6,7 @@ import { pendingFleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
 import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import type { FleetComponentCatalog, FleetTableRecord } from './fleetTableWireSchema'
 
 const testComponentCatalog: FleetComponentCatalog = {
@@ -181,6 +182,7 @@ describe('FleetTableView', () => {
       <FleetTableView
         componentCatalog={testComponentCatalog}
         streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
       />
     )
 
@@ -188,6 +190,77 @@ describe('FleetTableView', () => {
     expect(tiles).toHaveLength(2)
     expect(within(tiles[0]).getByRole('heading', { level: 3 })).toHaveTextContent('Bob')
     expect(within(tiles[1]).getByRole('heading', { level: 3 })).toHaveTextContent('Alice')
+  })
+
+  it('prefers turn-scoped scoreboard labels over shell game-info names', () => {
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [
+          { ordinal: 1, playerId: 8, name: 'dead', raceName: 'The Solar Federation' },
+        ],
+        isGameFinished: true,
+        sectorDisplayName: 'Test Sector',
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+      },
+      selectedTurn: 8,
+      perspectiveOverrideName: 'dead',
+      storageOnlyLoad: false,
+      storageAvailablePerspectives: null,
+    })
+    useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(8, true)
+
+    const streamPlayersById = new Map([[8, pendingFleetPlayerStreamSlice()]])
+    const racePlayerLabels = new Map([[8, 'The Solar Federation (dougp314)']])
+
+    render(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={racePlayerLabels}
+      />
+    )
+
+    expect(
+      screen.getByRole('region', { name: 'The Solar Federation (dougp314) fleet table' })
+    ).toBeInTheDocument()
+  })
+
+  it('shows race and player name in tile headings when race is known', () => {
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [
+          { ordinal: 1, playerId: 8, name: 'Alice', raceName: 'The Feds' },
+          { ordinal: 2, playerId: 9, name: 'Bob', raceName: 'The Evil Empire' },
+        ],
+        isGameFinished: true,
+        sectorDisplayName: 'Test Sector',
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+      },
+      selectedTurn: 5,
+      perspectiveOverrideName: 'Bob',
+      storageOnlyLoad: false,
+      storageAvailablePerspectives: null,
+    })
+
+    const streamPlayersById = new Map([
+      [8, pendingFleetPlayerStreamSlice()],
+      [9, pendingFleetPlayerStreamSlice()],
+    ])
+
+    render(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    expect(screen.getByRole('region', { name: 'The Evil Empire (Bob) fleet table' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'The Feds (Alice) fleet table' })).toBeInTheDocument()
   })
 
   it('hides tiles for players turned off in fleet visibility', () => {
@@ -203,6 +276,7 @@ describe('FleetTableView', () => {
       <FleetTableView
         componentCatalog={testComponentCatalog}
         streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
       />
     )
 

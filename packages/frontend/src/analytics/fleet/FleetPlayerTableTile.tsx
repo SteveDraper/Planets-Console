@@ -30,11 +30,7 @@ import {
 import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
-import {
-  fleetTileProgressSummary,
-  isFleetTileActivelyMaterializing,
-  isFleetTileMaterializing,
-} from './fleetTileStatus'
+import { fleetTileProgressSummary, isFleetTileMaterializing } from './fleetTileStatus'
 
 type FleetPlayerTableTileProps = {
   playerName: string
@@ -89,13 +85,10 @@ function FleetTileProgressIndicator({
   }
 
   const summary = fleetTileProgressSummary(streamSlice)
-  const activelyMaterializing = isFleetTileActivelyMaterializing(streamSlice)
 
   return (
     <p role="status" className="mt-1 inline-flex items-center gap-1.5 text-xs text-slate-300">
-      {activelyMaterializing ? (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-emerald-400" aria-hidden />
-      ) : null}
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-emerald-400" aria-hidden />
       <span>{summary}</span>
     </p>
   )
