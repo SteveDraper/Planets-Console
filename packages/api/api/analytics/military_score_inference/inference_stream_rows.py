@@ -38,9 +38,10 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.streaming.table_stream.connect import (
-    AdmissionDispatch,
-    iter_table_stream_connect_with_scope,
+from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
+from api.streaming.table_stream.connect_policy import (
+    DelegatingTableStreamConnectPolicy,
+    TableStreamConnectPolicyHooks,
 )
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
@@ -308,70 +309,6 @@ def cleanup_inference_stream_sessions(
     scheduler.end_inference_stream(scope, sessions, stream_token=stream_token)
 
 
-@dataclass
-class _ScoresTableStreamConnectPolicy:
-    controller: object
-    scheduler: InferenceRowScheduler
-    scope: InferenceStreamScope
-    stream_token: str
-
-    def preamble_events(self) -> tuple[dict[str, object], ...]:
-        pause_status = self.scheduler.global_pause_status(self.scope)
-        return (inference_global_pause_event(paused=bool(pause_status.get("paused"))),)
-
-    def attach(self) -> None:
-        self.controller.attach()
-
-    def detach(self) -> None:
-        self.controller.detach()
-
-    def owns_table_stream(self) -> bool:
-        return self.scheduler.owns_table_stream(self.stream_token)
-
-    def resolve_admission(self, player_id: int) -> RowStreamAdmission:
-        return self.controller.resolve_row_admission(player_id)
-
-    def dispatch_admission(self, player_id: int, admission: object) -> AdmissionDispatch:
-        return self.controller.dispatch_row_admission(player_id, admission)
-
-    def current_scheduled_rows(self) -> tuple[ScheduledInferenceRow, ...]:
-        return self.controller.current_scheduled_rows()
-
-    def register_scheduled_row(self, player_id: int, scheduled: object) -> None:
-        self.controller.register_scheduled_row(player_id, scheduled)
-
-    def finished_run_ids(self) -> set[str]:
-        return self.controller.finished_run_ids
-
-    def drain_pending_wire_events(self) -> list[dict[str, object]]:
-        return self.controller.drain_pending_wire_events()
-
-    def wake_multiplex(self):
-        return self.controller.wake_multiplex
-
-    def multiplex_event_to_wire_events(
-        self,
-        row: object,
-        raw_event: object,
-    ) -> Iterator[dict[str, object]]:
-        assert isinstance(row, ScheduledInferenceRow)
-        return _inference_multiplex_event_to_wire_events(row, raw_event)
-
-    def tag_event(self, event: dict[str, object], player_id: int) -> dict[str, object]:
-        return tag_inference_stream_event(event, player_id=player_id)
-
-    def terminal_types(self) -> frozenset[str]:
-        return _TERMINAL_EVENT_TYPES
-
-    def end_sessions(self) -> None:
-        cleanup_inference_stream_sessions(
-            self.scheduler,
-            self.scope,
-            tuple(row.session for row in self.controller.current_scheduled_rows()),
-            stream_token=self.stream_token,
-        )
-
-
 def iter_scores_table_inference_events(
     turn: TurnInfo,
     player_ids: tuple[int, ...],
@@ -399,7 +336,9 @@ def iter_scores_table_inference_events(
     )
     resolved_scheduler = scheduler or get_inference_row_scheduler()
 
-    def policy_factory(stream_token: str) -> _ScoresTableStreamConnectPolicy:
+    def policy_factory(
+        stream_token: str,
+    ) -> DelegatingTableStreamConnectPolicy[ScheduledInferenceRow]:
         controller = InferenceTableStreamController(
             scope=stream_scope,
             stream_token=stream_token,
@@ -414,11 +353,32 @@ def iter_scores_table_inference_events(
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             persistence=persistence,
         )
-        return _ScoresTableStreamConnectPolicy(
+        return DelegatingTableStreamConnectPolicy(
             controller=controller,
-            scheduler=resolved_scheduler,
-            scope=stream_scope,
-            stream_token=stream_token,
+            owns_table_stream_fn=lambda: resolved_scheduler.owns_table_stream(stream_token),
+            hooks=TableStreamConnectPolicyHooks(
+                preamble_events=lambda: (
+                    inference_global_pause_event(
+                        paused=bool(
+                            resolved_scheduler.global_pause_status(stream_scope).get("paused")
+                        ),
+                    ),
+                ),
+                resolve_admission=controller.resolve_row_admission,
+                dispatch_admission=controller.dispatch_row_admission,
+                multiplex_event_to_wire_events=_inference_multiplex_event_to_wire_events,
+                tag_event=lambda event, player_id: tag_inference_stream_event(
+                    event,
+                    player_id=player_id,
+                ),
+                terminal_types=lambda: _TERMINAL_EVENT_TYPES,
+                end_sessions=lambda: cleanup_inference_stream_sessions(
+                    resolved_scheduler,
+                    stream_scope,
+                    tuple(row.session for row in controller.current_scheduled_rows()),
+                    stream_token=stream_token,
+                ),
+            ),
         )
 
     yield from iter_table_stream_connect_with_scope(
