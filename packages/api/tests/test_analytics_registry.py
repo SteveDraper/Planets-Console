@@ -179,7 +179,10 @@ def test_validate_turn_analytic_registrations_rejects_non_callable_compute():
 
 
 def test_validate_turn_analytic_registrations_rejects_invalid_compute_profile():
-    from api.analytics.registration import TurnAnalyticRegistration, validate_turn_analytic_registrations
+    from api.analytics.registration import (
+        TurnAnalyticRegistration,
+        validate_turn_analytic_registrations,
+    )
     from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 
     base = _registration_for_validation()

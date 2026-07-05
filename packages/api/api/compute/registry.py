@@ -6,11 +6,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from api.analytics.registration import TurnAnalyticRegistration
-from api.validation import require_non_empty_string
 from api.compute.persistence import PersistencePolicy
 from api.compute.profile import VALID_COMPUTE_BACKENDS, AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ScopeKeySpec
 from api.compute.wire import BuildStepJobWireFn, RunStepFn
+from api.validation import require_non_empty_string
 
 
 @dataclass(frozen=True)
