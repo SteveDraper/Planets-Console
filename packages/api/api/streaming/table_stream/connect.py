@@ -116,6 +116,7 @@ def iter_table_stream_connect(
 def iter_table_stream_connect_with_scope(
     *,
     begin_scope: Callable[[], str],
+    end_scope: Callable[[str], None],
     policy_factory: Callable[
         [str],
         TableStreamConnectPolicy[ScheduledT, AdmissionT, EventT],
@@ -124,5 +125,10 @@ def iter_table_stream_connect_with_scope(
 ) -> Iterator[dict[str, object]]:
     """Begin scheduler scope, then run shared connect orchestration."""
     stream_token = begin_scope()
-    policy = policy_factory(stream_token)
-    yield from iter_table_stream_connect(policy, player_ids)
+    policy: TableStreamConnectPolicy[ScheduledT, AdmissionT, EventT] | None = None
+    try:
+        policy = policy_factory(stream_token)
+        yield from iter_table_stream_connect(policy, player_ids)
+    finally:
+        if policy is None:
+            end_scope(stream_token)

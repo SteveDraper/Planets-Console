@@ -242,7 +242,7 @@ def iter_fleet_table_stream_events(
                     turn_number=turn_number,
                     player_id=player_id,
                 ),
-                dispatch_admission=controller.dispatch_player_admission,
+                dispatch_admission=controller.dispatch_admission,
                 multiplex_event_to_wire_events=_fleet_multiplex_event_to_wire_events,
                 tag_event=lambda event, player_id: tag_fleet_table_stream_event(
                     event,
@@ -260,6 +260,12 @@ def iter_fleet_table_stream_events(
 
     yield from iter_table_stream_connect_with_scope(
         begin_scope=lambda: resolved_scheduler.begin_scope(stream_scope),
+        end_scope=lambda stream_token: cleanup_fleet_table_stream_sessions(
+            resolved_scheduler,
+            stream_scope,
+            (),
+            stream_token=stream_token,
+        ),
         policy_factory=policy_factory,
         player_ids=player_ids,
     )

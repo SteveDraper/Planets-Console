@@ -31,7 +31,9 @@ from api.streaming.table_stream.controller_base import TableStreamControllerBase
 
 
 @dataclass(kw_only=True)
-class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenceRow]):
+class InferenceTableStreamController(
+    TableStreamControllerBase[ScheduledInferenceRow, RowStreamAdmission]
+):
     scope: InferenceStreamScope
     turn: TurnInfo
     scheduler: InferenceRowScheduler
@@ -95,7 +97,7 @@ class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenc
         if row is not None:
             self.scheduler.cancel_row_run(row.session.run_id)
 
-    def dispatch_row_admission(
+    def dispatch_admission(
         self,
         player_id: int,
         admission: RowStreamAdmission,
@@ -118,19 +120,6 @@ class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenc
             return AdmissionDispatch(schedule_failed=True)
         return AdmissionDispatch(scheduled=scheduled)
 
-    def _register_admitted_schedule(self, player_id: int, admission: RowStreamAdmission) -> bool:
-        dispatch = self.dispatch_row_admission(player_id, admission)
-        if dispatch.schedule_failed:
-            return False
-        if dispatch.wire_events:
-            self.pending_wire_events.extend(dispatch.wire_events)
-        if dispatch.scheduled is not None:
-            scheduled = dispatch.scheduled
-            assert isinstance(scheduled, ScheduledInferenceRow)
-            self.scheduled_rows[player_id] = scheduled
-            self.finished_run_ids.discard(scheduled.session.run_id)
-        return True
-
     def _refresh_host_turn(self) -> None:
         if self.reload_host_turn is not None:
             self.turn = self.reload_host_turn()
@@ -144,7 +133,7 @@ class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenc
                 self.finished_run_ids.discard(old_row.session.run_id)
             self.scheduled_rows.pop(player_id, None)
             admission = self.resolve_row_admission(player_id)
-            if not self._register_admitted_schedule(player_id, admission):
+            if not self.register_admitted_schedule(player_id, admission):
                 return False
         self.wake_multiplex.set()
         return True
@@ -161,7 +150,7 @@ class InferenceTableStreamController(TableStreamControllerBase[ScheduledInferenc
                     player_id,
                     force_schedule=force_schedule,
                 )
-                if not self._register_admitted_schedule(player_id, admission):
+                if not self.register_admitted_schedule(player_id, admission):
                     return False
         self.wake_multiplex.set()
         return True

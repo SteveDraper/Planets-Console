@@ -19,10 +19,14 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_controller import (
     InferenceTableStreamController,
 )
-from api.streaming.table_stream.connect import AdmissionDispatch
+from api.streaming.table_stream.connect import (
+    AdmissionDispatch,
+    iter_table_stream_connect_with_scope,
+)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -120,7 +124,7 @@ def test_scores_schedule_failed_releases_scope_for_reconnect(sample_turn, monkey
 
     monkeypatch.setattr(
         InferenceTableStreamController,
-        "dispatch_row_admission",
+        "dispatch_admission",
         _failing_dispatch,
     )
 
@@ -275,7 +279,7 @@ def test_fleet_schedule_failed_releases_scope_for_reconnect(
 
     monkeypatch.setattr(
         FleetTableStreamController,
-        "dispatch_player_admission",
+        "dispatch_admission",
         _failing_dispatch,
     )
 
@@ -372,5 +376,88 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
     )
     try:
         list(replacement)
+    finally:
+        replacement.close()
+
+
+def test_scores_policy_factory_failure_releases_scope_for_reconnect(sample_turn, monkeypatch):
+    scheduler = _install_scores_scheduler(monkeypatch)
+    stream_scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=111)
+
+    def _failing_policy_factory(_stream_token: str):
+        raise RuntimeError("policy construction failed")
+
+    stream = iter_table_stream_connect_with_scope(
+        begin_scope=lambda: scheduler.begin_scope(stream_scope),
+        end_scope=lambda stream_token: scheduler.end_inference_stream(
+            stream_scope,
+            (),
+            stream_token=stream_token,
+        ),
+        policy_factory=_failing_policy_factory,
+        player_ids=(),
+    )
+    with pytest.raises(RuntimeError, match="policy construction failed"):
+        next(stream)
+
+    assert not scheduler._scope_guard.has_active_table_stream
+
+    replacement = iter_scores_table_inference_events(
+        sample_turn,
+        (),
+        game_id=628580,
+        perspective=1,
+        scheduler=scheduler,
+    )
+    try:
+        assert next(replacement) == {"type": "globalPause", "paused": False}
+    finally:
+        replacement.close()
+
+
+def test_fleet_policy_factory_failure_releases_scope_for_reconnect(
+    sample_turn,
+    monkeypatch,
+    persistence,
+):
+    from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+
+    scheduler = _install_fleet_scheduler(monkeypatch)
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    stream_scope = FleetTableStreamScope(game_id=628580, perspective=1, turn_number=111)
+
+    def _failing_policy_factory(_stream_token: str):
+        raise RuntimeError("policy construction failed")
+
+    stream = iter_table_stream_connect_with_scope(
+        begin_scope=lambda: scheduler.begin_scope(stream_scope),
+        end_scope=lambda stream_token: scheduler.end_fleet_table_stream(
+            stream_scope,
+            (),
+            stream_token=stream_token,
+        ),
+        policy_factory=_failing_policy_factory,
+        player_ids=(),
+    )
+    with pytest.raises(RuntimeError, match="policy construction failed"):
+        next(stream)
+
+    assert not scheduler._scope_guard.has_active_table_stream
+
+    replacement = iter_fleet_table_stream_events(
+        sample_turn,
+        (),
+        game_id=628580,
+        perspective=1,
+        fleet_services=services,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    try:
+        assert list(replacement) == []
     finally:
         replacement.close()

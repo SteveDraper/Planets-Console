@@ -26,7 +26,9 @@ from api.streaming.table_stream.controller_base import TableStreamControllerBase
 
 
 @dataclass(kw_only=True)
-class FleetTableStreamController(TableStreamControllerBase[ScheduledFleetPlayer]):
+class FleetTableStreamController(
+    TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission]
+):
     scope: FleetTableStreamScope
     turn: TurnInfo
     scheduler: FleetTableStreamScheduler
@@ -39,7 +41,7 @@ class FleetTableStreamController(TableStreamControllerBase[ScheduledFleetPlayer]
     def register_scheduled_player(self, player_id: int, row: ScheduledFleetPlayer) -> None:
         self.register_scheduled_row(player_id, row)
 
-    def dispatch_player_admission(
+    def dispatch_admission(
         self,
         player_id: int,
         admission: PlayerStreamAdmission,
@@ -65,19 +67,6 @@ class FleetTableStreamController(TableStreamControllerBase[ScheduledFleetPlayer]
             return AdmissionDispatch(schedule_failed=True)
         return AdmissionDispatch(scheduled=scheduled)
 
-    def _register_admitted_schedule(self, player_id: int, admission: PlayerStreamAdmission) -> bool:
-        dispatch = self.dispatch_player_admission(player_id, admission)
-        if dispatch.schedule_failed:
-            return False
-        if dispatch.wire_events:
-            self.pending_wire_events.extend(dispatch.wire_events)
-        if dispatch.scheduled is not None:
-            scheduled = dispatch.scheduled
-            assert isinstance(scheduled, ScheduledFleetPlayer)
-            self.scheduled_rows[player_id] = scheduled
-            self.finished_run_ids.discard(scheduled.session.run_id)
-        return True
-
     def reschedule_player(self, player_id: int) -> bool:
         with self.stream_lock:
             old_row = self.scheduled_rows.get(player_id)
@@ -92,7 +81,7 @@ class FleetTableStreamController(TableStreamControllerBase[ScheduledFleetPlayer]
                 turn_number=self.turn.settings.turn,
                 player_id=player_id,
             )
-            if not self._register_admitted_schedule(player_id, admission):
+            if not self.register_admitted_schedule(player_id, admission):
                 return False
         self.wake_multiplex.set()
         return True
@@ -114,7 +103,7 @@ class FleetTableStreamController(TableStreamControllerBase[ScheduledFleetPlayer]
                     player_id=player_id,
                     force_schedule=force_schedule,
                 )
-                if not self._register_admitted_schedule(player_id, admission):
+                if not self.register_admitted_schedule(player_id, admission):
                     return False
         self.wake_multiplex.set()
         return True
