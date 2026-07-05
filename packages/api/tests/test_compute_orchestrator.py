@@ -73,6 +73,41 @@ def _inline_compute_registration(
     )
 
 
+def _two_step_inline_compute_registration(
+    analytic_id: str,
+    step_calls: list[str],
+) -> TurnAnalyticRegistration:
+    def run_tier1(job):
+        step_calls.append("tier1")
+        return {"result": "tier1", "scope": job["scope"]}
+
+    def run_tier2(job):
+        step_calls.append("tier2")
+        return {"result": "tier2", "scope": job["scope"]}
+
+    return TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(analytic_id),
+        compute=lambda _ctx: {"analyticId": analytic_id},
+        export_catalog=empty_export_catalog_for(analytic_id),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(
+                ComputeStepSpec(step_kind="tier1", backend="inline"),
+                ComputeStepSpec(step_kind="tier2", backend="inline"),
+            ),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("tier1", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+            ("tier2", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(
+            ("tier1", run_tier1),
+            ("tier2", run_tier2),
+        ),
+    )
+
+
 def _thread_compute_registration(analytic_id: str) -> TurnAnalyticRegistration:
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(analytic_id),
@@ -427,6 +462,28 @@ def test_leader_handle_exposes_error_after_inline_failure(sample_turn):
 
     assert handle.state == "failed"
     assert handle.error is inline_failure
+
+
+def test_orchestrator_runs_multi_step_inline_profile_in_order(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    step_calls: list[str] = []
+    compute_registry = build_compute_registry(
+        (_two_step_inline_compute_registration(SHARED_ID, step_calls),)
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert handle.result_wire == {"result": "tier2", "scope": SHARED_ID}
+    assert step_calls == ["tier1", "tier2"]
+    assert orchestrator.nodes[shared_scope].step_index == 2
+    assert orchestrator.metrics.inline_executions == 2
 
 
 def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
