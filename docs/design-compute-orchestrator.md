@@ -339,8 +339,9 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Core scheduler | [#196](https://github.com/SteveDraper/Planets-Console/issues/196) | DAG gating, singleflight, `attach_inflight`, inline backend |
 | Worker pools | [#197](https://github.com/SteveDraper/Planets-Console/issues/197) | Global pool, priority bands, four backends |
 | Job wire + epochs | [#198](https://github.com/SteveDraper/Planets-Console/issues/198) | Wire builders, `DependencyOutputs`, invalidation re-check, persist coordination |
-| Fleet migration | [#199](https://github.com/SteveDraper/Planets-Console/issues/199) | Fleet leg steps; retire `FleetTableStreamScheduler` workers |
-| Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; retire `InferenceRowScheduler` workers |
+| Fleet migration | [#199](https://github.com/SteveDraper/Planets-Console/issues/199) | Fleet leg steps; delete `FleetTableStreamScheduler` worker pool |
+| Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; delete `InferenceRowScheduler` worker pool |
+| Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure/gap-fill via orchestrator; retire coordinator + blocking ensure |
 | Turn cache | [#201](https://github.com/SteveDraper/Planets-Console/issues/201) | Orchestrator LRU + prefetch into job wire |
 | Phase 2 | [#202](https://github.com/SteveDraper/Planets-Console/issues/202) | Route table/map `compute()` through orchestrator |
 | Phase 3 | [#203](https://github.com/SteveDraper/Planets-Console/issues/203) | BFF / MCP uniform compute API |
