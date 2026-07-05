@@ -188,6 +188,10 @@ class ComputeOrchestrator:
     def _refresh_node_readiness(self, node: ComputeNodeRun) -> None:
         if node.state in {"complete", "failed", "running"}:
             return
+        failed_dependency_error = self._failed_dependency_error(node)
+        if failed_dependency_error is not None:
+            self._fail_node(node, failed_dependency_error)
+            return
         if self._deps_complete(node):
             if node.state != "ready":
                 node.state = "ready"
@@ -195,6 +199,13 @@ class ComputeOrchestrator:
         else:
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
+
+    def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
+        for dependency_scope in node.dependency_scopes:
+            dependency = self._nodes.get(dependency_scope)
+            if dependency is not None and dependency.state == "failed":
+                return dependency.error
+        return None
 
     def _deps_complete(self, node: ComputeNodeRun) -> bool:
         for dependency_scope in node.dependency_scopes:
@@ -309,12 +320,15 @@ class ComputeOrchestrator:
         self._on_dependency_terminal(node.scope)
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
+        if node.state == "failed":
+            return
         node.state = "failed"
         node.error = error
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:
             waiter.error = error
         node.waiters.clear()
+        self._on_dependency_terminal(node.scope)
 
     def _on_dependency_terminal(self, completed_scope: ComputeScope) -> None:
         for node in self._nodes.values():

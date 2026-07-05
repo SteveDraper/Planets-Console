@@ -305,3 +305,44 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
 
     assert inline_calls == [ROOT_ID]
     assert orchestrator.nodes[root_scope].state == "complete"
+
+
+def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    thread_registry = build_compute_registry(
+        (
+            _thread_compute_registration(ROOT_ID),
+            _thread_compute_registration(BRANCH_B_ID),
+            _thread_compute_registration(BRANCH_C_ID),
+            _thread_compute_registration(SHARED_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=thread_registry,
+        pool_submitter=lambda _node, _step: None,
+    )
+
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+
+    orchestrator.submit(ComputeRequest(scope=root_scope))
+
+    shared_failure = RuntimeError("shared step failed")
+    orchestrator.complete_pool_step(shared_scope, error=shared_failure)
+
+    orchestrator.run_until_idle()
+
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[shared_scope].error is shared_failure
+    assert orchestrator.nodes[branch_b_scope].state == "failed"
+    assert orchestrator.nodes[branch_c_scope].state == "failed"
+    assert orchestrator.nodes[root_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].error is shared_failure
+    assert orchestrator.nodes[root_scope].error is shared_failure
