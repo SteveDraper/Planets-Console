@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from api.analytics.exports.jsonpath import resolve_jsonpath
 from api.compute.scope import ComputeScope
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.
@@ -17,11 +18,7 @@ RunStepFn = Callable[[Any], Any]
 
 @dataclass
 class DependencyOutputs:
-    """Ancestor result wires for job-wire builders.
-
-    Full path projection arrives in #198; this slice stores whole result wires
-    keyed by completed dependency scope.
-    """
+    """Ancestor result wires for job-wire builders."""
 
     _by_scope: dict[ComputeScope, object] = field(default_factory=dict)
 
@@ -37,11 +34,16 @@ class DependencyOutputs:
         analytic_id: str,
         scope: ComputeScope,
         paths: tuple[str, ...],
-    ) -> object:
-        del analytic_id, paths
+    ) -> dict[str, list[Any]]:
         if scope not in self._by_scope:
             raise KeyError(f"dependency output missing for scope {scope!r}")
-        return self._by_scope[scope]
+        if scope.analytic_id != analytic_id:
+            raise ValueError(
+                f"dependency scope analytic_id {scope.analytic_id!r} "
+                f"does not match required {analytic_id!r}"
+            )
+        result_wire = self._by_scope[scope]
+        return {path: resolve_jsonpath(result_wire, path) for path in paths}
 
     def as_mapping(self) -> Mapping[ComputeScope, object]:
         return self._by_scope

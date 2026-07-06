@@ -30,6 +30,9 @@ class _StubPersistencePolicy:
     def invalidate(self, _ctx, _scope) -> None:
         return None
 
+    def invalidation_generation(self, _ctx, _scope) -> int:
+        return 0
+
 
 def _catalog_entry(analytic_id: str = "test-analytic") -> TurnAnalyticCatalogEntry:
     return TurnAnalyticCatalogEntry(

@@ -43,7 +43,7 @@ def _mapping_from_pairs(
 
 
 def _check_persistence_policy(policy: object, *, analytic_id: str) -> None:
-    for hook in ("is_satisfied", "persist", "invalidate"):
+    for hook in ("is_satisfied", "persist", "invalidate", "invalidation_generation"):
         if not callable(getattr(policy, hook, None)):
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} persistence_policy must implement "

@@ -72,6 +72,7 @@ class ComputeNodeRun:
     state: NodeState = "waiting_deps"
     step_index: int = 0
     priority_band: ComputePriorityBand = "background"
+    generation_at_submit: int | None = None
     result_wire: object | None = None
     error: BaseException | None = None
     waiters: list[ComputeHandle] = field(default_factory=list)
@@ -83,6 +84,8 @@ class OrchestratorMetrics:
 
     inline_executions: int = 0
     pool_submissions: int = 0
+    epoch_discards: int = 0
+    persist_calls: int = 0
 
 
 class ComputeOrchestrator:
@@ -288,14 +291,14 @@ class ComputeOrchestrator:
             step = self._current_step_spec(node, registration)
             if step.backend == "inline":
                 self._ready_queue.popleft()
-                node.state = "running"
+                self._begin_step_execution(node)
                 self._run_inline(node, registration, step)
                 continue
 
             if self._pool_submitter is None:
                 return
             self._ready_queue.popleft()
-            node.state = "running"
+            self._begin_step_execution(node)
             self._submit_pool_step(node, registration, step)
             self._metrics.pool_submissions += 1
             continue
@@ -363,8 +366,37 @@ class ComputeOrchestrator:
             ctx=self._ctx,
         )
 
-    def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
+    def _begin_step_execution(self, node: ComputeNodeRun) -> None:
         registration = self._compute_registry[node.scope.analytic_id]
+        node.state = "running"
+        node.generation_at_submit = registration.persistence_policy.invalidation_generation(
+            self._ctx,
+            node.scope,
+        )
+
+    def _current_invalidation_generation(self, node: ComputeNodeRun) -> int:
+        registration = self._compute_registry[node.scope.analytic_id]
+        return registration.persistence_policy.invalidation_generation(self._ctx, node.scope)
+
+    def _is_epoch_stale(self, node: ComputeNodeRun) -> bool:
+        if node.generation_at_submit is None:
+            return False
+        return self._current_invalidation_generation(node) != node.generation_at_submit
+
+    def _retry_step_after_epoch_bump(self, node: ComputeNodeRun) -> None:
+        self._metrics.epoch_discards += 1
+        node.generation_at_submit = None
+        node.state = "ready"
+        self._enqueue_ready(node.scope)
+        self._dispatch()
+
+    def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
+        if self._is_epoch_stale(node):
+            self._retry_step_after_epoch_bump(node)
+            return
+
+        registration = self._compute_registry[node.scope.analytic_id]
+        node.generation_at_submit = None
         node.step_index += 1
         if node.step_index < len(registration.compute_profile.steps):
             node.state = "ready"
@@ -372,6 +404,8 @@ class ComputeOrchestrator:
             self._dispatch()
             return
         node.result_wire = result_wire
+        registration.persistence_policy.persist(self._ctx, node.scope, result_wire)
+        self._metrics.persist_calls += 1
         self._complete_node(node)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
