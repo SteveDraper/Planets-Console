@@ -231,9 +231,7 @@ class ComputeWorkerPool:
     def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
         with self._condition:
             if self._interpreter_executor is None:
-                self._interpreter_executor = InterpreterPoolExecutor(
-                    max_workers=self._worker_count
-                )
+                self._interpreter_executor = InterpreterPoolExecutor(max_workers=self._worker_count)
             return self._interpreter_executor
 
     def _process_executor_locked(self) -> ProcessPoolExecutor:
