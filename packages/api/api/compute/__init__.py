@@ -28,6 +28,20 @@ _REGISTRY_EXPORTS = frozenset(
 )
 
 
+_POOL_EXPORTS = frozenset(
+    {
+        "ComputePriorityBand",
+        "ComputeWorkerPool",
+        "PoolMetrics",
+        "PoolSubmitter",
+        "PoolWorkItem",
+        "configured_worker_count",
+        "dequeue_next_work_item",
+        "get_compute_worker_pool",
+        "reset_compute_worker_pool_for_tests",
+    }
+)
+
 _COMPUTE_ORCHESTRATOR_EXPORTS = frozenset(
     {
         "ComputeHandle",
@@ -36,7 +50,6 @@ _COMPUTE_ORCHESTRATOR_EXPORTS = frozenset(
         "ComputeRequest",
         "NodeState",
         "OrchestratorMetrics",
-        "PoolSubmitter",
     }
 )
 
@@ -57,6 +70,10 @@ def __getattr__(name: str) -> object:
         from api.compute import orchestrator as orchestrator_module
 
         return getattr(orchestrator_module, name)
+    if name in _POOL_EXPORTS:
+        from api.compute import pools as pools_module
+
+        return getattr(pools_module, name)
     if name in _DAG_EXPORTS:
         from api.compute import dag as dag_module
 
@@ -75,22 +92,30 @@ __all__ = [
     "ComputeHandle",
     "ComputeNodeRun",
     "ComputeOrchestrator",
+    "ComputePriorityBand",
     "ComputeRequest",
     "ComputeScope",
     "ComputeStepSpec",
+    "ComputeWorkerPool",
     "DependencyOutputs",
     "NodeState",
     "OrchestratorMetrics",
     "PersistencePolicy",
     "PlannedComputeNode",
+    "PoolMetrics",
     "PoolSubmitter",
+    "PoolWorkItem",
     "RunStepFn",
     "ScopeAxis",
     "ScopeKeySpec",
     "build_compute_registry",
     "compute_scope_to_export_scope",
+    "configured_worker_count",
+    "dequeue_next_work_item",
     "fingerprint_parameters",
+    "get_compute_worker_pool",
     "normalize_export_scope_to_compute_scope",
     "plan_compute_dag",
+    "reset_compute_worker_pool_for_tests",
     "validate_turn_analytic_compute_registration",
 ]
