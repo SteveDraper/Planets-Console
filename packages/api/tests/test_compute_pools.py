@@ -26,7 +26,10 @@ from api.compute import (
     normalize_export_scope_to_compute_scope,
 )
 
-from tests.compute_pool_test_helpers import run_interpreter_materialize
+from tests.compute_pool_test_helpers import (
+    run_interpreter_materialize,
+    run_process_materialize,
+)
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.test_compute_foundation import _StubPersistencePolicy
@@ -336,6 +339,51 @@ def test_pool_dispatches_interpreter_backend(sample_turn):
     assert handle.state == "complete", handle.error
     assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
     assert pool.metrics.interpreter_executions == 1
+
+
+def _process_backend_registration() -> TurnAnalyticRegistration:
+    return TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(_FLEET_ANALYTIC_ID),
+        compute=lambda _ctx: {"analyticId": _FLEET_ANALYTIC_ID},
+        export_catalog=make_fixture_catalog(_FLEET_ANALYTIC_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="process"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_process_materialize),),
+    )
+
+
+def test_pool_dispatches_process_backend(sample_turn):
+    compute_registry = build_compute_registry((_process_backend_registration(),))
+    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    pool = ComputeWorkerPool(worker_count=1)
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+    scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        player_id=scope.player_id,
+    )
+
+    handle = orchestrator.submit(ComputeRequest(scope=scope))
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if handle.state == "complete":
+            break
+        time.sleep(0.01)
+
+    pool.shutdown()
+    assert handle.state == "complete", handle.error
+    assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
+    assert pool.metrics.process_executions == 1
 
 
 def test_configured_worker_count_reads_environment(monkeypatch: pytest.MonkeyPatch):
