@@ -73,7 +73,6 @@ def _work_item(
     scope: ComputeScope,
     priority_band: ComputePriorityBand = "background",
     step_index: int = 0,
-    sequence: int = 0,
     backend: str = "thread",
 ) -> PoolWorkItem:
     return PoolWorkItem(
@@ -82,7 +81,6 @@ def _work_item(
         backend=backend,
         priority_band=priority_band,
         step_index=step_index,
-        sequence=sequence,
     )
 
 
@@ -93,8 +91,8 @@ def test_dequeue_prefers_stream_attached_over_background(sample_turn):
     scope_b = _scope_for_player(sample_turn, player_b)
     queue = deque(
         [
-            _work_item(scope=scope_a, priority_band="background", sequence=1),
-            _work_item(scope=scope_b, priority_band="stream_attached", sequence=2),
+            _work_item(scope=scope_a, priority_band="background"),
+            _work_item(scope=scope_b, priority_band="stream_attached"),
         ]
     )
 
@@ -112,8 +110,8 @@ def test_dequeue_prefers_interactive_ensure_over_background(sample_turn):
     scope_b = _scope_for_player(sample_turn, player_b)
     queue = deque(
         [
-            _work_item(scope=scope_a, priority_band="background", sequence=1),
-            _work_item(scope=scope_b, priority_band="interactive_ensure", sequence=2),
+            _work_item(scope=scope_a, priority_band="background"),
+            _work_item(scope=scope_b, priority_band="interactive_ensure"),
         ]
     )
 
@@ -130,8 +128,8 @@ def test_dequeue_prefers_stream_attached_over_interactive_ensure(sample_turn):
     scope_b = _scope_for_player(sample_turn, player_b)
     queue = deque(
         [
-            _work_item(scope=scope_a, priority_band="interactive_ensure", sequence=1),
-            _work_item(scope=scope_b, priority_band="stream_attached", sequence=2),
+            _work_item(scope=scope_a, priority_band="interactive_ensure"),
+            _work_item(scope=scope_b, priority_band="stream_attached"),
         ]
     )
 
@@ -150,9 +148,9 @@ def test_dequeue_tier_one_before_continuations_from_other_scopes(sample_turn):
     scope_b = _scope_for_player(sample_turn, player_ids[1])
     queue = deque(
         [
-            _work_item(scope=scope_a, step_index=0, sequence=1),
-            _work_item(scope=scope_a, step_index=1, sequence=2),
-            _work_item(scope=scope_b, step_index=0, sequence=3),
+            _work_item(scope=scope_a, step_index=0),
+            _work_item(scope=scope_a, step_index=1),
+            _work_item(scope=scope_b, step_index=0),
         ]
     )
 
@@ -172,10 +170,10 @@ def test_dequeue_continuation_round_robin_across_scopes(sample_turn):
     scope_b = _scope_for_player(sample_turn, player_ids[1])
     queue = deque(
         [
-            _work_item(scope=scope_a, step_index=1, sequence=1),
-            _work_item(scope=scope_b, step_index=1, sequence=2),
-            _work_item(scope=scope_a, step_index=2, sequence=3),
-            _work_item(scope=scope_b, step_index=2, sequence=4),
+            _work_item(scope=scope_a, step_index=1),
+            _work_item(scope=scope_b, step_index=1),
+            _work_item(scope=scope_a, step_index=2),
+            _work_item(scope=scope_b, step_index=2),
         ]
     )
 

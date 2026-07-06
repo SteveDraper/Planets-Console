@@ -58,7 +58,6 @@ class PoolWorkItem:
     backend: ComputeBackend
     priority_band: ComputePriorityBand
     step_index: int
-    sequence: int
     job_wire: object | None = None
     run_step: RunStepFn | None = None
 
@@ -110,7 +109,6 @@ class ComputeWorkerPool:
         self._worker_count = worker_count if worker_count is not None else configured_worker_count()
         self._orchestrator: ComputeOrchestrator | None = None
         self._work_queue: deque[PoolWorkItem] = deque()
-        self._sequence = 0
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._shutdown = False
@@ -147,7 +145,6 @@ class ComputeWorkerPool:
     ) -> None:
         """Enqueue one ready orchestrator step for pool execution."""
         with self._condition:
-            self._sequence += 1
             self._work_queue.append(
                 PoolWorkItem(
                     scope=node.scope,
@@ -155,7 +152,6 @@ class ComputeWorkerPool:
                     backend=step.backend,
                     priority_band=priority_band,
                     step_index=node.step_index,
-                    sequence=self._sequence,
                     job_wire=job_wire,
                     run_step=run_step,
                 )
@@ -203,12 +199,21 @@ class ComputeWorkerPool:
                 self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
             return None
 
+    def _record_backend_execution_locked(self, backend: ComputeBackend) -> None:
+        if backend == "thread":
+            self._metrics.thread_executions += 1
+        elif backend == "interpreter":
+            self._metrics.interpreter_executions += 1
+        elif backend == "process":
+            self._metrics.process_executions += 1
+
     def _execute_item(self, item: PoolWorkItem) -> None:
         orchestrator = self._orchestrator
         if orchestrator is None:
             raise RuntimeError("ComputeWorkerPool is not attached to an orchestrator")
         if item.backend == "thread":
-            self._metrics.thread_executions += 1
+            with self._condition:
+                self._record_backend_execution_locked(item.backend)
             self._complete_from_callable(orchestrator, item.scope, orchestrator.execute_pool_step)
             return
         if item.backend in {"interpreter", "process"}:
@@ -217,28 +222,26 @@ class ComputeWorkerPool:
                     f"pool step {item.step_kind!r} with backend {item.backend!r} "
                     f"requires a pre-built job wire and run_step"
                 )
-            if item.backend == "interpreter":
-                self._metrics.interpreter_executions += 1
-                executor = self._interpreter_executor_locked()
-            else:
-                self._metrics.process_executions += 1
-                executor = self._process_executor_locked()
+            with self._condition:
+                self._record_backend_execution_locked(item.backend)
+                if item.backend == "interpreter":
+                    executor = self._interpreter_executor_locked()
+                else:
+                    executor = self._process_executor_locked()
             future = executor.submit(item.run_step, item.job_wire)
             self._complete_from_future(orchestrator, item.scope, future)
             return
         raise RuntimeError(f"unsupported pool backend {item.backend!r}")
 
     def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
-        with self._condition:
-            if self._interpreter_executor is None:
-                self._interpreter_executor = InterpreterPoolExecutor(max_workers=self._worker_count)
-            return self._interpreter_executor
+        if self._interpreter_executor is None:
+            self._interpreter_executor = InterpreterPoolExecutor(max_workers=self._worker_count)
+        return self._interpreter_executor
 
     def _process_executor_locked(self) -> ProcessPoolExecutor:
-        with self._condition:
-            if self._process_executor is None:
-                self._process_executor = ProcessPoolExecutor(max_workers=self._worker_count)
-            return self._process_executor
+        if self._process_executor is None:
+            self._process_executor = ProcessPoolExecutor(max_workers=self._worker_count)
+        return self._process_executor
 
     def _shutdown_executors(self) -> None:
         with self._condition:
