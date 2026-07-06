@@ -28,3 +28,7 @@ class PersistencePolicy(Protocol):
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         """Drop or bump cached state for one compute scope."""
         ...
+
+    def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+        """Return the current invalidation epoch for one compute scope."""
+        ...

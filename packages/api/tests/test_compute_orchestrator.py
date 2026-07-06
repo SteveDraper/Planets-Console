@@ -12,6 +12,7 @@ from api.compute import (
     ComputeRequest,
     ComputeScope,
     ComputeStepSpec,
+    DependencyOutputs,
     ScopeKeySpec,
     build_compute_registry,
     normalize_export_scope_to_compute_scope,
@@ -508,3 +509,201 @@ def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
 
     assert handle.state == "failed"
     assert handle.error is pool_failure
+
+
+class _RecordingPersistencePolicy:
+    def __init__(self) -> None:
+        self.generation = 0
+        self.persist_calls: list[tuple[ComputeScope, object]] = []
+
+    def is_satisfied(self, _ctx, _scope) -> bool:
+        return False
+
+    def persist(self, _ctx, scope, result_wire) -> None:
+        self.persist_calls.append((scope, result_wire))
+
+    def invalidate(self, _ctx, _scope) -> None:
+        self.generation += 1
+
+    def invalidation_generation(self, _ctx, _scope) -> int:
+        return self.generation
+
+
+def test_dependency_outputs_require_projects_jsonpath_slices():
+    shared_scope = ComputeScope(
+        analytic_id="scores",
+        game_id=1,
+        perspective=1,
+        turn=10,
+        player_id=8,
+    )
+    outputs = DependencyOutputs()
+    outputs.put(
+        shared_scope,
+        {
+            "solutions": [{"id": 1}],
+            "meta": {"searchStatus": "complete"},
+        },
+    )
+
+    slices = outputs.require(
+        analytic_id="scores",
+        scope=shared_scope,
+        paths=("$.solutions", "$.meta.searchStatus"),
+    )
+
+    assert slices["$.solutions"] == [[{"id": 1}]]
+    assert slices["$.meta.searchStatus"] == ["complete"]
+
+
+def test_wire_builder_receives_dependency_slices(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    captured: list[dict[str, object]] = []
+
+    def build_branch_b_wire(scope, *, dependency_outputs, ctx=None):
+        del ctx
+        captured.append(
+            {
+                "scope": scope.analytic_id,
+                "dependency_scopes": dict(dependency_outputs.as_mapping()),
+                "shared_result": dependency_outputs.require(
+                    analytic_id=SHARED_ID,
+                    scope=shared_scope,
+                    paths=("$.result",),
+                ),
+            }
+        )
+        return {"scope": scope.analytic_id}
+
+    compute_registry = build_compute_registry(
+        (
+            _inline_compute_registration(ROOT_ID),
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(BRANCH_B_ID),
+                compute=lambda _ctx: {"analyticId": BRANCH_B_ID},
+                export_catalog=empty_export_catalog_for(BRANCH_B_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(("materialize", build_branch_b_wire),),
+                run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+            ),
+            _inline_compute_registration(BRANCH_C_ID),
+            _inline_compute_registration(SHARED_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=root_scope))
+
+    assert handle.state == "complete"
+    assert len(captured) == 1
+    assert captured[0]["scope"] == BRANCH_B_ID
+    assert shared_scope in captured[0]["dependency_scopes"]
+    assert captured[0]["dependency_scopes"][shared_scope] == {"result": SHARED_ID}
+    assert captured[0]["shared_result"] == {"$.result": [SHARED_ID]}
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+
+
+def test_stale_epoch_discards_result_and_requeues(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persistence = _RecordingPersistencePolicy()
+    pool_submissions: list[str] = []
+
+    def pool_submitter(node, _step, **_kwargs) -> None:
+        pool_submissions.append(node.scope.analytic_id)
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
+                ),
+                persistence_policy=persistence,
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    assert handle.state == "running"
+    assert pool_submissions == [SHARED_ID]
+    assert orchestrator.nodes[shared_scope].generation_at_submit == 0
+
+    persistence.invalidate(ctx, shared_scope)
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    assert orchestrator.metrics.epoch_discards == 1
+    assert orchestrator.metrics.persist_calls == 0
+    assert persistence.persist_calls == []
+    assert handle.state == "running"
+    assert pool_submissions == [SHARED_ID, SHARED_ID]
+    assert orchestrator.nodes[shared_scope].generation_at_submit == 1
+
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    assert handle.state == "complete"
+    assert orchestrator.metrics.epoch_discards == 1
+    assert orchestrator.metrics.persist_calls == 1
+    assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
+
+
+def test_orchestrator_persists_after_inline_node_completes(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persistence = _RecordingPersistencePolicy()
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=persistence,
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert orchestrator.metrics.persist_calls == 1
+    assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
