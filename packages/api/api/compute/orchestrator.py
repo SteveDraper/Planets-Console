@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -104,6 +105,8 @@ class ComputeOrchestrator:
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
+        self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -119,39 +122,48 @@ class ComputeOrchestrator:
 
     def ready_scopes(self) -> tuple[ComputeScope, ...]:
         """Return scopes currently in the ready queue."""
-        return tuple(scope for scope in self._ready_queue if self._nodes[scope].state == "ready")
+        with self._condition:
+            return tuple(
+                scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
+            )
 
     def submit(self, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
-        scope = request.scope
-        existing = self._nodes.get(scope)
-        if existing is not None:
-            return self._attach_to_existing(existing)
+        with self._condition:
+            scope = request.scope
+            existing = self._nodes.get(scope)
+            if existing is not None:
+                return self._attach_to_existing(existing)
 
-        self._plan_and_register(scope, priority_band=request.priority_band)
-        for node in self._nodes.values():
-            self._refresh_node_readiness(node)
-        handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
-        self._dispatch()
-        return handle
+            self._plan_and_register(scope, priority_band=request.priority_band)
+            for node in self._nodes.values():
+                self._refresh_node_readiness(node)
+            handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
+            self._dispatch()
+            return handle
 
     def execute_pool_step(self, scope: ComputeScope) -> object:
         """Run the current pool step for one scope on the calling thread."""
-        node = self._nodes[scope]
-        if node.state != "running":
-            raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
-        registration = self._compute_registry[node.scope.analytic_id]
-        step = self._current_step_spec(node, registration)
-        job_wire = self._build_job_wire(node, registration, step)
-        return registration.run_step[step.step_kind](job_wire)
+        with self._condition:
+            node = self._nodes[scope]
+            if node.state != "running":
+                raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
+            registration = self._compute_registry[node.scope.analytic_id]
+            step = self._current_step_spec(node, registration)
+            job_wire = self._build_job_wire(node, registration, step)
+            run_step = registration.run_step[step.step_kind]
+        return run_step(job_wire)
 
     def run_until_idle(self) -> None:
         """Drain ready inline work until no ready or running nodes remain."""
-        while self._has_pending_work():
-            self._refresh_all_readiness()
-            self._dispatch()
-            if any(node.state == "running" for node in self._nodes.values()):
-                break
+        while True:
+            with self._condition:
+                if not self._has_pending_work():
+                    return
+                self._refresh_all_readiness()
+                self._dispatch()
+                if any(node.state == "running" for node in self._nodes.values()):
+                    return
 
     def complete_pool_step(
         self,
@@ -161,13 +173,14 @@ class ComputeOrchestrator:
         error: BaseException | None = None,
     ) -> None:
         """Mark a pool-submitted step complete (used by worker pool integration)."""
-        node = self._nodes[scope]
-        if node.state != "running":
-            raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
-        if error is not None:
-            self._fail_node(node, error)
-            return
-        self._after_step_success(node, result_wire)
+        with self._condition:
+            node = self._nodes[scope]
+            if node.state != "running":
+                raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
+            if error is not None:
+                self._fail_node(node, error)
+                return
+            self._after_step_success(node, result_wire)
 
     def _attach_to_existing(self, node: ComputeNodeRun) -> ComputeHandle:
         if node.state in {"complete", "failed"}:

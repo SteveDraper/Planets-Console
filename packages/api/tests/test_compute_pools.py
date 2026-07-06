@@ -346,3 +346,63 @@ def test_configured_worker_count_reads_environment(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setenv("COMPUTE_ORCHESTRATOR_WORKERS", "7")
     assert configured_worker_count() == 7
+
+
+def _single_step_thread_registration() -> TurnAnalyticRegistration:
+    return TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(),
+        compute=lambda _ctx: {"analyticId": _ANALYTIC_ID},
+        export_catalog=make_fixture_catalog(_ANALYTIC_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"player_id": scope.player_id}),
+        ),
+        run_steps=(("materialize", lambda job: {"result": job["player_id"]}),),
+    )
+
+
+def test_concurrent_submit_with_multiple_pool_workers(sample_turn):
+    """Submit from several threads while pool workers complete steps concurrently."""
+    compute_registry = build_compute_registry((_single_step_thread_registration(),))
+    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    pool = ComputeWorkerPool(worker_count=2)
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+
+    player_ids = [row.ownerid for row in sample_turn.scores[:4]]
+    scopes = [_scope_for_player(sample_turn, player_id) for player_id in player_ids]
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+
+    def submit_scope(scope: ComputeScope) -> None:
+        try:
+            handle = orchestrator.submit(ComputeRequest(scope=scope))
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if handle.state in {"complete", "failed"}:
+                    break
+                time.sleep(0.01)
+            if handle.state != "complete":
+                with lock:
+                    if handle.error is not None:
+                        errors.append(handle.error)
+                    else:
+                        errors.append(RuntimeError(f"scope {scope.player_id} did not complete"))
+        except BaseException as exc:
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=submit_scope, args=(scope,)) for scope in scopes]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5.0)
+
+    pool.shutdown()
+    assert errors == []
+    for scope in scopes:
+        assert orchestrator.nodes[scope].state == "complete"
+        assert orchestrator.nodes[scope].result_wire == {"result": scope.player_id}
