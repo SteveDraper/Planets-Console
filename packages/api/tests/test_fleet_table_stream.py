@@ -765,14 +765,83 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
 
 
 @pytest.mark.slow
-def test_concurrent_multi_player_materialization_completes(sample_turn):
+def test_concurrent_multi_player_materialization_completes(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    # Anchor at turn 110: empty persistence with ephemeral turn_chain_through(111)
+    # forces a cold-start gap-fill of turns 1..111 per player (111 legs x 3 players).
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+
+    from tests.scores_exports_helpers import put_persisted_row
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_ids = tuple(player.id for player in list(iter_turn_players(turn_111))[:3])
+
+    for player_id in player_ids:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            player_id,
+            PersistedFleetLedger(
+                ledger=ensure_fleet_baseline_for_player(628580, 1, turn_110, player_id),
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
+
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    for player_id in player_ids:
+        put_persisted_row(
+            inference_persistence,
+            turn_111,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seeded for concurrent materialization",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=111,
+        )
+
     reset_fleet_table_stream_scheduler_for_tests()
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=2)
     scheduler = FleetTableStreamScheduler()
-    player_ids = tuple(player.id for player in list(iter_turn_players(sample_turn))[:3])
-    events = _events_for_players(sample_turn, player_ids, scheduler=scheduler)
+    services = FleetComputeServices(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        load_turn=load_turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
+    )
+    events = _events_for_players(
+        turn_111,
+        player_ids,
+        scheduler=scheduler,
+        services=services,
+    )
     assert {
         event["playerId"]
         for event in events
