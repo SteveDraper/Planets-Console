@@ -171,15 +171,11 @@ def cleanup_fleet_table_stream_sessions(
     sessions: tuple[FleetPlayerStreamSession, ...],
     *,
     stream_token: str,
-    turn: TurnInfo | None = None,
-    fleet_services: FleetComputeServices | None = None,
 ) -> None:
     scheduler.end_fleet_table_stream(
         scope,
         sessions,
         stream_token=stream_token,
-        host_turn=turn,
-        fleet_services=fleet_services,
     )
 
 
@@ -236,8 +232,6 @@ def iter_fleet_table_stream_events(
             stream_scope,
             (),
             stream_token=stream_token,
-            turn=turn,
-            fleet_services=fleet_services,
         ),
         policy_factory=policy_factory,
         player_ids=player_ids,

@@ -167,8 +167,6 @@ class FleetTableStreamScheduler:
         sessions: tuple[FleetPlayerStreamSession, ...],
         *,
         stream_token: str,
-        host_turn: TurnInfo | None = None,
-        fleet_services: FleetComputeServices | None = None,
     ) -> None:
         with self._lock:
             self._scope_guard.end_table_stream_locked(scope, stream_token)

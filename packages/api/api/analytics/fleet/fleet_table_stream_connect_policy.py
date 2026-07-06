@@ -95,6 +95,4 @@ class FleetTableStreamConnectPolicy:
             self.stream_scope,
             tuple(row.session for row in self.controller.current_scheduled_rows()),
             stream_token=self.stream_token,
-            turn=self.controller.turn,
-            fleet_services=self.controller.fleet_services,
         )

@@ -636,8 +636,6 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
             scope,
             (),
             stream_token=stream_token,
-            host_turn=sample_turn,
-            fleet_services=services,
         )
 
 
