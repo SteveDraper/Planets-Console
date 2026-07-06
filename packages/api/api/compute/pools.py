@@ -229,22 +229,27 @@ class ComputeWorkerPool:
         raise RuntimeError(f"unsupported pool backend {item.backend!r}")
 
     def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
-        if self._interpreter_executor is None:
-            self._interpreter_executor = InterpreterPoolExecutor(max_workers=self._worker_count)
-        return self._interpreter_executor
+        with self._condition:
+            if self._interpreter_executor is None:
+                self._interpreter_executor = InterpreterPoolExecutor(
+                    max_workers=self._worker_count
+                )
+            return self._interpreter_executor
 
     def _process_executor_locked(self) -> ProcessPoolExecutor:
-        if self._process_executor is None:
-            self._process_executor = ProcessPoolExecutor(max_workers=self._worker_count)
-        return self._process_executor
+        with self._condition:
+            if self._process_executor is None:
+                self._process_executor = ProcessPoolExecutor(max_workers=self._worker_count)
+            return self._process_executor
 
     def _shutdown_executors(self) -> None:
-        if self._interpreter_executor is not None:
-            self._interpreter_executor.shutdown(wait=False)
-            self._interpreter_executor = None
-        if self._process_executor is not None:
-            self._process_executor.shutdown(wait=False)
-            self._process_executor = None
+        with self._condition:
+            if self._interpreter_executor is not None:
+                self._interpreter_executor.shutdown(wait=False)
+                self._interpreter_executor = None
+            if self._process_executor is not None:
+                self._process_executor.shutdown(wait=False)
+                self._process_executor = None
 
     def _complete_from_callable(
         self,
