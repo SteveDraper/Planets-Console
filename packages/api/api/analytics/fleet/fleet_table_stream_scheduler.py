@@ -18,6 +18,7 @@ from api.analytics.fleet.fleet_table_player_run import (
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
+from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.runtime import orchestrator_for_context, release_orchestrator_for_context
@@ -250,26 +251,13 @@ class FleetTableStreamScheduler:
                     )
                 continue
             persisted = persisted_fleet_ledger_from_json(persisted_wire)
-            tracker = run.progress_tracker
-            if scope.turn < run.host_turn_number:
-                if cancelled:
-                    continue
-                for event in tracker.leg_progress_events(persisted):
-                    session.event_queue.put(event)
-                continue
-            if scope.turn != run.host_turn_number:
-                continue
-            if tracker.emitted_progress:
-                for event in tracker.leg_progress_events(persisted):
-                    session.event_queue.put(event)
-                session.event_queue.put(wire_materialized_complete_event(persisted))
-                continue
-            if cancelled:
-                continue
-            for event in wire_materialized_player_events(
-                before=tracker.wire_before,
+            for event in _node_complete_stream_events(
+                scope_turn=scope.turn,
+                host_turn_number=run.host_turn_number,
+                tracker=run.progress_tracker,
                 persisted=persisted,
-                host_turn=session.turn,
+                session_turn=session.turn,
+                cancelled=cancelled,
             ):
                 session.event_queue.put(event)
 
@@ -291,6 +279,39 @@ class FleetTableStreamScheduler:
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()
+
+
+def _node_complete_stream_events(
+    *,
+    scope_turn: int,
+    host_turn_number: int,
+    tracker: FleetLedgerWireProgressTracker,
+    persisted: PersistedFleetLedger,
+    session_turn: TurnInfo,
+    cancelled: bool,
+) -> tuple[dict[str, object], ...]:
+    if scope_turn < host_turn_number:
+        if cancelled:
+            return ()
+        return tracker.leg_progress_events(persisted)
+
+    if scope_turn != host_turn_number:
+        return ()
+
+    if tracker.emitted_progress:
+        return (
+            *tracker.leg_progress_events(persisted),
+            wire_materialized_complete_event(persisted),
+        )
+
+    if cancelled:
+        return ()
+
+    return wire_materialized_player_events(
+        before=tracker.wire_before,
+        persisted=persisted,
+        host_turn=session_turn,
+    )
 
 
 def _query_context_for_services(
