@@ -123,6 +123,25 @@ def test_dequeue_prefers_interactive_ensure_over_background(sample_turn):
     assert item.scope == scope_b
 
 
+def test_dequeue_prefers_stream_attached_over_interactive_ensure(sample_turn):
+    player_a = next(row.ownerid for row in sample_turn.scores)
+    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
+    scope_a = _scope_for_player(sample_turn, player_a)
+    scope_b = _scope_for_player(sample_turn, player_b)
+    queue = deque(
+        [
+            _work_item(scope=scope_a, priority_band="interactive_ensure", sequence=1),
+            _work_item(scope=scope_b, priority_band="stream_attached", sequence=2),
+        ]
+    )
+
+    item = dequeue_next_work_item(queue)
+
+    assert item is not None
+    assert item.scope == scope_b
+    assert item.priority_band == "stream_attached"
+
+
 def test_dequeue_tier_one_before_continuations_from_other_scopes(sample_turn):
     """Port of inference scheduler fairness: tier-1 before continuation steps."""
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
