@@ -6,7 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+from api.analytics.fleet.compute_services import (
+    FleetComputeServices,
+    build_ephemeral_fleet_compute_services,
+)
 from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
@@ -69,8 +72,13 @@ def _install_scores_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowSc
 
 
 def _install_fleet_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler(worker_count=0)
+    scheduler = FleetTableStreamScheduler()
 
     def _get_scheduler() -> FleetTableStreamScheduler:
         return scheduler
@@ -315,7 +323,10 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
     monkeypatch,
     persistence,
 ):
+    from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
     from api.analytics.fleet.fleet_table_stream_rows import resolve_player_stream_admission
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+    from api.analytics.turn_roster import iter_turn_players
 
     scheduler = _install_fleet_scheduler(monkeypatch)
     services = build_ephemeral_fleet_compute_services(
@@ -323,7 +334,28 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
         game_id=628580,
         perspective=1,
     )
-    player_ids = tuple(row.ownerid for row in sample_turn.scores[:3])
+    services = FleetComputeServices(
+        persistence=persistence,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        load_turn=services.load_turn,
+        inference_materialization=services.inference_materialization,
+    )
+    player_ids = tuple(player.id for player in list(iter_turn_players(sample_turn))[:3])
+    for player_id in player_ids:
+        persistence.put_ledger(
+            628580,
+            1,
+            sample_turn.settings.turn,
+            player_id,
+            PersistedFleetLedger(
+                ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
     admission_calls = 0
     preempting_stream = None
     original_resolve = resolve_player_stream_admission

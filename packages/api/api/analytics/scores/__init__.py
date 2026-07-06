@@ -14,6 +14,14 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.scores.compute_orchestration import (
+    SCORES_COMPUTE_PROFILE,
+    SCORES_MATERIALIZE,
+    SCORES_PERSISTENCE_POLICY,
+    SCORES_SCOPE_KEY_SPEC,
+    build_scores_materialize_job_wire,
+    run_scores_materialize,
+)
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.analytics.turn_roster import players_by_id as turn_players_by_id
@@ -113,4 +121,9 @@ REGISTRATION = TurnAnalyticRegistration(
     catalog_entry=catalog_entry(ANALYTIC_ID),
     compute=compute_scores_table,
     export_catalog_loader=_load_scores_export_catalog,
+    scope_key_spec=SCORES_SCOPE_KEY_SPEC,
+    compute_profile=SCORES_COMPUTE_PROFILE,
+    persistence_policy=SCORES_PERSISTENCE_POLICY,
+    build_step_job_wires=((SCORES_MATERIALIZE, build_scores_materialize_job_wire),),
+    run_steps=((SCORES_MATERIALIZE, run_scores_materialize),),
 )

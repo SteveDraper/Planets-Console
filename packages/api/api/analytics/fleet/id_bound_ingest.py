@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-from api.analytics.fleet.scoreboard_counts import max_ship_id_bound_for_inferred_record
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -25,6 +24,8 @@ def tighten_inferred_ship_id_bounds(
     shell_turn: int,
 ) -> None:
     """Apply host-turn-appropriate id bounds to inferred rows on this shell turn."""
+    from api.analytics.fleet.scoreboard_counts import max_ship_id_bound_for_inferred_record
+
     for record in ledger.records:
         if record.disposition != "active":
             continue

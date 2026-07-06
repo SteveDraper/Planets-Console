@@ -1,54 +1,65 @@
-"""Process-wide scheduler for fleet table stream per-player materialization jobs."""
+"""Process-wide scheduler adapter for fleet table stream orchestrator submissions."""
 
 from __future__ import annotations
 
-import os
 import threading
-from collections import deque
-from collections.abc import Callable
 from dataclasses import dataclass
 
+from api.analytics.export_context import make_analytic_query_context
+from api.analytics.fleet.compute_services import FleetComputeServices
+from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.fleet_table_player_run import (
+    FleetLedgerWireProgressTracker,
     FleetPlayerStreamSession,
+    _initial_wire_before_ledger,
+    wire_materialized_complete_event,
+    wire_materialized_player_events,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
+from api.analytics.options import TurnAnalyticsOptions
+from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
+from api.compute.runtime import orchestrator_for_context, release_orchestrator_for_context
+from api.compute.scope import ComputeScope
+from api.models.game import TurnInfo
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
+from api.transport.fleet_table_stream import fleet_error_event
 
 __all__ = [
     "FleetTableStreamScheduler",
     "get_fleet_table_stream_scheduler",
+    "reset_fleet_table_stream_scheduler_for_tests",
 ]
-from api.transport.fleet_table_stream import fleet_error_event
-
-_DEFAULT_WORKER_COUNT = 4
-_DEQUEUE_WAIT_SECONDS = 0.25
 
 
-@dataclass(frozen=True)
-class FleetPlayerJob:
+@dataclass
+class _FleetStreamOrchestratorBinding:
+    orchestrator: ComputeOrchestrator
+    unregister_listener: object
+    query_context_id: int
+
+
+@dataclass
+class _FleetPlayerOrchestratorRun:
     session: FleetPlayerStreamSession
-    materialize: Callable[[FleetPlayerStreamSession], None]
+    host_turn_number: int
+    progress_tracker: FleetLedgerWireProgressTracker
+    root_scope: ComputeScope
+    emitted_progress: bool = False
 
 
 class FleetTableStreamScheduler:
-    """Fair scheduler: one materialization job per player on a table stream."""
+    """Fair scheduler: one orchestrator submission per player on a table stream."""
 
-    def __init__(self, worker_count: int = _DEFAULT_WORKER_COUNT) -> None:
-        self._work_queue: deque[FleetPlayerJob] = deque()
-        self._runs: dict[str, FleetPlayerStreamSession] = {}
+    def __init__(self) -> None:
+        self._runs: dict[str, _FleetPlayerOrchestratorRun] = {}
         self._lock = threading.Lock()
-        self._condition = threading.Condition(self._lock)
-        self._worker_count = worker_count
-        self._workers: list[threading.Thread] = []
-        self._shutdown = False
         self._scope_guard = TableStreamScopeGuard[FleetTableStreamScope]()
-        for _ in range(worker_count):
-            thread = threading.Thread(target=self._worker_loop, daemon=True)
-            thread.start()
-            self._workers.append(thread)
+        self._stream_bindings: dict[str, _FleetStreamOrchestratorBinding] = {}
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
-        with self._condition:
+        with self._lock:
             return self._scope_guard.begin_scope_locked(
                 scope,
                 on_same_scope_preempt=self._preempt_active_table_stream_locked,
@@ -56,11 +67,11 @@ class FleetTableStreamScheduler:
             )
 
     def owns_table_stream(self, stream_token: str) -> bool:
-        with self._condition:
+        with self._lock:
             return self._scope_guard.owns_table_stream_locked(stream_token)
 
     def active_scope_matches(self, scope: FleetTableStreamScope) -> bool:
-        with self._condition:
+        with self._lock:
             return self._scope_guard.active_scope_matches_locked(scope)
 
     def row_run_for_player(
@@ -68,8 +79,9 @@ class FleetTableStreamScheduler:
         scope: FleetTableStreamScope,
         player_id: int,
     ) -> FleetPlayerStreamSession | None:
-        with self._condition:
-            for session in self._runs.values():
+        with self._lock:
+            for run in self._runs.values():
+                session = run.session
                 if (
                     session.game_id == scope.game_id
                     and session.perspective == scope.perspective
@@ -82,34 +94,73 @@ class FleetTableStreamScheduler:
     def enqueue_player_run(
         self,
         session: FleetPlayerStreamSession,
-        materialize: Callable[[FleetPlayerStreamSession], None],
         *,
+        fleet_services: FleetComputeServices,
+        persistence: FleetSnapshotPersistenceService,
         stream_token: str | None = None,
     ) -> FleetPlayerStreamSession | None:
-        with self._condition:
+        with self._lock:
             if (
                 stream_token is not None
                 and self._scope_guard.active_table_stream_token != stream_token
             ):
                 return None
             for existing in self._runs.values():
-                if existing.player_id == session.player_id:
-                    return existing
-            self._runs[session.run_id] = session
-            self._work_queue.append(FleetPlayerJob(session=session, materialize=materialize))
-            self._condition.notify()
+                if existing.session.player_id == session.player_id:
+                    return existing.session
+
+            if stream_token is None:
+                return None
+
+            binding = self._binding_for_stream_locked(
+                stream_token,
+                host_turn=session.turn,
+                fleet_services=fleet_services,
+            )
+            host_turn_number = session.turn.settings.turn
+            player_id = session.player_id
+            before_persisted = persistence.get_ledger(
+                fleet_services.game_id,
+                fleet_services.perspective,
+                host_turn_number,
+                player_id,
+            )
+            progress_tracker = FleetLedgerWireProgressTracker(
+                host_turn=session.turn,
+                wire_before=_initial_wire_before_ledger(
+                    persistence=persistence,
+                    game_id=fleet_services.game_id,
+                    perspective=fleet_services.perspective,
+                    player_id=player_id,
+                    host_turn=session.turn,
+                    before_persisted=before_persisted,
+                ),
+            )
+            root_scope = ComputeScope(
+                analytic_id=ANALYTIC_ID,
+                game_id=fleet_services.game_id,
+                perspective=fleet_services.perspective,
+                turn=host_turn_number,
+                player_id=player_id,
+            )
+            run = _FleetPlayerOrchestratorRun(
+                session=session,
+                host_turn_number=host_turn_number,
+                progress_tracker=progress_tracker,
+                root_scope=root_scope,
+            )
+            self._runs[session.run_id] = run
+            binding.orchestrator.submit(
+                ComputeRequest(scope=root_scope, priority_band="stream_attached")
+            )
             return session
 
     def cancel_player_run(self, run_id: str) -> None:
-        with self._condition:
-            session = self._runs.get(run_id)
-            if session is not None:
-                session.cancel_token.cancel()
-            self._work_queue = deque(
-                job for job in self._work_queue if job.session.run_id != run_id
-            )
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is not None:
+                run.session.cancel_token.cancel()
             self._runs.pop(run_id, None)
-            self._condition.notify_all()
 
     def end_fleet_table_stream(
         self,
@@ -117,75 +168,168 @@ class FleetTableStreamScheduler:
         sessions: tuple[FleetPlayerStreamSession, ...],
         *,
         stream_token: str,
+        host_turn: TurnInfo | None = None,
+        fleet_services: FleetComputeServices | None = None,
     ) -> None:
-        with self._condition:
+        with self._lock:
             self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 session.cancel_token.cancel()
-                self._work_queue = deque(
-                    job for job in self._work_queue if job.session.run_id != session.run_id
-                )
                 self._runs.pop(session.run_id, None)
-            self._condition.notify_all()
+            binding = self._stream_bindings.pop(stream_token, None)
+            if binding is not None and fleet_services is not None and host_turn is not None:
+                query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
+                release_orchestrator_for_context(query_ctx)
+            if binding is not None and callable(binding.unregister_listener):
+                binding.unregister_listener()
+
+    def _binding_for_stream_locked(
+        self,
+        stream_token: str,
+        *,
+        host_turn: TurnInfo,
+        fleet_services: FleetComputeServices,
+    ) -> _FleetStreamOrchestratorBinding:
+        existing = self._stream_bindings.get(stream_token)
+        if existing is not None:
+            return existing
+        query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
+        orchestrator = orchestrator_for_context(query_ctx)
+        unregister = orchestrator.register_node_complete_listener(
+            lambda scope, node: self._on_orchestrator_node_complete(scope, node)
+        )
+        binding = _FleetStreamOrchestratorBinding(
+            orchestrator=orchestrator,
+            unregister_listener=unregister,
+            query_context_id=id(query_ctx),
+        )
+        self._stream_bindings[stream_token] = binding
+        return binding
+
+    def _on_orchestrator_node_complete(
+        self,
+        scope: ComputeScope,
+        node: ComputeNodeRun,
+    ) -> None:
+        if scope.analytic_id != ANALYTIC_ID:
+            return
+        if scope.turn == "*" or not isinstance(scope.turn, int):
+            return
+        if scope.player_id == "*" or not isinstance(scope.player_id, int):
+            return
+
+        with self._lock:
+            matching_runs = [
+                run
+                for run in self._runs.values()
+                if run.session.player_id == scope.player_id
+                and run.session.game_id == scope.game_id
+                and run.session.perspective == scope.perspective
+                and scope.turn <= run.host_turn_number
+            ]
+
+        for run in matching_runs:
+            session = run.session
+            cancelled = session.cancel_token.is_cancelled()
+            if node.state == "failed":
+                if not cancelled:
+                    detail = (
+                        str(node.error)
+                        if node.error is not None
+                        else "Fleet ledger materialization failed"
+                    )
+                    session.event_queue.put(fleet_error_event(detail))
+                continue
+            if node.state != "complete" or node.result_wire is None:
+                continue
+            if not isinstance(node.result_wire, dict):
+                if not cancelled:
+                    session.event_queue.put(
+                        fleet_error_event("Fleet ledger materialization failed")
+                    )
+                continue
+            persisted_wire = node.result_wire.get("persistedLedgerWire")
+            if not isinstance(persisted_wire, dict):
+                if not cancelled:
+                    session.event_queue.put(
+                        fleet_error_event("Fleet ledger materialization failed")
+                    )
+                continue
+            persisted = persisted_fleet_ledger_from_json(persisted_wire)
+            if scope.turn < run.host_turn_number:
+                if cancelled:
+                    continue
+                for event in run.progress_tracker.leg_progress_events(persisted):
+                    session.event_queue.put(event)
+                with self._lock:
+                    run.emitted_progress = True
+                continue
+            if run.emitted_progress or run.progress_tracker.emitted_progress:
+                if scope.turn == run.host_turn_number:
+                    for event in run.progress_tracker.leg_progress_events(persisted):
+                        session.event_queue.put(event)
+                session.event_queue.put(wire_materialized_complete_event(persisted))
+                continue
+            if cancelled:
+                continue
+            for event in wire_materialized_player_events(
+                before=run.progress_tracker.wire_before,
+                persisted=persisted,
+                host_turn=session.turn,
+            ):
+                session.event_queue.put(event)
 
     def _preempt_active_table_stream_locked(self) -> None:
-        """Cancel in-flight player runs so a reconnect can own this scope."""
-        for session in self._runs.values():
-            session.cancel_token.cancel()
+        for run in self._runs.values():
+            run.session.cancel_token.cancel()
         self._runs.clear()
-        self._work_queue.clear()
+        for stream_token, binding in list(self._stream_bindings.items()):
+            if callable(binding.unregister_listener):
+                binding.unregister_listener()
+            self._stream_bindings.pop(stream_token, None)
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()
 
-    def _worker_loop(self) -> None:
-        while True:
-            with self._condition:
-                while not self._shutdown and not self._work_queue:
-                    self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
-                if self._shutdown:
-                    return
-                job = self._work_queue.popleft()
-            if job.session.cancel_token.is_cancelled():
-                continue
-            try:
-                job.materialize(job.session)
-            except Exception:
-                if job.session.event_queue.empty():
-                    job.session.event_queue.put(
-                        fleet_error_event("Fleet ledger materialization failed")
-                    )
-                continue
-            if job.session.event_queue.empty():
-                job.session.event_queue.put(
-                    fleet_error_event("Fleet ledger materialization ended without stream events")
-                )
+
+def _query_context_for_services(
+    fleet_services: FleetComputeServices,
+    *,
+    host_turn,
+):
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+
+    export_services: dict[str, object] = {ANALYTIC_ID: fleet_services}
+    if fleet_services.inference_materialization is not None:
+        scores_services = fleet_services.inference_materialization.inference.scores_services
+    else:
+        scores_services = ScoresExportContext()
+    export_services[SCORES_ANALYTIC_ID] = scores_services
+    return make_analytic_query_context(
+        host_turn,
+        TurnAnalyticsOptions(),
+        load_turn=fleet_services.load_turn,
+        export_services=export_services,
+    )
 
 
 _process_scheduler: FleetTableStreamScheduler | None = None
 _process_scheduler_lock = threading.Lock()
 
 
-def _configured_worker_count() -> int:
-    raw = os.environ.get("FLEET_TABLE_STREAM_SCHEDULER_WORKERS")
-    if raw is not None:
-        return max(1, int(raw))
-    return _DEFAULT_WORKER_COUNT
-
-
 def get_fleet_table_stream_scheduler() -> FleetTableStreamScheduler:
     global _process_scheduler
     with _process_scheduler_lock:
         if _process_scheduler is None:
-            _process_scheduler = FleetTableStreamScheduler(worker_count=_configured_worker_count())
+            _process_scheduler = FleetTableStreamScheduler()
         return _process_scheduler
 
 
 def reset_fleet_table_stream_scheduler_for_tests() -> None:
     global _process_scheduler
+    from api.compute.runtime import reset_orchestrators_for_tests
+
     with _process_scheduler_lock:
-        if _process_scheduler is not None:
-            _process_scheduler._shutdown = True
-            with _process_scheduler._condition:
-                _process_scheduler._condition.notify_all()
-        _process_scheduler = FleetTableStreamScheduler(worker_count=0)
+        _process_scheduler = FleetTableStreamScheduler()
+    reset_orchestrators_for_tests()

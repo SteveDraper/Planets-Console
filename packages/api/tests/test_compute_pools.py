@@ -468,3 +468,88 @@ def test_concurrent_submit_with_multiple_pool_workers(sample_turn):
     for scope in scopes:
         assert orchestrator.nodes[scope].state == "complete"
         assert orchestrator.nodes[scope].result_wire == {"result": scope.player_id}
+
+
+def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
+    from api.analytics.fleet.compute_orchestration import FLEET_MATERIALIZATION_LEG
+    from api.analytics.fleet.compute_plane.materialization_leg import run_fleet_materialization_leg
+
+    def build_job_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
+        del dependency_outputs
+        from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
+        from api.analytics.fleet.types import FleetAcquisitionLedger
+        from api.serialization.turn import turn_info_to_json
+
+        if ctx is None:
+            raise RuntimeError("fleet leg test job wire requires AnalyticQueryContext")
+        turn = ctx.load_turn(scope.turn)
+        if turn is None:
+            raise RuntimeError(f"turn {scope.turn} required for fleet leg test job wire")
+        from api.analytics.turn_roster import iter_turn_players
+
+        player_name = next(
+            (player.username for player in iter_turn_players(turn) if player.id == scope.player_id),
+            f"player-{scope.player_id}",
+        )
+        baseline = FleetAcquisitionLedger(
+            player_id=scope.player_id,
+            player_name=player_name,
+        )
+        return {
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "playerId": scope.player_id,
+            "materializeTurn": scope.turn,
+            "turnWire": turn_info_to_json(turn),
+            "priorLedgerWire": None,
+            "baselineLedgerWire": fleet_acquisition_ledger_to_json(baseline),
+            "provenanceWire": {
+                "turnEvidenceAtN": False,
+                "priorLedgerAtNMinus1": False,
+            },
+        }
+
+    return TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(_FLEET_ANALYTIC_ID),
+        compute=lambda _ctx: {"analyticId": _FLEET_ANALYTIC_ID},
+        export_catalog=make_fixture_catalog(_FLEET_ANALYTIC_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(
+                ComputeStepSpec(step_kind=FLEET_MATERIALIZATION_LEG, backend="interpreter"),
+            ),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=((FLEET_MATERIALIZATION_LEG, build_job_wire),),
+        run_steps=((FLEET_MATERIALIZATION_LEG, run_fleet_materialization_leg),),
+    )
+
+
+def test_pool_dispatches_fleet_materialization_leg_interpreter(sample_turn):
+    compute_registry = build_compute_registry((_fleet_materialization_leg_registration(),))
+    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    pool = ComputeWorkerPool(worker_count=1)
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+    scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        player_id=scope.player_id,
+    )
+
+    handle = orchestrator.submit(ComputeRequest(scope=scope))
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if handle.state == "complete":
+            break
+        time.sleep(0.01)
+
+    pool.shutdown()
+    assert handle.state == "complete", handle.error
+    assert isinstance(handle.result_wire, dict)
+    assert "persistedLedgerWire" in handle.result_wire
+    assert handle.result_wire["materializeTurn"] == scope.turn
+    assert pool.metrics.interpreter_executions == 1

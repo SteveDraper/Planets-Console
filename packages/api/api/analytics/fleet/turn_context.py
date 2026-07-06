@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from api.analytics.fleet.scoreboard_counts import compute_max_ship_id_bound
+from api.analytics.fleet.scoreboard_ship_totals import compute_max_ship_id_bound
 from api.models.game import TurnInfo
 
 

@@ -1,4 +1,4 @@
-"""Per-player fleet table stream session and background materialization job."""
+"""Per-player fleet table stream session and wire event helpers."""
 
 from __future__ import annotations
 
@@ -11,9 +11,7 @@ from dataclasses import dataclass, field
 from api.analytics.fleet.chain import (
     _find_chain_anchor_for_player,
     advance_ledger_to_turn,
-    get_or_materialize_fleet_ledger_for_player,
 )
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.serialization import (
     fleet_ship_record_to_json,
 )
@@ -22,12 +20,9 @@ from api.analytics.fleet.table_wire import (
     fleet_ship_record_to_table_wire,
 )
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, PersistedFleetLedger
-from api.analytics.turn_roster import iter_turn_players
-from api.errors import PlanetsConsoleError
 from api.models.game import TurnInfo
 from api.transport.fleet_table_stream import (
     fleet_complete_event,
-    fleet_error_event,
     fleet_ledger_updated_event,
     fleet_provenance_event,
     fleet_record_refined_event,
@@ -200,81 +195,3 @@ class FleetLedgerWireProgressTracker:
         self.wire_before = _host_turn_shaped_ledger(persisted, self.host_turn)
         self.emitted_progress = True
         return events
-
-
-def run_fleet_player_materialization_job(
-    session: FleetPlayerStreamSession,
-    *,
-    fleet_services: FleetComputeServices,
-    persistence,
-) -> None:
-    """Materialize one player's fleet ledger and enqueue stream wire events."""
-    if session.cancel_token.is_cancelled():
-        return
-
-    player_id = session.player_id
-    turn = session.turn
-    roster_ids = {player.id for player in iter_turn_players(turn)}
-    if player_id not in roster_ids:
-        session.event_queue.put(
-            fleet_error_event(f"Player {player_id} is not on turn {turn.settings.turn} roster")
-        )
-        return
-
-    turn_number = turn.settings.turn
-    before_persisted = persistence.get_ledger(
-        fleet_services.game_id,
-        fleet_services.perspective,
-        turn_number,
-        player_id,
-    )
-    progress_tracker = FleetLedgerWireProgressTracker(
-        host_turn=turn,
-        wire_before=_initial_wire_before_ledger(
-            persistence=persistence,
-            game_id=fleet_services.game_id,
-            perspective=fleet_services.perspective,
-            player_id=player_id,
-            host_turn=turn,
-            before_persisted=before_persisted,
-        ),
-    )
-
-    def on_progress(
-        persisted_leg: PersistedFleetLedger,
-        _materialize_turn: int,
-    ) -> None:
-        if session.cancel_token.is_cancelled():
-            return
-        for event in progress_tracker.leg_progress_events(persisted_leg):
-            session.event_queue.put(event)
-
-    try:
-        persisted = get_or_materialize_fleet_ledger_for_player(
-            persistence,
-            fleet_services.game_id,
-            fleet_services.perspective,
-            player_id,
-            turn,
-            load_turn=fleet_services.load_turn,
-            inference_materialization=fleet_services.inference_materialization,
-            on_progress=on_progress,
-        )
-    except PlanetsConsoleError as exc:
-        detail = str(exc) or "Fleet ledger materialization failed"
-        session.event_queue.put(fleet_error_event(detail))
-        return
-    except Exception:
-        session.event_queue.put(fleet_error_event("Fleet ledger materialization failed"))
-        return
-
-    if progress_tracker.emitted_progress:
-        session.event_queue.put(wire_materialized_complete_event(persisted))
-        return
-
-    for event in wire_materialized_player_events(
-        before=progress_tracker.wire_before,
-        persisted=persisted,
-        host_turn=turn,
-    ):
-        session.event_queue.put(event)

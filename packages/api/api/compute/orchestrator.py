@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -15,6 +15,8 @@ from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
+
+NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 
 NodeState = Literal[
     "waiting_deps",
@@ -110,6 +112,7 @@ class ComputeOrchestrator:
         self._metrics = OrchestratorMetrics()
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
+        self._node_complete_listeners: list[NodeCompleteListener] = []
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -118,6 +121,23 @@ class ComputeOrchestrator:
     @property
     def metrics(self) -> OrchestratorMetrics:
         return self._metrics
+
+    def register_node_complete_listener(
+        self,
+        listener: NodeCompleteListener,
+    ) -> Callable[[], None]:
+        """Register a node completion listener; return an unregister callable."""
+        with self._condition:
+            self._node_complete_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._node_complete_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
 
     @property
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
@@ -414,6 +434,7 @@ class ComputeOrchestrator:
         for waiter in node.waiters:
             waiter._waiter_error = None
         node.waiters.clear()
+        self._notify_node_complete(node)
         self._on_dependency_terminal(node.scope)
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
@@ -425,7 +446,13 @@ class ComputeOrchestrator:
         for waiter in node.waiters:
             waiter._waiter_error = error
         node.waiters.clear()
+        self._notify_node_complete(node)
         self._on_dependency_terminal(node.scope)
+
+    def _notify_node_complete(self, node: ComputeNodeRun) -> None:
+        listeners = tuple(self._node_complete_listeners)
+        for listener in listeners:
+            listener(node.scope, node)
 
     def _on_dependency_terminal(self, completed_scope: ComputeScope) -> None:
         for node in self._nodes.values():

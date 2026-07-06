@@ -119,4 +119,6 @@ class FleetTableStreamController(
             self.scope,
             tuple(row.session for row in self.current_scheduled_rows()),
             stream_token=self.stream_token,
+            host_turn=self.turn,
+            fleet_services=self.fleet_services,
         )

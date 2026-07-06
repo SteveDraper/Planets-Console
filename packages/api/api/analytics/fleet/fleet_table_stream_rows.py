@@ -10,7 +10,6 @@ from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.fleet_table_player_run import (
     FleetPlayerStreamSession,
     ScheduledFleetPlayer,
-    run_fleet_player_materialization_job,
     wire_cached_player_events,
 )
 from api.analytics.fleet.fleet_table_stream_scheduler import (
@@ -90,16 +89,10 @@ def schedule_fleet_player_run(
         perspective=perspective,
     )
 
-    def materialize(active_session: FleetPlayerStreamSession) -> None:
-        run_fleet_player_materialization_job(
-            active_session,
-            fleet_services=fleet_services,
-            persistence=persistence,
-        )
-
     scheduler.enqueue_player_run(
         session,
-        materialize,
+        fleet_services=fleet_services,
+        persistence=persistence,
         stream_token=stream_token,
     )
     if stream_token is not None and not scheduler.owns_table_stream(stream_token):
@@ -178,8 +171,16 @@ def cleanup_fleet_table_stream_sessions(
     sessions: tuple[FleetPlayerStreamSession, ...],
     *,
     stream_token: str,
+    turn: TurnInfo | None = None,
+    fleet_services: FleetComputeServices | None = None,
 ) -> None:
-    scheduler.end_fleet_table_stream(scope, sessions, stream_token=stream_token)
+    scheduler.end_fleet_table_stream(
+        scope,
+        sessions,
+        stream_token=stream_token,
+        host_turn=turn,
+        fleet_services=fleet_services,
+    )
 
 
 def iter_fleet_table_stream_events(
@@ -235,6 +236,8 @@ def iter_fleet_table_stream_events(
             stream_scope,
             (),
             stream_token=stream_token,
+            turn=turn,
+            fleet_services=fleet_services,
         ),
         policy_factory=policy_factory,
         player_ids=player_ids,
