@@ -285,6 +285,15 @@ def get_compute_worker_pool() -> ComputeWorkerPool:
         return _process_pool
 
 
+def shutdown_compute_worker_pool_for_tests() -> None:
+    """Tear down the process-wide pool singleton (tests only)."""
+    global _process_pool
+    with _process_pool_lock:
+        if _process_pool is not None:
+            _process_pool.shutdown()
+            _process_pool = None
+
+
 def reset_compute_worker_pool_for_tests(*, worker_count: int = 0) -> ComputeWorkerPool:
     global _process_pool
     with _process_pool_lock:

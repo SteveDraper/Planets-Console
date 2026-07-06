@@ -39,6 +39,7 @@ _POOL_EXPORTS = frozenset(
         "dequeue_next_work_item",
         "get_compute_worker_pool",
         "reset_compute_worker_pool_for_tests",
+        "shutdown_compute_worker_pool_for_tests",
     }
 )
 
@@ -117,5 +118,6 @@ __all__ = [
     "normalize_export_scope_to_compute_scope",
     "plan_compute_dag",
     "reset_compute_worker_pool_for_tests",
+    "shutdown_compute_worker_pool_for_tests",
     "validate_turn_analytic_compute_registration",
 ]

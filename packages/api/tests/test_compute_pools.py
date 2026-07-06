@@ -24,7 +24,6 @@ from api.compute import (
     build_compute_registry,
     dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
-    reset_compute_worker_pool_for_tests,
 )
 
 from tests.compute_pool_test_helpers import run_interpreter_materialize
@@ -222,7 +221,6 @@ def _multi_step_thread_registration(
 
 def test_pool_tier_one_jobs_run_before_continuations_from_other_scopes(sample_turn):
     """Integration: worker pool applies tier-1-before-continuation fairness."""
-    reset_compute_worker_pool_for_tests(worker_count=1)
     execution_order: list[tuple[int, int]] = []
     gate = threading.Event()
     gate.set()
@@ -262,7 +260,6 @@ def test_pool_tier_one_jobs_run_before_continuations_from_other_scopes(sample_tu
 
 
 def test_pool_continuation_jobs_round_robin_across_scopes(sample_turn):
-    reset_compute_worker_pool_for_tests(worker_count=1)
     execution_order: list[tuple[int, int]] = []
     gate = threading.Event()
     gate.set()
