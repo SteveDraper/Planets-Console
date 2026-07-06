@@ -198,6 +198,62 @@ def test_fleet_table_stream_reconnect_preempts_active_scope(sample_turn):
     scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
 
 
+def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample_turn):
+    from api.compute import runtime as compute_runtime
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
+    reset_fleet_table_stream_scheduler_for_tests()
+    scheduler = FleetTableStreamScheduler()
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    services.persistence.put_ledger(
+        628580,
+        1,
+        sample_turn.settings.turn,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+    scope = FleetTableStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
+    scheduled = schedule_fleet_player_run(
+        scheduler,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=1,
+        fleet_services=services,
+        persistence=services.persistence,
+        stream_token=stream_token,
+    )
+    assert scheduled is not None
+    assert len(compute_runtime._orchestrators_by_ctx_id) == 1
+    assert len(scheduler._stream_bindings) == 1
+
+    second_token = scheduler.begin_scope(scope)
+
+    assert len(compute_runtime._orchestrators_by_ctx_id) == 0
+    assert len(scheduler._stream_bindings) == 0
+
+    scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
+
+
 def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
     reset_fleet_table_stream_scheduler_for_tests()
     scheduler = FleetTableStreamScheduler()

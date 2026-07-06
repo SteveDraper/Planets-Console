@@ -178,9 +178,7 @@ class FleetTableStreamScheduler:
                 self._runs.pop(session.run_id, None)
             binding = self._stream_bindings.pop(stream_token, None)
             if binding is not None:
-                release_orchestrator_for_context(binding.query_context)
-            if binding is not None and callable(binding.unregister_listener):
-                binding.unregister_listener()
+                self._release_stream_binding_locked(binding)
 
     def _binding_for_stream_locked(
         self,
@@ -278,14 +276,21 @@ class FleetTableStreamScheduler:
             ):
                 session.event_queue.put(event)
 
+    def _release_stream_binding_locked(
+        self,
+        binding: _FleetStreamOrchestratorBinding,
+    ) -> None:
+        release_orchestrator_for_context(binding.query_context)
+        if callable(binding.unregister_listener):
+            binding.unregister_listener()
+
     def _preempt_active_table_stream_locked(self) -> None:
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         self._runs.clear()
-        for stream_token, binding in list(self._stream_bindings.items()):
-            if callable(binding.unregister_listener):
-                binding.unregister_listener()
-            self._stream_bindings.pop(stream_token, None)
+        for stream_token in list(self._stream_bindings):
+            binding = self._stream_bindings.pop(stream_token)
+            self._release_stream_binding_locked(binding)
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()
