@@ -11,7 +11,6 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import PersistedFleetLedger
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,
@@ -44,62 +43,6 @@ def _fleet_prior_scope(scope: ComputeScope) -> ComputeScope | None:
         player_id=scope.player_id,
         parameters=scope.parameters,
     )
-
-
-def _scores_scope_for_fleet(scope: ComputeScope) -> ComputeScope:
-    return ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID,
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn=scope.turn,
-        player_id=scope.player_id,
-        parameters=(),
-    )
-
-
-def _scores_search_status_from_dependency_outputs(
-    fleet_scope: ComputeScope,
-    dependency_outputs: DependencyOutputs,
-) -> str | None:
-    """Resolve scores searchStatus from ancestor wires when present."""
-    from api.analytics.exports.jsonpath import resolve_jsonpath
-
-    expected = _scores_scope_for_fleet(fleet_scope)
-    result_wire = dependency_outputs.get(expected)
-    if result_wire is None:
-        for dep_scope, wire in dependency_outputs.as_mapping().items():
-            if dep_scope.analytic_id != SCORES_ANALYTIC_ID:
-                continue
-            if (
-                dep_scope.game_id == fleet_scope.game_id
-                and dep_scope.perspective == fleet_scope.perspective
-                and dep_scope.turn == fleet_scope.turn
-                and dep_scope.player_id == fleet_scope.player_id
-            ):
-                result_wire = wire
-                break
-    if result_wire is None:
-        return None
-    values = resolve_jsonpath(result_wire, "$.meta.searchStatus")
-    return values[0] if values else "not_started"
-
-
-def _scores_search_status_for_fleet_leg(
-    scope: ComputeScope,
-    dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext,
-) -> str:
-    """Read scores searchStatus from dependency wires or satisfied export materialization."""
-    from api.analytics.exports.jsonpath import resolve_jsonpath
-    from api.analytics.scores.exports import materialize_scores_export_tree
-
-    resolved = _scores_search_status_from_dependency_outputs(scope, dependency_outputs)
-    if resolved is not None:
-        return resolved
-    scores_export_scope = compute_scope_to_export_scope(_scores_scope_for_fleet(scope))
-    tree = materialize_scores_export_tree(ctx, scores_export_scope)
-    values = resolve_jsonpath(tree, "$.meta.searchStatus")
-    return values[0] if values else "not_started"
 
 
 def build_fleet_materialization_leg_job_wire(
@@ -147,12 +90,6 @@ def build_fleet_materialization_leg_job_wire(
     else:
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
-    scores_search_status = _scores_search_status_for_fleet_leg(
-        scope,
-        dependency_outputs,
-        ctx,
-    )
-
     services = resolve_fleet_services(ctx)
     load_turn = services.load_turn
     turn_context = FleetTurnContext.from_turn(turn)
@@ -177,7 +114,6 @@ def build_fleet_materialization_leg_job_wire(
             persisted_fleet_ledger_to_json(prior_persisted) if prior_persisted is not None else None
         ),
         "baselineLedgerWire": baseline_ledger_wire,
-        "scoresSearchStatus": scores_search_status,
         "provenanceWire": {
             "turnEvidenceAtN": provenance.turn_evidence_at_n,
             "priorLedgerAtNMinus1": provenance.prior_ledger_at_n_minus_1,

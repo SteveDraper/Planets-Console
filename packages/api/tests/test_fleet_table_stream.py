@@ -743,7 +743,6 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
         host_turn_number=112,
         progress_tracker=progress_tracker,
         root_scope=scope,
-        emitted_progress=True,
     )
     scheduler._on_orchestrator_node_complete(
         scope,

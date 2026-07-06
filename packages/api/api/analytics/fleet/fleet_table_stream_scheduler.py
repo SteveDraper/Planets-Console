@@ -46,7 +46,6 @@ class _FleetPlayerOrchestratorRun:
     host_turn_number: int
     progress_tracker: FleetLedgerWireProgressTracker
     root_scope: ComputeScope
-    emitted_progress: bool = False
 
 
 class FleetTableStreamScheduler:
@@ -253,24 +252,24 @@ class FleetTableStreamScheduler:
                     )
                 continue
             persisted = persisted_fleet_ledger_from_json(persisted_wire)
+            tracker = run.progress_tracker
             if scope.turn < run.host_turn_number:
                 if cancelled:
                     continue
-                for event in run.progress_tracker.leg_progress_events(persisted):
+                for event in tracker.leg_progress_events(persisted):
                     session.event_queue.put(event)
-                with self._lock:
-                    run.emitted_progress = True
                 continue
-            if run.emitted_progress or run.progress_tracker.emitted_progress:
-                if scope.turn == run.host_turn_number:
-                    for event in run.progress_tracker.leg_progress_events(persisted):
-                        session.event_queue.put(event)
+            if scope.turn != run.host_turn_number:
+                continue
+            if tracker.emitted_progress:
+                for event in tracker.leg_progress_events(persisted):
+                    session.event_queue.put(event)
                 session.event_queue.put(wire_materialized_complete_event(persisted))
                 continue
             if cancelled:
                 continue
             for event in wire_materialized_player_events(
-                before=run.progress_tracker.wire_before,
+                before=tracker.wire_before,
                 persisted=persisted,
                 host_turn=session.turn,
             ):
