@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.fleet_table_player_run import (
@@ -37,7 +37,7 @@ __all__ = [
 class _FleetStreamOrchestratorBinding:
     orchestrator: ComputeOrchestrator
     unregister_listener: object
-    query_context_id: int
+    query_context: AnalyticQueryContext
 
 
 @dataclass
@@ -177,9 +177,8 @@ class FleetTableStreamScheduler:
                 session.cancel_token.cancel()
                 self._runs.pop(session.run_id, None)
             binding = self._stream_bindings.pop(stream_token, None)
-            if binding is not None and fleet_services is not None and host_turn is not None:
-                query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
-                release_orchestrator_for_context(query_ctx)
+            if binding is not None:
+                release_orchestrator_for_context(binding.query_context)
             if binding is not None and callable(binding.unregister_listener):
                 binding.unregister_listener()
 
@@ -201,7 +200,7 @@ class FleetTableStreamScheduler:
         binding = _FleetStreamOrchestratorBinding(
             orchestrator=orchestrator,
             unregister_listener=unregister,
-            query_context_id=id(query_ctx),
+            query_context=query_ctx,
         )
         self._stream_bindings[stream_token] = binding
         return binding

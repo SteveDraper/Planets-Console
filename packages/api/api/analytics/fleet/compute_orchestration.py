@@ -57,6 +57,51 @@ def _scores_scope_for_fleet(scope: ComputeScope) -> ComputeScope:
     )
 
 
+def _scores_search_status_from_dependency_outputs(
+    fleet_scope: ComputeScope,
+    dependency_outputs: DependencyOutputs,
+) -> str | None:
+    """Resolve scores searchStatus from ancestor wires when present."""
+    from api.analytics.exports.jsonpath import resolve_jsonpath
+
+    expected = _scores_scope_for_fleet(fleet_scope)
+    result_wire = dependency_outputs.get(expected)
+    if result_wire is None:
+        for dep_scope, wire in dependency_outputs.as_mapping().items():
+            if dep_scope.analytic_id != SCORES_ANALYTIC_ID:
+                continue
+            if (
+                dep_scope.game_id == fleet_scope.game_id
+                and dep_scope.perspective == fleet_scope.perspective
+                and dep_scope.turn == fleet_scope.turn
+                and dep_scope.player_id == fleet_scope.player_id
+            ):
+                result_wire = wire
+                break
+    if result_wire is None:
+        return None
+    values = resolve_jsonpath(result_wire, "$.meta.searchStatus")
+    return values[0] if values else "not_started"
+
+
+def _scores_search_status_for_fleet_leg(
+    scope: ComputeScope,
+    dependency_outputs: DependencyOutputs,
+    ctx: AnalyticQueryContext,
+) -> str:
+    """Read scores searchStatus from dependency wires or satisfied export materialization."""
+    from api.analytics.exports.jsonpath import resolve_jsonpath
+    from api.analytics.scores.exports import materialize_scores_export_tree
+
+    resolved = _scores_search_status_from_dependency_outputs(scope, dependency_outputs)
+    if resolved is not None:
+        return resolved
+    scores_export_scope = compute_scope_to_export_scope(_scores_scope_for_fleet(scope))
+    tree = materialize_scores_export_tree(ctx, scores_export_scope)
+    values = resolve_jsonpath(tree, "$.meta.searchStatus")
+    return values[0] if values else "not_started"
+
+
 def build_fleet_materialization_leg_job_wire(
     scope: ComputeScope,
     *,
@@ -102,14 +147,11 @@ def build_fleet_materialization_leg_job_wire(
     else:
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
-    scores_scope = _scores_scope_for_fleet(scope)
-    scores_slices = dependency_outputs.require(
-        analytic_id=SCORES_ANALYTIC_ID,
-        scope=scores_scope,
-        paths=("$.meta.searchStatus",),
+    scores_search_status = _scores_search_status_for_fleet_leg(
+        scope,
+        dependency_outputs,
+        ctx,
     )
-    search_status_values = scores_slices.get("$.meta.searchStatus", [])
-    scores_search_status = search_status_values[0] if search_status_values else "not_started"
 
     services = resolve_fleet_services(ctx)
     load_turn = services.load_turn

@@ -194,8 +194,7 @@ def fleet_build_option_set_from_inference_ship_build(
 
     if not isinstance(ship_build, InferenceSolutionShipBuild):
         raise TypeError(
-            "ship_build must be InferenceSolutionShipBuild, "
-            f"got {type(ship_build).__name__}",
+            f"ship_build must be InferenceSolutionShipBuild, got {type(ship_build).__name__}",
         )
     combo_id = ship_build.combo_id or None
     return FleetBuildOptionSet(

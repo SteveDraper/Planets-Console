@@ -158,13 +158,13 @@ class ComputeWorkerPool:
             )
             self._condition.notify()
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, wait_for_interpreters: bool = False) -> None:
         with self._condition:
             self._shutdown = True
             self._condition.notify_all()
         for thread in self._workers:
             thread.join(timeout=1.0)
-        self._shutdown_executors()
+        self._shutdown_executors(wait=wait_for_interpreters)
 
     def _submit_from_orchestrator(
         self,
@@ -243,13 +243,13 @@ class ComputeWorkerPool:
             self._process_executor = ProcessPoolExecutor(max_workers=self._worker_count)
         return self._process_executor
 
-    def _shutdown_executors(self) -> None:
+    def _shutdown_executors(self, *, wait: bool = False) -> None:
         with self._condition:
             if self._interpreter_executor is not None:
-                self._interpreter_executor.shutdown(wait=False)
+                self._interpreter_executor.shutdown(wait=wait, cancel_futures=wait)
                 self._interpreter_executor = None
             if self._process_executor is not None:
-                self._process_executor.shutdown(wait=False)
+                self._process_executor.shutdown(wait=wait, cancel_futures=wait)
                 self._process_executor = None
 
     def _complete_from_callable(
@@ -296,7 +296,7 @@ def shutdown_compute_worker_pool_for_tests() -> None:
     global _global_worker_pool
     with _global_worker_pool_lock:
         if _global_worker_pool is not None:
-            _global_worker_pool.shutdown()
+            _global_worker_pool.shutdown(wait_for_interpreters=True)
             _global_worker_pool = None
 
 
@@ -304,6 +304,6 @@ def reset_compute_worker_pool_for_tests(*, worker_count: int = 0) -> ComputeWork
     global _global_worker_pool
     with _global_worker_pool_lock:
         if _global_worker_pool is not None:
-            _global_worker_pool.shutdown()
+            _global_worker_pool.shutdown(wait_for_interpreters=True)
         _global_worker_pool = ComputeWorkerPool(worker_count=worker_count)
         return _global_worker_pool

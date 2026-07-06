@@ -515,9 +515,7 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
         export_catalog=make_fixture_catalog(_FLEET_ANALYTIC_ID),
         scope_key_spec=_ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
-            steps=(
-                ComputeStepSpec(step_kind=FLEET_MATERIALIZATION_LEG, backend="interpreter"),
-            ),
+            steps=(ComputeStepSpec(step_kind=FLEET_MATERIALIZATION_LEG, backend="interpreter"),),
         ),
         persistence_policy=_StubPersistencePolicy(),
         build_step_job_wires=((FLEET_MATERIALIZATION_LEG, build_job_wire),),
