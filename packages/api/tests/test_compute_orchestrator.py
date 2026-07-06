@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_types import ExportScope
 from api.analytics.exports.empty import empty_export_catalog_for
@@ -18,7 +19,12 @@ from api.compute import (
     normalize_export_scope_to_compute_scope,
     plan_compute_dag,
 )
+from api.compute.profile import ComputeBackend
 
+from tests.compute_pool_test_helpers import (
+    run_interpreter_materialize,
+    run_process_materialize,
+)
 from tests.fixtures.export_framework.diamond_exports import (
     BRANCH_B_ID,
     BRANCH_C_ID,
@@ -110,19 +116,38 @@ def _two_step_inline_compute_registration(
 
 
 def _thread_compute_registration(analytic_id: str) -> TurnAnalyticRegistration:
+    return _pool_compute_registration(analytic_id, backend="thread")
+
+
+def _pool_run_step_for_backend(backend: ComputeBackend):
+    if backend == "thread":
+        return lambda job: {"result": job["scope"]}
+    if backend == "interpreter":
+        return run_interpreter_materialize
+    if backend == "process":
+        return run_process_materialize
+    raise ValueError(f"unsupported pool backend {backend!r}")
+
+
+def _pool_compute_registration(
+    analytic_id: str,
+    *,
+    backend: ComputeBackend,
+    persistence_policy: object | None = None,
+) -> TurnAnalyticRegistration:
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(analytic_id),
         compute=lambda _ctx: {"analyticId": analytic_id},
         export_catalog=empty_export_catalog_for(analytic_id),
         scope_key_spec=_ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
+            steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=persistence_policy or _StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
-        run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+        run_steps=(("materialize", _pool_run_step_for_backend(backend)),),
     )
 
 
@@ -614,33 +639,25 @@ def test_wire_builder_receives_dependency_slices(sample_turn):
     assert orchestrator.nodes[branch_b_scope].state == "complete"
 
 
-def test_stale_epoch_discards_result_and_requeues(sample_turn):
+@pytest.mark.parametrize("backend", ["thread", "interpreter", "process"])
+def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, backend):
     ctx = make_fixture_query_context(
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
     export_scope = _export_scope(sample_turn)
     persistence = _RecordingPersistencePolicy()
-    pool_submissions: list[str] = []
+    pool_submissions: list[tuple[str, str]] = []
 
-    def pool_submitter(node, _step, **_kwargs) -> None:
-        pool_submissions.append(node.scope.analytic_id)
+    def pool_submitter(node, step, **_kwargs) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.backend))
 
     compute_registry = build_compute_registry(
         (
-            TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
-                compute=lambda _ctx: {"analyticId": SHARED_ID},
-                export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
-                compute_profile=AnalyticComputeProfile(
-                    steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
-                ),
+            _pool_compute_registration(
+                SHARED_ID,
+                backend=backend,
                 persistence_policy=persistence,
-                build_step_job_wires=(
-                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
-                ),
-                run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
             ),
         )
     )
@@ -653,7 +670,7 @@ def test_stale_epoch_discards_result_and_requeues(sample_turn):
 
     handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
     assert handle.state == "running"
-    assert pool_submissions == [SHARED_ID]
+    assert pool_submissions == [(SHARED_ID, backend)]
     assert orchestrator.nodes[shared_scope].generation_at_submit == 0
 
     persistence.invalidate(ctx, shared_scope)
@@ -663,13 +680,60 @@ def test_stale_epoch_discards_result_and_requeues(sample_turn):
     assert orchestrator.metrics.persist_calls == 0
     assert persistence.persist_calls == []
     assert handle.state == "running"
-    assert pool_submissions == [SHARED_ID, SHARED_ID]
+    assert pool_submissions == [(SHARED_ID, backend), (SHARED_ID, backend)]
     assert orchestrator.nodes[shared_scope].generation_at_submit == 1
 
     orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
 
     assert handle.state == "complete"
     assert orchestrator.metrics.epoch_discards == 1
+    assert orchestrator.metrics.persist_calls == 1
+    assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
+
+
+def test_stale_epoch_discards_result_and_requeues_inline(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    persistence = _RecordingPersistencePolicy()
+    run_attempts = 0
+
+    def run_materialize(job):
+        nonlocal run_attempts
+        run_attempts += 1
+        if run_attempts == 1:
+            persistence.invalidate(ctx, shared_scope)
+        return {"result": job["scope"]}
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=persistence,
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", run_materialize),),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert run_attempts == 2
+    assert orchestrator.metrics.epoch_discards == 1
+    assert orchestrator.metrics.inline_executions == 2
     assert orchestrator.metrics.persist_calls == 1
     assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
 
