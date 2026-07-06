@@ -8,7 +8,7 @@ from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.scope import ComputeScope
@@ -28,7 +28,18 @@ PRIORITY_BAND_RANK: dict[ComputePriorityBand, int] = {
 _DEFAULT_WORKER_COUNT = 4
 _DEQUEUE_WAIT_SECONDS = 0.25
 
-PoolSubmitter = Callable[["ComputeNodeRun", ComputeStepSpec], None]
+
+class PoolSubmitter(Protocol):
+    """Callback the orchestrator uses to enqueue ready steps on a worker pool."""
+
+    def __call__(
+        self,
+        node: ComputeNodeRun,
+        step: ComputeStepSpec,
+        *,
+        job_wire: object | None = None,
+        run_step: RunStepFn | None = None,
+    ) -> None: ...
 
 
 def configured_worker_count() -> int:
