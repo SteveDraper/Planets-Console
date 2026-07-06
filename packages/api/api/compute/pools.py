@@ -278,31 +278,31 @@ class ComputeWorkerPool:
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
 
 
-_process_pool: ComputeWorkerPool | None = None
-_process_pool_lock = threading.Lock()
+_global_worker_pool: ComputeWorkerPool | None = None
+_global_worker_pool_lock = threading.Lock()
 
 
 def get_compute_worker_pool() -> ComputeWorkerPool:
-    global _process_pool
-    with _process_pool_lock:
-        if _process_pool is None:
-            _process_pool = ComputeWorkerPool()
-        return _process_pool
+    global _global_worker_pool
+    with _global_worker_pool_lock:
+        if _global_worker_pool is None:
+            _global_worker_pool = ComputeWorkerPool()
+        return _global_worker_pool
 
 
 def shutdown_compute_worker_pool_for_tests() -> None:
     """Tear down the process-wide pool singleton (tests only)."""
-    global _process_pool
-    with _process_pool_lock:
-        if _process_pool is not None:
-            _process_pool.shutdown()
-            _process_pool = None
+    global _global_worker_pool
+    with _global_worker_pool_lock:
+        if _global_worker_pool is not None:
+            _global_worker_pool.shutdown()
+            _global_worker_pool = None
 
 
 def reset_compute_worker_pool_for_tests(*, worker_count: int = 0) -> ComputeWorkerPool:
-    global _process_pool
-    with _process_pool_lock:
-        if _process_pool is not None:
-            _process_pool.shutdown()
-        _process_pool = ComputeWorkerPool(worker_count=worker_count)
-        return _process_pool
+    global _global_worker_pool
+    with _global_worker_pool_lock:
+        if _global_worker_pool is not None:
+            _global_worker_pool.shutdown()
+        _global_worker_pool = ComputeWorkerPool(worker_count=worker_count)
+        return _global_worker_pool
