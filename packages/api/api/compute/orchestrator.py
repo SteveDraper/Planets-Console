@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
+from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
@@ -23,8 +25,6 @@ NodeState = Literal[
     "failed",
 ]
 
-PoolSubmitter = Callable[["ComputeNodeRun", ComputeStepSpec], None]
-
 
 @dataclass(frozen=True)
 class ComputeRequest:
@@ -32,6 +32,7 @@ class ComputeRequest:
 
     scope: ComputeScope
     step_kind: str | None = None
+    priority_band: ComputePriorityBand = "background"
 
 
 @dataclass
@@ -70,6 +71,7 @@ class ComputeNodeRun:
     dependency_scopes: tuple[ComputeScope, ...]
     state: NodeState = "waiting_deps"
     step_index: int = 0
+    priority_band: ComputePriorityBand = "background"
     result_wire: object | None = None
     error: BaseException | None = None
     waiters: list[ComputeHandle] = field(default_factory=list)
@@ -92,13 +94,23 @@ class ComputeOrchestrator:
         *,
         compute_registry: Mapping[str, AnalyticComputeRegistration],
         pool_submitter: PoolSubmitter | None = None,
+        worker_pool: ComputeWorkerPool | None = None,
     ) -> None:
         self._ctx = ctx
         self._compute_registry = compute_registry
+        if worker_pool is not None:
+            pool_submitter = worker_pool.attach(self)
         self._pool_submitter = pool_submitter
+        self._worker_pool = worker_pool
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
+        self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+
+    @property
+    def worker_pool(self) -> ComputeWorkerPool | None:
+        return self._worker_pool
 
     @property
     def metrics(self) -> OrchestratorMetrics:
@@ -110,29 +122,48 @@ class ComputeOrchestrator:
 
     def ready_scopes(self) -> tuple[ComputeScope, ...]:
         """Return scopes currently in the ready queue."""
-        return tuple(scope for scope in self._ready_queue if self._nodes[scope].state == "ready")
+        with self._condition:
+            return tuple(
+                scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
+            )
 
     def submit(self, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
-        scope = request.scope
-        existing = self._nodes.get(scope)
-        if existing is not None:
-            return self._attach_to_existing(existing)
+        with self._condition:
+            scope = request.scope
+            existing = self._nodes.get(scope)
+            if existing is not None:
+                return self._attach_to_existing(existing)
 
-        self._plan_and_register(scope)
-        for node in self._nodes.values():
-            self._refresh_node_readiness(node)
-        handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
-        self._dispatch()
-        return handle
+            self._plan_and_register(scope, priority_band=request.priority_band)
+            for node in self._nodes.values():
+                self._refresh_node_readiness(node)
+            handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
+            self._dispatch()
+            return handle
+
+    def execute_pool_step(self, scope: ComputeScope) -> object:
+        """Run the current pool step for one scope on the calling thread."""
+        with self._condition:
+            node = self._nodes[scope]
+            if node.state != "running":
+                raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
+            registration = self._compute_registry[node.scope.analytic_id]
+            step = self._current_step_spec(node, registration)
+            job_wire = self._build_job_wire(node, registration, step)
+            run_step = registration.run_step[step.step_kind]
+        return run_step(job_wire)
 
     def run_until_idle(self) -> None:
         """Drain ready inline work until no ready or running nodes remain."""
-        while self._has_pending_work():
-            self._refresh_all_readiness()
-            self._dispatch()
-            if any(node.state == "running" for node in self._nodes.values()):
-                break
+        while True:
+            with self._condition:
+                if not self._has_pending_work():
+                    return
+                self._refresh_all_readiness()
+                self._dispatch()
+                if any(node.state == "running" for node in self._nodes.values()):
+                    return
 
     def complete_pool_step(
         self,
@@ -142,13 +173,14 @@ class ComputeOrchestrator:
         error: BaseException | None = None,
     ) -> None:
         """Mark a pool-submitted step complete (used by worker pool integration)."""
-        node = self._nodes[scope]
-        if node.state != "running":
-            raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
-        if error is not None:
-            self._fail_node(node, error)
-            return
-        self._after_step_success(node, result_wire)
+        with self._condition:
+            node = self._nodes[scope]
+            if node.state != "running":
+                raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
+            if error is not None:
+                self._fail_node(node, error)
+                return
+            self._after_step_success(node, result_wire)
 
     def _attach_to_existing(self, node: ComputeNodeRun) -> ComputeHandle:
         if node.state in {"complete", "failed"}:
@@ -157,7 +189,12 @@ class ComputeOrchestrator:
         node.waiters.append(handle)
         return handle
 
-    def _plan_and_register(self, root_scope: ComputeScope) -> None:
+    def _plan_and_register(
+        self,
+        root_scope: ComputeScope,
+        *,
+        priority_band: ComputePriorityBand,
+    ) -> None:
         export_scope = compute_scope_to_export_scope(root_scope)
         planned_nodes = plan_compute_dag(
             self._ctx,
@@ -166,20 +203,27 @@ class ComputeOrchestrator:
             compute_registry=self._compute_registry,
         )
         for planned in planned_nodes:
-            self._register_planned_node(planned)
+            self._register_planned_node(planned, priority_band=priority_band)
         if root_scope not in self._nodes:
             self._nodes[root_scope] = ComputeNodeRun(
                 scope=root_scope,
                 dependency_scopes=(),
                 state="complete",
+                priority_band=priority_band,
             )
 
-    def _register_planned_node(self, planned: PlannedComputeNode) -> None:
+    def _register_planned_node(
+        self,
+        planned: PlannedComputeNode,
+        *,
+        priority_band: ComputePriorityBand,
+    ) -> None:
         if planned.scope in self._nodes:
             return
         node = ComputeNodeRun(
             scope=planned.scope,
             dependency_scopes=planned.dependency_scopes,
+            priority_band=priority_band,
         )
         self._nodes[planned.scope] = node
 
@@ -252,9 +296,24 @@ class ComputeOrchestrator:
                 return
             self._ready_queue.popleft()
             node.state = "running"
-            self._pool_submitter(node, step)
+            self._submit_pool_step(node, registration, step)
             self._metrics.pool_submissions += 1
+            continue
+
+    def _submit_pool_step(
+        self,
+        node: ComputeNodeRun,
+        registration: AnalyticComputeRegistration,
+        step: ComputeStepSpec,
+    ) -> None:
+        if self._pool_submitter is None:
+            raise RuntimeError("pool_submitter is not configured")
+        if step.backend in {"interpreter", "process"}:
+            job_wire = self._build_job_wire(node, registration, step)
+            run_step = registration.run_step[step.step_kind]
+            self._pool_submitter(node, step, job_wire=job_wire, run_step=run_step)
             return
+        self._pool_submitter(node, step)
 
     def _current_step_spec(
         self,

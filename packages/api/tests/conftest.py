@@ -1,5 +1,23 @@
 """Shared pytest fixtures for API package tests."""
 
+import os
+import sys
+from pathlib import Path
+
+# ``uv run pytest`` uses the console-script entry point, which breaks
+# InterpreterPoolExecutor shareability for module-level test helpers unless
+# PYTHONPATH is set before interpreter startup. Re-exec via ``python -m pytest``.
+if os.environ.get("_API_PYTEST_REEXEC") != "1":
+    argv0 = Path(sys.argv[0]).name
+    running_compute_pool_tests = any("test_compute_pools" in arg for arg in sys.argv[1:])
+    if argv0 in {"pytest", "py.test"} and running_compute_pool_tests:
+        api_root = str(Path(__file__).resolve().parent.parent)
+        pythonpath = os.environ.get("PYTHONPATH", "")
+        if api_root not in pythonpath.split(os.pathsep):
+            pythonpath = f"{api_root}{os.pathsep}{pythonpath}" if pythonpath else api_root
+        env = {**os.environ, "_API_PYTEST_REEXEC": "1", "PYTHONPATH": pythonpath}
+        os.execve(sys.executable, [sys.executable, "-m", "pytest", *sys.argv[1:]], env)
+
 import pytest
 
 from tests.fixtures.hand_seeded_prior_weights import (  # noqa: F401
@@ -17,6 +35,17 @@ from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F40
 )
 
 pytest_plugins = ["tests.scores_exports_helpers"]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
+    yield
+    if request.path.name != "test_compute_pools.py":
+        return
+    from api.compute.pools import shutdown_compute_worker_pool_for_tests
+
+    shutdown_compute_worker_pool_for_tests()
+
 
 # OR-Tools / inference-corpus integration tests excluded from `make ci` (see Makefile `test_api`).
 _SLOW_TEST_NAMES = frozenset(
