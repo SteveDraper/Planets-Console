@@ -396,6 +396,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
         perspective=ctx.perspective,
         load_scoreboard_turn=ctx.load_turn,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+        export_services=ctx.export_services,
         persistence=inference_persistence,
         scheduler=scheduler,
     )
@@ -549,6 +550,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         perspective=ctx.perspective,
         load_scoreboard_turn=ctx.load_turn,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+        export_services=ctx.export_services,
         persistence=inference_persistence,
         scheduler=scheduler,
     )
@@ -572,7 +574,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         first_complete = next(event for event in events if event.get("type") == "complete")
         first_diagnostics = first_complete.get("diagnostics")
         assert isinstance(first_diagnostics, dict)
-        assert first_diagnostics.get("fleetTorpInputStatus") == "pending"
+        assert first_diagnostics.get("fleetTorpInputStatus") == "applied"
 
         _seed_prior_turn_fleet_with_belief_sets(
             ctx,

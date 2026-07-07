@@ -80,7 +80,7 @@ class InferenceRowScheduler:
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
         self._runs: dict[str, _InferenceRowOrchestratorRun] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._stream_bindings: dict[str, _InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
