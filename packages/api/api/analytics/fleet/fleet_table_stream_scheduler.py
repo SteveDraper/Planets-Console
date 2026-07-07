@@ -330,7 +330,7 @@ def _node_complete_stream_events(
 def _query_context_for_services(
     fleet_services: FleetComputeServices,
     *,
-    host_turn,
+    host_turn: TurnInfo,
 ):
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
