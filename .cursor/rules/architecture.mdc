@@ -34,6 +34,24 @@ The system is structured as four layers, each only ever depending on the layer(s
 **Shared primitives live below features.** If two analytics need the same lookup, codec, or scope filter, extract to `concepts/`, `serialization/`, or a dedicated shared module -- never import analytic A from analytic B for convenience.
 **One policy, one encoding.** Branching precedence, export classification, and similar policy must not be duplicated in parallel functions; share a decision record or table.
 
+## Turn analytics: orchestrator parity
+
+Turn-scoped analytics that run through the **compute orchestrator** (table streams today; export ensure and batch compute in later phases) must follow the **same template** for analogous concerns. Fleet ([#199](https://github.com/SteveDraper/Planets-Console/issues/199)) and scores inference ([#200](https://github.com/SteveDraper/Planets-Console/issues/200)) are the reference pair.
+
+| Concern | Shared pattern | Analytic-specific |
+|---------|----------------|-------------------|
+| **Registration** | `scope_key_spec`, `compute_profile` (`ComputeStepSpec` per `step_kind`), `PersistencePolicy`, wire builders, `run_step` | Step kinds, backends, artifact shape |
+| **Submission** | `ComputeRequest(scope, step_kind?, priority_band)` | Entry step (`materialize` vs `tier_solve`, etc.) |
+| **Step outcome** | Result wire declares `continue`, `persist`, or `complete` | What `persist` writes; reader gates on terminal quality |
+| **Table stream adapter** | Per-stream orchestrator binding; node-complete listener for wire events; scope guard + per-row run state | Mid-step incremental events (e.g. inference `solution`) |
+| **Durable persistence** | `PersistencePolicy.persist` on `persist` outcome only | Fleet `provenance.is_final`; scores persistable statuses |
+| **Invalidation** | `invalidation_generation` + epoch discard; analytic `invalidate` hook | Cross-analytic triggers (fleet ledger persist invalidates scores row) |
+| **Dependencies** | `DependencyOutputs` on job wire; no blocking ensure in workers | `ENSURE_DEPENDENCIES` per export catalog |
+
+Do not reintroduce per-analytic worker pools, adapter-owned durable persistence, or read paths that ignore terminal-quality metadata (e.g. `has_ledger` where `has_final_ledger` is required).
+
+Full specification: [design-compute-orchestrator.md](../../docs/design-compute-orchestrator.md). Glossary: [CONTEXT.md](../../CONTEXT.md).
+
 ## Repo Structure
 
 ```

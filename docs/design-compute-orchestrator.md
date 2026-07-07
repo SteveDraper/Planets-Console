@@ -135,9 +135,43 @@ The orchestrator builds a **DAG of compute scopes** from these edges (same walk 
 |-------|-------|---------|
 | **Compute node** | One DAG vertex at one scope | `scores@8,P`, `fleet@5,P` |
 | **Compute step** | One pool submission inside a node | scores tier-1; fleet one turn leg |
-| **Continuation** | Next step for same node after prior step completes | scores tier-2; invalidation retry leg |
+| **Continuation** | Next pool submission for the **same** node after prior step completes | scores tier *n+1* (repeatable `step_kind`); invalidation retry leg |
+
+Repeatable step kinds (scores `tier_solve`): the orchestrator re-queues the **same** `step_kind` until the result wire signals a terminal outcome. `step_index` on the node counts executions within that node (`0` = tier-1, `>0` = continuations) for pool fairness -- it is **not** an index into a fixed multi-entry profile when ladder length is dynamic.
 
 Fleet gap-fill `M..N` for one player is **`2 × (N − M + 1)` nodes** (scores + fleet per turn), not one `FleetPlayerJob` chain on a single worker.
+
+DAG **vertices** are registered on first `submit` for a scope chain; **pool work** is dependency-gated and dispatched incrementally (only `ready` nodes are submitted; dependents promote when ancestors complete).
+
+---
+
+## Compute step outcome
+
+Every `run_step` result wire carries an explicit **step outcome** the orchestrator interprets:
+
+| Outcome | Orchestrator action |
+|---------|---------------------|
+| **`continue`** | Increment `step_index`; re-queue the same `step_kind` for the same node |
+| **`persist`** | After epoch re-check, call analytic `PersistencePolicy.persist`, then mark node `complete` |
+| **`complete`** | Mark node `complete` **without** calling `persist` |
+
+Analytics own **what** `persist` writes and **how readers** gate on terminal quality. Examples:
+
+- **Fleet** -- `persist` on every materialization leg; `provenance.is_final` distinguishes gap-fill intermediates from ensure-satisfied finals. Readers use `has_final_ledger` / `is_fleet_export_ensure_satisfied`, not raw `has_ledger`, where terminal quality matters.
+- **Scores inference** -- `persist` only for terminal `exact` / `no_exact_solution`; `stopped` uses `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
+
+Fleet and scores share the orchestrator contract; persistence semantics differ by domain.
+
+---
+
+## Compute request entry step
+
+`ComputeRequest` may name an entry `step_kind` so one registration profile serves multiple callers on the same scope. Example scores profile: `(materialize, tier_solve)`.
+
+- **Export ensure / DAG satisfaction** -- submit from profile step 0 (`materialize`, inline).
+- **Inference table stream** -- submit with `step_kind="tier_solve"` and `priority_band="stream_attached"`.
+
+The orchestrator honors the entry step when creating or attaching to a node.
 
 ---
 
@@ -179,10 +213,10 @@ Interpreter/process steps:
 
 - Receive **serializable `JobWire`** (orchestrator may prefetch `turn_wire`, `prior_ledger_wire`, dependency slices).
 - May read storage via worker-local `StorageBackend(storage_root)` when wire omits large payloads (ancestor already **complete**).
-- Return **`ResultWire`**; orchestrator persists after epoch re-check.
+- Return **`ResultWire`** with an explicit **step outcome** (`continue`, `persist`, or `complete`); see [Compute step outcome](#compute-step-outcome).
 - **Never** hold `AnalyticQueryContext`, schedulers, or gap-fill coordinators.
 
-Thread steps (scores tiers) may use session-bound state (`RowRun`) but still must not block on cross-node ensure.
+Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id` on the job wire; ladder progress stays adapter-owned between continuations. They must not block on cross-node ensure or call `ensure_fleet_export` in the worker.
 
 ### Job wire and dependency outputs
 
@@ -211,7 +245,16 @@ def run_fleet_materialization_leg(job: FleetMaterializationJobWire) -> FleetLegR
 
 This replaces in-worker `FleetInferenceMaterialization.held_inference_for_scoreboard_turn(...)` and stream-time `ensure_fleet_export` chains.
 
-### Caching
+#### Scores prior-turn fleet overlay (inference stream)
+
+Scores `ENSURE_DEPENDENCIES` already declare `fleet@(host_turn - 1, same player)`. For inference stream `tier_solve` wire build:
+
+1. **No `ensure_fleet_export` inside workers or tier steps.**
+2. **Pending-first, then refresh** -- first `tier_solve` wire may use `fleetTorpInputStatus: pending` when `fleet@(host_turn - 1)` is not yet terminal; when that fleet node completes, fleet invalidation bumps scores epoch, drops inference row persistence, and reschedules the open-stream row so later wires read overlay from `DependencyOutputs`.
+3. **Stream open** submits orchestrator `background`-band `fleet@(host_turn - 1)` per player (replaces ad-hoc warm threads).
+4. **Readers** of prior-turn fleet for overlay must use `has_final_ledger`, not `has_ledger` ([#200](https://github.com/SteveDraper/Planets-Console/issues/200) fixes `prior_turn_fleet_torp_overlay`).
+
+---
 
 | Layer | Mechanism |
 |-------|-----------|
@@ -252,9 +295,9 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 |------------|--------|
 | **Submit** | Record `generation_at_submit` |
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
-| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check |
+| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
 
-Same semantics as gap-fill coordinator leader/waiter retry, applied to all node kinds.
+Same semantics as gap-fill coordinator leader/waiter retry, applied to all node kinds. Scores `invalidation_generation` aligns with per-player fleet epoch so in-flight `tier_solve` work is discarded when `fleet@(host_turn - 1)` lands; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
 
 ---
 
@@ -262,10 +305,23 @@ Same semantics as gap-fill coordinator leader/waiter retry, applied to all node 
 
 | Owner | Responsibility |
 |-------|----------------|
-| **Orchestrator** | When to compute; singleflight; epoch gates; invoke persist hook |
-| **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules |
+| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome |
+| **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules; terminal-quality metadata on stored artifacts |
 
 Storage paths remain per [ADR 0002](adr/0002-analytic-persistence.md). Orchestrator is cache **coordinator**, not cache **schema** owner.
+
+### Table-stream terminal persistence (fleet-aligned template)
+
+All table-stream analytics follow the same adapter template ([#199](https://github.com/SteveDraper/Planets-Console/issues/199) fleet, [#200](https://github.com/SteveDraper/Planets-Console/issues/200) scores):
+
+| Concern | Owner |
+|---------|--------|
+| Per-stream `ComputeOrchestrator` binding | Stream adapter (one orchestrator per stream token; released on disconnect) |
+| Durable terminal write | `PersistencePolicy.persist` on `persist` outcome |
+| NDJSON wire events | Adapter `register_node_complete_listener` (and mid-step callbacks for incremental events) |
+| Cache replay at admission | Probe persistence directly (`has_final_ledger`, inference row store, etc.) |
+
+Do not use adapter `on_row_complete` callbacks for durable persistence once migrated.
 
 ---
 
@@ -291,13 +347,19 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
 
+**Thin adapters** (same template for fleet and scores):
+
+- One **compute orchestrator per open table stream** (stream-token binding; released on disconnect).
+- Submit `ComputeRequest` scopes to the orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
+- Register `node_complete_listener` to map terminal `result_wire` to NDJSON events.
+- Retain stream-only state (scope guard, per-row run registry, global pause gate).
+- **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
+
+**Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
+
 **Replace:**
 
-- `InferenceRowScheduler` and `FleetTableStreamScheduler` worker dequeue loops.
-
-**Thin adapters:**
-
-- Stream controllers submit compute steps / continuations to orchestrator and map completion to wire events.
+- `InferenceRowScheduler` and `FleetTableStreamScheduler` private worker dequeue loops (`_worker_loop`, `_work_queue`).
 
 ---
 
@@ -340,7 +402,7 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Worker pools | [#197](https://github.com/SteveDraper/Planets-Console/issues/197) | Global pool, priority bands, four backends |
 | Job wire + epochs | [#198](https://github.com/SteveDraper/Planets-Console/issues/198) | Wire builders, `DependencyOutputs`, invalidation re-check, persist coordination |
 | Fleet migration | [#199](https://github.com/SteveDraper/Planets-Console/issues/199) | Fleet leg steps; delete `FleetTableStreamScheduler` worker pool |
-| Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; delete `InferenceRowScheduler` worker pool |
+| Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; orchestrator primitives; delete `InferenceRowScheduler` worker pool; fleet overlay + `has_final_ledger` fix |
 | Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure/gap-fill via orchestrator; retire coordinator + blocking ensure |
 | Turn cache | [#201](https://github.com/SteveDraper/Planets-Console/issues/201) | Orchestrator LRU + prefetch into job wire |
 | Phase 2 | [#202](https://github.com/SteveDraper/Planets-Console/issues/202) | Route table/map `compute()` through orchestrator |

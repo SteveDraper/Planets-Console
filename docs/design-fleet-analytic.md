@@ -197,7 +197,7 @@ scores@M,P → fleet@M,P → scores@(M+1),P → fleet@(M+1),P → … → scores
 
 **What `ConflictError` means:** after `GAP_FILL_MAX_RETRIES` invalidation aborts, gap-fill raises `ConflictError` when the target **player ledger** is still not ensure-final. This is a **coherence / liveness** failure ("too many mid-chain invalidation bumps"), not evidence that two writers produced different fleet ledgers. The generation guard exists to prevent **torn chains** (e.g. persisting turn 6 after turn 5 was invalidated mid-flight).
 
-**Concurrent callers:** multiple entry points can request the same fleet node `(gameId, perspective, playerId, turn)` -- fleet table stream tile, scores export ensure (`fleet` @ *N*−1), and scores inference **background warm**. They share storage and the per-perspective invalidation-generation counter.
+**Concurrent callers:** multiple entry points can request the same fleet node `(gameId, perspective, playerId, turn)` -- fleet table stream tile, scores export ensure (`fleet` @ *N*−1), and scores inference stream orchestrator **`background`-band** warm ([#200](https://github.com/SteveDraper/Planets-Console/issues/200)). They share storage and the per-perspective invalidation-generation counter.
 
 **Phase 1 (shipped):** before raising `ConflictError`, and after each invalidation abort, re-read the target player's ledger cache; return it if another path already finished. Background warm treats `ConflictError` as success when the requested player's `fleet@(host_turn - 1)` ledger is ensure-final.
 
