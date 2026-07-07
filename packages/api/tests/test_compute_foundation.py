@@ -239,7 +239,49 @@ def test_build_compute_registry_rejects_duplicate_compute_ids():
         build_compute_registry(registrations)
 
 
-def test_production_compute_registry_imports_without_profiles():
+def test_production_compute_registry_imports_fleet_and_scores():
     from api.compute.registry import COMPUTE_REGISTRY
 
-    assert COMPUTE_REGISTRY == {}
+    assert "fleet" in COMPUTE_REGISTRY
+    assert "scores" in COMPUTE_REGISTRY
+
+
+def test_fleet_compute_profile_uses_interpreter_backend():
+    from api.analytics.fleet.compute_orchestration import FLEET_COMPUTE_PROFILE
+
+    assert len(FLEET_COMPUTE_PROFILE.steps) == 1
+    assert FLEET_COMPUTE_PROFILE.steps[0].backend == "interpreter"
+
+
+def test_fleet_materialization_leg_import_does_not_load_transport_stack():
+    """Compute-plane materialization leg must not pull FastAPI or Pydantic."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    api_root = Path(__file__).resolve().parent.parent
+    script = """
+import sys
+from api.analytics.fleet.compute_plane.materialization_leg import run_fleet_materialization_leg
+blocked = [
+    name
+    for name in sys.modules
+    if name == "fastapi"
+    or name.startswith("fastapi.")
+    or name == "pydantic"
+    or name.startswith("pydantic.")
+    or name == "pydantic_core"
+    or name.startswith("pydantic_core.")
+]
+if blocked:
+    raise SystemExit(f"unexpected transport modules: {blocked}")
+if run_fleet_materialization_leg is None:
+    raise SystemExit("run_fleet_materialization_leg import failed")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=api_root,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout

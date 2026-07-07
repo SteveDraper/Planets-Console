@@ -47,6 +47,32 @@ def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
     shutdown_compute_worker_pool_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_fleet_table_stream_compute_state(request: pytest.FixtureRequest):
+    """Reset orchestrator and worker pool between fleet stream tests."""
+    if "test_fleet_table_stream" not in request.path.name:
+        yield
+        return
+    from api.analytics.fleet.fleet_table_stream_registry import (
+        reset_fleet_table_stream_registry_for_tests,
+    )
+    from api.analytics.fleet.fleet_table_stream_scheduler import (
+        reset_fleet_table_stream_scheduler_for_tests,
+    )
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_fleet_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
+    reset_fleet_table_stream_scheduler_for_tests()
+    yield
+    reset_fleet_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
+    reset_fleet_table_stream_scheduler_for_tests()
+
+
 # OR-Tools / inference-corpus integration tests excluded from `make ci` (see Makefile `test_api`).
 _SLOW_TEST_NAMES = frozenset(
     {

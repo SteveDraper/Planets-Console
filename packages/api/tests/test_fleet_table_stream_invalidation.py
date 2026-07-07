@@ -10,7 +10,10 @@ from pathlib import Path
 
 import pytest
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+from api.analytics.fleet.compute_services import (
+    FleetComputeServices,
+    turn_chain_through,
+)
 from api.analytics.fleet.fleet_table_stream_registry import (
     controller_for_scope,
     reset_fleet_table_stream_registry_for_tests,
@@ -42,8 +45,13 @@ def memory_backend():
 
 
 def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler(worker_count=0)
+    scheduler = FleetTableStreamScheduler()
 
     def _get_scheduler() -> FleetTableStreamScheduler:
         return scheduler
@@ -90,7 +98,8 @@ def _run_ids_for_players(
     player_ids: tuple[int, ...],
 ) -> dict[int, str]:
     mapping: dict[int, str] = {}
-    for session in scheduler._runs.values():
+    for run in scheduler._runs.values():
+        session = run.session
         if session.player_id in player_ids:
             mapping[session.player_id] = session.run_id
     return mapping
@@ -125,21 +134,84 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     memory_backend,
 ):
     """All-cached replay: evidence invalidation reschedules on the open stream."""
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.scores_exports_helpers import put_persisted_row
+
     reset_fleet_table_stream_registry_for_tests()
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
-    services = build_ephemeral_fleet_compute_services(
-        sample_turn,
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    for player_id in player_ids:
+        put_persisted_row(
+            inference_persistence,
+            sample_turn,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seeded for fleet stream invalidation",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=turn_number,
+        )
+
+    stored_turns = turn_chain_through(sample_turn)
+
+    def load_turn(turn: int):
+        return stored_turns.get(turn)
+
+    services = FleetComputeServices(
+        persistence=FleetSnapshotPersistenceService(memory_backend),
         game_id=628580,
         perspective=1,
+        load_turn=load_turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
     )
     fleet_persistence = services.persistence
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
     invalidation = InferenceInvalidationService(
         inference_persistence,
         fleet_persistence=fleet_persistence,
     )
+    for player_id in player_ids:
+        fleet_persistence.put_ledger(
+            628580,
+            1,
+            turn_number - 1,
+            player_id,
+            PersistedFleetLedger(
+                ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
+        put_persisted_row(
+            inference_persistence,
+            sample_turn,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seeded for fleet stream invalidation prior turn",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=turn_number - 1,
+        )
     _seed_cached_ledgers(
         fleet_persistence,
         sample_turn,
@@ -186,12 +258,15 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     assert fleet_persistence.get_ledger(628580, 1, turn_number, target_player_id) is None
 
     rescheduled_run = scheduler._runs[_run_ids_for_players(scheduler, player_ids)[target_player_id]]
-    rescheduled_run.event_queue.put(
+    rescheduled_run.session.event_queue.put(
         fleet_complete_event(
             is_final=True,
             summary="after evidence invalidation on cached row",
         )
     )
+    controller = controller_for_scope(scope)
+    if controller is not None:
+        controller.wake_multiplex.set()
 
     _wait_until(
         lambda: any(
@@ -220,21 +295,84 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     memory_backend,
 ):
     """Integration: invalidation while iter_fleet_table_stream_events multiplex is active."""
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.scores_exports_helpers import put_persisted_row
+
     reset_fleet_table_stream_registry_for_tests()
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
-    services = build_ephemeral_fleet_compute_services(
-        sample_turn,
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    for player_id in player_ids:
+        put_persisted_row(
+            inference_persistence,
+            sample_turn,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seeded for fleet stream invalidation",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=turn_number,
+        )
+
+    stored_turns = turn_chain_through(sample_turn)
+
+    def load_turn(turn: int):
+        return stored_turns.get(turn)
+
+    services = FleetComputeServices(
+        persistence=FleetSnapshotPersistenceService(memory_backend),
         game_id=628580,
         perspective=1,
+        load_turn=load_turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
     )
     fleet_persistence = services.persistence
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
     invalidation = InferenceInvalidationService(
         inference_persistence,
         fleet_persistence=fleet_persistence,
     )
+    for player_id in player_ids:
+        fleet_persistence.put_ledger(
+            628580,
+            1,
+            turn_number - 1,
+            player_id,
+            PersistedFleetLedger(
+                ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
+        put_persisted_row(
+            inference_persistence,
+            sample_turn,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seeded for fleet stream invalidation prior turn",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=turn_number - 1,
+        )
     _seed_cached_ledgers(
         fleet_persistence,
         sample_turn,

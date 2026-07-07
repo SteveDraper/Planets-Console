@@ -34,8 +34,7 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
-from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
-from api.errors import ValidationError
+from api.exceptions import ValidationError
 
 
 def _require_object_list(raw: object, *, field_name: str) -> list[dict[str, Any]]:
@@ -186,11 +185,17 @@ def _resolved_fleet_component_id(component_id: int) -> int | None:
 
 
 def fleet_build_option_set_from_inference_ship_build(
-    ship_build: InferenceSolutionShipBuild,
+    ship_build: object,
     *,
     solution_rank_weight: int,
 ) -> FleetBuildOptionSet:
     """Map one inference solution ship build into a fleet build option set."""
+    from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
+
+    if not isinstance(ship_build, InferenceSolutionShipBuild):
+        raise TypeError(
+            f"ship_build must be InferenceSolutionShipBuild, got {type(ship_build).__name__}",
+        )
     combo_id = ship_build.combo_id or None
     return FleetBuildOptionSet(
         combo_id=combo_id,

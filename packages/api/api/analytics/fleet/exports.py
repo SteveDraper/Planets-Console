@@ -33,6 +33,7 @@ PATH_PREFIX_SCOPE_RULES = (
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
     EnsureDependency(analytic_id="scores", turn_delta=0, player_id="same"),
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
 )
 
 

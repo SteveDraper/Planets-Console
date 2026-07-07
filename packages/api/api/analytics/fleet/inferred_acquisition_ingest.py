@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
-from api.analytics.fleet.scoreboard_counts import iter_current_turn_scores
+from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -17,15 +16,12 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
-from api.analytics.scores.placeholder_targets import (
-    ScoreboardPlaceholderTarget,
-    homeworld_starting_freighter_hull_id,
-    homeworld_starting_inventory_counts,
-    scoreboard_placeholder_targets,
-    should_seed_homeworld_starting_inventory,
-)
 from api.models.game import TurnInfo
 from api.models.player import Score
+
+if TYPE_CHECKING:
+    from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
+    from api.analytics.fleet.scoreboard_placeholder_targets import ScoreboardPlaceholderTarget
 
 SCOREBOARD_SOURCE = "scoreboard"
 
@@ -62,6 +58,11 @@ def ingest_player_inferred_acquisitions(
     turn_number = turn.settings.turn
     score = _score_for_player(turn, ledger.player_id)
     if score is not None:
+        from api.analytics.fleet.scoreboard_placeholder_targets import (
+            scoreboard_placeholder_targets,
+            should_seed_homeworld_starting_inventory,
+        )
+
         if should_seed_homeworld_starting_inventory(turn):
             _ensure_homeworld_starting_inventory_rows(
                 ledger,
@@ -105,6 +106,10 @@ def _ensure_homeworld_starting_inventory_rows(
     shell_turn: int,
 ) -> None:
     """Seed homeworld starting ships not represented in accelerated scoreboard deltas."""
+    from api.analytics.fleet.scoreboard_placeholder_targets import (
+        homeworld_starting_inventory_counts,
+    )
+
     freighters, warships = homeworld_starting_inventory_counts(turn)
     _ensure_starting_inventory_rows(
         ledger,
@@ -173,6 +178,10 @@ def _starting_inventory_hull_field(
     ship_class: FleetShipClass,
 ) -> FleetFieldKnown | FleetFieldUnknown:
     if ship_class == "freighter":
+        from api.analytics.fleet.scoreboard_placeholder_targets import (
+            homeworld_starting_freighter_hull_id,
+        )
+
         return FleetFieldKnown(homeworld_starting_freighter_hull_id())
     return FleetFieldUnknown()
 

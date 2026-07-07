@@ -4,21 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from api.analytics.scores.placeholder_targets import (
-    homeworld_starting_inventory_counts,
-    is_first_reliable_accelerated_shell_turn,
+from api.analytics.fleet.scoreboard_ship_totals import (
+    compute_max_ship_id_bound,
+    iter_current_turn_scores,
 )
 from api.analytics.turn_roster import iter_turn_players
 from api.models.game import TurnInfo
 from api.models.player import Score
-
-
-def iter_current_turn_scores(turn: TurnInfo) -> Iterator[Score]:
-    """Yield scoreboard rows for the shell turn."""
-    turn_number = turn.settings.turn
-    for score in turn.scores:
-        if score.turn == turn_number:
-            yield score
 
 
 def _current_turn_scores(turn: TurnInfo) -> Iterator[Score]:
@@ -49,18 +41,6 @@ def global_net_delta_from_scores(turn: TurnInfo) -> int:
     return sum(score.shipchange + score.freighterchange for score in _current_turn_scores(turn))
 
 
-def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
-    """Upper-bound unknown ship ids from current-turn scoreboard totals and deltas.
-
-    Returns None when the current turn has no scoreboard rows; callers must skip
-    id-bound tightening rather than inferring from visible ship lists.
-    """
-    scores = list(_current_turn_scores(turn))
-    if not scores:
-        return None
-    return _max_ship_id_bound_from_scores(scores)
-
-
 def _max_ship_id_bound_from_scores(scores: list[Score]) -> int:
     total = sum(score.capitalships + score.freighters for score in scores)
     net = sum(score.shipchange + score.freighterchange for score in scores)
@@ -86,6 +66,10 @@ def global_ship_count_at_synthetic_prior(turn: TurnInfo) -> int | None:
 
 def global_homeworld_starting_ship_id_bound(turn: TurnInfo) -> int:
     """Upper bound on ids after each player receives homeworld starting ships."""
+    from api.analytics.fleet.scoreboard_placeholder_targets import (
+        homeworld_starting_inventory_counts,
+    )
+
     freighters, warships = homeworld_starting_inventory_counts(turn)
     per_player = warships + freighters
     if per_player <= 0:
@@ -101,6 +85,10 @@ def max_ship_id_bound_for_inferred_record(
     is_starting_inventory: bool,
 ) -> int | None:
     """Resolve the id upper bound for one inferred placeholder on this shell turn."""
+    from api.analytics.fleet.scoreboard_placeholder_targets import (
+        is_first_reliable_accelerated_shell_turn,
+    )
+
     if is_starting_inventory:
         bound = global_homeworld_starting_ship_id_bound(turn)
         return bound if bound > 0 else None

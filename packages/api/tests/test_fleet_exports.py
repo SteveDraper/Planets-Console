@@ -41,6 +41,7 @@ def test_export_registry_includes_non_empty_fleet_catalog():
     assert not catalog.is_empty
     assert catalog.ensure_dependencies == (
         EnsureDependency(analytic_id="scores", turn_delta=0, player_id="same"),
+        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
     )
     assert catalog.materialize_export_tree is not None
     assert catalog.ensure_export is not None

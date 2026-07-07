@@ -1,9 +1,6 @@
-"""Exception hierarchy and HTTP exception handling for the Core API.
+"""FastAPI HTTP exception handling for the Core API."""
 
-All package-raised exceptions should inherit from CoreAPIError (or a descendant).
-Each exception class may override `http_error` (default 500) to control the
-HTTP status returned to the client.
-"""
+from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
@@ -12,73 +9,30 @@ from typing import Type
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from api.exceptions import (
+    ConflictError,
+    CoreAPIError,
+    FleetMaterializationTimeoutError,
+    LoginCredentialsRequiredError,
+    NotFoundError,
+    PlanetsConsoleError,
+    UpstreamPlanetsError,
+    ValidationError,
+)
+
+__all__ = [
+    "ConflictError",
+    "CoreAPIError",
+    "FleetMaterializationTimeoutError",
+    "LoginCredentialsRequiredError",
+    "NotFoundError",
+    "PlanetsConsoleError",
+    "UpstreamPlanetsError",
+    "ValidationError",
+    "make_http_exception_handler",
+]
+
 logger = logging.getLogger(__name__)
-
-
-class PlanetsConsoleError(Exception):
-    """Base for all server-side exceptions that map to an HTTP status.
-
-    Subclass this in each package (CoreAPIError, BFFError) so that handlers
-    can return the exception's http_error as the response status.
-    """
-
-    http_error: int = 500
-
-    def __init__(self, message: str = "", *, http_error: int | None = None) -> None:
-        super().__init__(message)
-        if http_error is not None:
-            self.http_error = http_error
-
-
-class CoreAPIError(PlanetsConsoleError):
-    """Root exception for the Core REST API package.
-
-    All exceptions raised by the Core API should inherit from this (or a
-    descendant). Override the class attribute `http_error` for a fixed status
-    per exception type, or pass `http_error=` to the constructor for one-off
-    overrides.
-    """
-
-    http_error: int = 500
-
-
-# --- Store / storage layer exceptions (design §6) ---
-
-
-class NotFoundError(CoreAPIError):
-    """Path does not exist (read/update/delete)."""
-
-    http_error: int = 404
-
-
-class ConflictError(CoreAPIError):
-    """Create on existing path, or update would change node type."""
-
-    http_error: int = 409
-
-
-class ValidationError(CoreAPIError):
-    """Invalid payload/path (e.g. reserved @ key, malformed path segment)."""
-
-    http_error: int = 422
-
-
-class LoginCredentialsRequiredError(CoreAPIError):
-    """Stored API key is missing and no password was supplied for refresh."""
-
-    http_error: int = 401
-
-
-class UpstreamPlanetsError(CoreAPIError):
-    """Planets.nu HTTP or transport failure, or an unusable response body."""
-
-    http_error: int = 502
-
-
-class FleetMaterializationTimeoutError(CoreAPIError):
-    """Coordinated fleet gap-fill did not complete within the waiter timeout."""
-
-    http_error: int = 504
 
 
 def make_http_exception_handler(
