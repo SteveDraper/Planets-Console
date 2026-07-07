@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -14,6 +14,7 @@ from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmit
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
@@ -102,6 +103,8 @@ class ComputeOrchestrator:
         worker_pool: ComputeWorkerPool | None = None,
     ) -> None:
         self._ctx = ctx
+        self._turn_cache = OrchestratorTurnCache(ctx.load_turn)
+        self._cached_ctx = replace(ctx, load_turn=self._turn_cache.get)
         self._compute_registry = compute_registry
         self._pool_registration_id: int | None = None
         if worker_pool is not None:
@@ -127,6 +130,10 @@ class ComputeOrchestrator:
     @property
     def metrics(self) -> OrchestratorMetrics:
         return self._metrics
+
+    @property
+    def turn_cache(self) -> OrchestratorTurnCache:
+        return self._turn_cache
 
     def register_node_complete_listener(
         self,
@@ -226,11 +233,12 @@ class ComputeOrchestrator:
     ) -> None:
         export_scope = compute_scope_to_export_scope(root_scope)
         planned_nodes = plan_compute_dag(
-            self._ctx,
+            self._cached_ctx,
             root_scope.analytic_id,
             export_scope,
             compute_registry=self._compute_registry,
         )
+        self._turn_cache.prefetch_planned_nodes(planned_nodes)
         for planned in planned_nodes:
             self._register_planned_node(planned, priority_band=priority_band)
         if root_scope not in self._nodes:
@@ -389,7 +397,7 @@ class ComputeOrchestrator:
         return builder(
             node.scope,
             dependency_outputs=dependency_outputs,
-            ctx=self._ctx,
+            ctx=self._cached_ctx,
         )
 
     def _begin_step_execution(self, node: ComputeNodeRun) -> None:
@@ -430,7 +438,7 @@ class ComputeOrchestrator:
             self._dispatch()
             return
         node.result_wire = result_wire
-        registration.persistence_policy.persist(self._ctx, node.scope, result_wire)
+        registration.persistence_policy.persist(self._cached_ctx, node.scope, result_wire)
         self._metrics.persist_calls += 1
         self._complete_node(node)
 

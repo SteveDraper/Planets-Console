@@ -81,12 +81,20 @@ def build_fleet_materialization_leg_job_wire(
         raise ValueError(f"stored turn {export_scope.turn} is required for fleet materialization")
 
     player_id = scope.player_id
+    services = resolve_fleet_services(ctx)
     prior_scope = _fleet_prior_scope(scope)
     prior_persisted: PersistedFleetLedger | None = None
     if prior_scope is not None:
         prior_wire = dependency_outputs.get(prior_scope)
         if prior_wire is not None:
             prior_persisted = persisted_fleet_ledger_from_json(prior_wire["persistedLedgerWire"])
+        if prior_persisted is None:
+            prior_persisted = services.persistence.get_ledger(
+                scope.game_id,
+                scope.perspective,
+                prior_scope.turn,
+                player_id,
+            )
 
     if prior_persisted is None:
         baseline_ledger = ensure_fleet_baseline_for_player(
@@ -99,8 +107,6 @@ def build_fleet_materialization_leg_job_wire(
     else:
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
-    services = resolve_fleet_services(ctx)
-    load_turn = services.load_turn
     turn_context = FleetTurnContext.from_turn(turn)
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=scope.turn,
@@ -109,7 +115,7 @@ def build_fleet_materialization_leg_job_wire(
         player_id=player_id,
         game_id=scope.game_id,
         perspective=scope.perspective,
-        load_turn=load_turn,
+        load_turn=ctx.load_turn,
         inference_materialization=services.inference_materialization,
     )
 

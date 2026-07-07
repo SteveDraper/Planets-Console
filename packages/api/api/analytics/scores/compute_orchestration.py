@@ -8,6 +8,7 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.wire import DependencyOutputs
 
 SCORES_MATERIALIZE = "materialize"
 
@@ -21,7 +22,7 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
 def build_scores_materialize_job_wire(
     scope: ComputeScope,
     *,
-    dependency_outputs: object,
+    dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
