@@ -145,6 +145,46 @@ def test_pause_holds_enqueued_jobs_and_resume_requeues(sample_turn, monkeypatch)
     assert len(submitted_scopes) == 1
 
 
+def test_resume_dispatches_orchestrator_ready_work(sample_turn):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler()
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
+
+    class FakeOrchestrator:
+        nodes = {}
+
+        def __init__(self) -> None:
+            self.dispatch_calls = 0
+
+        def set_dispatch_gate(self, _gate: object) -> None:
+            pass
+
+        def dispatch_ready_work(self) -> None:
+            self.dispatch_calls += 1
+
+    fake_orchestrator = FakeOrchestrator()
+    fake_binding = type(
+        "FakeBinding",
+        (),
+        {
+            "orchestrator": fake_orchestrator,
+            "unregister_listener": lambda: None,
+            "query_context": object(),
+        },
+    )()
+    scheduler._stream_bindings[stream_token] = fake_binding
+    scheduler.pause_globally(scope)
+
+    scheduler.resume_globally(scope)
+
+    assert fake_orchestrator.dispatch_calls == 1
+
+
 def test_new_scope_invalidates_retained_pause_state(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()

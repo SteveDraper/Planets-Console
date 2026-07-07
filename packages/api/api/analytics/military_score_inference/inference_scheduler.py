@@ -172,6 +172,7 @@ class InferenceRowScheduler:
             self._globally_paused = False
             self._apply_dispatch_gates_locked()
             self._flush_held_submissions_locked()
+            self._dispatch_ready_orchestrator_work_locked()
             self._broadcast_global_pause_locked(paused=False)
             return self._global_pause_status_locked(scope)
 
@@ -531,6 +532,10 @@ class InferenceRowScheduler:
         gate = self._dispatch_gate if self._globally_paused else None
         for binding in self._stream_bindings.values():
             binding.orchestrator.set_dispatch_gate(gate)
+
+    def _dispatch_ready_orchestrator_work_locked(self) -> None:
+        for binding in self._stream_bindings.values():
+            binding.orchestrator.dispatch_ready_work()
 
     @property
     def _dispatch_gate(self) -> Callable[[object], bool]:

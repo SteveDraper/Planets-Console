@@ -127,6 +127,11 @@ class ComputeOrchestrator:
         with self._condition:
             self._dispatch_gate = gate
 
+    def dispatch_ready_work(self) -> None:
+        """Dispatch any ready nodes allowed by the current gate."""
+        with self._condition:
+            self._dispatch()
+
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
         return self._worker_pool

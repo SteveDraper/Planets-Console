@@ -1000,3 +1000,41 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
     assert orchestrator.nodes[branch_b_scope].state == "ready"
     assert pool_submissions == [SHARED_ID, BRANCH_C_ID]
     assert orchestrator.ready_scopes() == (branch_b_scope,)
+
+
+def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    pool_submissions: list[ComputeScope] = []
+    is_paused = False
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    compute_registry = build_compute_registry(
+        (_pool_compute_registration(SHARED_ID, backend="thread"),)
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    orchestrator.set_dispatch_gate(lambda _node: not is_paused)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    orchestrator.submit(ComputeRequest(scope=shared_scope))
+    is_paused = True
+    orchestrator.complete_pool_step(shared_scope, result_wire=StepResult(outcome="continue"))
+
+    assert pool_submissions == [shared_scope]
+    assert orchestrator.nodes[shared_scope].state == "ready"
+    assert orchestrator.ready_scopes() == (shared_scope,)
+
+    is_paused = False
+    orchestrator.dispatch_ready_work()
+
+    assert pool_submissions == [shared_scope, shared_scope]
+    assert orchestrator.nodes[shared_scope].state == "running"
