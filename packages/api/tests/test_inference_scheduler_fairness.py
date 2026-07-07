@@ -25,9 +25,7 @@ def _patch_scores_dag_without_fleet_deps(monkeypatch: pytest.MonkeyPatch) -> Non
     from api.compute.dag import plan_compute_dag as real_plan
     from api.compute.scope import normalize_export_scope_to_compute_scope
 
-    def scores_only_dag(
-        ctx, analytic_id, export_scope, *, compute_registry, force_root=False
-    ):
+    def scores_only_dag(ctx, analytic_id, export_scope, *, compute_registry, force_root=False):
         if analytic_id != "scores":
             return real_plan(
                 ctx,
