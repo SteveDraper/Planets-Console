@@ -7,11 +7,23 @@ import json
 from pathlib import Path
 
 import pytest
+from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
+from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
+from api.analytics.options import TurnAnalyticsOptions
+from api.compute.scope import ComputeScope
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.test_fleet_persistence import (
@@ -268,3 +280,71 @@ def test_fleet_ledger_persisted_invalidates_scores_row_for_player_only(
     assert inference_persistence.get_row(628580, 1, 112, player_q) is not None
     assert rescheduled_players == [player_p]
     assert all_rescheduled == []
+
+
+def test_orchestrator_fleet_persist_notifies_scores_invalidation(
+    persistence,
+    load_turn,
+    memory_backend,
+    monkeypatch,
+):
+    from api.analytics.turn_roster import iter_turn_players
+
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    players = list(iter_turn_players(turn_112))
+    player_p = players[0].id
+    player_q = players[1].id
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    rescheduled_players: list[int] = []
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_inference_row",
+        lambda _scope, player_id: rescheduled_players.append(player_id),
+    )
+
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=persistence,
+    )
+    invalidation.wire_scores_invalidation_to_fleet_persistence()
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    ctx = make_analytic_query_context(
+        turn_111,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_services={
+            "fleet": FleetComputeServices(
+                persistence=persistence,
+                game_id=628580,
+                perspective=1,
+                load_turn=load_turn,
+            ),
+        },
+    )
+    persisted = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=player_p),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+
+    FleetPersistencePolicy().persist(
+        ctx,
+        ComputeScope(
+            analytic_id="fleet",
+            game_id=628580,
+            perspective=1,
+            turn=111,
+            player_id=player_p,
+        ),
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)},
+    )
+
+    assert inference_persistence.get_row(628580, 1, 112, player_p) is None
+    assert inference_persistence.get_row(628580, 1, 112, player_q) is not None
+    assert rescheduled_players == [player_p]

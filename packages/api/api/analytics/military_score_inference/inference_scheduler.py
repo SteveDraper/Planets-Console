@@ -177,7 +177,7 @@ class InferenceRowScheduler:
 
     def unregister_session(self, run_id: str) -> None:
         with self._lock:
-            self._remove_run_locked(run_id, clear_held=True)
+            self._remove_run_locked(run_id)
 
     def end_inference_stream(
         self,
@@ -191,7 +191,7 @@ class InferenceRowScheduler:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 session.cancel_token.cancel()
-                self._remove_run_locked(session.run_id, clear_held=True)
+                self._remove_run_locked(session.run_id)
             self._drop_held_for_stream_locked(stream_token)
             binding = self._stream_bindings.pop(stream_token, None)
             if binding is not None:
@@ -214,7 +214,7 @@ class InferenceRowScheduler:
             run = self._runs.get(run_id)
             if run is not None:
                 run.session.cancel_token.cancel()
-            self._remove_run_locked(run_id, clear_held=True)
+            self._remove_run_locked(run_id)
 
     def enqueue_tier_ladder(
         self,
@@ -425,7 +425,7 @@ class InferenceRowScheduler:
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
-            self._remove_run_locked(session.run_id, clear_held=False)
+            self._remove_run_locked(session.run_id)
 
     def _release_stream_binding_locked(
         self,
@@ -445,7 +445,7 @@ class InferenceRowScheduler:
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         for run_id in list(self._runs):
-            self._remove_run_locked(run_id, clear_held=False)
+            self._remove_run_locked(run_id)
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
             self._release_stream_binding_locked(binding)
@@ -535,17 +535,13 @@ class InferenceRowScheduler:
 
         return gate
 
-    def _remove_run_locked(self, run_id: str, *, clear_held: bool) -> None:
-        from api.analytics.scores.tier_row_run_registry import get_row_run, unregister_row_run
+    def _remove_run_locked(self, run_id: str) -> None:
+        from api.analytics.scores.tier_row_run_registry import unregister_row_run
 
         run = self._runs.pop(run_id, None)
         unregister_row_run(run_id)
         if run is None:
             return
-        if clear_held:
-            row_run = get_row_run(run_id)
-            if row_run is not None:
-                row_run.clear_held()
         root_scope = run.root_scope
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.root_scope != root_scope

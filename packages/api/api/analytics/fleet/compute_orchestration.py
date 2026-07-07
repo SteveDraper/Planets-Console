@@ -228,7 +228,6 @@ class FleetPersistencePolicy:
             scope.turn,
             scope.player_id,
             persisted,
-            defer_ledger_persisted_notification=True,
         )
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
