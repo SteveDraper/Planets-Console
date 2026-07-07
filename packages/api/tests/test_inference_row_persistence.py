@@ -381,6 +381,7 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
 ):
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
     from api.analytics.military_score_inference.inference_stream_session import (
         InferenceRowStreamSession,
     )
@@ -400,7 +401,6 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
-    from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
     from api.compute.scope import ComputeScope
 
     reset_tier_row_run_registry_for_tests()

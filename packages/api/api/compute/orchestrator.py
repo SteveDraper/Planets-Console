@@ -300,8 +300,7 @@ class ComputeOrchestrator:
             if step.step_kind == entry_step_kind:
                 return index
         raise ValueError(
-            f"unknown entry step_kind {entry_step_kind!r} for analytic "
-            f"{registration.analytic_id!r}"
+            f"unknown entry step_kind {entry_step_kind!r} for analytic {registration.analytic_id!r}"
         )
 
     def _refresh_all_readiness(self) -> None:

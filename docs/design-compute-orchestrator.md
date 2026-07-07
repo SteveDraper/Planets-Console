@@ -357,9 +357,9 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 **Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 
-**Replace:**
+**Replaced (#199, #200):**
 
-- `InferenceRowScheduler` and `FleetTableStreamScheduler` private worker dequeue loops (`_worker_loop`, `_work_queue`).
+- Legacy `InferenceRowScheduler` and `FleetTableStreamScheduler` private worker dequeue loops (`_worker_loop`, `_work_queue`). Both are thin orchestrator stream adapters; tier and fleet leg work submits through the global compute pool.
 
 ---
 

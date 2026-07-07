@@ -61,9 +61,7 @@ def _reset_scores_tier_registry():
 
 
 def _session_for_player(sample_turn, *, player_id: int | None = None) -> InferenceRowStreamSession:
-    score = next(
-        row for row in sample_turn.scores if player_id is None or row.ownerid == player_id
-    )
+    score = next(row for row in sample_turn.scores if player_id is None or row.ownerid == player_id)
     return InferenceRowStreamSession(
         player_id=score.ownerid,
         observation=build_inference_observation(score, sample_turn),
@@ -100,7 +98,9 @@ def test_scores_registration_includes_tier_solve_step() -> None:
 def test_tier_job_outcome_mapping(sample_turn) -> None:
     run = _register_run(sample_turn)
 
-    continue_result = tier_job_outcome_to_step_result(run, TierJobOutcome(enqueue_continuation=True))
+    continue_result = tier_job_outcome_to_step_result(
+        run, TierJobOutcome(enqueue_continuation=True)
+    )
     assert continue_result.outcome == "continue"
 
     persist_result = tier_job_outcome_to_step_result(
@@ -290,15 +290,14 @@ def test_run_scores_tier_solve_returns_orchestrator_outcome(sample_turn) -> None
 def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.exports.catalog import AnalyticExportCatalog
-    from api.analytics.registration import TurnAnalyticRegistration
     from api.analytics.exports.registry import EXPORT_REGISTRY
+    from api.analytics.registration import TurnAnalyticRegistration
     from api.compute import AnalyticComputeProfile, ComputeStepSpec
 
     tier_catalog = AnalyticExportCatalog(
         analytic_id="scores-tier-probe",
         is_ensure_satisfied=lambda _ctx, _scope: False,
     )
-    from api.analytics.exports.registry import EXPORT_REGISTRY
 
     run = _register_run(sample_turn)
     ctx = make_analytic_query_context(
@@ -322,9 +321,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
             steps=(ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),),
         ),
         persistence_policy=SCORES_REGISTRATION.persistence_policy,
-        build_step_job_wires=(
-            (SCORES_TIER_SOLVE, build_scores_tier_solve_job_wire),
-        ),
+        build_step_job_wires=((SCORES_TIER_SOLVE, build_scores_tier_solve_job_wire),),
         run_steps=((SCORES_TIER_SOLVE, run_scores_tier_solve),),
     )
     compute_registry = build_compute_registry((tier_registration,))

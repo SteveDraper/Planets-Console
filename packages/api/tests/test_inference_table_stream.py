@@ -7,7 +7,6 @@ import json
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    get_inference_row_scheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -252,7 +251,7 @@ def test_cancel_run_purges_queued_tier_jobs_for_run(sample_turn):
     scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
     scheduler.enqueue_tier_ladder(other_session, stream_token=stream_token)
     scheduler.pause_globally(scope)
-    scheduler._enqueue_continuation(session)
+    scheduler._submit_tier_continuation_locked(session)
 
     scheduler.cancel_run(session.run_id)
 

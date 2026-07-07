@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import pytest
 from api.analytics.fleet.chain import (
     ensure_fleet_baseline_for_player,
     get_or_materialize_fleet_snapshot,
@@ -23,6 +22,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
     schedule_background_prior_turn_fleet_warm,
 )
+
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
@@ -119,7 +119,9 @@ def test_resolve_prior_turn_overlay_readonly_pending_on_partial_ledger(sample_tu
             ),
         ),
     )
-    assert fleet_services.persistence.has_ledger(ctx.game_id, ctx.perspective, prior_turn, player_id)
+    assert fleet_services.persistence.has_ledger(
+        ctx.game_id, ctx.perspective, prior_turn, player_id
+    )
     assert not fleet_services.persistence.has_final_ledger(
         ctx.game_id,
         ctx.perspective,

@@ -97,7 +97,7 @@ def test_pause_holds_continuation_tier_job_enqueued_while_paused(sample_turn):
     session = _session_for_turn(sample_turn)
     scheduler.pause_globally(scope)
 
-    scheduler._enqueue_continuation(session)
+    scheduler._submit_tier_continuation_locked(session)
 
     status = scheduler.global_pause_status(scope)
     assert status["heldContinuationCount"] == 1
@@ -267,7 +267,11 @@ def test_stale_end_inference_stream_does_not_clear_replacement_stream(sample_tur
 def test_emit_held_solutions_snapshots_merged_list(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()
-    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=sample_turn.settings.turn)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
     scheduler.begin_scope(scope)
     session = _session_for_turn(sample_turn)
     scheduler.enqueue_tier_ladder(session)

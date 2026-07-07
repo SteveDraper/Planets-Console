@@ -290,7 +290,11 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
 
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=sample_turn.settings.turn)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
     scheduler.begin_scope(scope)
     orchestration = _accelerated_split_orchestration(sample_turn)
     orchestration.current_segment_index = 1

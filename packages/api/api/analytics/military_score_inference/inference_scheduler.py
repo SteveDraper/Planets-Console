@@ -70,12 +70,15 @@ class InferenceRowScheduler:
         self,
         *,
         on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
+        defer_orchestrator_submit: bool = False,
         worker_count: int | None = None,
         **_deprecated_kwargs: object,
     ) -> None:
         del _deprecated_kwargs
         self._on_held_solutions_updated = on_held_solutions_updated
-        self._defer_orchestrator_submit = worker_count == 0
+        if worker_count == 0:
+            defer_orchestrator_submit = True
+        self._defer_orchestrator_submit = defer_orchestrator_submit
         self._runs: dict[str, _InferenceRowOrchestratorRun] = {}
         self._lock = threading.Lock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
@@ -252,8 +255,8 @@ class InferenceRowScheduler:
                 return
             self._submit_tier_solve_locked(binding, root_scope)
 
-    def _enqueue_continuation(self, session: InferenceRowStreamSession) -> None:
-        """Hold or submit one tier continuation for tests and internal callers."""
+    def _submit_tier_continuation_locked(self, session: InferenceRowStreamSession) -> None:
+        """Hold or submit one tier continuation while adapter lock is held."""
         with self._lock:
             if self._defer_orchestrator_submit:
                 return
@@ -451,9 +454,7 @@ class InferenceRowScheduler:
         binding.orchestrator.set_dispatch_gate(None)
         binding.unregister_listener()
         ctx_id = id(binding.query_context)
-        if not any(
-            id(other.query_context) == ctx_id for other in self._stream_bindings.values()
-        ):
+        if not any(id(other.query_context) == ctx_id for other in self._stream_bindings.values()):
             release_orchestrator_for_context(binding.query_context)
 
     def _preempt_active_table_stream_locked(self) -> None:
@@ -507,9 +508,7 @@ class InferenceRowScheduler:
 
     def _drop_held_for_stream_locked(self, stream_token: str) -> None:
         self._held_initial_submissions = [
-            held
-            for held in self._held_initial_submissions
-            if held.stream_token != stream_token
+            held for held in self._held_initial_submissions if held.stream_token != stream_token
         ]
 
     def _held_work_counts_locked(self) -> tuple[int, int]:
@@ -621,9 +620,7 @@ def _query_context_for_session(
     return make_analytic_query_context(
         session.turn,
         TurnAnalyticsOptions(),
-        load_turn=lambda turn_number: (
-            session.turn if turn_number == session.turn_number else None
-        ),
+        load_turn=lambda turn_number: session.turn if turn_number == session.turn_number else None,
         export_services={SCORES_ANALYTIC_ID: scores_services},
     )
 

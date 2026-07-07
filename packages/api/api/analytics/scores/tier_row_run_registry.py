@@ -11,7 +11,7 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.compute.scope import ComputeScope, WILDCARD
+from api.compute.scope import WILDCARD, ComputeScope
 
 _lock = threading.Lock()
 _runs_by_id: dict[str, RowRun] = {}

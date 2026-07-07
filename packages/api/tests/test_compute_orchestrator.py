@@ -811,7 +811,11 @@ def test_step_outcome_persist_calls_persistence_policy(sample_turn):
     export_scope = _export_scope(sample_turn)
     persistence = _RecordingPersistencePolicy()
     compute_registry = build_compute_registry(
-        (_outcome_compute_registration(SHARED_ID, outcome="persist", persistence_policy=persistence),)
+        (
+            _outcome_compute_registration(
+                SHARED_ID, outcome="persist", persistence_policy=persistence
+            ),
+        )
     )
     orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
@@ -832,7 +836,11 @@ def test_step_outcome_complete_skips_persistence_policy(sample_turn):
     export_scope = _export_scope(sample_turn)
     persistence = _RecordingPersistencePolicy()
     compute_registry = build_compute_registry(
-        (_outcome_compute_registration(SHARED_ID, outcome="complete", persistence_policy=persistence),)
+        (
+            _outcome_compute_registration(
+                SHARED_ID, outcome="complete", persistence_policy=persistence
+            ),
+        )
     )
     orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
@@ -858,7 +866,10 @@ def test_step_outcome_continue_requeues_same_step_kind(sample_turn):
         run_attempts += 1
         if run_attempts < 3:
             return StepResult(outcome="continue")
-        return StepResult(outcome="persist", payload={"result": SHARED_ID, "attempts": run_attempts})
+        return StepResult(
+            outcome="persist",
+            payload={"result": SHARED_ID, "attempts": run_attempts},
+        )
 
     compute_registry = build_compute_registry(
         (
