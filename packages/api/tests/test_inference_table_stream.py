@@ -113,7 +113,7 @@ def test_table_stream_reconnect_via_ndjson_transport(sample_turn):
 
 def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = get_inference_row_scheduler()
+    scheduler = InferenceRowScheduler(worker_count=0)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -241,17 +241,23 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
 def test_cancel_run_purges_queued_tier_jobs_for_run(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid)
     other_session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
-    scheduler.enqueue_tier_ladder(session)
-    scheduler.enqueue_tier_ladder(other_session)
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+    scheduler.enqueue_tier_ladder(other_session, stream_token=stream_token)
+    scheduler.pause_globally(scope)
     scheduler._enqueue_continuation(session)
 
     scheduler.cancel_run(session.run_id)
 
     assert session.cancel_token.is_cancelled() is True
-    assert len(scheduler._work_queue) == 1
-    remaining_job = scheduler._work_queue.popleft()
-    assert remaining_job.session.run_id == other_session.run_id
-    cancelled_run = scheduler._runs.get(session.run_id)
-    assert cancelled_run is None or cancelled_run.held_job_count == 0
+    assert session.run_id not in scheduler._runs
+    assert other_session.run_id in scheduler._runs
+    status = scheduler.global_pause_status(scope)
+    assert status["heldContinuationCount"] == 0

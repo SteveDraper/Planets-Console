@@ -33,6 +33,7 @@ from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
+    get_tier_callbacks,
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
@@ -212,11 +213,13 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     if run is None:
         raise RuntimeError(f"scores tier_solve missing registered RowRun for runId {run_id!r}")
 
-    callbacks = InferenceTierJobCallbacks(
-        emit_tier_started_progress=lambda: None,
-        emit_progress=lambda: None,
-        emit_held_solutions=lambda _observation: None,
-    )
+    callbacks = get_tier_callbacks(run_id)
+    if callbacks is None:
+        callbacks = InferenceTierJobCallbacks(
+            emit_tier_started_progress=lambda: None,
+            emit_progress=lambda: None,
+            emit_held_solutions=lambda _observation: None,
+        )
     outcome = run_inference_tier_job(run, callbacks)
     return tier_job_outcome_to_step_result(run, outcome)
 
@@ -252,7 +255,9 @@ class ScoresPersistencePolicy:
             raise TypeError("scores persist result wire missing string runId")
         run = get_row_run(run_id)
         if run is None:
-            raise RuntimeError(f"scores persist missing registered RowRun for runId {run_id!r}")
+            return
+        if run.session.cancel_token.is_cancelled():
+            return
         row_complete = result_wire.get("rowComplete")
         if not isinstance(row_complete, RowComplete):
             raise TypeError("scores persist result wire missing RowComplete payload")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 
+from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
 )
@@ -15,6 +16,7 @@ from api.compute.scope import ComputeScope, WILDCARD
 _lock = threading.Lock()
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
+_tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -91,9 +93,21 @@ def unregister_row_run(run_id: str) -> None:
         if run is None:
             return
         _run_id_by_scope_key.pop(_session_scope_key(run.session), None)
+        _tier_callbacks_by_run_id.pop(run_id, None)
+
+
+def register_tier_callbacks(run_id: str, callbacks: InferenceTierJobCallbacks) -> None:
+    with _lock:
+        _tier_callbacks_by_run_id[run_id] = callbacks
+
+
+def get_tier_callbacks(run_id: str) -> InferenceTierJobCallbacks | None:
+    with _lock:
+        return _tier_callbacks_by_run_id.get(run_id)
 
 
 def reset_tier_row_run_registry_for_tests() -> None:
     with _lock:
         _runs_by_id.clear()
         _run_id_by_scope_key.clear()
+        _tier_callbacks_by_run_id.clear()

@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -289,6 +290,8 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
 
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=sample_turn.settings.turn)
+    scheduler.begin_scope(scope)
     orchestration = _accelerated_split_orchestration(sample_turn)
     orchestration.current_segment_index = 1
     score = sample_turn.scores[0]
@@ -301,9 +304,12 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
         turn_number=sample_turn.settings.turn,
     )
     scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
-    run = scheduler._runs[session.run_id]
-    run.ladder_state.catalog = ActionCatalog((), (), {})
-    run.ladder_state.merged_solutions = [
+    from api.analytics.scores.tier_row_run_registry import get_row_run
+
+    row_run = get_row_run(session.run_id)
+    assert row_run is not None
+    row_run.ladder_state.catalog = ActionCatalog((), (), {})
+    row_run.ladder_state.merged_solutions = [
         InferenceSolution(
             objective_value=20,
             actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),

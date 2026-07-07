@@ -45,7 +45,6 @@ def build_service_stack(
         )
 
     inference_scheduler = create_inference_row_scheduler(
-        on_row_complete=inference_persistence.persist_row_complete,
         on_held_solutions_updated=on_held_solutions_updated,
     )
     inference_invalidation.bind_scheduler(inference_scheduler)

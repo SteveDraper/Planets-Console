@@ -46,8 +46,14 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 
 @pytest.fixture(autouse=True)
 def _reset_coordinators():
+    from api.analytics.military_score_inference.inference_scheduler import (
+        reset_inference_row_scheduler_for_tests,
+    )
+
+    reset_inference_row_scheduler_for_tests()
     reset_coordinators()
     yield
+    reset_inference_row_scheduler_for_tests()
     reset_coordinators()
 
 
