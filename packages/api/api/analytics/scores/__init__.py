@@ -1,6 +1,6 @@
 """Core scoreboard analytic."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
@@ -96,6 +96,7 @@ def iter_scores_table_inference_stream(
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
     | None = None,
+    export_services: Mapping[str, object] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -109,6 +110,7 @@ def iter_scores_table_inference_stream(
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+        export_services=export_services,
         persistence=persistence,
         scheduler=scheduler,
     )

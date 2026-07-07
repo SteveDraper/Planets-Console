@@ -57,3 +57,34 @@ class TestTurnAnalytics:
         assert first["freighters"] == {"value": 26, "change": 0}
         assert first["military"] == {"value": 2509092, "change": -53869}
         assert first["priorityPoints"] == {"value": 217, "change": 54}
+
+    def test_scores_inference_stream_wrapper_forwards_export_services(
+        self,
+        sample_turn,
+        monkeypatch,
+    ):
+        from api.analytics import scores
+
+        forwarded: dict[str, object] = {}
+        export_services = {"fleet": object(), "scores": object()}
+
+        def fake_iter_scores_table_inference_events(*_args, **kwargs):
+            forwarded.update(kwargs)
+            yield {"type": "globalPause", "paused": False}
+
+        monkeypatch.setattr(
+            scores,
+            "iter_scores_table_inference_events",
+            fake_iter_scores_table_inference_events,
+        )
+
+        stream = scores.iter_scores_table_inference_stream(
+            sample_turn,
+            (8,),
+            game_id=628580,
+            perspective=1,
+            export_services=export_services,
+        )
+
+        assert next(stream) == {"type": "globalPause", "paused": False}
+        assert forwarded["export_services"] is export_services
