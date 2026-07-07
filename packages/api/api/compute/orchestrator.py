@@ -103,8 +103,10 @@ class ComputeOrchestrator:
     ) -> None:
         self._ctx = ctx
         self._compute_registry = compute_registry
+        self._pool_registration_id: int | None = None
         if worker_pool is not None:
-            pool_submitter = worker_pool.attach(self)
+            self._pool_registration_id = worker_pool.register(self)
+            pool_submitter = worker_pool.submitter_for(self._pool_registration_id)
         self._pool_submitter = pool_submitter
         self._worker_pool = worker_pool
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
@@ -117,6 +119,10 @@ class ComputeOrchestrator:
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
         return self._worker_pool
+
+    @property
+    def pool_registration_id(self) -> int | None:
+        return self._pool_registration_id
 
     @property
     def metrics(self) -> OrchestratorMetrics:

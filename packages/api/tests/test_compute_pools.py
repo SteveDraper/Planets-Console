@@ -74,8 +74,10 @@ def _work_item(
     priority_band: ComputePriorityBand = "background",
     step_index: int = 0,
     backend: str = "thread",
+    orchestrator_id: int = 0,
 ) -> PoolWorkItem:
     return PoolWorkItem(
+        orchestrator_id=orchestrator_id,
         scope=scope,
         step_kind="tier1" if step_index == 0 else "tier2",
         backend=backend,
@@ -425,6 +427,65 @@ def _single_step_thread_registration() -> TurnAnalyticRegistration:
         ),
         run_steps=(("materialize", lambda job: {"result": job["player_id"]}),),
     )
+
+
+def _gated_single_step_thread_registration(
+    gate: threading.Event,
+) -> TurnAnalyticRegistration:
+    def run_materialize(job):
+        gate.wait(timeout=1.0)
+        return {"result": job["player_id"]}
+
+    return TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(),
+        compute=lambda _ctx: {"analyticId": _ANALYTIC_ID},
+        export_catalog=make_fixture_catalog(_ANALYTIC_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"player_id": scope.player_id}),
+        ),
+        run_steps=(("materialize", run_materialize),),
+    )
+
+
+def test_two_orchestrators_shared_pool_interleaved_submits(sample_turn):
+    """Two orchestrators on one pool each receive their own pool completions."""
+    gate = threading.Event()
+    compute_registry = build_compute_registry((_gated_single_step_thread_registration(gate),))
+    ctx_a = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    ctx_b = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    pool = ComputeWorkerPool(worker_count=1)
+    orchestrator_a = ComputeOrchestrator(ctx_a, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator_b = ComputeOrchestrator(ctx_b, compute_registry=compute_registry, worker_pool=pool)
+
+    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
+    scope_a = _scope_for_player(sample_turn, player_ids[0])
+    scope_b = _scope_for_player(sample_turn, player_ids[1])
+
+    gate.set()
+    handle_a = orchestrator_a.submit(ComputeRequest(scope=scope_a))
+    gate.clear()
+    time.sleep(0.05)
+    handle_b = orchestrator_b.submit(ComputeRequest(scope=scope_b))
+    gate.set()
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if handle_a.state == "complete" and handle_b.state == "complete":
+            break
+        time.sleep(0.01)
+
+    pool.shutdown()
+    assert handle_a.state == "complete", handle_a.error
+    assert handle_b.state == "complete", handle_b.error
+    assert orchestrator_a.nodes[scope_a].result_wire == {"result": player_ids[0]}
+    assert orchestrator_b.nodes[scope_b].result_wire == {"result": player_ids[1]}
+    assert scope_b not in orchestrator_a.nodes
+    assert scope_a not in orchestrator_b.nodes
 
 
 def test_concurrent_submit_with_multiple_pool_workers(sample_turn):

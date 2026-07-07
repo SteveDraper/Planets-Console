@@ -37,7 +37,13 @@ def orchestrator_for_context(
 def release_orchestrator_for_context(ctx: AnalyticQueryContext) -> None:
     """Drop a cached orchestrator for one query context (stream teardown)."""
     with _orchestrator_lock:
-        _orchestrators_by_ctx_id.pop(id(ctx), None)
+        orchestrator = _orchestrators_by_ctx_id.pop(id(ctx), None)
+    if orchestrator is None:
+        return
+    registration_id = orchestrator.pool_registration_id
+    worker_pool = orchestrator.worker_pool
+    if registration_id is not None and worker_pool is not None:
+        worker_pool.unregister(registration_id)
 
 
 def reset_orchestrators_for_tests() -> None:

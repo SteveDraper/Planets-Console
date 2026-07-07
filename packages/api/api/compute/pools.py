@@ -53,6 +53,7 @@ def configured_worker_count() -> int:
 class PoolWorkItem:
     """One schedulable pool unit dequeued by priority band and fairness rules."""
 
+    orchestrator_id: int
     scope: ComputeScope
     step_kind: str
     backend: ComputeBackend
@@ -107,7 +108,8 @@ class ComputeWorkerPool:
         worker_count: int | None = None,
     ) -> None:
         self._worker_count = worker_count if worker_count is not None else configured_worker_count()
-        self._orchestrator: ComputeOrchestrator | None = None
+        self._orchestrators: dict[int, ComputeOrchestrator] = {}
+        self._next_orchestrator_id = 0
         self._work_queue: deque[PoolWorkItem] = deque()
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
@@ -129,13 +131,32 @@ class ComputeWorkerPool:
     def worker_count(self) -> int:
         return self._worker_count
 
-    def attach(self, orchestrator: ComputeOrchestrator) -> PoolSubmitter:
-        """Bind an orchestrator and return its pool submitter callback."""
-        self._orchestrator = orchestrator
-        return self._submit_from_orchestrator
+    def register(self, orchestrator: ComputeOrchestrator) -> int:
+        """Register an orchestrator for pool completion routing; return its registration id."""
+        with self._condition:
+            orchestrator_id = self._next_orchestrator_id
+            self._next_orchestrator_id += 1
+            self._orchestrators[orchestrator_id] = orchestrator
+            return orchestrator_id
+
+    def unregister(self, orchestrator_id: int) -> None:
+        """Remove an orchestrator and drop any queued work for it."""
+        with self._condition:
+            self._orchestrators.pop(orchestrator_id, None)
+            if self._work_queue:
+                self._work_queue = deque(
+                    item
+                    for item in self._work_queue
+                    if item.orchestrator_id != orchestrator_id
+                )
+
+    def submitter_for(self, orchestrator_id: int) -> PoolSubmitter:
+        """Return a pool submitter callback bound to one orchestrator registration."""
+        return self._make_submitter(orchestrator_id)
 
     def submit(
         self,
+        orchestrator_id: int,
         node: ComputeNodeRun,
         step: ComputeStepSpec,
         *,
@@ -147,6 +168,7 @@ class ComputeWorkerPool:
         with self._condition:
             self._work_queue.append(
                 PoolWorkItem(
+                    orchestrator_id=orchestrator_id,
                     scope=node.scope,
                     step_kind=step.step_kind,
                     backend=step.backend,
@@ -166,21 +188,24 @@ class ComputeWorkerPool:
             thread.join(timeout=1.0)
         self._shutdown_executors(wait=wait_for_interpreters)
 
-    def _submit_from_orchestrator(
-        self,
-        node: ComputeNodeRun,
-        step: ComputeStepSpec,
-        *,
-        job_wire: object | None = None,
-        run_step: RunStepFn | None = None,
-    ) -> None:
-        self.submit(
-            node,
-            step,
-            priority_band=node.priority_band,
-            job_wire=job_wire,
-            run_step=run_step,
-        )
+    def _make_submitter(self, orchestrator_id: int) -> PoolSubmitter:
+        def _submit_from_orchestrator(
+            node: ComputeNodeRun,
+            step: ComputeStepSpec,
+            *,
+            job_wire: object | None = None,
+            run_step: RunStepFn | None = None,
+        ) -> None:
+            self.submit(
+                orchestrator_id,
+                node,
+                step,
+                priority_band=node.priority_band,
+                job_wire=job_wire,
+                run_step=run_step,
+            )
+
+        return _submit_from_orchestrator
 
     def _worker_loop(self) -> None:
         while True:
@@ -207,14 +232,22 @@ class ComputeWorkerPool:
         elif backend == "process":
             self._metrics.process_executions += 1
 
+    def _lookup_orchestrator(self, orchestrator_id: int) -> ComputeOrchestrator | None:
+        with self._condition:
+            return self._orchestrators.get(orchestrator_id)
+
     def _execute_item(self, item: PoolWorkItem) -> None:
-        orchestrator = self._orchestrator
+        orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
-            raise RuntimeError("ComputeWorkerPool is not attached to an orchestrator")
+            return
         if item.backend == "thread":
             with self._condition:
                 self._record_backend_execution_locked(item.backend)
-            self._complete_from_callable(orchestrator, item.scope, orchestrator.execute_pool_step)
+            self._complete_from_callable(
+                item.orchestrator_id,
+                item.scope,
+                orchestrator.execute_pool_step,
+            )
             return
         if item.backend in {"interpreter", "process"}:
             if item.job_wire is None or item.run_step is None:
@@ -229,7 +262,7 @@ class ComputeWorkerPool:
                 else:
                     executor = self._process_executor_locked()
             future = executor.submit(item.run_step, item.job_wire)
-            self._complete_from_future(orchestrator, item.scope, future)
+            self._complete_from_future(item.orchestrator_id, item.scope, future)
             return
         raise RuntimeError(f"unsupported pool backend {item.backend!r}")
 
@@ -254,29 +287,50 @@ class ComputeWorkerPool:
 
     def _complete_from_callable(
         self,
-        orchestrator: ComputeOrchestrator,
+        orchestrator_id: int,
         scope: ComputeScope,
         run_step: Callable[[ComputeScope], object],
     ) -> None:
         try:
             result_wire = run_step(scope)
         except BaseException as exc:
-            orchestrator.complete_pool_step(scope, error=exc)
+            self._complete_pool_step_if_registered(orchestrator_id, scope, error=exc)
             return
-        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+        self._complete_pool_step_if_registered(
+            orchestrator_id,
+            scope,
+            result_wire=result_wire,
+        )
 
     def _complete_from_future(
         self,
-        orchestrator: ComputeOrchestrator,
+        orchestrator_id: int,
         scope: ComputeScope,
         future: Future[object],
     ) -> None:
         try:
             result_wire = future.result()
         except BaseException as exc:
-            orchestrator.complete_pool_step(scope, error=exc)
+            self._complete_pool_step_if_registered(orchestrator_id, scope, error=exc)
             return
-        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+        self._complete_pool_step_if_registered(
+            orchestrator_id,
+            scope,
+            result_wire=result_wire,
+        )
+
+    def _complete_pool_step_if_registered(
+        self,
+        orchestrator_id: int,
+        scope: ComputeScope,
+        *,
+        result_wire: object | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        orchestrator = self._lookup_orchestrator(orchestrator_id)
+        if orchestrator is None:
+            return
+        orchestrator.complete_pool_step(scope, result_wire=result_wire, error=error)
 
 
 _global_worker_pool: ComputeWorkerPool | None = None
