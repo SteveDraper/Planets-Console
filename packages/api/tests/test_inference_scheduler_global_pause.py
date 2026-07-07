@@ -18,6 +18,9 @@ from api.analytics.military_score_inference.models import InferenceSolution, Inf
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeNodeRun
+from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 
 
@@ -85,7 +88,8 @@ def test_pause_with_mismatched_scope_raises_validation_error(sample_turn):
         scheduler.resume_globally(scope_b)
 
 
-def test_pause_holds_continuation_tier_job_enqueued_while_paused(sample_turn):
+def test_pause_counts_gated_orchestrator_continuation(sample_turn):
+    """Continuations held while paused are ready orchestrator nodes with step_index > 0."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()
     scope = InferenceStreamScope(
@@ -93,19 +97,60 @@ def test_pause_holds_continuation_tier_job_enqueued_while_paused(sample_turn):
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    scheduler.begin_scope(scope)
+    stream_token = scheduler.begin_scope(scope)
     session = _session_for_turn(sample_turn)
-    scheduler.pause_globally(scope)
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
 
-    scheduler._submit_tier_continuation_locked(session)
+    root_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn=session.turn_number,
+        player_id=session.player_id,
+    )
+
+    class FakeOrchestrator:
+        def __init__(self) -> None:
+            self.nodes = {
+                root_scope: ComputeNodeRun(
+                    scope=root_scope,
+                    dependency_scopes=(),
+                    state="ready",
+                    step_index=1,
+                    profile_step_index=1,
+                )
+            }
+            self.dispatch_calls = 0
+
+        def set_dispatch_gate(self, _gate: object) -> None:
+            pass
+
+        def dispatch_ready_work(self) -> None:
+            self.dispatch_calls += 1
+
+        def register_node_complete_listener(self, _listener: object) -> object:
+            return lambda: None
+
+    fake_orchestrator = FakeOrchestrator()
+    scheduler._stream_bindings[stream_token] = type(
+        "FakeBinding",
+        (),
+        {
+            "orchestrator": fake_orchestrator,
+            "unregister_listener": lambda: None,
+            "query_context": object(),
+        },
+    )()
+
+    scheduler.pause_globally(scope)
 
     status = scheduler.global_pause_status(scope)
     assert status["heldContinuationCount"] == 1
-    assert len(scheduler._held_continuation_scopes) == 1
+    assert status["heldJobCount"] == 0
 
     resumed = scheduler.resume_globally(scope)
     assert resumed["heldContinuationCount"] == 0
-    assert len(scheduler._held_continuation_scopes) == 0
+    assert fake_orchestrator.dispatch_calls == 1
 
 
 def test_pause_holds_enqueued_jobs_and_resume_requeues(sample_turn, monkeypatch):

@@ -85,7 +85,6 @@ class InferenceRowScheduler:
         self._stream_bindings: dict[str, _InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
         self._held_initial_submissions: list[_HeldTierSubmission] = []
-        self._held_continuation_scopes: list[ComputeScope] = []
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._lock:
@@ -208,7 +207,6 @@ class InferenceRowScheduler:
             return
         self._globally_paused = False
         self._held_initial_submissions.clear()
-        self._held_continuation_scopes.clear()
         self._apply_dispatch_gates_locked()
 
     def cancel_run(self, run_id: str) -> None:
@@ -253,23 +251,6 @@ class InferenceRowScheduler:
                 self._held_initial_submissions.append(
                     _HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
                 )
-                return
-            self._submit_tier_solve_locked(binding, root_scope)
-
-    def _submit_tier_continuation_locked(self, session: InferenceRowStreamSession) -> None:
-        """Hold or submit one tier continuation while adapter lock is held."""
-        with self._lock:
-            if self._defer_orchestrator_submit:
-                return
-            root_scope = self._root_scope_for_session(session)
-            if self._globally_paused:
-                self._held_continuation_scopes.append(root_scope)
-                return
-            stream_token = self._scope_guard.active_table_stream_token
-            if stream_token is None:
-                return
-            binding = self._stream_bindings.get(stream_token)
-            if binding is None:
                 return
             self._submit_tier_solve_locked(binding, root_scope)
 
@@ -461,7 +442,6 @@ class InferenceRowScheduler:
     def _preempt_active_table_stream_locked(self) -> None:
         self._globally_paused = False
         self._held_initial_submissions.clear()
-        self._held_continuation_scopes.clear()
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         for run_id in list(self._runs):
@@ -502,10 +482,6 @@ class InferenceRowScheduler:
             if binding is not None:
                 self._submit_tier_solve_locked(binding, held.root_scope)
         self._held_initial_submissions.clear()
-        for scope in self._held_continuation_scopes:
-            for binding in self._stream_bindings.values():
-                self._submit_tier_solve_locked(binding, scope)
-        self._held_continuation_scopes.clear()
 
     def _drop_held_for_stream_locked(self, stream_token: str) -> None:
         self._held_initial_submissions = [
@@ -514,7 +490,7 @@ class InferenceRowScheduler:
 
     def _held_work_counts_locked(self) -> tuple[int, int]:
         held_jobs = len(self._held_initial_submissions)
-        held_continuations = len(self._held_continuation_scopes)
+        held_continuations = 0
         if not self._globally_paused:
             return held_jobs, held_continuations
         for binding in self._stream_bindings.values():
@@ -573,9 +549,6 @@ class InferenceRowScheduler:
         root_scope = run.root_scope
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.root_scope != root_scope
-        ]
-        self._held_continuation_scopes = [
-            scope for scope in self._held_continuation_scopes if scope != root_scope
         ]
 
     @staticmethod
