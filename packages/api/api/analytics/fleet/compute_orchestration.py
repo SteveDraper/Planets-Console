@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -18,7 +19,9 @@ from api.compute.scope import (
     ScopeKeySpec,
     compute_scope_to_export_scope,
 )
+from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs
+from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_to_json
 
 FLEET_MATERIALIZATION_LEG = "materialization_leg"
@@ -55,6 +58,7 @@ def build_fleet_materialization_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    turn_cache: OrchestratorTurnCache | None = None,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet materialization leg.
 
@@ -76,17 +80,26 @@ def build_fleet_materialization_leg_job_wire(
         raise ValueError("fleet materialization leg requires concrete turn")
 
     export_scope = compute_scope_to_export_scope(scope)
-    turn = ctx.load_turn(export_scope.turn)
+    load_turn = _orchestrator_load_turn(ctx=ctx, turn_cache=turn_cache)
+    turn = load_turn(export_scope.turn)
     if turn is None:
         raise ValueError(f"stored turn {export_scope.turn} is required for fleet materialization")
 
     player_id = scope.player_id
+    services = resolve_fleet_services(ctx)
     prior_scope = _fleet_prior_scope(scope)
     prior_persisted: PersistedFleetLedger | None = None
     if prior_scope is not None:
         prior_wire = dependency_outputs.get(prior_scope)
         if prior_wire is not None:
             prior_persisted = persisted_fleet_ledger_from_json(prior_wire["persistedLedgerWire"])
+        if prior_persisted is None:
+            prior_persisted = services.persistence.get_ledger(
+                scope.game_id,
+                scope.perspective,
+                prior_scope.turn,
+                player_id,
+            )
 
     if prior_persisted is None:
         baseline_ledger = ensure_fleet_baseline_for_player(
@@ -99,8 +112,6 @@ def build_fleet_materialization_leg_job_wire(
     else:
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
-    services = resolve_fleet_services(ctx)
-    load_turn = services.load_turn
     turn_context = FleetTurnContext.from_turn(turn)
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=scope.turn,
@@ -254,3 +265,17 @@ class FleetPersistencePolicy:
 
 
 FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()
+
+
+def _orchestrator_load_turn(
+    *,
+    ctx: AnalyticQueryContext | None,
+    turn_cache: OrchestratorTurnCache | None,
+) -> Callable[[int], TurnInfo | None]:
+    if turn_cache is not None:
+        return turn_cache.get
+    if ctx is not None:
+        return ctx.load_turn
+    raise RuntimeError(
+        "fleet materialization leg job wire requires AnalyticQueryContext or turn_cache"
+    )
