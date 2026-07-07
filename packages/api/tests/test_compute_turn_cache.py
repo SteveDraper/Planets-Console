@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_context import make_analytic_query_context
@@ -94,6 +95,7 @@ def test_fleet_job_wire_includes_prefetched_turn_wire(sample_turn) -> None:
         },
     )
     cache = OrchestratorTurnCache(ctx.load_turn)
+    cached_ctx = replace(ctx, load_turn=cache.get)
     player_id = next(row.ownerid for row in sample_turn.scores)
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -106,8 +108,7 @@ def test_fleet_job_wire_includes_prefetched_turn_wire(sample_turn) -> None:
     job_wire = build_fleet_materialization_leg_job_wire(
         scope,
         dependency_outputs=DependencyOutputs(),
-        ctx=ctx,
-        turn_cache=cache,
+        ctx=cached_ctx,
     )
 
     assert "turnWire" in job_wire
@@ -314,7 +315,6 @@ def test_pool_fleet_leg_uses_prefetched_turn_wire(sample_turn) -> None:
     built = build_fleet_materialization_leg_job_wire(
         scope,
         dependency_outputs=DependencyOutputs(),
-        ctx=ctx,
-        turn_cache=orchestrator.turn_cache,
+        ctx=replace(ctx, load_turn=orchestrator.turn_cache.get),
     )
     assert "turnWire" in built

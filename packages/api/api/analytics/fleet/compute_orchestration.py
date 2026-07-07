@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -19,9 +18,7 @@ from api.compute.scope import (
     ScopeKeySpec,
     compute_scope_to_export_scope,
 )
-from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs
-from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_to_json
 
 FLEET_MATERIALIZATION_LEG = "materialization_leg"
@@ -58,7 +55,6 @@ def build_fleet_materialization_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    turn_cache: OrchestratorTurnCache | None = None,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet materialization leg.
 
@@ -80,8 +76,7 @@ def build_fleet_materialization_leg_job_wire(
         raise ValueError("fleet materialization leg requires concrete turn")
 
     export_scope = compute_scope_to_export_scope(scope)
-    load_turn = _orchestrator_load_turn(ctx=ctx, turn_cache=turn_cache)
-    turn = load_turn(export_scope.turn)
+    turn = ctx.load_turn(export_scope.turn)
     if turn is None:
         raise ValueError(f"stored turn {export_scope.turn} is required for fleet materialization")
 
@@ -120,7 +115,7 @@ def build_fleet_materialization_leg_job_wire(
         player_id=player_id,
         game_id=scope.game_id,
         perspective=scope.perspective,
-        load_turn=load_turn,
+        load_turn=ctx.load_turn,
         inference_materialization=services.inference_materialization,
     )
 
@@ -265,17 +260,3 @@ class FleetPersistencePolicy:
 
 
 FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()
-
-
-def _orchestrator_load_turn(
-    *,
-    ctx: AnalyticQueryContext | None,
-    turn_cache: OrchestratorTurnCache | None,
-) -> Callable[[int], TurnInfo | None]:
-    if turn_cache is not None:
-        return turn_cache.get
-    if ctx is not None:
-        return ctx.load_turn
-    raise RuntimeError(
-        "fleet materialization leg job wire requires AnalyticQueryContext or turn_cache"
-    )
