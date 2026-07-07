@@ -1,4 +1,10 @@
-"""Pure fleet materialization leg for compute orchestrator interpreter steps."""
+"""Pure fleet materialization leg for compute orchestrator interpreter steps.
+
+Phase 1 of two-phase fleet materialization: advance the acquisition ledger one
+turn in the interpreter compute plane without scores inference. Phase 2 is
+``FleetPersistencePolicy.persist`` in ``compute_orchestration``, which applies
+inference and may refresh provenance before storage.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +26,11 @@ from api.serialization.turn import turn_info_from_json
 
 
 def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> dict[str, Any]:
-    """Materialize one fleet turn leg from a serializable job wire (compute plane)."""
+    """Materialize one fleet turn leg from a serializable job wire (compute plane).
+
+    Returns a persisted-ledger wire carrying provenance from the job wire.
+    Scores inference is deferred to the orchestration persist hook.
+    """
     turn = turn_info_from_json(job_wire["turnWire"])
     prior_ledger_wire = job_wire.get("priorLedgerWire")
     prior_persisted = (
@@ -41,7 +51,7 @@ def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> dict[str, Any]:
         turn_context,
         game_id=int(job_wire["gameId"]),
         perspective=int(job_wire["perspective"]),
-        inference_materialization=None,
+        inference_materialization=None,  # phase 2 persist hook owns scores inference
     )
     provenance = fleet_materialization_provenance_from_json(job_wire["provenanceWire"])
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)

@@ -23,6 +23,11 @@ from api.serialization.turn import turn_info_to_json
 
 FLEET_MATERIALIZATION_LEG = "materialization_leg"
 
+# Two-phase fleet materialization:
+# 1. Interpreter leg (materialization_leg) advances the ledger without inference.
+# 2. FleetPersistencePolicy.persist refines inferred acquisitions from scores and
+#    may re-resolve provenance before put_ledger.
+
 FLEET_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
 FLEET_COMPUTE_PROFILE = AnalyticComputeProfile(
@@ -51,7 +56,11 @@ def build_fleet_materialization_leg_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
 ) -> dict[str, Any]:
-    """Assemble a serializable job wire for one fleet materialization leg."""
+    """Assemble a serializable job wire for one fleet materialization leg.
+
+    Embeds provenance at wire-build time for the interpreter leg; persist may
+    re-resolve provenance after scores inference refines the ledger.
+    """
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
     from api.analytics.fleet.compute_services import resolve_fleet_services
     from api.analytics.fleet.materialization_provenance import (
@@ -122,7 +131,12 @@ def build_fleet_materialization_leg_job_wire(
 
 
 class FleetPersistencePolicy:
-    """Orchestrator persistence hooks for per-player fleet ledger scopes."""
+    """Orchestrator persistence hooks for per-player fleet ledger scopes.
+
+    ``persist`` is phase 2 of fleet materialization: when scores inference is
+    wired it refines inferred acquisitions and re-resolves provenance before
+    storing the ledger returned by the interpreter leg.
+    """
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
         from api.analytics.fleet.compute_services import resolve_fleet_services
@@ -171,6 +185,7 @@ class FleetPersistencePolicy:
             raise ValueError(f"stored turn {scope.turn} is required for fleet persist")
 
         if services.inference_materialization is not None:
+            # Phase 2: scores inference may mutate the ledger and provenance.
             refine_player_inferred_acquisitions_from_scores(
                 persisted.ledger,
                 turn,
