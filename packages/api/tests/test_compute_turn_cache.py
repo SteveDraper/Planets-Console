@@ -172,9 +172,9 @@ def test_fleet_job_wire_prefetches_prior_ledger_from_persistence(sample_turn) ->
     assert persisted_fleet_ledger_to_json(loaded_prior) == persisted_fleet_ledger_to_json(
         expected_prior
     )
-    assert job_wire["baselineLedgerWire"] == persisted_fleet_ledger_to_json(expected_prior)[
-        "ledger"
-    ]
+    assert (
+        job_wire["baselineLedgerWire"] == persisted_fleet_ledger_to_json(expected_prior)["ledger"]
+    )
 
 
 def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:
