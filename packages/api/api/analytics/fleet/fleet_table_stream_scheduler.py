@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
@@ -37,7 +38,7 @@ __all__ = [
 @dataclass
 class _FleetStreamOrchestratorBinding:
     orchestrator: ComputeOrchestrator
-    unregister_listener: object
+    unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
 
 
@@ -266,8 +267,7 @@ class FleetTableStreamScheduler:
         binding: _FleetStreamOrchestratorBinding,
     ) -> None:
         release_orchestrator_for_context(binding.query_context)
-        if callable(binding.unregister_listener):
-            binding.unregister_listener()
+        binding.unregister_listener()
 
     def _preempt_active_table_stream_locked(self) -> None:
         for run in self._runs.values():
