@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -22,8 +20,6 @@ from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
-
-logger = logging.getLogger(__name__)
 
 FleetTorpInputStatus = Literal["not_applicable", "pending", "applied", "unavailable"]
 
@@ -157,7 +153,7 @@ def _load_prior_turn_fleet_snapshot(
             return None
         return persistence.get_snapshot(scope.game_id, scope.perspective, scope.turn)
 
-    if not persistence.has_ledger(
+    if not persistence.has_final_ledger(
         scope.game_id,
         scope.perspective,
         scope.turn,
@@ -291,40 +287,21 @@ def schedule_background_prior_turn_fleet_warm(
         load_turn=load_turn,
         export_services=export_services,
     )
+    from api.compute.orchestrator import ComputeRequest
+    from api.compute.runtime import orchestrator_for_context
+    from api.compute.scope import ComputeScope
 
-    def warm_prior_turn_fleet_for_player(player_id: int) -> None:
-        from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
-        from api.errors import ConflictError, FleetMaterializationTimeoutError
-
-        def prior_turn_ledger_available() -> bool:
-            return persistence.has_final_ledger(game_id, perspective, prior_turn, player_id)
-
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                game_id,
-                perspective,
-                player_id,
-                prior_turn_info,
-                load_turn=fleet_services.load_turn,
-                inference_materialization=fleet_services.inference_materialization,
-                query_context=query_context,
-            )
-        except ConflictError, FleetMaterializationTimeoutError, OSError, ValueError, KeyError:
-            if prior_turn_ledger_available():
-                return
-            logger.warning(
-                "Background prior-turn fleet warm failed for game %s perspective %s "
-                "player %s turn %s",
-                game_id,
-                perspective,
-                player_id,
-                prior_turn,
-            )
-
+    orchestrator = orchestrator_for_context(query_context)
     for player_id in players_needing_warm:
-        threading.Thread(
-            target=warm_prior_turn_fleet_for_player,
-            args=(player_id,),
-            daemon=True,
-        ).start()
+        orchestrator.submit(
+            ComputeRequest(
+                scope=ComputeScope(
+                    analytic_id=FLEET_ANALYTIC_ID,
+                    game_id=game_id,
+                    perspective=perspective,
+                    turn=prior_turn,
+                    player_id=player_id,
+                ),
+                priority_band="background",
+            )
+        )

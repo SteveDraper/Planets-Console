@@ -172,18 +172,77 @@ def _wait_until(
     raise AssertionError("condition not met before timeout")
 
 
-def _run_warm_synchronously(monkeypatch: pytest.MonkeyPatch) -> None:
-    def immediate_thread(*, target, args=(), daemon=True):
-        class _ImmediateThread:
-            def start(self) -> None:
-                target(*args)
+def _run_warm_to_completion(
+    *,
+    host_turn,
+    ctx,
+    player_ids: tuple[int, ...],
+    timeout_seconds: float = 30.0,
+) -> None:
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        player_ids=player_ids,
+    )
+    prior_turn = host_turn.settings.turn - 1
+    fleet_persistence = ctx.export_services["fleet"].persistence
 
-        return _ImmediateThread()
+    def all_final() -> bool:
+        return all(
+            fleet_persistence.has_final_ledger(
+                ctx.game_id,
+                ctx.perspective,
+                prior_turn,
+                player_id,
+            )
+            for player_id in player_ids
+        )
+
+    _wait_until(all_final, timeout_seconds=timeout_seconds)
+
+
+def test_background_warm_submits_orchestrator_background_requests(
+    sample_turn,
+    persistence,
+    monkeypatch,
+):
+    """Stream-open warm submits background-band fleet@(host_turn - 1) per player."""
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_ids[0],
+    )
+    prior_turn = HOST_TURN - 1
+    fleet_persistence = ctx.export_services["fleet"].persistence
+    fleet_persistence.delete_snapshot(ctx.game_id, ctx.perspective, prior_turn)
+
+    submitted: list[object] = []
+
+    def capture_submit(self, request):
+        submitted.append(request)
+        from api.compute.orchestrator import ComputeHandle
+
+        return ComputeHandle(scope=request.scope, _node=None)
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.prior_turn_fleet_torp_overlay.threading.Thread",
-        immediate_thread,
+        "api.compute.orchestrator.ComputeOrchestrator.submit",
+        capture_submit,
     )
+
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        player_ids=player_ids,
+    )
+
+    assert len(submitted) == len(player_ids)
+    assert all(request.priority_band == "background" for request in submitted)
+    assert {request.scope.player_id for request in submitted} == set(player_ids)
+    assert all(request.scope.turn == prior_turn for request in submitted)
+    assert all(request.scope.analytic_id == "fleet" for request in submitted)
 
 
 def _run_ids_for_players(
@@ -423,13 +482,7 @@ def test_background_warm_eventually_applies_fleet_overlay(
     assert pending.input_status == "pending"
     assert pending.overlay is None
 
-    _run_warm_synchronously(monkeypatch)
-    schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=ctx.load_turn,
-        export_services=ctx.export_services,
-        player_ids=(player_id,),
-    )
+    _run_warm_to_completion(host_turn=host_turn, ctx=ctx, player_ids=(player_id,))
 
     assert fleet_persistence.has_final_ledger(
         ctx.game_id,

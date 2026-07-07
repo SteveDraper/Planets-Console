@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import replace
 
 import pytest
@@ -24,8 +23,6 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
     schedule_background_prior_turn_fleet_warm,
 )
-from api.errors import ConflictError
-
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
@@ -71,7 +68,8 @@ def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample
     assert resolution.input_status == "pending"
 
 
-def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn, persistence):
+def test_resolve_prior_turn_overlay_readonly_pending_on_partial_ledger(sample_turn, persistence):
+    """Partial prior-turn fleet ledger is not terminal quality; overlay stays pending."""
     player_id = 8
     host_turn, ctx = _host_turn_context(
         sample_turn,
@@ -103,17 +101,79 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
                     fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
                     build_option_sets=[
                         FleetBuildOptionSet(torp_id=4, label="Mk IV"),
-                        FleetBuildOptionSet(torp_id=8, label="Mk VIII"),
                     ],
                 ),
             ],
         ),
     ]
-    fleet_services.persistence.put_snapshot(
+    fleet_services.persistence.put_ledger(
         ctx.game_id,
         ctx.perspective,
         prior_turn,
-        snapshot,
+        player_id,
+        PersistedFleetLedger(
+            ledger=next(ledger for ledger in snapshot.players if ledger.player_id == player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=False,
+            ),
+        ),
+    )
+    assert fleet_services.persistence.has_ledger(ctx.game_id, ctx.perspective, prior_turn, player_id)
+    assert not fleet_services.persistence.has_final_ledger(
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn,
+        player_id,
+    )
+
+    resolution = resolve_prior_turn_fleet_torp_overlay(
+        turn=host_turn,
+        player_id=player_id,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        ensure=False,
+    )
+
+    assert resolution.overlay is None
+    assert resolution.input_status == "pending"
+
+
+def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn, persistence):
+    player_id = 8
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_id,
+    )
+    prior_turn = HOST_TURN - 1
+    fleet_services = ctx.export_services["fleet"]
+    target_ledger = FleetAcquisitionLedger(
+        player_id=player_id,
+        records=[
+            FleetShipRecord(
+                record_id="inferred",
+                disposition="active",
+                fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
+                build_option_sets=[
+                    FleetBuildOptionSet(torp_id=4, label="Mk IV"),
+                    FleetBuildOptionSet(torp_id=8, label="Mk VIII"),
+                ],
+            ),
+        ],
+    )
+    fleet_services.persistence.put_ledger(
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn,
+        player_id,
+        PersistedFleetLedger(
+            ledger=target_ledger,
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
     )
 
     resolution = resolve_prior_turn_fleet_torp_overlay(
@@ -270,24 +330,9 @@ def test_resolve_prior_turn_overlay_uses_export_services(sample_turn, persistenc
     assert resolution.input_status == "applied"
 
 
-def _run_warm_synchronously(monkeypatch: pytest.MonkeyPatch) -> None:
-    def immediate_thread(*, target, args=(), daemon=True):
-        class _ImmediateThread:
-            def start(self) -> None:
-                target(*args)
-
-        return _ImmediateThread()
-
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.prior_turn_fleet_torp_overlay.threading.Thread",
-        immediate_thread,
-    )
-
-
-def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
+def test_background_warm_skips_players_with_final_ledger(
     sample_turn,
     monkeypatch,
-    caplog,
 ):
     player_id = 8
     host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
@@ -317,30 +362,32 @@ def test_background_warm_swallows_conflict_when_prior_turn_snapshot_exists(
         ),
     )
 
-    def raise_conflict(*_args, **_kwargs):
-        raise ConflictError("fleet snapshot gap-fill exceeded invalidation retries")
+    submitted: list[object] = []
+
+    def capture_submit(self, request):
+        submitted.append(request)
+        from api.compute.orchestrator import ComputeHandle
+
+        return ComputeHandle(scope=request.scope, _node=None)
 
     monkeypatch.setattr(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
-        raise_conflict,
+        "api.compute.orchestrator.ComputeOrchestrator.submit",
+        capture_submit,
     )
-    _run_warm_synchronously(monkeypatch)
 
-    with caplog.at_level(logging.WARNING):
-        schedule_background_prior_turn_fleet_warm(
-            turn=host_turn,
-            load_turn=fleet_services.load_turn,
-            export_services={"fleet": fleet_services},
-            player_ids=(player_id,),
-        )
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=fleet_services.load_turn,
+        export_services={"fleet": fleet_services},
+        player_ids=(player_id,),
+    )
 
-    assert "Background prior-turn fleet warm failed" not in caplog.text
+    assert submitted == []
 
 
-def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
+def test_background_warm_submits_orchestrator_background_requests(
     sample_turn,
     monkeypatch,
-    caplog,
 ):
     player_id = sample_turn.scores[0].ownerid
     host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
@@ -349,21 +396,29 @@ def test_background_warm_logs_warning_on_conflict_without_prior_turn_snapshot(
         stored_turns=stored_turns,
     )
 
-    def raise_conflict(*_args, **_kwargs):
-        raise ConflictError("fleet snapshot gap-fill exceeded invalidation retries")
+    submitted: list[object] = []
+
+    def capture_submit(self, request):
+        submitted.append(request)
+        from api.compute.orchestrator import ComputeHandle
+
+        return ComputeHandle(scope=request.scope, _node=None)
 
     monkeypatch.setattr(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
-        raise_conflict,
+        "api.compute.orchestrator.ComputeOrchestrator.submit",
+        capture_submit,
     )
-    _run_warm_synchronously(monkeypatch)
 
-    with caplog.at_level(logging.WARNING):
-        schedule_background_prior_turn_fleet_warm(
-            turn=host_turn,
-            load_turn=fleet_services.load_turn,
-            export_services={"fleet": fleet_services},
-            player_ids=(player_id,),
-        )
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=fleet_services.load_turn,
+        export_services={"fleet": fleet_services},
+        player_ids=(player_id,),
+    )
 
-    assert "Background prior-turn fleet warm failed" in caplog.text
+    assert len(submitted) == 1
+    request = submitted[0]
+    assert request.priority_band == "background"
+    assert request.scope.analytic_id == "fleet"
+    assert request.scope.turn == HOST_TURN - 1
+    assert request.scope.player_id == player_id
