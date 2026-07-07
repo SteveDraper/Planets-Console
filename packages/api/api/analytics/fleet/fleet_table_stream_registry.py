@@ -25,6 +25,12 @@ def controller_for_scope(scope: FleetTableStreamScope) -> FleetTableStreamContro
     return _registry.controller_for_scope(scope)
 
 
+def wake_fleet_table_stream_multiplex(scope: FleetTableStreamScope) -> None:
+    controller = controller_for_scope(scope)
+    if controller is not None:
+        controller.wake_multiplex.set()
+
+
 def reschedule_fleet_table_player(scope: FleetTableStreamScope, player_id: int) -> bool:
     """Cancel and reschedule one player on the open fleet table stream for ``scope``."""
     controller = controller_for_scope(scope)

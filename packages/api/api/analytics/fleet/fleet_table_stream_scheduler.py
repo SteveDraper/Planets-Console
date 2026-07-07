@@ -16,6 +16,7 @@ from api.analytics.fleet.fleet_table_player_run import (
     wire_materialized_complete_event,
     wire_materialized_player_events,
 )
+from api.analytics.fleet.fleet_table_stream_registry import wake_fleet_table_stream_multiplex
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
@@ -255,15 +256,18 @@ class FleetTableStreamScheduler:
                 )
                 continue
             persisted = persisted_fleet_ledger_from_json(persisted_wire)
-            for event in _node_complete_stream_events(
+            stream_events = _node_complete_stream_events(
                 scope_turn=scope.turn,
                 host_turn_number=run.host_turn_number,
                 tracker=run.progress_tracker,
                 persisted=persisted,
                 session_turn=session.turn,
                 cancelled=cancelled,
-            ):
+            )
+            for event in stream_events:
                 session.event_queue.put(event)
+            if stream_events:
+                _wake_multiplex_for_session(session)
 
     def _release_stream_binding_locked(
         self,
@@ -292,6 +296,17 @@ def _emit_fleet_materialization_error(
 ) -> None:
     if not cancelled:
         session.event_queue.put(fleet_error_event(detail))
+        _wake_multiplex_for_session(session)
+
+
+def _wake_multiplex_for_session(session: FleetPlayerStreamSession) -> None:
+    wake_fleet_table_stream_multiplex(
+        FleetTableStreamScope(
+            game_id=session.game_id,
+            perspective=session.perspective,
+            turn_number=session.turn.settings.turn,
+        )
+    )
 
 
 def _node_complete_stream_events(
