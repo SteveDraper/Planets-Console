@@ -8,11 +8,19 @@ import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
+from api.analytics.fleet.compute_services import (
+    build_ephemeral_fleet_compute_services,
+    turn_chain_through,
+)
+from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
-from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    _query_context_for_session,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -46,7 +54,9 @@ from api.compute import (
     ComputeScope,
     DependencyOutputs,
     build_compute_registry,
+    compute_scope_to_export_scope,
 )
+from api.compute.dag import plan_compute_dag
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -407,3 +417,67 @@ def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
     assert handle.state == "running"
     assert submitted_scopes == [scope]
     assert orchestrator.nodes[scope].profile_step_index == 1
+
+
+def test_stream_query_context_plans_prior_turn_fleet_dependency(
+    sample_turn,
+    persistence,
+) -> None:
+    host_turn = host_turn_at(sample_turn, HOST_TURN)[0]
+    turns = turn_chain_through(host_turn)
+    player_id = host_turn.scores[0].ownerid
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+
+    def load_turn(turn_number: int):
+        return turns.get(turn_number)
+
+    scores_services = ScoresExportContext(
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    fleet_services = build_ephemeral_fleet_compute_services(
+        host_turn,
+        game_id=628580,
+        perspective=1,
+        stored_turns=turns,
+        inference=FleetInferenceSupport(scores_services=scores_services),
+    )
+    session = InferenceRowStreamSession(
+        player_id=player_id,
+        observation=build_inference_observation(
+            host_turn.scores[0],
+            host_turn,
+            load_scoreboard_turn=load_turn,
+        ),
+        turn=host_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=host_turn.settings.turn,
+        load_scoreboard_turn=load_turn,
+        export_services={
+            SCORES_ANALYTIC_ID: scores_services,
+            _FLEET_ANALYTIC_ID: fleet_services,
+        },
+    )
+    ctx = _query_context_for_session(session, scheduler=scheduler)
+    scope = _scores_scope(host_turn, player_id)
+    prior_fleet_scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=HOST_TURN - 1,
+        player_id=player_id,
+    )
+
+    planned = plan_compute_dag(
+        ctx,
+        SCORES_ANALYTIC_ID,
+        compute_scope_to_export_scope(scope),
+        compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
+        force_root=True,
+    )
+    planned_by_scope = {node.scope: node for node in planned}
+
+    assert prior_fleet_scope in planned_by_scope
+    assert scope in planned_by_scope
+    assert prior_fleet_scope in planned_by_scope[scope].dependency_scopes

@@ -310,6 +310,7 @@ def _ensure_current_turn_scheduler(
         resolved_mask=inputs.resolved_mask,
         fleet_torp_overlay=fleet_resolution.overlay,
         fleet_torp_input_status=fleet_resolution.input_status,
+        export_services=ctx.export_services,
         stream_token=inputs.stream_token,
     )
     return True

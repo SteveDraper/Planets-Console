@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -45,6 +45,7 @@ class InferenceTableStreamController(
     resolve_fleet_torp_resolution_for_player: (
         Callable[[int], PriorTurnFleetTorpResolution] | None
     ) = None
+    export_services: Mapping[str, object] = field(default_factory=dict)
     persistence: InferenceRowPersistenceService | None = None
 
     def resolve_row_admission(
@@ -89,6 +90,7 @@ class InferenceTableStreamController(
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_resolution.overlay,
             fleet_torp_input_status=fleet_resolution.input_status,
+            export_services=self.export_services,
             stream_token=self.stream_token,
         )
 

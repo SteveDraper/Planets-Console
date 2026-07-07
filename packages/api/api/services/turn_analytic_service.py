@@ -259,6 +259,7 @@ class TurnAnalyticService:
             reload_host_turn=reload_host_turn,
             resolve_mask_for_player=resolve_mask_for_player,
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+            export_services=export_services,
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
         )

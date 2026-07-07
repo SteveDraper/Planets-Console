@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
@@ -621,12 +621,25 @@ def _query_context_for_session(
 ) -> AnalyticQueryContext:
     from api.analytics.scores.export_services import ScoresExportContext
 
-    scores_services = ScoresExportContext(scheduler=scheduler)
+    load_turn = session.load_scoreboard_turn
+    if load_turn is None:
+
+        def load_turn(turn_number: int):
+            return session.turn if turn_number == session.turn_number else None
+
+    export_services = dict(session.export_services)
+    injected_scores_services = export_services.get(SCORES_ANALYTIC_ID)
+    if isinstance(injected_scores_services, ScoresExportContext):
+        scores_services = replace(injected_scores_services, scheduler=scheduler)
+    else:
+        scores_services = ScoresExportContext(scheduler=scheduler)
+    export_services[SCORES_ANALYTIC_ID] = scores_services
+
     return make_analytic_query_context(
         session.turn,
         TurnAnalyticsOptions(),
-        load_turn=lambda turn_number: session.turn if turn_number == session.turn_number else None,
-        export_services={SCORES_ANALYTIC_ID: scores_services},
+        load_turn=load_turn,
+        export_services=export_services,
     )
 
 
