@@ -38,6 +38,7 @@ def walk_dependency_tree(
     scope: ExportScope,
     *,
     visiting: set[tuple[str, ExportScope]],
+    force_root: bool = False,
 ) -> DependencyWalkResult:
     result = DependencyWalkResult()
     seen_pending: set[tuple[str, ExportScope]] = set()
@@ -52,10 +53,10 @@ def walk_dependency_tree(
     visiting.add(visit_key)
     try:
         catalog = ctx.export_registry.get(analytic_id)
-        if not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
+        if catalog is None or catalog.is_empty:
             return result
-
-        assert catalog is not None
+        if not force_root and not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
+            return result
 
         for dependency in catalog.ensure_dependencies:
             dependency_scope = dependency_scope_for(scope, dependency)

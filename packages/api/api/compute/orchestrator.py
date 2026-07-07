@@ -250,6 +250,7 @@ class ComputeOrchestrator:
             root_scope.analytic_id,
             export_scope,
             compute_registry=self._compute_registry,
+            force_root=entry_step_kind is not None,
         )
         self._turn_cache.prefetch_planned_nodes(planned_nodes)
         for planned in planned_nodes:

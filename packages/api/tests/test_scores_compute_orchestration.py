@@ -6,11 +6,14 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
+from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -361,3 +364,46 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
 
     assert handle.state == "complete", handle.error
     assert handle.result_wire is not None
+
+
+def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
+    sample_turn,
+    persistence,
+) -> None:
+    player_id = sample_turn.scores[0].ownerid
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(
+        InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=sample_turn.settings.turn,
+        )
+    )
+    session = _session_for_player(sample_turn, player_id=player_id)
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
+    submitted_scopes: list[ComputeScope] = []
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del step, job_wire, run_step
+        submitted_scopes.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    scope = _scores_scope(sample_turn, player_id)
+
+    handle = orchestrator.submit(ComputeRequest(scope=scope, step_kind=SCORES_TIER_SOLVE))
+
+    assert handle.state == "running"
+    assert submitted_scopes == [scope]
+    assert orchestrator.nodes[scope].profile_step_index == 1
