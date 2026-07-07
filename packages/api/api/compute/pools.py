@@ -145,9 +145,7 @@ class ComputeWorkerPool:
             self._orchestrators.pop(orchestrator_id, None)
             if self._work_queue:
                 self._work_queue = deque(
-                    item
-                    for item in self._work_queue
-                    if item.orchestrator_id != orchestrator_id
+                    item for item in self._work_queue if item.orchestrator_id != orchestrator_id
                 )
 
     def submitter_for(self, orchestrator_id: int) -> PoolSubmitter:
