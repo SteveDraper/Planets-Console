@@ -234,9 +234,7 @@ class FleetTableStreamScheduler:
                     if node.error is not None
                     else "Fleet ledger materialization failed"
                 )
-                _emit_fleet_materialization_error(
-                    session, cancelled=cancelled, detail=detail
-                )
+                _emit_fleet_materialization_error(session, cancelled=cancelled, detail=detail)
                 continue
             if node.state != "complete" or node.result_wire is None:
                 continue
