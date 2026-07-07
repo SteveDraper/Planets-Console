@@ -228,28 +228,31 @@ class FleetTableStreamScheduler:
             session = run.session
             cancelled = session.cancel_token.is_cancelled()
             if node.state == "failed":
-                if not cancelled:
-                    detail = (
-                        str(node.error)
-                        if node.error is not None
-                        else "Fleet ledger materialization failed"
-                    )
-                    session.event_queue.put(fleet_error_event(detail))
+                detail = (
+                    str(node.error)
+                    if node.error is not None
+                    else "Fleet ledger materialization failed"
+                )
+                _emit_fleet_materialization_error(
+                    session, cancelled=cancelled, detail=detail
+                )
                 continue
             if node.state != "complete" or node.result_wire is None:
                 continue
             if not isinstance(node.result_wire, dict):
-                if not cancelled:
-                    session.event_queue.put(
-                        fleet_error_event("Fleet ledger materialization failed")
-                    )
+                _emit_fleet_materialization_error(
+                    session,
+                    cancelled=cancelled,
+                    detail="Fleet ledger materialization failed",
+                )
                 continue
             persisted_wire = node.result_wire.get("persistedLedgerWire")
             if not isinstance(persisted_wire, dict):
-                if not cancelled:
-                    session.event_queue.put(
-                        fleet_error_event("Fleet ledger materialization failed")
-                    )
+                _emit_fleet_materialization_error(
+                    session,
+                    cancelled=cancelled,
+                    detail="Fleet ledger materialization failed",
+                )
                 continue
             persisted = persisted_fleet_ledger_from_json(persisted_wire)
             for event in _node_complete_stream_events(
@@ -279,6 +282,16 @@ class FleetTableStreamScheduler:
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()
+
+
+def _emit_fleet_materialization_error(
+    session: FleetPlayerStreamSession,
+    *,
+    cancelled: bool,
+    detail: str,
+) -> None:
+    if not cancelled:
+        session.event_queue.put(fleet_error_event(detail))
 
 
 def _node_complete_stream_events(
