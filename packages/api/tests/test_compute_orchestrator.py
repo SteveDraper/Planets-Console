@@ -354,6 +354,95 @@ def test_attach_inflight_does_not_double_pool_workers(sample_turn):
     assert waiter.state == "complete"
 
 
+def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    run_payloads: list[int] = []
+
+    def run_step(_job):
+        run_payload = len(run_payloads) + 1
+        run_payloads.append(run_payload)
+        return {"run": run_payload}
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_step),),
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    first = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    duplicate = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    fresh = orchestrator.submit(ComputeRequest(scope=shared_scope, force_fresh=True))
+
+    assert run_payloads == [1, 2]
+    assert first.result_wire == {"run": 1}
+    assert duplicate.result_wire == {"run": 1}
+    assert fresh.result_wire == {"run": 2}
+    assert orchestrator.nodes[shared_scope] is fresh._node
+
+
+def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    run_count = 0
+
+    def run_step(_job):
+        nonlocal run_count
+        run_count += 1
+        if run_count == 1:
+            raise ValueError("first run failed")
+        return {"run": run_count}
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_step),),
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    failed = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    fresh = orchestrator.submit(ComputeRequest(scope=shared_scope, force_fresh=True))
+
+    assert failed.state == "failed"
+    assert isinstance(failed.error, ValueError)
+    assert fresh.state == "complete"
+    assert fresh.result_wire == {"run": 2}
+    assert orchestrator.nodes[shared_scope] is fresh._node
+
+
 def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,

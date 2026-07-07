@@ -37,6 +37,7 @@ class ComputeRequest:
     scope: ComputeScope
     step_kind: str | None = None
     priority_band: ComputePriorityBand = "background"
+    force_fresh: bool = False
 
 
 @dataclass
@@ -182,7 +183,9 @@ class ComputeOrchestrator:
             scope = request.scope
             existing = self._nodes.get(scope)
             if existing is not None:
-                return self._attach_to_existing(existing)
+                if not (request.force_fresh and existing.state in {"complete", "failed"}):
+                    return self._attach_to_existing(existing)
+                self._replace_terminal_node(existing)
 
             self._plan_and_register(
                 scope,
@@ -241,6 +244,13 @@ class ComputeOrchestrator:
         handle = ComputeHandle(scope=node.scope, _node=node, is_waiter=True)
         node.waiters.append(handle)
         return handle
+
+    def _replace_terminal_node(self, node: ComputeNodeRun) -> None:
+        if node.state not in {"complete", "failed"}:
+            raise RuntimeError(f"cannot replace non-terminal node in state {node.state!r}")
+        self._dequeue_ready(node.scope)
+        node.waiters.clear()
+        self._nodes.pop(node.scope, None)
 
     def _plan_and_register(
         self,

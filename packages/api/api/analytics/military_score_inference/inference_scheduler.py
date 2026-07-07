@@ -473,6 +473,7 @@ class InferenceRowScheduler:
                 scope=root_scope,
                 step_kind=SCORES_TIER_SOLVE,
                 priority_band="stream_attached",
+                force_fresh=True,
             )
         )
 
