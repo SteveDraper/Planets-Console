@@ -271,7 +271,8 @@ def test_worker_turn_cache_reuses_turn_wire_deserialize(sample_turn) -> None:
     assert worker_deserialize_calls() == 1
 
 
-def test_pool_fleet_leg_uses_prefetched_turn_wire(sample_turn) -> None:
+def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> None:
+    reset_worker_deserialize_calls_for_tests()
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     fleet_services = build_ephemeral_fleet_compute_services(
         sample_turn,
@@ -307,14 +308,10 @@ def test_pool_fleet_leg_uses_prefetched_turn_wire(sample_turn) -> None:
             break
         time.sleep(0.01)
 
-    pool.shutdown()
     assert handle.state == "complete", handle.error
     assert isinstance(handle.result_wire, dict)
     assert "persistedLedgerWire" in handle.result_wire
+    assert pool.metrics.interpreter_executions == 1
+    assert pool.worker_deserialize_calls_for_tests() == 1
 
-    built = build_fleet_materialization_leg_job_wire(
-        scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=replace(ctx, load_turn=orchestrator.turn_cache.get),
-    )
-    assert "turnWire" in built
+    pool.shutdown()

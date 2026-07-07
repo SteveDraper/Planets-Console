@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.scope import ComputeScope
 from api.compute.wire import RunStepFn
+from api.compute.worker_turn_cache import init_worker_turn_cache, worker_deserialize_calls
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
@@ -186,6 +187,14 @@ class ComputeWorkerPool:
             thread.join(timeout=1.0)
         self._shutdown_executors(wait=wait_for_interpreters)
 
+    def worker_deserialize_calls_for_tests(self) -> int:
+        """Return turn-wire deserialize count from an interpreter pool worker (tests only)."""
+        with self._condition:
+            executor = self._interpreter_executor
+            if executor is None:
+                return 0
+        return executor.submit(worker_deserialize_calls).result()
+
     def _make_submitter(self, orchestrator_id: int) -> PoolSubmitter:
         def _submit_from_orchestrator(
             node: ComputeNodeRun,
@@ -266,12 +275,18 @@ class ComputeWorkerPool:
 
     def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
         if self._interpreter_executor is None:
-            self._interpreter_executor = InterpreterPoolExecutor(max_workers=self._worker_count)
+            self._interpreter_executor = InterpreterPoolExecutor(
+                max_workers=self._worker_count,
+                initializer=init_worker_turn_cache,
+            )
         return self._interpreter_executor
 
     def _process_executor_locked(self) -> ProcessPoolExecutor:
         if self._process_executor is None:
-            self._process_executor = ProcessPoolExecutor(max_workers=self._worker_count)
+            self._process_executor = ProcessPoolExecutor(
+                max_workers=self._worker_count,
+                initializer=init_worker_turn_cache,
+            )
         return self._process_executor
 
     def _shutdown_executors(self, *, wait: bool = False) -> None:
