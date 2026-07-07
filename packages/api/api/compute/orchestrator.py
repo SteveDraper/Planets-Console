@@ -15,9 +15,10 @@ from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.turn_cache import OrchestratorTurnCache
-from api.compute.wire import DependencyOutputs
+from api.compute.wire import DependencyOutputs, coerce_step_result
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 
 NodeState = Literal[
     "waiting_deps",
@@ -73,6 +74,7 @@ class ComputeNodeRun:
     scope: ComputeScope
     dependency_scopes: tuple[ComputeScope, ...]
     state: NodeState = "waiting_deps"
+    profile_step_index: int = 0
     step_index: int = 0
     priority_band: ComputePriorityBand = "background"
     generation_at_submit: int | None = None
@@ -118,6 +120,12 @@ class ComputeOrchestrator:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._node_complete_listeners: list[NodeCompleteListener] = []
+        self._dispatch_gate: NodeDispatchGate | None = None
+
+    def set_dispatch_gate(self, gate: NodeDispatchGate | None) -> None:
+        """Set a node-level gate checked before pool or inline dispatch."""
+        with self._condition:
+            self._dispatch_gate = gate
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -171,7 +179,11 @@ class ComputeOrchestrator:
             if existing is not None:
                 return self._attach_to_existing(existing)
 
-            self._plan_and_register(scope, priority_band=request.priority_band)
+            self._plan_and_register(
+                scope,
+                priority_band=request.priority_band,
+                entry_step_kind=request.step_kind,
+            )
             for node in self._nodes.values():
                 self._refresh_node_readiness(node)
             handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
@@ -230,6 +242,7 @@ class ComputeOrchestrator:
         root_scope: ComputeScope,
         *,
         priority_band: ComputePriorityBand,
+        entry_step_kind: str | None = None,
     ) -> None:
         export_scope = compute_scope_to_export_scope(root_scope)
         planned_nodes = plan_compute_dag(
@@ -240,7 +253,11 @@ class ComputeOrchestrator:
         )
         self._turn_cache.prefetch_planned_nodes(planned_nodes)
         for planned in planned_nodes:
-            self._register_planned_node(planned, priority_band=priority_band)
+            self._register_planned_node(
+                planned,
+                priority_band=priority_band,
+                entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
+            )
         if root_scope not in self._nodes:
             self._nodes[root_scope] = ComputeNodeRun(
                 scope=root_scope,
@@ -254,15 +271,38 @@ class ComputeOrchestrator:
         planned: PlannedComputeNode,
         *,
         priority_band: ComputePriorityBand,
+        entry_step_kind: str | None = None,
     ) -> None:
         if planned.scope in self._nodes:
             return
+        registration = self._compute_registry[planned.scope.analytic_id]
+        profile_step_index = self._resolve_profile_step_index(
+            registration,
+            entry_step_kind,
+        )
         node = ComputeNodeRun(
             scope=planned.scope,
             dependency_scopes=planned.dependency_scopes,
             priority_band=priority_band,
+            profile_step_index=profile_step_index,
         )
         self._nodes[planned.scope] = node
+
+    def _resolve_profile_step_index(
+        self,
+        registration: AnalyticComputeRegistration,
+        entry_step_kind: str | None,
+    ) -> int:
+        steps = registration.compute_profile.steps
+        if entry_step_kind is None:
+            return 0
+        for index, step in enumerate(steps):
+            if step.step_kind == entry_step_kind:
+                return index
+        raise ValueError(
+            f"unknown entry step_kind {entry_step_kind!r} for analytic "
+            f"{registration.analytic_id!r}"
+        )
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
@@ -311,31 +351,44 @@ class ComputeOrchestrator:
 
     def _dispatch(self) -> None:
         while self._ready_queue:
-            scope = self._ready_queue[0]
-            node = self._nodes[scope]
-            if node.state != "ready":
-                self._ready_queue.popleft()
-                continue
-            if not self._deps_complete(node):
-                node.state = "waiting_deps"
-                self._ready_queue.popleft()
-                continue
+            scope, node = self._dequeue_dispatchable_ready_node()
+            if scope is None or node is None:
+                return
 
             registration = self._compute_registry[node.scope.analytic_id]
             step = self._current_step_spec(node, registration)
             if step.backend == "inline":
-                self._ready_queue.popleft()
                 self._begin_step_execution(node)
                 self._run_inline(node, registration, step)
                 continue
 
             if self._pool_submitter is None:
+                self._enqueue_ready(scope)
                 return
-            self._ready_queue.popleft()
             self._begin_step_execution(node)
             self._submit_pool_step(node, registration, step)
             self._metrics.pool_submissions += 1
-            continue
+            return
+
+    def _dequeue_dispatchable_ready_node(
+        self,
+    ) -> tuple[ComputeScope | None, ComputeNodeRun | None]:
+        queue_len = len(self._ready_queue)
+        if queue_len == 0:
+            return None, None
+        for _ in range(queue_len):
+            scope = self._ready_queue.popleft()
+            node = self._nodes[scope]
+            if node.state != "ready":
+                continue
+            if not self._deps_complete(node):
+                node.state = "waiting_deps"
+                continue
+            if self._dispatch_gate is not None and not self._dispatch_gate(node):
+                self._ready_queue.append(scope)
+                continue
+            return scope, node
+        return None, None
 
     def _submit_pool_step(
         self,
@@ -358,11 +411,12 @@ class ComputeOrchestrator:
         registration: AnalyticComputeRegistration,
     ) -> ComputeStepSpec:
         steps = registration.compute_profile.steps
-        if node.step_index >= len(steps):
+        if node.profile_step_index >= len(steps):
             raise RuntimeError(
-                f"compute node {node.scope!r} has no step at index {node.step_index}"
+                f"compute node {node.scope!r} has no step at profile index "
+                f"{node.profile_step_index}"
             )
-        return steps[node.step_index]
+        return steps[node.profile_step_index]
 
     def _run_inline(
         self,
@@ -429,18 +483,48 @@ class ComputeOrchestrator:
             self._retry_step_after_epoch_bump(node)
             return
 
+        step_result = coerce_step_result(result_wire)
         registration = self._compute_registry[node.scope.analytic_id]
         node.generation_at_submit = None
-        node.step_index += 1
-        if node.step_index < len(registration.compute_profile.steps):
-            node.state = "ready"
-            self._enqueue_ready(node.scope)
-            self._dispatch()
+
+        if step_result.outcome == "continue":
+            self._continue_node_step(node, registration)
             return
-        node.result_wire = result_wire
-        registration.persistence_policy.persist(self._cached_ctx, node.scope, result_wire)
-        self._metrics.persist_calls += 1
-        self._complete_node(node)
+
+        if step_result.outcome == "persist":
+            node.result_wire = step_result.payload
+            registration.persistence_policy.persist(
+                self._cached_ctx,
+                node.scope,
+                step_result.payload,
+            )
+            self._metrics.persist_calls += 1
+            self._complete_node(node)
+            return
+
+        if step_result.outcome == "complete":
+            node.result_wire = step_result.payload
+            self._complete_node(node)
+            return
+
+        raise RuntimeError(f"unsupported step outcome {step_result.outcome!r}")
+
+    def _continue_node_step(
+        self,
+        node: ComputeNodeRun,
+        registration: AnalyticComputeRegistration,
+    ) -> None:
+        node.step_index += 1
+        steps = registration.compute_profile.steps
+        current_step = steps[node.profile_step_index]
+        next_profile_index = node.profile_step_index + 1
+        if next_profile_index < len(steps):
+            next_step = steps[next_profile_index]
+            if next_step.step_kind != current_step.step_kind:
+                node.profile_step_index = next_profile_index
+        node.state = "ready"
+        self._enqueue_ready(node.scope)
+        self._dispatch()
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
         node.state = "complete"

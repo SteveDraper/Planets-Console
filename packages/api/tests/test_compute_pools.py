@@ -25,6 +25,7 @@ from api.compute import (
     dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
 )
+from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
     run_interpreter_materialize,
@@ -198,13 +199,16 @@ def _multi_step_thread_registration(
         player_id = job["player_id"]
         execution_order.append((player_id, 0))
         gate.wait(timeout=1.0)
-        return {"result": "tier1", "player_id": player_id}
+        return StepResult(outcome="continue")
 
     def run_tier2(job):
         player_id = job["player_id"]
         execution_order.append((player_id, 1))
         gate.wait(timeout=1.0)
-        return {"result": "tier2", "player_id": player_id}
+        return StepResult(
+            outcome="persist",
+            payload={"result": "tier2", "player_id": player_id},
+        )
 
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(),

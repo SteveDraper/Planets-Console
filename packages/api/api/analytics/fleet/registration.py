@@ -11,10 +11,11 @@ from api.analytics.fleet.compute_orchestration import (
 )
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.registration import TurnAnalyticRegistration
+from api.compute.wire import StepResult
 from api.models.game import TurnInfo
 
 
-def _run_fleet_materialization_leg(job_wire: dict[str, object]) -> dict[str, object]:
+def _run_fleet_materialization_leg(job_wire: dict[str, object]) -> StepResult:
     from api.analytics.fleet.compute_plane.materialization_leg import run_fleet_materialization_leg
 
     return run_fleet_materialization_leg(job_wire)

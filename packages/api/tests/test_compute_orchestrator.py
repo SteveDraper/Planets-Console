@@ -20,6 +20,7 @@ from api.compute import (
     plan_compute_dag,
 )
 from api.compute.profile import ComputeBackend
+from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
     run_interpreter_materialize,
@@ -86,11 +87,14 @@ def _two_step_inline_compute_registration(
 ) -> TurnAnalyticRegistration:
     def run_tier1(job):
         step_calls.append("tier1")
-        return {"result": "tier1", "scope": job["scope"]}
+        return StepResult(outcome="continue")
 
     def run_tier2(job):
         step_calls.append("tier2")
-        return {"result": "tier2", "scope": job["scope"]}
+        return StepResult(
+            outcome="persist",
+            payload={"result": "tier2", "scope": job["scope"]},
+        )
 
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(analytic_id),
@@ -508,7 +512,8 @@ def test_orchestrator_runs_multi_step_inline_profile_in_order(sample_turn):
     assert handle.state == "complete"
     assert handle.result_wire == {"result": "tier2", "scope": SHARED_ID}
     assert step_calls == ["tier1", "tier2"]
-    assert orchestrator.nodes[shared_scope].step_index == 2
+    assert orchestrator.nodes[shared_scope].step_index == 1
+    assert orchestrator.nodes[shared_scope].profile_step_index == 1
     assert orchestrator.metrics.inline_executions == 2
 
 
@@ -771,3 +776,216 @@ def test_orchestrator_persists_after_inline_node_completes(sample_turn):
     assert handle.state == "complete"
     assert orchestrator.metrics.persist_calls == 1
     assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
+
+
+def _outcome_compute_registration(
+    analytic_id: str,
+    *,
+    outcome: str,
+    persistence_policy: object | None = None,
+) -> TurnAnalyticRegistration:
+    def run_materialize(_job):
+        return StepResult(outcome=outcome, payload={"result": analytic_id})
+
+    return TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(analytic_id),
+        compute=lambda _ctx: {"analyticId": analytic_id},
+        export_catalog=empty_export_catalog_for(analytic_id),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=persistence_policy or _StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_materialize),),
+    )
+
+
+def test_step_outcome_persist_calls_persistence_policy(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persistence = _RecordingPersistencePolicy()
+    compute_registry = build_compute_registry(
+        (_outcome_compute_registration(SHARED_ID, outcome="persist", persistence_policy=persistence),)
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert handle.result_wire == {"result": SHARED_ID}
+    assert orchestrator.metrics.persist_calls == 1
+    assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
+
+
+def test_step_outcome_complete_skips_persistence_policy(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persistence = _RecordingPersistencePolicy()
+    compute_registry = build_compute_registry(
+        (_outcome_compute_registration(SHARED_ID, outcome="complete", persistence_policy=persistence),)
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert handle.result_wire == {"result": SHARED_ID}
+    assert orchestrator.metrics.persist_calls == 0
+    assert persistence.persist_calls == []
+
+
+def test_step_outcome_continue_requeues_same_step_kind(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    run_attempts = 0
+
+    def run_materialize(_job):
+        nonlocal run_attempts
+        run_attempts += 1
+        if run_attempts < 3:
+            return StepResult(outcome="continue")
+        return StepResult(outcome="persist", payload={"result": SHARED_ID, "attempts": run_attempts})
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", run_materialize),),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert run_attempts == 3
+    assert orchestrator.nodes[shared_scope].step_index == 2
+    assert orchestrator.metrics.inline_executions == 3
+
+
+def test_submit_entry_step_kind_selects_profile_step(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    step_calls: list[str] = []
+
+    def run_materialize(_job):
+        step_calls.append("materialize")
+        return StepResult(outcome="persist", payload={"result": "materialize"})
+
+    def run_tier_solve(_job):
+        step_calls.append("tier_solve")
+        return StepResult(outcome="complete", payload={"result": "tier_solve"})
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(
+                        ComputeStepSpec(step_kind="materialize", backend="inline"),
+                        ComputeStepSpec(step_kind="tier_solve", backend="inline"),
+                    ),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                    ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(
+                    ("materialize", run_materialize),
+                    ("tier_solve", run_tier_solve),
+                ),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(
+        ComputeRequest(scope=shared_scope, step_kind="tier_solve"),
+    )
+
+    assert handle.state == "complete"
+    assert step_calls == ["tier_solve"]
+    assert handle.result_wire == {"result": "tier_solve"}
+    assert orchestrator.nodes[shared_scope].profile_step_index == 1
+
+
+def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    pool_submissions: list[str] = []
+    gated_analytic_id = BRANCH_B_ID
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope.analytic_id)
+
+    thread_registry = build_compute_registry(
+        (
+            _thread_compute_registration(ROOT_ID),
+            _thread_compute_registration(BRANCH_B_ID),
+            _thread_compute_registration(BRANCH_C_ID),
+            _thread_compute_registration(SHARED_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=thread_registry,
+        pool_submitter=pool_submitter,
+    )
+    orchestrator.set_dispatch_gate(
+        lambda node: node.scope.analytic_id != gated_analytic_id,
+    )
+
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+
+    orchestrator.submit(ComputeRequest(scope=root_scope))
+
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[branch_c_scope].state == "waiting_deps"
+
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    assert orchestrator.nodes[branch_c_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "ready"
+    assert pool_submissions == [SHARED_ID, BRANCH_C_ID]
+    assert orchestrator.ready_scopes() == (branch_b_scope,)

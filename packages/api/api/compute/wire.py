@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack
 
 from api.analytics.exports.jsonpath import resolve_jsonpath
 from api.compute.scope import ComputeScope
@@ -12,8 +12,30 @@ from api.compute.scope import ComputeScope
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
+StepOutcome = Literal["continue", "persist", "complete"]
+
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
+
+
+@dataclass(frozen=True)
+class StepResult:
+    """Explicit orchestrator step outcome with an optional serializable payload."""
+
+    outcome: StepOutcome
+    payload: object | None = None
+
+
+def coerce_step_result(result_wire: object) -> StepResult:
+    """Normalize a leaf step return value into an explicit step outcome."""
+    if isinstance(result_wire, StepResult):
+        return result_wire
+    if isinstance(result_wire, dict) and "outcome" in result_wire:
+        outcome = result_wire["outcome"]
+        if outcome not in {"continue", "persist", "complete"}:
+            raise ValueError(f"invalid step outcome {outcome!r}")
+        return StepResult(outcome=outcome, payload=result_wire.get("payload"))
+    return StepResult(outcome="persist", payload=result_wire)
 
 
 @dataclass
