@@ -19,8 +19,11 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_MATERIALIZE,
     SCORES_PERSISTENCE_POLICY,
     SCORES_SCOPE_KEY_SPEC,
+    SCORES_TIER_SOLVE,
     build_scores_materialize_job_wire,
+    build_scores_tier_solve_job_wire,
     run_scores_materialize,
+    run_scores_tier_solve,
 )
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
@@ -124,6 +127,12 @@ REGISTRATION = TurnAnalyticRegistration(
     scope_key_spec=SCORES_SCOPE_KEY_SPEC,
     compute_profile=SCORES_COMPUTE_PROFILE,
     persistence_policy=SCORES_PERSISTENCE_POLICY,
-    build_step_job_wires=((SCORES_MATERIALIZE, build_scores_materialize_job_wire),),
-    run_steps=((SCORES_MATERIALIZE, run_scores_materialize),),
+    build_step_job_wires=(
+        (SCORES_MATERIALIZE, build_scores_materialize_job_wire),
+        (SCORES_TIER_SOLVE, build_scores_tier_solve_job_wire),
+    ),
+    run_steps=(
+        (SCORES_MATERIALIZE, run_scores_materialize),
+        (SCORES_TIER_SOLVE, run_scores_tier_solve),
+    ),
 )

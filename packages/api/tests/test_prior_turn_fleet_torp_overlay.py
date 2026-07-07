@@ -129,6 +129,116 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
     assert resolution.input_status == "applied"
 
 
+def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, persistence):
+    from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_stream_session import (
+        InferenceRowStreamSession,
+    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.compute.scope import ComputeScope
+    from api.compute.wire import DependencyOutputs
+
+    reset_tier_row_run_registry_for_tests()
+    player_id = 8
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_id,
+    )
+    prior_turn = HOST_TURN - 1
+    prior_turn_obj = replace(
+        host_turn,
+        settings=replace(host_turn.settings, turn=prior_turn),
+        game=replace(host_turn.game, turn=prior_turn),
+    )
+    fleet_services = ctx.export_services["fleet"]
+    snapshot = get_or_materialize_fleet_snapshot(
+        fleet_services.persistence,
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn_obj,
+        load_turn=ctx.load_turn,
+        inference_materialization=fleet_services.inference_materialization,
+    )
+    snapshot.players = [
+        FleetAcquisitionLedger(
+            player_id=player_id,
+            records=[
+                FleetShipRecord(
+                    record_id="inferred",
+                    disposition="active",
+                    fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
+                    build_option_sets=[
+                        FleetBuildOptionSet(torp_id=4, label="Mk IV"),
+                        FleetBuildOptionSet(torp_id=8, label="Mk VIII"),
+                    ],
+                ),
+            ],
+        ),
+    ]
+    fleet_services.persistence.put_snapshot(
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn,
+        snapshot,
+    )
+    prior_persisted = fleet_services.persistence.get_ledger(
+        ctx.game_id,
+        ctx.perspective,
+        prior_turn,
+        player_id,
+    )
+    assert prior_persisted is not None
+
+    score = next(row for row in host_turn.scores if row.ownerid == player_id)
+    session = InferenceRowStreamSession(
+        player_id=player_id,
+        observation=build_inference_observation(score, host_turn),
+        turn=host_turn,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn_number=host_turn.settings.turn,
+        fleet_torp_input_status="pending",
+    )
+    run = RowRun(session)
+    register_row_run(run)
+
+    prior_fleet_scope = ComputeScope(
+        analytic_id="fleet",
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    dependency_outputs = DependencyOutputs()
+    dependency_outputs.put(
+        prior_fleet_scope,
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(prior_persisted)},
+    )
+
+    build_scores_tier_solve_job_wire(
+        ComputeScope(
+            analytic_id="scores",
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=host_turn.settings.turn,
+            player_id=player_id,
+        ),
+        dependency_outputs=dependency_outputs,
+        ctx=ctx,
+    )
+
+    assert run.session.fleet_torp_input_status == "applied"
+    assert run.session.fleet_torp_overlay is not None
+    assert run.session.fleet_torp_overlay.belief_set.torp_ids == frozenset({4, 8})
+
+
 def test_resolve_prior_turn_overlay_without_export_services_returns_none(sample_turn):
     host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
     ctx = export_chain_query_context(host_turn, stored_turns=stored_turns)
