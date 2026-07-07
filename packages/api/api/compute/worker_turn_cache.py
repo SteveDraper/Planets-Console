@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from typing import Any
 
+from api.compute.lru_cache import LruCache
 from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
 
 _DEFAULT_MAXSIZE = 32
 
-_cache: OrderedDict[tuple[int, int, int], TurnInfo] = OrderedDict()
+_cache = LruCache[tuple[int, int, int], TurnInfo](_DEFAULT_MAXSIZE)
 _deserialize_calls = 0
 
 
@@ -42,13 +42,9 @@ def turn_from_materialization_job_wire(job_wire: dict[str, Any]) -> TurnInfo:
     )
     cached = _cache.get(key)
     if cached is not None:
-        _cache.move_to_end(key)
         return cached
 
     _deserialize_calls += 1
     turn = turn_info_from_json(job_wire["turnWire"])
-    _cache[key] = turn
-    _cache.move_to_end(key)
-    while len(_cache) > _DEFAULT_MAXSIZE:
-        _cache.popitem(last=False)
+    _cache.put(key, turn)
     return turn

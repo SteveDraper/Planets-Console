@@ -16,7 +16,7 @@ from api.compute.scope import (
     fingerprint_parameters,
     normalize_export_scope_to_compute_scope,
 )
-from api.compute.wire import BuildStepJobWireFn, DependencyOutputs, RunStepFn
+from api.compute.wire import BuildStepJobWireFn, BuildStepJobWireKwargs, DependencyOutputs, RunStepFn
 
 _REGISTRY_EXPORTS = frozenset(
     {
@@ -89,6 +89,7 @@ __all__ = [
     "AnalyticComputeProfile",
     "AnalyticComputeRegistration",
     "BuildStepJobWireFn",
+    "BuildStepJobWireKwargs",
     "ComputeBackend",
     "ComputeHandle",
     "ComputeNodeRun",

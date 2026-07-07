@@ -22,7 +22,7 @@ from api.analytics.fleet.serialization import (
 )
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
-from api.serialization.turn import turn_info_from_json
+from api.compute.worker_turn_cache import turn_from_materialization_job_wire
 
 
 def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> dict[str, Any]:
@@ -31,7 +31,7 @@ def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> dict[str, Any]:
     Returns a persisted-ledger wire carrying provenance from the job wire.
     Scores inference is deferred to the orchestration persist hook.
     """
-    turn = turn_info_from_json(job_wire["turnWire"])
+    turn = turn_from_materialization_job_wire(job_wire)
     prior_ledger_wire = job_wire.get("priorLedgerWire")
     prior_persisted = (
         persisted_fleet_ledger_from_json(prior_ledger_wire)

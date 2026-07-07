@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 from api.analytics.exports.jsonpath import resolve_jsonpath
 from api.compute.scope import ComputeScope
 
-# Orchestration plane: scope + dependency outputs -> serializable job payload.
-BuildStepJobWireFn = Callable[..., Any]
+if TYPE_CHECKING:
+    from api.analytics.export_context import AnalyticQueryContext
 
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
@@ -47,3 +47,17 @@ class DependencyOutputs:
 
     def as_mapping(self) -> Mapping[ComputeScope, object]:
         return self._by_scope
+
+
+class BuildStepJobWireKwargs(TypedDict):
+    """Keyword arguments passed to job-wire builders by the orchestrator."""
+
+    dependency_outputs: DependencyOutputs
+    ctx: AnalyticQueryContext | None
+
+
+# Orchestration plane: scope + dependency outputs -> serializable job payload.
+BuildStepJobWireFn = Callable[
+    [ComputeScope, Unpack[BuildStepJobWireKwargs]],
+    Any,
+]
