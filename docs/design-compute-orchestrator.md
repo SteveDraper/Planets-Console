@@ -192,6 +192,21 @@ waiting_deps → ready → running → complete | failed
 
 **Hard invariant:** pool workers never call `ensure_export` or block on another node's completion.
 
+### Terminal reuse and `force_fresh`
+
+`ComputeRequest.force_fresh` controls whether a duplicate submission for an already-terminal scope starts new work or reuses the cached node outcome.
+
+| `force_fresh` | Existing node state | Behavior |
+|---------------|---------------------|----------|
+| `False` (default) | `complete` or `failed` | Attach to the terminal node; return its cached `result_wire` or error. No new pool work. |
+| `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. |
+| `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
+| `True` | non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
+
+Default behavior treats terminal nodes as a **cache hit**: repeat callers for the same normalized `ComputeScope` get the prior outcome without re-execution. Opt-in `force_fresh=True` is the generic lifecycle primitive for callers that need a new run after terminal completion or failure (for example scores inference stream reschedule paths that must re-enter `tier_solve` on an already-failed or completed scope).
+
+Supersession clears orchestrator node state only; analytic persistence invalidation and reader gates remain the analytic's responsibility.
+
 ---
 
 ## Execution backends
