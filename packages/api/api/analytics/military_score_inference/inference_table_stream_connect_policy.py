@@ -65,6 +65,13 @@ class InferenceTableStreamConnectPolicy:
     def register_scheduled_row(self, player_id: int, scheduled: ScheduledInferenceRow) -> None:
         self.controller.register_scheduled_row(player_id, scheduled)
 
+    def adopt_admission_scheduled_row(
+        self,
+        player_id: int,
+        scheduled: ScheduledInferenceRow,
+    ) -> bool:
+        return self.controller.adopt_admission_scheduled_row(player_id, scheduled)
+
     def finished_run_ids(self) -> set[str]:
         return self.controller.finished_run_ids
 

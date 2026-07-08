@@ -27,6 +27,12 @@ def controller_for_scope(scope: InferenceStreamScope) -> InferenceTableStreamCon
     return _registry.controller_for_scope(scope)
 
 
+def wake_inference_table_stream_multiplex(scope: InferenceStreamScope) -> None:
+    controller = controller_for_scope(scope)
+    if controller is not None:
+        controller.wake_multiplex.set()
+
+
 def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> bool:
     """Cancel and reschedule one row on the open table stream for ``scope``."""
     controller = controller_for_scope(scope)

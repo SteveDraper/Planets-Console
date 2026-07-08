@@ -23,6 +23,8 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -54,14 +56,44 @@ def _wait_until(predicate, *, timeout_seconds: float = 2.0) -> None:
     raise AssertionError("condition not met before timeout")
 
 
+def _patch_scores_dag_without_fleet_deps(monkeypatch) -> None:
+    from api.compute.dag import PlannedComputeNode
+    from api.compute.dag import plan_compute_dag as real_plan
+    from api.compute.scope import normalize_export_scope_to_compute_scope
+
+    def scores_only_dag(ctx, analytic_id, export_scope, *, compute_registry, force_root=False):
+        if analytic_id != "scores":
+            return real_plan(
+                ctx,
+                analytic_id,
+                export_scope,
+                compute_registry=compute_registry,
+                force_root=force_root,
+            )
+        registration = compute_registry[analytic_id]
+        scope = normalize_export_scope_to_compute_scope(
+            export_scope,
+            analytic_id=analytic_id,
+            scope_key_spec=registration.scope_key_spec,
+        )
+        return (
+            PlannedComputeNode(
+                scope=scope,
+                export_scope=export_scope,
+                dependency_scopes=(),
+            ),
+        )
+
+    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+
+
 def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monkeypatch):
     """A zombie worker must not persist or resurrect a row run cancelled mid-tier."""
+    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    scheduler = InferenceRowScheduler(
-        worker_count=1,
-        on_row_complete=persistence.persist_row_complete,
-    )
+    scheduler = InferenceRowScheduler()
     try:
         scope = InferenceStreamScope(
             game_id=628580,
@@ -116,7 +148,7 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
             fake_tier_step,
         )
         monkeypatch.setattr(
-            "api.analytics.military_score_inference.inference_scheduler.run_inference_tier_job",
+            "api.analytics.scores.compute_orchestration.run_inference_tier_job",
             gated_run_inference_tier_job,
         )
 
@@ -125,9 +157,9 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         turn_number = sample_turn.settings.turn
 
         scheduler.enqueue_tier_ladder(session)
-        scheduler._runs[session.run_id].ladder_state = PolicyLadderState(
-            policy_steps=short_ladder,
-        )
+        row_run = get_row_run(session.run_id)
+        assert row_run is not None
+        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
 
         _wait_until(tier_step_started.is_set)
         scheduler.cancel_row_run(run_id := session.run_id)
@@ -137,28 +169,21 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         _wait_until(outcome_computed.is_set)
 
         release_outcome.set()
-
-        _wait_until(
-            lambda: all(job.session.run_id != run_id for job in scheduler._work_queue),
-            timeout_seconds=3.0,
-        )
-        time.sleep(0.05)
+        time.sleep(0.1)
 
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
         assert run_id not in scheduler._runs
-        assert all(job.session.run_id != run_id for job in scheduler._work_queue)
     finally:
         reset_inference_row_scheduler_for_tests()
 
 
 def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monkeypatch):
-    """Cancel after tier work returns but before row-complete persist must not write storage."""
+    """Cancel after tier work returns but before row-complete emit must not write storage."""
+    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    scheduler = InferenceRowScheduler(
-        worker_count=1,
-        on_row_complete=persistence.persist_row_complete,
-    )
+    scheduler = InferenceRowScheduler()
     try:
         scope = InferenceStreamScope(
             game_id=628580,
@@ -167,16 +192,16 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
         )
         scheduler.begin_scope(scope)
 
-        emit_entered = threading.Event()
-        emit_gate = threading.Event()
-        original_emit = InferenceRowScheduler._emit_row_complete
+        finalize_entered = threading.Event()
+        finalize_gate = threading.Event()
+        original_finalize = InferenceRowScheduler._finalize_row_run
 
-        def gated_emit(self, session, event):
-            emit_entered.set()
-            emit_gate.wait(timeout=2.0)
-            original_emit(self, session, event)
+        def gated_finalize(self, session):
+            finalize_entered.set()
+            finalize_gate.wait(timeout=2.0)
+            original_finalize(self, session)
 
-        monkeypatch.setattr(InferenceRowScheduler, "_emit_row_complete", gated_emit)
+        monkeypatch.setattr(InferenceRowScheduler, "_finalize_row_run", gated_finalize)
 
         short_ladder = resolve_tier_policies(None)[:1]
 
@@ -203,14 +228,14 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
         turn_number = sample_turn.settings.turn
 
         scheduler.enqueue_tier_ladder(session)
-        scheduler._runs[session.run_id].ladder_state = PolicyLadderState(
-            policy_steps=short_ladder,
-        )
+        row_run = get_row_run(session.run_id)
+        assert row_run is not None
+        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
 
-        _wait_until(emit_entered.is_set)
+        _wait_until(finalize_entered.is_set)
         scheduler.cancel_row_run(run_id := session.run_id)
         persistence.delete_row(628580, 1, turn_number, player_id)
-        emit_gate.set()
+        finalize_gate.set()
 
         _wait_until(lambda: run_id not in scheduler._runs, timeout_seconds=3.0)
         time.sleep(0.05)

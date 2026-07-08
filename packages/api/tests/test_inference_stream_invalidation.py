@@ -30,6 +30,8 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.compute.wire import StepResult
 from api.models.game import TurnInfo
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
@@ -151,9 +153,12 @@ def _run_ids_for_players(
     player_ids: tuple[int, ...],
 ) -> dict[int, str]:
     mapping: dict[int, str] = {}
-    for run in scheduler._runs.values():
-        if run.session.player_id in player_ids:
-            mapping[run.session.player_id] = run.session.run_id
+    for run_id in scheduler._runs:
+        row_run = get_row_run(run_id)
+        if row_run is None:
+            continue
+        if row_run.session.player_id in player_ids:
+            mapping[row_run.session.player_id] = row_run.session.run_id
     return mapping
 
 
@@ -222,9 +227,12 @@ def _observation_for_player(
     scheduler: InferenceRowScheduler,
     player_id: int,
 ) -> object | None:
-    for run in scheduler._runs.values():
-        if run.session.player_id == player_id:
-            return run.session.observation
+    for run_id in scheduler._runs:
+        row_run = get_row_run(run_id)
+        if row_run is None:
+            continue
+        if row_run.session.player_id == player_id:
+            return row_run.session.observation
     return None
 
 
@@ -257,8 +265,8 @@ def test_mask_change_reschedules_in_flight_row_while_table_stream_active_case_3(
     after = _run_ids_for_players(scheduler, player_ids)
     assert after[target_player_id] != before[target_player_id]
     assert after[other_player_id] == before[other_player_id]
-    cancelled_run = scheduler._runs.get(before[target_player_id])
-    assert cancelled_run is None or cancelled_run.session.cancel_token.is_cancelled()
+    cancelled_row_run = get_row_run(before[target_player_id])
+    assert cancelled_row_run is None or cancelled_row_run.session.cancel_token.is_cancelled()
     assert persistence.get_row(628580, 1, sample_turn.settings.turn, target_player_id) is None
 
 
@@ -298,6 +306,117 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
     assert scheduled_rows[target_player_id].session.run_id != before_target_run_id
     assert before_target_run_id not in finished_run_ids
     assert persistence.get_row(628580, 1, sample_turn.settings.turn, target_player_id) is None
+
+
+def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
+    sample_turn,
+    monkeypatch,
+    request,
+):
+    from api.compute.dag import PlannedComputeNode
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+    from api.compute.scope import ComputeScope
+
+    reset_inference_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = InferenceRowScheduler()
+    controller: InferenceTableStreamController | None = None
+
+    def cleanup() -> None:
+        if controller is not None:
+            controller.end_stream(scheduler)
+        reset_orchestrators_for_tests()
+        reset_compute_worker_pool_for_tests(worker_count=1)
+
+    request.addfinalizer(cleanup)
+
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    target_player_id = player_ids[0]
+    scope_key = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope_key)
+    controller = InferenceTableStreamController(
+        scope=scope_key,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=player_ids,
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+    )
+    controller.attach()
+
+    def scores_only_dag(_ctx, analytic_id, export_scope, **_kwargs):
+        return (
+            PlannedComputeNode(
+                scope=ComputeScope(
+                    analytic_id=analytic_id,
+                    game_id=export_scope.game_id,
+                    perspective=export_scope.perspective,
+                    turn=export_scope.turn,
+                    player_id=export_scope.player_id,
+                ),
+                export_scope=export_scope,
+                dependency_scopes=(),
+            ),
+        )
+
+    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+
+    for player_id in player_ids:
+        scheduled = _schedule_player_row(
+            scheduler,
+            sample_turn,
+            player_id=player_id,
+            stream_token=stream_token,
+        )
+        controller.register_scheduled_row(player_id, scheduled)
+    scheduled_rows = controller.scheduled_rows
+    binding = next(iter(scheduler._stream_bindings.values()))
+    before_run_id = scheduled_rows[target_player_id].session.run_id
+    scope = scheduler._root_scope_for_session(scheduled_rows[target_player_id].session)
+
+    binding.orchestrator.complete_pool_step(
+        scope,
+        result_wire=StepResult(
+            outcome="complete",
+            payload={
+                "runId": before_run_id,
+                "rowComplete": row_complete_with_summary(
+                    InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                    summary="before reschedule",
+                ),
+            },
+        ),
+    )
+
+    assert binding.orchestrator.nodes[scope].state == "complete"
+    assert binding.orchestrator.metrics.pool_submissions == len(player_ids)
+
+    assert controller.reschedule_row(target_player_id)
+    after_run_id = scheduled_rows[target_player_id].session.run_id
+
+    assert after_run_id != before_run_id
+    assert binding.orchestrator.nodes[scope].state == "running"
+    assert binding.orchestrator.metrics.pool_submissions == len(player_ids) + 1
+
+    binding.orchestrator.complete_pool_step(
+        scope,
+        result_wire=StepResult(
+            outcome="complete",
+            payload={
+                "runId": after_run_id,
+                "rowComplete": row_complete_with_summary(
+                    InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                    summary="after reschedule",
+                ),
+            },
+        ),
+    )
+
+    assert binding.orchestrator.nodes[scope].state == "complete"
+    assert binding.orchestrator.nodes[scope].result_wire["runId"] == after_run_id
 
 
 def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
@@ -461,8 +580,10 @@ def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integr
     assert other_player_id not in _run_ids_for_players(scheduler, (other_player_id,))
     assert persistence.get_row(628580, 1, turn_number, target_player_id) is None
 
-    rescheduled_run = scheduler._runs[_run_ids_for_players(scheduler, player_ids)[target_player_id]]
-    rescheduled_run.session.event_queue.put(
+    rescheduled_run_id = _run_ids_for_players(scheduler, player_ids)[target_player_id]
+    rescheduled_row_run = get_row_run(rescheduled_run_id)
+    assert rescheduled_row_run is not None
+    rescheduled_row_run.session.event_queue.put(
         row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="after mask on cached row",

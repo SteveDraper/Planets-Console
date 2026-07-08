@@ -136,7 +136,7 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
           {
             storageOnlyLoad: true,
             storageAvailablePerspectives: load.storedPerspectives,
-            perspectiveOverrideName: load.defaultViewpointName,
+            perspectiveOverrideOrdinal: load.defaultViewpointOrdinal,
           }
         )
       } else {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -196,6 +196,7 @@ def schedule_inference_row(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
+    export_services: Mapping[str, object] | None = None,
     stream_token: str | None = None,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
@@ -216,6 +217,8 @@ def schedule_inference_row(
         game_id=game_id,
         perspective=perspective,
         turn_number=turn_number,
+        load_scoreboard_turn=load_scoreboard_turn,
+        export_services=export_services if export_services is not None else {},
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
@@ -314,6 +317,7 @@ def iter_scores_table_inference_events(
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
     | None = None,
+    export_services: Mapping[str, object] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -347,6 +351,7 @@ def iter_scores_table_inference_events(
             reload_host_turn=reload_host_turn,
             resolve_mask_for_player=resolve_mask_for_player,
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+            export_services=export_services if export_services is not None else {},
             persistence=persistence,
         )
         return InferenceTableStreamConnectPolicy(

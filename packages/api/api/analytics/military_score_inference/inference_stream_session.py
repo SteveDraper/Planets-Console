@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
@@ -30,6 +31,8 @@ class InferenceRowStreamSession:
     game_id: int
     perspective: int
     turn_number: int
+    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
+    export_services: Mapping[str, object] = field(default_factory=dict)
     resolved_mask: ResolvedHullCatalogMask | None = None
     fleet_torp_overlay: FleetTorpOverlay | None = None
     fleet_torp_input_status: FleetTorpInputStatus | None = None

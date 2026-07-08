@@ -1,20 +1,19 @@
-"""Process-wide scheduler for inference search tier jobs."""
+"""Process-wide orchestrator adapter for scores inference table stream tier work."""
 
 from __future__ import annotations
 
-import os
 import threading
-from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 
-from api.analytics.military_score_inference.inference_row_runner import (
-    InferenceTierJobCallbacks,
-    run_inference_tier_job,
-)
+from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
+from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
     HeldSolutionsUpdated,
     RowComplete,
+    RowFailed,
     TierProgress,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -24,64 +23,72 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    wake_inference_table_stream_multiplex,
+)
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.row_run import RowRun, TierJob
-from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 
-__all__ = ["InferenceRowScheduler", "get_inference_row_scheduler"]
+__all__ = [
+    "InferenceRowScheduler",
+    "create_inference_row_scheduler",
+    "get_inference_row_scheduler",
+    "reset_inference_row_scheduler_for_tests",
+]
 
-_DEFAULT_WORKER_COUNT = 4
-_DEQUEUE_WAIT_SECONDS = 0.25
-
-
-# Re-exported for scheduler tests that construct tier jobs directly.
-_TierJob = TierJob
-
-_Sentinel = object()
-_Job = TierJob | object
-
-OnRowCompleteCallback = Callable[[InferenceRowStreamSession, RowComplete], None]
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
 
-def _configured_worker_count() -> int:
-    raw = os.environ.get("MILITARY_SCORE_INFERENCE_SCHEDULER_WORKERS")
-    if raw is not None:
-        return max(1, int(raw))
-    return _DEFAULT_WORKER_COUNT
+@dataclass
+class _InferenceStreamOrchestratorBinding:
+    orchestrator: object
+    unregister_listener: Callable[[], None]
+    query_context: AnalyticQueryContext
+
+
+@dataclass(frozen=True)
+class _HeldTierSubmission:
+    stream_token: str
+    root_scope: ComputeScope
 
 
 class InferenceRowScheduler:
-    """Fair tier-job scheduler: tier-1 jobs for all rows before any tier continuations."""
+    """Fair orchestrator adapter: one tier_solve submission per scoreboard row."""
 
     def __init__(
         self,
-        worker_count: int = _DEFAULT_WORKER_COUNT,
         *,
-        on_row_complete: OnRowCompleteCallback | None = None,
         on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
+        defer_orchestrator_submit: bool = False,
+        worker_count: int | None = None,
+        **_deprecated_kwargs: object,
     ) -> None:
-        self._on_row_complete = on_row_complete
+        del _deprecated_kwargs
         self._on_held_solutions_updated = on_held_solutions_updated
-        self._work_queue: deque[TierJob] = deque()
-        self._runs: dict[str, RowRun] = {}
-        self._lock = threading.Lock()
-        self._condition = threading.Condition(self._lock)
-        self._worker_count = worker_count
-        self._workers: list[threading.Thread] = []
-        self._shutdown = False
+        if worker_count == 0:
+            defer_orchestrator_submit = True
+        self._defer_orchestrator_submit = defer_orchestrator_submit
+        self._runs: dict[str, ComputeScope] = {}
+        # RLock: adapter methods hold this lock across orchestrator calls. When resume_globally
+        # calls _dispatch_ready_orchestrator_work_locked, dispatch_ready_work drains post-lock
+        # callbacks in the caller thread and the node-complete listener
+        # (_on_orchestrator_node_complete, _finalize_row_run) can re-acquire the lock on that
+        # thread. pause_globally shares the same lock while updating dispatch gates. Production
+        # tier_solve uses the thread pool backend, so listener completion is usually async rather
+        # than synchronous in the dispatch caller.
+        self._lock = threading.RLock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
+        self._stream_bindings: dict[str, _InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
-        for _ in range(worker_count):
-            thread = threading.Thread(target=self._worker_loop, daemon=True)
-            thread.start()
-            self._workers.append(thread)
+        self._held_initial_submissions: list[_HeldTierSubmission] = []
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
-        with self._condition:
+        with self._lock:
             return self._scope_guard.begin_scope_locked(
                 scope,
                 on_same_scope_preempt=self._preempt_active_table_stream_locked,
@@ -89,33 +96,145 @@ class InferenceRowScheduler:
             )
 
     def owns_table_stream(self, stream_token: str) -> bool:
-        with self._condition:
+        with self._lock:
             return self._scope_guard.owns_table_stream_locked(stream_token)
 
     def active_scope_matches(self, scope: InferenceStreamScope) -> bool:
-        with self._condition:
+        with self._lock:
             return self._scope_guard.active_scope_matches_locked(scope)
+
+    def should_reschedule_scores_row_after_fleet_persist(
+        self,
+        scope: InferenceStreamScope,
+        event: FleetLedgerPersistedEvent,
+        *,
+        invalidate_row: Callable[[], None],
+    ) -> bool:
+        """Return whether scores@N should reschedule after one fleet ledger persist.
+
+        Runs invalidation and the skip decision under the scheduler lock.
+        """
+        with self._lock:
+            invalidate_row()
+            return not self._should_skip_reschedule_for_fleet_persist_locked(scope, event)
+
+    def _stream_binding_for_scope_locked(
+        self,
+        scope: InferenceStreamScope,
+    ) -> _InferenceStreamOrchestratorBinding | None:
+        if not self._scope_guard.active_scope_matches_locked(scope):
+            return None
+        stream_token = self._scope_guard.active_table_stream_token
+        if stream_token is None:
+            return None
+        return self._stream_bindings.get(stream_token)
+
+    def _should_skip_reschedule_for_fleet_persist_locked(
+        self,
+        scope: InferenceStreamScope,
+        event: FleetLedgerPersistedEvent,
+    ) -> bool:
+        """Return whether to skip in-place reschedule for this fleet persist notification."""
+        from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+
+        binding = self._stream_binding_for_scope_locked(scope)
+        if binding is None:
+            return False
+
+        scores_scope = ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn_number,
+            player_id=event.player_id,
+        )
+        fleet_scope = ComputeScope(
+            analytic_id=FLEET_ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=event.fleet_turn,
+            player_id=event.player_id,
+        )
+        scores_node = binding.orchestrator.nodes.get(scores_scope)
+        if scores_node is None or scores_node.state != "waiting_deps":
+            return False
+        if fleet_scope not in scores_node.dependency_scopes:
+            return False
+
+        fleet_node = binding.orchestrator.nodes.get(fleet_scope)
+        if fleet_node is None:
+            return False
+
+        if (
+            event.source_context_id is not None
+            and self._fleet_persist_source_matches_stream_binding(
+                binding,
+                event.source_context_id,
+            )
+        ):
+            return fleet_node.result_wire is not None and not self._fleet_versions_conflict(
+                fleet_node,
+                event,
+            )
+
+        if fleet_node.state in {"waiting_deps", "ready", "running"}:
+            return True
+
+        if fleet_node.state == "complete":
+            return not self._fleet_versions_conflict(fleet_node, event)
+
+        return False
+
+    @staticmethod
+    def _fleet_versions_conflict(
+        fleet_node: object,
+        event: FleetLedgerPersistedEvent,
+    ) -> bool:
+        from api.analytics.fleet.serialization import (
+            materialization_version_from_fleet_compute_result_wire,
+        )
+
+        result_wire = getattr(fleet_node, "result_wire", None)
+        stream_version = materialization_version_from_fleet_compute_result_wire(result_wire)
+        if stream_version is None:
+            return False
+        return stream_version != event.materialization_version
+
+    @staticmethod
+    def _fleet_persist_source_matches_stream_binding(
+        binding: _InferenceStreamOrchestratorBinding,
+        source_context_id: int,
+    ) -> bool:
+        """Match orchestrator dep-chain notifications to one stream binding context."""
+        if source_context_id == id(binding.query_context):
+            return True
+        orchestrator = binding.orchestrator
+        original_ctx = getattr(orchestrator, "_ctx", None)
+        if original_ctx is not None and source_context_id == id(original_ctx):
+            return True
+        cached_ctx = getattr(orchestrator, "_cached_ctx", None)
+        return cached_ctx is not None and source_context_id == id(cached_ctx)
 
     def row_run_for_player(
         self,
         scope: InferenceStreamScope,
         player_id: int,
     ) -> RowRun | None:
-        with self._condition:
-            for run in self._runs.values():
-                session = run.session
+        with self._lock:
+            for run_id, root_scope in self._runs.items():
                 if (
-                    session.game_id == scope.game_id
-                    and session.perspective == scope.perspective
-                    and session.turn_number == scope.turn_number
-                    and session.player_id == player_id
+                    root_scope.game_id == scope.game_id
+                    and root_scope.perspective == scope.perspective
+                    and root_scope.turn == scope.turn_number
+                    and root_scope.player_id == player_id
                 ):
-                    return run
+                    return self._adapter_row_run(run_id)
             return None
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
         active_scope = self._scope_guard.active_scope
         scope_matches = active_scope == scope
+        held_jobs, held_continuations = self._held_work_counts_locked()
         return {
             "gameId": scope.game_id,
             "perspective": scope.perspective,
@@ -130,19 +249,13 @@ class InferenceRowScheduler:
                 if active_scope is not None
                 else None
             ),
-            "heldJobCount": (
-                sum(run.held_job_count for run in self._runs.values()) if scope_matches else 0
-            ),
-            "heldContinuationCount": (
-                sum(run.held_continuation_count for run in self._runs.values())
-                if scope_matches
-                else 0
-            ),
+            "heldJobCount": held_jobs if scope_matches else 0,
+            "heldContinuationCount": held_continuations if scope_matches else 0,
             "activeSessionCount": len(self._runs) if scope_matches else 0,
         }
 
     def global_pause_status(self, scope: InferenceStreamScope) -> dict[str, object]:
-        with self._condition:
+        with self._lock:
             return self._global_pause_status_locked(scope)
 
     def _require_active_stream_for_scope_locked(self, scope: InferenceStreamScope) -> None:
@@ -152,35 +265,31 @@ class InferenceRowScheduler:
             )
 
     def pause_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
-        """Soft pause: drain queued tier jobs; in-flight tier work is not cancelled."""
-        with self._condition:
+        """Soft pause: hold tier_solve dispatch; in-flight tier work is not cancelled."""
+        with self._lock:
             self._require_active_stream_for_scope_locked(scope)
             if self._globally_paused:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = True
-            self._drain_queue_locked()
+            self._apply_dispatch_gates_locked()
             self._broadcast_global_pause_locked(paused=True)
-            self._condition.notify_all()
             return self._global_pause_status_locked(scope)
 
     def resume_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
-        with self._condition:
+        with self._lock:
             self._require_active_stream_for_scope_locked(scope)
             if not self._globally_paused:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = False
-            for run in self._runs.values():
-                for job in run.pop_held_jobs():
-                    self._requeue_job_locked(job)
+            self._apply_dispatch_gates_locked()
+            self._flush_held_submissions_locked()
+            self._dispatch_ready_orchestrator_work_locked()
             self._broadcast_global_pause_locked(paused=False)
-            self._condition.notify_all()
             return self._global_pause_status_locked(scope)
 
     def unregister_session(self, run_id: str) -> None:
-        with self._condition:
-            run = self._runs.pop(run_id, None)
-            if run is not None:
-                run.clear_held()
+        with self._lock:
+            self._remove_run_locked(run_id)
 
     def end_inference_stream(
         self,
@@ -190,16 +299,17 @@ class InferenceRowScheduler:
         stream_token: str,
     ) -> None:
         """Cancel all row runs for a table stream and clear global pause on disconnect."""
-        with self._condition:
+        with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
-                run_id = session.run_id
                 session.cancel_token.cancel()
-                self._purge_queued_jobs_for_run_locked(run_id)
-                self._runs.pop(run_id, None)
+                self._remove_run_locked(session.run_id)
+            self._drop_held_for_stream_locked(stream_token)
+            binding = self._stream_bindings.pop(stream_token, None)
+            if binding is not None:
+                self._release_stream_binding_locked(binding)
             if owns_scope:
                 self._clear_global_pause_for_active_scope_locked(scope)
-            self._condition.notify_all()
 
     def _clear_global_pause_for_active_scope_locked(
         self,
@@ -208,29 +318,15 @@ class InferenceRowScheduler:
         if self._scope_guard.active_scope != scope:
             return
         self._globally_paused = False
-        for run in self._runs.values():
-            run.clear_held()
+        self._held_initial_submissions.clear()
+        self._apply_dispatch_gates_locked()
 
     def cancel_run(self, run_id: str) -> None:
-        with self._condition:
-            run = self._runs.get(run_id)
-            if run is not None:
-                run.session.cancel_token.cancel()
-            self._purge_queued_jobs_for_run_locked(run_id)
-            self._condition.notify_all()
-
-    def _get_or_create_run(self, session: InferenceRowStreamSession) -> RowRun:
-        run = self._runs.get(session.run_id)
-        if run is None:
-            run = RowRun(session)
-            self._runs[session.run_id] = run
-        return run
-
-    def _purge_queued_jobs_for_run_locked(self, run_id: str) -> None:
-        self._work_queue = deque(job for job in self._work_queue if job.session.run_id != run_id)
-        run = self._runs.get(run_id)
-        if run is not None:
-            run.purge_queued_work()
+        with self._lock:
+            row_run = self._adapter_row_run(run_id)
+            if row_run is not None:
+                row_run.session.cancel_token.cancel()
+            self._remove_run_locked(run_id)
 
     def enqueue_tier_ladder(
         self,
@@ -239,95 +335,48 @@ class InferenceRowScheduler:
         orchestration: InferenceStreamOrchestration | None = None,
         stream_token: str | None = None,
     ) -> None:
-        with self._condition:
-            if (
-                stream_token is not None
-                and self._scope_guard.active_table_stream_token != stream_token
-            ):
-                return
-        run = self._get_or_create_run(session)
-        run.orchestration = orchestration
-        if orchestration is not None:
-            run.ladder_state = orchestration.new_ladder_state(
-                resolved_mask=session.resolved_mask,
-                fleet_torp_overlay=session.fleet_torp_overlay,
+        with self._lock:
+            resolved_token = (
+                stream_token
+                if stream_token is not None
+                else self._scope_guard.active_table_stream_token
             )
-        else:
-            policy_steps = tuple(resolve_tier_policies(None))
-            run.ladder_state = PolicyLadderState(
-                policy_steps=policy_steps,
-                resolved_mask=session.resolved_mask,
-                fleet_torp_overlay=session.fleet_torp_overlay,
-            )
-        self._enqueue_job(TierJob(session=session))
 
-    def _enqueue_job(self, job: TierJob) -> None:
-        with self._condition:
+            row_run = RowRun(session)
+            from api.analytics.scores.tier_row_run_registry import register_row_run
+
+            register_row_run(row_run, orchestration=orchestration)
+            self._register_tier_callbacks_for_run(row_run)
+            root_scope = self._root_scope_for_session(session)
+            self._runs[session.run_id] = root_scope
+            if resolved_token is None:
+                return
+            if self._scope_guard.active_table_stream_token != resolved_token:
+                return
+            if self._defer_orchestrator_submit:
+                return
+            binding = self._binding_for_stream_locked(resolved_token, session=session)
             if self._globally_paused:
-                self._get_or_create_run(job.session).hold_job(job)
-            else:
-                self._work_queue.append(job)
-            self._condition.notify_all()
-
-    def _enqueue_continuation(self, session: InferenceRowStreamSession) -> None:
-        self._enqueue_job(TierJob(session=session, is_continuation=True))
-
-    def _requeue_job_locked(self, job: TierJob) -> None:
-        self._work_queue.append(job)
-
-    def _dequeue_next_job_locked(self) -> TierJob | None:
-        if not self._work_queue:
-            return None
-        for index, job in enumerate(self._work_queue):
-            if not job.is_continuation:
-                del self._work_queue[index]
-                return job
-        return self._work_queue.popleft()
-
-    def _drain_queue_locked(self) -> None:
-        while self._work_queue:
-            job = self._work_queue.popleft()
-            self._get_or_create_run(job.session).hold_job(job)
-
-    def _preempt_active_table_stream_locked(self) -> None:
-        """Cancel in-flight row runs so a reconnect can own this scope."""
-        self._globally_paused = False
-        for run in list(self._runs.values()):
-            run.session.cancel_token.cancel()
-        self._runs.clear()
-        while self._work_queue:
-            job = self._work_queue.popleft()
-            job.session.cancel_token.cancel()
-
-    def _invalidate_retained_state_locked(self) -> None:
-        self._preempt_active_table_stream_locked()
-
-    def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
-        event = GlobalPauseChanged(paused=paused)
-        for run in self._runs.values():
-            run.session.event_queue.put(event)
-
-    def _take_next_job(self) -> _Job | None:
-        # Soft pause: globally paused workers stop dequeuing; tier jobs already
-        # running in _run_tier_job continue until the current tier step finishes.
-        with self._condition:
-            while not self._shutdown:
-                if not self._globally_paused:
-                    job = self._dequeue_next_job_locked()
-                    if job is not None:
-                        return job
-                self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
-            return _Sentinel
-
-    def _worker_loop(self) -> None:
-        while True:
-            job = self._take_next_job()
-            if job is None:
-                continue
-            if job is _Sentinel:
+                self._held_initial_submissions.append(
+                    _HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
+                )
                 return
-            if isinstance(job, TierJob):
-                self._run_tier_job(job.session)
+            self._submit_tier_solve_locked(binding, root_scope)
+
+    def cancel_row_run(self, run_id: str) -> None:
+        """Cancel one row run."""
+        self.cancel_run(run_id)
+
+    def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
+        with self._lock:
+            if self._scope_guard.active_scope == scope:
+                self._clear_global_pause_for_active_scope_locked(scope)
+                self._broadcast_global_pause_locked(paused=False)
+
+    def shutdown(self) -> None:
+        """Reset adapter state; safe for test teardown after dropping a service stack."""
+        with self._lock:
+            self._invalidate_retained_state_locked()
 
     def _emit_held_solutions(
         self,
@@ -335,14 +384,14 @@ class InferenceRowScheduler:
         *,
         observation: InferenceObservation,
     ) -> None:
-        run = self._runs.get(session.run_id)
-        if run is None:
+        row_run = self._adapter_row_run(session.run_id)
+        if row_run is None:
             return
-        state = run.ladder_state
+        state = row_run.ladder_state
         if state is None or state.catalog is None or not state.merged_solutions:
             return
         segment_id: str | None = None
-        orchestration = run.orchestration
+        orchestration = row_run.orchestration
         if orchestration is not None:
             segment = orchestration.current_segment()
             if segment is not None:
@@ -357,12 +406,13 @@ class InferenceRowScheduler:
         )
         if self._on_held_solutions_updated is not None:
             self._on_held_solutions_updated(session)
+        self._wake_multiplex_for_session(session)
 
     def _emit_progress(self, session: InferenceRowStreamSession) -> None:
-        run = self._runs.get(session.run_id)
-        if run is None:
+        row_run = self._adapter_row_run(session.run_id)
+        if row_run is None:
             return
-        state = run.ladder_state
+        state = row_run.ladder_state
         if state is None or state.catalog is None:
             return
         session.event_queue.put(
@@ -372,12 +422,13 @@ class InferenceRowScheduler:
                 held_count=len(state.merged_solutions),
             )
         )
+        self._wake_multiplex_for_session(session)
 
     def _emit_tier_started_progress(self, session: InferenceRowStreamSession) -> None:
-        run = self._runs.get(session.run_id)
-        if run is None:
+        row_run = self._adapter_row_run(session.run_id)
+        if row_run is None:
             return
-        state = run.ladder_state
+        state = row_run.ladder_state
         if state is None or state.next_step_index >= len(state.policy_steps):
             return
         step = state.policy_steps[state.next_step_index]
@@ -387,91 +438,294 @@ class InferenceRowScheduler:
                 held_count=len(state.merged_solutions),
             )
         )
+        self._wake_multiplex_for_session(session)
 
-    def _try_claim_run_for_finalize(self, session: InferenceRowStreamSession) -> bool:
-        with self._condition:
-            if session.cancel_token.is_cancelled():
-                return False
-            run = self._runs.pop(session.run_id, None)
-            if run is None:
-                return False
-            run.clear_held()
-            return True
+    def _register_tier_callbacks_for_run(self, row_run: RowRun) -> None:
+        from api.analytics.scores.tier_row_run_registry import register_tier_callbacks
 
-    def _emit_row_complete(self, session: InferenceRowStreamSession, event: RowComplete) -> None:
-        if not self._try_claim_run_for_finalize(session):
-            return
-        if self._on_row_complete is not None:
-            self._on_row_complete(session, event)
-        session.event_queue.put(event)
+        session = row_run.session
 
-    def cancel_row_run(self, run_id: str) -> None:
-        """Cancel one row run and purge its queued tier jobs."""
-        with self._condition:
-            run = self._runs.get(run_id)
-            if run is not None:
-                run.session.cancel_token.cancel()
-            self._purge_queued_jobs_for_run_locked(run_id)
-            self._runs.pop(run_id, None)
-            self._condition.notify_all()
+        def callbacks() -> InferenceTierJobCallbacks:
+            return InferenceTierJobCallbacks(
+                emit_tier_started_progress=lambda: self._emit_tier_started_progress(session),
+                emit_progress=lambda: self._emit_progress(session),
+                emit_held_solutions=lambda observation: self._emit_held_solutions(
+                    session,
+                    observation=observation,
+                ),
+            )
 
-    def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
-        with self._condition:
-            if self._scope_guard.active_scope == scope:
-                self._clear_global_pause_for_active_scope_locked(scope)
-                self._broadcast_global_pause_locked(paused=False)
-                self._condition.notify_all()
+        register_tier_callbacks(row_run.run_id, callbacks())
 
-    def shutdown(self) -> None:
-        """Stop worker threads; safe for test teardown after dropping a service stack."""
-        with self._condition:
-            self._shutdown = True
-            self._invalidate_retained_state_locked()
-            self._condition.notify_all()
+    def _binding_for_stream_locked(
+        self,
+        stream_token: str,
+        *,
+        session: InferenceRowStreamSession,
+    ) -> _InferenceStreamOrchestratorBinding:
+        from api.compute.runtime import orchestrator_for_context
 
-    def _run_tier_job(self, session: InferenceRowStreamSession) -> None:
-        run = self._runs.get(session.run_id)
-        if run is None:
-            return
-        # Not interrupted by global pause; merge-admit hooks may still emit solution
-        # events until this tier step returns.
-        callbacks = InferenceTierJobCallbacks(
-            emit_tier_started_progress=lambda: self._emit_tier_started_progress(session),
-            emit_progress=lambda: self._emit_progress(session),
-            emit_held_solutions=lambda observation: self._emit_held_solutions(
-                session,
-                observation=observation,
-            ),
+        existing = self._stream_bindings.get(stream_token)
+        if existing is not None:
+            return existing
+        query_ctx = _query_context_for_session(session, scheduler=self)
+        orchestrator = orchestrator_for_context(query_ctx)
+        unregister = orchestrator.register_node_complete_listener(
+            lambda scope, node: self._on_orchestrator_node_complete(scope, node)
         )
-        outcome = run_inference_tier_job(run, callbacks)
-        if outcome.row_complete is not None:
-            self._emit_row_complete(session, outcome.row_complete)
+        binding = _InferenceStreamOrchestratorBinding(
+            orchestrator=orchestrator,
+            unregister_listener=unregister,
+            query_context=query_ctx,
+        )
+        self._stream_bindings[stream_token] = binding
+        self._apply_dispatch_gates_locked()
+        return binding
+
+    def _on_orchestrator_node_complete(
+        self,
+        scope: ComputeScope,
+        node: object,
+    ) -> None:
+        if scope.analytic_id != SCORES_ANALYTIC_ID:
             return
-        with self._condition:
-            if session.cancel_token.is_cancelled():
-                return
-            active_run = self._runs.get(session.run_id)
-            if active_run is None:
-                return
-            if outcome.next_ladder_state is not None:
-                active_run.ladder_state = outcome.next_ladder_state
-            if outcome.enqueue_continuation:
-                if self._globally_paused:
-                    active_run.hold_job(TierJob(session=session, is_continuation=True))
+        if scope.turn == "*" or not isinstance(scope.turn, int):
+            return
+        if scope.player_id == "*" or not isinstance(scope.player_id, int):
+            return
+
+        with self._lock:
+            matching_run_ids = [
+                run_id
+                for run_id, root_scope in self._runs.items()
+                if root_scope.player_id == scope.player_id
+                and root_scope.game_id == scope.game_id
+                and root_scope.perspective == scope.perspective
+                and scope.turn == root_scope.turn
+            ]
+
+        for run_id in matching_run_ids:
+            row_run = self._adapter_row_run(run_id)
+            if row_run is None:
+                continue
+            session = row_run.session
+            cancelled = session.cancel_token.is_cancelled()
+            if node.state == "failed":
+                detail = (
+                    str(node.error) if node.error is not None else "Inference tier solve failed"
+                )
+                if not cancelled:
+                    session.event_queue.put(RowFailed(detail=detail))
+                    self._wake_multiplex_for_session(session)
+                self._finalize_row_run(session)
+                continue
+            if node.state != "complete":
+                continue
+            row_complete = self._row_complete_from_result_wire(node.result_wire)
+            if row_complete is None:
+                if not cancelled:
+                    session.event_queue.put(
+                        RowFailed(detail="Inference tier solve completed without row payload")
+                    )
+                    self._wake_multiplex_for_session(session)
+                self._finalize_row_run(session)
+                continue
+            if not cancelled:
+                session.event_queue.put(row_complete)
+                self._wake_multiplex_for_session(session)
+            self._finalize_row_run(session)
+
+    def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
+        with self._lock:
+            self._remove_run_locked(session.run_id)
+
+    def _release_stream_binding_locked(
+        self,
+        binding: _InferenceStreamOrchestratorBinding,
+    ) -> None:
+        from api.compute.runtime import release_orchestrator_for_context
+
+        binding.orchestrator.set_dispatch_gate(None)
+        binding.unregister_listener()
+        ctx_id = id(binding.query_context)
+        if not any(id(other.query_context) == ctx_id for other in self._stream_bindings.values()):
+            release_orchestrator_for_context(binding.query_context)
+
+    def _preempt_active_table_stream_locked(self) -> None:
+        self._globally_paused = False
+        self._held_initial_submissions.clear()
+        for run_id in list(self._runs):
+            row_run = self._adapter_row_run(run_id)
+            if row_run is not None:
+                row_run.session.cancel_token.cancel()
+            self._remove_run_locked(run_id)
+        for stream_token in list(self._stream_bindings):
+            binding = self._stream_bindings.pop(stream_token)
+            self._release_stream_binding_locked(binding)
+
+    def _invalidate_retained_state_locked(self) -> None:
+        self._preempt_active_table_stream_locked()
+
+    def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
+        event = GlobalPauseChanged(paused=paused)
+        for run_id in self._runs:
+            row_run = self._adapter_row_run(run_id)
+            if row_run is not None:
+                row_run.session.event_queue.put(event)
+
+    def _submit_tier_solve_locked(
+        self,
+        binding: _InferenceStreamOrchestratorBinding,
+        root_scope: ComputeScope,
+    ) -> None:
+        if self._defer_orchestrator_submit:
+            return
+        from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
+        from api.compute.orchestrator import ComputeRequest
+
+        binding.orchestrator.submit(
+            ComputeRequest(
+                scope=root_scope,
+                step_kind=SCORES_TIER_SOLVE,
+                priority_band="stream_attached",
+                force_fresh=True,
+            )
+        )
+
+    def _flush_held_submissions_locked(self) -> None:
+        for held in self._held_initial_submissions:
+            binding = self._stream_bindings.get(held.stream_token)
+            if binding is not None:
+                self._submit_tier_solve_locked(binding, held.root_scope)
+        self._held_initial_submissions.clear()
+
+    def _drop_held_for_stream_locked(self, stream_token: str) -> None:
+        self._held_initial_submissions = [
+            held for held in self._held_initial_submissions if held.stream_token != stream_token
+        ]
+
+    def _held_work_counts_locked(self) -> tuple[int, int]:
+        held_jobs = len(self._held_initial_submissions)
+        held_continuations = 0
+        if not self._globally_paused:
+            return held_jobs, held_continuations
+        for binding in self._stream_bindings.values():
+            for root_scope in self._runs.values():
+                node = binding.orchestrator.nodes.get(root_scope)
+                if node is None or node.state != "ready":
+                    continue
+                if node.step_index == 0:
+                    held_jobs += 1
                 else:
-                    self._work_queue.append(TierJob(session=session, is_continuation=True))
-                self._condition.notify_all()
+                    held_continuations += 1
+        return held_jobs, held_continuations
+
+    def _apply_dispatch_gates_locked(self) -> None:
+        gate = self._dispatch_gate if self._globally_paused else None
+        for binding in self._stream_bindings.values():
+            binding.orchestrator.set_dispatch_gate(gate)
+
+    def _dispatch_ready_orchestrator_work_locked(self) -> None:
+        for binding in self._stream_bindings.values():
+            binding.orchestrator.dispatch_ready_work()
+
+    @property
+    def _dispatch_gate(self) -> Callable[[object], bool]:
+        from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
+
+        def gate(node: object) -> bool:
+            if not self._globally_paused:
+                return True
+            if node.scope.analytic_id != SCORES_ANALYTIC_ID:
+                return True
+            return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
+
+        return gate
+
+    def _remove_run_locked(self, run_id: str) -> None:
+        from api.analytics.scores.tier_row_run_registry import unregister_row_run
+
+        root_scope = self._runs.pop(run_id, None)
+        unregister_row_run(run_id)
+        if root_scope is None:
+            return
+        self._held_initial_submissions = [
+            held for held in self._held_initial_submissions if held.root_scope != root_scope
+        ]
+
+    @staticmethod
+    def _adapter_row_run(run_id: str) -> RowRun | None:
+        from api.analytics.scores.tier_row_run_registry import get_row_run
+
+        return get_row_run(run_id)
+
+    @staticmethod
+    def _root_scope_for_session(session: InferenceRowStreamSession) -> ComputeScope:
+        return ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=session.game_id,
+            perspective=session.perspective,
+            turn=session.turn_number,
+            player_id=session.player_id,
+        )
+
+    @staticmethod
+    def _row_complete_from_result_wire(result_wire: object | None) -> RowComplete | None:
+        if not isinstance(result_wire, dict):
+            return None
+        row_complete = result_wire.get("rowComplete")
+        if isinstance(row_complete, RowComplete):
+            return row_complete
+        return None
+
+    @staticmethod
+    def _wake_multiplex_for_session(session: InferenceRowStreamSession) -> None:
+        wake_inference_table_stream_multiplex(
+            InferenceStreamScope(
+                game_id=session.game_id,
+                perspective=session.perspective,
+                turn_number=session.turn_number,
+            )
+        )
+
+
+def _query_context_for_session(
+    session: InferenceRowStreamSession,
+    *,
+    scheduler: InferenceRowScheduler,
+) -> AnalyticQueryContext:
+    from api.analytics.scores.export_services import ScoresExportContext
+
+    load_turn = session.load_scoreboard_turn
+    if load_turn is None:
+
+        def load_turn(turn_number: int):
+            return session.turn if turn_number == session.turn_number else None
+
+    export_services = dict(session.export_services)
+    injected_scores_services = export_services.get(SCORES_ANALYTIC_ID)
+    if isinstance(injected_scores_services, ScoresExportContext):
+        scores_services = replace(injected_scores_services, scheduler=scheduler)
+    else:
+        scores_services = ScoresExportContext(scheduler=scheduler)
+    export_services[SCORES_ANALYTIC_ID] = scores_services
+
+    return make_analytic_query_context(
+        session.turn,
+        TurnAnalyticsOptions(),
+        load_turn=load_turn,
+        export_services=export_services,
+    )
 
 
 def create_inference_row_scheduler(
     *,
-    on_row_complete: OnRowCompleteCallback | None = None,
     on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
+    **_deprecated_kwargs: object,
 ) -> InferenceRowScheduler:
     return InferenceRowScheduler(
-        worker_count=_configured_worker_count(),
-        on_row_complete=on_row_complete,
         on_held_solutions_updated=on_held_solutions_updated,
+        **_deprecated_kwargs,
     )
 
 
@@ -481,15 +735,15 @@ _scheduler_lock = threading.Lock()
 
 def get_inference_row_scheduler(
     *,
-    on_row_complete: OnRowCompleteCallback | None = None,
     on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
+    **_deprecated_kwargs: object,
 ) -> InferenceRowScheduler:
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
             _scheduler = create_inference_row_scheduler(
-                on_row_complete=on_row_complete,
                 on_held_solutions_updated=on_held_solutions_updated,
+                **_deprecated_kwargs,
             )
         return _scheduler
 
@@ -497,7 +751,15 @@ def get_inference_row_scheduler(
 def reset_inference_row_scheduler_for_tests() -> None:
     """Drop the process-wide scheduler (tests only)."""
     global _scheduler
+    from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
     with _scheduler_lock:
         if _scheduler is not None:
             _scheduler.shutdown()
         _scheduler = None
+    reset_orchestrators_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    from api.compute.pools import shutdown_compute_worker_pool_for_tests
+
+    shutdown_compute_worker_pool_for_tests()

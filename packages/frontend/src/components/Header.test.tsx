@@ -30,7 +30,7 @@ function renderHeader() {
         setTurn={() => {}}
         stepTurn={() => {}}
         shellViewpoints={[]}
-        shellSelectedViewpointName={null}
+        shellSelectedViewpointOrdinal={null}
         onShellViewpointChange={() => {}}
       />
     </QueryClientProvider>
@@ -106,7 +106,7 @@ describe('Header', () => {
           setTurn={() => {}}
           stepTurn={() => {}}
           shellViewpoints={[]}
-          shellSelectedViewpointName={null}
+          shellSelectedViewpointOrdinal={null}
           onShellViewpointChange={() => {}}
         />
       </QueryClientProvider>
@@ -168,18 +168,18 @@ describe('Header', () => {
           setTurn={() => {}}
           stepTurn={() => {}}
           shellViewpoints={[
-            { name: 'Alpha', raceName: null, disabled: false },
-            { name: 'Beta', raceName: null, disabled: false },
+            { ordinal: 1, displayName: 'Alpha', raceName: null, disabled: false },
+            { ordinal: 2, displayName: 'Beta', raceName: null, disabled: false },
           ]}
-          shellSelectedViewpointName="Alpha"
+          shellSelectedViewpointOrdinal={1}
           onShellViewpointChange={onViewpoint}
         />
       </QueryClientProvider>
     )
     const select = screen.getByLabelText(/^viewpoint$/i)
-    expect(select).toHaveValue('Alpha')
-    await user.selectOptions(select, 'Beta')
-    expect(onViewpoint).toHaveBeenCalledWith('Beta')
+    expect(select).toHaveValue('1')
+    await user.selectOptions(select, '2')
+    expect(onViewpoint).toHaveBeenCalledWith(2)
   })
 
   it('marks disabled viewpoint options and keeps only the active slot selectable', () => {
@@ -201,10 +201,10 @@ describe('Header', () => {
           setTurn={() => {}}
           stepTurn={() => {}}
           shellViewpoints={[
-            { name: 'Alpha', raceName: null, disabled: false },
-            { name: 'Beta', raceName: null, disabled: true },
+            { ordinal: 1, displayName: 'Alpha', raceName: null, disabled: false },
+            { ordinal: 2, displayName: 'Beta', raceName: null, disabled: true },
           ]}
-          shellSelectedViewpointName="Alpha"
+          shellSelectedViewpointOrdinal={1}
           onShellViewpointChange={onViewpoint}
         />
       </QueryClientProvider>
@@ -237,7 +237,7 @@ describe('Header', () => {
             setTurn={setTurn}
             stepTurn={stepTurn}
             shellViewpoints={[]}
-            shellSelectedViewpointName={null}
+            shellSelectedViewpointOrdinal={null}
             onShellViewpointChange={() => {}}
           />
         </QueryClientProvider>
@@ -279,7 +279,7 @@ describe('Header', () => {
           setTurn={() => {}}
           stepTurn={() => {}}
           shellViewpoints={[]}
-          shellSelectedViewpointName={null}
+          shellSelectedViewpointOrdinal={null}
           onShellViewpointChange={() => {}}
         />
       </QueryClientProvider>
@@ -306,7 +306,7 @@ describe('Header', () => {
           setTurn={() => {}}
           stepTurn={() => {}}
           shellViewpoints={[]}
-          shellSelectedViewpointName={null}
+          shellSelectedViewpointOrdinal={null}
           onShellViewpointChange={() => {}}
         />
       </QueryClientProvider>

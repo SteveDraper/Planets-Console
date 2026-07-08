@@ -19,9 +19,11 @@ Locked choices:
 5. **Scheduling** -- one global pool; priority bands (stream-attached, interactive ensure, background); scores tier-1-before-continuations fairness inside bands.
 6. **Backends** -- declarative per `step_kind` on registration: `inline | thread | interpreter | process`. Fleet materialization leg defaults to `interpreter`; scores tier to `thread`; not hardcoded in orchestrator.
 7. **Dependencies** -- orchestrator completes ancestors first; wire builders pass `DependencyOutputs` on job wire; storage read fallback only for terminal ancestor artifacts.
-8. **Persistence** -- orchestrator coordinates timing and epochs; analytic `PersistencePolicy` owns schema, write gates, merge, invalidation (ADR 0002 paths unchanged).
-9. **Table streams** -- keep [#175](https://github.com/SteveDraper/Planets-Console/issues/175) session framework; replace per-analytic scheduler worker pools with orchestrator adapters.
-10. **Phased rollout** -- v1: export ensure + stream steps; phase 2: batch `compute()`; phase 3: BFF/MCP uniform API.
+8. **Persistence** -- orchestrator coordinates timing and epochs; analytic `PersistencePolicy` owns schema, write gates, merge, invalidation (ADR 0002 paths unchanged). `persist` runs only when step outcome is `persist`; `complete` omits persist (e.g. scores `stopped`).
+9. **Step outcome** -- every `run_step` result declares `continue`, `persist`, or `complete`. Repeatable step kinds (scores `tier_solve`) use `continue` until terminal; `step_index` counts within-node executions for pool fairness.
+10. **Compute request entry step** -- `ComputeRequest.step_kind` selects profile entry (e.g. scores `materialize` for ensure, `tier_solve` for inference stream).
+11. **Table streams** -- keep [#175](https://github.com/SteveDraper/Planets-Console/issues/175) session framework; replace per-analytic scheduler worker pools with orchestrator adapters. **Parity template:** per-stream orchestrator binding; `PersistencePolicy.persist` for durable writes; adapter node-complete listener for wire events; admission reads persistence directly. Fleet ([#199](https://github.com/SteveDraper/Planets-Console/issues/199)) and scores ([#200](https://github.com/SteveDraper/Planets-Console/issues/200)) are reference implementations.
+12. **Phased rollout** -- v1: export ensure + stream steps; phase 2: batch `compute()`; phase 3: BFF/MCP uniform API.
 
 ## Consequences
 

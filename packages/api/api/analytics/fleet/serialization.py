@@ -727,6 +727,20 @@ def fleet_materialization_version_from_json(data: dict[str, Any]) -> int:
     return raw
 
 
+def materialization_version_from_fleet_compute_result_wire(
+    result_wire: object | None,
+) -> int | None:
+    """Read materialization version from one fleet orchestrator result wire."""
+    if not isinstance(result_wire, dict):
+        return None
+    persisted_wire = result_wire.get("persistedLedgerWire")
+    if not isinstance(persisted_wire, dict):
+        return None
+    if "materializationVersion" not in persisted_wire:
+        return None
+    return fleet_materialization_version_from_json(persisted_wire)
+
+
 def is_current_fleet_materialization_version(version: int) -> bool:
     return version == FLEET_MATERIALIZATION_VERSION
 

@@ -1,6 +1,6 @@
 """Core scoreboard analytic."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
@@ -19,8 +19,11 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_MATERIALIZE,
     SCORES_PERSISTENCE_POLICY,
     SCORES_SCOPE_KEY_SPEC,
+    SCORES_TIER_SOLVE,
     build_scores_materialize_job_wire,
+    build_scores_tier_solve_job_wire,
     run_scores_materialize,
+    run_scores_tier_solve,
 )
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
@@ -93,6 +96,7 @@ def iter_scores_table_inference_stream(
     resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
     | None = None,
+    export_services: Mapping[str, object] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
@@ -106,6 +110,7 @@ def iter_scores_table_inference_stream(
         reload_host_turn=reload_host_turn,
         resolve_mask_for_player=resolve_mask_for_player,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+        export_services=export_services,
         persistence=persistence,
         scheduler=scheduler,
     )
@@ -124,6 +129,12 @@ REGISTRATION = TurnAnalyticRegistration(
     scope_key_spec=SCORES_SCOPE_KEY_SPEC,
     compute_profile=SCORES_COMPUTE_PROFILE,
     persistence_policy=SCORES_PERSISTENCE_POLICY,
-    build_step_job_wires=((SCORES_MATERIALIZE, build_scores_materialize_job_wire),),
-    run_steps=((SCORES_MATERIALIZE, run_scores_materialize),),
+    build_step_job_wires=(
+        (SCORES_MATERIALIZE, build_scores_materialize_job_wire),
+        (SCORES_TIER_SOLVE, build_scores_tier_solve_job_wire),
+    ),
+    run_steps=(
+        (SCORES_MATERIALIZE, run_scores_materialize),
+        (SCORES_TIER_SOLVE, run_scores_tier_solve),
+    ),
 )

@@ -7,7 +7,6 @@ import json
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    get_inference_row_scheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -25,6 +24,9 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeNodeRun
+from api.compute.scope import ComputeScope
 from api.transport.inference_stream import (
     stream_inference_ndjson,
 )
@@ -113,7 +115,7 @@ def test_table_stream_reconnect_via_ndjson_transport(sample_turn):
 
 def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = get_inference_row_scheduler()
+    scheduler = InferenceRowScheduler(worker_count=0)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -238,20 +240,75 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
     assert complete_player_ids == set(player_ids)
 
 
-def test_cancel_run_purges_queued_tier_jobs_for_run(sample_turn):
+def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid)
     other_session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
-    scheduler.enqueue_tier_ladder(session)
-    scheduler.enqueue_tier_ladder(other_session)
-    scheduler._enqueue_continuation(session)
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+    scheduler.enqueue_tier_ladder(other_session, stream_token=stream_token)
+    scheduler.pause_globally(scope)
+
+    session_root_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn=session.turn_number,
+        player_id=session.player_id,
+    )
+    other_root_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=other_session.game_id,
+        perspective=other_session.perspective,
+        turn=other_session.turn_number,
+        player_id=other_session.player_id,
+    )
+    scheduler._stream_bindings[stream_token] = type(
+        "FakeBinding",
+        (),
+        {
+            "orchestrator": type(
+                "FakeOrchestrator",
+                (),
+                {
+                    "nodes": {
+                        session_root_scope: ComputeNodeRun(
+                            scope=session_root_scope,
+                            dependency_scopes=(),
+                            state="ready",
+                            step_index=1,
+                            profile_step_index=1,
+                        ),
+                        other_root_scope: ComputeNodeRun(
+                            scope=other_root_scope,
+                            dependency_scopes=(),
+                            state="ready",
+                            step_index=0,
+                            profile_step_index=1,
+                        ),
+                    },
+                    "set_dispatch_gate": lambda _gate: None,
+                    "dispatch_ready_work": lambda: None,
+                    "register_node_complete_listener": lambda _listener: lambda: None,
+                },
+            )(),
+            "unregister_listener": lambda: None,
+            "query_context": object(),
+        },
+    )()
+
+    assert scheduler.global_pause_status(scope)["heldContinuationCount"] == 1
 
     scheduler.cancel_run(session.run_id)
 
     assert session.cancel_token.is_cancelled() is True
-    assert len(scheduler._work_queue) == 1
-    remaining_job = scheduler._work_queue.popleft()
-    assert remaining_job.session.run_id == other_session.run_id
-    cancelled_run = scheduler._runs.get(session.run_id)
-    assert cancelled_run is None or cancelled_run.held_job_count == 0
+    assert session.run_id not in scheduler._runs
+    assert other_session.run_id in scheduler._runs
+    status = scheduler.global_pause_status(scope)
+    assert status["heldContinuationCount"] == 0

@@ -46,7 +46,7 @@ export function applyShellGameBootstrapResult(
       storageAvailablePerspectives: loaded.storedPerspectives,
     }
     if (options?.storageOnlyUseDefaultViewpoint) {
-      refreshOptions.perspectiveOverrideName = loaded.defaultViewpointName
+      refreshOptions.perspectiveOverrideOrdinal = loaded.defaultViewpointOrdinal
     }
     applyGameInfoRefresh(gameId, buildGameInfoShellContext(loaded.gameInfo), refreshOptions)
     return

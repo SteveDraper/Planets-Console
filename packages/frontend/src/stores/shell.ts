@@ -7,6 +7,7 @@ import type { PerspectiveRow } from '../lib/gameInfoShell'
 const shellPersistStorage = createLocalStorageOrMemoryStateStorage()
 
 export const SHELL_STORAGE_KEY = 'planets-console-shell'
+const SHELL_PERSIST_VERSION = 2
 
 export type ShellViewMode = 'tabular' | 'map'
 
@@ -27,8 +28,8 @@ type ShellState = {
   gameInfoContext: GameInfoShellContext | null
   /** Viewed turn; may exceed gameInfoContext.turn for future prediction. */
   selectedTurn: number | null
-  /** When set, overrides login-based default for the viewpoint control. */
-  perspectiveOverrideName: string | null
+  /** When set, overrides login-based default for the viewpoint control (1-based slot; 0 spectator). */
+  perspectiveOverrideOrdinal: number | null
   /** Last game id used for turn/perspective reset heuristics on refresh. */
   lastShellGameId: string | null
   /** Game loaded from storage without login; turn ensure may skip credentials. */
@@ -37,7 +38,7 @@ type ShellState = {
   storageAvailablePerspectives: number[] | null
   viewMode: ShellViewMode
   setSelectedTurn: (turn: number | null) => void
-  setPerspectiveOverrideName: (name: string | null) => void
+  setPerspectiveOverrideOrdinal: (ordinal: number | null) => void
   resetPerspectiveOverride: () => void
   setViewMode: (mode: ShellViewMode) => void
   setStorageAvailablePerspectives: (perspectives: number[] | null) => void
@@ -51,7 +52,7 @@ type ShellState = {
 }
 
 export type ApplyGameInfoRefreshOptions = {
-  perspectiveOverrideName?: string | null
+  perspectiveOverrideOrdinal?: number | null
   storageOnlyLoad?: boolean
   storageAvailablePerspectives?: number[] | null
   /** Caps initial/clamped selected turn (host pseudo-view on in-progress games). */
@@ -64,14 +65,14 @@ export const useShellStore = create<ShellState>()(
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       lastShellGameId: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
       viewMode: 'map',
       setSelectedTurn: (turn) => set({ selectedTurn: turn }),
-      setPerspectiveOverrideName: (name) => set({ perspectiveOverrideName: name }),
-      resetPerspectiveOverride: () => set({ perspectiveOverrideName: null }),
+      setPerspectiveOverrideOrdinal: (ordinal) => set({ perspectiveOverrideOrdinal: ordinal }),
+      resetPerspectiveOverride: () => set({ perspectiveOverrideOrdinal: null }),
       setViewMode: (viewMode) => set({ viewMode }),
       setStorageAvailablePerspectives: (perspectives) =>
         set({ storageAvailablePerspectives: perspectives }),
@@ -80,18 +81,19 @@ export const useShellStore = create<ShellState>()(
       applyGameInfoRefresh: (gameId, ctx, options) => {
         const prevGameId = get().lastShellGameId
         const latestTurn = ctx.turn
-        const overrideFromOptions = options?.perspectiveOverrideName
+        const overrideFromOptions = options?.perspectiveOverrideOrdinal
 
         if (prevGameId !== gameId) {
-          set({ perspectiveOverrideName: overrideFromOptions ?? null })
+          set({ perspectiveOverrideOrdinal: overrideFromOptions ?? null })
         } else if (overrideFromOptions !== undefined) {
-          set({ perspectiveOverrideName: overrideFromOptions })
+          set({ perspectiveOverrideOrdinal: overrideFromOptions })
         } else {
-          const names = new Set(ctx.perspectives.map((p) => p.name))
+          const ordinals = new Set(ctx.perspectives.map((p) => p.ordinal))
           set((s) => ({
-            perspectiveOverrideName:
-              s.perspectiveOverrideName != null && names.has(s.perspectiveOverrideName)
-                ? s.perspectiveOverrideName
+            perspectiveOverrideOrdinal:
+              s.perspectiveOverrideOrdinal != null &&
+              ordinals.has(s.perspectiveOverrideOrdinal)
+                ? s.perspectiveOverrideOrdinal
                 : null,
           }))
         }
@@ -140,11 +142,23 @@ export const useShellStore = create<ShellState>()(
     }),
     {
       name: SHELL_STORAGE_KEY,
+      version: SHELL_PERSIST_VERSION,
       storage: createJSONStorage(() => shellPersistStorage),
+      migrate: (persisted) => {
+        const state = (persisted as { state?: Record<string, unknown> })?.state ?? {}
+        const { perspectiveOverrideName: _legacy, ...rest } = state
+        return {
+          ...(persisted as object),
+          state: {
+            ...rest,
+            perspectiveOverrideOrdinal: null,
+          },
+        }
+      },
       partialize: (state) => ({
         selectedGameId: state.selectedGameId,
         selectedTurn: state.selectedTurn,
-        perspectiveOverrideName: state.perspectiveOverrideName,
+        perspectiveOverrideOrdinal: state.perspectiveOverrideOrdinal,
         lastShellGameId: state.lastShellGameId,
         viewMode: state.viewMode,
       }),

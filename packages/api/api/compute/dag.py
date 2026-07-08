@@ -37,9 +37,16 @@ def plan_compute_dag(
     export_scope: ExportScope,
     *,
     compute_registry: Mapping[str, AnalyticComputeRegistration],
+    force_root: bool = False,
 ) -> tuple[PlannedComputeNode, ...]:
     """Plan compute nodes and dependency edges from ENSURE_DEPENDENCIES walk."""
-    walk_result = walk_dependency_tree(ctx, analytic_id, export_scope, visiting=set())
+    walk_result = walk_dependency_tree(
+        ctx,
+        analytic_id,
+        export_scope,
+        visiting=set(),
+        force_root=force_root,
+    )
     if walk_result.turn_unavailable is not None:
         raise ValueError(
             f"cannot plan compute DAG: turn unavailable ({walk_result.turn_unavailable})"

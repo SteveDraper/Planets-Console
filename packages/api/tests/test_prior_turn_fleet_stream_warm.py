@@ -44,6 +44,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
@@ -58,6 +59,11 @@ def _reset_stream_registry_after_test() -> None:
     yield
     reset_coordinators()
     reset_inference_table_stream_registry_for_tests()
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
 
 
 def _wire_fleet_scores_invalidation(
@@ -80,6 +86,12 @@ def _install_scheduler(
     worker_count: int = 0,
 ) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
+    if worker_count > 0:
+        from api.compute.pools import reset_compute_worker_pool_for_tests
+
+        # Fresh pool for orchestrator-backed stream tests; allow fleet warm and tier work
+        # to make progress without waiting on a saturated process-wide singleton.
+        reset_compute_worker_pool_for_tests(worker_count=max(worker_count, 2))
     scheduler = InferenceRowScheduler(worker_count=worker_count)
 
     def _get_scheduler() -> InferenceRowScheduler:
@@ -172,18 +184,77 @@ def _wait_until(
     raise AssertionError("condition not met before timeout")
 
 
-def _run_warm_synchronously(monkeypatch: pytest.MonkeyPatch) -> None:
-    def immediate_thread(*, target, args=(), daemon=True):
-        class _ImmediateThread:
-            def start(self) -> None:
-                target(*args)
+def _run_warm_to_completion(
+    *,
+    host_turn,
+    ctx,
+    player_ids: tuple[int, ...],
+    timeout_seconds: float = 30.0,
+) -> None:
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        player_ids=player_ids,
+    )
+    prior_turn = host_turn.settings.turn - 1
+    fleet_persistence = ctx.export_services["fleet"].persistence
 
-        return _ImmediateThread()
+    def all_final() -> bool:
+        return all(
+            fleet_persistence.has_final_ledger(
+                ctx.game_id,
+                ctx.perspective,
+                prior_turn,
+                player_id,
+            )
+            for player_id in player_ids
+        )
+
+    _wait_until(all_final, timeout_seconds=timeout_seconds)
+
+
+def test_background_warm_submits_orchestrator_background_requests(
+    sample_turn,
+    persistence,
+    monkeypatch,
+):
+    """Stream-open warm submits background-band fleet@(host_turn - 1) per player."""
+    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    host_turn, ctx = _host_turn_context(
+        sample_turn,
+        persistence,
+        seed_player_ids=player_ids[0],
+    )
+    prior_turn = HOST_TURN - 1
+    fleet_persistence = ctx.export_services["fleet"].persistence
+    fleet_persistence.delete_snapshot(ctx.game_id, ctx.perspective, prior_turn)
+
+    submitted: list[object] = []
+
+    def capture_submit(self, request):
+        submitted.append(request)
+        from api.compute.orchestrator import ComputeHandle
+
+        return ComputeHandle(scope=request.scope, _node=None)
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.prior_turn_fleet_torp_overlay.threading.Thread",
-        immediate_thread,
+        "api.compute.orchestrator.ComputeOrchestrator.submit",
+        capture_submit,
     )
+
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        player_ids=player_ids,
+    )
+
+    assert len(submitted) == len(player_ids)
+    assert all(request.priority_band == "background" for request in submitted)
+    assert {request.scope.player_id for request in submitted} == set(player_ids)
+    assert all(request.scope.turn == prior_turn for request in submitted)
+    assert all(request.scope.analytic_id == "fleet" for request in submitted)
 
 
 def _run_ids_for_players(
@@ -191,9 +262,12 @@ def _run_ids_for_players(
     player_ids: tuple[int, ...],
 ) -> dict[int, str]:
     mapping: dict[int, str] = {}
-    for run in scheduler._runs.values():
-        if run.session.player_id in player_ids:
-            mapping[run.session.player_id] = run.session.run_id
+    for run_id in scheduler._runs:
+        row_run = get_row_run(run_id)
+        if row_run is None:
+            continue
+        if row_run.session.player_id in player_ids:
+            mapping[row_run.session.player_id] = row_run.session.run_id
     return mapping
 
 
@@ -337,6 +411,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
         perspective=ctx.perspective,
         load_scoreboard_turn=ctx.load_turn,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+        export_services=ctx.export_services,
         persistence=inference_persistence,
         scheduler=scheduler,
     )
@@ -423,13 +498,7 @@ def test_background_warm_eventually_applies_fleet_overlay(
     assert pending.input_status == "pending"
     assert pending.overlay is None
 
-    _run_warm_synchronously(monkeypatch)
-    schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=ctx.load_turn,
-        export_services=ctx.export_services,
-        player_ids=(player_id,),
-    )
+    _run_warm_to_completion(host_turn=host_turn, ctx=ctx, player_ids=(player_id,))
 
     assert fleet_persistence.has_final_ledger(
         ctx.game_id,
@@ -496,6 +565,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         perspective=ctx.perspective,
         load_scoreboard_turn=ctx.load_turn,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
+        export_services=ctx.export_services,
         persistence=inference_persistence,
         scheduler=scheduler,
     )
@@ -512,6 +582,15 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     thread.start()
     try:
         _wait_until(
+            lambda: fleet_persistence.has_final_ledger(
+                ctx.game_id,
+                ctx.perspective,
+                prior_turn,
+                player_id,
+            ),
+            timeout_seconds=30.0,
+        )
+        _wait_until(
             lambda: any(event.get("type") == "complete" for event in events),
             timeout_seconds=30.0,
         )
@@ -519,7 +598,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         first_complete = next(event for event in events if event.get("type") == "complete")
         first_diagnostics = first_complete.get("diagnostics")
         assert isinstance(first_diagnostics, dict)
-        assert first_diagnostics.get("fleetTorpInputStatus") == "pending"
+        assert first_diagnostics.get("fleetTorpInputStatus") == "applied"
 
         _seed_prior_turn_fleet_with_belief_sets(
             ctx,

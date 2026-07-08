@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -91,20 +92,24 @@ class InferenceInvalidationService:
         self._fleet_persistence.on_snapshot_persisted = None
         self._fleet_persistence.on_ledger_persisted = self.on_fleet_ledger_persisted
 
-    def on_fleet_ledger_persisted(
-        self,
-        game_id: int,
-        perspective: int,
-        fleet_turn: int,
-        player_id: int,
-    ) -> None:
+    def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:
         """Drop one player's scores@N inference row when fleet@(N-1) is persisted."""
-        host_turn = fleet_turn + 1
-        self._persistence.delete_row(game_id, perspective, host_turn, player_id)
-        reschedule_inference_row(
-            self._scope(game_id, perspective, host_turn),
-            player_id,
+        host_turn = event.fleet_turn + 1
+        scope = self._scope(event.game_id, event.perspective, host_turn)
+        scheduler = self._scheduler_instance()
+        should_reschedule = scheduler.should_reschedule_scores_row_after_fleet_persist(
+            scope,
+            event,
+            invalidate_row=lambda: self._persistence.delete_row(
+                event.game_id,
+                event.perspective,
+                host_turn,
+                event.player_id,
+            ),
         )
+        if not should_reschedule:
+            return
+        reschedule_inference_row(scope, event.player_id)
 
     def on_fleet_snapshot_persisted(
         self,

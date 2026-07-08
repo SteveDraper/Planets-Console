@@ -23,6 +23,7 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
+from api.transport.fleet_table_stream import fleet_error_event
 
 
 @dataclass(kw_only=True)
@@ -64,7 +65,16 @@ class FleetTableStreamController(
             stream_token=self.stream_token,
         )
         if scheduled is None:
-            return AdmissionDispatch(schedule_failed=True)
+            return AdmissionDispatch(
+                wire_events=(
+                    tag_fleet_table_stream_event(
+                        fleet_error_event(
+                            "Fleet ledger materialization could not be scheduled",
+                        ),
+                        player_id=player_id,
+                    ),
+                ),
+            )
         return AdmissionDispatch(scheduled=scheduled)
 
     def reschedule_player(self, player_id: int) -> bool:
@@ -73,6 +83,11 @@ class FleetTableStreamController(
             if old_row is not None:
                 self.scheduler.cancel_player_run(old_row.session.run_id)
                 self.finished_run_ids.discard(old_row.session.run_id)
+            else:
+                active = self.scheduler.row_run_for_player(self.scope, player_id)
+                if active is not None:
+                    self.scheduler.cancel_player_run(active.session.run_id)
+                    self.finished_run_ids.discard(active.session.run_id)
             self.scheduled_rows.pop(player_id, None)
             admission = resolve_player_stream_admission(
                 self.persistence,
@@ -119,4 +134,15 @@ class FleetTableStreamController(
             self.scope,
             tuple(row.session for row in self.current_scheduled_rows()),
             stream_token=self.stream_token,
+        )
+
+    def adopt_admission_scheduled_row(
+        self,
+        player_id: int,
+        row: ScheduledFleetPlayer,
+    ) -> bool:
+        return super().adopt_admission_scheduled_row(
+            player_id,
+            row,
+            cancel_run_id=self.scheduler.cancel_player_run,
         )

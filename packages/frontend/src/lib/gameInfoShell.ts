@@ -3,14 +3,19 @@ import type { GameInfoShellContext } from '../stores/shell'
 import { resolveRaceDisplayNameFromGameInfo } from './planetsNuRaceDisplayName'
 import { stellarCartographySettingsGatesFromGameInfo } from './stellarCartographySettings'
 
+import { ELIMINATED_PLAYER_WIRE_STATUS } from './turnPlayerUsernames'
+
 /** 1-based player index in game info `players` order, with display name. */
 export type PerspectiveRow = {
   ordinal: number
   /** Host player id from game info `players[].id` when present, else ordinal. */
   playerId: number
+  /** Username from stored game info (may be ``dead`` for eliminated slots). */
   name: string
   /** From turn-style `races` on the payload when present, else static HOST catalog. */
   raceName: string | null
+  /** Turn the player was eliminated, or null when still active at game-info snapshot. */
+  eliminationTurn: number | null
 }
 
 /**
@@ -61,6 +66,7 @@ export function buildPerspectivesFromGameInfo(data: GameInfoResponse): Perspecti
     let username = ''
     let raceId: number | null = null
     let playerId = i + 1
+    let eliminationTurn: number | null = null
     if (entry && typeof entry === 'object') {
       const o = entry as Record<string, unknown>
       const u = o.username
@@ -75,6 +81,15 @@ export function buildPerspectivesFromGameInfo(data: GameInfoResponse): Perspecti
       if (typeof hostPlayerId === 'number' && Number.isFinite(hostPlayerId)) {
         playerId = hostPlayerId
       }
+      const status = o.status
+      const statusTurn = o.statusturn
+      if (
+        status === ELIMINATED_PLAYER_WIRE_STATUS &&
+        typeof statusTurn === 'number' &&
+        Number.isFinite(statusTurn)
+      ) {
+        eliminationTurn = Math.floor(statusTurn)
+      }
     }
     const trimmed = username.trim()
     const name = trimmed || `Player ${i + 1}`
@@ -84,6 +99,7 @@ export function buildPerspectivesFromGameInfo(data: GameInfoResponse): Perspecti
       playerId,
       name,
       raceName,
+      eliminationTurn,
     }
   })
 }
@@ -173,6 +189,53 @@ export function selectableTurnMaxForShell(latestTurn: number | null): number | n
     return null
   }
   return Math.floor(latestTurn)
+}
+
+/** Shell viewpoint label for a perspective row at the viewed data turn. */
+export function perspectiveDisplayName(
+  row: PerspectiveRow,
+  viewedDataTurn: number | null,
+  turnUsernamesByPlayerId: ReadonlyMap<number, string> | null
+): string {
+  const turnUsername = turnUsernamesByPlayerId?.get(row.playerId)?.trim()
+  if (
+    viewedDataTurn != null &&
+    turnUsername &&
+    (row.eliminationTurn == null || viewedDataTurn < row.eliminationTurn)
+  ) {
+    return turnUsername
+  }
+  return row.name
+}
+
+/** Match logged-in name to a 1-based perspective slot; otherwise first slot. */
+export function viewpointOrdinalForLogin(
+  perspectives: PerspectiveRow[],
+  loginName: string | null
+): number | null {
+  if (perspectives.length === 0) {
+    return null
+  }
+  const n = loginName?.trim().toLowerCase() ?? ''
+  if (n) {
+    const hit = perspectives.find((p) => p.name.toLowerCase() === n)
+    if (hit) {
+      return hit.ordinal
+    }
+  }
+  return perspectives[0]?.ordinal ?? null
+}
+
+/** Host player id for a 1-based perspective slot, or null when unknown or spectator. */
+export function playerIdForPerspectiveOrdinal(
+  perspectives: PerspectiveRow[],
+  ordinal: number | null
+): number | null {
+  if (ordinal == null || ordinal === PSEUDO_VIEWPOINT_PERSPECTIVE) {
+    return null
+  }
+  const hit = perspectives.find((p) => p.ordinal === ordinal)
+  return hit?.playerId ?? null
 }
 
 /** Match logged-in name to a player (case-insensitive); otherwise first perspective. */

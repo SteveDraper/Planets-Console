@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -45,6 +45,7 @@ class InferenceTableStreamController(
     resolve_fleet_torp_resolution_for_player: (
         Callable[[int], PriorTurnFleetTorpResolution] | None
     ) = None
+    export_services: Mapping[str, object] = field(default_factory=dict)
     persistence: InferenceRowPersistenceService | None = None
 
     def resolve_row_admission(
@@ -89,6 +90,7 @@ class InferenceTableStreamController(
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_resolution.overlay,
             fleet_torp_input_status=fleet_resolution.input_status,
+            export_services=self.export_services,
             stream_token=self.stream_token,
         )
 
@@ -118,6 +120,10 @@ class InferenceTableStreamController(
         scheduled = self.schedule_player_row(player_id)
         if scheduled is None:
             return AdmissionDispatch(schedule_failed=True)
+        existing = self.scheduled_rows.get(player_id)
+        if existing is not None and existing.session.run_id != scheduled.session.run_id:
+            self.scheduler.cancel_row_run(scheduled.session.run_id)
+            return AdmissionDispatch()
         return AdmissionDispatch(scheduled=scheduled)
 
     def _refresh_host_turn(self) -> None:
@@ -131,12 +137,28 @@ class InferenceTableStreamController(
             if old_row is not None:
                 self.cancel_player_row(player_id)
                 self.finished_run_ids.discard(old_row.session.run_id)
+            else:
+                active = self.scheduler.row_run_for_player(self.scope, player_id)
+                if active is not None:
+                    self.scheduler.cancel_row_run(active.session.run_id)
+                    self.finished_run_ids.discard(active.session.run_id)
             self.scheduled_rows.pop(player_id, None)
             admission = self.resolve_row_admission(player_id)
             if not self.register_admitted_schedule(player_id, admission):
                 return False
         self.wake_multiplex.set()
         return True
+
+    def adopt_admission_scheduled_row(
+        self,
+        player_id: int,
+        row: ScheduledInferenceRow,
+    ) -> bool:
+        return super().adopt_admission_scheduled_row(
+            player_id,
+            row,
+            cancel_run_id=self.scheduler.cancel_row_run,
+        )
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         with self.stream_lock:

@@ -29,7 +29,7 @@ export function FleetAnalyticTile({
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideName = useShellStore((s) => s.perspectiveOverrideName)
+  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
   const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
   const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
   const loginName = useSessionStore((s) => s.name)
@@ -41,16 +41,18 @@ export function FleetAnalyticTile({
         selectedGameId,
         gameInfoContext,
         selectedTurn,
-        perspectiveOverrideName,
+        perspectiveOverrideOrdinal,
         loginName,
         storageOnlyLoad,
         storageAvailablePerspectives,
+        viewedDataTurn: selectedTurn,
+        turnUsernamesByPlayerId: null,
       }),
     [
       selectedGameId,
       gameInfoContext,
       selectedTurn,
-      perspectiveOverrideName,
+      perspectiveOverrideOrdinal,
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,

@@ -77,7 +77,7 @@ function ConsoleShell() {
     turnEnsureError,
     turnBlockedNoLogin,
     shellViewpoints,
-    selectedViewpointName: shellSelectedViewpointName,
+    selectedViewpointOrdinal: shellSelectedViewpointOrdinal,
     onViewpointChange: handleShellViewpointChange,
     shellTurnMax,
     selectedTurn,
@@ -304,7 +304,7 @@ function ConsoleShell() {
         setTurn={setTurn}
         stepTurn={stepTurn}
         shellViewpoints={shellViewpoints}
-        shellSelectedViewpointName={shellSelectedViewpointName}
+        shellSelectedViewpointOrdinal={shellSelectedViewpointOrdinal}
         onShellViewpointChange={handleShellViewpointChange}
       />
       <ShellErrorBar errors={shellErrors} onDismiss={dismissShellError} />

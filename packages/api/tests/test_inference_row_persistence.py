@@ -313,3 +313,136 @@ def test_legacy_v1_upgrade_enables_functional_backfill_without_diagnostics():
     assert resolved.payload.diagnostics is None
     assert resolved.payload.solutions
     assert resolved.payload.solutions_held > 0
+
+
+def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memory_backend):
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_stream_session import (
+        InferenceRowStreamSession,
+    )
+    from api.analytics.military_score_inference.models import InferenceResult
+    from api.analytics.military_score_inference.row_complete_factory import (
+        row_complete_with_summary,
+    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.compute.scope import ComputeScope
+
+    reset_tier_row_run_registry_for_tests()
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    run = RowRun(session)
+    register_row_run(run)
+    persistence = InferenceRowPersistenceService(memory_backend)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    policy = ScoresPersistencePolicy()
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="orchestrator exact",
+    )
+    policy.persist(
+        ctx,
+        ComputeScope(
+            analytic_id="scores",
+            game_id=628580,
+            perspective=1,
+            turn=sample_turn.settings.turn,
+            player_id=score.ownerid,
+        ),
+        {"runId": run.run_id, "rowComplete": row_complete},
+    )
+
+    stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
+    assert stored is not None
+    assert stored.summary == "orchestrator exact"
+
+
+def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
+    sample_turn,
+    memory_backend,
+):
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+    from api.analytics.military_score_inference.inference_stream_session import (
+        InferenceRowStreamSession,
+    )
+    from api.analytics.military_score_inference.models import InferenceResult
+    from api.analytics.military_score_inference.row_complete_factory import (
+        row_complete_with_summary,
+    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.solver import STATUS_STOPPED
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import (
+        ScoresPersistencePolicy,
+        tier_job_outcome_to_step_result,
+    )
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.compute.scope import ComputeScope
+
+    reset_tier_row_run_registry_for_tests()
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    run = RowRun(session)
+    register_row_run(run)
+    step_result = tier_job_outcome_to_step_result(
+        run,
+        TierJobOutcome(
+            row_complete=row_complete_with_summary(
+                InferenceResult(status=STATUS_STOPPED, solutions=(), diagnostics={}),
+                summary="stopped",
+            ),
+        ),
+    )
+    assert step_result.outcome == "complete"
+
+    persistence = InferenceRowPersistenceService(memory_backend)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    policy = ScoresPersistencePolicy()
+    policy.persist(
+        ctx,
+        ComputeScope(
+            analytic_id="scores",
+            game_id=628580,
+            perspective=1,
+            turn=sample_turn.settings.turn,
+            player_id=score.ownerid,
+        ),
+        step_result.payload,
+    )
+
+    assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None

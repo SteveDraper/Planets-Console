@@ -12,14 +12,14 @@ describe('useOrderedFleetPlayers', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
   })
 
   it('orders players with the viewpoint first', () => {
-    seedShellViewpoint('Bob')
+    seedShellViewpoint(2)
 
     const { result } = renderHook(() => useOrderedFleetPlayers())
 
@@ -28,7 +28,7 @@ describe('useOrderedFleetPlayers', () => {
   })
 
   it('returns all ordered players by default', () => {
-    seedShellViewpoint('Alice')
+    seedShellViewpoint(1)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
     const { result } = renderHook(() => useOrderedFleetPlayers())
@@ -38,7 +38,7 @@ describe('useOrderedFleetPlayers', () => {
   })
 
   it('filters to visible players when visibleOnly is true', () => {
-    seedShellViewpoint('Alice')
+    seedShellViewpoint(1)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
     const { result } = renderHook(() => useOrderedFleetPlayers({ visibleOnly: true }))
@@ -47,7 +47,7 @@ describe('useOrderedFleetPlayers', () => {
   })
 
   it('keeps viewpoint ordering when filtering visible players', () => {
-    seedShellViewpoint('Bob')
+    seedShellViewpoint(2)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(8, false)
 
     const { result } = renderHook(() => useOrderedFleetPlayers({ visibleOnly: true }))

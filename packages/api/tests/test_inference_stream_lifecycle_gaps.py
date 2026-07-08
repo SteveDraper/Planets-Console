@@ -117,6 +117,19 @@ def _install_workerless_scheduler(
     return scheduler
 
 
+def _complete_row_via_scheduler(
+    scheduler: InferenceRowScheduler,
+    session: InferenceRowStreamSession,
+    row_complete: RowComplete,
+    *,
+    persistence: InferenceRowPersistenceService | None = None,
+) -> None:
+    if persistence is not None:
+        persistence.persist_row_complete(session, row_complete)
+    session.event_queue.put(row_complete)
+    scheduler._finalize_row_run(session)
+
+
 def _wait_until(predicate: Callable[[], bool], *, timeout_seconds: float = 2.0) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -237,12 +250,14 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     scheduler.enqueue_tier_ladder(completed_session, stream_token=first_token)
     scheduler.enqueue_tier_ladder(in_flight_session, stream_token=first_token)
 
-    scheduler._emit_row_complete(
+    _complete_row_via_scheduler(
+        scheduler,
         completed_session,
         _row_complete(
             summary="persisted on backend",
             diagnostics=_diagnostics(turn=turn_number, player_id=completed_player_id),
         ),
+        persistence=persistence,
     )
 
     replacement = iter_scores_table_inference_events(
@@ -424,12 +439,14 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         stream_token=stream_token,
     )
     assert scheduled is not None
-    scheduler._emit_row_complete(
+    _complete_row_via_scheduler(
+        scheduler,
         scheduled.session,
         _row_complete(
             summary="terminal before reconnect",
             diagnostics=_diagnostics(turn=turn_number, player_id=player_id),
         ),
+        persistence=persistence,
     )
     scheduler.end_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
 

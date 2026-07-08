@@ -22,10 +22,11 @@ from api.analytics.fleet.serialization import (
 )
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
+from api.compute.wire import StepResult
 from api.compute.worker_turn_cache import turn_from_materialization_job_wire
 
 
-def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> dict[str, Any]:
+def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> StepResult:
     """Materialize one fleet turn leg from a serializable job wire (compute plane).
 
     Returns a persisted-ledger wire carrying provenance from the job wire.
@@ -55,7 +56,10 @@ def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> dict[str, Any]:
     )
     provenance = fleet_materialization_provenance_from_json(job_wire["provenanceWire"])
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
-    return {
-        "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
-        "materializeTurn": int(job_wire["materializeTurn"]),
-    }
+    return StepResult(
+        outcome="persist",
+        payload={
+            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+            "materializeTurn": int(job_wire["materializeTurn"]),
+        },
+    )

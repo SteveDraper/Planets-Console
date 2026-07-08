@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -16,6 +17,38 @@ from api.analytics.military_score_inference.inference_stream_session import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.tier_row_run_registry import get_row_run
+
+
+def _patch_scores_dag_without_fleet_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api.compute.dag import PlannedComputeNode
+    from api.compute.dag import plan_compute_dag as real_plan
+    from api.compute.scope import normalize_export_scope_to_compute_scope
+
+    def scores_only_dag(ctx, analytic_id, export_scope, *, compute_registry, force_root=False):
+        if analytic_id != "scores":
+            return real_plan(
+                ctx,
+                analytic_id,
+                export_scope,
+                compute_registry=compute_registry,
+                force_root=force_root,
+            )
+        registration = compute_registry[analytic_id]
+        scope = normalize_export_scope_to_compute_scope(
+            export_scope,
+            analytic_id=analytic_id,
+            scope_key_spec=registration.scope_key_spec,
+        )
+        return (
+            PlannedComputeNode(
+                scope=scope,
+                export_scope=export_scope,
+                dependency_scopes=(),
+            ),
+        )
+
+    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
 
 
 def _session_for_player(
@@ -38,8 +71,12 @@ def _session_for_player(
 
 def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, monkeypatch):
     """A later row's tier-1 job must not wait behind an earlier row's tier-2+ jobs."""
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+
+    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=1)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
+    scheduler = InferenceRowScheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -48,8 +85,6 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
     scheduler.begin_scope(scope)
 
     execution_order: list[tuple[int, int]] = []
-    gate = threading.Event()
-    gate.set()
 
     def fake_tier_step(
         state: PolicyLadderState,
@@ -67,7 +102,6 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
         state.next_step_index += 1
         if state.next_step_index >= len(state.policy_steps):
             state.ladder_complete = True
-        gate.wait(timeout=1.0)
 
     monkeypatch.setattr(
         "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
@@ -75,19 +109,18 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
     )
     monkeypatch.setattr(
         scheduler,
-        "_emit_row_complete",
-        lambda session, _event: scheduler.unregister_session(session.run_id),
+        "_finalize_row_run",
+        lambda session: scheduler.unregister_session(session.run_id),
     )
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     assert len(player_ids) >= 2
     session_a = _session_for_player(sample_turn, player_id=player_ids[0])
     session_b = _session_for_player(sample_turn, player_id=player_ids[1])
 
+    scheduler.pause_globally(scope)
     scheduler.enqueue_tier_ladder(session_a)
-    gate.clear()
-    time.sleep(0.05)
     scheduler.enqueue_tier_ladder(session_b)
-    gate.set()
+    scheduler.resume_globally(scope)
 
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
@@ -103,8 +136,12 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
 
 
 def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+
+    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=1)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
+    scheduler = InferenceRowScheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -140,8 +177,8 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
     )
     monkeypatch.setattr(
         scheduler,
-        "_emit_row_complete",
-        lambda session, _event: scheduler.unregister_session(session.run_id),
+        "_finalize_row_run",
+        lambda session: scheduler.unregister_session(session.run_id),
     )
 
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
@@ -150,12 +187,11 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
     scheduler.pause_globally(scope)
     scheduler.enqueue_tier_ladder(session_a)
     scheduler.enqueue_tier_ladder(session_b)
-    scheduler._runs[session_a.run_id].ladder_state = PolicyLadderState(
-        policy_steps=short_ladder,
-    )
-    scheduler._runs[session_b.run_id].ladder_state = PolicyLadderState(
-        policy_steps=short_ladder,
-    )
+    run_a = get_row_run(session_a.run_id)
+    run_b = get_row_run(session_b.run_id)
+    assert run_a is not None and run_b is not None
+    run_a.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+    run_b.ladder_state = PolicyLadderState(policy_steps=short_ladder)
     scheduler.resume_globally(scope)
     gate.set()
 

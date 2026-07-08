@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildPerspectivesFromGameInfo,
+  perspectiveDisplayName,
   getLatestTurnFromGameInfo,
   getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
@@ -62,6 +63,26 @@ describe('getLatestTurnFromGameInfo', () => {
   })
 })
 
+describe('perspectiveDisplayName', () => {
+  const eliminated = perspectiveRow(1, 'dead', {
+    playerId: 1,
+    raceName: 'Feds',
+    eliminationTurn: 49,
+  })
+
+  it('uses turn username when viewing before elimination', () => {
+    expect(
+      perspectiveDisplayName(eliminated, 8, new Map([[1, 'dougp314']]))
+    ).toBe('dougp314')
+  })
+
+  it('falls back to game-info name at or after elimination', () => {
+    expect(
+      perspectiveDisplayName(eliminated, 49, new Map([[1, 'dougp314']]))
+    ).toBe('dead')
+  })
+})
+
 describe('buildPerspectivesFromGameInfo', () => {
   it('maps players order to 1-based ordinals and names', () => {
     const rows = buildPerspectivesFromGameInfo(
@@ -70,8 +91,8 @@ describe('buildPerspectivesFromGameInfo', () => {
       })
     )
     expect(rows).toEqual([
-      { ordinal: 1, name: 'alice', playerId: 1, raceName: null },
-      { ordinal: 2, name: 'bob', playerId: 2, raceName: null },
+      { ordinal: 1, name: 'alice', playerId: 1, raceName: null, eliminationTurn: null },
+      { ordinal: 2, name: 'bob', playerId: 2, raceName: null, eliminationTurn: null },
     ])
   })
 
@@ -97,6 +118,7 @@ describe('buildPerspectivesFromGameInfo', () => {
       playerId: 1,
       name: 'alice',
       raceName: 'Override From Turn RST',
+      eliminationTurn: null,
     })
   })
 
@@ -117,6 +139,16 @@ describe('buildPerspectivesFromGameInfo', () => {
     )
     expect(rows[0].playerId).toBe(42)
     expect(rows[1].playerId).toBe(2)
+  })
+
+  it('records elimination turn from wire status 3', () => {
+    const rows = buildPerspectivesFromGameInfo(
+      minimalInfo({
+        players: [{ username: 'dead', status: 3, statusturn: 49, id: 1 }],
+      })
+    )
+    expect(rows[0]?.eliminationTurn).toBe(49)
+    expect(rows[0]?.name).toBe('dead')
   })
 })
 
