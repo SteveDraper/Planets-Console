@@ -73,6 +73,7 @@ def iter_table_stream_connect(
     try:
         yield from policy.preamble_events()
 
+        admitted_player_count = 0
         for player_id in player_ids:
             if not policy.owns_table_stream():
                 return
@@ -82,6 +83,7 @@ def iter_table_stream_connect(
             if dispatch.schedule_failed:
                 continue
 
+            admitted_player_count += 1
             yield from dispatch.wire_events
 
             if dispatch.scheduled is not None:
@@ -95,10 +97,9 @@ def iter_table_stream_connect(
                     terminal_types=policy.terminal_types(),
                 )
 
-        scheduled_rows = policy.current_scheduled_rows()
-        if scheduled_rows:
+        if admitted_player_count > 0 and policy.owns_table_stream():
             yield from iter_multiplexed_stream_events(
-                scheduled_rows,
+                policy.current_scheduled_rows(),
                 tag_player_id=True,
                 finished_run_ids=policy.finished_run_ids(),
                 is_stream_active=policy.owns_table_stream,

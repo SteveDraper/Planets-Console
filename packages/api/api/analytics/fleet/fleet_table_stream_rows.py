@@ -187,6 +187,7 @@ def _iter_fleet_table_stream_connect_sequential(
     try:
         yield from policy.preamble_events()
 
+        admitted_player_count = 0
         for player_id in player_ids:
             if not policy.owns_table_stream():
                 return
@@ -196,6 +197,7 @@ def _iter_fleet_table_stream_connect_sequential(
             if dispatch.schedule_failed:
                 continue
 
+            admitted_player_count += 1
             yield from dispatch.wire_events
             scheduled = dispatch.scheduled
             if scheduled is None:
@@ -214,6 +216,17 @@ def _iter_fleet_table_stream_connect_sequential(
                 tag_player_id=True,
                 finished_run_ids=policy.finished_run_ids(),
                 player_provider=lambda rows=active_rows: rows,
+                pending_events_provider=policy.drain_pending_wire_events,
+                wake_event=policy.wake_multiplex(),
+            )
+
+        if admitted_player_count > 0 and policy.owns_table_stream():
+            yield from iter_multiplexed_fleet_table_events(
+                policy.current_scheduled_rows(),
+                tag_player_id=True,
+                finished_run_ids=policy.finished_run_ids(),
+                is_stream_active=policy.owns_table_stream,
+                player_provider=policy.current_scheduled_rows,
                 pending_events_provider=policy.drain_pending_wire_events,
                 wake_event=policy.wake_multiplex(),
             )
