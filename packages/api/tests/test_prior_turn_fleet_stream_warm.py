@@ -59,6 +59,11 @@ def _reset_stream_registry_after_test() -> None:
     yield
     reset_coordinators()
     reset_inference_table_stream_registry_for_tests()
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
 
 
 def _wire_fleet_scores_invalidation(
@@ -81,6 +86,12 @@ def _install_scheduler(
     worker_count: int = 0,
 ) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
+    if worker_count > 0:
+        from api.compute.pools import reset_compute_worker_pool_for_tests
+
+        # Fresh pool for orchestrator-backed stream tests; allow fleet warm and tier work
+        # to make progress without waiting on a saturated process-wide singleton.
+        reset_compute_worker_pool_for_tests(worker_count=max(worker_count, 2))
     scheduler = InferenceRowScheduler(worker_count=worker_count)
 
     def _get_scheduler() -> InferenceRowScheduler:
@@ -570,6 +581,15 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     thread = threading.Thread(target=consume_stream, daemon=True)
     thread.start()
     try:
+        _wait_until(
+            lambda: fleet_persistence.has_final_ledger(
+                ctx.game_id,
+                ctx.perspective,
+                prior_turn,
+                player_id,
+            ),
+            timeout_seconds=30.0,
+        )
         _wait_until(
             lambda: any(event.get("type") == "complete" for event in events),
             timeout_seconds=30.0,
