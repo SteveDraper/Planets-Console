@@ -333,7 +333,7 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
         ),
     )
 
-    FleetPersistencePolicy().persist(
+    notification = FleetPersistencePolicy().persist(
         ctx,
         ComputeScope(
             analytic_id="fleet",
@@ -344,6 +344,8 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
         ),
         {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)},
     )
+    assert notification is not None
+    notification()
 
     assert inference_persistence.get_row(628580, 1, 112, player_p) is None
     assert inference_persistence.get_row(628580, 1, 112, player_q) is not None

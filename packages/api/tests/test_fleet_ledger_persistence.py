@@ -329,6 +329,27 @@ def test_put_ledger_notifies_on_ensure_final_transition(persistence, sample_ledg
     assert callbacks == [(111, 8)]
 
 
+def test_put_ledger_can_defer_final_transition_notification(persistence, sample_ledger):
+    callbacks: list[tuple[int, int]] = []
+    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callbacks.append(
+        (turn_number, player_id)
+    )
+
+    notification = persistence.put_ledger(
+        628580,
+        1,
+        111,
+        8,
+        PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance()),
+        defer_ledger_persisted_notification=True,
+    )
+
+    assert callbacks == []
+    assert notification is not None
+    notification()
+    assert callbacks == [(111, 8)]
+
+
 def test_put_ledger_notifies_on_final_ledger_version_bump(
     persistence,
     memory_backend,

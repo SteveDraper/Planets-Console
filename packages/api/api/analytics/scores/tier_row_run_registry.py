@@ -92,7 +92,9 @@ def unregister_row_run(run_id: str) -> None:
         run = _runs_by_id.pop(run_id, None)
         if run is None:
             return
-        _run_id_by_scope_key.pop(_session_scope_key(run.session), None)
+        scope_key = _session_scope_key(run.session)
+        if _run_id_by_scope_key.get(scope_key) == run_id:
+            _run_id_by_scope_key.pop(scope_key, None)
         _tier_callbacks_by_run_id.pop(run_id, None)
 
 

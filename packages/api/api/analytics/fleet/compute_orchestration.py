@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -164,7 +165,7 @@ class FleetPersistencePolicy:
         ctx: AnalyticQueryContext,
         scope: ComputeScope,
         result_wire: object,
-    ) -> None:
+    ) -> Callable[[], None] | None:
         from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.inferred_acquisition_refine import (
             refine_player_inferred_acquisitions_from_scores,
@@ -222,12 +223,13 @@ class FleetPersistencePolicy:
             )
             persisted = PersistedFleetLedger(ledger=persisted.ledger, provenance=provenance)
 
-        services.persistence.put_ledger(
+        return services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
             scope.turn,
             scope.player_id,
             persisted,
+            defer_ledger_persisted_notification=True,
         )
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:

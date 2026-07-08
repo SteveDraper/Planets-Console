@@ -29,6 +29,7 @@ from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
 OnLedgerPersistedCallback = Callable[[int, int, int, int], None]
+DeferredNotification = Callable[[], None]
 
 
 class FleetSnapshotPersistenceService:
@@ -114,7 +115,7 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         defer_ledger_persisted_notification: bool = False,
-    ) -> None:
+    ) -> DeferredNotification | None:
         if persisted.ledger.player_id != player_id:
             raise ValidationError(
                 "persisted fleet ledger player_id "
@@ -135,15 +136,19 @@ class FleetSnapshotPersistenceService:
         ledgers = self._ledgers_object(document)
         ledgers[str(player_id)] = persisted_fleet_ledger_to_json(to_store)
         self._write_document(game_id, perspective, turn_number, document)
-        if not defer_ledger_persisted_notification:
-            self._notify_ledger_persisted_if_needed(
-                game_id,
-                perspective,
-                turn_number,
-                player_id,
-                prior=prior,
-                persisted=to_store,
-            )
+        notification = self._ledger_persisted_notification_if_needed(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            prior=prior,
+            persisted=to_store,
+        )
+        if defer_ledger_persisted_notification:
+            return notification
+        if notification is not None:
+            notification()
+        return None
 
     def has_ledger(
         self,
@@ -285,15 +290,37 @@ class FleetSnapshotPersistenceService:
         prior: PersistedFleetLedger | None,
         persisted: PersistedFleetLedger,
     ) -> None:
-        if self._on_ledger_persisted is None:
-            return
+        notification = self._ledger_persisted_notification_if_needed(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            prior=prior,
+            persisted=persisted,
+        )
+        if notification is not None:
+            notification()
+
+    def _ledger_persisted_notification_if_needed(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        *,
+        prior: PersistedFleetLedger | None,
+        persisted: PersistedFleetLedger,
+    ) -> DeferredNotification | None:
+        callback = self._on_ledger_persisted
+        if callback is None:
+            return None
         if not persisted.provenance.is_final:
-            return
+            return None
         if prior is None or not prior.provenance.is_final:
-            self._on_ledger_persisted(game_id, perspective, turn_number, player_id)
-            return
+            return lambda: callback(game_id, perspective, turn_number, player_id)
         if prior.materialization_version != persisted.materialization_version:
-            self._on_ledger_persisted(game_id, perspective, turn_number, player_id)
+            return lambda: callback(game_id, perspective, turn_number, player_id)
+        return None
 
     def _notify_snapshot_persisted_legacy(
         self,

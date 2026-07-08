@@ -120,6 +120,10 @@ class InferenceTableStreamController(
         scheduled = self.schedule_player_row(player_id)
         if scheduled is None:
             return AdmissionDispatch(schedule_failed=True)
+        existing = self.scheduled_rows.get(player_id)
+        if existing is not None and existing.session.run_id != scheduled.session.run_id:
+            self.scheduler.cancel_row_run(scheduled.session.run_id)
+            return AdmissionDispatch()
         return AdmissionDispatch(scheduled=scheduled)
 
     def _refresh_host_turn(self) -> None:

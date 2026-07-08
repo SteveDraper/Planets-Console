@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -21,8 +22,12 @@ class PersistencePolicy(Protocol):
         ctx: AnalyticQueryContext,
         scope: ComputeScope,
         result_wire: object,
-    ) -> None:
-        """Persist a completed result wire after orchestrator epoch checks."""
+    ) -> Callable[[], None] | None:
+        """Persist a completed result wire after orchestrator epoch checks.
+
+        Return an optional side-effect callback to run after the orchestrator lock
+        is released.
+        """
         ...
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:

@@ -19,6 +19,7 @@ from api.compute.wire import DependencyOutputs, coerce_step_result
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
+PostLockCallback = Callable[[], None]
 
 NodeState = Literal[
     "waiting_deps",
@@ -122,6 +123,7 @@ class ComputeOrchestrator:
         self._condition = threading.Condition(self._lock)
         self._node_complete_listeners: list[NodeCompleteListener] = []
         self._dispatch_gate: NodeDispatchGate | None = None
+        self._post_lock_callbacks: list[PostLockCallback] = []
 
     def set_dispatch_gate(self, gate: NodeDispatchGate | None) -> None:
         """Set a node-level gate checked before pool or inline dispatch."""
@@ -132,6 +134,7 @@ class ComputeOrchestrator:
         """Dispatch any ready nodes allowed by the current gate."""
         with self._condition:
             self._dispatch()
+        self._drain_post_lock_callbacks()
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -184,19 +187,27 @@ class ComputeOrchestrator:
             existing = self._nodes.get(scope)
             if existing is not None:
                 if not (request.force_fresh and existing.state in {"complete", "failed"}):
-                    return self._attach_to_existing(existing)
-                self._replace_terminal_node(existing)
+                    handle = self._attach_to_existing(existing)
+                    self._dispatch()
+                    should_plan = False
+                else:
+                    self._replace_terminal_node(existing)
+                    should_plan = True
+            else:
+                should_plan = True
 
-            self._plan_and_register(
-                scope,
-                priority_band=request.priority_band,
-                entry_step_kind=request.step_kind,
-            )
-            for node in self._nodes.values():
-                self._refresh_node_readiness(node)
-            handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
-            self._dispatch()
-            return handle
+            if should_plan:
+                self._plan_and_register(
+                    scope,
+                    priority_band=request.priority_band,
+                    entry_step_kind=request.step_kind,
+                )
+                for node in self._nodes.values():
+                    self._refresh_node_readiness(node)
+                handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
+                self._dispatch()
+        self._drain_post_lock_callbacks()
+        return handle
 
     def execute_pool_step(self, scope: ComputeScope) -> object:
         """Run the current pool step for one scope on the calling thread."""
@@ -215,11 +226,13 @@ class ComputeOrchestrator:
         while True:
             with self._condition:
                 if not self._has_pending_work():
-                    return
+                    break
                 self._refresh_all_readiness()
                 self._dispatch()
                 if any(node.state == "running" for node in self._nodes.values()):
-                    return
+                    break
+            self._drain_post_lock_callbacks()
+        self._drain_post_lock_callbacks()
 
     def complete_pool_step(
         self,
@@ -235,8 +248,9 @@ class ComputeOrchestrator:
                 raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
             if error is not None:
                 self._fail_node(node, error)
-                return
-            self._after_step_success(node, result_wire)
+            else:
+                self._after_step_success(node, result_wire)
+        self._drain_post_lock_callbacks()
 
     def _attach_to_existing(self, node: ComputeNodeRun) -> ComputeHandle:
         if node.state in {"complete", "failed"}:
@@ -508,11 +522,13 @@ class ComputeOrchestrator:
 
         if step_result.outcome == "persist":
             node.result_wire = step_result.payload
-            registration.persistence_policy.persist(
+            post_lock_callback = registration.persistence_policy.persist(
                 self._cached_ctx,
                 node.scope,
                 step_result.payload,
             )
+            if post_lock_callback is not None:
+                self._post_lock_callbacks.append(post_lock_callback)
             self._metrics.persist_calls += 1
             self._complete_node(node)
             return
@@ -548,7 +564,9 @@ class ComputeOrchestrator:
             waiter._waiter_error = None
         node.waiters.clear()
         self._notify_node_complete(node)
-        self._on_dependency_terminal(node.scope)
+        self._post_lock_callbacks.append(
+            lambda completed_scope=node.scope: self._handle_dependency_terminal(completed_scope),
+        )
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
         if node.state == "failed":
@@ -560,12 +578,30 @@ class ComputeOrchestrator:
             waiter._waiter_error = error
         node.waiters.clear()
         self._notify_node_complete(node)
-        self._on_dependency_terminal(node.scope)
+        self._post_lock_callbacks.append(
+            lambda completed_scope=node.scope: self._handle_dependency_terminal(completed_scope),
+        )
 
     def _notify_node_complete(self, node: ComputeNodeRun) -> None:
         listeners = tuple(self._node_complete_listeners)
         for listener in listeners:
-            listener(node.scope, node)
+            self._post_lock_callbacks.append(
+                lambda listener=listener, node=node: listener(node.scope, node),
+            )
+
+    def _drain_post_lock_callbacks(self) -> None:
+        while True:
+            with self._condition:
+                callbacks = tuple(self._post_lock_callbacks)
+                self._post_lock_callbacks.clear()
+            if not callbacks:
+                return
+            for callback in callbacks:
+                callback()
+
+    def _handle_dependency_terminal(self, completed_scope: ComputeScope) -> None:
+        with self._condition:
+            self._on_dependency_terminal(completed_scope)
 
     def _on_dependency_terminal(self, completed_scope: ComputeScope) -> None:
         for node in self._nodes.values():

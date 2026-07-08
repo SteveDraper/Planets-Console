@@ -44,8 +44,10 @@ from api.analytics.scores.compute_orchestration import (
 )
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
+    get_row_run_for_scope,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
+    unregister_row_run,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
@@ -106,6 +108,17 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     step_kinds = tuple(step.step_kind for step in SCORES_REGISTRATION.compute_profile.steps)
     assert step_kinds == ("materialize", SCORES_TIER_SOLVE)
     assert build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
+
+
+def test_unregister_stale_run_preserves_replacement_scope_mapping(sample_turn) -> None:
+    player_id = sample_turn.scores[0].ownerid
+    old_run = _register_run(sample_turn, player_id=player_id)
+    replacement_run = _register_run(sample_turn, player_id=player_id)
+    scope = _scores_scope(sample_turn, player_id)
+
+    unregister_row_run(old_run.run_id)
+
+    assert get_row_run_for_scope(scope) is replacement_run
 
 
 def test_tier_job_outcome_mapping(sample_turn) -> None:
