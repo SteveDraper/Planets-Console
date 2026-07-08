@@ -51,12 +51,6 @@ class _InferenceStreamOrchestratorBinding:
     query_context: AnalyticQueryContext
 
 
-@dataclass
-class _InferenceRowOrchestratorRun:
-    session: InferenceRowStreamSession
-    root_scope: ComputeScope
-
-
 @dataclass(frozen=True)
 class _HeldTierSubmission:
     stream_token: str
@@ -79,7 +73,7 @@ class InferenceRowScheduler:
         if worker_count == 0:
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
-        self._runs: dict[str, _InferenceRowOrchestratorRun] = {}
+        self._runs: dict[str, ComputeScope] = {}
         # RLock: adapter methods hold this lock across orchestrator calls. When resume_globally
         # calls _dispatch_ready_orchestrator_work_locked, dispatch_ready_work drains post-lock
         # callbacks in the caller thread and the node-complete listener (_on_orchestrator_node_complete,
@@ -114,15 +108,14 @@ class InferenceRowScheduler:
         player_id: int,
     ) -> RowRun | None:
         with self._lock:
-            for run in self._runs.values():
-                session = run.session
+            for run_id, root_scope in self._runs.items():
                 if (
-                    session.game_id == scope.game_id
-                    and session.perspective == scope.perspective
-                    and session.turn_number == scope.turn_number
-                    and session.player_id == player_id
+                    root_scope.game_id == scope.game_id
+                    and root_scope.perspective == scope.perspective
+                    and root_scope.turn == scope.turn_number
+                    and root_scope.player_id == player_id
                 ):
-                    return self._adapter_row_run(session.run_id)
+                    return self._adapter_row_run(run_id)
             return None
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
@@ -217,9 +210,9 @@ class InferenceRowScheduler:
 
     def cancel_run(self, run_id: str) -> None:
         with self._lock:
-            run = self._runs.get(run_id)
-            if run is not None:
-                run.session.cancel_token.cancel()
+            row_run = self._adapter_row_run(run_id)
+            if row_run is not None:
+                row_run.session.cancel_token.cancel()
             self._remove_run_locked(run_id)
 
     def enqueue_tier_ladder(
@@ -242,10 +235,7 @@ class InferenceRowScheduler:
             register_row_run(row_run, orchestration=orchestration)
             self._register_tier_callbacks_for_run(row_run)
             root_scope = self._root_scope_for_session(session)
-            self._runs[session.run_id] = _InferenceRowOrchestratorRun(
-                session=session,
-                root_scope=root_scope,
-            )
+            self._runs[session.run_id] = root_scope
             if resolved_token is None:
                 return
             if self._scope_guard.active_table_stream_token != resolved_token:
@@ -392,17 +382,20 @@ class InferenceRowScheduler:
             return
 
         with self._lock:
-            matching_runs = [
-                run
-                for run in self._runs.values()
-                if run.session.player_id == scope.player_id
-                and run.session.game_id == scope.game_id
-                and run.session.perspective == scope.perspective
-                and scope.turn == run.session.turn_number
+            matching_run_ids = [
+                run_id
+                for run_id, root_scope in self._runs.items()
+                if root_scope.player_id == scope.player_id
+                and root_scope.game_id == scope.game_id
+                and root_scope.perspective == scope.perspective
+                and scope.turn == root_scope.turn
             ]
 
-        for run in matching_runs:
-            session = run.session
+        for run_id in matching_run_ids:
+            row_run = self._adapter_row_run(run_id)
+            if row_run is None:
+                continue
+            session = row_run.session
             cancelled = session.cancel_token.is_cancelled()
             if node.state == "failed":
                 detail = (
@@ -448,9 +441,10 @@ class InferenceRowScheduler:
     def _preempt_active_table_stream_locked(self) -> None:
         self._globally_paused = False
         self._held_initial_submissions.clear()
-        for run in self._runs.values():
-            run.session.cancel_token.cancel()
         for run_id in list(self._runs):
+            row_run = self._adapter_row_run(run_id)
+            if row_run is not None:
+                row_run.session.cancel_token.cancel()
             self._remove_run_locked(run_id)
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
@@ -461,8 +455,10 @@ class InferenceRowScheduler:
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)
-        for run in self._runs.values():
-            run.session.event_queue.put(event)
+        for run_id in self._runs:
+            row_run = self._adapter_row_run(run_id)
+            if row_run is not None:
+                row_run.session.event_queue.put(event)
 
     def _submit_tier_solve_locked(
         self,
@@ -501,8 +497,8 @@ class InferenceRowScheduler:
         if not self._globally_paused:
             return held_jobs, held_continuations
         for binding in self._stream_bindings.values():
-            for run in self._runs.values():
-                node = binding.orchestrator.nodes.get(run.root_scope)
+            for root_scope in self._runs.values():
+                node = binding.orchestrator.nodes.get(root_scope)
                 if node is None or node.state != "ready":
                     continue
                 if node.step_index == 0:
@@ -522,34 +518,24 @@ class InferenceRowScheduler:
 
     @property
     def _dispatch_gate(self) -> Callable[[object], bool]:
-        from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
+        from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
 
         def gate(node: object) -> bool:
             if not self._globally_paused:
                 return True
             if node.scope.analytic_id != SCORES_ANALYTIC_ID:
                 return True
-            registration_step = node.profile_step_index
-            from api.compute.registry import COMPUTE_REGISTRY
-
-            registration = COMPUTE_REGISTRY.get(SCORES_ANALYTIC_ID)
-            if registration is None:
-                return True
-            steps = registration.compute_profile.steps
-            if registration_step >= len(steps):
-                return True
-            return steps[registration_step].step_kind != SCORES_TIER_SOLVE
+            return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
 
         return gate
 
     def _remove_run_locked(self, run_id: str) -> None:
         from api.analytics.scores.tier_row_run_registry import unregister_row_run
 
-        run = self._runs.pop(run_id, None)
+        root_scope = self._runs.pop(run_id, None)
         unregister_row_run(run_id)
-        if run is None:
+        if root_scope is None:
             return
-        root_scope = run.root_scope
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.root_scope != root_scope
         ]

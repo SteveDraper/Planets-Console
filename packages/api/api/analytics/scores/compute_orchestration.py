@@ -41,6 +41,7 @@ from api.compute.wire import DependencyOutputs, StepResult
 
 SCORES_MATERIALIZE = "materialize"
 SCORES_TIER_SOLVE = "tier_solve"
+SCORES_TIER_SOLVE_PROFILE_INDEX = 1
 
 SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 

@@ -44,6 +44,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
@@ -250,9 +251,12 @@ def _run_ids_for_players(
     player_ids: tuple[int, ...],
 ) -> dict[int, str]:
     mapping: dict[int, str] = {}
-    for run in scheduler._runs.values():
-        if run.session.player_id in player_ids:
-            mapping[run.session.player_id] = run.session.run_id
+    for run_id in scheduler._runs:
+        row_run = get_row_run(run_id)
+        if row_run is None:
+            continue
+        if row_run.session.player_id in player_ids:
+            mapping[row_run.session.player_id] = row_run.session.run_id
     return mapping
 
 
