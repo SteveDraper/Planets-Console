@@ -19,6 +19,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
+from api.streaming.table_stream.connect import _scheduled_row_is_current
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
 )
@@ -198,12 +199,15 @@ def _iter_fleet_table_stream_connect_sequential(
                 continue
 
             admitted_player_count += 1
-            yield from dispatch.wire_events
             scheduled = dispatch.scheduled
+            if scheduled is not None:
+                policy.adopt_admission_scheduled_row(player_id, scheduled)
+            yield from dispatch.wire_events
             if scheduled is None:
                 continue
+            if not _scheduled_row_is_current(policy, player_id, scheduled):
+                continue
 
-            policy.register_scheduled_row(player_id, scheduled)
             active_rows = (scheduled,)
 
             yield from drain_available_multiplex_events(

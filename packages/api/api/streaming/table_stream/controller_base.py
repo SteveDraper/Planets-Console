@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
@@ -35,6 +36,29 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
     def register_scheduled_row(self, player_id: int, row: ScheduledT) -> None:
         with self.stream_lock:
             self.scheduled_rows[player_id] = row
+
+    def adopt_admission_scheduled_row(
+        self,
+        player_id: int,
+        row: ScheduledT,
+        *,
+        cancel_run_id: Callable[[str], None],
+    ) -> bool:
+        """Register connect admission unless invalidation rescheduled during enqueue.
+
+        Returns False when a fresher row is already registered for ``player_id``.
+        """
+        with self.stream_lock:
+            existing = self.scheduled_rows.get(player_id)
+            new_run_id = self._run_id_for_scheduled_row(row)
+            if existing is not None:
+                existing_run_id = self._run_id_for_scheduled_row(existing)
+                if existing_run_id != new_run_id:
+                    cancel_run_id(new_run_id)
+                    return False
+            self.scheduled_rows[player_id] = row
+            self.finished_run_ids.discard(new_run_id)
+            return True
 
     def dispatch_admission(
         self,

@@ -308,8 +308,8 @@ def _final_provenance() -> FleetMaterializationProvenance:
 
 def test_put_ledger_notifies_on_ensure_final_transition(persistence, sample_ledger):
     callbacks: list[tuple[int, int]] = []
-    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callbacks.append(
-        (turn_number, player_id)
+    persistence.on_ledger_persisted = lambda event: callbacks.append(
+        (event.fleet_turn, event.player_id)
     )
 
     partial = PersistedFleetLedger(
@@ -331,8 +331,8 @@ def test_put_ledger_notifies_on_ensure_final_transition(persistence, sample_ledg
 
 def test_put_ledger_can_defer_final_transition_notification(persistence, sample_ledger):
     callbacks: list[tuple[int, int]] = []
-    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callbacks.append(
-        (turn_number, player_id)
+    persistence.on_ledger_persisted = lambda event: callbacks.append(
+        (event.fleet_turn, event.player_id)
     )
 
     notification = persistence.put_ledger(
@@ -356,8 +356,8 @@ def test_put_ledger_notifies_on_final_ledger_version_bump(
     sample_ledger,
 ):
     callbacks: list[tuple[int, int]] = []
-    persistence.on_ledger_persisted = lambda _g, _p, turn_number, player_id: callbacks.append(
-        (turn_number, player_id)
+    persistence.on_ledger_persisted = lambda event: callbacks.append(
+        (event.fleet_turn, event.player_id)
     )
     final = PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance())
 

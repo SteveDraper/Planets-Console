@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 
@@ -49,4 +50,15 @@ def emit_deferred_fleet_ledger_notifications(
         load_turn,
     )
     for fleet_turn in sorted(complete_after - complete_before):
-        persistence.on_ledger_persisted(game_id, perspective, fleet_turn, player_id)
+        persisted = persistence.get_ledger(game_id, perspective, fleet_turn, player_id)
+        if persisted is None:
+            continue
+        persistence.on_ledger_persisted(
+            FleetLedgerPersistedEvent(
+                game_id=game_id,
+                perspective=perspective,
+                fleet_turn=fleet_turn,
+                player_id=player_id,
+                materialization_version=persisted.materialization_version,
+            )
+        )

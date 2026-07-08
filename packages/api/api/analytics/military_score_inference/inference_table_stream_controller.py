@@ -137,12 +137,28 @@ class InferenceTableStreamController(
             if old_row is not None:
                 self.cancel_player_row(player_id)
                 self.finished_run_ids.discard(old_row.session.run_id)
+            else:
+                active = self.scheduler.row_run_for_player(self.scope, player_id)
+                if active is not None:
+                    self.scheduler.cancel_row_run(active.session.run_id)
+                    self.finished_run_ids.discard(active.session.run_id)
             self.scheduled_rows.pop(player_id, None)
             admission = self.resolve_row_admission(player_id)
             if not self.register_admitted_schedule(player_id, admission):
                 return False
         self.wake_multiplex.set()
         return True
+
+    def adopt_admission_scheduled_row(
+        self,
+        player_id: int,
+        row: ScheduledInferenceRow,
+    ) -> bool:
+        return super().adopt_admission_scheduled_row(
+            player_id,
+            row,
+            cancel_run_id=self.scheduler.cancel_row_run,
+        )
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         with self.stream_lock:

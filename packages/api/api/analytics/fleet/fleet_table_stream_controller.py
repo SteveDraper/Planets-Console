@@ -83,6 +83,11 @@ class FleetTableStreamController(
             if old_row is not None:
                 self.scheduler.cancel_player_run(old_row.session.run_id)
                 self.finished_run_ids.discard(old_row.session.run_id)
+            else:
+                active = self.scheduler.row_run_for_player(self.scope, player_id)
+                if active is not None:
+                    self.scheduler.cancel_player_run(active.session.run_id)
+                    self.finished_run_ids.discard(active.session.run_id)
             self.scheduled_rows.pop(player_id, None)
             admission = resolve_player_stream_admission(
                 self.persistence,
@@ -129,4 +134,15 @@ class FleetTableStreamController(
             self.scope,
             tuple(row.session for row in self.current_scheduled_rows()),
             stream_token=self.stream_token,
+        )
+
+    def adopt_admission_scheduled_row(
+        self,
+        player_id: int,
+        row: ScheduledFleetPlayer,
+    ) -> bool:
+        return super().adopt_admission_scheduled_row(
+            player_id,
+            row,
+            cancel_run_id=self.scheduler.cancel_player_run,
         )

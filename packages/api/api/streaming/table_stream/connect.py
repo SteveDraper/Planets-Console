@@ -45,6 +45,8 @@ class TableStreamConnectPolicy(Protocol[ScheduledT, AdmissionT, EventT]):
 
     def register_scheduled_row(self, player_id: int, scheduled: ScheduledT) -> None: ...
 
+    def adopt_admission_scheduled_row(self, player_id: int, scheduled: ScheduledT) -> bool: ...
+
     def finished_run_ids(self) -> set[str]: ...
 
     def drain_pending_wire_events(self) -> list[dict[str, object]]: ...
@@ -62,6 +64,22 @@ class TableStreamConnectPolicy(Protocol[ScheduledT, AdmissionT, EventT]):
     def terminal_types(self) -> frozenset[str]: ...
 
     def end_sessions(self) -> None: ...
+
+
+def _scheduled_row_is_current(
+    policy: TableStreamConnectPolicy[ScheduledT, AdmissionT, EventT],
+    player_id: int,
+    scheduled: ScheduledT,
+) -> bool:
+    scheduled_run_id = getattr(getattr(scheduled, "session", None), "run_id", None)
+    if not isinstance(scheduled_run_id, str):
+        return False
+    for row in policy.current_scheduled_rows():
+        if row.player_id != player_id:
+            continue
+        row_run_id = getattr(getattr(row, "session", None), "run_id", None)
+        return row_run_id == scheduled_run_id
+    return False
 
 
 def iter_table_stream_connect(
@@ -84,10 +102,12 @@ def iter_table_stream_connect(
                 continue
 
             admitted_player_count += 1
+            scheduled = dispatch.scheduled
+            if scheduled is not None:
+                policy.adopt_admission_scheduled_row(player_id, scheduled)
             yield from dispatch.wire_events
 
-            if dispatch.scheduled is not None:
-                policy.register_scheduled_row(player_id, dispatch.scheduled)
+            if scheduled is not None and _scheduled_row_is_current(policy, player_id, scheduled):
                 yield from drain_available_multiplex_events(
                     policy.current_scheduled_rows(),
                     tag_player_id=True,

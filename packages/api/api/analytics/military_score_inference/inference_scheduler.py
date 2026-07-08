@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
@@ -39,7 +40,6 @@ __all__ = [
     "get_inference_row_scheduler",
     "reset_inference_row_scheduler_for_tests",
 ]
-
 
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
@@ -102,6 +102,118 @@ class InferenceRowScheduler:
     def active_scope_matches(self, scope: InferenceStreamScope) -> bool:
         with self._lock:
             return self._scope_guard.active_scope_matches_locked(scope)
+
+    def should_reschedule_scores_row_after_fleet_persist(
+        self,
+        scope: InferenceStreamScope,
+        event: FleetLedgerPersistedEvent,
+        *,
+        invalidate_row: Callable[[], None],
+    ) -> bool:
+        """Return whether scores@N should reschedule after one fleet ledger persist.
+
+        Runs invalidation and the skip decision under the scheduler lock.
+        """
+        with self._lock:
+            invalidate_row()
+            return not self._should_skip_reschedule_for_fleet_persist_locked(scope, event)
+
+    def _stream_binding_for_scope_locked(
+        self,
+        scope: InferenceStreamScope,
+    ) -> _InferenceStreamOrchestratorBinding | None:
+        if not self._scope_guard.active_scope_matches_locked(scope):
+            return None
+        stream_token = self._scope_guard.active_table_stream_token
+        if stream_token is None:
+            return None
+        return self._stream_bindings.get(stream_token)
+
+    def _should_skip_reschedule_for_fleet_persist_locked(
+        self,
+        scope: InferenceStreamScope,
+        event: FleetLedgerPersistedEvent,
+    ) -> bool:
+        """Return whether to skip in-place reschedule for this fleet persist notification."""
+        from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+
+        binding = self._stream_binding_for_scope_locked(scope)
+        if binding is None:
+            return False
+
+        scores_scope = ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn_number,
+            player_id=event.player_id,
+        )
+        fleet_scope = ComputeScope(
+            analytic_id=FLEET_ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=event.fleet_turn,
+            player_id=event.player_id,
+        )
+        scores_node = binding.orchestrator.nodes.get(scores_scope)
+        if scores_node is None or scores_node.state != "waiting_deps":
+            return False
+        if fleet_scope not in scores_node.dependency_scopes:
+            return False
+
+        fleet_node = binding.orchestrator.nodes.get(fleet_scope)
+        if fleet_node is None:
+            return False
+
+        if (
+            event.source_context_id is not None
+            and self._fleet_persist_source_matches_stream_binding(
+                binding,
+                event.source_context_id,
+            )
+        ):
+            return fleet_node.result_wire is not None and not self._fleet_versions_conflict(
+                fleet_node,
+                event,
+            )
+
+        if fleet_node.state in {"waiting_deps", "ready", "running"}:
+            return True
+
+        if fleet_node.state == "complete":
+            return not self._fleet_versions_conflict(fleet_node, event)
+
+        return False
+
+    @staticmethod
+    def _fleet_versions_conflict(
+        fleet_node: object,
+        event: FleetLedgerPersistedEvent,
+    ) -> bool:
+        from api.analytics.fleet.serialization import (
+            materialization_version_from_fleet_compute_result_wire,
+        )
+
+        result_wire = getattr(fleet_node, "result_wire", None)
+        stream_version = materialization_version_from_fleet_compute_result_wire(result_wire)
+        if stream_version is None:
+            return False
+        return stream_version != event.materialization_version
+
+    @staticmethod
+    def _fleet_persist_source_matches_stream_binding(
+        binding: _InferenceStreamOrchestratorBinding,
+        source_context_id: int,
+    ) -> bool:
+        """Match orchestrator dep-chain notifications to one stream binding context."""
+        if source_context_id == id(binding.query_context):
+            return True
+        orchestrator = binding.orchestrator
+        original_ctx = getattr(orchestrator, "_ctx", None)
+        if original_ctx is not None and source_context_id == id(original_ctx):
+            return True
+        cached_ctx = getattr(orchestrator, "_cached_ctx", None)
+        return cached_ctx is not None and source_context_id == id(cached_ctx)
 
     def row_run_for_player(
         self,
