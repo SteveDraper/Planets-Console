@@ -19,7 +19,6 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
-from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
 )
@@ -179,6 +178,50 @@ def cleanup_fleet_table_stream_sessions(
     )
 
 
+def _iter_fleet_table_stream_connect_sequential(
+    policy,
+    player_ids: tuple[int, ...],
+) -> Iterator[dict[str, object]]:
+    """Admit cached players immediately; run orchestrator materialization one player at a time."""
+    policy.attach()
+    try:
+        yield from policy.preamble_events()
+
+        for player_id in player_ids:
+            if not policy.owns_table_stream():
+                return
+
+            admission = policy.resolve_admission(player_id)
+            dispatch = policy.dispatch_admission(player_id, admission)
+            if dispatch.schedule_failed:
+                continue
+
+            yield from dispatch.wire_events
+            scheduled = dispatch.scheduled
+            if scheduled is None:
+                continue
+
+            policy.register_scheduled_row(player_id, scheduled)
+            active_rows = (scheduled,)
+
+            yield from drain_available_multiplex_events(
+                active_rows,
+                tag_player_id=True,
+                finished_run_ids=policy.finished_run_ids(),
+            )
+            yield from iter_multiplexed_fleet_table_events(
+                active_rows,
+                tag_player_id=True,
+                finished_run_ids=policy.finished_run_ids(),
+                player_provider=lambda rows=active_rows: rows,
+                pending_events_provider=policy.drain_pending_wire_events,
+                wake_event=policy.wake_multiplex(),
+            )
+    finally:
+        policy.end_sessions()
+        policy.detach()
+
+
 def iter_fleet_table_stream_events(
     turn: TurnInfo,
     player_ids: tuple[int, ...],
@@ -225,7 +268,7 @@ def iter_fleet_table_stream_events(
             turn_number=turn_number,
         )
 
-    yield from iter_table_stream_connect_with_scope(
+    yield from _iter_fleet_table_stream_connect_with_scope(
         begin_scope=lambda: resolved_scheduler.begin_scope(stream_scope),
         end_scope=lambda stream_token: cleanup_fleet_table_stream_sessions(
             resolved_scheduler,
@@ -236,3 +279,18 @@ def iter_fleet_table_stream_events(
         policy_factory=policy_factory,
         player_ids=player_ids,
     )
+
+
+def _iter_fleet_table_stream_connect_with_scope(
+    *,
+    begin_scope: Callable[[], str],
+    end_scope: Callable[[str], None],
+    policy_factory: Callable[[str], object],
+    player_ids: tuple[int, ...],
+) -> Iterator[dict[str, object]]:
+    stream_token = begin_scope()
+    try:
+        policy = policy_factory(stream_token)
+        yield from _iter_fleet_table_stream_connect_sequential(policy, player_ids)
+    finally:
+        end_scope(stream_token)

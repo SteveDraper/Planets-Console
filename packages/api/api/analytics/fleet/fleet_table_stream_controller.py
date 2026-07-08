@@ -23,6 +23,7 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
+from api.transport.fleet_table_stream import fleet_error_event
 
 
 @dataclass(kw_only=True)
@@ -64,7 +65,16 @@ class FleetTableStreamController(
             stream_token=self.stream_token,
         )
         if scheduled is None:
-            return AdmissionDispatch(schedule_failed=True)
+            return AdmissionDispatch(
+                wire_events=(
+                    tag_fleet_table_stream_event(
+                        fleet_error_event(
+                            "Fleet ledger materialization could not be scheduled",
+                        ),
+                        player_id=player_id,
+                    ),
+                ),
+            )
         return AdmissionDispatch(scheduled=scheduled)
 
     def reschedule_player(self, player_id: int) -> bool:

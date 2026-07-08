@@ -80,7 +80,7 @@ def iter_table_stream_connect(
             admission = policy.resolve_admission(player_id)
             dispatch = policy.dispatch_admission(player_id, admission)
             if dispatch.schedule_failed:
-                return
+                continue
 
             yield from dispatch.wire_events
 
@@ -95,9 +95,10 @@ def iter_table_stream_connect(
                     terminal_types=policy.terminal_types(),
                 )
 
-        if player_ids:
+        scheduled_rows = policy.current_scheduled_rows()
+        if scheduled_rows:
             yield from iter_multiplexed_stream_events(
-                policy.current_scheduled_rows(),
+                scheduled_rows,
                 tag_player_id=True,
                 finished_run_ids=policy.finished_run_ids(),
                 is_stream_active=policy.owns_table_stream,
