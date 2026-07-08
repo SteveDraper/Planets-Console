@@ -1,6 +1,6 @@
 export {
   deriveAnalyticScope,
-  deriveSelectedViewpointName,
+  deriveSelectedViewpointOrdinal,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,

@@ -10,7 +10,7 @@ describe('useShellStore', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       lastShellGameId: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
@@ -21,7 +21,7 @@ describe('useShellStore', () => {
   it('defaults shell fields before persistence', () => {
     expect(useShellStore.getState().selectedGameId).toBeNull()
     expect(useShellStore.getState().selectedTurn).toBeNull()
-    expect(useShellStore.getState().perspectiveOverrideName).toBeNull()
+    expect(useShellStore.getState().perspectiveOverrideOrdinal).toBeNull()
     expect(useShellStore.getState().viewMode).toBe('map')
   })
 
@@ -30,7 +30,7 @@ describe('useShellStore', () => {
     useShellStore.setState({
       selectedGameId: '628580',
       selectedTurn: 42,
-      perspectiveOverrideName: 'Player Two',
+      perspectiveOverrideOrdinal: 2,
       lastShellGameId: '628580',
     })
 
@@ -38,7 +38,7 @@ describe('useShellStore', () => {
     expect(raw).toBeTruthy()
     expect(raw).toContain('628580')
     expect(raw).toContain('42')
-    expect(raw).toContain('Player Two')
+    expect(raw).toContain('"perspectiveOverrideOrdinal":2')
     expect(raw).toContain('tabular')
   })
 

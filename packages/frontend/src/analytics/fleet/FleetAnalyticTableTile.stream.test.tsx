@@ -84,11 +84,11 @@ describe('FleetAnalyticTableTile stream integration', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
-    seedShellViewpoint('Alice')
+    seedShellViewpoint(1)
     vi.mocked(fetchFleetComponentCatalog).mockResolvedValue({
       hulls: { '13': 'Cruiser A' },
       engines: {},

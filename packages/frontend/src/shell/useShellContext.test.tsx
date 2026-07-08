@@ -12,7 +12,7 @@ vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
   return {
     ...actual,
-    ensureTurnData: vi.fn().mockResolvedValue({ ready: true }),
+    ensureTurnData: vi.fn().mockResolvedValue({ ready: true, turnUsernamesByPlayerId: new Map() }),
     fetchStoredTurnPerspectives: vi.fn().mockResolvedValue({ perspectives: [1] }),
   }
 })
@@ -35,7 +35,7 @@ describe('useShellContext', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       lastShellGameId: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
@@ -192,7 +192,7 @@ describe('useShellContext', () => {
     useSessionStore.setState({ name: 'Alice', password: 'wrong', credentialsRevision: 1 })
     vi.mocked(ensureTurnData)
       .mockRejectedValueOnce(new Error('Bad password'))
-      .mockResolvedValueOnce({ ready: true })
+      .mockResolvedValueOnce({ ready: true, turnUsernamesByPlayerId: new Map() })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useShellStore.setState({
       selectedGameId: '628580',
@@ -331,7 +331,7 @@ describe('useShellContext', () => {
       selectedTurn: 5,
       storageOnlyLoad: true,
       storageAvailablePerspectives: [2],
-      perspectiveOverrideName: 'Bob',
+      perspectiveOverrideOrdinal: 2,
     })
 
     const { result, rerender } = renderHook(() => useShellContext({ reportShellError }), {
@@ -349,7 +349,7 @@ describe('useShellContext', () => {
       expect(fetchStoredTurnPerspectives).toHaveBeenCalledWith('628580', 6)
     })
     await waitFor(() => {
-      expect(result.current.selectedViewpointName).toBe('<Spectator>')
+      expect(result.current.selectedViewpointOrdinal).toBe(0)
       expect(result.current.analyticScope).toEqual({
         gameId: '628580',
         turn: 6,

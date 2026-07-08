@@ -3,7 +3,7 @@ import type { GameInfoShellContext } from '../stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import {
   deriveAnalyticScope,
-  deriveSelectedViewpointName,
+  deriveSelectedViewpointOrdinal,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
@@ -38,10 +38,12 @@ function baseInputs(overrides: Partial<ShellContextInputs> = {}): ShellContextIn
     selectedGameId: '628580',
     gameInfoContext: shellContext(),
     selectedTurn: 5,
-    perspectiveOverrideName: null,
+    perspectiveOverrideOrdinal: null,
     loginName: 'Alice',
     storageOnlyLoad: false,
     storageAvailablePerspectives: null,
+    viewedDataTurn: 5,
+    turnUsernamesByPlayerId: null,
     ...overrides,
   }
 }
@@ -109,9 +111,9 @@ describe('deriveShellViewpoints', () => {
   it('enables all viewpoints when game is finished', () => {
     const rows = deriveShellViewpoints(baseInputs())
     expect(rows).toEqual([
-      { name: 'Alice', raceName: 'Feds', disabled: false },
-      { name: 'Bob', raceName: 'Lizards', disabled: false },
-      { name: 'Carol', raceName: null, disabled: false },
+      { ordinal: 1, displayName: 'Alice', raceName: 'Feds', disabled: false },
+      { ordinal: 2, displayName: 'Bob', raceName: 'Lizards', disabled: false },
+      { ordinal: 3, displayName: 'Carol', raceName: null, disabled: false },
     ])
   })
 
@@ -120,9 +122,9 @@ describe('deriveShellViewpoints', () => {
     const rows = deriveShellViewpoints(
       baseInputs({ gameInfoContext: ctx, loginName: 'Bob' })
     )
-    expect(rows.find((r) => r.name === 'Bob')?.disabled).toBe(false)
-    expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(true)
-    expect(rows.find((r) => r.name === 'Carol')?.disabled).toBe(true)
+    expect(rows.find((r) => r.ordinal === 2)?.disabled).toBe(false)
+    expect(rows.find((r) => r.ordinal === 1)?.disabled).toBe(true)
+    expect(rows.find((r) => r.ordinal === 3)?.disabled).toBe(true)
   })
 
   it('adds spectator viewpoint when in-progress and login is not a player', () => {
@@ -130,9 +132,14 @@ describe('deriveShellViewpoints', () => {
     const rows = deriveShellViewpoints(
       baseInputs({ gameInfoContext: ctx, loginName: 'Unknown' })
     )
-    expect(rows[0]).toEqual({ name: '<Spectator>', raceName: null, disabled: false })
-    expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(true)
-    expect(rows.find((r) => r.name === 'Bob')?.disabled).toBe(true)
+    expect(rows[0]).toEqual({
+      ordinal: 0,
+      displayName: '<Spectator>',
+      raceName: null,
+      disabled: false,
+    })
+    expect(rows.find((r) => r.ordinal === 1)?.disabled).toBe(true)
+    expect(rows.find((r) => r.ordinal === 2)?.disabled).toBe(true)
   })
 
   it('filters by stored perspectives in storage-only mode without login', () => {
@@ -143,8 +150,8 @@ describe('deriveShellViewpoints', () => {
         storageAvailablePerspectives: [2],
       })
     )
-    expect(rows.find((r) => r.name === 'Bob')?.disabled).toBe(false)
-    expect(rows.find((r) => r.name === 'Alice')?.disabled).toBe(true)
+    expect(rows.find((r) => r.ordinal === 2)?.disabled).toBe(false)
+    expect(rows.find((r) => r.ordinal === 1)?.disabled).toBe(true)
   })
 
   it('includes spectator row when pseudo perspective 0 is stored', () => {
@@ -155,15 +162,39 @@ describe('deriveShellViewpoints', () => {
         storageAvailablePerspectives: [0],
       })
     )
-    expect(rows[0]).toEqual({ name: '<Spectator>', raceName: null, disabled: false })
-    expect(rows.every((r) => r.name === '<Spectator>' || r.disabled)).toBe(true)
+    expect(rows[0]).toEqual({
+      ordinal: 0,
+      displayName: '<Spectator>',
+      raceName: null,
+      disabled: false,
+    })
+    expect(rows.every((r) => r.ordinal === 0 || r.disabled)).toBe(true)
+  })
+
+  it('uses turn-scoped usernames before elimination when viewing an earlier turn', () => {
+    const rows = deriveShellViewpoints(
+      baseInputs({
+        gameInfoContext: shellContext({
+          perspectives: [
+            perspectiveRow(1, 'dead', {
+              playerId: 1,
+              raceName: 'Feds',
+              eliminationTurn: 49,
+            }),
+          ],
+        }),
+        viewedDataTurn: 8,
+        turnUsernamesByPlayerId: new Map([[1, 'dougp314']]),
+      })
+    )
+    expect(rows[0]?.displayName).toBe('dougp314')
   })
 })
 
-describe('deriveSelectedViewpointName', () => {
+describe('deriveSelectedViewpointOrdinal', () => {
   it('returns null when no perspectives', () => {
     expect(
-      deriveSelectedViewpointName(
+      deriveSelectedViewpointOrdinal(
         baseInputs({ gameInfoContext: { ...baseInputs().gameInfoContext!, perspectives: [] } })
       )
     ).toBeNull()
@@ -172,77 +203,92 @@ describe('deriveSelectedViewpointName', () => {
   it('uses login-matched player for in-progress games', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
-      deriveSelectedViewpointName(
-        baseInputs({ gameInfoContext: ctx, loginName: 'Bob', perspectiveOverrideName: 'Alice' })
+      deriveSelectedViewpointOrdinal(
+        baseInputs({ gameInfoContext: ctx, loginName: 'Bob', perspectiveOverrideOrdinal: 1 })
       )
-    ).toBe('Bob')
+    ).toBe(2)
   })
 
   it('selects spectator when in-progress and login is not a player', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
-      deriveSelectedViewpointName(
-        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
+      deriveSelectedViewpointOrdinal(
+        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideOrdinal: 1 })
       )
-    ).toBe('<Spectator>')
+    ).toBe(0)
   })
 
   it('uses override when game is finished', () => {
     expect(
-      deriveSelectedViewpointName(baseInputs({ perspectiveOverrideName: 'Carol' }))
-    ).toBe('Carol')
+      deriveSelectedViewpointOrdinal(baseInputs({ perspectiveOverrideOrdinal: 3 }))
+    ).toBe(3)
   })
 
   it('prefers override in storage-only mode without login', () => {
     expect(
-      deriveSelectedViewpointName(
+      deriveSelectedViewpointOrdinal(
         baseInputs({
           loginName: '',
           storageOnlyLoad: true,
           storageAvailablePerspectives: [2],
-          perspectiveOverrideName: 'Bob',
+          perspectiveOverrideOrdinal: 2,
         })
       )
-    ).toBe('Bob')
+    ).toBe(2)
   })
 
   it('falls back to first stored perspective in storage-only mode', () => {
     expect(
-      deriveSelectedViewpointName(
+      deriveSelectedViewpointOrdinal(
         baseInputs({
           loginName: '',
           storageOnlyLoad: true,
           storageAvailablePerspectives: [3],
-          perspectiveOverrideName: null,
+          perspectiveOverrideOrdinal: null,
         })
       )
-    ).toBe('Carol')
+    ).toBe(3)
   })
 
   it('selects spectator when only pseudo perspective 0 is stored', () => {
     expect(
-      deriveSelectedViewpointName(
+      deriveSelectedViewpointOrdinal(
         baseInputs({
           loginName: '',
           storageOnlyLoad: true,
           storageAvailablePerspectives: [0],
-          perspectiveOverrideName: null,
+          perspectiveOverrideOrdinal: null,
         })
       )
-    ).toBe('<Spectator>')
+    ).toBe(0)
   })
 
   it('honours spectator override in storage-only mode when slot 0 is stored', () => {
     expect(
-      deriveSelectedViewpointName(
+      deriveSelectedViewpointOrdinal(
         baseInputs({
           loginName: '',
           storageOnlyLoad: true,
           storageAvailablePerspectives: [0, 2],
-          perspectiveOverrideName: '<Spectator>',
+          perspectiveOverrideOrdinal: 0,
         })
       )
-    ).toBe('<Spectator>')
+    ).toBe(0)
+  })
+
+  it('resolves duplicate dead usernames to the overridden ordinal', () => {
+    const deadPerspectives = [
+      perspectiveRow(1, 'dead', { playerId: 1, raceName: 'Feds', eliminationTurn: 49 }),
+      perspectiveRow(2, 'dead', { playerId: 2, raceName: 'Rebels', eliminationTurn: 60 }),
+    ]
+    expect(
+      deriveSelectedViewpointOrdinal(
+        baseInputs({
+          gameInfoContext: shellContext({ perspectives: deadPerspectives }),
+          perspectiveOverrideOrdinal: 2,
+        })
+      )
+    ).toBe(2)
   })
 })
 
@@ -268,7 +314,7 @@ describe('deriveAnalyticScope', () => {
   })
 
   it('returns scope with resolved perspective ordinal', () => {
-    expect(deriveAnalyticScope(baseInputs({ perspectiveOverrideName: 'Bob' }))).toEqual({
+    expect(deriveAnalyticScope(baseInputs({ perspectiveOverrideOrdinal: 2 }))).toEqual({
       gameId: '628580',
       turn: 5,
       perspective: 2,
@@ -287,7 +333,7 @@ describe('deriveAnalyticScope', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveAnalyticScope(
-        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideName: 'Alice' })
+        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideOrdinal: 1 })
       )
     ).toEqual({
       gameId: '628580',
@@ -303,7 +349,7 @@ describe('deriveAnalyticScope', () => {
           loginName: '',
           storageOnlyLoad: true,
           storageAvailablePerspectives: [0],
-          perspectiveOverrideName: null,
+          perspectiveOverrideOrdinal: null,
         })
       )
     ).toEqual({
@@ -349,19 +395,19 @@ describe('shouldClearInProgressPerspectiveOverride', () => {
 
   it('clears override that does not match login for in-progress game', () => {
     expect(
-      shouldClearInProgressPerspectiveOverride(inProgress, 'Bob', 'Alice')
+      shouldClearInProgressPerspectiveOverride(inProgress, 'Bob', 1)
     ).toBe(true)
   })
 
   it('keeps matching override', () => {
     expect(
-      shouldClearInProgressPerspectiveOverride(inProgress, 'Bob', 'Bob')
+      shouldClearInProgressPerspectiveOverride(inProgress, 'Bob', 2)
     ).toBe(false)
   })
 
   it('does nothing for finished games', () => {
     expect(
-      shouldClearInProgressPerspectiveOverride(baseInputs().gameInfoContext, 'Bob', 'Alice')
+      shouldClearInProgressPerspectiveOverride(baseInputs().gameInfoContext, 'Bob', 1)
     ).toBe(false)
   })
 })
@@ -370,44 +416,28 @@ describe('isViewpointChangeAllowed', () => {
   const inProgress = shellContext({ isGameFinished: false, sectorDisplayName: null })
 
   it('allows spectator only when login is not a player during in-progress game', () => {
-    expect(
-      isViewpointChangeAllowed('<Spectator>', inProgress, 'Unknown', false, null, perspectives)
-    ).toBe(true)
-    expect(
-      isViewpointChangeAllowed('Alice', inProgress, 'Unknown', false, null, perspectives)
-    ).toBe(false)
+    expect(isViewpointChangeAllowed(0, inProgress, 'Unknown', false, null)).toBe(true)
+    expect(isViewpointChangeAllowed(1, inProgress, 'Unknown', false, null)).toBe(false)
   })
 
   it('allows login player only during in-progress game', () => {
-    expect(
-      isViewpointChangeAllowed('Bob', inProgress, 'Bob', false, null, perspectives)
-    ).toBe(true)
-    expect(
-      isViewpointChangeAllowed('Alice', inProgress, 'Bob', false, null, perspectives)
-    ).toBe(false)
+    expect(isViewpointChangeAllowed(2, inProgress, 'Bob', false, null)).toBe(true)
+    expect(isViewpointChangeAllowed(1, inProgress, 'Bob', false, null)).toBe(false)
   })
 
   it('allows stored perspectives in storage-only mode', () => {
-    expect(
-      isViewpointChangeAllowed('Bob', baseInputs().gameInfoContext, '', true, [2], perspectives)
-    ).toBe(true)
-    expect(
-      isViewpointChangeAllowed('Alice', baseInputs().gameInfoContext, '', true, [2], perspectives)
-    ).toBe(false)
+    expect(isViewpointChangeAllowed(2, baseInputs().gameInfoContext, '', true, [2])).toBe(true)
+    expect(isViewpointChangeAllowed(1, baseInputs().gameInfoContext, '', true, [2])).toBe(false)
   })
 
   it('allows spectator in storage-only mode when slot 0 is stored', () => {
-    expect(
-      isViewpointChangeAllowed('<Spectator>', baseInputs().gameInfoContext, '', true, [0], perspectives)
-    ).toBe(true)
-    expect(
-      isViewpointChangeAllowed('Alice', baseInputs().gameInfoContext, '', true, [0], perspectives)
-    ).toBe(false)
+    expect(isViewpointChangeAllowed(0, baseInputs().gameInfoContext, '', true, [0])).toBe(true)
+    expect(isViewpointChangeAllowed(1, baseInputs().gameInfoContext, '', true, [0])).toBe(false)
   })
 
   it('allows any player when game is finished', () => {
-    expect(
-      isViewpointChangeAllowed('Carol', baseInputs().gameInfoContext, 'Alice', false, null, perspectives)
-    ).toBe(true)
+    expect(isViewpointChangeAllowed(3, baseInputs().gameInfoContext, 'Alice', false, null)).toBe(
+      true
+    )
   })
 })

@@ -8,9 +8,9 @@ import {
 } from './fleetPlayerVisibilityPolicy'
 
 const players: PerspectiveRow[] = [
-  { ordinal: 1, playerId: 8, name: 'Alice', raceName: null },
-  { ordinal: 2, playerId: 9, name: 'Bob', raceName: null },
-  { ordinal: 3, playerId: 10, name: 'Carol', raceName: null },
+  { ordinal: 1, playerId: 8, name: 'Alice', raceName: null, eliminationTurn: null },
+  { ordinal: 2, playerId: 9, name: 'Bob', raceName: null, eliminationTurn: null },
+  { ordinal: 3, playerId: 10, name: 'Carol', raceName: null, eliminationTurn: null },
 ]
 
 describe('fleetPlayerVisibilityPolicy', () => {

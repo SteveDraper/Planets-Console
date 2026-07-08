@@ -57,7 +57,7 @@ describe('useShellGameSelection', () => {
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       lastShellGameId: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,

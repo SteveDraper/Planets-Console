@@ -36,10 +36,10 @@ type HeaderProps = {
   setTurn: (turn: number) => void
   stepTurn: (delta: number) => void
   /** Viewpoint entries in game order; disabled when another player's slot is not selectable. */
-  shellViewpoints: { name: string; raceName: string | null; disabled: boolean }[]
-  /** Current viewpoint (login default or user override). */
-  shellSelectedViewpointName: string | null
-  onShellViewpointChange: (name: string) => void
+  shellViewpoints: { ordinal: number; displayName: string; raceName: string | null; disabled: boolean }[]
+  /** Current viewpoint perspective slot (1-based; 0 spectator). */
+  shellSelectedViewpointOrdinal: number | null
+  onShellViewpointChange: (ordinal: number) => void
 }
 
 export function Header({
@@ -60,7 +60,7 @@ export function Header({
   setTurn,
   stepTurn,
   shellViewpoints,
-  shellSelectedViewpointName,
+  shellSelectedViewpointOrdinal,
   onShellViewpointChange,
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
@@ -246,13 +246,16 @@ export function Header({
       </div>
       <div className="flex items-center gap-1.5" title="Viewpoint">
         <span className="text-xs text-slate-400">Viewpoint</span>
-        {shellViewpoints.length > 0 && shellSelectedViewpointName != null ? (
+        {shellViewpoints.length > 0 && shellSelectedViewpointOrdinal != null ? (
           <select
             aria-label="Viewpoint"
-            value={shellSelectedViewpointName}
+            value={String(shellSelectedViewpointOrdinal)}
             onChange={(e) => {
-              const next = e.target.value
-              const row = shellViewpoints.find((v) => v.name === next)
+              const next = Number.parseInt(e.target.value, 10)
+              if (!Number.isFinite(next)) {
+                return
+              }
+              const row = shellViewpoints.find((v) => v.ordinal === next)
               if (row?.disabled) {
                 return
               }
@@ -264,9 +267,9 @@ export function Header({
               'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-400'
             )}
           >
-            {shellViewpoints.map(({ name, raceName, disabled }, index) => (
-              <option key={`${index}-${name}`} value={name} disabled={disabled}>
-                {formatViewpointRowLabel(playerListLabelMode, name, raceName)}
+            {shellViewpoints.map(({ ordinal, displayName, raceName, disabled }) => (
+              <option key={ordinal} value={String(ordinal)} disabled={disabled}>
+                {formatViewpointRowLabel(playerListLabelMode, displayName, raceName)}
               </option>
             ))}
           </select>

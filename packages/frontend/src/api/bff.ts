@@ -1,6 +1,4 @@
-/**
- * BFF client — frontend talks only to BFF, never to Core API.
- */
+import { turnUsernamesByPlayerIdFromPayload } from '../lib/turnPlayerUsernames'
 
 import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
 import type { ConnectionsMapParams } from '../analytics/connections/api'
@@ -514,7 +512,7 @@ export async function fetchLoadAllTurnsStatus(
 export async function ensureTurnData(
   gameId: string,
   params: EnsureTurnParams
-): Promise<{ ready: true }> {
+): Promise<{ ready: true; turnUsernamesByPlayerId: Map<number, string> }> {
   const trimmedUser = params.username.trim()
   const body: {
     turn: number
@@ -552,8 +550,11 @@ export async function ensureTurnData(
     }
     throw new Error(withEndpointIfGeneric(detail, endpointLabel))
   }
-  await r.json().catch(() => undefined)
-  return { ready: true }
+  const payload: unknown = await r.json().catch(() => undefined)
+  return {
+    ready: true,
+    turnUsernamesByPlayerId: turnUsernamesByPlayerIdFromPayload(payload),
+  }
 }
 
 export async function refreshGameInfo(

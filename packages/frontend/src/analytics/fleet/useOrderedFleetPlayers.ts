@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
-import { playerIdForViewpointName } from '../../lib/gameInfoShell'
-import { deriveSelectedViewpointName } from '../../shell/shellContext'
+import { playerIdForPerspectiveOrdinal } from '../../lib/gameInfoShell'
+import { deriveSelectedViewpointOrdinal } from '../../shell/shellContext'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
@@ -19,7 +19,7 @@ export function useOrderedFleetPlayers(options: UseOrderedFleetPlayersOptions = 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideName = useShellStore((s) => s.perspectiveOverrideName)
+  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
   const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
   const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
   const loginName = useSessionStore((s) => s.name)
@@ -27,21 +27,23 @@ export function useOrderedFleetPlayers(options: UseOrderedFleetPlayersOptions = 
 
   const shellPlayers = gameInfoContext?.perspectives ?? []
   const viewpointPlayerId = useMemo(() => {
-    const selectedViewpointName = deriveSelectedViewpointName({
+    const selectedOrdinal = deriveSelectedViewpointOrdinal({
       selectedGameId,
       gameInfoContext,
       selectedTurn,
-      perspectiveOverrideName,
+      perspectiveOverrideOrdinal,
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      viewedDataTurn: selectedTurn,
+      turnUsernamesByPlayerId: null,
     })
-    return playerIdForViewpointName(shellPlayers, selectedViewpointName)
+    return playerIdForPerspectiveOrdinal(shellPlayers, selectedOrdinal)
   }, [
     selectedGameId,
     gameInfoContext,
     selectedTurn,
-    perspectiveOverrideName,
+    perspectiveOverrideOrdinal,
     loginName,
     storageOnlyLoad,
     storageAvailablePerspectives,

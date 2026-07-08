@@ -3,15 +3,13 @@ import { fetchStoredGameInfo, fetchStoredTurnPerspectives, isBffNotFoundError } 
 import {
   LOGIN_REQUIRED_FOR_GAME_SELECTION,
   getLatestTurnFromGameInfo,
-  viewpointNameForStoredPerspective,
-  buildPerspectivesFromGameInfo,
 } from './gameInfoShell'
 
 export type StorageGameLoadResult = {
   gameInfo: GameInfoResponse
   turn: number
   storedPerspectives: number[]
-  defaultViewpointName: string
+  defaultViewpointOrdinal: number
 }
 
 /** Load game info and turn availability from storage only; no Planets.nu refresh. */
@@ -39,12 +37,8 @@ export async function loadGameFromStorage(gameId: string): Promise<StorageGameLo
     throw new Error(LOGIN_REQUIRED_FOR_GAME_SELECTION)
   }
 
-  const playerPerspectives = buildPerspectivesFromGameInfo(gameInfo)
-  const defaultViewpointName = viewpointNameForStoredPerspective(
-    storedPerspectives[0],
-    playerPerspectives
-  )
-  if (defaultViewpointName == null) {
+  const defaultViewpointOrdinal = storedPerspectives[0]
+  if (defaultViewpointOrdinal == null) {
     throw new Error(LOGIN_REQUIRED_FOR_GAME_SELECTION)
   }
 
@@ -52,6 +46,6 @@ export async function loadGameFromStorage(gameId: string): Promise<StorageGameLo
     gameInfo,
     turn: Math.floor(turn),
     storedPerspectives,
-    defaultViewpointName,
+    defaultViewpointOrdinal,
   }
 }

@@ -49,11 +49,11 @@ describe('useFleetTableStream', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
-    seedShellViewpoint('Alice')
+    seedShellViewpoint(1)
   })
 
   it('seeds pending slices for all players on stream connect', async () => {

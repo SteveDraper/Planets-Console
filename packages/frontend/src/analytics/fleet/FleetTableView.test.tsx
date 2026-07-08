@@ -164,14 +164,14 @@ describe('FleetTableView', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
   })
 
   it('sorts the viewpoint player tile first', () => {
-    seedShellViewpoint('Bob')
+    seedShellViewpoint(2)
 
     const streamPlayersById = new Map([
       [8, pendingFleetPlayerStreamSlice()],
@@ -198,14 +198,14 @@ describe('FleetTableView', () => {
       gameInfoContext: {
         turn: 10,
         perspectives: [
-          { ordinal: 1, playerId: 8, name: 'dead', raceName: 'The Solar Federation' },
+          { ordinal: 1, playerId: 8, name: 'dead', raceName: 'The Solar Federation', eliminationTurn: 49 },
         ],
         isGameFinished: true,
         sectorDisplayName: 'Test Sector',
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 8,
-      perspectiveOverrideName: 'dead',
+      perspectiveOverrideOrdinal: 1,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
@@ -233,15 +233,15 @@ describe('FleetTableView', () => {
       gameInfoContext: {
         turn: 10,
         perspectives: [
-          { ordinal: 1, playerId: 8, name: 'Alice', raceName: 'The Feds' },
-          { ordinal: 2, playerId: 9, name: 'Bob', raceName: 'The Evil Empire' },
+          { ordinal: 1, playerId: 8, name: 'Alice', raceName: 'The Feds', eliminationTurn: null },
+          { ordinal: 2, playerId: 9, name: 'Bob', raceName: 'The Evil Empire', eliminationTurn: null },
         ],
         isGameFinished: true,
         sectorDisplayName: 'Test Sector',
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
       },
       selectedTurn: 5,
-      perspectiveOverrideName: 'Bob',
+      perspectiveOverrideOrdinal: 2,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
@@ -264,7 +264,7 @@ describe('FleetTableView', () => {
   })
 
   it('hides tiles for players turned off in fleet visibility', () => {
-    seedShellViewpoint('Alice')
+    seedShellViewpoint(1)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
     const streamPlayersById = new Map([

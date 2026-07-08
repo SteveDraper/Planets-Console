@@ -46,11 +46,11 @@ describe('FleetAnalyticTile', () => {
       selectedGameId: null,
       gameInfoContext: null,
       selectedTurn: null,
-      perspectiveOverrideName: null,
+      perspectiveOverrideOrdinal: null,
       storageOnlyLoad: false,
       storageAvailablePerspectives: null,
     })
-    seedShellViewpoint('Alice')
+    seedShellViewpoint(1)
     vi.mocked(fetchAnalyticTable).mockResolvedValue({
       analyticId: 'scores',
       columns: ['Race (player)'],

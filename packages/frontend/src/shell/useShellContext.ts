@@ -5,16 +5,12 @@ import {
   fetchStoredTurnPerspectives,
   type AnalyticShellScope,
 } from '../api/bff'
-import {
-  LOGIN_REQUIRED_FOR_GAME_SELECTION,
-  perspectiveOrdinalForName,
-  viewpointNameForStoredPerspective,
-} from '../lib/gameInfoShell'
+import { LOGIN_REQUIRED_FOR_GAME_SELECTION } from '../lib/gameInfoShell'
 import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
 import {
   deriveAnalyticScope,
-  deriveSelectedViewpointName,
+  deriveSelectedViewpointOrdinal,
   deriveShellTurnMax,
   deriveShellViewpoints,
   deriveTurnBlockedNoLogin,
@@ -39,8 +35,8 @@ export type ShellContext = {
   turnDataReady: boolean
   turnBlockedNoLogin: boolean
   shellViewpoints: ShellViewpointRow[]
-  selectedViewpointName: string | null
-  onViewpointChange: (name: string) => void
+  selectedViewpointOrdinal: number | null
+  onViewpointChange: (ordinal: number) => void
   shellTurnMax: number | null
   selectedTurn: number | null
   isFuture: boolean
@@ -56,39 +52,12 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideName = useShellStore((s) => s.perspectiveOverrideName)
+  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
   const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
   const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
   const setSelectedTurn = useShellStore((s) => s.setSelectedTurn)
-  const setPerspectiveOverrideName = useShellStore((s) => s.setPerspectiveOverrideName)
+  const setPerspectiveOverrideOrdinal = useShellStore((s) => s.setPerspectiveOverrideOrdinal)
   const setStorageAvailablePerspectives = useShellStore((s) => s.setStorageAvailablePerspectives)
-
-  const shellInputs = useMemo(
-    () => ({
-      selectedGameId,
-      gameInfoContext,
-      selectedTurn,
-      perspectiveOverrideName,
-      loginName,
-      storageOnlyLoad,
-      storageAvailablePerspectives,
-    }),
-    [
-      selectedGameId,
-      gameInfoContext,
-      selectedTurn,
-      perspectiveOverrideName,
-      loginName,
-      storageOnlyLoad,
-      storageAvailablePerspectives,
-    ]
-  )
-
-  useEffect(() => {
-    if (selectedTurn != null && selectedTurn < 1) {
-      setSelectedTurn(1)
-    }
-  }, [selectedTurn, setSelectedTurn])
 
   const shellTurnMax = useMemo(
     () => deriveShellTurnMax(gameInfoContext),
@@ -102,10 +71,113 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
 
   const { dataTurn, futureOffset: futureTurnOffset, isFuture } = turnView
 
+  const scopeInputs = useMemo(
+    () => ({
+      selectedGameId,
+      gameInfoContext,
+      selectedTurn,
+      perspectiveOverrideOrdinal,
+      loginName,
+      storageOnlyLoad,
+      storageAvailablePerspectives,
+      viewedDataTurn: dataTurn,
+      turnUsernamesByPlayerId: null as ReadonlyMap<number, string> | null,
+    }),
+    [
+      selectedGameId,
+      gameInfoContext,
+      selectedTurn,
+      perspectiveOverrideOrdinal,
+      loginName,
+      storageOnlyLoad,
+      storageAvailablePerspectives,
+      dataTurn,
+    ]
+  )
+
+  const analyticScopeForEnsure = useMemo(
+    () => deriveAnalyticScope(scopeInputs),
+    [scopeInputs]
+  )
+
+  const loginTrimmed = loginName?.trim() ?? ''
+  const turnEnsureEnabled = deriveTurnEnsureEnabled(
+    analyticScopeForEnsure,
+    loginName,
+    storageOnlyLoad
+  )
+
+  const {
+    data: turnEnsureData,
+    isSuccess: turnEnsureSuccess,
+    isPending: turnEnsurePending,
+    isError: turnEnsureIsError,
+    error: turnEnsureError,
+  } = useQuery({
+    queryKey: [
+      'bff',
+      'turnData',
+      analyticScopeForEnsure?.gameId ?? '',
+      analyticScopeForEnsure?.turn ?? 0,
+      analyticScopeForEnsure?.perspective ?? 0,
+      loginTrimmed,
+      credentialsRevision,
+    ] as const,
+    queryFn: () => {
+      const { name, password } = useSessionStore.getState()
+      const user = name?.trim() ?? ''
+      if (!analyticScopeForEnsure) {
+        throw new Error('Missing shell scope')
+      }
+      return ensureTurnData(analyticScopeForEnsure.gameId, {
+        turn: analyticScopeForEnsure.turn,
+        perspective: analyticScopeForEnsure.perspective,
+        username: user,
+        password: password || undefined,
+      })
+    },
+    enabled: turnEnsureEnabled,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  })
+
+  const turnUsernamesByPlayerId = turnEnsureData?.turnUsernamesByPlayerId ?? null
+
+  const shellInputs = useMemo(
+    () => ({
+      selectedGameId,
+      gameInfoContext,
+      selectedTurn,
+      perspectiveOverrideOrdinal,
+      loginName,
+      storageOnlyLoad,
+      storageAvailablePerspectives,
+      viewedDataTurn: dataTurn,
+      turnUsernamesByPlayerId,
+    }),
+    [
+      selectedGameId,
+      gameInfoContext,
+      selectedTurn,
+      perspectiveOverrideOrdinal,
+      loginName,
+      storageOnlyLoad,
+      storageAvailablePerspectives,
+      dataTurn,
+      turnUsernamesByPlayerId,
+    ]
+  )
+
+  useEffect(() => {
+    if (selectedTurn != null && selectedTurn < 1) {
+      setSelectedTurn(1)
+    }
+  }, [selectedTurn, setSelectedTurn])
+
   const shellViewpoints = useMemo(() => deriveShellViewpoints(shellInputs), [shellInputs])
 
-  const selectedViewpointName = useMemo(
-    () => deriveSelectedViewpointName(shellInputs),
+  const selectedViewpointOrdinal = useMemo(
+    () => deriveSelectedViewpointOrdinal(shellInputs),
     [shellInputs]
   )
 
@@ -114,40 +186,42 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       shouldClearInProgressPerspectiveOverride(
         gameInfoContext,
         loginName,
-        perspectiveOverrideName
+        perspectiveOverrideOrdinal
       )
     ) {
-      setPerspectiveOverrideName(null)
+      setPerspectiveOverrideOrdinal(null)
     }
-  }, [gameInfoContext, loginName, perspectiveOverrideName, setPerspectiveOverrideName])
+  }, [
+    gameInfoContext,
+    loginName,
+    perspectiveOverrideOrdinal,
+    setPerspectiveOverrideOrdinal,
+  ])
 
   const onViewpointChange = useCallback(
-    (name: string) => {
-      const perspectives = gameInfoContext?.perspectives ?? []
+    (ordinal: number) => {
       if (
         !isViewpointChangeAllowed(
-          name,
+          ordinal,
           gameInfoContext,
           loginName,
           storageOnlyLoad,
-          storageAvailablePerspectives,
-          perspectives
+          storageAvailablePerspectives
         )
       ) {
         return
       }
-      setPerspectiveOverrideName(name)
+      setPerspectiveOverrideOrdinal(ordinal)
     },
     [
       gameInfoContext,
       loginName,
-      setPerspectiveOverrideName,
+      setPerspectiveOverrideOrdinal,
       storageOnlyLoad,
       storageAvailablePerspectives,
     ]
   )
 
-  // Lower bound only; no upper clamp -- future turns beyond shellTurnMax are intentional.
   const setTurn = useCallback(
     (absolute: number) => {
       if (shellTurnMax == null) return
@@ -165,42 +239,6 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
   )
 
   const analyticScope = useMemo(() => deriveAnalyticScope(shellInputs), [shellInputs])
-
-  const loginTrimmed = loginName?.trim() ?? ''
-  const turnEnsureEnabled = deriveTurnEnsureEnabled(analyticScope, loginName, storageOnlyLoad)
-
-  const {
-    isSuccess: turnEnsureSuccess,
-    isPending: turnEnsurePending,
-    isError: turnEnsureIsError,
-    error: turnEnsureError,
-  } = useQuery({
-    queryKey: [
-      'bff',
-      'turnData',
-      analyticScope?.gameId ?? '',
-      analyticScope?.turn ?? 0,
-      analyticScope?.perspective ?? 0,
-      loginTrimmed,
-      credentialsRevision,
-    ] as const,
-    queryFn: () => {
-      const { name, password } = useSessionStore.getState()
-      const user = name?.trim() ?? ''
-      if (!analyticScope) {
-        throw new Error('Missing shell scope')
-      }
-      return ensureTurnData(analyticScope.gameId, {
-        turn: analyticScope.turn,
-        perspective: analyticScope.perspective,
-        username: user,
-        password: password || undefined,
-      })
-    },
-    enabled: turnEnsureEnabled,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  })
 
   const turnEnsureFailureSeen = useRef(false)
   useEffect(() => {
@@ -240,15 +278,13 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
           return
         }
         setStorageAvailablePerspectives(perspectives)
-        const perspectivesRows = useShellStore.getState().gameInfoContext?.perspectives ?? []
-        const currentName = useShellStore.getState().perspectiveOverrideName
-        const currentOrdinal = perspectiveOrdinalForName(perspectivesRows, currentName)
+        const currentOrdinal = useShellStore.getState().perspectiveOverrideOrdinal
         if (currentOrdinal != null && perspectives.includes(currentOrdinal)) {
           return
         }
-        const nextName = viewpointNameForStoredPerspective(perspectives[0], perspectivesRows)
-        if (nextName) {
-          setPerspectiveOverrideName(nextName)
+        const nextOrdinal = perspectives[0]
+        if (nextOrdinal != null) {
+          setPerspectiveOverrideOrdinal(nextOrdinal)
         }
       })
       .catch((err: unknown) => {
@@ -272,7 +308,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     selectedGameId,
     dataTurn,
     setStorageAvailablePerspectives,
-    setPerspectiveOverrideName,
+    setPerspectiveOverrideOrdinal,
     reportShellError,
   ])
 
@@ -288,7 +324,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     turnDataReady,
     turnBlockedNoLogin,
     shellViewpoints,
-    selectedViewpointName,
+    selectedViewpointOrdinal,
     onViewpointChange,
     shellTurnMax,
     selectedTurn,
