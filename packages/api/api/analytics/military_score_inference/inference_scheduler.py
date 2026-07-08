@@ -80,6 +80,12 @@ class InferenceRowScheduler:
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
         self._runs: dict[str, _InferenceRowOrchestratorRun] = {}
+        # RLock: adapter methods hold this lock across orchestrator calls. When resume_globally
+        # calls _dispatch_ready_orchestrator_work_locked, dispatch_ready_work drains post-lock
+        # callbacks in the caller thread and the node-complete listener (_on_orchestrator_node_complete,
+        # _finalize_row_run) can re-acquire the lock on that thread. pause_globally shares the same
+        # lock while updating dispatch gates. Production tier_solve uses the thread pool backend,
+        # so listener completion is usually async rather than synchronous in the dispatch caller.
         self._lock = threading.RLock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._stream_bindings: dict[str, _InferenceStreamOrchestratorBinding] = {}
