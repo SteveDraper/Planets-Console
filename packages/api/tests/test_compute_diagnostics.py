@@ -905,6 +905,40 @@ def test_sticky_freeze_disarms_on_game_change():
     assert controller._freeze_state.freeze_armed_for_game(1) is False
 
 
+def test_sticky_freeze_stays_armed_across_turn_change_and_resets_allowlist():
+    """Freeze is sticky per game; allowlist resets empty on shell context change."""
+    controller = get_compute_diagnostics_controller()
+    shell_turn_8 = ShellContextKey(game_id=1, perspective=1, turn=8)
+    shell_turn_9 = ShellContextKey(game_id=1, perspective=1, turn=9)
+
+    controller.set_freeze_armed(shell_turn_8, freeze_armed=True)
+    controller.set_allowlist(shell_turn_8, frozenset({3, 7}))
+    snap_8 = controller.snapshot(shell_turn_8)
+    assert snap_8.freeze_armed is True
+    assert snap_8.allowlisted_player_ids == (3, 7)
+
+    snap_9 = controller.snapshot(shell_turn_9)
+    assert snap_9.freeze_armed is True
+    assert snap_9.allowlisted_player_ids == ()
+    assert controller.stream_allowlisted_player_ids(shell_turn_9) == frozenset()
+
+
+def test_sticky_freeze_stays_armed_across_perspective_change_and_resets_allowlist():
+    """Same-game perspective change keeps freeze armed and clears the allowlist."""
+    controller = get_compute_diagnostics_controller()
+    shell_p1 = ShellContextKey(game_id=1, perspective=1, turn=8)
+    shell_p2 = ShellContextKey(game_id=1, perspective=2, turn=8)
+
+    controller.set_freeze_armed(shell_p1, freeze_armed=True)
+    controller.set_allowlist(shell_p1, frozenset({11}))
+    assert controller.snapshot(shell_p1).allowlisted_player_ids == (11,)
+
+    snap_p2 = controller.snapshot(shell_p2)
+    assert snap_p2.freeze_armed is True
+    assert snap_p2.allowlisted_player_ids == ()
+    assert controller.stream_allowlisted_player_ids(shell_p2) == frozenset()
+
+
 def test_sticky_freeze_game_change_redispatches_ready_node(sample_turn):
     controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 

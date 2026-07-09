@@ -97,3 +97,62 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     bootstrap = client.get("/shell/bootstrap")
     assert bootstrap.status_code == 200
     assert bootstrap.json()["computeDiagnosticsEnabled"] is True
+
+
+def test_sticky_freeze_across_turn_and_perspective_resets_allowlist():
+    """Freeze stays armed within a game; allowlist clears on shell context change."""
+    set_api_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            storage_asset_path=None,
+            include_dummy_data=False,
+            compute_diagnostics=True,
+        )
+    )
+    freeze = client.put(
+        "/diagnostics/compute/freeze",
+        json={"gameId": 628580, "perspective": 1, "turn": 8, "freezeArmed": True},
+    )
+    assert freeze.status_code == 200
+    assert freeze.json()["freezeArmed"] is True
+
+    allowlist = client.put(
+        "/diagnostics/compute/allowlist",
+        json={"gameId": 628580, "perspective": 1, "turn": 8, "playerIds": [3, 7]},
+    )
+    assert allowlist.status_code == 200
+    assert allowlist.json()["allowlistedPlayerIds"] == [3, 7]
+
+    turn_change = client.get(
+        "/diagnostics/compute/snapshot?gameId=628580&perspective=1&turn=9"
+    )
+    assert turn_change.status_code == 200
+    turn_body = turn_change.json()
+    assert turn_body["freezeArmed"] is True
+    assert turn_body["allowlistedPlayerIds"] == []
+
+    # Re-apply allowlist on the new turn, then change perspective.
+    client.put(
+        "/diagnostics/compute/allowlist",
+        json={"gameId": 628580, "perspective": 1, "turn": 9, "playerIds": [11]},
+    )
+    perspective_change = client.get(
+        "/diagnostics/compute/snapshot?gameId=628580&perspective=2&turn=9"
+    )
+    assert perspective_change.status_code == 200
+    perspective_body = perspective_change.json()
+    assert perspective_body["freezeArmed"] is True
+    assert perspective_body["allowlistedPlayerIds"] == []
+
+    game_change = client.get(
+        "/diagnostics/compute/snapshot?gameId=999001&perspective=2&turn=9"
+    )
+    assert game_change.status_code == 200
+    assert game_change.json()["freezeArmed"] is False
+
+    # Prior game is disarmed after leaving it.
+    prior_game = client.get(
+        "/diagnostics/compute/snapshot?gameId=628580&perspective=2&turn=9"
+    )
+    assert prior_game.status_code == 200
+    assert prior_game.json()["freezeArmed"] is False
