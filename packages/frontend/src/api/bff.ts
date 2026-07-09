@@ -1018,13 +1018,6 @@ export type ComputeDiagnosticsSnapshotResponse = {
   readyQueue: Record<string, unknown>[]
   completionHistory: Record<string, unknown>[]
   serverStreams: Record<string, unknown>[]
-  clientStreams: {
-    connectionKey: string
-    generation: number
-    lastEventAt: string | null
-    lastEventType: string | null
-    lastConnectResult: string | null
-  }[]
 }
 
 function computeDiagnosticsQuery(scope: AnalyticShellScope): string {
@@ -1037,14 +1030,9 @@ function computeDiagnosticsQuery(scope: AnalyticShellScope): string {
 }
 
 export async function fetchComputeDiagnosticsSnapshot(
-  scope: AnalyticShellScope,
-  clientStreams?: ComputeDiagnosticsSnapshotResponse['clientStreams']
+  scope: AnalyticShellScope
 ): Promise<ComputeDiagnosticsSnapshotResponse> {
-  const params = new URLSearchParams(computeDiagnosticsQuery(scope))
-  if (clientStreams != null && clientStreams.length > 0) {
-    params.set('clientStreams', JSON.stringify(clientStreams))
-  }
-  const path = `/bff/diagnostics/compute/snapshot?${params.toString()}`
+  const path = `/bff/diagnostics/compute/snapshot?${computeDiagnosticsQuery(scope)}`
   const endpointLabel = 'GET /bff/diagnostics/compute/snapshot'
   const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {

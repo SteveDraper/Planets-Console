@@ -12,7 +12,6 @@ from bff.config import BffConfig
 from bff.config import set_config as set_bff_config
 from bff.core_client import clear_core_client_cache
 from bff.diagnostics_buffer import get_diagnostics_buffer
-from bff.routers.diagnostics_compute import reset_compute_diagnostics_client_streams_for_tests
 from fastapi.testclient import TestClient
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -23,7 +22,6 @@ def _reset():
     clear_backend_cache()
     clear_core_client_cache()
     reset_compute_diagnostics_for_tests()
-    reset_compute_diagnostics_client_streams_for_tests()
     set_bff_config(BffConfig(diagnostics_buffer_size=10))
     get_diagnostics_buffer().clear()
     set_api_config(
@@ -38,7 +36,6 @@ def _reset():
     clear_core_client_cache()
     clear_backend_cache()
     reset_compute_diagnostics_for_tests()
-    reset_compute_diagnostics_client_streams_for_tests()
 
 
 def test_compute_diagnostics_disabled_returns_404():
@@ -64,11 +61,18 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     body = snapshot.json()
     assert body["shell"] == {"gameId": 628580, "perspective": 1, "turn": 8}
     assert body["freezeArmed"] is False
+    assert "clientStreams" not in body
     assert "poolQueue" in body
     assert "dagNodes" in body
     assert "readyQueue" in body
     assert "completionHistory" in body
     assert "serverStreams" in body
+
+    missing_client_streams = client.put(
+        "/diagnostics/compute/client-streams?gameId=628580&perspective=1&turn=8",
+        json=[],
+    )
+    assert missing_client_streams.status_code == 404
 
     freeze = client.put(
         "/diagnostics/compute/freeze",

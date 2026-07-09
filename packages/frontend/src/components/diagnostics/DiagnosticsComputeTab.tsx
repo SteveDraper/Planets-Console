@@ -7,8 +7,15 @@ import {
   putComputeDiagnosticsFreeze,
 } from '../../api/bff'
 import { cn } from '../../lib/utils'
-import { useComputeDiagnosticsStore } from '../../stores/computeDiagnostics'
+import {
+  type ClientStreamLifecycle,
+  useComputeDiagnosticsStore,
+} from '../../stores/computeDiagnostics'
 import { DiagnosticsJsonBlock } from './DiagnosticsJsonBlock'
+
+type ComputeDiagnosticsUiSnapshot = ComputeDiagnosticsSnapshotResponse & {
+  clientStreams: ClientStreamLifecycle[]
+}
 
 type DiagnosticsComputeTabProps = {
   scope: AnalyticShellScope | null
@@ -47,15 +54,19 @@ function SectionPanel({
 export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabProps) {
   const clientStreams = useComputeDiagnosticsStore((state) => state.clientStreams)
   const setSnapshot = useComputeDiagnosticsStore((state) => state.setSnapshot)
-  const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsSnapshotResponse | null>(null)
+  const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsUiSnapshot | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [allowlistInput, setAllowlistInput] = useState('')
 
   const applySnapshot = useCallback(
     (next: ComputeDiagnosticsSnapshotResponse) => {
-      setLocalSnapshot(next)
-      setSnapshot(next)
+      const merged: ComputeDiagnosticsUiSnapshot = {
+        ...next,
+        clientStreams: useComputeDiagnosticsStore.getState().clientStreams,
+      }
+      setLocalSnapshot(merged)
+      setSnapshot(merged)
       setAllowlistInput(next.allowlistedPlayerIds.join(','))
     },
     [setSnapshot]
@@ -69,18 +80,28 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     setPending(true)
     setLoadError(null)
     try {
-      const next = await fetchComputeDiagnosticsSnapshot(scope, clientStreams)
+      const next = await fetchComputeDiagnosticsSnapshot(scope)
       applySnapshot(next)
     } catch (error: unknown) {
       setLoadError(error instanceof Error ? error.message : String(error))
     } finally {
       setPending(false)
     }
-  }, [applySnapshot, clientStreams, scope])
+  }, [applySnapshot, scope])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    setLocalSnapshot((current) =>
+      current == null ? current : { ...current, clientStreams }
+    )
+    const existing = useComputeDiagnosticsStore.getState().snapshot
+    if (existing != null) {
+      setSnapshot({ ...existing, clientStreams })
+    }
+  }, [clientStreams, setSnapshot])
 
   const runMutation = useCallback(
     async (action: () => Promise<ComputeDiagnosticsSnapshotResponse>) => {

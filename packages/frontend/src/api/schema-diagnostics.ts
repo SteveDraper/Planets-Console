@@ -124,26 +124,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/diagnostics/compute/client-streams": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Put Compute Diagnostics Client Streams
-         * @description Accept client stream lifecycle telemetry for one shell context.
-         */
-        put: operations["put_compute_diagnostics_client_streams_diagnostics_compute_client_streams_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -158,19 +138,6 @@ export interface components {
             turn: number;
             /** Playerids */
             playerIds: number[];
-        };
-        /** ComputeDiagnosticsClientStreamReport */
-        ComputeDiagnosticsClientStreamReport: {
-            /** Connectionkey */
-            connectionKey: string;
-            /** Generation */
-            generation: number;
-            /** Lasteventat */
-            lastEventAt?: string | null;
-            /** Lasteventtype */
-            lastEventType?: string | null;
-            /** Lastconnectresult */
-            lastConnectResult?: string | null;
         };
         /** ComputeDiagnosticsFreezeRequest */
         ComputeDiagnosticsFreezeRequest: {
@@ -226,10 +193,6 @@ export interface components {
             }[];
             /** Serverstreams */
             serverStreams: {
-                [key: string]: unknown;
-            }[];
-            /** Clientstreams */
-            clientStreams?: {
                 [key: string]: unknown;
             }[];
         };
@@ -308,7 +271,6 @@ export interface operations {
                 gameId: number;
                 perspective: number;
                 turn: number;
-                clientStreams?: string | null;
             };
             header?: never;
             path?: never;
@@ -422,45 +384,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_compute_diagnostics_client_streams_diagnostics_compute_client_streams_put: {
-        parameters: {
-            query: {
-                gameId: number;
-                perspective: number;
-                turn: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ComputeDiagnosticsClientStreamReport"][];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
                 };
             };
             /** @description Validation Error */

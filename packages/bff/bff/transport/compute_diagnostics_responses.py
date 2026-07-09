@@ -24,7 +24,6 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     ready_queue: list[dict] = Field(alias="readyQueue")
     completion_history: list[dict] = Field(alias="completionHistory")
     server_streams: list[dict] = Field(alias="serverStreams")
-    client_streams: list[dict] = Field(default_factory=list, alias="clientStreams")
 
 
 class ComputeDiagnosticsFreezeRequest(BaseModel):
@@ -51,13 +50,3 @@ class ComputeDiagnosticsSingleStepRequest(BaseModel):
     game_id: int = Field(alias="gameId")
     perspective: int
     turn: int = Field(ge=1)
-
-
-class ComputeDiagnosticsClientStreamReport(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    connection_key: str = Field(alias="connectionKey")
-    generation: int
-    last_event_at: str | None = Field(default=None, alias="lastEventAt")
-    last_event_type: str | None = Field(default=None, alias="lastEventType")
-    last_connect_result: str | None = Field(default=None, alias="lastConnectResult")
