@@ -178,6 +178,12 @@ def load_config(
             f"api.include_dummy_data must be a boolean, got "
             f"{type(include_dummy).__name__}: {include_dummy!r}"
         )
+    raw_compute_diag = api_dict.get("compute_diagnostics", ApiConfig().compute_diagnostics)
+    if not isinstance(raw_compute_diag, bool):
+        raise TypeError(
+            f"api.compute_diagnostics must be a boolean, got "
+            f"{type(raw_compute_diag).__name__}: {raw_compute_diag!r}"
+        )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_root=_parse_api_storage_root(api_dict.get("storage_root")),
@@ -186,6 +192,7 @@ def load_config(
         planets_api_base_url=str(
             api_dict.get("planets_api_base_url", ApiConfig().planets_api_base_url)
         ),
+        compute_diagnostics=raw_compute_diag,
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):

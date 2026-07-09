@@ -18,6 +18,10 @@ from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs, coerce_step_result
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+StepCompleteListener = Callable[
+    [ComputeScope, "ComputeNodeRun", str, Literal["inline", "pool"], Literal["success", "failed"]],
+    None,
+]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
 
@@ -95,6 +99,25 @@ class OrchestratorMetrics:
     persist_calls: int = 0
 
 
+@dataclass(frozen=True)
+class OrchestratorNodeSnapshot:
+    """Immutable copy of one node's diagnostics-visible fields."""
+
+    scope: ComputeScope
+    state: NodeState
+    profile_step_index: int
+    step_index: int
+    priority_band: ComputePriorityBand
+
+
+@dataclass(frozen=True)
+class OrchestratorDiagnosticsSnapshot:
+    """Immutable node and ready-queue view captured under the orchestrator lock."""
+
+    nodes: tuple[OrchestratorNodeSnapshot, ...]
+    ready_scopes: tuple[ComputeScope, ...]
+
+
 class ComputeOrchestrator:
     """DAG scheduler with singleflight per normalized compute scope."""
 
@@ -122,16 +145,12 @@ class ComputeOrchestrator:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._node_complete_listeners: list[NodeCompleteListener] = []
-        self._dispatch_gate: NodeDispatchGate | None = None
+        self._step_complete_listeners: list[StepCompleteListener] = []
+        self._dispatch_gates: list[NodeDispatchGate] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
 
-    def set_dispatch_gate(self, gate: NodeDispatchGate | None) -> None:
-        """Set a node-level gate checked before pool or inline dispatch."""
-        with self._condition:
-            self._dispatch_gate = gate
-
     def dispatch_ready_work(self) -> None:
-        """Dispatch any ready nodes allowed by the current gate."""
+        """Dispatch any ready nodes allowed by the current gates."""
         with self._condition:
             self._dispatch()
         self._drain_post_lock_callbacks()
@@ -152,6 +171,26 @@ class ComputeOrchestrator:
     def turn_cache(self) -> OrchestratorTurnCache:
         return self._turn_cache
 
+    def register_dispatch_gate(
+        self,
+        gate: NodeDispatchGate,
+    ) -> Callable[[], None]:
+        """Register a node-level gate; dispatch only if all registered gates pass.
+
+        Returns an unregister callable that removes only this gate.
+        """
+        with self._condition:
+            self._dispatch_gates.append(gate)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._dispatch_gates.remove(gate)
+                except ValueError:
+                    return
+
+        return unregister
+
     def register_node_complete_listener(
         self,
         listener: NodeCompleteListener,
@@ -169,6 +208,23 @@ class ComputeOrchestrator:
 
         return unregister
 
+    def register_step_complete_listener(
+        self,
+        listener: StepCompleteListener,
+    ) -> Callable[[], None]:
+        """Register a step completion listener; return an unregister callable."""
+        with self._condition:
+            self._step_complete_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._step_complete_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
     @property
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
         return self._nodes
@@ -179,6 +235,24 @@ class ComputeOrchestrator:
             return tuple(
                 scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
             )
+
+    def diagnostics_snapshot(self) -> OrchestratorDiagnosticsSnapshot:
+        """Return immutable node and ready-queue data in one critical section."""
+        with self._condition:
+            nodes = tuple(
+                OrchestratorNodeSnapshot(
+                    scope=node.scope,
+                    state=node.state,
+                    profile_step_index=node.profile_step_index,
+                    step_index=node.step_index,
+                    priority_band=node.priority_band,
+                )
+                for node in self._nodes.values()
+            )
+            ready_scopes = tuple(
+                scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
+            )
+            return OrchestratorDiagnosticsSnapshot(nodes=nodes, ready_scopes=ready_scopes)
 
     def submit(self, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
@@ -243,14 +317,62 @@ class ComputeOrchestrator:
     ) -> None:
         """Mark a pool-submitted step complete (used by worker pool integration)."""
         with self._condition:
-            node = self._nodes[scope]
+            node = self._nodes.get(scope)
+            if node is None:
+                return
             if node.state != "running":
-                raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
+                # Already aborted/cancelled while the pool worker was still finishing.
+                return
             if error is not None:
+                step_kind = self._current_step_spec(
+                    node,
+                    self._compute_registry[node.scope.analytic_id],
+                ).step_kind
+                self._notify_step_complete(
+                    node,
+                    step_kind,
+                    surface="pool",
+                    terminal_state="failed",
+                )
                 self._fail_node(node, error)
             else:
+                step_kind = self._current_step_spec(
+                    node,
+                    self._compute_registry[node.scope.analytic_id],
+                ).step_kind
+                self._notify_step_complete(
+                    node,
+                    step_kind,
+                    surface="pool",
+                    terminal_state="success",
+                )
                 self._after_step_success(node, result_wire)
         self._drain_post_lock_callbacks()
+
+    def abort_scope(self, scope: ComputeScope, error: BaseException) -> bool:
+        """Fail a non-terminal node so a later ``force_fresh`` submit can replace it.
+
+        Returns whether a node was aborted. No-op when the scope is absent or already
+        terminal. Used when a stream row run is cancelled while orchestrator work for
+        that scope is still in flight.
+        """
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None or node.state in {"complete", "failed"}:
+                return False
+            if node.state == "running":
+                registration = self._compute_registry.get(node.scope.analytic_id)
+                if registration is not None:
+                    step_kind = self._current_step_spec(node, registration).step_kind
+                    self._notify_step_complete(
+                        node,
+                        step_kind,
+                        surface="pool",
+                        terminal_state="failed",
+                    )
+            self._fail_node(node, error)
+        self._drain_post_lock_callbacks()
+        return True
 
     def _attach_to_existing(self, node: ComputeNodeRun) -> ComputeHandle:
         if node.state in {"complete", "failed"}:
@@ -413,7 +535,7 @@ class ComputeOrchestrator:
             if not self._deps_complete(node):
                 node.state = "waiting_deps"
                 continue
-            if self._dispatch_gate is not None and not self._dispatch_gate(node):
+            if not all(gate(node) for gate in self._dispatch_gates):
                 self._ready_queue.append(scope)
                 continue
             return scope, node
@@ -458,8 +580,15 @@ class ComputeOrchestrator:
             job_wire = self._build_job_wire(node, registration, step)
             result_wire = registration.run_step[step.step_kind](job_wire)
         except BaseException as exc:
+            self._notify_step_complete(
+                node,
+                step.step_kind,
+                surface="inline",
+                terminal_state="failed",
+            )
             self._fail_node(node, exc)
             return
+        self._notify_step_complete(node, step.step_kind, surface="inline", terminal_state="success")
         self._after_step_success(node, result_wire)
 
     def _build_job_wire(
@@ -587,6 +716,26 @@ class ComputeOrchestrator:
         for listener in listeners:
             self._post_lock_callbacks.append(
                 lambda listener=listener, node=node: listener(node.scope, node),
+            )
+
+    def _notify_step_complete(
+        self,
+        node: ComputeNodeRun,
+        step_kind: str,
+        *,
+        surface: Literal["inline", "pool"],
+        terminal_state: Literal["success", "failed"],
+    ) -> None:
+        listeners = tuple(self._step_complete_listeners)
+        for listener in listeners:
+            self._post_lock_callbacks.append(
+                lambda listener=listener, node=node, step_kind=step_kind: listener(
+                    node.scope,
+                    node,
+                    step_kind,
+                    surface,
+                    terminal_state,
+                ),
             )
 
     def _drain_post_lock_callbacks(self) -> None:

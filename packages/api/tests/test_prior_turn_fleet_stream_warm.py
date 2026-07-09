@@ -55,13 +55,18 @@ from tests.fleet_exports_helpers import host_turn_at
 
 @pytest.fixture(autouse=True)
 def _reset_stream_registry_after_test() -> None:
-    reset_coordinators()
-    yield
-    reset_coordinators()
-    reset_inference_table_stream_registry_for_tests()
+    from api.compute.diagnostics import reset_compute_diagnostics_for_tests
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
+    reset_coordinators()
+    reset_compute_diagnostics_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
+    yield
+    reset_coordinators()
+    reset_inference_table_stream_registry_for_tests()
+    reset_compute_diagnostics_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -523,7 +528,11 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     persistence,
     monkeypatch,
 ):
-    """First-pass pending overlay triggers reschedule when fleet@(N-1) persists."""
+    """First-pass pending overlay triggers reschedule when fleet@(N-1) persists.
+
+    Mirrors production: background fleet warm runs before the scores stream opens so
+    fleet persist can race connect admission (external source_context_id).
+    """
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_scheduler(monkeypatch, worker_count=1)
     player_id = sample_turn.scores[0].ownerid
@@ -545,6 +554,14 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         game_id=ctx.game_id,
         perspective=ctx.perspective,
         turn_number=HOST_TURN,
+    )
+
+    # Same order as TurnAnalyticService.iter_scores_table_inference_stream.
+    schedule_background_prior_turn_fleet_warm(
+        turn=host_turn,
+        load_turn=ctx.load_turn,
+        export_services=ctx.export_services,
+        player_ids=player_ids,
     )
 
     def resolve_fleet_torp_resolution_for_player(
@@ -590,10 +607,39 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
             ),
             timeout_seconds=30.0,
         )
-        _wait_until(
-            lambda: any(event.get("type") == "complete" for event in events),
-            timeout_seconds=30.0,
-        )
+        try:
+            _wait_until(
+                lambda: any(event.get("type") == "complete" for event in events),
+                timeout_seconds=30.0,
+            )
+        except AssertionError as exc:
+            controller = controller_for_scope(scope)
+            scheduled_run_ids = (
+                {pid: row.session.run_id for pid, row in controller.scheduled_rows.items()}
+                if controller is not None
+                else {}
+            )
+            event_summary = [
+                (
+                    event.get("type"),
+                    event.get("playerId"),
+                    (event.get("diagnostics") or {}).get("fleetTorpInputStatus")
+                    if isinstance(event.get("diagnostics"), dict)
+                    else None,
+                )
+                for event in events
+            ]
+            owns_stream = controller is not None and scheduler.owns_table_stream(
+                controller.stream_token
+            )
+            raise AssertionError(
+                "scores stream never emitted complete after fleet ledger landed; "
+                f"events={event_summary!r}; "
+                f"scheduler_runs={dict(scheduler._runs)!r}; "
+                f"scheduled_run_ids={scheduled_run_ids!r}; "
+                f"owns_stream={owns_stream!r}; "
+                f"globally_paused={scheduler._globally_paused!r}"
+            ) from exc
 
         first_complete = next(event for event in events if event.get("type") == "complete")
         first_diagnostics = first_complete.get("diagnostics")

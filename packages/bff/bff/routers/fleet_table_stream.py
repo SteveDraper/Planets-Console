@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from bff.analytics.fleet import ANALYTIC_ID, component_catalog_wire
+from bff.compute_diagnostics_stream import filter_table_stream_player_ids
 from bff.core_client import get_core_client
 
 router = APIRouter()
@@ -41,6 +42,12 @@ def get_fleet_table_stream(
 ):
     """Stream fleet table materialization for requested players on one NDJSON connection."""
     parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
+    filtered_player_ids = filter_table_stream_player_ids(
+        game_id=game_id,
+        perspective=perspective,
+        turn=turn,
+        player_ids=parsed_player_ids,
+    )
     core = get_core_client()
     return StreamingResponse(
         stream_fleet_table_ndjson(
@@ -48,7 +55,7 @@ def get_fleet_table_stream(
                 game_id,
                 perspective,
                 turn,
-                parsed_player_ids,
+                filtered_player_ids,
             )
         ),
         media_type="application/x-ndjson",

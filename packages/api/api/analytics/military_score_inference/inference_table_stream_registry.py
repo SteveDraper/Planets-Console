@@ -15,6 +15,13 @@ if TYPE_CHECKING:
 _registry = TableStreamRegistry[InferenceStreamScope, "InferenceTableStreamController"]()
 
 
+def get_inference_table_stream_registry() -> TableStreamRegistry[
+    InferenceStreamScope, "InferenceTableStreamController"
+]:
+    """Return the process-wide scores inference table-stream registry."""
+    return _registry
+
+
 def attach_inference_table_stream(controller: InferenceTableStreamController) -> None:
     _registry.attach(controller.scope, controller)
 

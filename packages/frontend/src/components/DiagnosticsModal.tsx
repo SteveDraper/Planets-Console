@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ClipboardCopy } from 'lucide-react'
+import type { AnalyticShellScope } from '../api/bff'
 import {
   isIncludeDiagnosticsSessionEnabled,
   setIncludeDiagnosticsSessionEnabled,
@@ -9,6 +10,8 @@ import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
+import { useComputeDiagnosticsStore } from '../stores/computeDiagnostics'
+import { DiagnosticsComputeTab } from './diagnostics/DiagnosticsComputeTab'
 import {
   DiagnosticsRequestsTab,
   formatAllDiagnosticsItems,
@@ -17,6 +20,7 @@ import {
 import { DiagnosticsScoresTab } from './diagnostics/DiagnosticsScoresTab'
 import {
   DIAGNOSTICS_TAB_IDS,
+  DIAGNOSTICS_TAB_IDS_WITHOUT_COMPUTE,
   DIAGNOSTICS_TAB_LABELS,
   type DiagnosticsTabId,
 } from './diagnostics/diagnosticsTabs'
@@ -24,12 +28,16 @@ import {
 type DiagnosticsModalProps = {
   isOpen: boolean
   onClose: () => void
+  analyticScope: AnalyticShellScope | null
+  computeDiagnosticsEnabled: boolean
   getFocusRestoreFallback?: () => HTMLElement | null
 }
 
 export function DiagnosticsModal({
   isOpen,
   onClose,
+  analyticScope,
+  computeDiagnosticsEnabled,
   getFocusRestoreFallback,
 }: DiagnosticsModalProps) {
   const queryClient = useQueryClient()
@@ -43,6 +51,11 @@ export function DiagnosticsModal({
   const [clipboardError, setClipboardError] = useState<string | null>(null)
   const [recordBffDiagnostics, setRecordBffDiagnostics] = useState(false)
   const scoresSnapshot = useAnalyticDiagnosticsStore((state) => state.scores)
+  const computeSnapshot = useComputeDiagnosticsStore((state) => state.snapshot)
+
+  const visibleTabIds: readonly DiagnosticsTabId[] = computeDiagnosticsEnabled
+    ? DIAGNOSTICS_TAB_IDS
+    : DIAGNOSTICS_TAB_IDS_WITHOUT_COMPUTE
 
   const closeAndReturnFocus = useCallback(() => {
     const target = returnFocusRef.current
@@ -68,6 +81,13 @@ export function DiagnosticsModal({
     }
     el.focus()
   }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    if (!visibleTabIds.includes(activeTab)) {
+      setActiveTab('requests')
+    }
+  }, [activeTab, isOpen, visibleTabIds])
 
   useEffect(() => {
     if (!isOpen) return
@@ -130,15 +150,23 @@ export function DiagnosticsModal({
       runClipboardCopy(formatAllDiagnosticsItems(items))
       return
     }
-    if (scoresSnapshot != null) {
+    if (activeTab === 'scores' && scoresSnapshot != null) {
       runClipboardCopy(JSON.stringify(scoresSnapshot, null, 2))
+      return
+    }
+    if (activeTab === 'compute' && computeSnapshot != null) {
+      runClipboardCopy(JSON.stringify(computeSnapshot, null, 2))
     }
   }
 
   if (!isOpen) return null
 
   const canCopyActiveTab =
-    activeTab === 'requests' ? Boolean(items?.length) : scoresSnapshot != null
+    activeTab === 'requests'
+      ? Boolean(items?.length)
+      : activeTab === 'scores'
+        ? scoresSnapshot != null
+        : computeSnapshot != null
 
   return (
     <div
@@ -192,7 +220,7 @@ export function DiagnosticsModal({
           role="tablist"
           aria-label="Diagnostics sections"
         >
-          {DIAGNOSTICS_TAB_IDS.map((tabId) => (
+          {visibleTabIds.map((tabId) => (
             <button
               key={tabId}
               type="button"
@@ -246,8 +274,10 @@ export function DiagnosticsModal({
           )}
           {activeTab === 'requests' ? (
             <DiagnosticsRequestsTab items={items} loadError={loadError} onCopy={runClipboardCopy} />
-          ) : (
+          ) : activeTab === 'scores' ? (
             <DiagnosticsScoresTab snapshot={scoresSnapshot} onCopy={runClipboardCopy} />
+          ) : (
+            <DiagnosticsComputeTab scope={analyticScope} onCopy={runClipboardCopy} />
           )}
         </div>
       </div>

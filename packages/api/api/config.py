@@ -24,6 +24,9 @@ class ApiConfig:
     planets_api_base_url: str = "https://api.planets.nu"
     """Base URL for Planets.nu HTTP API (login, loadinfo, etc.)."""
 
+    compute_diagnostics: bool = False
+    """Enable compute orchestrator diagnostics observer and BFF control endpoints."""
+
 
 def get_config() -> ApiConfig:
     """Return the current API config. Defaults if not yet set by server."""

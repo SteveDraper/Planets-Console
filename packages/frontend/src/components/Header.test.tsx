@@ -12,6 +12,11 @@ const headerQueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 })
 
+const defaultHeaderProps = {
+  analyticScope: null,
+  computeDiagnosticsEnabled: false,
+} as const
+
 function renderHeader() {
   return render(
     <QueryClientProvider client={headerQueryClient}>
@@ -32,6 +37,7 @@ function renderHeader() {
         shellViewpoints={[]}
         shellSelectedViewpointOrdinal={null}
         onShellViewpointChange={() => {}}
+        {...defaultHeaderProps}
       />
     </QueryClientProvider>
   )
@@ -108,6 +114,7 @@ describe('Header', () => {
           shellViewpoints={[]}
           shellSelectedViewpointOrdinal={null}
           onShellViewpointChange={() => {}}
+          {...defaultHeaderProps}
         />
       </QueryClientProvider>
     )
@@ -173,6 +180,7 @@ describe('Header', () => {
           ]}
           shellSelectedViewpointOrdinal={1}
           onShellViewpointChange={onViewpoint}
+          {...defaultHeaderProps}
         />
       </QueryClientProvider>
     )
@@ -206,6 +214,7 @@ describe('Header', () => {
           ]}
           shellSelectedViewpointOrdinal={1}
           onShellViewpointChange={onViewpoint}
+          {...defaultHeaderProps}
         />
       </QueryClientProvider>
     )
@@ -239,6 +248,7 @@ describe('Header', () => {
             shellViewpoints={[]}
             shellSelectedViewpointOrdinal={null}
             onShellViewpointChange={() => {}}
+            {...defaultHeaderProps}
           />
         </QueryClientProvider>
       )
@@ -281,6 +291,7 @@ describe('Header', () => {
           shellViewpoints={[]}
           shellSelectedViewpointOrdinal={null}
           onShellViewpointChange={() => {}}
+          {...defaultHeaderProps}
         />
       </QueryClientProvider>
     )
@@ -308,6 +319,7 @@ describe('Header', () => {
           shellViewpoints={[]}
           shellSelectedViewpointOrdinal={null}
           onShellViewpointChange={() => {}}
+          {...defaultHeaderProps}
         />
       </QueryClientProvider>
     )

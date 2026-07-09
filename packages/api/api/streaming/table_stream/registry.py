@@ -30,6 +30,10 @@ class TableStreamRegistry(Generic[ScopeT, ControllerT]):
         with self._lock:
             return self._active_controllers.get(scope)
 
+    def list_active_scopes(self) -> tuple[ScopeT, ...]:
+        with self._lock:
+            return tuple(self._active_controllers.keys())
+
     def reset_for_tests(self) -> None:
         with self._lock:
             self._active_controllers.clear()

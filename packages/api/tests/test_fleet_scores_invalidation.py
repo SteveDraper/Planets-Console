@@ -638,9 +638,10 @@ def test_fleet_ledger_persist_skips_when_stream_wire_lacks_version_stamp(
     )
 
 
-def test_fleet_ledger_persist_skips_for_external_persist_while_stream_fleet_dep_in_flight(
+def test_fleet_ledger_persist_reschedules_for_external_persist_while_stream_fleet_dep_in_flight(
     memory_backend,
 ):
+    """External fleet persist should reschedule even when the stream dep is still running."""
     from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
     from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -705,7 +706,7 @@ def test_fleet_ledger_persist_skips_for_external_persist_while_stream_fleet_dep_
             event,
             invalidate_row=lambda: None,
         )
-        is False
+        is True
     )
 
 

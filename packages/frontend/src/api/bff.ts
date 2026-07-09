@@ -134,7 +134,7 @@ export function toFetchRejectionError(
   )
 }
 
-async function bffRequest(
+export async function bffRequest(
   path: string,
   init: RequestInit | undefined,
   endpointLabel: string
@@ -345,6 +345,7 @@ export type EnsureTurnParams = {
 
 export type ShellBootstrapResponse = {
   showInitialGame: string | null
+  computeDiagnosticsEnabled?: boolean
 }
 
 export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {

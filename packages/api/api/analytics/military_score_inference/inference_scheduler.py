@@ -49,6 +49,7 @@ class _InferenceStreamOrchestratorBinding:
     orchestrator: object
     unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
+    unregister_dispatch_gate: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,15 @@ class InferenceRowScheduler:
             )
 
         if fleet_node.state in {"waiting_deps", "ready", "running"}:
-            return True
+            if (
+                event.source_context_id is not None
+                and self._fleet_persist_source_matches_stream_binding(
+                    binding,
+                    event.source_context_id,
+                )
+            ):
+                return True
+            return False
 
         if fleet_node.state == "complete":
             return not self._fleet_versions_conflict(fleet_node, event)
@@ -324,9 +333,12 @@ class InferenceRowScheduler:
     def cancel_run(self, run_id: str) -> None:
         with self._lock:
             row_run = self._adapter_row_run(run_id)
+            root_scope = self._runs.get(run_id)
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
             self._remove_run_locked(run_id)
+            if root_scope is not None:
+                self._abort_orchestrator_scope_locked(root_scope)
 
     def enqueue_tier_ladder(
         self,
@@ -545,7 +557,9 @@ class InferenceRowScheduler:
     ) -> None:
         from api.compute.runtime import release_orchestrator_for_context
 
-        binding.orchestrator.set_dispatch_gate(None)
+        if binding.unregister_dispatch_gate is not None:
+            binding.unregister_dispatch_gate()
+            binding.unregister_dispatch_gate = None
         binding.unregister_listener()
         ctx_id = id(binding.query_context)
         if not any(id(other.query_context) == ctx_id for other in self._stream_bindings.values()):
@@ -621,26 +635,28 @@ class InferenceRowScheduler:
         return held_jobs, held_continuations
 
     def _apply_dispatch_gates_locked(self) -> None:
-        gate = self._dispatch_gate if self._globally_paused else None
         for binding in self._stream_bindings.values():
-            binding.orchestrator.set_dispatch_gate(gate)
+            if self._globally_paused:
+                if binding.unregister_dispatch_gate is None:
+                    binding.unregister_dispatch_gate = binding.orchestrator.register_dispatch_gate(
+                        self._pause_dispatch_gate
+                    )
+            elif binding.unregister_dispatch_gate is not None:
+                binding.unregister_dispatch_gate()
+                binding.unregister_dispatch_gate = None
 
     def _dispatch_ready_orchestrator_work_locked(self) -> None:
         for binding in self._stream_bindings.values():
             binding.orchestrator.dispatch_ready_work()
 
-    @property
-    def _dispatch_gate(self) -> Callable[[object], bool]:
+    def _pause_dispatch_gate(self, node: object) -> bool:
         from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
 
-        def gate(node: object) -> bool:
-            if not self._globally_paused:
-                return True
-            if node.scope.analytic_id != SCORES_ANALYTIC_ID:
-                return True
-            return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
-
-        return gate
+        if not self._globally_paused:
+            return True
+        if node.scope.analytic_id != SCORES_ANALYTIC_ID:
+            return True
+        return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
 
     def _remove_run_locked(self, run_id: str) -> None:
         from api.analytics.scores.tier_row_run_registry import unregister_row_run
@@ -652,6 +668,21 @@ class InferenceRowScheduler:
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.root_scope != root_scope
         ]
+
+    def _abort_orchestrator_scope_locked(self, root_scope: ComputeScope) -> None:
+        """Fail in-flight orchestrator work for ``root_scope`` after a row-run cancel.
+
+        Without this, a later ``force_fresh`` submit attaches to the still-running node
+        and ``tier_solve`` fails with a missing RowRun after unregister.
+        """
+        for binding in self._stream_bindings.values():
+            abort = getattr(binding.orchestrator, "abort_scope", None)
+            if not callable(abort):
+                continue
+            abort(
+                root_scope,
+                RuntimeError("scores inference row run cancelled"),
+            )
 
     @staticmethod
     def _adapter_row_run(run_id: str) -> RowRun | None:

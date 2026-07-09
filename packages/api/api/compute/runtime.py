@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.compute.diagnostics import compute_diagnostics_enabled, get_compute_diagnostics_controller
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.pools import ComputeWorkerPool, get_compute_worker_pool
 from api.compute.registry import COMPUTE_REGISTRY
@@ -31,6 +32,8 @@ def orchestrator_for_context(
             worker_pool=pool,
         )
         _orchestrators_by_ctx_id[ctx_id] = orchestrator
+        if compute_diagnostics_enabled():
+            get_compute_diagnostics_controller().bind_orchestrator(orchestrator, ctx)
         return orchestrator
 
 
@@ -44,6 +47,7 @@ def release_orchestrator_for_context(ctx: AnalyticQueryContext) -> None:
     worker_pool = orchestrator.worker_pool
     if registration_id is not None and worker_pool is not None:
         worker_pool.unregister(registration_id)
+    get_compute_diagnostics_controller().unbind_orchestrator(orchestrator)
 
 
 def reset_orchestrators_for_tests() -> None:

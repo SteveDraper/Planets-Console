@@ -24,10 +24,228 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/diagnostics/compute/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Compute Diagnostics Enabled
+         * @description Return whether compute diagnostics are enabled on this server.
+         */
+        get: operations["get_compute_diagnostics_enabled_diagnostics_compute_enabled_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/compute/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Compute Diagnostics Snapshot
+         * @description Return a read-only compute diagnostics snapshot for one shell context.
+         */
+        get: operations["get_compute_diagnostics_snapshot_diagnostics_compute_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/compute/freeze-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Compute Diagnostics Freeze Status
+         * @description Return freeze armed state and allowlist for one shell (no heavy snapshot).
+         */
+        get: operations["get_compute_diagnostics_freeze_status_diagnostics_compute_freeze_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/compute/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Compute Diagnostics Freeze
+         * @description Arm or disarm compute freeze mode for one game.
+         */
+        put: operations["put_compute_diagnostics_freeze_diagnostics_compute_freeze_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/compute/allowlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Compute Diagnostics Allowlist
+         * @description Set the per-shell player allowlist while freeze mode is armed.
+         */
+        put: operations["put_compute_diagnostics_allowlist_diagnostics_compute_allowlist_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/compute/single-step": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Compute Diagnostics Single Step
+         * @description Release exactly one pool work item, then re-freeze unless allowlisted.
+         */
+        post: operations["post_compute_diagnostics_single_step_diagnostics_compute_single_step_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: never;
+    schemas: {
+        /** ComputeDiagnosticsAllowlistRequest */
+        ComputeDiagnosticsAllowlistRequest: {
+            /** Gameid */
+            gameId: number;
+            /** Perspective */
+            perspective: number;
+            /** Turn */
+            turn: number;
+            /** Playerids */
+            playerIds: number[];
+        };
+        /** ComputeDiagnosticsFreezeRequest */
+        ComputeDiagnosticsFreezeRequest: {
+            /** Gameid */
+            gameId: number;
+            /** Perspective */
+            perspective: number;
+            /** Turn */
+            turn: number;
+            /** Freezearmed */
+            freezeArmed: boolean;
+        };
+        /**
+         * ComputeDiagnosticsFreezeStatusResponse
+         * @description Thin freeze control signal (no pool/DAG/history payload).
+         */
+        ComputeDiagnosticsFreezeStatusResponse: {
+            shell: components["schemas"]["ComputeDiagnosticsShellContext"];
+            /** Freezearmed */
+            freezeArmed: boolean;
+            /** Allowlistedplayerids */
+            allowlistedPlayerIds: number[];
+        };
+        /** ComputeDiagnosticsShellContext */
+        ComputeDiagnosticsShellContext: {
+            /** Gameid */
+            gameId: number;
+            /** Perspective */
+            perspective: number;
+            /** Turn */
+            turn: number;
+        };
+        /** ComputeDiagnosticsSingleStepRequest */
+        ComputeDiagnosticsSingleStepRequest: {
+            /** Gameid */
+            gameId: number;
+            /** Perspective */
+            perspective: number;
+            /** Turn */
+            turn: number;
+        };
+        /** ComputeDiagnosticsSnapshotResponse */
+        ComputeDiagnosticsSnapshotResponse: {
+            shell: components["schemas"]["ComputeDiagnosticsShellContext"];
+            /** Freezearmed */
+            freezeArmed: boolean;
+            /** Allowlistedplayerids */
+            allowlistedPlayerIds: number[];
+            /** Poolqueue */
+            poolQueue: {
+                [key: string]: unknown;
+            }[];
+            /** Dagnodes */
+            dagNodes: {
+                [key: string]: unknown;
+            }[];
+            /** Readyqueue */
+            readyQueue: {
+                [key: string]: unknown;
+            }[];
+            /** Completionhistory */
+            completionHistory: {
+                [key: string]: unknown;
+            }[];
+            /** Serverstreams */
+            serverStreams: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+    };
     responses: never;
     parameters: never;
     requestBodies: never;
@@ -52,6 +270,193 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_compute_diagnostics_enabled_diagnostics_compute_enabled_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+        };
+    };
+    get_compute_diagnostics_snapshot_diagnostics_compute_snapshot_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                perspective: number;
+                turn: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compute_diagnostics_freeze_status_diagnostics_compute_freeze_status_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                perspective: number;
+                turn: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeDiagnosticsFreezeStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_compute_diagnostics_freeze_diagnostics_compute_freeze_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComputeDiagnosticsFreezeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_compute_diagnostics_allowlist_diagnostics_compute_allowlist_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComputeDiagnosticsAllowlistRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_compute_diagnostics_single_step_diagnostics_compute_single_step_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComputeDiagnosticsSingleStepRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

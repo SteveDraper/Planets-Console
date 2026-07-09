@@ -831,3 +831,155 @@ def test_recompute_force_schedules_immediate_path_players(
 
     _end_open_table_stream(_stream_scope(first_turn), scheduler)
     thread.join(timeout=2.0)
+
+
+def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
+    sample_turn,
+    monkeypatch,
+):
+    """Connect admission must not drop the stream when reschedule wins the race.
+
+    If fleet persist reschedules during ``schedule_player_row``, returning an empty
+    AdmissionDispatch leaves multiplex with zero rows (globalPause only).
+    """
+    from api.analytics.military_score_inference.inference_stream_rows import ScheduleRowAdmission
+
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_id = sample_turn.scores[0].ownerid
+    scope = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope)
+    controller = InferenceTableStreamController(
+        scope=scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(player_id,),
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+    )
+
+    fresher = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=player_id,
+        stream_token=stream_token,
+    )
+    controller.register_scheduled_row(player_id, fresher)
+    fresher_run_id = fresher.session.run_id
+
+    stale = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=player_id,
+        stream_token=stream_token,
+    )
+    assert stale.session.run_id != fresher_run_id
+
+    monkeypatch.setattr(controller, "schedule_player_row", lambda _player_id: stale)
+
+    dispatch = controller.dispatch_admission(player_id, ScheduleRowAdmission())
+    assert dispatch.schedule_failed is False
+    assert dispatch.scheduled is not None
+    assert dispatch.scheduled.session.run_id == fresher_run_id
+    assert controller.scheduled_rows[player_id].session.run_id == fresher_run_id
+    assert fresher_run_id in scheduler._runs
+    assert stale.session.run_id not in scheduler._runs
+
+    controller.end_stream(scheduler)
+    reset_inference_table_stream_registry_for_tests()
+
+
+def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
+    sample_turn,
+    monkeypatch,
+):
+    """If invalidation cancels the connect-enqueued run with no replacement, reschedule."""
+    from api.analytics.military_score_inference.inference_stream_rows import ScheduleRowAdmission
+
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_id = sample_turn.scores[0].ownerid
+    scope = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope)
+    controller = InferenceTableStreamController(
+        scope=scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(player_id,),
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+    )
+
+    cancelled = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=player_id,
+        stream_token=stream_token,
+    )
+    scheduler.cancel_row_run(cancelled.session.run_id)
+    assert cancelled.session.cancel_token.is_cancelled()
+
+    replacement = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=player_id,
+        stream_token=stream_token,
+    )
+    assert replacement.session.run_id != cancelled.session.run_id
+
+    calls = {"n": 0}
+
+    def schedule_once_cancelled_then_live(_player_id: int):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return cancelled
+        return replacement
+
+    monkeypatch.setattr(controller, "schedule_player_row", schedule_once_cancelled_then_live)
+
+    dispatch = controller.dispatch_admission(player_id, ScheduleRowAdmission())
+    assert dispatch.schedule_failed is False
+    assert dispatch.scheduled is not None
+    assert dispatch.scheduled.session.run_id == replacement.session.run_id
+    assert not dispatch.scheduled.session.cancel_token.is_cancelled()
+    assert cancelled.session.run_id not in scheduler._runs
+    assert replacement.session.run_id in scheduler._runs
+
+    controller.end_stream(scheduler)
+    reset_inference_table_stream_registry_for_tests()
+
+
+def test_adopt_admission_rejects_cancelled_connect_run(
+    sample_turn,
+    monkeypatch,
+):
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_id = sample_turn.scores[0].ownerid
+    scope = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope)
+    controller = InferenceTableStreamController(
+        scope=scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(player_id,),
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+    )
+
+    cancelled = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=player_id,
+        stream_token=stream_token,
+    )
+    scheduler.cancel_row_run(cancelled.session.run_id)
+
+    assert controller.adopt_admission_scheduled_row(player_id, cancelled) is False
+    assert player_id not in controller.scheduled_rows
+
+    controller.end_stream(scheduler)
+    reset_inference_table_stream_registry_for_tests()

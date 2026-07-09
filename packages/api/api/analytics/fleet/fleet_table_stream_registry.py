@@ -13,6 +13,13 @@ if TYPE_CHECKING:
 _registry = TableStreamRegistry[FleetTableStreamScope, "FleetTableStreamController"]()
 
 
+def get_fleet_table_stream_registry() -> TableStreamRegistry[
+    FleetTableStreamScope, "FleetTableStreamController"
+]:
+    """Return the process-wide fleet table-stream registry."""
+    return _registry
+
+
 def attach_fleet_table_stream(controller: FleetTableStreamController) -> None:
     _registry.attach(controller.scope, controller)
 
