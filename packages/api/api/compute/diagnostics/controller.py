@@ -215,16 +215,29 @@ class ComputeDiagnosticsController:
         self._redispatch_after_gate_change(shell.game_id)
         return True
 
+    def freeze_status(self, shell: ShellContextKey) -> tuple[bool, frozenset[int]]:
+        """Return ``(freeze_armed, allowlisted_player_ids)`` after shell-context notify.
+
+        Lightweight alternative to :meth:`snapshot` for clients that only need freeze
+        control (stream hold). Notifies shell context so game/turn/perspective sticky
+        rules match stream narrowing and the full snapshot path.
+        """
+        self.on_shell_context(shell)
+        freeze_armed = self._freeze_state.freeze_armed_for_game(shell.game_id)
+        if not freeze_armed:
+            return False, frozenset()
+        return True, self._freeze_state.allowlisted_player_ids(shell)
+
     def stream_allowlisted_player_ids(self, shell: ShellContextKey) -> frozenset[int] | None:
         """When freeze is armed, return allowlisted players for stream narrowing.
 
         Notifies shell context first so a stream for a different game disarms the
         previous game's freeze even when diagnostics endpoints are not hit.
         """
-        self.on_shell_context(shell)
-        if not self._freeze_state.freeze_armed_for_game(shell.game_id):
+        freeze_armed, allowlisted = self.freeze_status(shell)
+        if not freeze_armed:
             return None
-        return self._freeze_state.allowlisted_player_ids(shell)
+        return allowlisted
 
     def reset_for_tests(self) -> None:
         with self._lock:

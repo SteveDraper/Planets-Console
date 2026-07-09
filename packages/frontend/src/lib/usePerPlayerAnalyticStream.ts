@@ -101,12 +101,12 @@ export function usePerPlayerAnalyticStream<
   const { scope, enabled, playerIdsKey, policy } = options
 
   const diagnosticsEnabled = useComputeDiagnosticsStore((state) => state.enabled)
-  const diagnosticsSnapshot = useComputeDiagnosticsStore((state) => state.snapshot)
+  const freezeStatus = useComputeDiagnosticsStore((state) => state.freezeStatus)
   const freezeHold =
     scope != null
       ? computeFreezeStreamHold(scope, {
           enabled: diagnosticsEnabled,
-          snapshot: diagnosticsSnapshot,
+          freezeStatus,
         })
       : { holding: false, expectedPlayerIds: null }
   const freezeHoldKey = freezeStreamHoldKey(freezeHold)

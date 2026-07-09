@@ -14,6 +14,8 @@ from bff.errors import BFFNotFoundError
 from bff.transport.compute_diagnostics_responses import (
     ComputeDiagnosticsAllowlistRequest,
     ComputeDiagnosticsFreezeRequest,
+    ComputeDiagnosticsFreezeStatusResponse,
+    ComputeDiagnosticsShellContext,
     ComputeDiagnosticsSingleStepRequest,
     ComputeDiagnosticsSnapshotResponse,
 )
@@ -53,6 +55,28 @@ def get_compute_diagnostics_snapshot(
     controller = get_compute_diagnostics_controller()
     wire = snapshot_to_wire(controller.snapshot(shell))
     return ComputeDiagnosticsSnapshotResponse.model_validate(wire)
+
+
+@router.get("/compute/freeze-status", response_model=ComputeDiagnosticsFreezeStatusResponse)
+def get_compute_diagnostics_freeze_status(
+    game_id: int = Query(..., alias="gameId"),
+    perspective: int = Query(..., ge=0),
+    turn: int = Query(..., ge=1),
+) -> ComputeDiagnosticsFreezeStatusResponse:
+    """Return freeze armed state and allowlist for one shell (no heavy snapshot)."""
+    _require_compute_diagnostics_enabled()
+    shell = _shell_key(game_id=game_id, perspective=perspective, turn=turn)
+    controller = get_compute_diagnostics_controller()
+    freeze_armed, allowlisted = controller.freeze_status(shell)
+    return ComputeDiagnosticsFreezeStatusResponse(
+        shell=ComputeDiagnosticsShellContext(
+            game_id=shell.game_id,
+            perspective=shell.perspective,
+            turn=shell.turn,
+        ),
+        freeze_armed=freeze_armed,
+        allowlisted_player_ids=sorted(allowlisted),
+    )
 
 
 @router.put("/compute/freeze", response_model=ComputeDiagnosticsSnapshotResponse)

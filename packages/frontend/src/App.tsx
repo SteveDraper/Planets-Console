@@ -26,6 +26,7 @@ import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
 import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
 import { usePersistStoreHydrated } from './lib/usePersistStoreHydrated'
+import { useComputeFreezeStatusSync } from './lib/useComputeFreezeStatusSync'
 import { useComputeDiagnosticsStore } from './stores/computeDiagnostics'
 
 const queryClient = new QueryClient({
@@ -138,6 +139,8 @@ function ConsoleShell() {
   useEffect(() => {
     setComputeDiagnosticsEnabled(Boolean(shellBootstrap?.computeDiagnosticsEnabled))
   }, [setComputeDiagnosticsEnabled, shellBootstrap?.computeDiagnosticsEnabled])
+
+  useComputeFreezeStatusSync(analyticScope)
 
   const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
   const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)

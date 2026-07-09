@@ -75,6 +75,7 @@ describe('recordClientStreamLifecycle', () => {
   beforeEach(() => {
     useComputeDiagnosticsStore.setState({
       enabled: false,
+      freezeStatus: null,
       snapshot: null,
       clientStreams: [],
     })
@@ -96,9 +97,47 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
   beforeEach(() => {
     useComputeDiagnosticsStore.setState({
       enabled: false,
+      freezeStatus: null,
       snapshot: null,
       clientStreams: [],
     })
+  })
+
+  it('enabled + freeze armed with no snapshot still holds (empty allowlist)', async () => {
+    const connectUntilComplete = vi.fn(async () => 'incomplete_exhausted' as const)
+    const policy = makePolicy(connectUntilComplete)
+
+    useComputeDiagnosticsStore.setState({
+      enabled: true,
+      freezeStatus: {
+        shell: scope,
+        freezeArmed: true,
+        allowlistedPlayerIds: [],
+      },
+      snapshot: null,
+      clientStreams: [],
+    })
+
+    const { result } = renderHook(() =>
+      usePerPlayerAnalyticStream({
+        scope,
+        enabled: true,
+        playerIdsKey: '3,7,11',
+        policy,
+      })
+    )
+
+    await waitFor(() => {
+      expect(result.current.publishedByPlayerId.size).toBe(3)
+    })
+
+    expect(connectUntilComplete).not.toHaveBeenCalled()
+    for (const playerId of [3, 7, 11]) {
+      expect(result.current.publishedByPlayerId.get(playerId)).toEqual({
+        status: 'pending',
+        detail: null,
+      })
+    }
   })
 
   it('freeze + empty allowlist does not mark rows failed', async () => {
@@ -107,17 +146,12 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     useComputeDiagnosticsStore.setState({
       enabled: true,
-      snapshot: {
+      freezeStatus: {
         shell: scope,
         freezeArmed: true,
         allowlistedPlayerIds: [],
-        poolQueue: [],
-        dagNodes: [],
-        readyQueue: [],
-        completionHistory: [],
-        serverStreams: [],
-        clientStreams: [],
       },
+      snapshot: null,
       clientStreams: [],
     })
 
@@ -189,17 +223,12 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     useComputeDiagnosticsStore.setState({
       enabled: true,
-      snapshot: {
+      freezeStatus: {
         shell: scope,
         freezeArmed: true,
         allowlistedPlayerIds: [],
-        poolQueue: [],
-        dagNodes: [],
-        readyQueue: [],
-        completionHistory: [],
-        serverStreams: [],
-        clientStreams: [],
       },
+      snapshot: null,
       clientStreams: [],
     })
 
@@ -218,16 +247,10 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
     expect(connectUntilComplete).not.toHaveBeenCalled()
 
     await act(async () => {
-      useComputeDiagnosticsStore.getState().setSnapshot({
+      useComputeDiagnosticsStore.getState().setFreezeStatus({
         shell: scope,
         freezeArmed: false,
         allowlistedPlayerIds: [],
-        poolQueue: [],
-        dagNodes: [],
-        readyQueue: [],
-        completionHistory: [],
-        serverStreams: [],
-        clientStreams: [],
       })
     })
 
@@ -237,7 +260,7 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
     expect(connectUntilComplete).toHaveBeenCalled()
   })
 
-  it('sticky freeze across turn change holds without connecting (stale snapshot shell)', async () => {
+  it('sticky freeze across turn change holds without connecting (stale freezeStatus shell)', async () => {
     const connectUntilComplete = vi.fn(async () => 'incomplete_exhausted' as const)
     const policy = makePolicy(connectUntilComplete)
     const nextTurnScope: AnalyticShellScope = {
@@ -248,17 +271,12 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     useComputeDiagnosticsStore.setState({
       enabled: true,
-      snapshot: {
+      freezeStatus: {
         shell: scope,
         freezeArmed: true,
         allowlistedPlayerIds: [3, 7],
-        poolQueue: [],
-        dagNodes: [],
-        readyQueue: [],
-        completionHistory: [],
-        serverStreams: [],
-        clientStreams: [],
       },
+      snapshot: null,
       clientStreams: [],
     })
 

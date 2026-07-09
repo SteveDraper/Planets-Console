@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/diagnostics/compute/freeze-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Compute Diagnostics Freeze Status
+         * @description Return freeze armed state and allowlist for one shell (no heavy snapshot).
+         */
+        get: operations["get_compute_diagnostics_freeze_status_diagnostics_compute_freeze_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/diagnostics/compute/freeze": {
         parameters: {
             query?: never;
@@ -149,6 +169,17 @@ export interface components {
             turn: number;
             /** Freezearmed */
             freezeArmed: boolean;
+        };
+        /**
+         * ComputeDiagnosticsFreezeStatusResponse
+         * @description Thin freeze control signal (no pool/DAG/history payload).
+         */
+        ComputeDiagnosticsFreezeStatusResponse: {
+            shell: components["schemas"]["ComputeDiagnosticsShellContext"];
+            /** Freezearmed */
+            freezeArmed: boolean;
+            /** Allowlistedplayerids */
+            allowlistedPlayerIds: number[];
         };
         /** ComputeDiagnosticsShellContext */
         ComputeDiagnosticsShellContext: {
@@ -285,6 +316,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compute_diagnostics_freeze_status_diagnostics_compute_freeze_status_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                perspective: number;
+                turn: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeDiagnosticsFreezeStatusResponse"];
                 };
             };
             /** @description Validation Error */

@@ -55,6 +55,7 @@ function SectionPanel({
 export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabProps) {
   const clientStreams = useComputeDiagnosticsStore((state) => state.clientStreams)
   const setSnapshot = useComputeDiagnosticsStore((state) => state.setSnapshot)
+  const setFreezeStatus = useComputeDiagnosticsStore((state) => state.setFreezeStatus)
   const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsUiSnapshot | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -68,9 +69,14 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
       }
       setLocalSnapshot(merged)
       setSnapshot(merged)
+      setFreezeStatus({
+        shell: next.shell,
+        freezeArmed: next.freezeArmed,
+        allowlistedPlayerIds: next.allowlistedPlayerIds,
+      })
       setAllowlistInput(next.allowlistedPlayerIds.join(','))
     },
-    [setSnapshot]
+    [setFreezeStatus, setSnapshot]
   )
 
   const refresh = useCallback(async () => {

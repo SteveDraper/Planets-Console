@@ -1,5 +1,5 @@
 import type { AnalyticShellScope } from '../api/bff'
-import type { ComputeDiagnosticsSnapshot } from '../stores/computeDiagnostics'
+import type { ComputeFreezeStatus } from '../stores/computeDiagnostics'
 import { analyticScopeKey } from './analyticScopeKey'
 
 export type ComputeFreezeStreamHold = {
@@ -24,25 +24,33 @@ export function computeFreezeStreamHold(
   scope: AnalyticShellScope,
   state: {
     enabled: boolean
-    snapshot: ComputeDiagnosticsSnapshot | null
+    freezeStatus: ComputeFreezeStatus | null
   }
 ): ComputeFreezeStreamHold {
-  if (!state.enabled || state.snapshot == null || !state.snapshot.freezeArmed) {
+  if (!state.enabled) {
+    return { holding: false, expectedPlayerIds: null }
+  }
+  // Status not loaded yet: hold empty so reload / shell-change cannot race into
+  // full-player subscribe before freeze-status arrives.
+  if (state.freezeStatus == null) {
+    return { holding: true, expectedPlayerIds: new Set() }
+  }
+  if (!state.freezeStatus.freezeArmed) {
     return { holding: false, expectedPlayerIds: null }
   }
   // Sticky freeze is per-game; disarm on game change (server clears freeze).
-  if (!sameGameId(state.snapshot.shell.gameId, scope.gameId)) {
+  if (!sameGameId(state.freezeStatus.shell.gameId, scope.gameId)) {
     return { holding: false, expectedPlayerIds: null }
   }
-  // Same full shell: use the snapshot allowlist.
-  if (analyticScopeKey(state.snapshot.shell) === analyticScopeKey(scope)) {
+  // Same full shell: use the status allowlist.
+  if (analyticScopeKey(state.freezeStatus.shell) === analyticScopeKey(scope)) {
     return {
       holding: true,
-      expectedPlayerIds: new Set(state.snapshot.allowlistedPlayerIds),
+      expectedPlayerIds: new Set(state.freezeStatus.allowlistedPlayerIds),
     }
   }
   // Same game, different turn/perspective: allowlist resets empty on the server
-  // until a fresh snapshot for the new shell arrives. Hold with no subscriptions.
+  // until a fresh status for the new shell arrives. Hold with no subscriptions.
   return {
     holding: true,
     expectedPlayerIds: new Set(),

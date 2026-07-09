@@ -26,6 +26,16 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     server_streams: list[dict] = Field(alias="serverStreams")
 
 
+class ComputeDiagnosticsFreezeStatusResponse(BaseModel):
+    """Thin freeze control signal (no pool/DAG/history payload)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    shell: ComputeDiagnosticsShellContext
+    freeze_armed: bool = Field(alias="freezeArmed")
+    allowlisted_player_ids: list[int] = Field(alias="allowlistedPlayerIds")
+
+
 class ComputeDiagnosticsFreezeRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
