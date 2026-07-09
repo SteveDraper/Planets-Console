@@ -216,7 +216,12 @@ class ComputeDiagnosticsController:
         return True
 
     def stream_allowlisted_player_ids(self, shell: ShellContextKey) -> frozenset[int] | None:
-        """When freeze is armed, return allowlisted players for stream narrowing."""
+        """When freeze is armed, return allowlisted players for stream narrowing.
+
+        Notifies shell context first so a stream for a different game disarms the
+        previous game's freeze even when diagnostics endpoints are not hit.
+        """
+        self.on_shell_context(shell)
         if not self._freeze_state.freeze_armed_for_game(shell.game_id):
             return None
         return self._freeze_state.allowlisted_player_ids(shell)

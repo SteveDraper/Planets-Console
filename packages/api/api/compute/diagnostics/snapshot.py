@@ -11,7 +11,7 @@ from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionRecord
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.scope_key import format_compute_scope_key
-from api.compute.orchestrator import ComputeNodeRun
+from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import ComputeWorkerPool, PoolWorkItem
 from api.compute.registry import COMPUTE_REGISTRY
 from api.compute.scope import ComputeScope
@@ -31,7 +31,7 @@ class ComputeDiagnosticsSnapshot:
 
 
 def _node_wire(
-    node: ComputeNodeRun,
+    node: OrchestratorNodeSnapshot,
     *,
     registration_step_kind: str | None,
 ) -> dict[str, Any]:
@@ -44,6 +44,13 @@ def _node_wire(
         "priorityBand": node.priority_band,
         "profileStepIndex": node.profile_step_index,
     }
+
+
+def _registration_step_kind(node: OrchestratorNodeSnapshot) -> str | None:
+    registration = COMPUTE_REGISTRY.get(node.scope.analytic_id)
+    if registration is None or node.profile_step_index >= len(registration.compute_profile.steps):
+        return None
+    return registration.compute_profile.steps[node.profile_step_index].step_kind
 
 
 def _pool_item_wire(
@@ -92,27 +99,19 @@ def build_compute_diagnostics_snapshot(
     for bound in bound_orchestrators:
         if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
             continue
-        for scope, node in bound.orchestrator.nodes.items():
-            if not _scope_in_shell(scope, shell=shell, ancestor_turns=ancestor_turns):
+        orchestrator_view = bound.orchestrator.diagnostics_snapshot()
+        nodes_by_scope = {node.scope: node for node in orchestrator_view.nodes}
+        for node in orchestrator_view.nodes:
+            if not _scope_in_shell(node.scope, shell=shell, ancestor_turns=ancestor_turns):
                 continue
-            registration = COMPUTE_REGISTRY.get(scope.analytic_id)
-            step_kind = None
-            if registration is not None and node.profile_step_index < len(
-                registration.compute_profile.steps
-            ):
-                step_kind = registration.compute_profile.steps[node.profile_step_index].step_kind
-            dag_nodes.append(_node_wire(node, registration_step_kind=step_kind))
-        for ready_scope in bound.orchestrator.ready_scopes():
+            dag_nodes.append(_node_wire(node, registration_step_kind=_registration_step_kind(node)))
+        for ready_scope in orchestrator_view.ready_scopes:
             if not _scope_in_shell(ready_scope, shell=shell, ancestor_turns=ancestor_turns):
                 continue
-            node = bound.orchestrator.nodes[ready_scope]
-            registration = COMPUTE_REGISTRY.get(ready_scope.analytic_id)
-            step_kind = None
-            if registration is not None and node.profile_step_index < len(
-                registration.compute_profile.steps
-            ):
-                step_kind = registration.compute_profile.steps[node.profile_step_index].step_kind
-            ready_queue.append(_node_wire(node, registration_step_kind=step_kind))
+            node = nodes_by_scope[ready_scope]
+            ready_queue.append(
+                _node_wire(node, registration_step_kind=_registration_step_kind(node))
+            )
 
     pool_queue: list[dict[str, Any]] = []
     if pool is not None:

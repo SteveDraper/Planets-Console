@@ -99,6 +99,25 @@ class OrchestratorMetrics:
     persist_calls: int = 0
 
 
+@dataclass(frozen=True)
+class OrchestratorNodeSnapshot:
+    """Immutable copy of one node's diagnostics-visible fields."""
+
+    scope: ComputeScope
+    state: NodeState
+    profile_step_index: int
+    step_index: int
+    priority_band: ComputePriorityBand
+
+
+@dataclass(frozen=True)
+class OrchestratorDiagnosticsSnapshot:
+    """Immutable node and ready-queue view captured under the orchestrator lock."""
+
+    nodes: tuple[OrchestratorNodeSnapshot, ...]
+    ready_scopes: tuple[ComputeScope, ...]
+
+
 class ComputeOrchestrator:
     """DAG scheduler with singleflight per normalized compute scope."""
 
@@ -216,6 +235,24 @@ class ComputeOrchestrator:
             return tuple(
                 scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
             )
+
+    def diagnostics_snapshot(self) -> OrchestratorDiagnosticsSnapshot:
+        """Return immutable node and ready-queue data in one critical section."""
+        with self._condition:
+            nodes = tuple(
+                OrchestratorNodeSnapshot(
+                    scope=node.scope,
+                    state=node.state,
+                    profile_step_index=node.profile_step_index,
+                    step_index=node.step_index,
+                    priority_band=node.priority_band,
+                )
+                for node in self._nodes.values()
+            )
+            ready_scopes = tuple(
+                scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
+            )
+            return OrchestratorDiagnosticsSnapshot(nodes=nodes, ready_scopes=ready_scopes)
 
     def submit(self, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""

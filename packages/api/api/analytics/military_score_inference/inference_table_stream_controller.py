@@ -122,8 +122,11 @@ class InferenceTableStreamController(
             return AdmissionDispatch(schedule_failed=True)
         existing = self.scheduled_rows.get(player_id)
         if existing is not None and existing.session.run_id != scheduled.session.run_id:
+            # Invalidation rescheduled during enqueue: keep the fresher row. Returning an
+            # empty dispatch would still count as admitted and leave multiplex waiting on
+            # zero rows (globalPause only, scheduler_runs cleared after cancel).
             self.scheduler.cancel_row_run(scheduled.session.run_id)
-            return AdmissionDispatch()
+            return AdmissionDispatch(scheduled=existing)
         return AdmissionDispatch(scheduled=scheduled)
 
     def _refresh_host_turn(self) -> None:

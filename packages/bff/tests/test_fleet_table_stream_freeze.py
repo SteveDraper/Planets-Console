@@ -107,3 +107,36 @@ def test_fleet_table_stream_narrows_to_allowlisted_players():
 
     assert response.status_code == 200
     assert captured == [(7, 11)]
+
+
+def test_fleet_table_stream_disarms_previous_game_freeze_on_context_change():
+    """Opening a stream for game B must disarm freeze left armed on game A."""
+    shell_a = ShellContextKey(game_id=628580, perspective=1, turn=8)
+    controller = get_compute_diagnostics_controller()
+    controller.set_freeze_armed(shell_a, freeze_armed=True)
+    assert controller.stream_allowlisted_player_ids(shell_a) == frozenset()
+
+    captured: list[tuple[int, ...]] = []
+
+    def _iter_fleet_table_stream(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+    ):
+        del game_id, perspective, turn_number
+        captured.append(player_ids)
+        yield from ()
+
+    mock_core = MagicMock()
+    mock_core.iter_fleet_table_stream = _iter_fleet_table_stream
+
+    with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
+        response = client.get(
+            "/analytics/fleet/table-stream?gameId=999001&perspective=1&turn=8&playerIds=3,7"
+        )
+
+    assert response.status_code == 200
+    assert captured == [(3, 7)]
+    # Game A freeze must be cleared; stream narrowing returns None when unarmed.
+    assert controller.stream_allowlisted_player_ids(shell_a) is None
