@@ -271,6 +271,78 @@ def test_single_step_redispatches_ready_node_into_pool(sample_turn):
     assert orchestrator.nodes[scope].state == "running"
 
 
+def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
+    """Inline single-step must not leave a dequeue grant for a later frozen pool item."""
+    from api.analytics.exports.catalog import AnalyticExportCatalog
+    from api.analytics.exports.registry import merge_export_registry
+    from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
+
+    scores_stub_export = AnalyticExportCatalog(
+        analytic_id="scores",
+        is_ensure_satisfied=lambda _ctx, _scope: True,
+    )
+    compute_registry = build_compute_registry((_scores_inline_materialize_registration(),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(scores_stub_export),
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    inline_scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=sample_turn.scores[0].ownerid,
+        ),
+        analytic_id="scores",
+        scope_key_spec=compute_registry["scores"].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    handle = orchestrator.submit(
+        ComputeRequest(scope=inline_scope, step_kind=SCORES_MATERIALIZE),
+    )
+    assert handle.state == "ready"
+    assert orchestrator.nodes[inline_scope].state == "ready"
+
+    assert controller.single_step(shell) is True
+    assert orchestrator.nodes[inline_scope].state == "complete"
+    assert controller._single_step_dispatch_slots_remaining == 0
+    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step_shell is None
+
+    registration_id = orchestrator.pool_registration_id
+    assert registration_id is not None
+    later_held = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=_player_scope(
+            ctx,
+            player_id=sample_turn.scores[1].ownerid,
+            analytic_id="scores",
+            scope_key_spec=compute_registry["scores"].scope_key_spec,
+        ),
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+    pool.enqueue_for_tests(later_held)
+    assert controller._pool_item_is_runnable(later_held) is False
+    assert pool.take_next_item_for_tests() is None
+
+
 def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     ctx = make_fixture_query_context(

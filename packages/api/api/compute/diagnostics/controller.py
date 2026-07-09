@@ -159,6 +159,10 @@ class ComputeDiagnosticsController:
         Prefer an already-held pool item (dequeue grant only). When none are held, arm one
         dispatch slot so a single frozen ready node may enter the pool, plus one dequeue
         grant so that item can run.
+
+        Single-step releases pool work only. If the armed dispatch slot is consumed by an
+        inline step (no pool enqueue), ``_dispatch_gate`` clears the unused dequeue grant
+        immediately so it cannot orphan onto a later frozen pool item.
         """
         if not self._freeze_state.freeze_armed_for_game(shell.game_id):
             return False
@@ -294,8 +298,23 @@ class ComputeDiagnosticsController:
                 and self._scope_matches_single_step_shell(node.scope)
             ):
                 self._single_step_dispatch_slots_remaining -= 1
+                # Inline steps run in-process and never enqueue; drop the paired pool
+                # grant so single-step cannot leave an orphan for a later dequeue.
+                if self._node_current_step_is_inline(node):
+                    self._single_step_grants_remaining = 0
+                    self._single_step_shell = None
                 return True
         return False
+
+    def _node_current_step_is_inline(self, node: ComputeNodeRun) -> bool:
+        """Return whether ``node``'s current profile step uses the inline backend."""
+        registration = COMPUTE_REGISTRY.get(node.scope.analytic_id)
+        if registration is None:
+            return False
+        steps = registration.compute_profile.steps
+        if node.profile_step_index < 0 or node.profile_step_index >= len(steps):
+            return False
+        return steps[node.profile_step_index].backend == "inline"
 
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""
