@@ -83,6 +83,11 @@ def dequeue_next_work_item(
 
     Within a band, initial steps (step_index == 0) run before continuations.
     Among continuations, FIFO queue order provides round-robin across scopes.
+
+    ``predicate`` is evaluated for every queued item before selection. It must be
+    side-effect free -- grant or other mutable gate state belongs in an
+    ``on_item_dequeued`` hook invoked under the pool lock after the chosen item
+    is popped, so concurrent workers cannot both claim the same grant.
     """
     if not queue:
         return None
@@ -125,6 +130,7 @@ class ComputeWorkerPool:
         self._workers: list[threading.Thread] = []
         self._metrics = PoolMetrics()
         self._dequeue_predicate: Callable[[PoolWorkItem], bool] | None = None
+        self._on_item_dequeued: Callable[[PoolWorkItem], None] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
         for _ in range(self._worker_count):
@@ -144,9 +150,17 @@ class ComputeWorkerPool:
         self,
         predicate: Callable[[PoolWorkItem], bool] | None,
     ) -> None:
-        """Set a predicate that must return True for a queued item to be dequeued."""
+        """Set a side-effect-free predicate that must return True for dequeue eligibility."""
         with self._condition:
             self._dequeue_predicate = predicate
+
+    def set_on_item_dequeued(
+        self,
+        callback: Callable[[PoolWorkItem], None] | None,
+    ) -> None:
+        """Set a hook invoked once under the pool lock for the item actually dequeued."""
+        with self._condition:
+            self._on_item_dequeued = callback
 
     def snapshot_work_queue(self) -> tuple[PoolWorkItem, ...]:
         with self._condition:
@@ -164,6 +178,19 @@ class ComputeWorkerPool:
         with self._condition:
             self._work_queue.append(item)
             self._condition.notify()
+
+    def take_next_item_for_tests(self) -> PoolWorkItem | None:
+        """Dequeue one item using live predicate / on_dequeued hooks (tests only)."""
+        with self._condition:
+            on_dequeued = self._on_item_dequeued
+            item = dequeue_next_work_item(self._work_queue, predicate=self._dequeue_predicate)
+            if item is None:
+                return None
+            self._metrics.dequeues += 1
+            # Same critical section as pop -- grant burn must be atomic with selection.
+            if on_dequeued is not None:
+                on_dequeued(item)
+            return item
 
     def register(self, orchestrator: ComputeOrchestrator) -> int:
         """Register an orchestrator for pool completion routing; return its registration id."""
@@ -258,9 +285,14 @@ class ComputeWorkerPool:
         with self._condition:
             while not self._shutdown:
                 predicate = self._dequeue_predicate
+                on_dequeued = self._on_item_dequeued
                 item = dequeue_next_work_item(self._work_queue, predicate=predicate)
                 if item is not None:
                     self._metrics.dequeues += 1
+                    # Same critical section as pop -- grant burn must be atomic with selection.
+                    # Callback may take the diagnostics controller lock (pool -> controller).
+                    if on_dequeued is not None:
+                        on_dequeued(item)
                     return item
                 self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
             return None

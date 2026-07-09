@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_types import ExportScope
@@ -374,19 +376,166 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     assert orchestrator.nodes[ready_scope].state == "ready"
     assert controller._single_step_dispatch_slots_remaining == 0
     assert controller._single_step_grants_remaining == 1
-    assert controller._pool_dequeue_predicate(held_item) is True
+    assert controller._pool_item_is_runnable(held_item) is True
+    assert controller._single_step_grants_remaining == 1
+
+    released = pool.take_next_item_for_tests()
+    assert released is held_item
     assert controller._single_step_grants_remaining == 0
-    assert controller._pool_dequeue_predicate(held_item) is False
+    assert controller._pool_item_is_runnable(held_item) is False
 
 
-def test_single_step_pool_predicate_releases_one_held_item(sample_turn):
-    controller, _pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=1)
+def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    assert controller._pool_dequeue_predicate(item) is False
+    pool.enqueue_for_tests(item)
+    assert controller._pool_item_is_runnable(item) is False
     controller.single_step(shell)
-    assert controller._pool_dequeue_predicate(item) is True
-    assert controller._pool_dequeue_predicate(item) is False
+    assert controller._pool_item_is_runnable(item) is True
+    assert controller._single_step_grants_remaining == 1
+
+    released = pool.take_next_item_for_tests()
+    assert released is item
+    assert controller._single_step_grants_remaining == 0
+    assert controller._pool_item_is_runnable(item) is False
+    assert pool.take_next_item_for_tests() is None
+
+
+def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter(
+    sample_turn,
+):
+    """Filter must not consume the grant while scanning lower-priority frozen items."""
+    controller, pool, shell, low_item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    high_scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=shell.game_id,
+            perspective=shell.perspective,
+            turn=shell.turn,
+            player_id=sample_turn.scores[1].ownerid,
+        ),
+        analytic_id="pool-analytic",
+        scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
+    )
+    high_item = PoolWorkItem(
+        orchestrator_id=low_item.orchestrator_id,
+        scope=high_scope,
+        step_kind="materialize",
+        backend="inline",
+        priority_band="stream_attached",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    # Lower-priority frozen item is first in the queue; higher-priority second.
+    pool.enqueue_for_tests(low_item)
+    pool.enqueue_for_tests(high_item)
+    assert controller.single_step(shell) is True
+    assert controller._single_step_grants_remaining == 1
+
+    released = pool.take_next_item_for_tests()
+    assert released is high_item
+    assert controller._single_step_grants_remaining == 0
+    assert pool.snapshot_work_queue() == (low_item,)
+    assert controller._pool_item_is_runnable(low_item) is False
+    assert pool.take_next_item_for_tests() is None
+
+
+def test_single_step_does_not_burn_grant_when_allowlisted_item_dequeues_first(
+    sample_turn,
+):
+    """Allowlisted dequeue must not consume the grant meant for a held frozen item."""
+    controller, pool, shell, frozen_item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    allowlisted_player = sample_turn.scores[1].ownerid
+    allowlisted_scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=shell.game_id,
+            perspective=shell.perspective,
+            turn=shell.turn,
+            player_id=allowlisted_player,
+        ),
+        analytic_id="pool-analytic",
+        scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
+    )
+    allowlisted_item = PoolWorkItem(
+        orchestrator_id=frozen_item.orchestrator_id,
+        scope=allowlisted_scope,
+        step_kind="materialize",
+        backend="inline",
+        priority_band="stream_attached",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({allowlisted_player}))
+    pool.enqueue_for_tests(frozen_item)
+    pool.enqueue_for_tests(allowlisted_item)
+    assert controller.single_step(shell) is True
+
+    first = pool.take_next_item_for_tests()
+    assert first is allowlisted_item
+    assert controller._single_step_grants_remaining == 1
+
+    second = pool.take_next_item_for_tests()
+    assert second is frozen_item
+    assert controller._single_step_grants_remaining == 0
+    assert pool.take_next_item_for_tests() is None
+
+
+def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
+    sample_turn,
+):
+    """One grant must release exactly one frozen item when two workers race dequeue."""
+    controller, pool, shell, first_item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    second_scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=shell.game_id,
+            perspective=shell.perspective,
+            turn=shell.turn,
+            player_id=sample_turn.scores[1].ownerid,
+        ),
+        analytic_id="pool-analytic",
+        scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
+    )
+    second_item = PoolWorkItem(
+        orchestrator_id=first_item.orchestrator_id,
+        scope=second_scope,
+        step_kind="materialize",
+        backend="inline",
+        priority_band="background",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    pool.enqueue_for_tests(first_item)
+    pool.enqueue_for_tests(second_item)
+    assert controller.single_step(shell) is True
+    assert controller._single_step_grants_remaining == 1
+
+    start = threading.Barrier(2)
+    released: list[PoolWorkItem | None] = []
+    released_lock = threading.Lock()
+
+    def dequeue_once() -> None:
+        start.wait(timeout=2.0)
+        item = pool.take_next_item_for_tests()
+        with released_lock:
+            released.append(item)
+
+    workers = [threading.Thread(target=dequeue_once) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=5.0)
+        assert not worker.is_alive()
+
+    non_none = [item for item in released if item is not None]
+    assert len(released) == 2
+    assert len(non_none) == 1
+    assert non_none[0] in {first_item, second_item}
+    assert controller._single_step_grants_remaining == 0
+    assert len(pool.snapshot_work_queue()) == 1
+    assert pool.take_next_item_for_tests() is None
 
 
 def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
@@ -469,9 +618,11 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
     assert controller._pool_item_is_runnable(item) is True
     assert controller._single_step_grants_remaining == 1
 
-    assert controller._pool_dequeue_predicate(item) is True
+    released = pool.take_next_item_for_tests()
+    assert released is item
     assert controller._single_step_grants_remaining == 0
-    assert controller._pool_dequeue_predicate(item) is False
+    assert controller._pool_item_is_runnable(item) is False
+    assert pool.take_next_item_for_tests() is None
 
 
 def test_snapshot_wire_shape_includes_required_sections(sample_turn):
@@ -686,9 +837,12 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         step_index=0,
     )
     pool.enqueue_for_tests(held_item)
-    assert controller._pool_dequeue_predicate(held_item) is False
+    assert controller._pool_item_is_runnable(held_item) is False
     assert controller.single_step(operator_shell) is True
-    assert controller._pool_dequeue_predicate(held_item) is True
+    assert controller._pool_item_is_runnable(held_item) is True
+    assert controller._single_step_grants_remaining == 1
+    assert pool.take_next_item_for_tests() is held_item
+    assert controller._single_step_grants_remaining == 0
 
     # Production fleet step kind (history resolves against COMPUTE_REGISTRY).
     completed_node = ComputeNodeRun(

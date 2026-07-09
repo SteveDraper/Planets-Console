@@ -78,7 +78,8 @@ class ComputeDiagnosticsController:
         with self._lock:
             if self._wired and self._pool is pool:
                 return
-            pool.set_dequeue_predicate(self._pool_dequeue_predicate)
+            pool.set_dequeue_predicate(self._pool_item_is_runnable)
+            pool.set_on_item_dequeued(self._on_pool_item_dequeued)
             self._pool = pool
             self._wired = True
 
@@ -190,6 +191,7 @@ class ComputeDiagnosticsController:
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)
+            self._pool.set_on_item_dequeued(None)
 
     def _history_for_shell(self, shell: ShellContextKey) -> ComputeCompletionHistory:
         with self._lock:
@@ -296,33 +298,38 @@ class ComputeDiagnosticsController:
         return False
 
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
-        """Return whether ``item`` would dequeue; never consumes single-step grants."""
-        return self._evaluate_pool_item_runnable(item, consume_single_step_grant=False)
-
-    def _pool_dequeue_predicate(self, item: PoolWorkItem) -> bool:
-        """Pool dequeue gate; consumes one single-step grant when releasing a held item."""
-        return self._evaluate_pool_item_runnable(item, consume_single_step_grant=True)
-
-    def _evaluate_pool_item_runnable(
-        self,
-        item: PoolWorkItem,
-        *,
-        consume_single_step_grant: bool,
-    ) -> bool:
+        """Return whether ``item`` may dequeue; never consumes single-step grants."""
         with self._lock:
             if self._single_step_grants_remaining > 0 and self._scope_matches_single_step_shell(
                 item.scope
             ):
-                if consume_single_step_grant:
-                    self._single_step_grants_remaining -= 1
-                    if self._single_step_grants_remaining == 0:
-                        self._single_step_shell = None
-                        self._single_step_dispatch_slots_remaining = 0
                 return True
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
             return True
         return not self._is_scope_frozen(item.scope, shell)
+
+    def _on_pool_item_dequeued(self, item: PoolWorkItem) -> None:
+        """Consume one single-step grant for the item actually dequeued, if any.
+
+        Invoked under the pool lock after pop so concurrent workers cannot both
+        observe a remaining grant before either burns it.
+        """
+        with self._lock:
+            if self._single_step_grants_remaining <= 0:
+                return
+            if not self._scope_matches_single_step_shell(item.scope):
+                return
+            # Only burn the grant when the dequeued item needed it (frozen scope).
+            shell = self._single_step_shell
+            if shell is None:
+                return
+            if not self._is_scope_frozen(item.scope, shell):
+                return
+            self._single_step_grants_remaining -= 1
+            if self._single_step_grants_remaining == 0:
+                self._single_step_shell = None
+                self._single_step_dispatch_slots_remaining = 0
 
     def _on_step_complete(
         self,
