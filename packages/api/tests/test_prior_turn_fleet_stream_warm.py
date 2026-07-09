@@ -55,13 +55,18 @@ from tests.fleet_exports_helpers import host_turn_at
 
 @pytest.fixture(autouse=True)
 def _reset_stream_registry_after_test() -> None:
-    reset_coordinators()
-    yield
-    reset_coordinators()
-    reset_inference_table_stream_registry_for_tests()
+    from api.compute.diagnostics import reset_compute_diagnostics_for_tests
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
+    reset_coordinators()
+    reset_compute_diagnostics_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
+    yield
+    reset_coordinators()
+    reset_inference_table_stream_registry_for_tests()
+    reset_compute_diagnostics_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
 

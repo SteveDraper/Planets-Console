@@ -71,12 +71,12 @@ class ComputeDiagnosticsController:
         return compute_diagnostics_enabled()
 
     def ensure_wired(self) -> None:
-        if not self.is_enabled() or self._wired:
+        if not self.is_enabled():
             return
+        pool = get_compute_worker_pool()
         with self._lock:
-            if self._wired:
+            if self._wired and self._pool is pool:
                 return
-            pool = get_compute_worker_pool()
             pool.set_dequeue_predicate(self._pool_dequeue_predicate)
             self._pool = pool
             self._wired = True

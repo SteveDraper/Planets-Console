@@ -46,6 +46,7 @@ def _reset_compute_diagnostics_state():
     reset_compute_diagnostics_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
+    set_config(ApiConfig(storage_backend="ephemeral", compute_diagnostics=False))
 
 
 def test_collect_diagnostic_ancestor_turns_includes_fleet_dependency_turn(sample_turn):

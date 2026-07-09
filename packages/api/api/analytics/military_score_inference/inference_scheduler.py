@@ -178,7 +178,15 @@ class InferenceRowScheduler:
             )
 
         if fleet_node.state in {"waiting_deps", "ready", "running"}:
-            return True
+            if (
+                event.source_context_id is not None
+                and self._fleet_persist_source_matches_stream_binding(
+                    binding,
+                    event.source_context_id,
+                )
+            ):
+                return True
+            return False
 
         if fleet_node.state == "complete":
             return not self._fleet_versions_conflict(fleet_node, event)

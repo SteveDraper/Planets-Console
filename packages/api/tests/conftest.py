@@ -48,6 +48,24 @@ def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
+    """Drop diagnostics observer state so later tests do not inherit freeze or pool gates."""
+    if request.path.name == "test_compute_diagnostics.py":
+        yield
+        return
+    from dataclasses import replace
+
+    from api.compute.diagnostics import reset_compute_diagnostics_for_tests
+    from api.config import get_config, set_config
+
+    reset_compute_diagnostics_for_tests()
+    yield
+    reset_compute_diagnostics_for_tests()
+    if get_config().compute_diagnostics:
+        set_config(replace(get_config(), compute_diagnostics=False))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_fleet_table_stream_compute_state(request: pytest.FixtureRequest):
     """Reset orchestrator and worker pool between fleet stream tests."""
     if "test_fleet_table_stream" not in request.path.name:
