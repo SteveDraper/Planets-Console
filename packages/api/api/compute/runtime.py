@@ -47,6 +47,7 @@ def release_orchestrator_for_context(ctx: AnalyticQueryContext) -> None:
     worker_pool = orchestrator.worker_pool
     if registration_id is not None and worker_pool is not None:
         worker_pool.unregister(registration_id)
+    get_compute_diagnostics_controller().unbind_orchestrator(orchestrator)
 
 
 def reset_orchestrators_for_tests() -> None:

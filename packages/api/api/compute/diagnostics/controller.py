@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,8 @@ class BoundOrchestrator:
     game_id: int
     perspective: int
     ambient_turn: int
+    unregister_dispatch_gate: Callable[[], None]
+    unregister_step_complete_listener: Callable[[], None]
 
 
 class ComputeDiagnosticsController:
@@ -95,16 +98,45 @@ class ComputeDiagnosticsController:
             for bound in self._bound_orchestrators:
                 if bound.orchestrator is orchestrator:
                     return
+        # Register outside ``_lock`` so we never take orchestrator condition under
+        # the controller lock (dispatch/step-complete take the opposite order).
+        unregister_dispatch_gate = orchestrator.register_dispatch_gate(self._dispatch_gate)
+        unregister_step_complete = orchestrator.register_step_complete_listener(
+            self._on_step_complete
+        )
+        with self._lock:
+            for bound in self._bound_orchestrators:
+                if bound.orchestrator is orchestrator:
+                    unregister_dispatch_gate()
+                    unregister_step_complete()
+                    return
             self._bound_orchestrators.append(
                 BoundOrchestrator(
                     orchestrator=orchestrator,
                     game_id=ctx.game_id,
                     perspective=ctx.perspective,
                     ambient_turn=ctx.ambient_turn,
+                    unregister_dispatch_gate=unregister_dispatch_gate,
+                    unregister_step_complete_listener=unregister_step_complete,
                 )
             )
-        orchestrator.register_dispatch_gate(self._dispatch_gate)
-        orchestrator.register_step_complete_listener(self._on_step_complete)
+
+    def unbind_orchestrator(self, orchestrator: ComputeOrchestrator) -> None:
+        """Drop diagnostics binding for a released orchestrator.
+
+        Safe no-op when diagnostics never bound this orchestrator (including when
+        diagnostics are disabled).
+        """
+        bound: BoundOrchestrator | None = None
+        with self._lock:
+            for index, candidate in enumerate(self._bound_orchestrators):
+                if candidate.orchestrator is orchestrator:
+                    bound = self._bound_orchestrators.pop(index)
+                    break
+        if bound is None:
+            return
+        bound.unregister_dispatch_gate()
+        bound.unregister_step_complete_listener()
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
         if not self.is_enabled():
@@ -185,6 +217,7 @@ class ComputeDiagnosticsController:
 
     def reset_for_tests(self) -> None:
         with self._lock:
+            bound = list(self._bound_orchestrators)
             self._bound_orchestrators.clear()
             self._histories.clear()
             self._single_step_shell = None
@@ -192,6 +225,9 @@ class ComputeDiagnosticsController:
             self._single_step_dispatch_slots_remaining = 0
             self._active_game_id = None
             self._last_shell_context = None
+        for entry in bound:
+            entry.unregister_dispatch_gate()
+            entry.unregister_step_complete_listener()
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)

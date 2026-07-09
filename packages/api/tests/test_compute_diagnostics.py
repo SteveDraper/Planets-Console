@@ -32,7 +32,11 @@ from api.compute.diagnostics.scope import (
 )
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.pools import PoolWorkItem
-from api.compute.runtime import orchestrator_for_context, reset_orchestrators_for_tests
+from api.compute.runtime import (
+    orchestrator_for_context,
+    release_orchestrator_for_context,
+    reset_orchestrators_for_tests,
+)
 from api.config import ApiConfig, set_config
 
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
@@ -718,6 +722,108 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "serverStreams",
     }
     assert wire["freezeArmed"] is False
+
+
+def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample_turn):
+    """Stream teardown drops BoundOrchestrator, listeners, and snapshot DAG nodes."""
+    from api.analytics.exports.catalog import AnalyticExportCatalog
+    from api.analytics.exports.registry import merge_export_registry
+    from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
+
+    scores_stub_export = AnalyticExportCatalog(
+        analytic_id="scores",
+        is_ensure_satisfied=lambda _ctx, _scope: True,
+    )
+    compute_registry = build_compute_registry((_scores_inline_materialize_registration(),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(scores_stub_export),
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    assert len(controller._bound_orchestrators) == 1
+    assert len(orchestrator._dispatch_gates) == 1
+    assert len(orchestrator._step_complete_listeners) == 1
+
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=sample_turn.scores[0].ownerid,
+        ),
+        analytic_id="scores",
+        scope_key_spec=compute_registry["scores"].scope_key_spec,
+    )
+    orchestrator.submit(ComputeRequest(scope=scope, step_kind=SCORES_MATERIALIZE))
+    wire_before = snapshot_to_wire(controller.snapshot(shell))
+    assert wire_before["dagNodes"]
+
+    # Mimic runtime release: unbind after dropping the cached orchestrator.
+    controller.unbind_orchestrator(orchestrator)
+
+    assert controller._bound_orchestrators == []
+    assert orchestrator._dispatch_gates == []
+    assert orchestrator._step_complete_listeners == []
+    wire_after = snapshot_to_wire(controller.snapshot(shell))
+    assert wire_after["dagNodes"] == []
+    # Safe when already unbound.
+    controller.unbind_orchestrator(orchestrator)
+
+
+def test_release_orchestrator_for_context_unbinds_diagnostics(sample_turn):
+    """Runtime release drops diagnostics binding and unregister callables."""
+    ctx = make_fixture_query_context(sample_turn)
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = orchestrator_for_context(ctx, worker_pool=pool)
+    controller = get_compute_diagnostics_controller()
+    assert len(controller._bound_orchestrators) == 1
+    assert len(orchestrator._dispatch_gates) == 1
+    assert len(orchestrator._step_complete_listeners) == 1
+
+    release_orchestrator_for_context(ctx)
+
+    assert controller._bound_orchestrators == []
+    assert orchestrator._dispatch_gates == []
+    assert orchestrator._step_complete_listeners == []
+    # Safe when already released / never bound.
+    release_orchestrator_for_context(ctx)
+
+
+def test_stream_churn_does_not_grow_bound_orchestrators(sample_turn):
+    """Repeated bind/release via runtime must not accumulate diagnostics bindings."""
+    controller = get_compute_diagnostics_controller()
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    for _ in range(8):
+        ctx = make_fixture_query_context(sample_turn)
+        orchestrator_for_context(ctx, worker_pool=pool)
+        assert len(controller._bound_orchestrators) == 1
+        release_orchestrator_for_context(ctx)
+        assert controller._bound_orchestrators == []
+    assert controller._bound_orchestrators == []
+
+
+def test_unbind_is_noop_when_diagnostics_disabled(sample_turn):
+    set_config(ApiConfig(storage_backend="ephemeral", compute_diagnostics=False))
+    controller = get_compute_diagnostics_controller()
+    ctx = make_fixture_query_context(sample_turn)
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = orchestrator_for_context(ctx, worker_pool=pool)
+    assert controller._bound_orchestrators == []
+    release_orchestrator_for_context(ctx)
+    assert controller._bound_orchestrators == []
+    controller.unbind_orchestrator(orchestrator)
 
 
 def test_completion_history_via_orchestrator_step_complete(sample_turn):
