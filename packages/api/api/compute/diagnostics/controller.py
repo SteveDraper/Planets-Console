@@ -102,7 +102,7 @@ class ComputeDiagnosticsController:
                     ambient_turn=ctx.ambient_turn,
                 )
             )
-        orchestrator.set_dispatch_gate(self._dispatch_gate)
+        orchestrator.register_dispatch_gate(self._dispatch_gate)
         orchestrator.register_step_complete_listener(self._on_step_complete)
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
@@ -119,8 +119,6 @@ class ComputeDiagnosticsController:
                 self._last_shell_context = shell
         if disarmed_game_id is not None:
             self._redispatch_after_gate_change(disarmed_game_id)
-        if self._freeze_state.freeze_armed_for_game(shell.game_id):
-            self._apply_gates_for_game(shell.game_id)
 
     def snapshot(self, shell: ShellContextKey) -> ComputeDiagnosticsSnapshot:
         from api.compute.diagnostics.snapshot import build_compute_diagnostics_snapshot
@@ -147,13 +145,11 @@ class ComputeDiagnosticsController:
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
         self.on_shell_context(shell)
         self._freeze_state.set_freeze_armed(shell.game_id, freeze_armed=freeze_armed)
-        self._apply_gates_for_game(shell.game_id)
         self._redispatch_after_gate_change(shell.game_id)
 
     def set_allowlist(self, shell: ShellContextKey, player_ids: frozenset[int]) -> None:
         self.on_shell_context(shell)
         self._freeze_state.set_allowlisted_player_ids(shell, player_ids)
-        self._apply_gates_for_game(shell.game_id)
         self._redispatch_after_gate_change(shell.game_id)
 
     def single_step(self, shell: ShellContextKey) -> bool:
@@ -206,11 +202,6 @@ class ComputeDiagnosticsController:
     def _bound_orchestrators_snapshot(self) -> tuple[BoundOrchestrator, ...]:
         with self._lock:
             return tuple(self._bound_orchestrators)
-
-    def _apply_gates_for_game(self, game_id: int) -> None:
-        for bound in self._bound_orchestrators_snapshot():
-            if bound.game_id == game_id:
-                bound.orchestrator.set_dispatch_gate(self._dispatch_gate)
 
     def _redispatch_after_gate_change(self, game_id: int) -> None:
         """Re-dispatch ready nodes and wake held pool items after a gate change."""

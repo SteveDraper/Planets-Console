@@ -127,16 +127,11 @@ class ComputeOrchestrator:
         self._condition = threading.Condition(self._lock)
         self._node_complete_listeners: list[NodeCompleteListener] = []
         self._step_complete_listeners: list[StepCompleteListener] = []
-        self._dispatch_gate: NodeDispatchGate | None = None
+        self._dispatch_gates: list[NodeDispatchGate] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
 
-    def set_dispatch_gate(self, gate: NodeDispatchGate | None) -> None:
-        """Set a node-level gate checked before pool or inline dispatch."""
-        with self._condition:
-            self._dispatch_gate = gate
-
     def dispatch_ready_work(self) -> None:
-        """Dispatch any ready nodes allowed by the current gate."""
+        """Dispatch any ready nodes allowed by the current gates."""
         with self._condition:
             self._dispatch()
         self._drain_post_lock_callbacks()
@@ -156,6 +151,26 @@ class ComputeOrchestrator:
     @property
     def turn_cache(self) -> OrchestratorTurnCache:
         return self._turn_cache
+
+    def register_dispatch_gate(
+        self,
+        gate: NodeDispatchGate,
+    ) -> Callable[[], None]:
+        """Register a node-level gate; dispatch only if all registered gates pass.
+
+        Returns an unregister callable that removes only this gate.
+        """
+        with self._condition:
+            self._dispatch_gates.append(gate)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._dispatch_gates.remove(gate)
+                except ValueError:
+                    return
+
+        return unregister
 
     def register_node_complete_listener(
         self,
@@ -455,7 +470,7 @@ class ComputeOrchestrator:
             if not self._deps_complete(node):
                 node.state = "waiting_deps"
                 continue
-            if self._dispatch_gate is not None and not self._dispatch_gate(node):
+            if not all(gate(node) for gate in self._dispatch_gates):
                 self._ready_queue.append(scope)
                 continue
             return scope, node

@@ -1068,7 +1068,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.set_dispatch_gate(
+    orchestrator.register_dispatch_gate(
         lambda node: node.scope.analytic_id != gated_analytic_id,
     )
 
@@ -1111,7 +1111,7 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.set_dispatch_gate(lambda _node: not is_paused)
+    unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not is_paused)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(scope=shared_scope))
@@ -1127,3 +1127,71 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
 
     assert pool_submissions == [shared_scope, shared_scope]
     assert orchestrator.nodes[shared_scope].state == "running"
+    unregister_pause()
+
+
+def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample_turn):
+    """Pause and freeze gates coexist; clearing one leaves the other."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    pool_submissions: list[str] = []
+    pause_blocks = False
+    freeze_blocks_branch_b = False
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope.analytic_id)
+
+    thread_registry = build_compute_registry(
+        (
+            _thread_compute_registration(ROOT_ID),
+            _thread_compute_registration(BRANCH_B_ID),
+            _thread_compute_registration(BRANCH_C_ID),
+            _thread_compute_registration(SHARED_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=thread_registry,
+        pool_submitter=pool_submitter,
+    )
+    unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not pause_blocks)
+    unregister_freeze = orchestrator.register_dispatch_gate(
+        lambda node: not (freeze_blocks_branch_b and node.scope.analytic_id == BRANCH_B_ID),
+    )
+
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+
+    orchestrator.submit(ComputeRequest(scope=root_scope))
+    assert pool_submissions == [SHARED_ID]
+
+    pause_blocks = True
+    freeze_blocks_branch_b = True
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    assert pool_submissions == [SHARED_ID]
+    assert orchestrator.nodes[branch_b_scope].state == "ready"
+    assert orchestrator.nodes[branch_c_scope].state == "ready"
+    assert set(orchestrator.ready_scopes()) == {branch_b_scope, branch_c_scope}
+
+    # Clear pause only -- freeze still blocks branch B; branch C may run.
+    pause_blocks = False
+    unregister_pause()
+    orchestrator.dispatch_ready_work()
+
+    assert pool_submissions == [SHARED_ID, BRANCH_C_ID]
+    assert orchestrator.nodes[branch_c_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "ready"
+    assert orchestrator.ready_scopes() == (branch_b_scope,)
+
+    # Clear freeze -- branch B may run.
+    unregister_freeze()
+    orchestrator.dispatch_ready_work()
+
+    assert pool_submissions == [SHARED_ID, BRANCH_C_ID, BRANCH_B_ID]
+    assert orchestrator.nodes[branch_b_scope].state == "running"

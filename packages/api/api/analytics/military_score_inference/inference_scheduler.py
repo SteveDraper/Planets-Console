@@ -49,6 +49,7 @@ class _InferenceStreamOrchestratorBinding:
     orchestrator: object
     unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
+    unregister_dispatch_gate: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -553,7 +554,9 @@ class InferenceRowScheduler:
     ) -> None:
         from api.compute.runtime import release_orchestrator_for_context
 
-        binding.orchestrator.set_dispatch_gate(None)
+        if binding.unregister_dispatch_gate is not None:
+            binding.unregister_dispatch_gate()
+            binding.unregister_dispatch_gate = None
         binding.unregister_listener()
         ctx_id = id(binding.query_context)
         if not any(id(other.query_context) == ctx_id for other in self._stream_bindings.values()):
@@ -629,26 +632,28 @@ class InferenceRowScheduler:
         return held_jobs, held_continuations
 
     def _apply_dispatch_gates_locked(self) -> None:
-        gate = self._dispatch_gate if self._globally_paused else None
         for binding in self._stream_bindings.values():
-            binding.orchestrator.set_dispatch_gate(gate)
+            if self._globally_paused:
+                if binding.unregister_dispatch_gate is None:
+                    binding.unregister_dispatch_gate = binding.orchestrator.register_dispatch_gate(
+                        self._pause_dispatch_gate
+                    )
+            elif binding.unregister_dispatch_gate is not None:
+                binding.unregister_dispatch_gate()
+                binding.unregister_dispatch_gate = None
 
     def _dispatch_ready_orchestrator_work_locked(self) -> None:
         for binding in self._stream_bindings.values():
             binding.orchestrator.dispatch_ready_work()
 
-    @property
-    def _dispatch_gate(self) -> Callable[[object], bool]:
+    def _pause_dispatch_gate(self, node: object) -> bool:
         from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
 
-        def gate(node: object) -> bool:
-            if not self._globally_paused:
-                return True
-            if node.scope.analytic_id != SCORES_ANALYTIC_ID:
-                return True
-            return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
-
-        return gate
+        if not self._globally_paused:
+            return True
+        if node.scope.analytic_id != SCORES_ANALYTIC_ID:
+            return True
+        return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
 
     def _remove_run_locked(self, run_id: str) -> None:
         from api.analytics.scores.tier_row_run_registry import unregister_row_run

@@ -122,8 +122,8 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn):
             }
             self.dispatch_calls = 0
 
-        def set_dispatch_gate(self, _gate: object) -> None:
-            pass
+        def register_dispatch_gate(self, _gate: object):
+            return lambda: None
 
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1
@@ -138,6 +138,7 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn):
         {
             "orchestrator": fake_orchestrator,
             "unregister_listener": lambda: None,
+            "unregister_dispatch_gate": None,
             "query_context": object(),
         },
     )()
@@ -206,8 +207,8 @@ def test_resume_dispatches_orchestrator_ready_work(sample_turn):
         def __init__(self) -> None:
             self.dispatch_calls = 0
 
-        def set_dispatch_gate(self, _gate: object) -> None:
-            pass
+        def register_dispatch_gate(self, _gate: object):
+            return lambda: None
 
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1
@@ -219,6 +220,7 @@ def test_resume_dispatches_orchestrator_ready_work(sample_turn):
         {
             "orchestrator": fake_orchestrator,
             "unregister_listener": lambda: None,
+            "unregister_dispatch_gate": None,
             "query_context": object(),
         },
     )()
