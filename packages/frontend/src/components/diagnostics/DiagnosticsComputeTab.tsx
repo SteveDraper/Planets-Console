@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AnalyticShellScope, ComputeDiagnosticsSnapshotResponse } from '../../api/bff'
+import type { AnalyticShellScope } from '../../api/bff'
 import {
   fetchComputeDiagnosticsSnapshot,
   postComputeDiagnosticsSingleStep,
   putComputeDiagnosticsAllowlist,
   putComputeDiagnosticsFreeze,
-} from '../../api/bff'
+  type ComputeDiagnosticsSnapshotResponse,
+} from '../../api/bffComputeDiagnostics'
 import { cn } from '../../lib/utils'
 import {
   type ClientStreamLifecycle,
