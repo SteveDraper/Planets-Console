@@ -185,10 +185,28 @@ def _bound_pool_orchestrator(sample_turn):
     return controller, orchestrator, shell, scope, pool_submissions
 
 
-def test_disarm_redispatches_ready_node_without_unrelated_completion(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(
-        sample_turn
+def _player_scope(
+    ctx,
+    *,
+    player_id: int,
+    analytic_id: str,
+    scope_key_spec: ScopeKeySpec,
+) -> ComputeScope:
+    export_scope = ExportScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+        player_id=player_id,
     )
+    return normalize_export_scope_to_compute_scope(
+        export_scope,
+        analytic_id=analytic_id,
+        scope_key_spec=scope_key_spec,
+    )
+
+
+def test_disarm_redispatches_ready_node_without_unrelated_completion(sample_turn):
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     orchestrator.submit(ComputeRequest(scope=scope))
@@ -202,9 +220,7 @@ def test_disarm_redispatches_ready_node_without_unrelated_completion(sample_turn
 
 
 def test_allowlist_redispatches_ready_node_without_unrelated_completion(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(
-        sample_turn
-    )
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     orchestrator.submit(ComputeRequest(scope=scope))
@@ -217,9 +233,7 @@ def test_allowlist_redispatches_ready_node_without_unrelated_completion(sample_t
 
 
 def test_single_step_redispatches_ready_node_into_pool(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(
-        sample_turn
-    )
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     orchestrator.submit(ComputeRequest(scope=scope))
@@ -229,6 +243,116 @@ def test_single_step_redispatches_ready_node_into_pool(sample_turn):
     assert controller.single_step(shell) is True
     assert pool_submissions == [scope]
     assert orchestrator.nodes[scope].state == "running"
+
+
+def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool_submissions: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    scope_a = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    scope_b = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[1].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    orchestrator.submit(ComputeRequest(scope=scope_a))
+    orchestrator.submit(ComputeRequest(scope=scope_b))
+    assert pool_submissions == []
+    assert orchestrator.nodes[scope_a].state == "ready"
+    assert orchestrator.nodes[scope_b].state == "ready"
+
+    assert controller.single_step(shell) is True
+    assert len(pool_submissions) == 1
+    released = pool_submissions[0]
+    held = scope_b if released == scope_a else scope_a
+    assert released in {scope_a, scope_b}
+    assert orchestrator.nodes[released].state == "running"
+    assert orchestrator.nodes[held].state == "ready"
+    assert controller._single_step_dispatch_slots_remaining == 0
+    assert controller._single_step_grants_remaining == 1
+
+
+def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    ready_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    held_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[1].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    registration_id = orchestrator.pool_registration_id
+    assert registration_id is not None
+    held_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=held_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    orchestrator.submit(ComputeRequest(scope=ready_scope))
+    pool.enqueue_for_tests(held_item)
+    assert orchestrator.nodes[ready_scope].state == "ready"
+
+    assert controller.single_step(shell) is True
+    assert orchestrator.nodes[ready_scope].state == "ready"
+    assert controller._single_step_dispatch_slots_remaining == 0
+    assert controller._single_step_grants_remaining == 1
+    assert controller._pool_dequeue_predicate(held_item) is True
+    assert controller._single_step_grants_remaining == 0
+    assert controller._pool_dequeue_predicate(held_item) is False
 
 
 def test_single_step_pool_predicate_releases_one_held_item(sample_turn):
@@ -359,9 +483,7 @@ def test_sticky_freeze_disarms_on_game_change():
 
 
 def test_sticky_freeze_game_change_redispatches_ready_node(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(
-        sample_turn
-    )
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     orchestrator.submit(ComputeRequest(scope=scope))

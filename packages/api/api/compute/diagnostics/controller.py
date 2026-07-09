@@ -62,6 +62,7 @@ class ComputeDiagnosticsController:
         self._lock = threading.Lock()
         self._single_step_shell: ShellContextKey | None = None
         self._single_step_grants_remaining = 0
+        self._single_step_dispatch_slots_remaining = 0
         self._pool: ComputeWorkerPool | None = None
         self._wired = False
         self._active_game_id: int | None = None
@@ -156,13 +157,22 @@ class ComputeDiagnosticsController:
         self._redispatch_after_gate_change(shell.game_id)
 
     def single_step(self, shell: ShellContextKey) -> bool:
-        """Release exactly one pool work item for ``shell``; return whether release was armed."""
+        """Release exactly one pool work item for ``shell``; return whether release was armed.
+
+        Prefer an already-held pool item (dequeue grant only). When none are held, arm one
+        dispatch slot so a single frozen ready node may enter the pool, plus one dequeue
+        grant so that item can run.
+        """
         if not self._freeze_state.freeze_armed_for_game(shell.game_id):
             return False
         self.on_shell_context(shell)
+        # Pool snapshot before taking ``_lock`` -- pool workers call into the controller
+        # while holding the pool lock, so never acquire pool lock under ``_lock``.
+        has_held_pool_item = self._has_held_in_scope_pool_items(shell)
         with self._lock:
             self._single_step_shell = shell
             self._single_step_grants_remaining = 1
+            self._single_step_dispatch_slots_remaining = 0 if has_held_pool_item else 1
         self._redispatch_after_gate_change(shell.game_id)
         return True
 
@@ -178,6 +188,7 @@ class ComputeDiagnosticsController:
             self._histories.clear()
             self._single_step_shell = None
             self._single_step_grants_remaining = 0
+            self._single_step_dispatch_slots_remaining = 0
             self._active_game_id = None
             self._last_shell_context = None
         self._freeze_state.reset_for_tests()
@@ -245,21 +256,48 @@ class ComputeDiagnosticsController:
             return True
         return player_id not in allowlisted
 
+    def _has_held_in_scope_pool_items(self, shell: ShellContextKey) -> bool:
+        """Return whether the pool holds a frozen in-scope item (ignoring single-step grants)."""
+        if self._pool is None:
+            return False
+        ancestor_turns = self._ancestor_turns_for_shell(shell)
+        for item in self._pool.snapshot_work_queue():
+            if not scope_in_diagnostic_scope(
+                item.scope,
+                game_id=shell.game_id,
+                perspective=shell.perspective,
+                ancestor_turns=ancestor_turns,
+            ):
+                continue
+            if self._is_scope_frozen(item.scope, shell):
+                return True
+        return False
+
+    def _scope_matches_single_step_shell(self, scope: ComputeScope) -> bool:
+        if self._single_step_shell is None:
+            return False
+        ancestor_turns = self._ancestor_turns_for_shell(self._single_step_shell)
+        return scope_in_diagnostic_scope(
+            scope,
+            game_id=self._single_step_shell.game_id,
+            perspective=self._single_step_shell.perspective,
+            ancestor_turns=ancestor_turns,
+        )
+
     def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
-        with self._lock:
-            if self._single_step_grants_remaining > 0 and self._single_step_shell is not None:
-                ancestor_turns = self._ancestor_turns_for_shell(self._single_step_shell)
-                if scope_in_diagnostic_scope(
-                    node.scope,
-                    game_id=self._single_step_shell.game_id,
-                    perspective=self._single_step_shell.perspective,
-                    ancestor_turns=ancestor_turns,
-                ):
-                    return True
         shell = self._scope_matches_active_shell(node.scope)
         if shell is None:
             return True
-        return not self._is_scope_frozen(node.scope, shell)
+        if not self._is_scope_frozen(node.scope, shell):
+            return True
+        with self._lock:
+            if (
+                self._single_step_dispatch_slots_remaining > 0
+                and self._scope_matches_single_step_shell(node.scope)
+            ):
+                self._single_step_dispatch_slots_remaining -= 1
+                return True
+        return False
 
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` would dequeue; never consumes single-step grants."""
@@ -276,19 +314,15 @@ class ComputeDiagnosticsController:
         consume_single_step_grant: bool,
     ) -> bool:
         with self._lock:
-            if self._single_step_grants_remaining > 0 and self._single_step_shell is not None:
-                ancestor_turns = self._ancestor_turns_for_shell(self._single_step_shell)
-                if scope_in_diagnostic_scope(
-                    item.scope,
-                    game_id=self._single_step_shell.game_id,
-                    perspective=self._single_step_shell.perspective,
-                    ancestor_turns=ancestor_turns,
-                ):
-                    if consume_single_step_grant:
-                        self._single_step_grants_remaining -= 1
-                        if self._single_step_grants_remaining == 0:
-                            self._single_step_shell = None
-                    return True
+            if self._single_step_grants_remaining > 0 and self._scope_matches_single_step_shell(
+                item.scope
+            ):
+                if consume_single_step_grant:
+                    self._single_step_grants_remaining -= 1
+                    if self._single_step_grants_remaining == 0:
+                        self._single_step_shell = None
+                        self._single_step_dispatch_slots_remaining = 0
+                return True
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
             return True
