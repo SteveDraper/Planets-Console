@@ -72,8 +72,7 @@ def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
 
     with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
         response = client.get(
-            "/analytics/fleet/table-stream"
-            "?gameId=628580&perspective=1&turn=8&playerIds=3,7,11"
+            "/analytics/fleet/table-stream?gameId=628580&perspective=1&turn=8&playerIds=3,7,11"
         )
 
     assert response.status_code == 200
@@ -103,8 +102,7 @@ def test_fleet_table_stream_narrows_to_allowlisted_players():
 
     with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
         response = client.get(
-            "/analytics/fleet/table-stream"
-            "?gameId=628580&perspective=1&turn=8&playerIds=3,7,11"
+            "/analytics/fleet/table-stream?gameId=628580&perspective=1&turn=8&playerIds=3,7,11"
         )
 
     assert response.status_code == 200

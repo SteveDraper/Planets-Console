@@ -293,7 +293,7 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
                             profile_step_index=1,
                         ),
                     },
-                    "register_dispatch_gate": lambda _gate: (lambda: None),
+                    "register_dispatch_gate": lambda _gate: lambda: None,
                     "dispatch_ready_work": lambda: None,
                     "register_node_complete_listener": lambda _listener: lambda: None,
                 },

@@ -123,9 +123,7 @@ def test_sticky_freeze_across_turn_and_perspective_resets_allowlist():
     assert allowlist.status_code == 200
     assert allowlist.json()["allowlistedPlayerIds"] == [3, 7]
 
-    turn_change = client.get(
-        "/diagnostics/compute/snapshot?gameId=628580&perspective=1&turn=9"
-    )
+    turn_change = client.get("/diagnostics/compute/snapshot?gameId=628580&perspective=1&turn=9")
     assert turn_change.status_code == 200
     turn_body = turn_change.json()
     assert turn_body["freezeArmed"] is True
@@ -144,15 +142,11 @@ def test_sticky_freeze_across_turn_and_perspective_resets_allowlist():
     assert perspective_body["freezeArmed"] is True
     assert perspective_body["allowlistedPlayerIds"] == []
 
-    game_change = client.get(
-        "/diagnostics/compute/snapshot?gameId=999001&perspective=2&turn=9"
-    )
+    game_change = client.get("/diagnostics/compute/snapshot?gameId=999001&perspective=2&turn=9")
     assert game_change.status_code == 200
     assert game_change.json()["freezeArmed"] is False
 
     # Prior game is disarmed after leaving it.
-    prior_game = client.get(
-        "/diagnostics/compute/snapshot?gameId=628580&perspective=2&turn=9"
-    )
+    prior_game = client.get("/diagnostics/compute/snapshot?gameId=628580&perspective=2&turn=9")
     assert prior_game.status_code == 200
     assert prior_game.json()["freezeArmed"] is False
