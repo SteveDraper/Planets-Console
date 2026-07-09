@@ -499,3 +499,124 @@ def test_sticky_freeze_game_change_redispatches_ready_node(sample_turn):
     assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is False
     assert pool_submissions == [scope]
     assert orchestrator.nodes[scope].state == "running"
+
+
+def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_turn):
+    """Allowlist/history use the operator shell, not bound ambient_turn.
+
+    Diagnosing turn N with an orchestrator bound at N-1 (fleet dependency) must
+    apply the turn-N allowlist and record completions under the turn-N history.
+    """
+    from tests.fixtures.export_framework.harness import clone_turn_at
+
+    operator_turn = sample_turn.settings.turn
+    ancestor_turn = operator_turn - 1
+    assert ancestor_turn >= 1
+
+    # Production analytic id so completion history resolves COMPUTE_REGISTRY.
+    fleet_registration = _thread_pool_registration("fleet")
+    compute_registry = build_compute_registry((fleet_registration,))
+    scope_key_spec = compute_registry["fleet"].scope_key_spec
+    ancestor_turn_info = clone_turn_at(sample_turn, ancestor_turn)
+    ancestor_ctx = make_fixture_query_context(
+        ancestor_turn_info,
+        stored_turns={
+            operator_turn: sample_turn,
+            ancestor_turn: ancestor_turn_info,
+        },
+    )
+    assert ancestor_ctx.ambient_turn == ancestor_turn
+
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ancestor_ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ancestor_ctx)
+
+    operator_shell = ShellContextKey(
+        game_id=ancestor_ctx.game_id,
+        perspective=ancestor_ctx.perspective,
+        turn=operator_turn,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    other_player_id = sample_turn.scores[1].ownerid
+    ancestor_scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ancestor_ctx.game_id,
+            perspective=ancestor_ctx.perspective,
+            turn=ancestor_turn,
+            player_id=player_id,
+        ),
+        analytic_id="fleet",
+        scope_key_spec=scope_key_spec,
+    )
+    other_ancestor_scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ancestor_ctx.game_id,
+            perspective=ancestor_ctx.perspective,
+            turn=ancestor_turn,
+            player_id=other_player_id,
+        ),
+        analytic_id="fleet",
+        scope_key_spec=scope_key_spec,
+    )
+
+    controller.set_freeze_armed(operator_shell, freeze_armed=True)
+    controller.set_allowlist(operator_shell, frozenset({player_id}))
+
+    allowlisted_node = ComputeNodeRun(
+        scope=ancestor_scope,
+        dependency_scopes=(),
+        state="ready",
+    )
+    frozen_node = ComputeNodeRun(
+        scope=other_ancestor_scope,
+        dependency_scopes=(),
+        state="ready",
+    )
+    # Operator allowlist at turn N applies to ancestor-turn N-1 work.
+    assert controller._dispatch_gate(allowlisted_node) is True
+    assert controller._dispatch_gate(frozen_node) is False
+
+    registration_id = orchestrator.pool_registration_id
+    assert registration_id is not None
+    held_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=other_ancestor_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+    pool.enqueue_for_tests(held_item)
+    assert controller._pool_dequeue_predicate(held_item) is False
+    assert controller.single_step(operator_shell) is True
+    assert controller._pool_dequeue_predicate(held_item) is True
+
+    # Production fleet step kind (history resolves against COMPUTE_REGISTRY).
+    completed_node = ComputeNodeRun(
+        scope=ancestor_scope,
+        dependency_scopes=(),
+        state="succeeded",
+        profile_step_index=0,
+        step_index=0,
+        priority_band="interactive",
+    )
+    controller._on_step_complete(
+        ancestor_scope,
+        completed_node,
+        "materialization_leg",
+        "pool",
+        "success",
+    )
+    operator_history = controller._history_for_shell(operator_shell).recent()
+    assert len(operator_history) == 1
+    wrong_shell = ShellContextKey(
+        game_id=operator_shell.game_id,
+        perspective=operator_shell.perspective,
+        turn=ancestor_turn,
+    )
+    assert controller._history_for_shell(wrong_shell).recent() == ()

@@ -231,20 +231,25 @@ class ComputeDiagnosticsController:
         )
 
     def _scope_matches_active_shell(self, scope: ComputeScope) -> ShellContextKey | None:
-        for bound in self._bound_orchestrators_snapshot():
-            shell = ShellContextKey(
-                game_id=bound.game_id,
-                perspective=bound.perspective,
-                turn=bound.ambient_turn,
-            )
-            ancestor_turns = self._ancestor_turns_for_shell(shell)
-            if scope_in_diagnostic_scope(
-                scope,
-                game_id=shell.game_id,
-                perspective=shell.perspective,
-                ancestor_turns=ancestor_turns,
-            ):
-                return shell
+        """Return the operator shell when ``scope`` is in its diagnostic scope.
+
+        Allowlist and completion history are keyed by the UI/operator shell
+        (``_last_shell_context``), not by a bound orchestrator's ``ambient_turn``.
+        Ancestor-turn work (e.g. fleet at N-1 while diagnosing scores at N) must
+        use that operator shell's allowlist and history bucket.
+        """
+        with self._lock:
+            shell = self._last_shell_context
+        if shell is None:
+            return None
+        ancestor_turns = self._ancestor_turns_for_shell(shell)
+        if scope_in_diagnostic_scope(
+            scope,
+            game_id=shell.game_id,
+            perspective=shell.perspective,
+            ancestor_turns=ancestor_turns,
+        ):
+            return shell
         return None
 
     def _is_scope_frozen(self, scope: ComputeScope, shell: ShellContextKey) -> bool:
