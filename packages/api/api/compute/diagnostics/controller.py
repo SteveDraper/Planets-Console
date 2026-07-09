@@ -107,13 +107,17 @@ class ComputeDiagnosticsController:
     def on_shell_context(self, shell: ShellContextKey) -> None:
         if not self.is_enabled():
             return
+        disarmed_game_id: int | None = None
         with self._lock:
             if self._active_game_id is not None and self._active_game_id != shell.game_id:
+                disarmed_game_id = self._active_game_id
                 self._freeze_state.set_freeze_armed(self._active_game_id, freeze_armed=False)
             self._active_game_id = shell.game_id
             if self._last_shell_context != shell:
                 self._freeze_state.on_shell_context_entered(shell)
                 self._last_shell_context = shell
+        if disarmed_game_id is not None:
+            self._redispatch_after_gate_change(disarmed_game_id)
         if self._freeze_state.freeze_armed_for_game(shell.game_id):
             self._apply_gates_for_game(shell.game_id)
 
@@ -143,14 +147,13 @@ class ComputeDiagnosticsController:
         self.on_shell_context(shell)
         self._freeze_state.set_freeze_armed(shell.game_id, freeze_armed=freeze_armed)
         self._apply_gates_for_game(shell.game_id)
-        if freeze_armed:
-            self._pool_hold_notify()
+        self._redispatch_after_gate_change(shell.game_id)
 
     def set_allowlist(self, shell: ShellContextKey, player_ids: frozenset[int]) -> None:
         self.on_shell_context(shell)
         self._freeze_state.set_allowlisted_player_ids(shell, player_ids)
         self._apply_gates_for_game(shell.game_id)
-        self._pool_hold_notify()
+        self._redispatch_after_gate_change(shell.game_id)
 
     def single_step(self, shell: ShellContextKey) -> bool:
         """Release exactly one pool work item for ``shell``; return whether release was armed."""
@@ -160,9 +163,7 @@ class ComputeDiagnosticsController:
         with self._lock:
             self._single_step_shell = shell
             self._single_step_grants_remaining = 1
-        self._pool_hold_notify()
-        if self._pool is not None:
-            self._pool.wake_workers()
+        self._redispatch_after_gate_change(shell.game_id)
         return True
 
     def stream_allowlisted_player_ids(self, shell: ShellContextKey) -> frozenset[int] | None:
@@ -199,6 +200,13 @@ class ComputeDiagnosticsController:
         for bound in self._bound_orchestrators_snapshot():
             if bound.game_id == game_id:
                 bound.orchestrator.set_dispatch_gate(self._dispatch_gate)
+
+    def _redispatch_after_gate_change(self, game_id: int) -> None:
+        """Re-dispatch ready nodes and wake held pool items after a gate change."""
+        for bound in self._bound_orchestrators_snapshot():
+            if bound.game_id == game_id:
+                bound.orchestrator.dispatch_ready_work()
+        self._pool_hold_notify()
 
     def _pool_hold_notify(self) -> None:
         if self._pool is not None:
