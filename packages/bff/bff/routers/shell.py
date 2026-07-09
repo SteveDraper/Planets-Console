@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from api.compute.diagnostics import compute_diagnostics_enabled
+from api.services.compute_diagnostics_service import compute_diagnostics_enabled
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 

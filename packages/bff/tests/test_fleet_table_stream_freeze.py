@@ -9,13 +9,15 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from api.compute.diagnostics import (
-    ShellContextKey,
-    get_compute_diagnostics_controller,
-    reset_compute_diagnostics_for_tests,
-)
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
+from api.services.compute_diagnostics_service import (
+    get_compute_diagnostics_freeze_status,
+    get_compute_diagnostics_stream_allowlist,
+    reset_compute_diagnostics_for_tests,
+    set_compute_diagnostics_allowlist,
+    set_compute_diagnostics_freeze_armed,
+)
 from api.storage import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
@@ -50,10 +52,19 @@ def _reset():
 
 def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
     """Freeze + empty allowlist narrows subscriptions to no players (AC)."""
-    shell = ShellContextKey(game_id=628580, perspective=1, turn=8)
-    controller = get_compute_diagnostics_controller()
-    controller.set_freeze_armed(shell, freeze_armed=True)
-    assert controller.snapshot(shell).allowlisted_player_ids == ()
+    set_compute_diagnostics_freeze_armed(
+        game_id=628580,
+        perspective=1,
+        turn=8,
+        freeze_armed=True,
+    )
+    freeze_armed, allowlisted = get_compute_diagnostics_freeze_status(
+        game_id=628580,
+        perspective=1,
+        turn=8,
+    )
+    assert freeze_armed is True
+    assert allowlisted == frozenset()
 
     captured: list[tuple[int, ...]] = []
 
@@ -80,10 +91,18 @@ def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
 
 
 def test_fleet_table_stream_narrows_to_allowlisted_players():
-    shell = ShellContextKey(game_id=628580, perspective=1, turn=8)
-    controller = get_compute_diagnostics_controller()
-    controller.set_freeze_armed(shell, freeze_armed=True)
-    controller.set_allowlist(shell, frozenset({7, 11}))
+    set_compute_diagnostics_freeze_armed(
+        game_id=628580,
+        perspective=1,
+        turn=8,
+        freeze_armed=True,
+    )
+    set_compute_diagnostics_allowlist(
+        game_id=628580,
+        perspective=1,
+        turn=8,
+        player_ids=frozenset({7, 11}),
+    )
 
     captured: list[tuple[int, ...]] = []
 
@@ -111,10 +130,20 @@ def test_fleet_table_stream_narrows_to_allowlisted_players():
 
 def test_fleet_table_stream_disarms_previous_game_freeze_on_context_change():
     """Opening a stream for game B must disarm freeze left armed on game A."""
-    shell_a = ShellContextKey(game_id=628580, perspective=1, turn=8)
-    controller = get_compute_diagnostics_controller()
-    controller.set_freeze_armed(shell_a, freeze_armed=True)
-    assert controller.stream_allowlisted_player_ids(shell_a) == frozenset()
+    set_compute_diagnostics_freeze_armed(
+        game_id=628580,
+        perspective=1,
+        turn=8,
+        freeze_armed=True,
+    )
+    assert (
+        get_compute_diagnostics_stream_allowlist(
+            game_id=628580,
+            perspective=1,
+            turn=8,
+        )
+        == frozenset()
+    )
 
     captured: list[tuple[int, ...]] = []
 
@@ -139,4 +168,11 @@ def test_fleet_table_stream_disarms_previous_game_freeze_on_context_change():
     assert response.status_code == 200
     assert captured == [(3, 7)]
     # Game A freeze must be cleared; stream narrowing returns None when unarmed.
-    assert controller.stream_allowlisted_player_ids(shell_a) is None
+    assert (
+        get_compute_diagnostics_stream_allowlist(
+            game_id=628580,
+            perspective=1,
+            turn=8,
+        )
+        is None
+    )
