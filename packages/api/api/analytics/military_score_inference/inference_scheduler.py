@@ -333,9 +333,12 @@ class InferenceRowScheduler:
     def cancel_run(self, run_id: str) -> None:
         with self._lock:
             row_run = self._adapter_row_run(run_id)
+            root_scope = self._runs.get(run_id)
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
             self._remove_run_locked(run_id)
+            if root_scope is not None:
+                self._abort_orchestrator_scope_locked(root_scope)
 
     def enqueue_tier_ladder(
         self,
@@ -665,6 +668,21 @@ class InferenceRowScheduler:
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.root_scope != root_scope
         ]
+
+    def _abort_orchestrator_scope_locked(self, root_scope: ComputeScope) -> None:
+        """Fail in-flight orchestrator work for ``root_scope`` after a row-run cancel.
+
+        Without this, a later ``force_fresh`` submit attaches to the still-running node
+        and ``tier_solve`` fails with a missing RowRun after unregister.
+        """
+        for binding in self._stream_bindings.values():
+            abort = getattr(binding.orchestrator, "abort_scope", None)
+            if not callable(abort):
+                continue
+            abort(
+                root_scope,
+                RuntimeError("scores inference row run cancelled"),
+            )
 
     @staticmethod
     def _adapter_row_run(run_id: str) -> RowRun | None:

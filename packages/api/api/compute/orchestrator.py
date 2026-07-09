@@ -317,9 +317,12 @@ class ComputeOrchestrator:
     ) -> None:
         """Mark a pool-submitted step complete (used by worker pool integration)."""
         with self._condition:
-            node = self._nodes[scope]
+            node = self._nodes.get(scope)
+            if node is None:
+                return
             if node.state != "running":
-                raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
+                # Already aborted/cancelled while the pool worker was still finishing.
+                return
             if error is not None:
                 step_kind = self._current_step_spec(
                     node,
@@ -345,6 +348,31 @@ class ComputeOrchestrator:
                 )
                 self._after_step_success(node, result_wire)
         self._drain_post_lock_callbacks()
+
+    def abort_scope(self, scope: ComputeScope, error: BaseException) -> bool:
+        """Fail a non-terminal node so a later ``force_fresh`` submit can replace it.
+
+        Returns whether a node was aborted. No-op when the scope is absent or already
+        terminal. Used when a stream row run is cancelled while orchestrator work for
+        that scope is still in flight.
+        """
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None or node.state in {"complete", "failed"}:
+                return False
+            if node.state == "running":
+                registration = self._compute_registry.get(node.scope.analytic_id)
+                if registration is not None:
+                    step_kind = self._current_step_spec(node, registration).step_kind
+                    self._notify_step_complete(
+                        node,
+                        step_kind,
+                        surface="pool",
+                        terminal_state="failed",
+                    )
+            self._fail_node(node, error)
+        self._drain_post_lock_callbacks()
+        return True
 
     def _attach_to_existing(self, node: ComputeNodeRun) -> ComputeHandle:
         if node.state in {"complete", "failed"}:

@@ -51,6 +51,12 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
         with self.stream_lock:
             existing = self.scheduled_rows.get(player_id)
             new_run_id = self._run_id_for_scheduled_row(row)
+            cancel_token = getattr(getattr(row, "session", None), "cancel_token", None)
+            is_cancelled = getattr(cancel_token, "is_cancelled", None)
+            if callable(is_cancelled) and bool(is_cancelled()):
+                # Invalidation cancelled this connect-enqueued run before adopt; keep any
+                # fresher row already registered and do not resurrect the cancelled one.
+                return False
             if existing is not None:
                 existing_run_id = self._run_id_for_scheduled_row(existing)
                 if existing_run_id != new_run_id:
