@@ -4,7 +4,10 @@ import { analyticScopeKey } from './analyticScopeKey'
 import type { AnalyticTableStreamConnectResult } from './analyticTableStreamConnect'
 import { errorDetailFromUnknown } from './queryRetry'
 import { playerIdsFromStableKey } from './stablePlayerIdsKey'
-import { useComputeDiagnosticsStore } from '../stores/computeDiagnostics'
+import {
+  type ClientStreamLifecycle,
+  useComputeDiagnosticsStore,
+} from '../stores/computeDiagnostics'
 
 type StreamErrorEvent = {
   type: string
@@ -55,6 +58,14 @@ export type UsePerPlayerAnalyticStreamOptions<
 
 export type UsePerPlayerAnalyticStreamResult<TPublished> = {
   publishedByPlayerId: Map<number, TPublished>
+}
+
+export function recordClientStreamLifecycle(entry: ClientStreamLifecycle): void {
+  const { enabled, upsertClientStream } = useComputeDiagnosticsStore.getState()
+  if (!enabled) {
+    return
+  }
+  upsertClientStream(entry)
 }
 
 function defaultRouteStreamEvent<TEvent extends StreamErrorEvent>(
@@ -177,7 +188,7 @@ export function usePerPlayerAnalyticStream<
 
     if (isNewConnection) {
       streamGenerationRef.current += 1
-      useComputeDiagnosticsStore.getState().upsertClientStream({
+      recordClientStreamLifecycle({
         connectionKey,
         generation: streamGenerationRef.current,
         lastEventAt: null,
@@ -219,7 +230,7 @@ export function usePerPlayerAnalyticStream<
       .connectUntilComplete(activeScope, playerIds, {
         signal: controller.signal,
         onEvent: (event) => {
-          useComputeDiagnosticsStore.getState().upsertClientStream({
+          recordClientStreamLifecycle({
             connectionKey,
             generation: streamGenerationRef.current,
             lastEventAt: new Date().toISOString(),
@@ -242,7 +253,7 @@ export function usePerPlayerAnalyticStream<
         if (controller.signal.aborted) {
           return
         }
-        useComputeDiagnosticsStore.getState().upsertClientStream({
+        recordClientStreamLifecycle({
           connectionKey,
           generation: streamGenerationRef.current,
           lastEventAt: new Date().toISOString(),
@@ -258,7 +269,7 @@ export function usePerPlayerAnalyticStream<
           return
         }
         const summary = errorDetailFromUnknown(error)
-        useComputeDiagnosticsStore.getState().upsertClientStream({
+        recordClientStreamLifecycle({
           connectionKey,
           generation: streamGenerationRef.current,
           lastEventAt: new Date().toISOString(),
