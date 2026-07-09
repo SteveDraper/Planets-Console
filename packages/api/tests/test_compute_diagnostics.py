@@ -232,6 +232,17 @@ def test_single_step_redispatches_ready_node_into_pool(sample_turn):
 
 
 def test_single_step_pool_predicate_releases_one_held_item(sample_turn):
+    controller, _pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=1)
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    assert controller._pool_dequeue_predicate(item) is False
+    controller.single_step(shell)
+    assert controller._pool_dequeue_predicate(item) is True
+    assert controller._pool_dequeue_predicate(item) is False
+
+
+def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
+    """Bind diagnostics to a pool-backed orchestrator and return one held work item."""
     registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(
             id="pool-analytic",
@@ -257,7 +268,7 @@ def test_single_step_pool_predicate_releases_one_held_item(sample_turn):
     )
     compute_registry = build_compute_registry((registration,))
     ctx = make_fixture_query_context(sample_turn)
-    pool = reset_compute_worker_pool_for_tests(worker_count=1)
+    pool = reset_compute_worker_pool_for_tests(worker_count=worker_count)
     orchestrator = ComputeOrchestrator(
         ctx,
         compute_registry=compute_registry,
@@ -291,11 +302,27 @@ def test_single_step_pool_predicate_releases_one_held_item(sample_turn):
         priority_band="background",
         step_index=0,
     )
+    return controller, pool, shell, item
+
+
+def test_snapshot_does_not_consume_single_step_grant(sample_turn):
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    assert controller._pool_dequeue_predicate(item) is False
-    controller.single_step(shell)
+    pool.enqueue_for_tests(item)
+    assert controller._pool_item_is_runnable(item) is False
+
+    assert controller.single_step(shell) is True
+    assert controller._single_step_grants_remaining == 1
+
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert controller._single_step_grants_remaining == 1
+    assert any(row["state"] == "queued" for row in wire["poolQueue"])
+    assert controller._pool_item_is_runnable(item) is True
+    assert controller._single_step_grants_remaining == 1
+
     assert controller._pool_dequeue_predicate(item) is True
+    assert controller._single_step_grants_remaining == 0
     assert controller._pool_dequeue_predicate(item) is False
 
 

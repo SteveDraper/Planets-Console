@@ -84,7 +84,7 @@ def build_compute_diagnostics_snapshot(
     allowlisted_player_ids: frozenset[int],
     bound_orchestrators: tuple[BoundOrchestrator, ...],
     pool: ComputeWorkerPool | None,
-    pool_dequeue_predicate: Callable[[PoolWorkItem], bool] | None,
+    pool_item_is_runnable: Callable[[PoolWorkItem], bool] | None,
     completion_history: tuple[ComputeCompletionRecord, ...],
 ) -> ComputeDiagnosticsSnapshot:
     dag_nodes: list[dict[str, Any]] = []
@@ -119,7 +119,7 @@ def build_compute_diagnostics_snapshot(
         for item in pool.snapshot_work_queue():
             if not _scope_in_shell(item.scope, shell=shell, ancestor_turns=ancestor_turns):
                 continue
-            runnable = pool_dequeue_predicate(item) if pool_dequeue_predicate is not None else True
+            runnable = pool_item_is_runnable(item) if pool_item_is_runnable is not None else True
             pool_queue.append(_pool_item_wire(item, runnable=runnable))
 
     server_streams = tuple(

@@ -139,7 +139,7 @@ class ComputeDiagnosticsController:
             allowlisted_player_ids=allowlisted,
             bound_orchestrators=self._bound_orchestrators_snapshot(),
             pool=self._pool,
-            pool_dequeue_predicate=self._pool_dequeue_predicate,
+            pool_item_is_runnable=self._pool_item_is_runnable,
             completion_history=self._history_for_shell(shell).recent(),
         )
 
@@ -261,7 +261,20 @@ class ComputeDiagnosticsController:
             return True
         return not self._is_scope_frozen(node.scope, shell)
 
+    def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
+        """Return whether ``item`` would dequeue; never consumes single-step grants."""
+        return self._evaluate_pool_item_runnable(item, consume_single_step_grant=False)
+
     def _pool_dequeue_predicate(self, item: PoolWorkItem) -> bool:
+        """Pool dequeue gate; consumes one single-step grant when releasing a held item."""
+        return self._evaluate_pool_item_runnable(item, consume_single_step_grant=True)
+
+    def _evaluate_pool_item_runnable(
+        self,
+        item: PoolWorkItem,
+        *,
+        consume_single_step_grant: bool,
+    ) -> bool:
         with self._lock:
             if self._single_step_grants_remaining > 0 and self._single_step_shell is not None:
                 ancestor_turns = self._ancestor_turns_for_shell(self._single_step_shell)
@@ -271,9 +284,10 @@ class ComputeDiagnosticsController:
                     perspective=self._single_step_shell.perspective,
                     ancestor_turns=ancestor_turns,
                 ):
-                    self._single_step_grants_remaining -= 1
-                    if self._single_step_grants_remaining == 0:
-                        self._single_step_shell = None
+                    if consume_single_step_grant:
+                        self._single_step_grants_remaining -= 1
+                        if self._single_step_grants_remaining == 0:
+                            self._single_step_shell = None
                     return True
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
