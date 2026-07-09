@@ -48,21 +48,3 @@ export const useComputeDiagnosticsStore = create<ComputeDiagnosticsState>()((set
   clearClientStreams: () => set({ clientStreams: [] }),
 }))
 
-export function filterPlayerIdsForComputeFreeze(
-  scope: AnalyticShellScope | null,
-  playerIds: number[]
-): number[] {
-  const snapshot = useComputeDiagnosticsStore.getState().snapshot
-  if (scope == null || snapshot == null || !snapshot.freezeArmed) {
-    return playerIds
-  }
-  if (
-    snapshot.shell.gameId !== scope.gameId ||
-    snapshot.shell.perspective !== scope.perspective ||
-    snapshot.shell.turn !== scope.turn
-  ) {
-    return playerIds
-  }
-  const allowlisted = new Set(snapshot.allowlistedPlayerIds)
-  return playerIds.filter((playerId) => allowlisted.has(playerId))
-}

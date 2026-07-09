@@ -3,8 +3,8 @@ import type { AnalyticShellScope } from '../api/bff'
 import { analyticScopeKey } from './analyticScopeKey'
 import type { AnalyticTableStreamConnectResult } from './analyticTableStreamConnect'
 import { errorDetailFromUnknown } from './queryRetry'
-import { playerIdsFromStableKey, stablePlayerIdsKey } from './stablePlayerIdsKey'
-import { filterPlayerIdsForComputeFreeze, useComputeDiagnosticsStore } from '../stores/computeDiagnostics'
+import { playerIdsFromStableKey } from './stablePlayerIdsKey'
+import { useComputeDiagnosticsStore } from '../stores/computeDiagnostics'
 
 type StreamErrorEvent = {
   type: string
@@ -84,11 +84,7 @@ export function usePerPlayerAnalyticStream<
   const { scope, enabled, playerIdsKey, policy } = options
 
   const scopeKey = scope != null ? analyticScopeKey(scope) : null
-  const rawPlayerIds =
-    enabled && playerIdsKey.length > 0 ? playerIdsFromStableKey(playerIdsKey) : []
-  const filteredPlayerIds = filterPlayerIdsForComputeFreeze(scope, rawPlayerIds)
-  const effectivePlayerIdsKey =
-    filteredPlayerIds.length > 0 ? stablePlayerIdsKey(filteredPlayerIds) : ''
+  const effectivePlayerIdsKey = enabled && playerIdsKey.length > 0 ? playerIdsKey : ''
   const connectionKey =
     enabled && scopeKey != null && effectivePlayerIdsKey.length > 0
       ? `${scopeKey}:${effectivePlayerIdsKey}`
