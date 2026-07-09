@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from bff.config import get_config
 from bff.errors import BFFError, BFFValidationError, make_http_exception_handler
-from bff.routers import analytics, diagnostics, games, shell
+from bff.routers import analytics, diagnostics, diagnostics_compute, games, shell
 from bff.strip_bff_prefix import StripBffPrefixWhenRootApp
 from bff.transport.fleet_table_stream_responses import (
     FleetTableStreamCompleteEvent,
@@ -94,6 +94,7 @@ app.add_exception_handler(Exception, make_http_exception_handler(BFFError))
 app.add_exception_handler(BFFValidationError, make_http_exception_handler(BFFValidationError))
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 app.include_router(diagnostics.router, prefix="/diagnostics", tags=["diagnostics"])
+app.include_router(diagnostics_compute.router, prefix="/diagnostics", tags=["diagnostics"])
 app.include_router(games.router, prefix="/games", tags=["games"])
 app.include_router(shell.router, prefix="/shell", tags=["shell"])
 

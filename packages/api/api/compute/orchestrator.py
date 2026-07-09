@@ -18,6 +18,10 @@ from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs, coerce_step_result
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+StepCompleteListener = Callable[
+    [ComputeScope, "ComputeNodeRun", str, Literal["inline", "pool"], Literal["success", "failed"]],
+    None,
+]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
 
@@ -122,6 +126,7 @@ class ComputeOrchestrator:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._node_complete_listeners: list[NodeCompleteListener] = []
+        self._step_complete_listeners: list[StepCompleteListener] = []
         self._dispatch_gate: NodeDispatchGate | None = None
         self._post_lock_callbacks: list[PostLockCallback] = []
 
@@ -164,6 +169,23 @@ class ComputeOrchestrator:
             with self._condition:
                 try:
                     self._node_complete_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
+    def register_step_complete_listener(
+        self,
+        listener: StepCompleteListener,
+    ) -> Callable[[], None]:
+        """Register a step completion listener; return an unregister callable."""
+        with self._condition:
+            self._step_complete_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._step_complete_listeners.remove(listener)
                 except ValueError:
                     return
 
@@ -247,8 +269,28 @@ class ComputeOrchestrator:
             if node.state != "running":
                 raise RuntimeError(f"cannot complete pool step for node in state {node.state!r}")
             if error is not None:
+                step_kind = self._current_step_spec(
+                    node,
+                    self._compute_registry[node.scope.analytic_id],
+                ).step_kind
+                self._notify_step_complete(
+                    node,
+                    step_kind,
+                    surface="pool",
+                    terminal_state="failed",
+                )
                 self._fail_node(node, error)
             else:
+                step_kind = self._current_step_spec(
+                    node,
+                    self._compute_registry[node.scope.analytic_id],
+                ).step_kind
+                self._notify_step_complete(
+                    node,
+                    step_kind,
+                    surface="pool",
+                    terminal_state="success",
+                )
                 self._after_step_success(node, result_wire)
         self._drain_post_lock_callbacks()
 
@@ -458,8 +500,15 @@ class ComputeOrchestrator:
             job_wire = self._build_job_wire(node, registration, step)
             result_wire = registration.run_step[step.step_kind](job_wire)
         except BaseException as exc:
+            self._notify_step_complete(
+                node,
+                step.step_kind,
+                surface="inline",
+                terminal_state="failed",
+            )
             self._fail_node(node, exc)
             return
+        self._notify_step_complete(node, step.step_kind, surface="inline", terminal_state="success")
         self._after_step_success(node, result_wire)
 
     def _build_job_wire(
@@ -587,6 +636,26 @@ class ComputeOrchestrator:
         for listener in listeners:
             self._post_lock_callbacks.append(
                 lambda listener=listener, node=node: listener(node.scope, node),
+            )
+
+    def _notify_step_complete(
+        self,
+        node: ComputeNodeRun,
+        step_kind: str,
+        *,
+        surface: Literal["inline", "pool"],
+        terminal_state: Literal["success", "failed"],
+    ) -> None:
+        listeners = tuple(self._step_complete_listeners)
+        for listener in listeners:
+            self._post_lock_callbacks.append(
+                lambda listener=listener, node=node, step_kind=step_kind: listener(
+                    node.scope,
+                    node,
+                    step_kind,
+                    surface,
+                    terminal_state,
+                ),
             )
 
     def _drain_post_lock_callbacks(self) -> None:

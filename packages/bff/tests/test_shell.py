@@ -35,14 +35,17 @@ def _reset():
 def test_shell_bootstrap_null_when_unconfigured():
     response = client.get("/shell/bootstrap")
     assert response.status_code == 200
-    assert response.json() == {"showInitialGame": None}
+    assert response.json() == {"showInitialGame": None, "computeDiagnosticsEnabled": False}
 
 
 def test_shell_bootstrap_returns_trimmed_game_id():
     set_bff_config(BffConfig(show_initial_game="  628580  "))
     response = client.get("/shell/bootstrap")
     assert response.status_code == 200
-    assert response.json() == {"showInitialGame": "628580"}
+    assert response.json() == {
+        "showInitialGame": "628580",
+        "computeDiagnosticsEnabled": False,
+    }
 
 
 def test_shell_bootstrap_preserves_game_id_when_diagnostics_enabled():

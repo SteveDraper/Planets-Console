@@ -26,6 +26,7 @@ import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
 import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
 import { usePersistStoreHydrated } from './lib/usePersistStoreHydrated'
+import { useComputeDiagnosticsStore } from './stores/computeDiagnostics'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -131,6 +132,12 @@ function ConsoleShell() {
     const t = raw.trim()
     return t.length > 0 ? t : null
   }, [shellBootstrap?.showInitialGame])
+
+  const setComputeDiagnosticsEnabled = useComputeDiagnosticsStore((state) => state.setEnabled)
+
+  useEffect(() => {
+    setComputeDiagnosticsEnabled(Boolean(shellBootstrap?.computeDiagnosticsEnabled))
+  }, [setComputeDiagnosticsEnabled, shellBootstrap?.computeDiagnosticsEnabled])
 
   const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
   const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)
@@ -306,6 +313,8 @@ function ConsoleShell() {
         shellViewpoints={shellViewpoints}
         shellSelectedViewpointOrdinal={shellSelectedViewpointOrdinal}
         onShellViewpointChange={handleShellViewpointChange}
+        analyticScope={analyticScope}
+        computeDiagnosticsEnabled={Boolean(shellBootstrap?.computeDiagnosticsEnabled)}
       />
       <ShellErrorBar errors={shellErrors} onDismiss={dismissShellError} />
       {loadAllProgress ? <ShellLoadAllProgressBar progress={loadAllProgress} /> : null}

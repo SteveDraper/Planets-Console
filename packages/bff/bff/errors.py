@@ -12,6 +12,7 @@ from api.errors import PlanetsConsoleError, make_http_exception_handler
 
 __all__ = [
     "BFFError",
+    "BFFNotFoundError",
     "BFFValidationError",
     "make_http_exception_handler",
     "PlanetsConsoleError",
@@ -33,3 +34,9 @@ class BFFValidationError(BFFError):
     """Invalid analytic id or unsupported view mode for a registered analytic."""
 
     http_error: int = 422
+
+
+class BFFNotFoundError(BFFError):
+    """Requested resource is unavailable or diagnostics are disabled."""
+
+    http_error: int = 404

@@ -3,7 +3,8 @@ import type { AnalyticShellScope } from '../api/bff'
 import { analyticScopeKey } from './analyticScopeKey'
 import type { AnalyticTableStreamConnectResult } from './analyticTableStreamConnect'
 import { errorDetailFromUnknown } from './queryRetry'
-import { playerIdsFromStableKey } from './stablePlayerIdsKey'
+import { playerIdsFromStableKey, stablePlayerIdsKey } from './stablePlayerIdsKey'
+import { filterPlayerIdsForComputeFreeze, useComputeDiagnosticsStore } from '../stores/computeDiagnostics'
 
 type StreamErrorEvent = {
   type: string
@@ -83,14 +84,22 @@ export function usePerPlayerAnalyticStream<
   const { scope, enabled, playerIdsKey, policy } = options
 
   const scopeKey = scope != null ? analyticScopeKey(scope) : null
+  const rawPlayerIds =
+    enabled && playerIdsKey.length > 0 ? playerIdsFromStableKey(playerIdsKey) : []
+  const filteredPlayerIds = filterPlayerIdsForComputeFreeze(scope, rawPlayerIds)
+  const effectivePlayerIdsKey =
+    filteredPlayerIds.length > 0 ? stablePlayerIdsKey(filteredPlayerIds) : ''
   const connectionKey =
-    enabled && scopeKey != null && playerIdsKey.length > 0 ? `${scopeKey}:${playerIdsKey}` : null
+    enabled && scopeKey != null && effectivePlayerIdsKey.length > 0
+      ? `${scopeKey}:${effectivePlayerIdsKey}`
+      : null
 
   const [publishedByPlayerId, setPublishedByPlayerId] = useState<Map<number, TPublished>>(
     new Map()
   )
   const refStateByPlayerId = useRef<Map<number, TRefState>>(new Map())
   const connectionKeyRef = useRef<string | null>(null)
+  const streamGenerationRef = useRef(0)
   const scopeRef = useRef(scope)
   scopeRef.current = scope
   const streamAbortControllerRef = useRef<AbortController | null>(null)
@@ -168,7 +177,18 @@ export function usePerPlayerAnalyticStream<
 
     const isNewConnection = connectionKeyRef.current !== connectionKey
     connectionKeyRef.current = connectionKey
-    const playerIds = playerIdsFromStableKey(playerIdsKey)
+    const playerIds = playerIdsFromStableKey(effectivePlayerIdsKey)
+
+    if (isNewConnection) {
+      streamGenerationRef.current += 1
+      useComputeDiagnosticsStore.getState().upsertClientStream({
+        connectionKey,
+        generation: streamGenerationRef.current,
+        lastEventAt: null,
+        lastEventType: null,
+        lastConnectResult: null,
+      })
+    }
 
     streamAbortControllerRef.current?.abort()
 
@@ -202,7 +222,16 @@ export function usePerPlayerAnalyticStream<
     void activePolicy
       .connectUntilComplete(activeScope, playerIds, {
         signal: controller.signal,
-        onEvent: (event) => handleStreamEventRef.current(event),
+        onEvent: (event) => {
+          useComputeDiagnosticsStore.getState().upsertClientStream({
+            connectionKey,
+            generation: streamGenerationRef.current,
+            lastEventAt: new Date().toISOString(),
+            lastEventType: event.type,
+            lastConnectResult: null,
+          })
+          handleStreamEventRef.current(event)
+        },
         hasPending: () => {
           for (const playerId of playerIds) {
             const state = refStateByPlayerId.current.get(playerId)
@@ -217,6 +246,13 @@ export function usePerPlayerAnalyticStream<
         if (controller.signal.aborted) {
           return
         }
+        useComputeDiagnosticsStore.getState().upsertClientStream({
+          connectionKey,
+          generation: streamGenerationRef.current,
+          lastEventAt: new Date().toISOString(),
+          lastEventType: null,
+          lastConnectResult: result,
+        })
         if (result === 'incomplete_exhausted') {
           markIncompleteFailed(activePolicy.incompleteExhaustedMessage)
         }
@@ -225,7 +261,15 @@ export function usePerPlayerAnalyticStream<
         if (controller.signal.aborted) {
           return
         }
-        markIncompleteFailed(errorDetailFromUnknown(error))
+        const summary = errorDetailFromUnknown(error)
+        useComputeDiagnosticsStore.getState().upsertClientStream({
+          connectionKey,
+          generation: streamGenerationRef.current,
+          lastEventAt: new Date().toISOString(),
+          lastEventType: 'error',
+          lastConnectResult: summary,
+        })
+        markIncompleteFailed(summary)
       })
 
     return () => {
@@ -233,7 +277,7 @@ export function usePerPlayerAnalyticStream<
       streamAbortControllerRef.current = null
       policyRef.current.onConnectionTeardown?.()
     }
-  }, [connectionKey, playerIdsKey])
+  }, [connectionKey, effectivePlayerIdsKey])
 
   return { publishedByPlayerId }
 }

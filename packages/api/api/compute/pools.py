@@ -74,7 +74,11 @@ class PoolMetrics:
     process_executions: int = 0
 
 
-def dequeue_next_work_item(queue: deque[PoolWorkItem]) -> PoolWorkItem | None:
+def dequeue_next_work_item(
+    queue: deque[PoolWorkItem],
+    *,
+    predicate: Callable[[PoolWorkItem], bool] | None = None,
+) -> PoolWorkItem | None:
     """Dequeue the next work item using priority bands and within-band fairness.
 
     Within a band, initial steps (step_index == 0) run before continuations.
@@ -82,11 +86,14 @@ def dequeue_next_work_item(queue: deque[PoolWorkItem]) -> PoolWorkItem | None:
     """
     if not queue:
         return None
-    best_rank = min(PRIORITY_BAND_RANK[item.priority_band] for item in queue)
+    allowed = [item for item in queue if predicate is None or predicate(item)]
+    if not allowed:
+        return None
+    best_rank = min(PRIORITY_BAND_RANK[item.priority_band] for item in allowed)
     candidate_indices = [
         index
         for index, item in enumerate(queue)
-        if PRIORITY_BAND_RANK[item.priority_band] == best_rank
+        if item in allowed and PRIORITY_BAND_RANK[item.priority_band] == best_rank
     ]
     for index in candidate_indices:
         if queue[index].step_index == 0:
@@ -117,6 +124,7 @@ class ComputeWorkerPool:
         self._shutdown = False
         self._workers: list[threading.Thread] = []
         self._metrics = PoolMetrics()
+        self._dequeue_predicate: Callable[[PoolWorkItem], bool] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
         for _ in range(self._worker_count):
@@ -131,6 +139,31 @@ class ComputeWorkerPool:
     @property
     def worker_count(self) -> int:
         return self._worker_count
+
+    def set_dequeue_predicate(
+        self,
+        predicate: Callable[[PoolWorkItem], bool] | None,
+    ) -> None:
+        """Set a predicate that must return True for a queued item to be dequeued."""
+        with self._condition:
+            self._dequeue_predicate = predicate
+
+    def snapshot_work_queue(self) -> tuple[PoolWorkItem, ...]:
+        with self._condition:
+            return tuple(self._work_queue)
+
+    def wake_workers(self) -> bool:
+        """Wake pool workers waiting on an empty or fully-held queue."""
+        with self._condition:
+            had_waiters = bool(self._work_queue)
+            self._condition.notify_all()
+            return had_waiters
+
+    def enqueue_for_tests(self, item: PoolWorkItem) -> None:
+        """Enqueue one work item without going through orchestrator dispatch (tests only)."""
+        with self._condition:
+            self._work_queue.append(item)
+            self._condition.notify()
 
     def register(self, orchestrator: ComputeOrchestrator) -> int:
         """Register an orchestrator for pool completion routing; return its registration id."""
@@ -224,7 +257,8 @@ class ComputeWorkerPool:
     def _take_next_item(self) -> PoolWorkItem | None:
         with self._condition:
             while not self._shutdown:
-                item = dequeue_next_work_item(self._work_queue)
+                predicate = self._dequeue_predicate
+                item = dequeue_next_work_item(self._work_queue, predicate=predicate)
                 if item is not None:
                     self._metrics.dequeues += 1
                     return item

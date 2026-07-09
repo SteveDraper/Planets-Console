@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.streaming.table_stream.registry import TableStreamRegistry
+from api.streaming.table_stream.registry_catalog import register_table_stream_registry
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_table_stream_controller import (
@@ -55,3 +56,18 @@ def reschedule_all_inference_rows(
 
 def reset_inference_table_stream_registry_for_tests() -> None:
     _registry.reset_for_tests()
+
+
+def _inference_stream_binding_wire(scope: InferenceStreamScope) -> dict[str, object]:
+    return {
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "turn": scope.turn_number,
+    }
+
+
+register_table_stream_registry(
+    "scores",
+    _registry,
+    binding_wire=_inference_stream_binding_wire,
+)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import type { AnalyticShellScope } from '../api/bff'
 import { ChevronDown, ChevronUp, MoreVertical, RefreshCw } from 'lucide-react'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
@@ -40,6 +41,8 @@ type HeaderProps = {
   /** Current viewpoint perspective slot (1-based; 0 spectator). */
   shellSelectedViewpointOrdinal: number | null
   onShellViewpointChange: (ordinal: number) => void
+  analyticScope: AnalyticShellScope | null
+  computeDiagnosticsEnabled: boolean
 }
 
 export function Header({
@@ -62,6 +65,8 @@ export function Header({
   shellViewpoints,
   shellSelectedViewpointOrdinal,
   onShellViewpointChange,
+  analyticScope,
+  computeDiagnosticsEnabled,
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
   const loginName = useSessionStore((s) => s.name)
@@ -441,6 +446,8 @@ export function Header({
       <DiagnosticsModal
         isOpen={isDiagnosticsOpen}
         onClose={() => setIsDiagnosticsOpen(false)}
+        analyticScope={analyticScope}
+        computeDiagnosticsEnabled={computeDiagnosticsEnabled}
         getFocusRestoreFallback={() => headerMenuTriggerRef.current}
       />
     </header>

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.streaming.table_stream.registry import TableStreamRegistry
+from api.streaming.table_stream.registry_catalog import register_table_stream_registry
 
 if TYPE_CHECKING:
     from api.analytics.fleet.fleet_table_stream_controller import FleetTableStreamController
@@ -53,3 +54,14 @@ def reschedule_all_fleet_table_players(
 
 def reset_fleet_table_stream_registry_for_tests() -> None:
     _registry.reset_for_tests()
+
+
+def _fleet_stream_binding_wire(scope: FleetTableStreamScope) -> dict[str, object]:
+    return {
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "turn": scope.turn_number,
+    }
+
+
+register_table_stream_registry("fleet", _registry, binding_wire=_fleet_stream_binding_wire)

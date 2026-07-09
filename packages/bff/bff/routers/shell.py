@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from api.compute.diagnostics import compute_diagnostics_enabled
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
@@ -24,6 +25,11 @@ class ShellBootstrapResponse(BaseModel):
         default=None,
         serialization_alias="showInitialGame",
         description="Stored game id to load automatically without login, or null when disabled.",
+    )
+    compute_diagnostics_enabled: bool = Field(
+        default=False,
+        serialization_alias="computeDiagnosticsEnabled",
+        description="When true, the diagnostics modal exposes compute orchestrator controls.",
     )
     diagnostics: dict[str, Any] | None = Field(
         default=None,
@@ -52,7 +58,10 @@ def get_shell_bootstrap(include: IncludeDiagnostics = False) -> object:
     root = optional_request_root(include, "GET", "/shell/bootstrap", handler="get_shell_bootstrap")
 
     def work() -> ShellBootstrapResponse:
-        return ShellBootstrapResponse(show_initial_game=show)
+        return ShellBootstrapResponse(
+            show_initial_game=show,
+            compute_diagnostics_enabled=compute_diagnostics_enabled(),
+        )
 
     result = with_timed_child(root, "get_shell_bootstrap", "total", work)
     return finish_response(result, root)
