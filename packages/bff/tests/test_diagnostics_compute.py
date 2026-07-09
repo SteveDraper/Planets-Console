@@ -41,9 +41,7 @@ def _reset():
 def test_compute_diagnostics_disabled_returns_404():
     response = client.get("/diagnostics/compute/snapshot?gameId=1&perspective=1&turn=8")
     assert response.status_code == 404
-    freeze_status = client.get(
-        "/diagnostics/compute/freeze-status?gameId=1&perspective=1&turn=8"
-    )
+    freeze_status = client.get("/diagnostics/compute/freeze-status?gameId=1&perspective=1&turn=8")
     assert freeze_status.status_code == 404
 
 
@@ -65,9 +63,7 @@ def test_compute_diagnostics_freeze_status_without_heavy_snapshot():
         json={"gameId": 628580, "perspective": 1, "turn": 8, "playerIds": [3, 7]},
     )
 
-    status = client.get(
-        "/diagnostics/compute/freeze-status?gameId=628580&perspective=1&turn=8"
-    )
+    status = client.get("/diagnostics/compute/freeze-status?gameId=628580&perspective=1&turn=8")
     assert status.status_code == 200
     body = status.json()
     assert body == {
