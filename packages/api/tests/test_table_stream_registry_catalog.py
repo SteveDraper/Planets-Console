@@ -51,9 +51,7 @@ def _module_imports_name(module_path: Path, name: str) -> bool:
 def test_fleet_and_scores_registry_modules_do_not_import_registry_catalog() -> None:
     api_root = Path(__file__).resolve().parents[1] / "api"
     fleet_path = api_root / "analytics/fleet/fleet_table_stream_registry.py"
-    scores_path = (
-        api_root / "analytics/military_score_inference/inference_table_stream_registry.py"
-    )
+    scores_path = api_root / "analytics/military_score_inference/inference_table_stream_registry.py"
     forbidden = "api.streaming.table_stream.registry_catalog"
     assert not _module_imports_name(fleet_path, forbidden)
     assert not _module_imports_name(scores_path, forbidden)
