@@ -81,8 +81,14 @@ class ComputeDiagnosticsController:
         with self._lock:
             if self._wired and self._pool is pool:
                 return
-            pool.set_dequeue_predicate(self._pool_item_is_runnable)
-            pool.set_on_item_dequeued(self._on_pool_item_dequeued)
+        # Pool hooks take the pool lock. Never call them under ``_lock`` -- pool
+        # workers invoke ``on_item_dequeued`` while holding the pool lock and then
+        # take ``_lock`` (pool -> controller). Controller -> pool here would ABBA.
+        pool.set_dequeue_predicate(self._pool_item_is_runnable)
+        pool.set_on_item_dequeued(self._on_pool_item_dequeued)
+        with self._lock:
+            if self._wired and self._pool is pool:
+                return
             self._pool = pool
             self._wired = True
 
@@ -232,6 +238,8 @@ class ComputeDiagnosticsController:
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)
             self._pool.set_on_item_dequeued(None)
+        self._pool = None
+        self._wired = False
 
     def _history_for_shell(self, shell: ShellContextKey) -> ComputeCompletionHistory:
         with self._lock:

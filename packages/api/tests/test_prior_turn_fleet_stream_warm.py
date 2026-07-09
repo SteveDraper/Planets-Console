@@ -595,10 +595,28 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
             ),
             timeout_seconds=30.0,
         )
-        _wait_until(
-            lambda: any(event.get("type") == "complete" for event in events),
-            timeout_seconds=30.0,
-        )
+        try:
+            _wait_until(
+                lambda: any(event.get("type") == "complete" for event in events),
+                timeout_seconds=30.0,
+            )
+        except AssertionError as exc:
+            event_summary = [
+                (
+                    event.get("type"),
+                    event.get("playerId"),
+                    (event.get("diagnostics") or {}).get("fleetTorpInputStatus")
+                    if isinstance(event.get("diagnostics"), dict)
+                    else None,
+                )
+                for event in events
+            ]
+            raise AssertionError(
+                "scores stream never emitted complete after fleet ledger landed; "
+                f"events={event_summary!r}; "
+                f"scheduler_runs={dict(scheduler._runs)!r}; "
+                f"globally_paused={scheduler._globally_paused!r}"
+            ) from exc
 
         first_complete = next(event for event in events if event.get("type") == "complete")
         first_diagnostics = first_complete.get("diagnostics")
