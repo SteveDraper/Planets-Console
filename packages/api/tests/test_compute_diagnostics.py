@@ -147,6 +147,30 @@ def _thread_pool_registration(analytic_id: str) -> TurnAnalyticRegistration:
     )
 
 
+def _scores_inline_materialize_registration() -> TurnAnalyticRegistration:
+    """Minimal scores registration so completion history resolves COMPUTE_REGISTRY."""
+    return TurnAnalyticRegistration(
+        catalog_entry=TurnAnalyticCatalogEntry(
+            id="scores",
+            name="scores",
+            supports_table=True,
+            supports_map=False,
+            type="selectable",
+        ),
+        compute=lambda _ctx: {"analyticId": "scores"},
+        export_catalog=empty_export_catalog_for("scores"),
+        scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+    )
+
+
 def _bound_pool_orchestrator(sample_turn):
     """Bind a pool-backed orchestrator and return controller wiring for gate tests."""
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
@@ -471,6 +495,76 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "serverStreams",
     }
     assert wire["freezeArmed"] is False
+
+
+def test_completion_history_via_orchestrator_step_complete(sample_turn):
+    """Orchestrator terminal steps appear on snapshot wire completionHistory."""
+    from datetime import datetime
+
+    from api.analytics.exports.catalog import AnalyticExportCatalog
+    from api.analytics.exports.registry import merge_export_registry
+    from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
+    from api.compute.diagnostics.scope_key import format_compute_scope_key
+
+    scores_stub_export = AnalyticExportCatalog(
+        analytic_id="scores",
+        is_ensure_satisfied=lambda _ctx, _scope: True,
+    )
+    compute_registry = build_compute_registry((_scores_inline_materialize_registration(),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(scores_stub_export),
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    controller.on_shell_context(shell)
+    scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=sample_turn.scores[0].ownerid,
+        ),
+        analytic_id="scores",
+        scope_key_spec=compute_registry["scores"].scope_key_spec,
+    )
+
+    handle = orchestrator.submit(
+        ComputeRequest(scope=scope, step_kind=SCORES_MATERIALIZE),
+    )
+    assert handle.state == "complete"
+
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    history = wire["completionHistory"]
+    assert len(history) >= 1
+    entry = history[-1]
+    assert set(entry) == {
+        "scopeKey",
+        "surface",
+        "terminalState",
+        "stepKind",
+        "stepIndex",
+        "priorityBand",
+        "completedAt",
+    }
+    assert entry["scopeKey"] == format_compute_scope_key(scope)
+    assert entry["surface"] == "inline"
+    assert entry["terminalState"] == "success"
+    assert entry["stepKind"] == SCORES_MATERIALIZE
+    assert entry["stepIndex"] == 0
+    assert entry["priorityBand"] == "background"
+    datetime.fromisoformat(entry["completedAt"])
 
 
 def test_sticky_freeze_disarms_on_game_change():
