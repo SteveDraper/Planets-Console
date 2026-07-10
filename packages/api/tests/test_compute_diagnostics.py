@@ -1260,9 +1260,7 @@ def test_start_frozen_arms_on_orchestrator_bind(sample_turn):
             compute_diagnostics_start_frozen=True,
         )
     )
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(
-        sample_turn
-    )
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
     assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is True
     orchestrator.submit(ComputeRequest(scope=scope))
     assert pool_submissions == []

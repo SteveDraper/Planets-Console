@@ -500,9 +500,8 @@ class ComputeDiagnosticsController:
             if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
                 return True
             with self._lock:
-                if (
-                    self._single_step_dispatch_slots_remaining > 0
-                    and self._single_step_may_release(node.scope)
+                if self._single_step_dispatch_slots_remaining > 0 and self._single_step_may_release(
+                    node.scope
                 ):
                     self._single_step_dispatch_slots_remaining -= 1
                     if self._node_current_step_is_inline(node):
