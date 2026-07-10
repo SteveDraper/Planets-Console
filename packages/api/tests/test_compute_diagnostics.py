@@ -284,6 +284,26 @@ def test_single_step_empty_allowlist_is_noop(sample_turn):
     assert wire["nextSingleStep"] == {"target": None, "disabledReason": "empty_allowlist"}
 
 
+def test_single_step_nothing_steppable_is_noop(sample_turn):
+    """Non-empty focus + freeze must not arm latent grants when preview has no target."""
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({scope.player_id}))
+    # No ready focus work and no held focus pool item -- preview is nothing_steppable.
+    preview, reason = controller.preview_single_step(shell)
+    assert preview is None
+    assert reason == "nothing_steppable"
+
+    assert controller.single_step(shell) is False
+    assert pool_submissions == []
+    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step_dispatch_slots_remaining == 0
+    assert controller._single_step_shell is None
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert wire["nextSingleStep"] == {"target": None, "disabledReason": "nothing_steppable"}
+
+
 def test_single_step_redispatches_ready_node_into_pool(sample_turn):
     controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 

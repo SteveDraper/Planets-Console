@@ -267,27 +267,28 @@ class ComputeDiagnosticsController:
     def single_step(self, shell: ShellContextKey) -> bool:
         """Release exactly one in-focus compute step for ``shell``; return whether armed.
 
-        Allowlist is the focus set: single-step is a no-op when it is empty. Prefer an
-        already-held focus pool item (dequeue grant only). When none are held, arm one
-        focus dispatch slot so a single ready node in the focus set may enter the pool,
-        plus one dequeue grant so that item can run.
+        Decision matches :meth:`preview_single_step`: no-op (return ``False``, leave
+        grants at 0) when preview has no target. When the target is a held focus pool
+        item, arm a dequeue grant only. When the target would dispatch, arm one focus
+        dispatch slot plus one dequeue grant so that item can run.
 
         If the armed dispatch slot is consumed by an inline step (no pool enqueue),
         ``_dispatch_gate`` clears the unused dequeue grant immediately so it cannot
         orphan onto a later frozen pool item.
         """
-        if not self._freeze_state.freeze_armed_for_game(shell.game_id):
-            return False
         self.on_shell_context(shell)
-        if not self._freeze_state.allowlisted_player_ids(shell):
+        # Pool / ready snapshot before taking ``_lock`` -- pool workers call into the
+        # controller while holding the pool lock, so never acquire pool lock under
+        # ``_lock``. Preview owns the held-vs-dispatch decision.
+        preview, _reason = self.preview_single_step(shell)
+        if preview is None:
             return False
-        # Pool snapshot before taking ``_lock`` -- pool workers call into the controller
-        # while holding the pool lock, so never acquire pool lock under ``_lock``.
-        has_held_focus_pool_item = self._has_held_focus_pool_items(shell)
         with self._lock:
             self._single_step_shell = shell
             self._single_step_grants_remaining = 1
-            self._single_step_dispatch_slots_remaining = 0 if has_held_focus_pool_item else 1
+            self._single_step_dispatch_slots_remaining = (
+                0 if preview.source == "held" else 1
+            )
         self._redispatch_after_gate_change(shell.game_id)
         return True
 
@@ -409,10 +410,6 @@ class ComputeDiagnosticsController:
         if player_id is None:
             return False
         return player_id in allowlisted
-
-    def _has_held_focus_pool_items(self, shell: ShellContextKey) -> bool:
-        """Return whether the pool holds a focus-set item (ignoring single-step grants)."""
-        return self._preview_held_focus_pool_item(shell) is not None
 
     def _preview_held_focus_pool_item(self, shell: ShellContextKey) -> PoolWorkItem | None:
         """Return the focus pool item single-step would dequeue first, if any."""
