@@ -260,9 +260,14 @@ class ComputeDiagnosticsController:
         self._redispatch_after_gate_change(shell.game_id)
 
     def set_allowlist(self, shell: ShellContextKey, player_ids: frozenset[int]) -> None:
+        """Update focus allowlist only; does not redispatch or free-run work.
+
+        Under the focus-only model, allowlist membership gates single-step
+        selection. Work advances via :meth:`single_step` (or freeze disarm),
+        never by allowlist mutation alone.
+        """
         self.on_shell_context(shell)
         self._freeze_state.set_allowlisted_player_ids(shell, player_ids)
-        self._redispatch_after_gate_change(shell.game_id)
 
     def single_step(self, shell: ShellContextKey) -> bool:
         """Release exactly one in-focus compute step for ``shell``; return whether armed.
