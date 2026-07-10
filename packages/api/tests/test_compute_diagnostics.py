@@ -860,12 +860,103 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "freezeArmed",
         "allowlistedPlayerIds",
         "poolQueue",
+        "inFlight",
         "dagNodes",
         "readyQueue",
         "completionHistory",
         "serverStreams",
     }
     assert wire["freezeArmed"] is False
+    assert wire["inFlight"] == []
+
+
+def test_in_flight_appears_on_dequeue_and_clears_on_pool_step_complete(sample_turn):
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    pool.enqueue_for_tests(item)
+
+    wire_before = snapshot_to_wire(controller.snapshot(shell))
+    assert wire_before["inFlight"] == []
+    assert len(wire_before["poolQueue"]) == 1
+
+    released = pool.take_next_item_for_tests()
+    assert released is item
+    wire_inflight = snapshot_to_wire(controller.snapshot(shell))
+    assert len(wire_inflight["inFlight"]) == 1
+    assert wire_inflight["poolQueue"] == []
+    row = wire_inflight["inFlight"][0]
+    assert row["scopeKey"]
+    assert row["analyticId"] == item.scope.analytic_id
+    assert row["stepKind"] == item.step_kind
+    assert row["stepIndex"] == item.step_index
+    assert row["priorityBand"] == item.priority_band
+    assert row["backend"] == item.backend
+    assert row["orchestratorId"] == item.orchestrator_id
+    assert isinstance(row["startedAt"], str) and row["startedAt"]
+
+    completed_node = ComputeNodeRun(
+        scope=item.scope,
+        dependency_scopes=(),
+        state="succeeded",
+        profile_step_index=0,
+        step_index=item.step_index,
+        priority_band=item.priority_band,
+    )
+    controller._on_step_complete(
+        item.scope,
+        completed_node,
+        item.step_kind,
+        "pool",
+        "success",
+    )
+    wire_after = snapshot_to_wire(controller.snapshot(shell))
+    assert wire_after["inFlight"] == []
+
+
+def test_in_flight_clears_on_orchestrator_unbind(sample_turn):
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    pool.enqueue_for_tests(item)
+    assert pool.take_next_item_for_tests() is item
+    assert len(snapshot_to_wire(controller.snapshot(shell))["inFlight"]) == 1
+
+    # Locate the bound orchestrator for this pool registration and unbind it.
+    bound = next(
+        entry
+        for entry in controller._bound_orchestrators_snapshot()
+        if entry.orchestrator.pool_registration_id == item.orchestrator_id
+    )
+    controller.unbind_orchestrator(bound.orchestrator)
+    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
+
+
+def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    other_scope = ComputeScope(
+        analytic_id=item.scope.analytic_id,
+        game_id=item.scope.game_id + 1,
+        perspective=item.scope.perspective,
+        turn=item.scope.turn,
+        player_id=item.scope.player_id,
+    )
+    other_item = PoolWorkItem(
+        orchestrator_id=item.orchestrator_id,
+        scope=other_scope,
+        step_kind=item.step_kind,
+        backend=item.backend,
+        priority_band=item.priority_band,
+        step_index=item.step_index,
+    )
+    pool.enqueue_for_tests(item)
+    pool.enqueue_for_tests(other_item)
+    assert pool.take_next_item_for_tests() is item
+    assert pool.take_next_item_for_tests() is other_item
+
+    # Both recorded on the controller; snapshot for ``shell`` only shows in-scope.
+    assert len(controller._in_flight_snapshot()) == 2
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert len(wire["inFlight"]) == 1
+    assert wire["inFlight"][0]["orchestratorId"] == item.orchestrator_id
+    assert "gameId" not in wire["inFlight"][0]
+    assert item.scope.analytic_id in wire["inFlight"][0]["scopeKey"]
 
 
 def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample_turn):
@@ -1047,6 +1138,92 @@ def test_sticky_freeze_disarms_on_game_change():
     controller.set_freeze_armed(shell_a, freeze_armed=True)
     controller.on_shell_context(shell_b)
     assert controller._freeze_state.freeze_armed_for_game(1) is False
+
+
+def test_start_frozen_arms_on_first_shell_with_empty_allowlist():
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            compute_diagnostics=True,
+            compute_diagnostics_start_frozen=True,
+        )
+    )
+    controller = get_compute_diagnostics_controller()
+    shell = ShellContextKey(game_id=628580, perspective=1, turn=8)
+    assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is False
+
+    freeze_armed, allowlisted = controller.freeze_status(shell)
+    assert freeze_armed is True
+    assert allowlisted == frozenset()
+    assert controller.snapshot(shell).freeze_armed is True
+    assert controller.snapshot(shell).allowlisted_player_ids == ()
+
+
+def test_start_frozen_ignored_when_diagnostics_disabled():
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            compute_diagnostics=False,
+            compute_diagnostics_start_frozen=True,
+        )
+    )
+    controller = get_compute_diagnostics_controller()
+    shell = ShellContextKey(game_id=628580, perspective=1, turn=8)
+    controller.on_shell_context(shell)
+    assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is False
+
+
+def test_start_frozen_does_not_rearm_after_operator_disarm():
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            compute_diagnostics=True,
+            compute_diagnostics_start_frozen=True,
+        )
+    )
+    controller = get_compute_diagnostics_controller()
+    shell = ShellContextKey(game_id=628580, perspective=1, turn=8)
+    assert controller.freeze_status(shell)[0] is True
+
+    controller.set_freeze_armed(shell, freeze_armed=False)
+    assert controller.freeze_status(shell)[0] is False
+
+    # Same-game shell notify must not re-arm after operator disarm.
+    shell_turn_9 = ShellContextKey(game_id=628580, perspective=1, turn=9)
+    assert controller.freeze_status(shell_turn_9)[0] is False
+
+
+def test_start_frozen_arms_new_game_after_game_change():
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            compute_diagnostics=True,
+            compute_diagnostics_start_frozen=True,
+        )
+    )
+    controller = get_compute_diagnostics_controller()
+    shell_a = ShellContextKey(game_id=1, perspective=1, turn=8)
+    shell_b = ShellContextKey(game_id=2, perspective=1, turn=8)
+    assert controller.freeze_status(shell_a)[0] is True
+    assert controller.freeze_status(shell_b)[0] is True
+    assert controller._freeze_state.freeze_armed_for_game(1) is False
+
+
+def test_start_frozen_arms_on_orchestrator_bind(sample_turn):
+    set_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            compute_diagnostics=True,
+            compute_diagnostics_start_frozen=True,
+        )
+    )
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(
+        sample_turn
+    )
+    assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is True
+    orchestrator.submit(ComputeRequest(scope=scope))
+    assert pool_submissions == []
+    assert orchestrator.nodes[scope].state == "ready"
 
 
 def test_stream_allowlist_disarms_freeze_on_game_change_without_diagnostics_endpoint():

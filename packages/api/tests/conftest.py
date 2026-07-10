@@ -61,12 +61,26 @@ def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
     reset_compute_diagnostics_for_tests()
     # Force the flag off at setup too -- a prior diagnostics process/crash can leave
     # compute_diagnostics=True, which wires freeze gates into unrelated stream tests.
-    if get_config().compute_diagnostics:
-        set_config(replace(get_config(), compute_diagnostics=False))
+    cfg = get_config()
+    if cfg.compute_diagnostics or cfg.compute_diagnostics_start_frozen:
+        set_config(
+            replace(
+                cfg,
+                compute_diagnostics=False,
+                compute_diagnostics_start_frozen=False,
+            )
+        )
     yield
     reset_compute_diagnostics_for_tests()
-    if get_config().compute_diagnostics:
-        set_config(replace(get_config(), compute_diagnostics=False))
+    cfg = get_config()
+    if cfg.compute_diagnostics or cfg.compute_diagnostics_start_frozen:
+        set_config(
+            replace(
+                cfg,
+                compute_diagnostics=False,
+                compute_diagnostics_start_frozen=False,
+            )
+        )
 
 
 @pytest.fixture(autouse=True)

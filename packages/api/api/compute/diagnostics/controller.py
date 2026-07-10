@@ -19,6 +19,10 @@ from api.compute.diagnostics.history import (
     CompletionTerminalState,
     ComputeCompletionHistory,
 )
+from api.compute.diagnostics.in_flight import (
+    InFlightPoolExecution,
+    in_flight_from_pool_item,
+)
 from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     player_id_from_scope,
@@ -43,6 +47,12 @@ def compute_diagnostics_enabled() -> bool:
     return get_config().compute_diagnostics
 
 
+def compute_diagnostics_start_frozen() -> bool:
+    """Return whether first game contact should arm freeze (requires diagnostics on)."""
+    cfg = get_config()
+    return cfg.compute_diagnostics and cfg.compute_diagnostics_start_frozen
+
+
 @dataclass(frozen=True)
 class BoundOrchestrator:
     """One orchestrator registered with the diagnostics observer."""
@@ -61,6 +71,7 @@ class ComputeDiagnosticsController:
     def __init__(self) -> None:
         self._freeze_state = ComputeDiagnosticsFreezeState()
         self._histories: dict[ShellContextKey, ComputeCompletionHistory] = {}
+        self._in_flight: list[InFlightPoolExecution] = []
         self._bound_orchestrators: list[BoundOrchestrator] = []
         self._lock = threading.Lock()
         self._single_step_shell: ShellContextKey | None = None
@@ -100,6 +111,9 @@ class ComputeDiagnosticsController:
         if not self.is_enabled():
             return
         self.ensure_wired()
+        # Arm before registering the dispatch gate so early submits see freeze.
+        if compute_diagnostics_start_frozen():
+            self._freeze_state.arm_start_frozen_if_needed(ctx.game_id)
         with self._lock:
             for bound in self._bound_orchestrators:
                 if bound.orchestrator is orchestrator:
@@ -131,14 +145,22 @@ class ComputeDiagnosticsController:
         """Drop diagnostics binding for a released orchestrator.
 
         Safe no-op when diagnostics never bound this orchestrator (including when
-        diagnostics are disabled).
+        diagnostics are disabled). Clears in-flight pool records for the
+        orchestrator's registration id (abandon path when workers cannot complete).
         """
         bound: BoundOrchestrator | None = None
+        registration_id = orchestrator.pool_registration_id
         with self._lock:
             for index, candidate in enumerate(self._bound_orchestrators):
                 if candidate.orchestrator is orchestrator:
                     bound = self._bound_orchestrators.pop(index)
                     break
+            if registration_id is not None:
+                self._in_flight = [
+                    record
+                    for record in self._in_flight
+                    if record.orchestrator_id != registration_id
+                ]
         if bound is None:
             return
         bound.unregister_dispatch_gate()
@@ -156,8 +178,13 @@ class ComputeDiagnosticsController:
             if self._last_shell_context != shell:
                 self._freeze_state.on_shell_context_entered(shell)
                 self._last_shell_context = shell
+        newly_armed = False
+        if compute_diagnostics_start_frozen():
+            newly_armed = self._freeze_state.arm_start_frozen_if_needed(shell.game_id)
         if disarmed_game_id is not None:
             self._redispatch_after_gate_change(disarmed_game_id)
+        if newly_armed:
+            self._redispatch_after_gate_change(shell.game_id)
 
     def snapshot(self, shell: ShellContextKey) -> ComputeDiagnosticsSnapshot:
         from api.compute.diagnostics.snapshot import build_compute_diagnostics_snapshot
@@ -178,6 +205,7 @@ class ComputeDiagnosticsController:
             bound_orchestrators=self._bound_orchestrators_snapshot(),
             pool=self._pool,
             pool_item_is_runnable=self._pool_item_is_runnable,
+            in_flight=self._in_flight_snapshot(),
             completion_history=self._history_for_shell(shell).recent(),
         )
 
@@ -247,6 +275,7 @@ class ComputeDiagnosticsController:
             bound = list(self._bound_orchestrators)
             self._bound_orchestrators.clear()
             self._histories.clear()
+            self._in_flight.clear()
             self._single_step_shell = None
             self._single_step_grants_remaining = 0
             self._single_step_dispatch_slots_remaining = 0
@@ -273,6 +302,10 @@ class ComputeDiagnosticsController:
     def _bound_orchestrators_snapshot(self) -> tuple[BoundOrchestrator, ...]:
         with self._lock:
             return tuple(self._bound_orchestrators)
+
+    def _in_flight_snapshot(self) -> tuple[InFlightPoolExecution, ...]:
+        with self._lock:
+            return tuple(self._in_flight)
 
     def _redispatch_after_gate_change(self, game_id: int) -> None:
         """Re-dispatch ready nodes and wake held pool items after a gate change."""
@@ -372,7 +405,21 @@ class ComputeDiagnosticsController:
     def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
         shell = self._scope_matches_active_shell(node.scope)
         if shell is None:
-            return True
+            # Freeze armed (e.g. start-frozen on bind) before any operator shell:
+            # hold all work for that game until shell sync / single-step.
+            if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
+                return True
+            with self._lock:
+                if (
+                    self._single_step_dispatch_slots_remaining > 0
+                    and self._single_step_may_release(node.scope)
+                ):
+                    self._single_step_dispatch_slots_remaining -= 1
+                    if self._node_current_step_is_inline(node):
+                        self._single_step_grants_remaining = 0
+                        self._single_step_shell = None
+                    return True
+            return False
         if not self._is_scope_frozen(node.scope, shell):
             return True
         with self._lock:
@@ -405,16 +452,17 @@ class ComputeDiagnosticsController:
                 return True
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
-            return True
+            return not self._freeze_state.freeze_armed_for_game(item.scope.game_id)
         return not self._is_scope_frozen(item.scope, shell)
 
     def _on_pool_item_dequeued(self, item: PoolWorkItem) -> None:
-        """Consume one single-step grant for the focus item actually dequeued, if any.
+        """Record in-flight work and consume a single-step grant when applicable.
 
         Invoked under the pool lock after pop so concurrent workers cannot both
         observe a remaining grant before either burns it.
         """
         with self._lock:
+            self._in_flight.append(in_flight_from_pool_item(item))
             if self._single_step_grants_remaining <= 0:
                 return
             if not self._single_step_may_release(item.scope):
@@ -424,6 +472,23 @@ class ComputeDiagnosticsController:
                 self._single_step_shell = None
                 self._single_step_dispatch_slots_remaining = 0
 
+    def _clear_in_flight_for_step(
+        self,
+        scope: ComputeScope,
+        *,
+        step_kind: str,
+        step_index: int,
+    ) -> None:
+        with self._lock:
+            for index, record in enumerate(self._in_flight):
+                if (
+                    record.scope == scope
+                    and record.step_kind == step_kind
+                    and record.step_index == step_index
+                ):
+                    del self._in_flight[index]
+                    return
+
     def _on_step_complete(
         self,
         scope: ComputeScope,
@@ -432,6 +497,12 @@ class ComputeDiagnosticsController:
         surface: CompletionSurface,
         terminal_state: CompletionTerminalState,
     ) -> None:
+        if surface == "pool":
+            self._clear_in_flight_for_step(
+                scope,
+                step_kind=step_kind,
+                step_index=node.step_index,
+            )
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return

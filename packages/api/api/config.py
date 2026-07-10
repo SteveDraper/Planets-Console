@@ -27,6 +27,9 @@ class ApiConfig:
     compute_diagnostics: bool = False
     """Enable compute orchestrator diagnostics observer and BFF control endpoints."""
 
+    compute_diagnostics_start_frozen: bool = False
+    """When compute_diagnostics is on, arm freeze on first shell/game contact (empty allowlist)."""
+
 
 def get_config() -> ApiConfig:
     """Return the current API config. Defaults if not yet set by server."""

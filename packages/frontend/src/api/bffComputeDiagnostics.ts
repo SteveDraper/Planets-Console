@@ -19,6 +19,7 @@ export type ComputeDiagnosticsSnapshotResponse = {
   freezeArmed: boolean
   allowlistedPlayerIds: number[]
   poolQueue: Record<string, unknown>[]
+  inFlight: Record<string, unknown>[]
   dagNodes: Record<string, unknown>[]
   readyQueue: Record<string, unknown>[]
   completionHistory: Record<string, unknown>[]

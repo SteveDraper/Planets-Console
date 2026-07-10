@@ -210,6 +210,10 @@ export interface components {
             poolQueue: {
                 [key: string]: unknown;
             }[];
+            /** Inflight */
+            inFlight: {
+                [key: string]: unknown;
+            }[];
             /** Dagnodes */
             dagNodes: {
                 [key: string]: unknown;

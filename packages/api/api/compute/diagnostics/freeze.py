@@ -54,6 +54,18 @@ class ComputeDiagnosticsFreezeState:
                     key: value for key, value in self._shell_state.items() if key.game_id != game_id
                 }
 
+    def arm_start_frozen_if_needed(self, game_id: int) -> bool:
+        """Arm freeze for a never-seen game. Return whether freeze was newly armed.
+
+        Once a game has freeze state (armed or operator-disarmed), this is a no-op so
+        disarming is sticky within the process for that game id.
+        """
+        with self._lock:
+            if game_id in self._game_state:
+                return False
+            self._game_state[game_id] = FreezeGameState(freeze_armed=True)
+            return True
+
     def on_shell_context_entered(self, shell: ShellContextKey) -> None:
         """Reset focus allowlist when the operator changes shell context."""
         with self._lock:
