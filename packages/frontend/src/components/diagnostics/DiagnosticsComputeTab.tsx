@@ -35,35 +35,18 @@ function SectionPanel({
   title,
   value,
   onCopy,
-  highlightScopeKey,
 }: {
   title: string
   value: unknown
   onCopy: (text: string) => void
-  highlightScopeKey?: string | null
 }) {
-  const displayValue =
-    highlightScopeKey != null && Array.isArray(value)
-      ? value.map((row) => {
-          if (
-            row != null &&
-            typeof row === 'object' &&
-            'scopeKey' in row &&
-            (row as { scopeKey?: unknown }).scopeKey === highlightScopeKey
-          ) {
-            return { ...row, _nextSingleStep: true }
-          }
-          return row
-        })
-      : value
-
   return (
     <section className="rounded border border-[#52575d] bg-[#40454a] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium text-slate-200">{title}</h3>
         <button
           type="button"
-          onClick={() => onCopy(JSON.stringify(displayValue, null, 2))}
+          onClick={() => onCopy(JSON.stringify(value, null, 2))}
           className={cn(
             'rounded px-2 py-1 text-[10px] text-slate-300',
             'hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-slate-400'
@@ -72,7 +55,7 @@ function SectionPanel({
           Copy
         </button>
       </div>
-      <DiagnosticsJsonBlock value={displayValue} />
+      <DiagnosticsJsonBlock value={value} />
     </section>
   )
 }
@@ -185,7 +168,6 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
   )
 
   const nextStep = snapshot?.nextSingleStep
-  const nextScopeKey = nextStep?.target?.scopeKey ?? null
   const singleStepDisabledReason = useMemo(() => {
     if (!freezeArmed) {
       return DISABLED_REASON_LABELS.freeze_not_armed
@@ -319,25 +301,10 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
             }}
             onCopy={onCopy}
           />
-          <SectionPanel
-            title="Pool queue"
-            value={snapshot.poolQueue}
-            onCopy={onCopy}
-            highlightScopeKey={nextScopeKey}
-          />
-          <SectionPanel
-            title="In-flight"
-            value={snapshot.inFlight}
-            onCopy={onCopy}
-            highlightScopeKey={nextScopeKey}
-          />
+          <SectionPanel title="Pool queue" value={snapshot.poolQueue} onCopy={onCopy} />
+          <SectionPanel title="In-flight" value={snapshot.inFlight} onCopy={onCopy} />
           <SectionPanel title="DAG nodes" value={snapshot.dagNodes} onCopy={onCopy} />
-          <SectionPanel
-            title="Ready queue"
-            value={snapshot.readyQueue}
-            onCopy={onCopy}
-            highlightScopeKey={nextScopeKey}
-          />
+          <SectionPanel title="Ready queue" value={snapshot.readyQueue} onCopy={onCopy} />
           <SectionPanel title="Completion history" value={snapshot.completionHistory} onCopy={onCopy} />
           <SectionPanel title="Server streams" value={snapshot.serverStreams} onCopy={onCopy} />
           <SectionPanel title="Client streams" value={snapshot.clientStreams} onCopy={onCopy} />
