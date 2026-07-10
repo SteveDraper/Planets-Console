@@ -1333,6 +1333,60 @@ def test_sticky_freeze_stays_armed_across_perspective_change_and_resets_allowlis
     assert controller.stream_allowlisted_player_ids(shell_p2) == frozenset()
 
 
+def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
+    """Armed freeze must not hold same-game work outside diagnostic scope.
+
+    Sticky freeze across perspective change must leave the other perspective
+    free-running; only compute diagnostic scope is gated.
+    """
+    controller, orchestrator, shell, scope, _pool_submissions = _bound_pool_orchestrator(
+        sample_turn
+    )
+    controller.set_freeze_armed(shell, freeze_armed=True)
+
+    in_scope_node = ComputeNodeRun(scope=scope, dependency_scopes=(), state="ready")
+    assert controller._dispatch_gate(in_scope_node) is False
+
+    other_perspective_scope = ComputeScope(
+        analytic_id=scope.analytic_id,
+        game_id=scope.game_id,
+        perspective=shell.perspective + 1,
+        turn=scope.turn,
+        player_id=scope.player_id,
+    )
+    non_ancestor_turn_scope = ComputeScope(
+        analytic_id=scope.analytic_id,
+        game_id=scope.game_id,
+        perspective=shell.perspective,
+        turn=shell.turn + 50,
+        player_id=scope.player_id,
+    )
+    for out_of_scope in (other_perspective_scope, non_ancestor_turn_scope):
+        out_node = ComputeNodeRun(scope=out_of_scope, dependency_scopes=(), state="ready")
+        assert controller._dispatch_gate(out_node) is True
+
+    registration_id = orchestrator.pool_registration_id or "test-orchestrator"
+    in_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+    assert controller._pool_item_is_runnable(in_item) is False
+    for out_of_scope in (other_perspective_scope, non_ancestor_turn_scope):
+        out_item = PoolWorkItem(
+            orchestrator_id=registration_id,
+            scope=out_of_scope,
+            step_kind="materialize",
+            backend="thread",
+            priority_band="background",
+            step_index=0,
+        )
+        assert controller._pool_item_is_runnable(out_item) is True
+
+
 def test_sticky_freeze_game_change_redispatches_ready_node(sample_turn):
     controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 

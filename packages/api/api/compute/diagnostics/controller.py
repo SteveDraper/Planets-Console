@@ -493,8 +493,9 @@ class ComputeDiagnosticsController:
         return self._scope_in_focus(scope, shell)
 
     def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
-        shell = self._scope_matches_active_shell(node.scope)
-        if shell is None:
+        with self._lock:
+            operator_shell = self._last_shell_context
+        if operator_shell is None:
             # Freeze armed (e.g. start-frozen on bind) before any operator shell:
             # hold all work for that game until shell sync / single-step.
             if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
@@ -509,6 +510,12 @@ class ComputeDiagnosticsController:
                         self._single_step_shell = None
                     return True
             return False
+
+        shell = self._scope_matches_active_shell(node.scope)
+        if shell is None:
+            # Operator shell set, but scope outside diagnostic scope: allow.
+            # Freeze only gates players in compute diagnostic scope.
+            return True
         if not self._is_scope_frozen(node.scope, shell):
             return True
         with self._lock:
@@ -539,9 +546,13 @@ class ComputeDiagnosticsController:
         with self._lock:
             if self._single_step_grants_remaining > 0 and self._single_step_may_release(item.scope):
                 return True
+            operator_shell = self._last_shell_context
+        if operator_shell is None:
+            return not self._freeze_state.freeze_armed_for_game(item.scope.game_id)
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
-            return not self._freeze_state.freeze_armed_for_game(item.scope.game_id)
+            # Outside diagnostic scope with an active operator shell: allow.
+            return True
         return not self._is_scope_frozen(item.scope, shell)
 
     def _on_pool_item_dequeued(self, item: PoolWorkItem) -> None:
