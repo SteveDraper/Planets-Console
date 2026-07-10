@@ -291,9 +291,7 @@ class ComputeDiagnosticsController:
         with self._lock:
             self._single_step_shell = shell
             self._single_step_grants_remaining = 1
-            self._single_step_dispatch_slots_remaining = (
-                0 if preview.source == "held" else 1
-            )
+            self._single_step_dispatch_slots_remaining = 0 if preview.source == "held" else 1
         self._redispatch_after_gate_change(shell.game_id)
         return True
 
