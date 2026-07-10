@@ -23,6 +23,7 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     in_flight: list[dict] = Field(alias="inFlight")
     dag_nodes: list[dict] = Field(alias="dagNodes")
     ready_queue: list[dict] = Field(alias="readyQueue")
+    next_single_step: dict = Field(alias="nextSingleStep")
     completion_history: list[dict] = Field(alias="completionHistory")
     server_streams: list[dict] = Field(alias="serverStreams")
 

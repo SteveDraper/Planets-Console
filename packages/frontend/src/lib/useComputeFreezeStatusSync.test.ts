@@ -92,4 +92,35 @@ describe('useComputeFreezeStatusSync', () => {
       })
     })
   })
+
+  it('rehydrates freeze armed and allowlist on same-shell remount (SPA refresh)', async () => {
+    const fetchSpy = vi
+      .spyOn(bffComputeDiagnostics, 'fetchComputeDiagnosticsFreezeStatus')
+      .mockResolvedValue({
+        shell: scope,
+        freezeArmed: true,
+        allowlistedPlayerIds: [11],
+      })
+
+    useComputeDiagnosticsStore.getState().setEnabled(true)
+    const { unmount } = renderHook(() => useComputeFreezeStatusSync(scope))
+    await waitFor(() => {
+      expect(useComputeDiagnosticsStore.getState().freezeStatus?.allowlistedPlayerIds).toEqual([
+        11,
+      ])
+    })
+    unmount()
+
+    // Simulate full remount after browser refresh: store may still be empty until sync.
+    useComputeDiagnosticsStore.setState({ freezeStatus: null, snapshot: null })
+    renderHook(() => useComputeFreezeStatusSync(scope))
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+      expect(useComputeDiagnosticsStore.getState().freezeStatus).toEqual({
+        shell: scope,
+        freezeArmed: true,
+        allowlistedPlayerIds: [11],
+      })
+    })
+  })
 })

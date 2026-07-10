@@ -12,6 +12,11 @@ from api.compute.diagnostics.history import ComputeCompletionRecord
 from api.compute.diagnostics.in_flight import InFlightPoolExecution, in_flight_to_wire
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.scope_key import format_compute_scope_key
+from api.compute.diagnostics.single_step_preview import (
+    SingleStepDisabledReason,
+    SingleStepPreview,
+    single_step_preview_to_wire,
+)
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import ComputeWorkerPool, PoolWorkItem
 from api.compute.registry import COMPUTE_REGISTRY
@@ -28,6 +33,7 @@ class ComputeDiagnosticsSnapshot:
     in_flight: tuple[dict[str, Any], ...]
     dag_nodes: tuple[dict[str, Any], ...]
     ready_queue: tuple[dict[str, Any], ...]
+    next_single_step: dict[str, Any]
     completion_history: tuple[dict[str, Any], ...]
     server_streams: tuple[dict[str, Any], ...]
 
@@ -95,6 +101,8 @@ def build_compute_diagnostics_snapshot(
     pool: ComputeWorkerPool | None,
     pool_item_is_runnable: Callable[[PoolWorkItem], bool] | None,
     in_flight: tuple[InFlightPoolExecution, ...],
+    next_single_step: SingleStepPreview | None,
+    single_step_disabled_reason: SingleStepDisabledReason | None,
     completion_history: tuple[ComputeCompletionRecord, ...],
 ) -> ComputeDiagnosticsSnapshot:
     dag_nodes: list[dict[str, Any]] = []
@@ -146,6 +154,10 @@ def build_compute_diagnostics_snapshot(
         in_flight=in_flight_rows,
         dag_nodes=tuple(dag_nodes),
         ready_queue=tuple(ready_queue),
+        next_single_step=single_step_preview_to_wire(
+            next_single_step,
+            disabled_reason=single_step_disabled_reason,
+        ),
         completion_history=tuple(asdict(record) for record in completion_history),
         server_streams=server_streams,
     )
@@ -176,6 +188,7 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
         "inFlight": list(snapshot.in_flight),
         "dagNodes": list(snapshot.dag_nodes),
         "readyQueue": list(snapshot.ready_queue),
+        "nextSingleStep": snapshot.next_single_step,
         "completionHistory": completion_history,
         "serverStreams": list(snapshot.server_streams),
     }

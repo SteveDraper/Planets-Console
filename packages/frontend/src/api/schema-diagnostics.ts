@@ -222,6 +222,10 @@ export interface components {
             readyQueue: {
                 [key: string]: unknown;
             }[];
+            /** Nextsinglestep */
+            nextSingleStep: {
+                [key: string]: unknown;
+            };
             /** Completionhistory */
             completionHistory: {
                 [key: string]: unknown;

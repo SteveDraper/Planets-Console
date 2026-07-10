@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -29,8 +30,17 @@ from api.compute.diagnostics.scope import (
     scope_in_diagnostic_scope,
 )
 from api.compute.diagnostics.scope_key import format_compute_scope_key
+from api.compute.diagnostics.single_step_preview import (
+    SingleStepDisabledReason,
+    SingleStepPreview,
+)
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
-from api.compute.pools import ComputeWorkerPool, PoolWorkItem, get_compute_worker_pool
+from api.compute.pools import (
+    ComputeWorkerPool,
+    PoolWorkItem,
+    dequeue_next_work_item,
+    get_compute_worker_pool,
+)
 from api.compute.registry import COMPUTE_REGISTRY
 from api.compute.scope import ComputeScope
 from api.config import get_config
@@ -197,6 +207,7 @@ class ComputeDiagnosticsController:
         )
         freeze_armed = self._freeze_state.freeze_armed_for_game(shell.game_id)
         allowlisted = self._freeze_state.allowlisted_player_ids(shell)
+        preview, disabled_reason = self.preview_single_step(shell)
         return build_compute_diagnostics_snapshot(
             shell=shell,
             ancestor_turns=ancestor_turns,
@@ -206,8 +217,42 @@ class ComputeDiagnosticsController:
             pool=self._pool,
             pool_item_is_runnable=self._pool_item_is_runnable,
             in_flight=self._in_flight_snapshot(),
+            next_single_step=preview,
+            single_step_disabled_reason=disabled_reason,
             completion_history=self._history_for_shell(shell).recent(),
         )
+
+    def preview_single_step(
+        self,
+        shell: ShellContextKey,
+    ) -> tuple[SingleStepPreview | None, SingleStepDisabledReason | None]:
+        """Return the next single-step target and why stepping is disabled, if at all.
+
+        Selection matches :meth:`single_step`: prefer a held focus pool item (pool
+        priority order), else the first focus ready node that would dispatch.
+        """
+        if not self._freeze_state.freeze_armed_for_game(shell.game_id):
+            return None, "freeze_not_armed"
+        if not self._freeze_state.allowlisted_player_ids(shell):
+            return None, "empty_allowlist"
+        held = self._preview_held_focus_pool_item(shell)
+        if held is not None:
+            return (
+                SingleStepPreview(
+                    scope_key=format_compute_scope_key(held.scope),
+                    analytic_id=held.scope.analytic_id,
+                    step_kind=held.step_kind,
+                    step_index=held.step_index,
+                    priority_band=held.priority_band,
+                    backend=held.backend,
+                    source="held",
+                ),
+                None,
+            )
+        ready = self._preview_focus_ready_dispatch(shell)
+        if ready is not None:
+            return ready, None
+        return None, "nothing_steppable"
 
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
         self.on_shell_context(shell)
@@ -367,20 +412,65 @@ class ComputeDiagnosticsController:
 
     def _has_held_focus_pool_items(self, shell: ShellContextKey) -> bool:
         """Return whether the pool holds a focus-set item (ignoring single-step grants)."""
+        return self._preview_held_focus_pool_item(shell) is not None
+
+    def _preview_held_focus_pool_item(self, shell: ShellContextKey) -> PoolWorkItem | None:
+        """Return the focus pool item single-step would dequeue first, if any."""
         if self._pool is None:
-            return False
+            return None
         ancestor_turns = self._ancestor_turns_for_shell(shell)
-        for item in self._pool.snapshot_work_queue():
+
+        def is_focus_item(item: PoolWorkItem) -> bool:
             if not scope_in_diagnostic_scope(
                 item.scope,
                 game_id=shell.game_id,
                 perspective=shell.perspective,
                 ancestor_turns=ancestor_turns,
             ):
+                return False
+            return self._scope_in_focus(item.scope, shell)
+
+        queue = deque(self._pool.snapshot_work_queue())
+        return dequeue_next_work_item(queue, predicate=is_focus_item)
+
+    def _preview_focus_ready_dispatch(self, shell: ShellContextKey) -> SingleStepPreview | None:
+        """Return the focus ready node single-step would dispatch first, if any."""
+        ancestor_turns = self._ancestor_turns_for_shell(shell)
+        for bound in self._bound_orchestrators_snapshot():
+            if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
                 continue
-            if self._scope_in_focus(item.scope, shell):
-                return True
-        return False
+            view = bound.orchestrator.diagnostics_snapshot()
+            nodes_by_scope = {node.scope: node for node in view.nodes}
+            for ready_scope in view.ready_scopes:
+                if not scope_in_diagnostic_scope(
+                    ready_scope,
+                    game_id=shell.game_id,
+                    perspective=shell.perspective,
+                    ancestor_turns=ancestor_turns,
+                ):
+                    continue
+                if not self._scope_in_focus(ready_scope, shell):
+                    continue
+                node = nodes_by_scope[ready_scope]
+                registration = COMPUTE_REGISTRY.get(ready_scope.analytic_id)
+                step_kind: str | None = None
+                backend: str | None = None
+                if registration is not None and 0 <= node.profile_step_index < len(
+                    registration.compute_profile.steps
+                ):
+                    step = registration.compute_profile.steps[node.profile_step_index]
+                    step_kind = step.step_kind
+                    backend = step.backend
+                return SingleStepPreview(
+                    scope_key=format_compute_scope_key(ready_scope),
+                    analytic_id=ready_scope.analytic_id,
+                    step_kind=step_kind,
+                    step_index=node.step_index,
+                    priority_band=node.priority_band,
+                    backend=backend,
+                    source="would_dispatch",
+                )
+        return None
 
     def _scope_matches_single_step_shell(self, scope: ComputeScope) -> bool:
         if self._single_step_shell is None:

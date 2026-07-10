@@ -30,6 +30,7 @@ from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     scope_in_diagnostic_scope,
 )
+from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.pools import PoolWorkItem
 from api.compute.runtime import (
@@ -276,6 +277,11 @@ def test_single_step_empty_allowlist_is_noop(sample_turn):
     assert orchestrator.nodes[scope].state == "ready"
     assert controller._single_step_grants_remaining == 0
     assert controller._single_step_dispatch_slots_remaining == 0
+    preview, reason = controller.preview_single_step(shell)
+    assert preview is None
+    assert reason == "empty_allowlist"
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert wire["nextSingleStep"] == {"target": None, "disabledReason": "empty_allowlist"}
 
 
 def test_single_step_redispatches_ready_node_into_pool(sample_turn):
@@ -286,6 +292,13 @@ def test_single_step_redispatches_ready_node_into_pool(sample_turn):
     orchestrator.submit(ComputeRequest(scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.source == "would_dispatch"
+    assert preview.analytic_id == scope.analytic_id
+    assert preview.scope_key == format_compute_scope_key(scope)
 
     assert controller.single_step(shell) is True
     assert pool_submissions == [scope]
@@ -516,6 +529,15 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     orchestrator.submit(ComputeRequest(scope=ready_scope))
     pool.enqueue_for_tests(held_item)
     assert orchestrator.nodes[ready_scope].state == "ready"
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.source == "held"
+    assert preview.scope_key == format_compute_scope_key(held_scope)
+    assert snapshot_to_wire(controller.snapshot(shell))["nextSingleStep"]["target"]["source"] == (
+        "held"
+    )
 
     assert controller.single_step(shell) is True
     assert orchestrator.nodes[ready_scope].state == "ready"
@@ -863,11 +885,16 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "inFlight",
         "dagNodes",
         "readyQueue",
+        "nextSingleStep",
         "completionHistory",
         "serverStreams",
     }
     assert wire["freezeArmed"] is False
     assert wire["inFlight"] == []
+    assert wire["nextSingleStep"] == {
+        "target": None,
+        "disabledReason": "freeze_not_armed",
+    }
 
 
 def test_in_flight_appears_on_dequeue_and_clears_on_pool_step_complete(sample_turn):
@@ -1129,6 +1156,22 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     assert entry["stepIndex"] == 0
     assert entry["priorityBand"] == "background"
     datetime.fromisoformat(entry["completedAt"])
+
+
+def test_same_shell_freeze_status_preserves_allowlist_across_refetch():
+    """SPA refresh rehydrates allowlist; same-shell notify must not clear it."""
+    controller = get_compute_diagnostics_controller()
+    shell = ShellContextKey(game_id=628580, perspective=1, turn=8)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({3, 11}))
+
+    armed, allowlisted = controller.freeze_status(shell)
+    assert armed is True
+    assert allowlisted == frozenset({3, 11})
+    # Second fetch (browser refresh) for the same shell keeps the focus set.
+    armed_again, allowlisted_again = controller.freeze_status(shell)
+    assert armed_again is True
+    assert allowlisted_again == frozenset({3, 11})
 
 
 def test_sticky_freeze_disarms_on_game_change():

@@ -21,8 +21,13 @@ export type ComputeDiagnosticsSnapshot = {
   freezeArmed: boolean
   allowlistedPlayerIds: number[]
   poolQueue: Record<string, unknown>[]
+  inFlight: Record<string, unknown>[]
   dagNodes: Record<string, unknown>[]
   readyQueue: Record<string, unknown>[]
+  nextSingleStep: {
+    target: Record<string, unknown> | null
+    disabledReason: string | null
+  }
   completionHistory: Record<string, unknown>[]
   serverStreams: Record<string, unknown>[]
   clientStreams: ClientStreamLifecycle[]
