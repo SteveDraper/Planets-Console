@@ -489,6 +489,22 @@ class ComputeDiagnosticsController:
             return False
         return self._scope_in_focus(scope, shell)
 
+    def _try_consume_single_step_dispatch(self, node: ComputeNodeRun) -> bool:
+        """Consume one single-step dispatch slot for ``node`` if armed.
+
+        Caller must hold ``self._lock``. Inline steps also clear the paired pool
+        grant so single-step cannot leave an orphan for a later dequeue.
+        """
+        if self._single_step_dispatch_slots_remaining <= 0:
+            return False
+        if not self._single_step_may_release(node.scope):
+            return False
+        self._single_step_dispatch_slots_remaining -= 1
+        if self._node_current_step_is_inline(node):
+            self._single_step_grants_remaining = 0
+            self._single_step_shell = None
+        return True
+
     def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
         with self._lock:
             operator_shell = self._last_shell_context
@@ -498,15 +514,7 @@ class ComputeDiagnosticsController:
             if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
                 return True
             with self._lock:
-                if self._single_step_dispatch_slots_remaining > 0 and self._single_step_may_release(
-                    node.scope
-                ):
-                    self._single_step_dispatch_slots_remaining -= 1
-                    if self._node_current_step_is_inline(node):
-                        self._single_step_grants_remaining = 0
-                        self._single_step_shell = None
-                    return True
-            return False
+                return self._try_consume_single_step_dispatch(node)
 
         shell = self._scope_matches_active_shell(node.scope)
         if shell is None:
@@ -516,17 +524,7 @@ class ComputeDiagnosticsController:
         if not self._is_scope_frozen(node.scope, shell):
             return True
         with self._lock:
-            if self._single_step_dispatch_slots_remaining > 0 and self._single_step_may_release(
-                node.scope
-            ):
-                self._single_step_dispatch_slots_remaining -= 1
-                # Inline steps run in-process and never enqueue; drop the paired pool
-                # grant so single-step cannot leave an orphan for a later dequeue.
-                if self._node_current_step_is_inline(node):
-                    self._single_step_grants_remaining = 0
-                    self._single_step_shell = None
-                return True
-        return False
+            return self._try_consume_single_step_dispatch(node)
 
     def _node_current_step_is_inline(self, node: ComputeNodeRun) -> bool:
         """Return whether ``node``'s current profile step uses the inline backend."""
