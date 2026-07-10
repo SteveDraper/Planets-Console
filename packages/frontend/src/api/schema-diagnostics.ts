@@ -114,7 +114,7 @@ export interface paths {
         get?: never;
         /**
          * Put Compute Diagnostics Allowlist
-         * @description Set the per-shell player allowlist while freeze mode is armed.
+         * @description Set the per-shell focus player allowlist while freeze mode is armed.
          */
         put: operations["put_compute_diagnostics_allowlist_diagnostics_compute_allowlist_put"];
         post?: never;
@@ -135,7 +135,7 @@ export interface paths {
         put?: never;
         /**
          * Post Compute Diagnostics Single Step
-         * @description Release exactly one pool work item, then re-freeze unless allowlisted.
+         * @description Release one in-focus compute step, then re-freeze (allowlist is focus, not free-run).
          */
         post: operations["post_compute_diagnostics_single_step_diagnostics_compute_single_step_post"];
         delete?: never;

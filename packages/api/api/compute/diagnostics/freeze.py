@@ -1,4 +1,4 @@
-"""Freeze-armed state and per-shell player allowlists for compute diagnostics."""
+"""Freeze-armed state and per-shell focus allowlists for compute diagnostics."""
 
 from __future__ import annotations
 
@@ -24,13 +24,17 @@ class FreezeGameState:
 
 @dataclass
 class FreezeShellState:
-    """Per-shell player allowlist; resets on each context change."""
+    """Per-shell focus player allowlist; resets on each context change.
+
+    The allowlist names which players are in play for single-step and stream
+    narrowing. It does not free-run those players while freeze is armed.
+    """
 
     allowlisted_player_ids: set[int] = field(default_factory=set)
 
 
 class ComputeDiagnosticsFreezeState:
-    """Process-wide freeze and allowlist registry for compute diagnostics."""
+    """Process-wide freeze and focus-allowlist registry for compute diagnostics."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -51,7 +55,7 @@ class ComputeDiagnosticsFreezeState:
                 }
 
     def on_shell_context_entered(self, shell: ShellContextKey) -> None:
-        """Reset allowlist when the operator changes shell context."""
+        """Reset focus allowlist when the operator changes shell context."""
         with self._lock:
             self._shell_state[shell] = FreezeShellState()
 

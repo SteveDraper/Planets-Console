@@ -127,7 +127,8 @@ def test_freeze_dispatch_gate_blocks_frozen_scope(sample_turn):
     controller.set_freeze_armed(shell, freeze_armed=True)
     assert controller._dispatch_gate(node) is False
     controller.set_allowlist(shell, frozenset({export_scope.player_id}))
-    assert controller._dispatch_gate(node) is True
+    # Allowlist is focus-only; it must not free-run the player.
+    assert controller._dispatch_gate(node) is False
 
 
 def _thread_pool_registration(analytic_id: str) -> TurnAnalyticRegistration:
@@ -249,7 +250,8 @@ def test_disarm_redispatches_ready_node_without_unrelated_completion(sample_turn
     assert orchestrator.nodes[scope].state == "running"
 
 
-def test_allowlist_redispatches_ready_node_without_unrelated_completion(sample_turn):
+def test_allowlist_does_not_free_run_ready_node(sample_turn):
+    """Focus allowlist must not redispatch; work advances only via single-step."""
     controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -258,14 +260,29 @@ def test_allowlist_redispatches_ready_node_without_unrelated_completion(sample_t
     assert orchestrator.nodes[scope].state == "ready"
 
     controller.set_allowlist(shell, frozenset({scope.player_id}))
-    assert pool_submissions == [scope]
-    assert orchestrator.nodes[scope].state == "running"
+    assert pool_submissions == []
+    assert orchestrator.nodes[scope].state == "ready"
+
+
+def test_single_step_empty_allowlist_is_noop(sample_turn):
+    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    orchestrator.submit(ComputeRequest(scope=scope))
+    assert pool_submissions == []
+
+    assert controller.single_step(shell) is False
+    assert pool_submissions == []
+    assert orchestrator.nodes[scope].state == "ready"
+    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step_dispatch_slots_remaining == 0
 
 
 def test_single_step_redispatches_ready_node_into_pool(sample_turn):
     controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({scope.player_id}))
     orchestrator.submit(ComputeRequest(scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
@@ -315,6 +332,7 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({inline_scope.player_id}))
     handle = orchestrator.submit(
         ComputeRequest(scope=inline_scope, step_kind=SCORES_MATERIALIZE),
     )
@@ -384,6 +402,7 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({scope_a.player_id, scope_b.player_id}))
     orchestrator.submit(ComputeRequest(scope=scope_a))
     orchestrator.submit(ComputeRequest(scope=scope_b))
     assert pool_submissions == []
@@ -399,6 +418,55 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
     assert orchestrator.nodes[held].state == "ready"
     assert controller._single_step_dispatch_slots_remaining == 0
     assert controller._single_step_grants_remaining == 1
+
+
+def test_single_step_only_releases_focus_ready_scope(sample_turn):
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool_submissions: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    focus_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    other_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[1].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({focus_scope.player_id}))
+    # Submit non-focus first so ready-queue order would prefer it without focus filtering.
+    orchestrator.submit(ComputeRequest(scope=other_scope))
+    orchestrator.submit(ComputeRequest(scope=focus_scope))
+    assert pool_submissions == []
+
+    assert controller.single_step(shell) is True
+    assert pool_submissions == [focus_scope]
+    assert orchestrator.nodes[focus_scope].state == "running"
+    assert orchestrator.nodes[other_scope].state == "ready"
 
 
 def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
@@ -444,6 +512,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({ready_scope.player_id, held_scope.player_id}))
     orchestrator.submit(ComputeRequest(scope=ready_scope))
     pool.enqueue_for_tests(held_item)
     assert orchestrator.nodes[ready_scope].state == "ready"
@@ -461,10 +530,79 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     assert controller._pool_item_is_runnable(held_item) is False
 
 
+def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
+    """Single-step must never prefer non-allowlisted held work over focus held work."""
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    focus_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    other_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[1].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    registration_id = orchestrator.pool_registration_id
+    assert registration_id is not None
+    other_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=other_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="stream_attached",
+        step_index=0,
+    )
+    focus_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=focus_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({focus_scope.player_id}))
+    # Non-focus higher-priority item is first; focus item second.
+    pool.enqueue_for_tests(other_item)
+    pool.enqueue_for_tests(focus_item)
+
+    assert controller.single_step(shell) is True
+    assert controller._pool_item_is_runnable(other_item) is False
+    assert controller._pool_item_is_runnable(focus_item) is True
+
+    released = pool.take_next_item_for_tests()
+    assert released is focus_item
+    assert controller._single_step_grants_remaining == 0
+    assert pool.snapshot_work_queue() == (other_item,)
+    assert pool.take_next_item_for_tests() is None
+
+
 def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({item.scope.player_id}))
     pool.enqueue_for_tests(item)
     assert controller._pool_item_is_runnable(item) is False
     controller.single_step(shell)
@@ -503,6 +641,10 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(
+        shell,
+        frozenset({low_item.scope.player_id, high_scope.player_id}),
+    )
     # Lower-priority frozen item is first in the queue; higher-priority second.
     pool.enqueue_for_tests(low_item)
     pool.enqueue_for_tests(high_item)
@@ -517,44 +659,41 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
     assert pool.take_next_item_for_tests() is None
 
 
-def test_single_step_does_not_burn_grant_when_allowlisted_item_dequeues_first(
+def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
     sample_turn,
 ):
-    """Allowlisted dequeue must not consume the grant meant for a held frozen item."""
+    """With focus allowlist, single-step must not release non-focus held work."""
     controller, pool, shell, frozen_item = _pool_held_item_fixture(sample_turn, worker_count=0)
-    allowlisted_player = sample_turn.scores[1].ownerid
-    allowlisted_scope = normalize_export_scope_to_compute_scope(
+    focus_player = sample_turn.scores[1].ownerid
+    focus_scope = normalize_export_scope_to_compute_scope(
         ExportScope(
             game_id=shell.game_id,
             perspective=shell.perspective,
             turn=shell.turn,
-            player_id=allowlisted_player,
+            player_id=focus_player,
         ),
         analytic_id="pool-analytic",
         scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
     )
-    allowlisted_item = PoolWorkItem(
+    focus_item = PoolWorkItem(
         orchestrator_id=frozen_item.orchestrator_id,
-        scope=allowlisted_scope,
+        scope=focus_scope,
         step_kind="materialize",
         backend="inline",
-        priority_band="stream_attached",
+        priority_band="background",
         step_index=0,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    controller.set_allowlist(shell, frozenset({allowlisted_player}))
+    controller.set_allowlist(shell, frozenset({focus_player}))
     pool.enqueue_for_tests(frozen_item)
-    pool.enqueue_for_tests(allowlisted_item)
+    pool.enqueue_for_tests(focus_item)
     assert controller.single_step(shell) is True
 
     first = pool.take_next_item_for_tests()
-    assert first is allowlisted_item
-    assert controller._single_step_grants_remaining == 1
-
-    second = pool.take_next_item_for_tests()
-    assert second is frozen_item
+    assert first is focus_item
     assert controller._single_step_grants_remaining == 0
+    assert pool.snapshot_work_queue() == (frozen_item,)
     assert pool.take_next_item_for_tests() is None
 
 
@@ -583,6 +722,10 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(
+        shell,
+        frozenset({first_item.scope.player_id, second_scope.player_id}),
+    )
     pool.enqueue_for_tests(first_item)
     pool.enqueue_for_tests(second_item)
     assert controller.single_step(shell) is True
@@ -682,6 +825,7 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
 
     controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({item.scope.player_id}))
     pool.enqueue_for_tests(item)
     assert controller._pool_item_is_runnable(item) is False
 
@@ -991,10 +1135,10 @@ def test_sticky_freeze_game_change_redispatches_ready_node(sample_turn):
 
 
 def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_turn):
-    """Allowlist/history use the operator shell, not bound ambient_turn.
+    """Focus allowlist/history use the operator shell, not bound ambient_turn.
 
     Diagnosing turn N with an orchestrator bound at N-1 (fleet dependency) must
-    apply the turn-N allowlist and record completions under the turn-N history.
+    apply the turn-N focus allowlist and record completions under the turn-N history.
     """
     from tests.fixtures.export_framework.harness import clone_turn_at
 
@@ -1066,27 +1210,39 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         dependency_scopes=(),
         state="ready",
     )
-    # Operator allowlist at turn N applies to ancestor-turn N-1 work.
-    assert controller._dispatch_gate(allowlisted_node) is True
+    # Focus allowlist at turn N covers ancestor-turn N-1 scopes but does not free-run.
+    assert controller._dispatch_gate(allowlisted_node) is False
     assert controller._dispatch_gate(frozen_node) is False
 
     registration_id = orchestrator.pool_registration_id
     assert registration_id is not None
-    held_item = PoolWorkItem(
+    non_focus_held = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=other_ancestor_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="stream_attached",
+        step_index=0,
+    )
+    focus_held = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=ancestor_scope,
         step_kind="materialize",
         backend="thread",
         priority_band="background",
         step_index=0,
     )
-    pool.enqueue_for_tests(held_item)
-    assert controller._pool_item_is_runnable(held_item) is False
+    pool.enqueue_for_tests(non_focus_held)
+    pool.enqueue_for_tests(focus_held)
+    assert controller._pool_item_is_runnable(non_focus_held) is False
+    assert controller._pool_item_is_runnable(focus_held) is False
     assert controller.single_step(operator_shell) is True
-    assert controller._pool_item_is_runnable(held_item) is True
+    assert controller._pool_item_is_runnable(non_focus_held) is False
+    assert controller._pool_item_is_runnable(focus_held) is True
     assert controller._single_step_grants_remaining == 1
-    assert pool.take_next_item_for_tests() is held_item
+    assert pool.take_next_item_for_tests() is focus_held
     assert controller._single_step_grants_remaining == 0
+    assert pool.snapshot_work_queue() == (non_focus_held,)
 
     # Production fleet step kind (history resolves against COMPUTE_REGISTRY).
     completed_node = ComputeNodeRun(

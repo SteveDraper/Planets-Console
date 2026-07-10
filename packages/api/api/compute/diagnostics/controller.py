@@ -192,26 +192,29 @@ class ComputeDiagnosticsController:
         self._redispatch_after_gate_change(shell.game_id)
 
     def single_step(self, shell: ShellContextKey) -> bool:
-        """Release exactly one pool work item for ``shell``; return whether release was armed.
+        """Release exactly one in-focus compute step for ``shell``; return whether armed.
 
-        Prefer an already-held pool item (dequeue grant only). When none are held, arm one
-        dispatch slot so a single frozen ready node may enter the pool, plus one dequeue
-        grant so that item can run.
+        Allowlist is the focus set: single-step is a no-op when it is empty. Prefer an
+        already-held focus pool item (dequeue grant only). When none are held, arm one
+        focus dispatch slot so a single ready node in the focus set may enter the pool,
+        plus one dequeue grant so that item can run.
 
-        Single-step releases pool work only. If the armed dispatch slot is consumed by an
-        inline step (no pool enqueue), ``_dispatch_gate`` clears the unused dequeue grant
-        immediately so it cannot orphan onto a later frozen pool item.
+        If the armed dispatch slot is consumed by an inline step (no pool enqueue),
+        ``_dispatch_gate`` clears the unused dequeue grant immediately so it cannot
+        orphan onto a later frozen pool item.
         """
         if not self._freeze_state.freeze_armed_for_game(shell.game_id):
             return False
         self.on_shell_context(shell)
+        if not self._freeze_state.allowlisted_player_ids(shell):
+            return False
         # Pool snapshot before taking ``_lock`` -- pool workers call into the controller
         # while holding the pool lock, so never acquire pool lock under ``_lock``.
-        has_held_pool_item = self._has_held_in_scope_pool_items(shell)
+        has_held_focus_pool_item = self._has_held_focus_pool_items(shell)
         with self._lock:
             self._single_step_shell = shell
             self._single_step_grants_remaining = 1
-            self._single_step_dispatch_slots_remaining = 0 if has_held_pool_item else 1
+            self._single_step_dispatch_slots_remaining = 0 if has_held_focus_pool_item else 1
         self._redispatch_after_gate_change(shell.game_id)
         return True
 
@@ -311,17 +314,26 @@ class ComputeDiagnosticsController:
             return shell
         return None
 
-    def _is_scope_frozen(self, scope: ComputeScope, shell: ShellContextKey) -> bool:
-        if not self._freeze_state.freeze_armed_for_game(shell.game_id):
-            return False
+    def _is_scope_frozen(self, _scope: ComputeScope, shell: ShellContextKey) -> bool:
+        """Return whether automatic dispatch/dequeue is gated for the shell's game.
+
+        While freeze is armed, every player in diagnostic scope stays frozen -- the
+        allowlist is a focus set for single-step and stream narrowing, not free-run.
+        """
+        return self._freeze_state.freeze_armed_for_game(shell.game_id)
+
+    def _scope_in_focus(self, scope: ComputeScope, shell: ShellContextKey) -> bool:
+        """Return whether ``scope``'s player is on the shell focus allowlist."""
         allowlisted = self._freeze_state.allowlisted_player_ids(shell)
+        if not allowlisted:
+            return False
         player_id = player_id_from_scope(scope)
         if player_id is None:
-            return True
-        return player_id not in allowlisted
+            return False
+        return player_id in allowlisted
 
-    def _has_held_in_scope_pool_items(self, shell: ShellContextKey) -> bool:
-        """Return whether the pool holds a frozen in-scope item (ignoring single-step grants)."""
+    def _has_held_focus_pool_items(self, shell: ShellContextKey) -> bool:
+        """Return whether the pool holds a focus-set item (ignoring single-step grants)."""
         if self._pool is None:
             return False
         ancestor_turns = self._ancestor_turns_for_shell(shell)
@@ -333,7 +345,7 @@ class ComputeDiagnosticsController:
                 ancestor_turns=ancestor_turns,
             ):
                 continue
-            if self._is_scope_frozen(item.scope, shell):
+            if self._scope_in_focus(item.scope, shell):
                 return True
         return False
 
@@ -348,6 +360,15 @@ class ComputeDiagnosticsController:
             ancestor_turns=ancestor_turns,
         )
 
+    def _single_step_may_release(self, scope: ComputeScope) -> bool:
+        """Return whether an armed single-step may release ``scope`` (shell + focus)."""
+        shell = self._single_step_shell
+        if shell is None:
+            return False
+        if not self._scope_matches_single_step_shell(scope):
+            return False
+        return self._scope_in_focus(scope, shell)
+
     def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
         shell = self._scope_matches_active_shell(node.scope)
         if shell is None:
@@ -355,9 +376,8 @@ class ComputeDiagnosticsController:
         if not self._is_scope_frozen(node.scope, shell):
             return True
         with self._lock:
-            if (
-                self._single_step_dispatch_slots_remaining > 0
-                and self._scope_matches_single_step_shell(node.scope)
+            if self._single_step_dispatch_slots_remaining > 0 and self._single_step_may_release(
+                node.scope
             ):
                 self._single_step_dispatch_slots_remaining -= 1
                 # Inline steps run in-process and never enqueue; drop the paired pool
@@ -381,9 +401,7 @@ class ComputeDiagnosticsController:
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""
         with self._lock:
-            if self._single_step_grants_remaining > 0 and self._scope_matches_single_step_shell(
-                item.scope
-            ):
+            if self._single_step_grants_remaining > 0 and self._single_step_may_release(item.scope):
                 return True
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
@@ -391,7 +409,7 @@ class ComputeDiagnosticsController:
         return not self._is_scope_frozen(item.scope, shell)
 
     def _on_pool_item_dequeued(self, item: PoolWorkItem) -> None:
-        """Consume one single-step grant for the item actually dequeued, if any.
+        """Consume one single-step grant for the focus item actually dequeued, if any.
 
         Invoked under the pool lock after pop so concurrent workers cannot both
         observe a remaining grant before either burns it.
@@ -399,13 +417,7 @@ class ComputeDiagnosticsController:
         with self._lock:
             if self._single_step_grants_remaining <= 0:
                 return
-            if not self._scope_matches_single_step_shell(item.scope):
-                return
-            # Only burn the grant when the dequeued item needed it (frozen scope).
-            shell = self._single_step_shell
-            if shell is None:
-                return
-            if not self._is_scope_frozen(item.scope, shell):
+            if not self._single_step_may_release(item.scope):
                 return
             self._single_step_grants_remaining -= 1
             if self._single_step_grants_remaining == 0:
