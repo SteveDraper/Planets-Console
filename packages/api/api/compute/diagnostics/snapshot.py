@@ -9,8 +9,14 @@ from typing import Any
 from api.compute.diagnostics.controller import BoundOrchestrator
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionRecord
+from api.compute.diagnostics.in_flight import InFlightPoolExecution, in_flight_to_wire
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.scope_key import format_compute_scope_key
+from api.compute.diagnostics.single_step_preview import (
+    SingleStepDisabledReason,
+    SingleStepPreview,
+    single_step_preview_to_wire,
+)
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import ComputeWorkerPool, PoolWorkItem
 from api.compute.registry import COMPUTE_REGISTRY
@@ -24,8 +30,10 @@ class ComputeDiagnosticsSnapshot:
     freeze_armed: bool
     allowlisted_player_ids: tuple[int, ...]
     pool_queue: tuple[dict[str, Any], ...]
+    in_flight: tuple[dict[str, Any], ...]
     dag_nodes: tuple[dict[str, Any], ...]
     ready_queue: tuple[dict[str, Any], ...]
+    next_single_step: dict[str, Any]
     completion_history: tuple[dict[str, Any], ...]
     server_streams: tuple[dict[str, Any], ...]
 
@@ -92,6 +100,9 @@ def build_compute_diagnostics_snapshot(
     bound_orchestrators: tuple[BoundOrchestrator, ...],
     pool: ComputeWorkerPool | None,
     pool_item_is_runnable: Callable[[PoolWorkItem], bool] | None,
+    in_flight: tuple[InFlightPoolExecution, ...],
+    next_single_step: SingleStepPreview | None,
+    single_step_disabled_reason: SingleStepDisabledReason | None,
     completion_history: tuple[ComputeCompletionRecord, ...],
 ) -> ComputeDiagnosticsSnapshot:
     dag_nodes: list[dict[str, Any]] = []
@@ -121,6 +132,12 @@ def build_compute_diagnostics_snapshot(
             runnable = pool_item_is_runnable(item) if pool_item_is_runnable is not None else True
             pool_queue.append(_pool_item_wire(item, runnable=runnable))
 
+    in_flight_rows = tuple(
+        in_flight_to_wire(record)
+        for record in in_flight
+        if _scope_in_shell(record.scope, shell=shell, ancestor_turns=ancestor_turns)
+    )
+
     server_streams = tuple(
         binding
         for binding in active_table_stream_bindings()
@@ -134,8 +151,13 @@ def build_compute_diagnostics_snapshot(
         freeze_armed=freeze_armed,
         allowlisted_player_ids=tuple(sorted(allowlisted_player_ids)),
         pool_queue=tuple(pool_queue),
+        in_flight=in_flight_rows,
         dag_nodes=tuple(dag_nodes),
         ready_queue=tuple(ready_queue),
+        next_single_step=single_step_preview_to_wire(
+            next_single_step,
+            disabled_reason=single_step_disabled_reason,
+        ),
         completion_history=tuple(asdict(record) for record in completion_history),
         server_streams=server_streams,
     )
@@ -163,8 +185,10 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
         "freezeArmed": snapshot.freeze_armed,
         "allowlistedPlayerIds": list(snapshot.allowlisted_player_ids),
         "poolQueue": list(snapshot.pool_queue),
+        "inFlight": list(snapshot.in_flight),
         "dagNodes": list(snapshot.dag_nodes),
         "readyQueue": list(snapshot.ready_queue),
+        "nextSingleStep": snapshot.next_single_step,
         "completionHistory": completion_history,
         "serverStreams": list(snapshot.server_streams),
     }

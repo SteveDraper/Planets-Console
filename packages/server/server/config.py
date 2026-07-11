@@ -184,6 +184,15 @@ def load_config(
             f"api.compute_diagnostics must be a boolean, got "
             f"{type(raw_compute_diag).__name__}: {raw_compute_diag!r}"
         )
+    raw_start_frozen = api_dict.get(
+        "compute_diagnostics_start_frozen",
+        ApiConfig().compute_diagnostics_start_frozen,
+    )
+    if not isinstance(raw_start_frozen, bool):
+        raise TypeError(
+            f"api.compute_diagnostics_start_frozen must be a boolean, got "
+            f"{type(raw_start_frozen).__name__}: {raw_start_frozen!r}"
+        )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_root=_parse_api_storage_root(api_dict.get("storage_root")),
@@ -193,6 +202,7 @@ def load_config(
             api_dict.get("planets_api_base_url", ApiConfig().planets_api_base_url)
         ),
         compute_diagnostics=raw_compute_diag,
+        compute_diagnostics_start_frozen=raw_start_frozen,
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):

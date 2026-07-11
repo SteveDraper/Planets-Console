@@ -190,6 +190,28 @@ def test_load_config_full_replace_last_wins():
     assert root.server.host == "0.0.0.0"
 
 
+def test_load_config_compute_diagnostics_start_frozen_bool():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=[
+            "api.compute_diagnostics=true",
+            "api.compute_diagnostics_start_frozen=true",
+        ],
+        default_config_path=base,
+    )
+    assert root.api.compute_diagnostics is True
+    assert root.api.compute_diagnostics_start_frozen is True
+
+
+def test_load_config_compute_diagnostics_start_frozen_string_raises():
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(TypeError, match="compute_diagnostics_start_frozen"):
+        load_config(
+            override_specs=["api.compute_diagnostics_start_frozen=notabool"],
+            default_config_path=base,
+        )
+
+
 def test_load_config_include_dummy_data_bool():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(

@@ -95,6 +95,8 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     assert body["freezeArmed"] is False
     assert "clientStreams" not in body
     assert "poolQueue" in body
+    assert "inFlight" in body
+    assert "nextSingleStep" in body
     assert "dagNodes" in body
     assert "readyQueue" in body
     assert "completionHistory" in body

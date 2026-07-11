@@ -93,7 +93,7 @@ def put_compute_diagnostics_freeze(
 def put_compute_diagnostics_allowlist(
     body: ComputeDiagnosticsAllowlistRequest = Body(...),
 ) -> ComputeDiagnosticsSnapshotResponse:
-    """Set the per-shell player allowlist while freeze mode is armed."""
+    """Set the per-shell focus player allowlist while freeze mode is armed."""
     _require_compute_diagnostics_enabled()
     compute_diagnostics.set_compute_diagnostics_allowlist(
         game_id=body.game_id,
@@ -113,7 +113,7 @@ def put_compute_diagnostics_allowlist(
 def post_compute_diagnostics_single_step(
     body: ComputeDiagnosticsSingleStepRequest = Body(...),
 ) -> ComputeDiagnosticsSnapshotResponse:
-    """Release exactly one pool work item, then re-freeze unless allowlisted."""
+    """Release one in-focus compute step, then re-freeze (allowlist is focus, not free-run)."""
     _require_compute_diagnostics_enabled()
     compute_diagnostics.run_compute_diagnostics_single_step(
         game_id=body.game_id,

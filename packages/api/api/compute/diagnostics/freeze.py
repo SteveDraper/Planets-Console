@@ -1,4 +1,4 @@
-"""Freeze-armed state and per-shell player allowlists for compute diagnostics."""
+"""Freeze-armed state and per-shell focus allowlists for compute diagnostics."""
 
 from __future__ import annotations
 
@@ -24,13 +24,17 @@ class FreezeGameState:
 
 @dataclass
 class FreezeShellState:
-    """Per-shell player allowlist; resets on each context change."""
+    """Per-shell focus player allowlist; resets on each context change.
+
+    The allowlist names which players are in play for single-step and stream
+    narrowing. It does not free-run those players while freeze is armed.
+    """
 
     allowlisted_player_ids: set[int] = field(default_factory=set)
 
 
 class ComputeDiagnosticsFreezeState:
-    """Process-wide freeze and allowlist registry for compute diagnostics."""
+    """Process-wide freeze and focus-allowlist registry for compute diagnostics."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -50,8 +54,20 @@ class ComputeDiagnosticsFreezeState:
                     key: value for key, value in self._shell_state.items() if key.game_id != game_id
                 }
 
+    def arm_start_frozen_if_needed(self, game_id: int) -> bool:
+        """Arm freeze for a never-seen game. Return whether freeze was newly armed.
+
+        Once a game has freeze state (armed or operator-disarmed), this is a no-op so
+        disarming is sticky within the process for that game id.
+        """
+        with self._lock:
+            if game_id in self._game_state:
+                return False
+            self._game_state[game_id] = FreezeGameState(freeze_armed=True)
+            return True
+
     def on_shell_context_entered(self, shell: ShellContextKey) -> None:
-        """Reset allowlist when the operator changes shell context."""
+        """Reset focus allowlist when the operator changes shell context."""
         with self._lock:
             self._shell_state[shell] = FreezeShellState()
 

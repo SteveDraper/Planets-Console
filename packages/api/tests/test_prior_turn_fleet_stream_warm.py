@@ -614,11 +614,15 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
             )
         except AssertionError as exc:
             controller = controller_for_scope(scope)
-            scheduled_run_ids = (
-                {pid: row.session.run_id for pid, row in controller.scheduled_rows.items()}
-                if controller is not None
-                else {}
-            )
+            scheduled_row_state = {}
+            if controller is not None:
+                for pid, row in controller.scheduled_rows.items():
+                    run_id = row.session.run_id
+                    scheduled_row_state[pid] = {
+                        "run_id": run_id,
+                        "cancelled": row.session.cancel_token.is_cancelled(),
+                        "in_scheduler_runs": run_id in scheduler._runs,
+                    }
             event_summary = [
                 (
                     event.get("type"),
@@ -636,7 +640,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
                 "scores stream never emitted complete after fleet ledger landed; "
                 f"events={event_summary!r}; "
                 f"scheduler_runs={dict(scheduler._runs)!r}; "
-                f"scheduled_run_ids={scheduled_run_ids!r}; "
+                f"scheduled_row_state={scheduled_row_state!r}; "
                 f"owns_stream={owns_stream!r}; "
                 f"globally_paused={scheduler._globally_paused!r}"
             ) from exc

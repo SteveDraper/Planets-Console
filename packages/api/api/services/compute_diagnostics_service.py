@@ -74,7 +74,7 @@ def set_compute_diagnostics_allowlist(
     turn: int,
     player_ids: frozenset[int],
 ) -> None:
-    """Set the per-shell player allowlist while freeze mode is armed."""
+    """Set the per-shell focus player allowlist while freeze mode is armed."""
     shell = _shell(game_id=game_id, perspective=perspective, turn=turn)
     get_compute_diagnostics_controller().set_allowlist(shell, player_ids)
 
@@ -85,7 +85,7 @@ def run_compute_diagnostics_single_step(
     perspective: int,
     turn: int,
 ) -> bool:
-    """Release exactly one pool work item for the shell; return whether armed."""
+    """Release exactly one in-focus compute step for the shell; return whether armed."""
     shell = _shell(game_id=game_id, perspective=perspective, turn=turn)
     return get_compute_diagnostics_controller().single_step(shell)
 

@@ -14,13 +14,30 @@ export type ComputeDiagnosticsFreezeStatusResponse = {
   allowlistedPlayerIds: number[]
 }
 
+export type NextSingleStepTarget = {
+  scopeKey: string
+  analyticId: string
+  stepKind: string | null
+  stepIndex: number
+  priorityBand: string | null
+  backend: string | null
+  source: 'held' | 'would_dispatch'
+}
+
+export type NextSingleStepPreview = {
+  target: NextSingleStepTarget | null
+  disabledReason: 'freeze_not_armed' | 'empty_allowlist' | 'nothing_steppable' | null
+}
+
 export type ComputeDiagnosticsSnapshotResponse = {
   shell: AnalyticShellScope
   freezeArmed: boolean
   allowlistedPlayerIds: number[]
   poolQueue: Record<string, unknown>[]
+  inFlight: Record<string, unknown>[]
   dagNodes: Record<string, unknown>[]
   readyQueue: Record<string, unknown>[]
+  nextSingleStep: NextSingleStepPreview
   completionHistory: Record<string, unknown>[]
   serverStreams: Record<string, unknown>[]
 }

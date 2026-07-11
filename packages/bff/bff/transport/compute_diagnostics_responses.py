@@ -20,8 +20,10 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     freeze_armed: bool = Field(alias="freezeArmed")
     allowlisted_player_ids: list[int] = Field(alias="allowlistedPlayerIds")
     pool_queue: list[dict] = Field(alias="poolQueue")
+    in_flight: list[dict] = Field(alias="inFlight")
     dag_nodes: list[dict] = Field(alias="dagNodes")
     ready_queue: list[dict] = Field(alias="readyQueue")
+    next_single_step: dict = Field(alias="nextSingleStep")
     completion_history: list[dict] = Field(alias="completionHistory")
     server_streams: list[dict] = Field(alias="serverStreams")
 
