@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from api.compute.scope import ComputeScope
+
 SingleStepSource = Literal["held", "would_dispatch"]
 SingleStepDisabledReason = Literal[
     "freeze_not_armed",
@@ -17,6 +19,7 @@ SingleStepDisabledReason = Literal[
 class SingleStepPreview:
     """One schedulable compute step that single-step would release next."""
 
+    scope: ComputeScope
     scope_key: str
     analytic_id: str
     step_kind: str | None

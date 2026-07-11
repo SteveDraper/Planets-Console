@@ -503,6 +503,7 @@ def test_single_step_only_releases_focus_ready_scope(sample_turn):
 
 
 def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
+    """Same-band held beats ready (already queued approximates unfrozen FIFO)."""
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     ctx = make_fixture_query_context(
         sample_turn,
@@ -570,6 +571,140 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     assert released is held_item
     assert controller._single_step_grants_remaining == 0
     assert controller._pool_item_is_runnable(held_item) is False
+
+
+def test_single_step_prefers_stream_attached_ready_over_background_held(sample_turn):
+    """Higher-band ready dispatch outranks lower-band held pool work."""
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    stream_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    held_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[1].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    registration_id = orchestrator.pool_registration_id
+    assert registration_id is not None
+    held_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=held_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({stream_scope.player_id, held_scope.player_id}))
+    orchestrator.submit(ComputeRequest(scope=stream_scope, priority_band="stream_attached"))
+    pool.enqueue_for_tests(held_item)
+    assert orchestrator.nodes[stream_scope].state == "ready"
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.source == "would_dispatch"
+    assert preview.priority_band == "stream_attached"
+    assert preview.scope_key == format_compute_scope_key(stream_scope)
+
+    assert controller.single_step(shell) is True
+    assert orchestrator.nodes[stream_scope].state == "running"
+    assert controller._pool_item_is_runnable(held_item) is False
+
+
+def test_single_step_prefers_stream_attached_ready_across_orchestrators(sample_turn):
+    """Band order wins even when a lower-band orchestrator was bound first."""
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    background_submissions: list[ComputeScope] = []
+    stream_submissions: list[ComputeScope] = []
+
+    def background_submitter(node, _step) -> None:
+        background_submissions.append(node.scope)
+
+    def stream_submitter(node, _step) -> None:
+        stream_submissions.append(node.scope)
+
+    background_ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    stream_ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    background_orch = ComputeOrchestrator(
+        background_ctx,
+        compute_registry=compute_registry,
+        pool_submitter=background_submitter,
+    )
+    stream_orch = ComputeOrchestrator(
+        stream_ctx,
+        compute_registry=compute_registry,
+        pool_submitter=stream_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(background_orch, background_ctx)
+    controller.bind_orchestrator(stream_orch, stream_ctx)
+    shell = ShellContextKey(
+        game_id=background_ctx.game_id,
+        perspective=background_ctx.perspective,
+        turn=background_ctx.ambient_turn,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    background_scope = _player_scope(
+        background_ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    stream_scope = _player_scope(
+        stream_ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({player_id}))
+    background_orch.submit(ComputeRequest(scope=background_scope, priority_band="background"))
+    stream_orch.submit(ComputeRequest(scope=stream_scope, priority_band="stream_attached"))
+    assert background_submissions == []
+    assert stream_submissions == []
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.priority_band == "stream_attached"
+    assert preview.source == "would_dispatch"
+    assert preview.scope_key == format_compute_scope_key(stream_scope)
+
+    assert controller.single_step(shell) is True
+    assert stream_submissions == [stream_scope]
+    assert background_submissions == []
+    assert stream_orch.nodes[stream_scope].state == "running"
+    assert background_orch.nodes[background_scope].state == "ready"
 
 
 def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):

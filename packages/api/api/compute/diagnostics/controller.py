@@ -36,6 +36,7 @@ from api.compute.diagnostics.single_step_preview import (
 )
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.pools import (
+    PRIORITY_BAND_RANK,
     ComputeWorkerPool,
     PoolWorkItem,
     dequeue_next_work_item,
@@ -85,6 +86,8 @@ class ComputeDiagnosticsController:
         self._bound_orchestrators: list[BoundOrchestrator] = []
         self._lock = threading.Lock()
         self._single_step_shell: ShellContextKey | None = None
+        self._single_step_target_scope: ComputeScope | None = None
+        self._single_step_target_priority_band: str | None = None
         self._single_step_grants_remaining = 0
         self._single_step_dispatch_slots_remaining = 0
         self._pool: ComputeWorkerPool | None = None
@@ -228,31 +231,39 @@ class ComputeDiagnosticsController:
     ) -> tuple[SingleStepPreview | None, SingleStepDisabledReason | None]:
         """Return the next single-step target and why stepping is disabled, if at all.
 
-        Selection matches :meth:`single_step`: prefer a held focus pool item (pool
-        priority order), else the first focus ready node that would dispatch.
+        Selection matches :meth:`single_step` and approximates unfrozen pool order:
+        compare the best held focus pool item and the best focus ready node by
+        priority band (then initial step before continuation). On a tie, prefer
+        the held item (already queued).
         """
         if not self._freeze_state.freeze_armed_for_game(shell.game_id):
             return None, "freeze_not_armed"
         if not self._freeze_state.allowlisted_player_ids(shell):
             return None, "empty_allowlist"
         held = self._preview_held_focus_pool_item(shell)
-        if held is not None:
-            return (
-                SingleStepPreview(
-                    scope_key=format_compute_scope_key(held.scope),
-                    analytic_id=held.scope.analytic_id,
-                    step_kind=held.step_kind,
-                    step_index=held.step_index,
-                    priority_band=held.priority_band,
-                    backend=held.backend,
-                    source="held",
-                ),
-                None,
-            )
         ready = self._preview_focus_ready_dispatch(shell)
-        if ready is not None:
+        if held is None and ready is None:
+            return None, "nothing_steppable"
+        if held is None:
             return ready, None
-        return None, "nothing_steppable"
+        held_preview = SingleStepPreview(
+            scope=held.scope,
+            scope_key=format_compute_scope_key(held.scope),
+            analytic_id=held.scope.analytic_id,
+            step_kind=held.step_kind,
+            step_index=held.step_index,
+            priority_band=held.priority_band,
+            backend=held.backend,
+            source="held",
+        )
+        if ready is None:
+            return held_preview, None
+        if _single_step_release_sort_key(
+            ready.priority_band,
+            ready.step_index,
+        ) < _single_step_release_sort_key(held.priority_band, held.step_index):
+            return ready, None
+        return held_preview, None
 
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
         self.on_shell_context(shell)
@@ -272,10 +283,12 @@ class ComputeDiagnosticsController:
     def single_step(self, shell: ShellContextKey) -> bool:
         """Release exactly one in-focus compute step for ``shell``; return whether armed.
 
-        Decision matches :meth:`preview_single_step`: no-op (return ``False``, leave
-        grants at 0) when preview has no target. When the target is a held focus pool
-        item, arm a dequeue grant only. When the target would dispatch, arm one focus
-        dispatch slot plus one dequeue grant so that item can run.
+        Decision matches :meth:`preview_single_step` (priority-band order approximating
+        unfrozen pool dequeue). No-op (return ``False``, leave grants at 0) when preview
+        has no target. When the target is a held focus pool item, arm a dequeue grant
+        only. When the target would dispatch, arm one focus dispatch slot plus one
+        dequeue grant so that item can run. The armed target scope and priority band
+        are pinned so a lower-band ready node cannot consume the slot.
 
         If the armed dispatch slot is consumed by an inline step (no pool enqueue),
         ``_dispatch_gate`` clears the unused dequeue grant immediately so it cannot
@@ -290,6 +303,8 @@ class ComputeDiagnosticsController:
             return False
         with self._lock:
             self._single_step_shell = shell
+            self._single_step_target_scope = preview.scope
+            self._single_step_target_priority_band = preview.priority_band
             self._single_step_grants_remaining = 1
             self._single_step_dispatch_slots_remaining = 0 if preview.source == "held" else 1
         self._redispatch_after_gate_change(shell.game_id)
@@ -326,6 +341,8 @@ class ComputeDiagnosticsController:
             self._histories.clear()
             self._in_flight.clear()
             self._single_step_shell = None
+            self._single_step_target_scope = None
+            self._single_step_target_priority_band = None
             self._single_step_grants_remaining = 0
             self._single_step_dispatch_slots_remaining = 0
             self._active_game_id = None
@@ -434,8 +451,14 @@ class ComputeDiagnosticsController:
         return dequeue_next_work_item(queue, predicate=is_focus_item)
 
     def _preview_focus_ready_dispatch(self, shell: ShellContextKey) -> SingleStepPreview | None:
-        """Return the focus ready node single-step would dispatch first, if any."""
+        """Return the focus ready node single-step would dispatch first, if any.
+
+        Across bound orchestrators, pick by the same priority-band / initial-step
+        rules as the global pool. Ties keep bind order then ready-queue order.
+        """
         ancestor_turns = self._ancestor_turns_for_shell(shell)
+        best: SingleStepPreview | None = None
+        best_key: tuple[int, int] | None = None
         for bound in self._bound_orchestrators_snapshot():
             if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
                 continue
@@ -461,7 +484,8 @@ class ComputeDiagnosticsController:
                     step = registration.compute_profile.steps[node.profile_step_index]
                     step_kind = step.step_kind
                     backend = step.backend
-                return SingleStepPreview(
+                candidate = SingleStepPreview(
+                    scope=ready_scope,
                     scope_key=format_compute_scope_key(ready_scope),
                     analytic_id=ready_scope.analytic_id,
                     step_kind=step_kind,
@@ -470,7 +494,14 @@ class ComputeDiagnosticsController:
                     backend=backend,
                     source="would_dispatch",
                 )
-        return None
+                candidate_key = _single_step_release_sort_key(
+                    node.priority_band,
+                    node.step_index,
+                )
+                if best is None or (best_key is not None and candidate_key < best_key):
+                    best = candidate
+                    best_key = candidate_key
+        return best
 
     def _scope_matches_single_step_shell(self, scope: ComputeScope) -> bool:
         if self._single_step_shell is None:
@@ -483,10 +514,26 @@ class ComputeDiagnosticsController:
             ancestor_turns=ancestor_turns,
         )
 
-    def _single_step_may_release(self, scope: ComputeScope) -> bool:
-        """Return whether an armed single-step may release ``scope`` (shell + focus)."""
+    def _single_step_may_release(
+        self,
+        scope: ComputeScope,
+        *,
+        priority_band: str | None = None,
+    ) -> bool:
+        """Return whether an armed single-step may release ``scope`` (shell + focus).
+
+        When a target is armed, both scope and priority band must match so the same
+        compute scope on a lower-band orchestrator cannot steal the release.
+        """
         shell = self._single_step_shell
         if shell is None:
+            return False
+        if self._single_step_target_scope is not None and scope != self._single_step_target_scope:
+            return False
+        if (
+            self._single_step_target_priority_band is not None
+            and priority_band != self._single_step_target_priority_band
+        ):
             return False
         if not self._scope_matches_single_step_shell(scope):
             return False
@@ -500,12 +547,17 @@ class ComputeDiagnosticsController:
         """
         if self._single_step_dispatch_slots_remaining <= 0:
             return False
-        if not self._single_step_may_release(node.scope):
+        if not self._single_step_may_release(
+            node.scope,
+            priority_band=node.priority_band,
+        ):
             return False
         self._single_step_dispatch_slots_remaining -= 1
         if self._node_current_step_is_inline(node):
             self._single_step_grants_remaining = 0
             self._single_step_shell = None
+            self._single_step_target_scope = None
+            self._single_step_target_priority_band = None
         return True
 
     def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
@@ -542,7 +594,10 @@ class ComputeDiagnosticsController:
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""
         with self._lock:
-            if self._single_step_grants_remaining > 0 and self._single_step_may_release(item.scope):
+            if self._single_step_grants_remaining > 0 and self._single_step_may_release(
+                item.scope,
+                priority_band=item.priority_band,
+            ):
                 return True
             operator_shell = self._last_shell_context
         if operator_shell is None:
@@ -563,11 +618,16 @@ class ComputeDiagnosticsController:
             self._in_flight.append(in_flight_from_pool_item(item))
             if self._single_step_grants_remaining <= 0:
                 return
-            if not self._single_step_may_release(item.scope):
+            if not self._single_step_may_release(
+                item.scope,
+                priority_band=item.priority_band,
+            ):
                 return
             self._single_step_grants_remaining -= 1
             if self._single_step_grants_remaining == 0:
                 self._single_step_shell = None
+                self._single_step_target_scope = None
+                self._single_step_target_priority_band = None
                 self._single_step_dispatch_slots_remaining = 0
 
     def _clear_in_flight_for_step(
@@ -618,6 +678,19 @@ class ComputeDiagnosticsController:
             step_index=node.step_index,
             priority_band=node.priority_band,
         )
+
+
+def _single_step_release_sort_key(
+    priority_band: str | None,
+    step_index: int,
+) -> tuple[int, int]:
+    """Sort key matching pool dequeue: lower band rank, then initial step first."""
+    if priority_band in PRIORITY_BAND_RANK:
+        band_rank = PRIORITY_BAND_RANK[priority_band]  # type: ignore[index]
+    else:
+        band_rank = max(PRIORITY_BAND_RANK.values()) + 1
+    continuation = 0 if step_index == 0 else 1
+    return (band_rank, continuation)
 
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:
