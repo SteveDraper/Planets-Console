@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_from_json,
@@ -26,8 +27,9 @@ FLEET_MATERIALIZATION_LEG = "materialization_leg"
 
 # Two-phase fleet materialization:
 # 1. Interpreter leg (materialization_leg) advances the ledger without inference.
-# 2. FleetPersistencePolicy.persist refines inferred acquisitions from scores and
-#    may re-resolve provenance before put_ledger.
+# 2. FleetPersistencePolicy.persist refines inferred acquisitions from scores,
+#    may re-resolve provenance, writes the refined ledger back onto result_wire,
+#    then put_ledger. Stream listeners and DependencyOutputs priors read that wire.
 
 FLEET_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -142,7 +144,10 @@ class FleetPersistencePolicy:
 
     ``persist`` is phase 2 of fleet materialization: when scores inference is
     wired it refines inferred acquisitions and re-resolves provenance before
-    storing the ledger returned by the interpreter leg.
+    storing the ledger returned by the interpreter leg. The refined ledger is
+    written back onto ``result_wire["persistedLedgerWire"]`` so node-complete
+    listeners and in-run ``DependencyOutputs`` priors see post-refine state
+    (not the phase-1 interpreter payload).
     """
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
@@ -222,6 +227,15 @@ class FleetPersistencePolicy:
                 inference_materialization=services.inference_materialization,
             )
             persisted = PersistedFleetLedger(ledger=persisted.ledger, provenance=provenance)
+
+        # Stamp current materialization version and publish onto result_wire so
+        # stream listeners and DependencyOutputs match what put_ledger stores.
+        persisted = PersistedFleetLedger(
+            ledger=persisted.ledger,
+            provenance=persisted.provenance,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+        )
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(persisted)
 
         return services.persistence.put_ledger(
             scope.game_id,
