@@ -40,6 +40,10 @@ const RUN_STALL_LIMIT = 3
 
 const RUN_POLL_MS = 50
 
+/** After Apply allowlist, poll briefly for stream-scheduled focus work. */
+const ALLOWLIST_SETTLE_MS = 50
+const ALLOWLIST_SETTLE_ATTEMPTS = 8
+
 function nextStepFingerprint(snapshot: ComputeDiagnosticsSnapshotResponse): string | null {
   const target = snapshot.nextSingleStep.target
   if (target == null) {
@@ -271,6 +275,35 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     [applySnapshot, scope]
   )
 
+  const applyAllowlist = useCallback(
+    async (playerIds: number[]) => {
+      if (scope == null) {
+        return
+      }
+      setPending(true)
+      setLoadError(null)
+      try {
+        let current = await putComputeDiagnosticsAllowlist(scope, playerIds)
+        applySnapshot(current)
+        // Allowlist narrows table streams; reconnect/scheduling often lands after the
+        // PUT snapshot. Refresh until focus work appears or settle attempts expire.
+        for (let attempt = 0; attempt < ALLOWLIST_SETTLE_ATTEMPTS; attempt++) {
+          if (snapshotHasNextStep(current) || snapshotHasPendingPoolWork(current)) {
+            break
+          }
+          await sleep(ALLOWLIST_SETTLE_MS)
+          current = await fetchComputeDiagnosticsSnapshot(scope)
+          applySnapshot(current)
+        }
+      } catch (error: unknown) {
+        setLoadError(error instanceof Error ? error.message : String(error))
+      } finally {
+        setPending(false)
+      }
+    },
+    [applySnapshot, scope]
+  )
+
   const stopRun = useCallback(() => {
     runCancelRef.current = true
   }, [])
@@ -331,6 +364,12 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           continue
         }
         break
+      }
+      // Final refresh after focus goes idle so preview/Run match post-completion DAG state
+      // (new ready work can appear after the last poll that saw an empty focus set).
+      if (!runCancelRef.current) {
+        current = await fetchComputeDiagnosticsSnapshot(scope)
+        applySnapshot(current)
       }
     } catch (error: unknown) {
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -488,7 +527,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
                 .filter((part) => part.length > 0)
                 .map((part) => Number.parseInt(part, 10))
                 .filter((value) => Number.isFinite(value))
-              void runMutation(() => putComputeDiagnosticsAllowlist(scope, playerIds))
+              void applyAllowlist(playerIds)
             }}
             className={cn(
               'rounded border border-[#52575d] px-2 py-1 text-xs text-slate-200',

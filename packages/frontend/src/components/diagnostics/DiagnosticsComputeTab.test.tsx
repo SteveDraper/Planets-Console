@@ -15,12 +15,14 @@ vi.mock('../../api/bffComputeDiagnostics', async (importOriginal) => {
     ...actual,
     fetchComputeDiagnosticsSnapshot: vi.fn(),
     postComputeDiagnosticsSingleStep: vi.fn(),
+    putComputeDiagnosticsAllowlist: vi.fn(),
   }
 })
 
 import {
   fetchComputeDiagnosticsSnapshot,
   postComputeDiagnosticsSingleStep,
+  putComputeDiagnosticsAllowlist,
 } from '../../api/bffComputeDiagnostics'
 
 const SCOPE = { gameId: '42', perspective: 1, turn: 7 }
@@ -56,7 +58,9 @@ function snapshotFixture(
   }
 }
 
-function idleSnapshot(): ComputeDiagnosticsSnapshotResponse {
+function idleSnapshot(
+  overrides: Partial<ComputeDiagnosticsSnapshotResponse> = {}
+): ComputeDiagnosticsSnapshotResponse {
   return snapshotFixture({
     poolQueue: [],
     readyQueue: [],
@@ -64,6 +68,7 @@ function idleSnapshot(): ComputeDiagnosticsSnapshotResponse {
       target: null,
       disabledReason: 'nothing_steppable',
     },
+    ...overrides,
   })
 }
 
@@ -77,6 +82,9 @@ describe('DiagnosticsComputeTab', () => {
       clientStreams: [],
     })
     vi.mocked(fetchComputeDiagnosticsSnapshot).mockResolvedValue(snapshotFixture())
+    vi.mocked(putComputeDiagnosticsAllowlist).mockImplementation(async (_scope, playerIds) =>
+      idleSnapshot({ allowlistedPlayerIds: [...playerIds] })
+    )
   })
 
   it('copies pool queue JSON without injecting _nextSingleStep', async () => {
@@ -123,6 +131,9 @@ describe('DiagnosticsComputeTab', () => {
     })
     vi.mocked(postComputeDiagnosticsSingleStep)
       .mockResolvedValueOnce(afterFirst)
+      .mockResolvedValueOnce(idleSnapshot())
+    vi.mocked(fetchComputeDiagnosticsSnapshot)
+      .mockResolvedValueOnce(snapshotFixture())
       .mockResolvedValueOnce(idleSnapshot())
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
@@ -176,6 +187,7 @@ describe('DiagnosticsComputeTab', () => {
       .mockResolvedValueOnce(snapshotFixture())
       .mockResolvedValueOnce(afterStep)
       .mockResolvedValueOnce(idleSnapshot())
+      .mockResolvedValueOnce(idleSnapshot())
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
@@ -189,7 +201,7 @@ describe('DiagnosticsComputeTab', () => {
       expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      expect(fetchComputeDiagnosticsSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3)
+      expect(fetchComputeDiagnosticsSnapshot.mock.calls.length).toBeGreaterThanOrEqual(4)
     })
     await waitFor(() => {
       expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
@@ -269,6 +281,9 @@ describe('DiagnosticsComputeTab', () => {
       },
     })
     vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValueOnce(afterStep)
+    vi.mocked(fetchComputeDiagnosticsSnapshot)
+      .mockResolvedValueOnce(snapshotFixture())
+      .mockResolvedValueOnce(afterStep)
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
@@ -284,8 +299,40 @@ describe('DiagnosticsComputeTab', () => {
     await waitFor(() => {
       expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
     })
-    // No poll loop for the ghost in-flight row.
-    expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(1)
+    // Initial load + final settle refresh; no poll loop for the ghost in-flight row.
+    expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('Apply allowlist refreshes until focus work appears after stream settle', async () => {
+    const user = userEvent.setup()
+    const afterPut = idleSnapshot({ allowlistedPlayerIds: [3] })
+    const afterSettle = snapshotFixture({ allowlistedPlayerIds: [3] })
+    vi.mocked(putComputeDiagnosticsAllowlist).mockResolvedValueOnce(afterPut)
+    vi.mocked(fetchComputeDiagnosticsSnapshot)
+      .mockResolvedValueOnce(idleSnapshot())
+      .mockResolvedValueOnce(afterPut)
+      .mockResolvedValueOnce(afterSettle)
+
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Apply allowlist')).toBeEnabled()
+    })
+
+    const input = screen.getByRole('textbox')
+    await user.clear(input)
+    await user.type(input, '3')
+    await user.click(screen.getByText('Apply allowlist'))
+
+    await waitFor(() => {
+      expect(putComputeDiagnosticsAllowlist).toHaveBeenCalledWith(SCOPE, [3])
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('next-single-step-preview').textContent).toContain(
+        NEXT_SCOPE_KEY
+      )
+    })
+    expect(fetchComputeDiagnosticsSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3)
   })
 })
 describe('snapshotHasPendingPoolWork', () => {
