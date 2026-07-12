@@ -1507,16 +1507,69 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
     assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
 
 
-def test_snapshot_purges_orphan_in_flight_without_running_node(sample_turn):
-    """In-flight with no matching running DAG node is dropped from the snapshot."""
+def test_snapshot_filters_orphan_in_flight_without_mutating(sample_turn):
+    """Orphan in-flight is omitted from the wire; snapshot GET must not purge state."""
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
     assert pool.take_next_item_for_tests() is item
     assert len(controller._in_flight_snapshot()) == 1
 
-    # Node never entered running on the bound orchestrator -- orphan.
+    # Node never entered running on the bound orchestrator -- orphan for the wire.
     wire = snapshot_to_wire(controller.snapshot(shell))
     assert wire["inFlight"] == []
+    assert len(controller._in_flight_snapshot()) == 1
+
+
+def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
+    """Orphans are purged on lifecycle reconcile / finish, not on snapshot GET."""
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    other_item = PoolWorkItem(
+        orchestrator_id=item.orchestrator_id,
+        scope=ComputeScope(
+            analytic_id=item.scope.analytic_id,
+            game_id=item.scope.game_id,
+            perspective=item.scope.perspective,
+            turn=item.scope.turn,
+            player_id=(item.scope.player_id or 0) + 1,
+        ),
+        step_kind=item.step_kind,
+        backend=item.backend,
+        priority_band=item.priority_band,
+        step_index=item.step_index,
+    )
+    pool.enqueue_for_tests(item)
+    pool.enqueue_for_tests(other_item)
+    assert pool.take_next_item_for_tests() is item
+    assert pool.take_next_item_for_tests() is other_item
+    assert len(controller._in_flight_snapshot()) == 2
+
+    # Snapshot filters only -- does not mutate controller state.
+    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
+    assert len(controller._in_flight_snapshot()) == 2
+
+    # Pool-failed step-complete clears the matching row and reconciles other orphans.
+    failed_node = ComputeNodeRun(
+        scope=item.scope,
+        dependency_scopes=(),
+        state="failed",
+        profile_step_index=0,
+        step_index=item.step_index,
+        priority_band=item.priority_band,
+    )
+    controller._on_step_complete(
+        item.scope,
+        failed_node,
+        item.step_kind,
+        "pool",
+        "failed",
+        orchestrator_id=item.orchestrator_id,
+    )
+    assert controller._in_flight_snapshot() == ()
+
+    # Finish remains the authoritative clear for the matching row after re-record.
+    controller._on_pool_item_dequeued(item)
+    assert len(controller._in_flight_snapshot()) == 1
+    controller._on_pool_item_finished(item)
     assert controller._in_flight_snapshot() == ()
 
 
@@ -1538,7 +1591,10 @@ def test_in_flight_clears_on_orchestrator_unbind(sample_turn):
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
     assert pool.take_next_item_for_tests() is item
-    # Force a live in-flight record past orphan purge by skipping snapshot.
+    # Orphan relative to running nodes; retained until unbind / finish (snapshot
+    # filters only and must not purge).
+    assert len(controller._in_flight_snapshot()) == 1
+    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
     assert len(controller._in_flight_snapshot()) == 1
 
     # Locate the bound orchestrator for this pool registration and unbind it.
@@ -1573,8 +1629,8 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
     assert pool.take_next_item_for_tests() is item
     assert pool.take_next_item_for_tests() is other_item
 
-    # Both recorded on the controller; snapshot for ``shell`` only shows in-scope
-    # when the matching node is still running (orphan purge otherwise).
+    # Both recorded on the controller; raw snapshot retains them (no matching
+    # running nodes -- wire live filter would omit them).
     assert len(controller._in_flight_snapshot()) == 2
     in_scope = [
         record

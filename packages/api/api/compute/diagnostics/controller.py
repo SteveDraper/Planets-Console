@@ -21,8 +21,12 @@ from api.compute.diagnostics.history import (
     ComputeCompletionHistory,
 )
 from api.compute.diagnostics.in_flight import (
+    InFlightExecutionKey,
     InFlightPoolExecution,
+    filter_live_in_flight,
     in_flight_from_pool_item,
+    orphan_in_flight_object_ids,
+    remove_in_flight_by_object_ids,
 )
 from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
@@ -441,17 +445,9 @@ class ComputeDiagnosticsController:
         with self._lock:
             return tuple(self._in_flight)
 
-    def _live_in_flight_snapshot(self) -> tuple[InFlightPoolExecution, ...]:
-        """Return in-flight rows that still have a matching ``running`` DAG node.
-
-        Drops orphans left when a pool remote future outlives abort/completion on
-        the orchestrator node (or when finish hooks have not yet run). Also purges
-        those orphans from the controller so they cannot stall observers forever.
-        """
-        records = self._in_flight_snapshot()
-        if not records:
-            return ()
-        running_keys: set[tuple[int, ComputeScope, str, int]] = set()
+    def _running_in_flight_keys(self) -> set[InFlightExecutionKey]:
+        """Return keys for bound orchestrator nodes currently in ``running`` state."""
+        running_keys: set[InFlightExecutionKey] = set()
         for bound in self._bound_orchestrators_snapshot():
             orch_id = bound.orchestrator.pool_registration_id
             if orch_id is None:
@@ -468,22 +464,40 @@ class ComputeDiagnosticsController:
                     continue
                 step_kind = steps[node.profile_step_index].step_kind
                 running_keys.add((orch_id, node.scope, step_kind, node.step_index))
-        live = tuple(
-            record
-            for record in records
-            if (
-                record.orchestrator_id,
-                record.scope,
-                record.step_kind,
-                record.step_index,
-            )
-            in running_keys
+        return running_keys
+
+    def _live_in_flight_snapshot(self) -> tuple[InFlightPoolExecution, ...]:
+        """Return in-flight rows that still have a matching ``running`` DAG node.
+
+        Filters orphans left when a pool remote future outlives abort/completion on
+        the orchestrator node (or when finish hooks have not yet run). Read-only:
+        does not mutate ``_in_flight``; lifecycle paths call
+        :meth:`_reconcile_orphan_in_flight` to purge.
+        """
+        records = self._in_flight_snapshot()
+        if not records:
+            return ()
+        return filter_live_in_flight(records, running_keys=self._running_in_flight_keys())
+
+    def _reconcile_orphan_in_flight(self) -> None:
+        """Purge in-flight rows that no longer match a running DAG node.
+
+        Authoritative cleanup for orphans (remote future vs abort). Invoked from
+        pool-failed step-complete -- never from snapshot assembly. Success rows
+        stay until ``on_item_finished`` so persist-before-complete remains visible.
+        """
+        with self._lock:
+            if not self._in_flight:
+                return
+            recorded = list(self._in_flight)
+        orphan_ids = orphan_in_flight_object_ids(
+            recorded,
+            running_keys=self._running_in_flight_keys(),
         )
-        if len(live) != len(records):
-            live_ids = {id(record) for record in live}
-            with self._lock:
-                self._in_flight = [record for record in self._in_flight if id(record) in live_ids]
-        return live
+        if not orphan_ids:
+            return
+        with self._lock:
+            remove_in_flight_by_object_ids(self._in_flight, orphan_ids)
 
     def _redispatch_after_gate_change(self, game_id: int) -> None:
         """Re-dispatch ready nodes and wake held pool items after a gate change."""
@@ -890,8 +904,9 @@ class ComputeDiagnosticsController:
         *,
         orchestrator_id: int | None = None,
     ) -> None:
-        # Clear in-flight on pool failure immediately. On success, leave the row until
-        # pool item finished / live orphan purge so persist-before-complete stays visible.
+        # Clear in-flight on pool failure immediately, then reconcile other orphans.
+        # On success, leave the row until pool item finished so persist-before-complete
+        # stays visible (node remains ``running`` through durable write).
         if surface == "pool" and terminal_state == "failed":
             self._clear_in_flight_for_step(
                 scope,
@@ -899,6 +914,7 @@ class ComputeDiagnosticsController:
                 step_index=node.step_index,
                 orchestrator_id=orchestrator_id,
             )
+            self._reconcile_orphan_in_flight()
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return
