@@ -1,0 +1,49 @@
+---
+description: >-
+  Clear persisted analytic state (fleet ledgers, scores inference rows, hull
+  catalog masks, homeworld locator cache) for a game/perspective/player via
+  scripts/clear_analytic_persistence.py. Apply when asked to clear, wipe, reset,
+  purge, or delete analytic persistence, cached inference/fleet results, or
+  similar durable analytic state for a game.
+alwaysApply: false
+---
+
+# Clear analytic persistence
+
+When asked to clear, wipe, reset, purge, or delete **persisted analytic state**
+for a game (fleet ledgers, scores inference rows, hull catalog masks, homeworld
+locator persistence, or "analytic cache"), **do not** invent ad-hoc `rm` paths
+or one-off storage deletes.
+
+Use the project script:
+
+```bash
+uv run python scripts/clear_analytic_persistence.py \
+  --game-id <GAME_ID> \
+  --perspective <N|*> \
+  --player <N|*>
+```
+
+Optional: `--storage-root ./.data` (default), `--dry-run`.
+
+## Selectors
+
+| Flag | Values | Effect |
+|------|--------|--------|
+| `--perspective` | integer or `*` | Filters turn-scoped and perspective-scoped analytic documents |
+| `--player` | integer or `*` | Filters per-player fleet/scores entries and hull catalog masks |
+
+Both axes are independent. Examples:
+
+- One perspective, all players: `--perspective 11 --player '*'`
+- All perspectives, one player: `--perspective '*' --player 8`
+- Full wipe for a game: `--perspective '*' --player '*'`
+
+Game-global non-player documents (e.g. homeworld-locator) clear only when both
+selectors are `*`. Turn **RST / TurnInfo** data is never removed.
+
+## After clearing
+
+Durable files under `storage_root` are updated immediately. If a local server
+process holds in-memory compute/export state for that scope, restart it or
+re-open the shell scope so work recomputes from empty persistence.
