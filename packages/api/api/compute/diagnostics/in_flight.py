@@ -85,11 +85,7 @@ def orphan_in_flight_object_ids(
     in-flight rows are not swept away by a stale running-key snapshot.
     """
     live_keys = frozenset(running_keys)
-    return {
-        id(record)
-        for record in records
-        if in_flight_execution_key(record) not in live_keys
-    }
+    return {id(record) for record in records if in_flight_execution_key(record) not in live_keys}
 
 
 def remove_in_flight_by_object_ids(
