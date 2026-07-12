@@ -6,10 +6,11 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from api.compute.diagnostics.controller import BoundOrchestrator
+from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionRecord
 from api.compute.diagnostics.in_flight import InFlightPoolExecution, in_flight_to_wire
+from api.compute.diagnostics.profile_steps import registration_step_kind
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
@@ -19,7 +20,6 @@ from api.compute.diagnostics.single_step_preview import (
 )
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import PoolWorkItem
-from api.compute.registry import COMPUTE_REGISTRY
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry_catalog import active_table_stream_bindings
 
@@ -54,13 +54,6 @@ def _node_wire(
         "profileStepIndex": node.profile_step_index,
         "orchestratorId": orchestrator_id,
     }
-
-
-def _registration_step_kind(node: OrchestratorNodeSnapshot) -> str | None:
-    registration = COMPUTE_REGISTRY.get(node.scope.analytic_id)
-    if registration is None or node.profile_step_index >= len(registration.compute_profile.steps):
-        return None
-    return registration.compute_profile.steps[node.profile_step_index].step_kind
 
 
 def _pool_item_wire(
@@ -121,7 +114,10 @@ def build_compute_diagnostics_snapshot(
             dag_nodes.append(
                 _node_wire(
                     node,
-                    registration_step_kind=_registration_step_kind(node),
+                    registration_step_kind=registration_step_kind(
+                        node.scope.analytic_id,
+                        node.profile_step_index,
+                    ),
                     orchestrator_id=orch_id,
                 )
             )
@@ -132,7 +128,10 @@ def build_compute_diagnostics_snapshot(
             ready_queue.append(
                 _node_wire(
                     node,
-                    registration_step_kind=_registration_step_kind(node),
+                    registration_step_kind=registration_step_kind(
+                        node.scope.analytic_id,
+                        node.profile_step_index,
+                    ),
                     orchestrator_id=orch_id,
                 )
             )

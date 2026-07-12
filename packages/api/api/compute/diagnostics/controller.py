@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import threading
-from collections import deque
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.exports.registry import EXPORT_REGISTRY
+from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.freeze import (
     ComputeDiagnosticsFreezeState,
     ShellContextKey,
@@ -23,10 +21,17 @@ from api.compute.diagnostics.history import (
 from api.compute.diagnostics.in_flight import (
     InFlightExecutionKey,
     InFlightPoolExecution,
+    clear_in_flight_for_step,
     filter_live_in_flight,
     in_flight_from_pool_item,
     orphan_in_flight_object_ids,
     remove_in_flight_by_object_ids,
+    running_in_flight_keys_for_nodes,
+)
+from api.compute.diagnostics.profile_steps import (
+    profile_step_at,
+    profile_step_is_inline,
+    registration_step_kind,
 )
 from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
@@ -35,15 +40,19 @@ from api.compute.diagnostics.scope import (
 )
 from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
+    SingleStepArm,
     SingleStepDisabledReason,
     SingleStepPreview,
+    find_held_focus_pool_item,
+    has_running_focus_work,
+    preview_focus_ready_dispatch,
+    resolve_single_step_preview,
+    single_step_pin_matches,
 )
-from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OrchestratorNodeSnapshot
 from api.compute.pools import (
-    PRIORITY_BAND_RANK,
     ComputeWorkerPool,
     PoolWorkItem,
-    dequeue_next_work_item,
     get_compute_worker_pool,
 )
 from api.compute.registry import COMPUTE_REGISTRY
@@ -68,19 +77,6 @@ def compute_diagnostics_start_frozen() -> bool:
     return cfg.compute_diagnostics and cfg.compute_diagnostics_start_frozen
 
 
-@dataclass(frozen=True)
-class BoundOrchestrator:
-    """One orchestrator registered with the diagnostics observer."""
-
-    orchestrator: ComputeOrchestrator
-    game_id: int
-    perspective: int
-    ambient_turn: int
-    unregister_dispatch_gate: Callable[[], None]
-    unregister_dispatch_commit_hook: Callable[[], None]
-    unregister_step_complete_listener: Callable[[], None]
-
-
 class ComputeDiagnosticsController:
     """Analytic-agnostic observer and freeze controller for compute orchestration."""
 
@@ -90,12 +86,7 @@ class ComputeDiagnosticsController:
         self._in_flight: list[InFlightPoolExecution] = []
         self._bound_orchestrators: list[BoundOrchestrator] = []
         self._lock = threading.Lock()
-        self._single_step_shell: ShellContextKey | None = None
-        self._single_step_target_scope: ComputeScope | None = None
-        self._single_step_target_priority_band: str | None = None
-        self._single_step_target_orchestrator_id: int | None = None
-        self._single_step_grants_remaining = 0
-        self._single_step_dispatch_slots_remaining = 0
+        self._single_step = SingleStepArm()
         self._pool: ComputeWorkerPool | None = None
         self._wired = False
         self._active_game_id: int | None = None
@@ -279,37 +270,15 @@ class ComputeDiagnosticsController:
         this decision (same tuple used to render ``poolQueue``) so held preview
         cannot race ahead of an emptied queue wire.
         """
-        if not self._freeze_state.freeze_armed_for_game(shell.game_id):
-            return None, "freeze_not_armed"
-        if not self._freeze_state.allowlisted_player_ids(shell):
-            return None, "empty_allowlist"
         held = self._preview_held_focus_pool_item(shell, pool_queue_items=pool_queue_items)
         ready = self._preview_focus_ready_dispatch(shell)
-        if held is None and ready is None:
-            if self._has_running_focus_work(shell):
-                return None, "work_in_progress"
-            return None, "nothing_steppable"
-        if held is None:
-            return ready, None
-        held_preview = SingleStepPreview(
-            scope=held.scope,
-            scope_key=format_compute_scope_key(held.scope),
-            analytic_id=held.scope.analytic_id,
-            step_kind=held.step_kind,
-            step_index=held.step_index,
-            priority_band=held.priority_band,
-            backend=held.backend,
-            source="held",
-            orchestrator_id=held.orchestrator_id,
+        return resolve_single_step_preview(
+            freeze_armed=self._freeze_state.freeze_armed_for_game(shell.game_id),
+            allowlist_empty=not self._freeze_state.allowlisted_player_ids(shell),
+            held=held,
+            ready=ready,
+            has_running_focus=lambda: self._has_running_focus_work(shell),
         )
-        if ready is None:
-            return held_preview, None
-        if _single_step_release_sort_key(
-            ready.priority_band,
-            ready.step_index,
-        ) < _single_step_release_sort_key(held.priority_band, held.step_index):
-            return ready, None
-        return held_preview, None
 
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
         self.on_shell_context(shell)
@@ -352,12 +321,7 @@ class ComputeDiagnosticsController:
         if preview is None:
             return False
         with self._lock:
-            self._single_step_shell = shell
-            self._single_step_target_scope = preview.scope
-            self._single_step_target_priority_band = preview.priority_band
-            self._single_step_target_orchestrator_id = preview.orchestrator_id
-            self._single_step_grants_remaining = 1
-            self._single_step_dispatch_slots_remaining = 0 if preview.source == "held" else 1
+            self._single_step.arm_from_preview(shell, preview)
         if preview.source == "held":
             self._pool_hold_notify()
             return True
@@ -366,16 +330,10 @@ class ComputeDiagnosticsController:
             orchestrator_id=preview.orchestrator_id,
         )
         with self._lock:
-            slots_remaining = self._single_step_dispatch_slots_remaining
-            if slots_remaining > 0:
+            if self._single_step.dispatch_slots_remaining > 0:
                 # No commit accepted the armed slot -- clear so observers are not left
                 # with a stale grant that nothing will consume.
-                self._single_step_shell = None
-                self._single_step_target_scope = None
-                self._single_step_target_priority_band = None
-                self._single_step_target_orchestrator_id = None
-                self._single_step_grants_remaining = 0
-                self._single_step_dispatch_slots_remaining = 0
+                self._single_step.clear()
                 return False
         return True
 
@@ -409,12 +367,7 @@ class ComputeDiagnosticsController:
             self._bound_orchestrators.clear()
             self._histories.clear()
             self._in_flight.clear()
-            self._single_step_shell = None
-            self._single_step_target_scope = None
-            self._single_step_target_priority_band = None
-            self._single_step_target_orchestrator_id = None
-            self._single_step_grants_remaining = 0
-            self._single_step_dispatch_slots_remaining = 0
+            self._single_step.clear()
             self._active_game_id = None
             self._last_shell_context = None
         for entry in bound:
@@ -448,22 +401,22 @@ class ComputeDiagnosticsController:
     def _running_in_flight_keys(self) -> set[InFlightExecutionKey]:
         """Return keys for bound orchestrator nodes currently in ``running`` state."""
         running_keys: set[InFlightExecutionKey] = set()
+
+        def step_kind_for_node(node: OrchestratorNodeSnapshot) -> str | None:
+            return registration_step_kind(node.scope.analytic_id, node.profile_step_index)
+
         for bound in self._bound_orchestrators_snapshot():
             orch_id = bound.orchestrator.pool_registration_id
             if orch_id is None:
                 continue
             view = bound.orchestrator.diagnostics_snapshot()
-            for node in view.nodes:
-                if node.state != "running":
-                    continue
-                registration = COMPUTE_REGISTRY.get(node.scope.analytic_id)
-                if registration is None:
-                    continue
-                steps = registration.compute_profile.steps
-                if node.profile_step_index < 0 or node.profile_step_index >= len(steps):
-                    continue
-                step_kind = steps[node.profile_step_index].step_kind
-                running_keys.add((orch_id, node.scope, step_kind, node.step_index))
+            running_keys.update(
+                running_in_flight_keys_for_nodes(
+                    orchestrator_id=orch_id,
+                    nodes=view.nodes,
+                    step_kind_for_node=step_kind_for_node,
+                )
+            )
         return running_keys
 
     def _live_in_flight_snapshot(self) -> tuple[InFlightPoolExecution, ...]:
@@ -587,24 +540,12 @@ class ComputeDiagnosticsController:
         Covers persist-before-complete: the pool step may have finished (and cleared
         queues) while durable write is still outstanding and the node stays running.
         """
-        ancestor_turns = self._ancestor_turns_for_shell(shell)
-        for bound in self._bound_orchestrators_snapshot():
-            if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
-                continue
-            view = bound.orchestrator.diagnostics_snapshot()
-            for node in view.nodes:
-                if node.state != "running":
-                    continue
-                if not scope_in_diagnostic_scope(
-                    node.scope,
-                    game_id=shell.game_id,
-                    perspective=shell.perspective,
-                    ancestor_turns=ancestor_turns,
-                ):
-                    continue
-                if self._scope_in_focus(node.scope, shell):
-                    return True
-        return False
+        return has_running_focus_work(
+            self._bound_orchestrators_snapshot(),
+            shell,
+            ancestor_turns=self._ancestor_turns_for_shell(shell),
+            scope_in_focus=lambda scope: self._scope_in_focus(scope, shell),
+        )
 
     def _preview_held_focus_pool_item(
         self,
@@ -631,8 +572,7 @@ class ComputeDiagnosticsController:
                 return False
             return self._scope_in_focus(item.scope, shell)
 
-        queue = deque(queue_items)
-        return dequeue_next_work_item(queue, predicate=is_focus_item)
+        return find_held_focus_pool_item(queue_items, is_focus_item=is_focus_item)
 
     def _preview_focus_ready_dispatch(self, shell: ShellContextKey) -> SingleStepPreview | None:
         """Return the focus ready node single-step would dispatch first, if any.
@@ -640,62 +580,21 @@ class ComputeDiagnosticsController:
         Across bound orchestrators, pick by the same priority-band / initial-step
         rules as the global pool. Ties keep bind order then ready-queue order.
         """
-        ancestor_turns = self._ancestor_turns_for_shell(shell)
-        best: SingleStepPreview | None = None
-        best_key: tuple[int, int] | None = None
-        for bound in self._bound_orchestrators_snapshot():
-            if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
-                continue
-            view = bound.orchestrator.diagnostics_snapshot()
-            nodes_by_scope = {node.scope: node for node in view.nodes}
-            for ready_scope in view.ready_scopes:
-                if not scope_in_diagnostic_scope(
-                    ready_scope,
-                    game_id=shell.game_id,
-                    perspective=shell.perspective,
-                    ancestor_turns=ancestor_turns,
-                ):
-                    continue
-                if not self._scope_in_focus(ready_scope, shell):
-                    continue
-                node = nodes_by_scope[ready_scope]
-                registration = COMPUTE_REGISTRY.get(ready_scope.analytic_id)
-                step_kind: str | None = None
-                backend: str | None = None
-                if registration is not None and 0 <= node.profile_step_index < len(
-                    registration.compute_profile.steps
-                ):
-                    step = registration.compute_profile.steps[node.profile_step_index]
-                    step_kind = step.step_kind
-                    backend = step.backend
-                candidate = SingleStepPreview(
-                    scope=ready_scope,
-                    scope_key=format_compute_scope_key(ready_scope),
-                    analytic_id=ready_scope.analytic_id,
-                    step_kind=step_kind,
-                    step_index=node.step_index,
-                    priority_band=node.priority_band,
-                    backend=backend,
-                    source="would_dispatch",
-                    orchestrator_id=bound.orchestrator.pool_registration_id,
-                )
-                candidate_key = _single_step_release_sort_key(
-                    node.priority_band,
-                    node.step_index,
-                )
-                if best is None or (best_key is not None and candidate_key < best_key):
-                    best = candidate
-                    best_key = candidate_key
-        return best
+        return preview_focus_ready_dispatch(
+            self._bound_orchestrators_snapshot(),
+            shell,
+            ancestor_turns=self._ancestor_turns_for_shell(shell),
+            scope_in_focus=lambda scope: self._scope_in_focus(scope, shell),
+        )
 
     def _scope_matches_single_step_shell(self, scope: ComputeScope) -> bool:
-        if self._single_step_shell is None:
+        if self._single_step.shell is None:
             return False
-        ancestor_turns = self._ancestor_turns_for_shell(self._single_step_shell)
+        ancestor_turns = self._ancestor_turns_for_shell(self._single_step.shell)
         return scope_in_diagnostic_scope(
             scope,
-            game_id=self._single_step_shell.game_id,
-            perspective=self._single_step_shell.perspective,
+            game_id=self._single_step.shell.game_id,
+            perspective=self._single_step.shell.perspective,
             ancestor_turns=ancestor_turns,
         )
 
@@ -711,20 +610,16 @@ class ComputeDiagnosticsController:
         When a target is armed, scope, priority band, and orchestrator id must match
         so the same compute scope on another orchestrator cannot steal the release.
         """
-        shell = self._single_step_shell
+        shell = self._single_step.shell
         if shell is None:
             return False
-        if self._single_step_target_scope is not None and scope != self._single_step_target_scope:
-            return False
-        if (
-            self._single_step_target_priority_band is not None
-            and priority_band != self._single_step_target_priority_band
-        ):
-            return False
-        if (
-            self._single_step_target_orchestrator_id is not None
-            and orchestrator_id is not None
-            and orchestrator_id != self._single_step_target_orchestrator_id
+        if not single_step_pin_matches(
+            target_scope=self._single_step.target_scope,
+            target_priority_band=self._single_step.target_priority_band,
+            target_orchestrator_id=self._single_step.target_orchestrator_id,
+            scope=scope,
+            priority_band=priority_band,
+            orchestrator_id=orchestrator_id,
         ):
             return False
         if not self._scope_matches_single_step_shell(scope):
@@ -770,7 +665,7 @@ class ComputeDiagnosticsController:
         orchestrator_id: int | None,
     ) -> bool:
         """Return whether an armed single-step may select ``node`` (no consume)."""
-        if self._single_step_dispatch_slots_remaining <= 0:
+        if self._single_step.dispatch_slots_remaining <= 0:
             return False
         return self._single_step_may_release(
             node.scope,
@@ -792,7 +687,7 @@ class ComputeDiagnosticsController:
         different target (caller requeues the node).
         """
         with self._lock:
-            if self._single_step_dispatch_slots_remaining <= 0:
+            if self._single_step.dispatch_slots_remaining <= 0:
                 return True
             if not self._single_step_may_release(
                 node.scope,
@@ -800,29 +695,19 @@ class ComputeDiagnosticsController:
                 orchestrator_id=orchestrator_id,
             ):
                 return False
-            self._single_step_dispatch_slots_remaining -= 1
+            self._single_step.dispatch_slots_remaining -= 1
             if self._node_current_step_is_inline(node):
-                self._single_step_grants_remaining = 0
-                self._single_step_shell = None
-                self._single_step_target_scope = None
-                self._single_step_target_priority_band = None
-                self._single_step_target_orchestrator_id = None
+                self._single_step.clear()
             return True
 
     def _node_current_step_is_inline(self, node: ComputeNodeRun) -> bool:
         """Return whether ``node``'s current profile step uses the inline backend."""
-        registration = COMPUTE_REGISTRY.get(node.scope.analytic_id)
-        if registration is None:
-            return False
-        steps = registration.compute_profile.steps
-        if node.profile_step_index < 0 or node.profile_step_index >= len(steps):
-            return False
-        return steps[node.profile_step_index].backend == "inline"
+        return profile_step_is_inline(node.scope.analytic_id, node.profile_step_index)
 
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""
         with self._lock:
-            if self._single_step_grants_remaining > 0 and self._single_step_may_release(
+            if self._single_step.grants_remaining > 0 and self._single_step_may_release(
                 item.scope,
                 priority_band=item.priority_band,
                 orchestrator_id=item.orchestrator_id,
@@ -845,7 +730,7 @@ class ComputeDiagnosticsController:
         """
         with self._lock:
             self._in_flight.append(in_flight_from_pool_item(item))
-            if self._single_step_grants_remaining <= 0:
+            if self._single_step.grants_remaining <= 0:
                 return
             if not self._single_step_may_release(
                 item.scope,
@@ -853,13 +738,9 @@ class ComputeDiagnosticsController:
                 orchestrator_id=item.orchestrator_id,
             ):
                 return
-            self._single_step_grants_remaining -= 1
-            if self._single_step_grants_remaining == 0:
-                self._single_step_shell = None
-                self._single_step_target_scope = None
-                self._single_step_target_priority_band = None
-                self._single_step_target_orchestrator_id = None
-                self._single_step_dispatch_slots_remaining = 0
+            self._single_step.grants_remaining -= 1
+            if self._single_step.grants_remaining == 0:
+                self._single_step.clear()
 
     def _on_pool_item_finished(self, item: PoolWorkItem) -> None:
         """Clear the matching in-flight record after a pool worker finishes the item.
@@ -884,15 +765,13 @@ class ComputeDiagnosticsController:
         orchestrator_id: int | None,
     ) -> None:
         with self._lock:
-            for index, record in enumerate(self._in_flight):
-                if (
-                    record.scope == scope
-                    and record.step_kind == step_kind
-                    and record.step_index == step_index
-                    and (orchestrator_id is None or record.orchestrator_id == orchestrator_id)
-                ):
-                    del self._in_flight[index]
-                    return
+            clear_in_flight_for_step(
+                self._in_flight,
+                scope,
+                step_kind=step_kind,
+                step_index=step_index,
+                orchestrator_id=orchestrator_id,
+            )
 
     def _on_step_complete(
         self,
@@ -918,11 +797,8 @@ class ComputeDiagnosticsController:
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return
-        registration = COMPUTE_REGISTRY.get(scope.analytic_id)
-        if registration is None:
-            return
-        step_spec = registration.compute_profile.steps[node.profile_step_index]
-        if step_spec.step_kind != step_kind:
+        step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
+        if step_spec is None or step_spec.step_kind != step_kind:
             return
         self._history_for_shell(shell).append(
             scope_key=format_compute_scope_key(scope),
@@ -932,19 +808,6 @@ class ComputeDiagnosticsController:
             step_index=node.step_index,
             priority_band=node.priority_band,
         )
-
-
-def _single_step_release_sort_key(
-    priority_band: str | None,
-    step_index: int,
-) -> tuple[int, int]:
-    """Sort key matching pool dequeue: lower band rank, then initial step first."""
-    if priority_band in PRIORITY_BAND_RANK:
-        band_rank = PRIORITY_BAND_RANK[priority_band]  # type: ignore[index]
-    else:
-        band_rank = max(PRIORITY_BAND_RANK.values()) + 1
-    continuation = 0 if step_index == 0 else 1
-    return (band_rank, continuation)
 
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:

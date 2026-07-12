@@ -276,8 +276,8 @@ def test_single_step_empty_allowlist_is_noop(sample_turn):
     assert controller.single_step(shell) is False
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
-    assert controller._single_step_grants_remaining == 0
-    assert controller._single_step_dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 0
+    assert controller._single_step.dispatch_slots_remaining == 0
     preview, reason = controller.preview_single_step(shell)
     assert preview is None
     assert reason == "empty_allowlist"
@@ -298,9 +298,9 @@ def test_single_step_nothing_steppable_is_noop(sample_turn):
 
     assert controller.single_step(shell) is False
     assert pool_submissions == []
-    assert controller._single_step_grants_remaining == 0
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_shell is None
+    assert controller._single_step.grants_remaining == 0
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.shell is None
     wire = snapshot_to_wire(controller.snapshot(shell))
     assert wire["nextSingleStep"] == {"target": None, "disabledReason": "nothing_steppable"}
 
@@ -599,9 +599,9 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
 
     assert controller.single_step(shell) is True
     assert orchestrator.nodes[inline_scope].state == "complete"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 0
-    assert controller._single_step_shell is None
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 0
+    assert controller._single_step.shell is None
 
     registration_id = orchestrator.pool_registration_id
     assert registration_id is not None
@@ -674,8 +674,8 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
     assert released in {scope_a, scope_b}
     assert orchestrator.nodes[released].state == "running"
     assert orchestrator.nodes[held].state == "ready"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 1
 
 
 def test_single_step_only_releases_focus_ready_scope(sample_turn):
@@ -787,14 +787,14 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
 
     assert controller.single_step(shell) is True
     assert orchestrator.nodes[ready_scope].state == "ready"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 1
     assert controller._pool_item_is_runnable(held_item) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is held_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(held_item) is False
 
 
@@ -977,12 +977,12 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
     controller.set_allowlist(shell, frozenset({player_id}))
 
     with controller._lock:
-        controller._single_step_shell = shell
-        controller._single_step_target_scope = scope
-        controller._single_step_target_priority_band = "background"
-        controller._single_step_target_orchestrator_id = id_a
-        controller._single_step_dispatch_slots_remaining = 1
-        controller._single_step_grants_remaining = 1
+        controller._single_step.shell = shell
+        controller._single_step.target_scope = scope
+        controller._single_step.target_priority_band = "background"
+        controller._single_step.target_orchestrator_id = id_a
+        controller._single_step.dispatch_slots_remaining = 1
+        controller._single_step.grants_remaining = 1
 
     node = ComputeNodeRun(
         scope=scope,
@@ -997,7 +997,7 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
     assert orch_b._dispatch_gates[0](node) is False
     # Commit agrees: wrong orch cannot consume the armed slot.
     assert controller._commit_single_step_dispatch(node, orchestrator_id=id_b) is False
-    assert controller._single_step_dispatch_slots_remaining == 1
+    assert controller._single_step.dispatch_slots_remaining == 1
 
 
 def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
@@ -1046,8 +1046,8 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
     assert controller.single_step(shell) is False
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 0
 
     preview, reason = controller.preview_single_step(shell)
     assert reason is None
@@ -1118,7 +1118,7 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
 
     released = pool.take_next_item_for_tests()
     assert released is focus_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (other_item,)
     assert pool.take_next_item_for_tests() is None
 
@@ -1132,11 +1132,11 @@ def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
     assert controller._pool_item_is_runnable(item) is False
     controller.single_step(shell)
     assert controller._pool_item_is_runnable(item) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(item) is False
     assert pool.take_next_item_for_tests() is None
 
@@ -1174,11 +1174,11 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
     pool.enqueue_for_tests(low_item)
     pool.enqueue_for_tests(high_item)
     assert controller.single_step(shell) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is high_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (low_item,)
     assert controller._pool_item_is_runnable(low_item) is False
     assert pool.take_next_item_for_tests() is None
@@ -1217,7 +1217,7 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
 
     first = pool.take_next_item_for_tests()
     assert first is focus_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (frozen_item,)
     assert pool.take_next_item_for_tests() is None
 
@@ -1254,7 +1254,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     pool.enqueue_for_tests(first_item)
     pool.enqueue_for_tests(second_item)
     assert controller.single_step(shell) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     start = threading.Barrier(2)
     released: list[PoolWorkItem | None] = []
@@ -1277,7 +1277,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     assert len(released) == 2
     assert len(non_none) == 1
     assert non_none[0] in {first_item, second_item}
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert len(pool.snapshot_work_queue()) == 1
     assert pool.take_next_item_for_tests() is None
 
@@ -1355,17 +1355,17 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
     assert controller._pool_item_is_runnable(item) is False
 
     assert controller.single_step(shell) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     wire = snapshot_to_wire(controller.snapshot(shell))
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
     assert any(row["state"] == "queued" for row in wire["poolQueue"])
     assert controller._pool_item_is_runnable(item) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(item) is False
     assert pool.take_next_item_for_tests() is None
 
@@ -2167,9 +2167,9 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
     assert controller.single_step(operator_shell) is True
     assert controller._pool_item_is_runnable(non_focus_held) is False
     assert controller._pool_item_is_runnable(focus_held) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
     assert pool.take_next_item_for_tests() is focus_held
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (non_focus_held,)
 
     # Production fleet step kind (history resolves against COMPUTE_REGISTRY).
