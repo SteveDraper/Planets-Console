@@ -419,3 +419,156 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
 
     _end_open_fleet_table_stream(_stream_scope(sample_turn), scheduler)
     thread.join(timeout=2.0)
+
+
+def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_fleet(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Scores evidence update must rematerialize a fleet node already complete on the DAG.
+
+    Game 628580 t8 pl10: fleet@N completed after scores materialize (no solutions yet).
+    Later scores tier_solve persisted exact solutions and invalidated the fleet ledger, but
+    reschedule attached to the stale ``complete`` orchestrator node without ``force_fresh``,
+    so unreined placeholders never got option sets.
+    """
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.scores_exports_helpers import put_persisted_row
+
+    reset_fleet_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_id = sample_turn.scores[0].ownerid
+    player_ids = (player_id,)
+    turn_number = sample_turn.settings.turn
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    put_persisted_row(
+        inference_persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seeded host turn",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=turn_number,
+    )
+    put_persisted_row(
+        inference_persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seeded prior turn",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=turn_number - 1,
+    )
+
+    stored_turns = turn_chain_through(sample_turn)
+
+    def load_turn(turn: int):
+        return stored_turns.get(turn)
+
+    services = FleetComputeServices(
+        persistence=FleetSnapshotPersistenceService(memory_backend),
+        game_id=628580,
+        perspective=1,
+        load_turn=load_turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
+    )
+    fleet_persistence = services.persistence
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=fleet_persistence,
+    )
+    fleet_persistence.put_ledger(
+        628580,
+        1,
+        turn_number - 1,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(628580, 1, sample_turn, player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+
+    events: list[dict[str, object]] = []
+    stream = iter_fleet_table_stream_events(
+        sample_turn,
+        player_ids,
+        game_id=628580,
+        perspective=1,
+        fleet_services=services,
+        persistence=fleet_persistence,
+    )
+
+    def consume_stream() -> None:
+        try:
+            for event in stream:
+                events.append(event)
+        finally:
+            stream.close()
+
+    thread = threading.Thread(target=consume_stream, daemon=True)
+    thread.start()
+
+    _wait_until(
+        lambda: fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is not None,
+        timeout_seconds=5.0,
+    )
+    _wait_until(
+        lambda: any(
+            event.get("type") == "complete" and event.get("playerId") == player_id
+            for event in events
+        ),
+        timeout_seconds=5.0,
+    )
+    first_ledger = fleet_persistence.get_ledger(628580, 1, turn_number, player_id)
+    assert first_ledger is not None
+
+    scope = _stream_scope(sample_turn)
+    controller = controller_for_scope(scope)
+    assert controller is not None
+    binding = next(iter(scheduler._stream_bindings.values()))
+    fleet_scope = next(
+        node.scope
+        for node in binding.orchestrator.nodes.values()
+        if node.scope.analytic_id == "fleet"
+        and node.scope.player_id == player_id
+        and node.scope.turn == turn_number
+    )
+    assert binding.orchestrator.nodes[fleet_scope].state == "complete"
+
+    invalidation.on_inference_evidence_updated(628580, 1, turn_number, player_id)
+    assert fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is None
+
+    # Rematerialize must replace the stale complete DAG node (force_fresh), not attach.
+    _wait_until(
+        lambda: fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is not None,
+        timeout_seconds=5.0,
+    )
+    rematerialized = fleet_persistence.get_ledger(628580, 1, turn_number, player_id)
+    assert rematerialized is not None
+    assert binding.orchestrator.nodes[fleet_scope].state == "complete"
+
+    _end_open_fleet_table_stream(scope, scheduler)
+    thread.join(timeout=2.0)

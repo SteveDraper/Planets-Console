@@ -153,7 +153,31 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
     assert stopped_result.outcome == "complete"
 
 
-def test_build_scores_tier_solve_job_wire_requires_registered_row_run(sample_turn) -> None:
+def test_run_scores_materialize_continues_to_tier_solve() -> None:
+    """Materialize must continue into tier_solve so same-orchestrator fleet deps wait.
+
+    Returning ``complete`` after materialize unblocked fleet@N before inference solutions
+    existed (game 628580 t8): fleet refined empty, then scores tier_solve ran separately.
+    """
+    from api.analytics.scores.compute_orchestration import run_scores_materialize
+
+    export_tree = {"analyticId": SCORES_ANALYTIC_ID}
+    result = run_scores_materialize({"exportTree": export_tree})
+    assert result.outcome == "continue"
+    assert result.payload == export_tree
+
+
+def test_scores_tier_solve_without_row_run_completes_after_materialize_continue(
+    sample_turn,
+) -> None:
+    """Ensure-only scores scopes (no stream RowRun) still terminate after materialize."""
+    from api.analytics.scores.compute_orchestration import (
+        build_scores_tier_solve_job_wire,
+        run_scores_materialize,
+        run_scores_tier_solve,
+    )
+    from api.compute.wire import StepResult
+
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
@@ -162,12 +186,38 @@ def test_build_scores_tier_solve_job_wire_requires_registered_row_run(sample_tur
     player_id = sample_turn.scores[0].ownerid
     scope = _scores_scope(sample_turn, player_id)
 
-    with pytest.raises(RuntimeError, match="registered RowRun"):
-        build_scores_tier_solve_job_wire(
-            scope,
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
+    materialize = run_scores_materialize({"exportTree": {"ok": True}})
+    assert materialize.outcome == "continue"
+
+    job_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert job_wire.get("runId") is None
+    tier = run_scores_tier_solve(job_wire)
+    assert isinstance(tier, StepResult)
+    assert tier.outcome == "complete"
+
+
+def test_build_scores_tier_solve_job_wire_skips_without_registered_row_run(
+    sample_turn,
+) -> None:
+    """No stream RowRun: tier_solve wire is a skip sentinel so materialize can continue."""
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = _scores_scope(sample_turn, player_id)
+
+    skip_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert skip_wire == {"runId": None}
 
     run = _register_run(sample_turn, player_id=player_id)
     job_wire = build_scores_tier_solve_job_wire(

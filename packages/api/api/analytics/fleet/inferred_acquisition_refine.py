@@ -228,8 +228,12 @@ def _default_option_set_index(option_sets: tuple[FleetBuildOptionSet, ...]) -> i
 
 
 def _ensure_unknown_spec_fields(record: FleetShipRecord) -> None:
-    if not isinstance(record.fields.ship_id, FleetFieldKnown):
-        record.fields.ship_id = FleetFieldUnknown()
+    """Clear component fields so display comes from build option sets.
+
+    Do not touch ``ship_id``: option sets never carry host ids, and scoreboard
+    ``lte`` bounds / known sightings must survive refine (including persist
+    phase-2 refine after observation ingest already tightened bounds).
+    """
     if not isinstance(record.fields.hull, FleetFieldKnown):
         record.fields.hull = FleetFieldUnknown()
     if not isinstance(record.fields.engine, FleetFieldKnown):

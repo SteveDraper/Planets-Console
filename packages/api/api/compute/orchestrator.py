@@ -804,6 +804,8 @@ class ComputeOrchestrator:
         node.generation_at_submit = None
 
         if step_result.outcome == "continue":
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
             self._continue_node_step(node, registration)
             return
 
@@ -853,7 +855,10 @@ class ComputeOrchestrator:
             return
 
         if step_result.outcome == "complete":
-            node.result_wire = step_result.payload
+            # Keep a provisional continue payload when the terminal step has none
+            # (e.g. scores materialize export tree then tier_solve skip).
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
             self._complete_node(node)
             return
 

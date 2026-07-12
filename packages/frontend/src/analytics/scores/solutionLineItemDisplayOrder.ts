@@ -6,10 +6,12 @@ export function solutionLineItemDisplayRank(actionId: string): number {
   return inferenceActionDisplayRank(actionId)
 }
 
-/** Player-facing action label; aggregate rows include the built count in brackets. */
+/** Player-facing action label; aggregates use brackets, multi-copy ships use ``Nx``. */
 export function formatSolutionLineItemLabel(line: MilitaryScoreLineItem): string {
   if (isComboActionId(line.actionId)) {
-    return line.label
+    // Match the non-arithmetic fallback and scores summary (e.g. ``2x Freighter``).
+    // Count 1 stays bare so warship labels that already embed fit details are unchanged.
+    return line.count > 1 ? `${line.count}x ${line.label}` : line.label
   }
   return `${line.label} (${line.count})`
 }

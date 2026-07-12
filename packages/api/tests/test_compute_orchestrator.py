@@ -1426,6 +1426,60 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
     unregister_pause()
 
 
+def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn):
+    """Provisional continue payload must remain the dependency result_wire.
+
+    Scores materialize→continue→tier_solve skip previously left ``result_wire`` None,
+    so fleet dispatch raised ``complete without a result wire``.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    calls = {"materialize": 0, "tier": 0}
+
+    def run_materialize(_job):
+        calls["materialize"] += 1
+        return StepResult(outcome="continue", payload={"exportTree": {"ok": True}})
+
+    def run_tier(_job):
+        calls["tier"] += 1
+        return StepResult(outcome="complete")
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(
+                ComputeStepSpec(step_kind="materialize", backend="inline"),
+                ComputeStepSpec(step_kind="tier_solve", backend="inline"),
+            ),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+            ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(
+            ("materialize", run_materialize),
+            ("tier_solve", run_tier),
+        ),
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert calls == {"materialize": 1, "tier": 1}
+    assert handle.state == "complete"
+    assert handle.result_wire == {"exportTree": {"ok": True}}
+
+
 def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample_turn):
     """Pause and freeze gates coexist; clearing one leaves the other."""
     ctx = make_fixture_query_context(
