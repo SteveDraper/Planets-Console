@@ -513,8 +513,7 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
             wire["poolQueue"] == []
             and wire["inFlight"] == []
             and wire["readyQueue"] == []
-            and wire["nextSingleStep"]
-            == {"target": None, "disabledReason": "nothing_steppable"}
+            and wire["nextSingleStep"] == {"target": None, "disabledReason": "nothing_steppable"}
             and orchestrator.nodes[scope].state == "running"
         )
         assert not looks_idle, (
@@ -931,6 +930,74 @@ def test_single_step_prefers_stream_attached_ready_across_orchestrators(sample_t
     assert background_submissions == []
     assert stream_orch.nodes[stream_scope].state == "running"
     assert background_orch.nodes[background_scope].state == "ready"
+
+
+def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
+    """Gate must enforce the same orchestrator pin that commit already uses.
+
+    When a single-step pin targets orch A, a matching ready node on orch B must
+    fail the gate (not only commit) so dispatch does not rotate the ready queue.
+    """
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orch_a = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    orch_b = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orch_a, ctx)
+    controller.bind_orchestrator(orch_b, ctx)
+    id_a = orch_a.pool_registration_id
+    id_b = orch_b.pool_registration_id
+    assert id_a is not None and id_b is not None and id_a != id_b
+
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = _player_scope(
+        ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({player_id}))
+
+    with controller._lock:
+        controller._single_step_shell = shell
+        controller._single_step_target_scope = scope
+        controller._single_step_target_priority_band = "background"
+        controller._single_step_target_orchestrator_id = id_a
+        controller._single_step_dispatch_slots_remaining = 1
+        controller._single_step_grants_remaining = 1
+
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="ready",
+        priority_band="background",
+    )
+    # Bound gates capture each orchestrator's registration id at bind time.
+    assert len(orch_a._dispatch_gates) == 1
+    assert len(orch_b._dispatch_gates) == 1
+    assert orch_a._dispatch_gates[0](node) is True
+    assert orch_b._dispatch_gates[0](node) is False
+    # Commit agrees: wrong orch cannot consume the armed slot.
+    assert controller._commit_single_step_dispatch(node, orchestrator_id=id_b) is False
+    assert controller._single_step_dispatch_slots_remaining == 1
 
 
 def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):

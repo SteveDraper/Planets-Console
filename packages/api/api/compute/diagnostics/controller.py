@@ -136,8 +136,15 @@ class ComputeDiagnosticsController:
                     return
         # Register outside ``_lock`` so we never take orchestrator condition under
         # the controller lock (dispatch/step-complete take the opposite order).
-        unregister_dispatch_gate = orchestrator.register_dispatch_gate(self._dispatch_gate)
+        # Gate and commit both capture pool_registration_id so an armed single-step
+        # pin rejects wrong-orchestrator nodes before commit (avoids ready-queue thrash).
         registration_id = orchestrator.pool_registration_id
+        unregister_dispatch_gate = orchestrator.register_dispatch_gate(
+            lambda node, _orch_id=registration_id: self._dispatch_gate(
+                node,
+                orchestrator_id=_orch_id,
+            )
+        )
         unregister_dispatch_commit = orchestrator.register_dispatch_commit_hook(
             lambda node, _orch_id=registration_id: self._commit_single_step_dispatch(
                 node,
@@ -710,7 +717,12 @@ class ComputeDiagnosticsController:
             return False
         return self._scope_in_focus(scope, shell)
 
-    def _dispatch_gate(self, node: ComputeNodeRun) -> bool:
+    def _dispatch_gate(
+        self,
+        node: ComputeNodeRun,
+        *,
+        orchestrator_id: int | None = None,
+    ) -> bool:
         """Side-effect free: whether freeze allows ``node`` to be selected."""
         with self._lock:
             operator_shell = self._last_shell_context
@@ -720,7 +732,10 @@ class ComputeDiagnosticsController:
             if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
                 return True
             with self._lock:
-                return self._single_step_dispatch_allowed_locked(node, orchestrator_id=None)
+                return self._single_step_dispatch_allowed_locked(
+                    node,
+                    orchestrator_id=orchestrator_id,
+                )
         shell = self._scope_matches_active_shell(node.scope)
         if shell is None:
             # Operator shell set, but scope outside diagnostic scope: allow.
@@ -729,7 +744,10 @@ class ComputeDiagnosticsController:
         if not self._is_scope_frozen(node.scope, shell):
             return True
         with self._lock:
-            return self._single_step_dispatch_allowed_locked(node, orchestrator_id=None)
+            return self._single_step_dispatch_allowed_locked(
+                node,
+                orchestrator_id=orchestrator_id,
+            )
 
     def _single_step_dispatch_allowed_locked(
         self,
