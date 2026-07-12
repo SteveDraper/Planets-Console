@@ -7,7 +7,11 @@ from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    InferenceStreamDomainEvent,
+)
 from api.analytics.military_score_inference.inference_stream_rows import (
+    _TERMINAL_EVENT_TYPES,
     CachedCompleteRowAdmission,
     ImmediateRowAdmission,
     RowStreamAdmission,
@@ -17,6 +21,9 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     tag_inference_stream_event,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     attach_inference_table_stream,
     detach_inference_table_stream,
@@ -28,6 +35,7 @@ from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
+from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 
 @dataclass(kw_only=True)
@@ -172,6 +180,36 @@ class InferenceTableStreamController(
             row,
             cancel_run_id=self.scheduler.cancel_row_run,
         )
+
+    def deliver_domain_event(
+        self,
+        session: InferenceRowStreamSession,
+        event: InferenceStreamDomainEvent,
+    ) -> None:
+        """Deliver a domain event to this open multiplex (bound queue or pending wire).
+
+        Bound rows enqueue on the session queue for multiplex drain. Unbound rows
+        (missed adopt / unbind) push tagged wire onto ``pending_wire_events`` so the
+        connect loop still yields terminals instead of staying preamble-only.
+        """
+        with self.stream_lock:
+            scheduled = self.scheduled_rows.get(session.player_id)
+            bound = scheduled is not None and scheduled.session.run_id == session.run_id
+            if bound:
+                session.event_queue.put(event)
+            else:
+                for wire in domain_event_to_wire_events(
+                    event,
+                    observation=session.observation,
+                    turn=session.turn,
+                    fleet_torp_input_status=session.fleet_torp_input_status,
+                ):
+                    self.pending_wire_events.append(
+                        tag_inference_stream_event(wire, player_id=session.player_id)
+                    )
+                    if wire.get("type") in _TERMINAL_EVENT_TYPES:
+                        self.finished_run_ids.add(session.run_id)
+        self.wake_multiplex.set()
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         with self.stream_lock:

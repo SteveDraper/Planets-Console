@@ -12,7 +12,6 @@ from api.analytics.military_score_inference.inference_row_runner import Inferenc
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
     HeldSolutionsUpdated,
-    InferenceStreamDomainEvent,
     RowComplete,
     RowFailed,
     TierProgress,
@@ -25,7 +24,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.inference_table_stream_registry import (
-    controller_for_scope,
+    deliver_inference_domain_event_to_open_stream,
     wake_inference_table_stream_multiplex,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
@@ -547,7 +546,7 @@ class InferenceRowScheduler:
                     str(node.error) if node.error is not None else "Inference tier solve failed"
                 )
                 if not cancelled:
-                    self._deliver_domain_event_to_open_stream(
+                    deliver_inference_domain_event_to_open_stream(
                         session,
                         RowFailed(detail=detail),
                     )
@@ -558,63 +557,15 @@ class InferenceRowScheduler:
             row_complete = self._row_complete_from_result_wire(node.result_wire)
             if row_complete is None:
                 if not cancelled:
-                    self._deliver_domain_event_to_open_stream(
+                    deliver_inference_domain_event_to_open_stream(
                         session,
                         RowFailed(detail="Inference tier solve completed without row payload"),
                     )
                 self._finalize_row_run(session)
                 continue
             if not cancelled:
-                self._deliver_domain_event_to_open_stream(session, row_complete)
+                deliver_inference_domain_event_to_open_stream(session, row_complete)
             self._finalize_row_run(session)
-
-    def _deliver_domain_event_to_open_stream(
-        self,
-        session: InferenceRowStreamSession,
-        event: InferenceStreamDomainEvent,
-    ) -> None:
-        """Deliver a domain event to the open table stream for ``session``.
-
-        When the session is bound in ``scheduled_rows``, enqueue on the session
-        queue for multiplex drain. When it is not (missed adopt / unbind), push
-        tagged wire events onto ``pending_wire_events`` so an open connect loop
-        still yields terminals instead of staying on preamble-only.
-        """
-        from api.analytics.military_score_inference.inference_stream_rows import (
-            tag_inference_stream_event,
-        )
-        from api.transport.inference_stream_wire import domain_event_to_wire_events
-
-        scope = InferenceStreamScope(
-            game_id=session.game_id,
-            perspective=session.perspective,
-            turn_number=session.turn_number,
-        )
-        controller = controller_for_scope(scope)
-        if controller is None:
-            session.event_queue.put(event)
-            return
-
-        with controller.stream_lock:
-            scheduled = controller.scheduled_rows.get(session.player_id)
-            bound = (
-                scheduled is not None and scheduled.session.run_id == session.run_id
-            )
-            if bound:
-                session.event_queue.put(event)
-            else:
-                for wire in domain_event_to_wire_events(
-                    event,
-                    observation=session.observation,
-                    turn=session.turn,
-                    fleet_torp_input_status=session.fleet_torp_input_status,
-                ):
-                    controller.pending_wire_events.append(
-                        tag_inference_stream_event(wire, player_id=session.player_id)
-                    )
-                    if wire.get("type") in {"complete", "error"}:
-                        controller.finished_run_ids.add(session.run_id)
-        controller.wake_multiplex.set()
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:

@@ -512,7 +512,10 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
                 events.append(event)
                 if event.get("type") == "globalPause":
                     preamble_seen.set()
-                if event.get("type") in {"complete", "error"} and event.get("playerId") == player_id:
+                if (
+                    event.get("type") in {"complete", "error"}
+                    and event.get("playerId") == player_id
+                ):
                     terminal_seen.set()
                     break
         finally:
@@ -565,8 +568,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
     scheduler._on_orchestrator_node_complete(compute_scope, node)
 
     assert terminal_seen.wait(timeout=2.0), (
-        "open stream never received terminal event after persist+node-complete "
-        f"(events={events!r})"
+        f"open stream never received terminal event after persist+node-complete (events={events!r})"
     )
     reader.join(timeout=2.0)
     completes = [
