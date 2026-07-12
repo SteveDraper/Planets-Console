@@ -101,10 +101,21 @@ def iter_table_stream_connect(
             if dispatch.schedule_failed:
                 continue
 
-            admitted_player_count += 1
             scheduled = dispatch.scheduled
             if scheduled is not None:
-                policy.adopt_admission_scheduled_row(player_id, scheduled)
+                adopted = policy.adopt_admission_scheduled_row(player_id, scheduled)
+                if not adopted:
+                    bound_for_player = any(
+                        row.player_id == player_id for row in policy.current_scheduled_rows()
+                    )
+                    if not bound_for_player:
+                        # Adopt lost and nothing else is bound for this player. Do not
+                        # count as admitted: that would enter multiplex with zero rows
+                        # (preamble only) while scheduler work continues undrained.
+                        yield from dispatch.wire_events
+                        continue
+
+            admitted_player_count += 1
             yield from dispatch.wire_events
 
             if scheduled is not None and _scheduled_row_is_current(policy, player_id, scheduled):

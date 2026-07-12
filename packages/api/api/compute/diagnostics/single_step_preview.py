@@ -12,6 +12,7 @@ SingleStepDisabledReason = Literal[
     "freeze_not_armed",
     "empty_allowlist",
     "nothing_steppable",
+    "work_in_progress",
 ]
 
 
@@ -27,6 +28,7 @@ class SingleStepPreview:
     priority_band: str | None
     backend: str | None
     source: SingleStepSource
+    orchestrator_id: int | None = None
 
 
 def single_step_preview_to_wire(
@@ -45,6 +47,7 @@ def single_step_preview_to_wire(
             "priorityBand": preview.priority_band,
             "backend": preview.backend,
             "source": preview.source,
+            "orchestratorId": preview.orchestrator_id,
         }
     return {
         "target": target,

@@ -131,6 +131,7 @@ class ComputeWorkerPool:
         self._metrics = PoolMetrics()
         self._dequeue_predicate: Callable[[PoolWorkItem], bool] | None = None
         self._on_item_dequeued: Callable[[PoolWorkItem], None] | None = None
+        self._on_item_finished: Callable[[PoolWorkItem], None] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
         for _ in range(self._worker_count):
@@ -161,6 +162,18 @@ class ComputeWorkerPool:
         """Set a hook invoked once under the pool lock for the item actually dequeued."""
         with self._condition:
             self._on_item_dequeued = callback
+
+    def set_on_item_finished(
+        self,
+        callback: Callable[[PoolWorkItem], None] | None,
+    ) -> None:
+        """Set a hook invoked after a dequeued item finishes (success, error, or abandon).
+
+        Called outside the pool lock so the callback may take other locks (e.g.
+        diagnostics controller) without nesting under the pool condition.
+        """
+        with self._condition:
+            self._on_item_finished = callback
 
     def snapshot_work_queue(self) -> tuple[PoolWorkItem, ...]:
         with self._condition:
@@ -310,20 +323,32 @@ class ComputeWorkerPool:
             return self._orchestrators.get(orchestrator_id)
 
     def _execute_item(self, item: PoolWorkItem) -> None:
+        """Run one dequeued item.
+
+        Thread-backend work runs synchronously on the pool worker. Interpreter and
+        process backends submit to their executors and complete via done callbacks
+        so a stuck remote future cannot pin a pool worker thread (and stall the
+        rest of the queue under freeze single-step).
+        """
         orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
+            self._notify_item_finished(item)
             return
         if item.backend == "thread":
-            with self._condition:
-                self._record_backend_execution_locked(item.backend)
-            self._complete_from_callable(
-                item.orchestrator_id,
-                item.scope,
-                orchestrator.execute_pool_step,
-            )
+            try:
+                with self._condition:
+                    self._record_backend_execution_locked(item.backend)
+                self._complete_from_callable(
+                    item.orchestrator_id,
+                    item.scope,
+                    orchestrator.execute_pool_step,
+                )
+            finally:
+                self._notify_item_finished(item)
             return
         if item.backend in {"interpreter", "process"}:
             if item.job_wire is None or item.run_step is None:
+                self._notify_item_finished(item)
                 raise RuntimeError(
                     f"pool step {item.step_kind!r} with backend {item.backend!r} "
                     f"requires a pre-built job wire and run_step"
@@ -335,9 +360,27 @@ class ComputeWorkerPool:
                 else:
                     executor = self._process_executor_locked()
             future = executor.submit(item.run_step, item.job_wire)
-            self._complete_from_future(item.orchestrator_id, item.scope, future)
+            future.add_done_callback(
+                lambda completed, pool_item=item: self._on_remote_future_done(
+                    pool_item,
+                    completed,
+                )
+            )
             return
+        self._notify_item_finished(item)
         raise RuntimeError(f"unsupported pool backend {item.backend!r}")
+
+    def _notify_item_finished(self, item: PoolWorkItem) -> None:
+        with self._condition:
+            on_finished = self._on_item_finished
+        if on_finished is not None:
+            on_finished(item)
+
+    def _on_remote_future_done(self, item: PoolWorkItem, future: Future[object]) -> None:
+        try:
+            self._complete_from_future(item.orchestrator_id, item.scope, future)
+        finally:
+            self._notify_item_finished(item)
 
     def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
         if self._interpreter_executor is None:

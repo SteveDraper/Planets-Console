@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import {
   fetchComputeDiagnosticsSnapshot,
@@ -29,6 +29,107 @@ const DISABLED_REASON_LABELS: Record<string, string> = {
   freeze_not_armed: 'Freeze is not armed',
   empty_allowlist: 'Set a focus allowlist before single-stepping',
   nothing_steppable: 'Nothing in the focus set is ready to step',
+  work_in_progress: 'Focus work is still running (including persist)',
+}
+
+/** Cap runaway Run loops (deep gap-fill chains under freeze). */
+const RUN_MAX_STEPS = 10_000
+
+/** Stop Run when single-step returns the same focus target with no pool progress. */
+const RUN_STALL_LIMIT = 3
+
+const RUN_POLL_MS = 50
+
+function nextStepFingerprint(snapshot: ComputeDiagnosticsSnapshotResponse): string | null {
+  const target = snapshot.nextSingleStep.target
+  if (target == null) {
+    return null
+  }
+  return [
+    String(target.scopeKey ?? ''),
+    String(target.stepKind ?? ''),
+    String(target.stepIndex ?? ''),
+    String(target.source ?? ''),
+    String(target.orchestratorId ?? ''),
+  ].join('\0')
+}
+
+export function snapshotHasNextStep(snapshot: ComputeDiagnosticsSnapshotResponse): boolean {
+  const target = snapshot.nextSingleStep.target
+  if (target == null) {
+    return false
+  }
+  // Held preview must still be present in the pool queue; otherwise the snapshot
+  // raced (item already dequeued) and arming another held grant would stall Run.
+  if (target.source === 'held') {
+    const scopeKey = String(target.scopeKey ?? '')
+    const stepKind = String(target.stepKind ?? '')
+    const stepIndex = Number(target.stepIndex ?? 0)
+    return snapshot.poolQueue.some((item) => {
+      if (String(item.scopeKey ?? '') !== scopeKey) {
+        return false
+      }
+      if (String(item.stepKind ?? '') !== stepKind) {
+        return false
+      }
+      return Number(item.stepIndex ?? 0) === stepIndex
+    })
+  }
+  return true
+}
+
+function runningDagStepKeys(
+  snapshot: ComputeDiagnosticsSnapshotResponse
+): Set<string> {
+  return new Set(
+    snapshot.dagNodes
+      .filter((node) => node.state === 'running')
+      .map(
+        (node) =>
+          `${String(node.scopeKey ?? '')}\0${String(node.stepKind ?? '')}\0${String(node.stepIndex ?? '')}`
+      )
+  )
+}
+
+/**
+ * True when the pool still has queued work, focus work is marked in progress, or a
+ * live in-flight execution still appears as ``running`` on a bound DAG node.
+ * Orphaned in-flight rows (no matching running node) do not block Run -- those are
+ * cleared by the backend finish hook, but the client must not spin if a ghost remains.
+ */
+export function snapshotHasPendingPoolWork(
+  snapshot: ComputeDiagnosticsSnapshotResponse
+): boolean {
+  if (snapshot.poolQueue.length > 0) {
+    return true
+  }
+  if (snapshot.nextSingleStep.disabledReason === 'work_in_progress') {
+    return true
+  }
+  if (snapshot.dagNodes.some((node) => node.state === 'running')) {
+    return true
+  }
+  if (snapshot.inFlight.length === 0) {
+    return false
+  }
+  const running = runningDagStepKeys(snapshot)
+  return snapshot.inFlight.some((item) =>
+    running.has(
+      `${String(item.scopeKey ?? '')}\0${String(item.stepKind ?? '')}\0${String(item.stepIndex ?? '')}`
+    )
+  )
+}
+
+function yieldForDiagnosticsPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0)
+  })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
 function SectionPanel({
@@ -81,11 +182,14 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
   const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsUiSnapshot | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [running, setRunning] = useState(false)
   const [allowlistInput, setAllowlistInput] = useState('')
+  const runCancelRef = useRef(false)
 
   const freezeArmed =
     snapshot?.freezeArmed === true ||
     (snapshot == null && freezeStatus?.freezeArmed === true)
+  const controlsBusy = pending || running
 
   const applySnapshot = useCallback(
     (next: ComputeDiagnosticsSnapshotResponse) => {
@@ -167,6 +271,75 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     [applySnapshot, scope]
   )
 
+  const stopRun = useCallback(() => {
+    runCancelRef.current = true
+  }, [])
+
+  const runUntilFocusIdle = useCallback(async () => {
+    if (scope == null) {
+      return
+    }
+    runCancelRef.current = false
+    setRunning(true)
+    setLoadError(null)
+    try {
+      let current =
+        snapshot ?? (await fetchComputeDiagnosticsSnapshot(scope).then((next) => {
+          applySnapshot(next)
+          return next
+        }))
+      let steps = 0
+      let stallCount = 0
+      while (!runCancelRef.current) {
+        if (snapshotHasNextStep(current)) {
+          if (steps >= RUN_MAX_STEPS) {
+            setLoadError(`Run stopped after ${RUN_MAX_STEPS} steps (safety limit).`)
+            break
+          }
+          const beforeFingerprint = nextStepFingerprint(current)
+          current = await postComputeDiagnosticsSingleStep(scope)
+          applySnapshot(current)
+          steps += 1
+          const afterFingerprint = nextStepFingerprint(current)
+          const sameTarget =
+            beforeFingerprint != null &&
+            afterFingerprint != null &&
+            beforeFingerprint === afterFingerprint
+          if (sameTarget && !snapshotHasPendingPoolWork(current)) {
+            stallCount += 1
+            if (stallCount >= RUN_STALL_LIMIT) {
+              setLoadError(
+                `Run stalled: single-step did not advance ${beforeFingerprint.split('\0')[0] || 'focus target'}.`
+              )
+              break
+            }
+          } else {
+            stallCount = 0
+          }
+          await yieldForDiagnosticsPaint()
+          continue
+        }
+        if (snapshotHasPendingPoolWork(current)) {
+          stallCount = 0
+          await sleep(RUN_POLL_MS)
+          if (runCancelRef.current) {
+            break
+          }
+          current = await fetchComputeDiagnosticsSnapshot(scope)
+          applySnapshot(current)
+          await yieldForDiagnosticsPaint()
+          continue
+        }
+        break
+      }
+    } catch (error: unknown) {
+      setLoadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRunning(false)
+      runCancelRef.current = false
+    }
+  }, [applySnapshot, scope, snapshot])
+
   const nextStep = snapshot?.nextSingleStep
   const singleStepDisabledReason = useMemo(() => {
     if (!freezeArmed) {
@@ -180,6 +353,27 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     }
     return null
   }, [freezeArmed, nextStep])
+
+  const runDisabledReason = useMemo(() => {
+    if (running) {
+      return null
+    }
+    if (!freezeArmed) {
+      return DISABLED_REASON_LABELS.freeze_not_armed
+    }
+    if (nextStep?.disabledReason === 'empty_allowlist') {
+      return DISABLED_REASON_LABELS.empty_allowlist
+    }
+    if (
+      nextStep?.target == null &&
+      nextStep?.disabledReason === 'nothing_steppable' &&
+      snapshot != null &&
+      !snapshotHasPendingPoolWork(snapshot)
+    ) {
+      return DISABLED_REASON_LABELS.nothing_steppable
+    }
+    return null
+  }, [freezeArmed, nextStep, running, snapshot])
 
   if (scope == null) {
     return (
@@ -200,7 +394,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          disabled={pending}
+          disabled={controlsBusy}
           onClick={() => void refresh()}
           className={cn(
             'rounded border border-[#52575d] px-2 py-1 text-xs text-slate-200',
@@ -211,7 +405,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
         </button>
         <button
           type="button"
-          disabled={pending || freezeArmed}
+          disabled={controlsBusy || freezeArmed}
           onClick={() => void runMutation(() => putComputeDiagnosticsFreeze(scope, true))}
           className={cn(
             'rounded border border-amber-700/60 px-2 py-1 text-xs text-amber-200',
@@ -222,7 +416,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
         </button>
         <button
           type="button"
-          disabled={pending || !freezeArmed}
+          disabled={controlsBusy || !freezeArmed}
           onClick={() => void runMutation(() => putComputeDiagnosticsFreeze(scope, false))}
           className={cn(
             'rounded border border-[#52575d] px-2 py-1 text-xs text-slate-200',
@@ -233,7 +427,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
         </button>
         <button
           type="button"
-          disabled={pending || singleStepDisabledReason != null}
+          disabled={controlsBusy || singleStepDisabledReason != null}
           title={singleStepDisabledReason ?? undefined}
           onClick={() => void runMutation(() => postComputeDiagnosticsSingleStep(scope))}
           className={cn(
@@ -242,6 +436,32 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           )}
         >
           Single step
+        </button>
+        <button
+          type="button"
+          disabled={!running && runDisabledReason != null}
+          title={
+            running
+              ? 'Stop automated single-stepping'
+              : (runDisabledReason ?? 'Single-step until the focus set has no remaining work')
+          }
+          onClick={() => {
+            if (running) {
+              stopRun()
+              return
+            }
+            void runUntilFocusIdle()
+          }}
+          className={cn(
+            'rounded border px-2 py-1 text-xs',
+            running
+              ? 'border-amber-700/60 text-amber-200 hover:bg-amber-900/20'
+              : 'border-[#52575d] text-slate-200 hover:bg-white/10',
+            'disabled:cursor-not-allowed disabled:opacity-50'
+          )}
+          data-testid="compute-diagnostics-run"
+        >
+          {running ? 'Stop' : 'Run'}
         </button>
       </div>
 
@@ -255,12 +475,12 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
             type="text"
             value={allowlistInput}
             onChange={(event) => setAllowlistInput(event.target.value)}
-            disabled={pending || !freezeArmed}
+            disabled={controlsBusy || !freezeArmed}
             className="min-w-0 flex-1 rounded border border-[#52575d] bg-[#2d3136] px-2 py-1 text-slate-100"
           />
           <button
             type="button"
-            disabled={pending || !freezeArmed}
+            disabled={controlsBusy || !freezeArmed}
             onClick={() => {
               const playerIds = allowlistInput
                 .split(',')
@@ -283,12 +503,17 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
       {freezeArmed ? (
         <p className="text-xs text-slate-400" data-testid="next-single-step-preview">
           Next single-step: {nextStepSummary(nextStep)}
-          {singleStepDisabledReason != null ? ` (${singleStepDisabledReason})` : null}
+          {running ? ' · Running…' : null}
+          {!running && singleStepDisabledReason != null
+            ? ` (${singleStepDisabledReason})`
+            : null}
         </p>
       ) : null}
 
       {snapshot == null ? (
-        <p className="text-sm text-slate-400">{pending ? 'Loading…' : 'No snapshot yet.'}</p>
+        <p className="text-sm text-slate-400">
+          {controlsBusy ? 'Loading…' : 'No snapshot yet.'}
+        </p>
       ) : (
         <div className="flex flex-col gap-3">
           <SectionPanel

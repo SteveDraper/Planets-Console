@@ -25,8 +25,13 @@ class PersistencePolicy(Protocol):
     ) -> Callable[[], None] | None:
         """Persist a completed result wire after orchestrator epoch checks.
 
-        Return an optional side-effect callback to run after the orchestrator lock
-        is released.
+        The orchestrator invokes this **outside** its lock, but **before** marking
+        the node ``complete``. Callers that observe terminal node state or run
+        after node-complete listeners may assume durable artifacts already exist.
+
+        Return an optional side-effect callback (e.g. ledger-persisted notification)
+        to run after the node has been marked complete and the orchestrator lock
+        is released again.
         """
         ...
 

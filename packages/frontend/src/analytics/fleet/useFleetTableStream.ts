@@ -66,6 +66,7 @@ export function useFleetTableStream(
   }, [enabled, visiblePlayers])
 
   const { publishedByPlayerId: streamPlayersById } = usePerPlayerAnalyticStream({
+    streamId: 'fleet',
     scope,
     enabled,
     playerIdsKey,

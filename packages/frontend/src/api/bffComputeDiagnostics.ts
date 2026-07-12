@@ -26,7 +26,12 @@ export type NextSingleStepTarget = {
 
 export type NextSingleStepPreview = {
   target: NextSingleStepTarget | null
-  disabledReason: 'freeze_not_armed' | 'empty_allowlist' | 'nothing_steppable' | null
+  disabledReason:
+    | 'freeze_not_armed'
+    | 'empty_allowlist'
+    | 'nothing_steppable'
+    | 'work_in_progress'
+    | null
 }
 
 export type ComputeDiagnosticsSnapshotResponse = {

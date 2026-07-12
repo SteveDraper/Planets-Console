@@ -101,6 +101,7 @@ export function useScoresInferenceByRow(
   )
 
   const { publishedByPlayerId: detailsByPlayerId } = usePerPlayerAnalyticStream({
+    streamId: 'scores',
     scope,
     enabled,
     playerIdsKey,

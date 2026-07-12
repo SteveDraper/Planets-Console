@@ -37,9 +37,13 @@ from api.analytics.military_score_inference.inference_stream_session import (
 )
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
+    reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeNodeRun
+from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -465,3 +469,114 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
     assert events[1]["summary"] == "terminal before reconnect"
     assert isinstance(events[1].get("diagnostics"), dict)
     assert events[1]["diagnostics"].get("turn") == turn_number
+
+
+def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+):
+    """Regression: durable exact must still NDJSON-complete an open scores stream.
+
+    Game 628580 p11 t8 pl3: DAG + persist finished while the client stayed on
+    ``globalPause`` / in-progress. Multiplex can be open with empty
+    ``scheduled_rows`` (missed adopt / unbind), so ``RowComplete`` on the session
+    queue is never drained. Persist + node-complete must still deliver a terminal
+    wire event via pending wire events (or re-bind) to the open stream.
+    """
+    reset_inference_table_stream_registry_for_tests()
+    persistence = InferenceRowPersistenceService(memory_backend)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch,
+        on_row_complete=persistence.persist_row_complete,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    turn_number = sample_turn.settings.turn
+    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=turn_number)
+
+    stream = iter_scores_table_inference_events(
+        sample_turn,
+        (player_id,),
+        game_id=628580,
+        perspective=1,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    events: list[dict[str, object]] = []
+    preamble_seen = threading.Event()
+    terminal_seen = threading.Event()
+
+    def consume() -> None:
+        try:
+            for event in stream:
+                events.append(event)
+                if event.get("type") == "globalPause":
+                    preamble_seen.set()
+                if event.get("type") in {"complete", "error"} and event.get("playerId") == player_id:
+                    terminal_seen.set()
+                    break
+        finally:
+            stream.close()
+
+    reader = threading.Thread(target=consume, name="scores-stream-reader", daemon=True)
+    reader.start()
+    assert preamble_seen.wait(timeout=2.0), "stream never emitted preamble"
+
+    _wait_until(lambda: len(scheduler._runs) >= 1)
+    controller = controller_for_scope(scope)
+    assert controller is not None
+    _wait_until(lambda: player_id in controller.scheduled_rows)
+
+    run_id = next(iter(scheduler._runs))
+    row_run = scheduler._adapter_row_run(run_id)
+    assert row_run is not None
+    session = row_run.session
+
+    # Unbind after multiplex is live; wake so pending_run_ids refreshes empty and
+    # the loop no longer holds a stale row reference from the prior drain cycle.
+    with controller.stream_lock:
+        controller.scheduled_rows.clear()
+    controller.wake_multiplex.set()
+    time.sleep(0.15)
+    assert controller.current_scheduled_rows() == ()
+    assert not terminal_seen.is_set()
+    assert events == [{"type": "globalPause", "paused": False}]
+
+    row_complete = _row_complete(
+        summary="persisted while multiplex unbound",
+        diagnostics=_diagnostics(turn=turn_number, player_id=player_id),
+    )
+    persistence.persist_row_complete(session, row_complete)
+    assert persistence.get_row(628580, 1, turn_number, player_id) is not None
+
+    compute_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=turn_number,
+        player_id=player_id,
+    )
+    node = ComputeNodeRun(
+        scope=compute_scope,
+        dependency_scopes=(),
+        state="complete",
+        result_wire={"runId": run_id, "rowComplete": row_complete},
+    )
+    scheduler._on_orchestrator_node_complete(compute_scope, node)
+
+    assert terminal_seen.wait(timeout=2.0), (
+        "open stream never received terminal event after persist+node-complete "
+        f"(events={events!r})"
+    )
+    reader.join(timeout=2.0)
+    completes = [
+        event
+        for event in events
+        if event.get("type") == "complete" and event.get("playerId") == player_id
+    ]
+    assert completes, f"expected complete for player {player_id}, got {events!r}"
+    assert completes[-1].get("summary") == "persisted while multiplex unbound"
+    assert persistence.get_row(628580, 1, turn_number, player_id) is not None
+
+    reset_inference_table_stream_registry_for_tests()
+    reset_inference_row_scheduler_for_tests()

@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { AnalyticShellScope } from '../api/bff'
 
 export type ClientStreamLifecycle = {
+  /** Analytic / stream identity (e.g. ``fleet``, ``scores``); part of ``connectionKey``. */
+  streamId: string
   connectionKey: string
   generation: number
   lastEventAt: string | null

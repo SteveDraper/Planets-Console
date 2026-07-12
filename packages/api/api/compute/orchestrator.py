@@ -23,7 +23,37 @@ StepCompleteListener = Callable[
     None,
 ]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
+# Side-effecting accept after all gates pass (e.g. consume a single-step slot).
+# Must be idempotent-safe under reject: return False to leave the node ready.
+NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
+
+
+@dataclass(frozen=True)
+class _PendingInlineExecution:
+    """Inline work accepted under the orchestrator lock; executed after release.
+
+    Job-wire builders (e.g. scores ``ensure_scores_export``) may take other locks
+    such as the inference scheduler lock. Building or running them while holding
+    the orchestrator lock deadlocks with scheduler paths that call back into
+    ``register_dispatch_gate`` / ``dispatch_ready_work``.
+    """
+
+    node: ComputeNodeRun
+    registration: AnalyticComputeRegistration
+    step: ComputeStepSpec
+    dependency_outputs: DependencyOutputs
+
+
+@dataclass(frozen=True)
+class _PendingPoolSubmission:
+    """Pool work accepted under the orchestrator lock; built and submitted after release."""
+
+    node: ComputeNodeRun
+    registration: AnalyticComputeRegistration
+    step: ComputeStepSpec
+    dependency_outputs: DependencyOutputs
+
 
 NodeState = Literal[
     "waiting_deps",
@@ -147,12 +177,22 @@ class ComputeOrchestrator:
         self._node_complete_listeners: list[NodeCompleteListener] = []
         self._step_complete_listeners: list[StepCompleteListener] = []
         self._dispatch_gates: list[NodeDispatchGate] = []
+        self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
 
     def dispatch_ready_work(self) -> None:
-        """Dispatch any ready nodes allowed by the current gates."""
+        """Dispatch any ready nodes allowed by the current gates.
+
+        Inline execution and pool job-wire construction run only after the
+        orchestrator lock is released. Holding that lock across ``pool.submit``
+        deadlocks with pool workers (pool lock then diagnostics controller lock).
+        Holding it across scores/fleet job-wire builders deadlocks with the
+        inference scheduler (scheduler lock then orchestrator lock).
+        """
         with self._condition:
-            self._dispatch()
+            pending_inline, pending_pool = self._dispatch()
+        self._execute_pending_inlines(pending_inline)
+        self._flush_pending_pool_submissions(pending_pool)
         self._drain_post_lock_callbacks()
 
     @property
@@ -177,6 +217,10 @@ class ComputeOrchestrator:
     ) -> Callable[[], None]:
         """Register a node-level gate; dispatch only if all registered gates pass.
 
+        Gates must be side-effect free. Slot or grant consumption belongs in a
+        :meth:`register_dispatch_commit_hook` so a later gate failure cannot burn
+        a single-step slot.
+
         Returns an unregister callable that removes only this gate.
         """
         with self._condition:
@@ -186,6 +230,26 @@ class ComputeOrchestrator:
             with self._condition:
                 try:
                     self._dispatch_gates.remove(gate)
+                except ValueError:
+                    return
+
+        return unregister
+
+    def register_dispatch_commit_hook(
+        self,
+        hook: NodeDispatchCommitHook,
+    ) -> Callable[[], None]:
+        """Register a post-gate commit hook; called only when every gate passed.
+
+        Returns an unregister callable that removes only this hook.
+        """
+        with self._condition:
+            self._dispatch_commit_hooks.append(hook)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._dispatch_commit_hooks.remove(hook)
                 except ValueError:
                     return
 
@@ -259,10 +323,12 @@ class ComputeOrchestrator:
         with self._condition:
             scope = request.scope
             existing = self._nodes.get(scope)
+            pending_inline: tuple[_PendingInlineExecution, ...] = ()
+            pending_pool: tuple[_PendingPoolSubmission, ...] = ()
             if existing is not None:
                 if not (request.force_fresh and existing.state in {"complete", "failed"}):
                     handle = self._attach_to_existing(existing)
-                    self._dispatch()
+                    pending_inline, pending_pool = self._dispatch()
                     should_plan = False
                 else:
                     self._replace_terminal_node(existing)
@@ -279,7 +345,9 @@ class ComputeOrchestrator:
                 for node in self._nodes.values():
                     self._refresh_node_readiness(node)
                 handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
-                self._dispatch()
+                pending_inline, pending_pool = self._dispatch()
+        self._execute_pending_inlines(pending_inline)
+        self._flush_pending_pool_submissions(pending_pool)
         self._drain_post_lock_callbacks()
         return handle
 
@@ -291,8 +359,15 @@ class ComputeOrchestrator:
                 raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
             registration = self._compute_registry[node.scope.analytic_id]
             step = self._current_step_spec(node, registration)
-            job_wire = self._build_job_wire(node, registration, step)
+            dependency_outputs = self._snapshot_dependency_outputs(node)
             run_step = registration.run_step[step.step_kind]
+            builder = registration.build_step_job_wire[step.step_kind]
+            node_scope = node.scope
+        job_wire = builder(
+            node_scope,
+            dependency_outputs=dependency_outputs,
+            ctx=self._cached_ctx,
+        )
         return run_step(job_wire)
 
     def run_until_idle(self) -> None:
@@ -302,10 +377,13 @@ class ComputeOrchestrator:
                 if not self._has_pending_work():
                     break
                 self._refresh_all_readiness()
-                self._dispatch()
-                if any(node.state == "running" for node in self._nodes.values()):
-                    break
+                pending_inline, pending_pool = self._dispatch()
+                has_running = any(node.state == "running" for node in self._nodes.values())
+            self._execute_pending_inlines(pending_inline)
+            self._flush_pending_pool_submissions(pending_pool)
             self._drain_post_lock_callbacks()
+            if has_running:
+                break
         self._drain_post_lock_callbacks()
 
     def complete_pool_step(
@@ -500,26 +578,142 @@ class ComputeOrchestrator:
         except ValueError:
             return
 
-    def _dispatch(self) -> None:
+    def _dispatch(
+        self,
+    ) -> tuple[tuple[_PendingInlineExecution, ...], tuple[_PendingPoolSubmission, ...]]:
+        """Select and begin ready work under the orchestrator lock.
+
+        Inline and pool steps are prepared here (state → running, dependency wires
+        snapshotted) but job-wire construction and execution happen only after the
+        caller releases the orchestrator lock.
+        """
+        pending_inline: list[_PendingInlineExecution] = []
+        pending_pool: list[_PendingPoolSubmission] = []
         while self._ready_queue:
             scope, node = self._dequeue_dispatchable_ready_node()
             if scope is None or node is None:
-                return
+                break
 
             registration = self._compute_registry[node.scope.analytic_id]
             step = self._current_step_spec(node, registration)
             if step.backend == "inline":
                 self._begin_step_execution(node)
-                self._run_inline(node, registration, step)
+                pending_inline.append(
+                    _PendingInlineExecution(
+                        node=node,
+                        registration=registration,
+                        step=step,
+                        dependency_outputs=self._snapshot_dependency_outputs(node),
+                    )
+                )
                 continue
 
             if self._pool_submitter is None:
                 self._enqueue_ready(scope)
-                return
+                break
             self._begin_step_execution(node)
-            self._submit_pool_step(node, registration, step)
+            pending_pool.append(
+                _PendingPoolSubmission(
+                    node=node,
+                    registration=registration,
+                    step=step,
+                    dependency_outputs=self._snapshot_dependency_outputs(node),
+                )
+            )
             self._metrics.pool_submissions += 1
+            break
+        return tuple(pending_inline), tuple(pending_pool)
+
+    def _snapshot_dependency_outputs(self, node: ComputeNodeRun) -> DependencyOutputs:
+        """Copy dependency result wires under the orchestrator lock."""
+        dependency_outputs = DependencyOutputs()
+        for dependency_scope in node.dependency_scopes:
+            dependency_node = self._nodes[dependency_scope]
+            if dependency_node.result_wire is None:
+                raise RuntimeError(
+                    f"dependency {dependency_scope!r} is complete without a result wire"
+                )
+            dependency_outputs.put(dependency_scope, dependency_node.result_wire)
+        return dependency_outputs
+
+    def _execute_pending_inlines(
+        self,
+        pending: tuple[_PendingInlineExecution, ...],
+    ) -> None:
+        """Build and run accepted inline steps without holding the orchestrator lock."""
+        for item in pending:
+            self._run_inline_outside_lock(item)
+
+    def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
+        node = pending.node
+        try:
+            builder = pending.registration.build_step_job_wire[pending.step.step_kind]
+            job_wire = builder(
+                node.scope,
+                dependency_outputs=pending.dependency_outputs,
+                ctx=self._cached_ctx,
+            )
+            result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
+        except BaseException as exc:
+            with self._condition:
+                self._metrics.inline_executions += 1
+                self._notify_step_complete(
+                    node,
+                    pending.step.step_kind,
+                    surface="inline",
+                    terminal_state="failed",
+                )
+                self._fail_node(node, exc)
             return
+        with self._condition:
+            self._metrics.inline_executions += 1
+            self._notify_step_complete(
+                node,
+                pending.step.step_kind,
+                surface="inline",
+                terminal_state="success",
+            )
+            self._after_step_success(node, result_wire)
+
+    def _flush_pending_pool_submissions(
+        self,
+        pending: tuple[_PendingPoolSubmission, ...],
+    ) -> None:
+        """Build job wires and submit prepared pool work without the orchestrator lock."""
+        if not pending:
+            return
+        if self._pool_submitter is None:
+            raise RuntimeError("pool_submitter is not configured")
+        for submission in pending:
+            node = submission.node
+            step = submission.step
+            try:
+                if step.backend in {"interpreter", "process"}:
+                    builder = submission.registration.build_step_job_wire[step.step_kind]
+                    job_wire = builder(
+                        node.scope,
+                        dependency_outputs=submission.dependency_outputs,
+                        ctx=self._cached_ctx,
+                    )
+                    run_step = submission.registration.run_step[step.step_kind]
+                    self._pool_submitter(
+                        node,
+                        step,
+                        job_wire=job_wire,
+                        run_step=run_step,
+                    )
+                else:
+                    self._pool_submitter(node, step)
+            except BaseException as exc:
+                with self._condition:
+                    if node.state == "running":
+                        self._notify_step_complete(
+                            node,
+                            step.step_kind,
+                            surface="pool",
+                            terminal_state="failed",
+                        )
+                        self._fail_node(node, exc)
 
     def _dequeue_dispatchable_ready_node(
         self,
@@ -535,26 +729,17 @@ class ComputeOrchestrator:
             if not self._deps_complete(node):
                 node.state = "waiting_deps"
                 continue
+            # Gates first (side-effect free), then commit hooks (may consume slots).
+            # Evaluating commits inside ``all(gate)`` burned single-step slots when a
+            # later gate (e.g. scores global-pause) rejected the same node.
             if not all(gate(node) for gate in self._dispatch_gates):
+                self._ready_queue.append(scope)
+                continue
+            if not all(hook(node) for hook in self._dispatch_commit_hooks):
                 self._ready_queue.append(scope)
                 continue
             return scope, node
         return None, None
-
-    def _submit_pool_step(
-        self,
-        node: ComputeNodeRun,
-        registration: AnalyticComputeRegistration,
-        step: ComputeStepSpec,
-    ) -> None:
-        if self._pool_submitter is None:
-            raise RuntimeError("pool_submitter is not configured")
-        if step.backend in {"interpreter", "process"}:
-            job_wire = self._build_job_wire(node, registration, step)
-            run_step = registration.run_step[step.step_kind]
-            self._pool_submitter(node, step, job_wire=job_wire, run_step=run_step)
-            return
-        self._pool_submitter(node, step)
 
     def _current_step_spec(
         self,
@@ -569,42 +754,14 @@ class ComputeOrchestrator:
             )
         return steps[node.profile_step_index]
 
-    def _run_inline(
-        self,
-        node: ComputeNodeRun,
-        registration: AnalyticComputeRegistration,
-        step: ComputeStepSpec,
-    ) -> None:
-        self._metrics.inline_executions += 1
-        try:
-            job_wire = self._build_job_wire(node, registration, step)
-            result_wire = registration.run_step[step.step_kind](job_wire)
-        except BaseException as exc:
-            self._notify_step_complete(
-                node,
-                step.step_kind,
-                surface="inline",
-                terminal_state="failed",
-            )
-            self._fail_node(node, exc)
-            return
-        self._notify_step_complete(node, step.step_kind, surface="inline", terminal_state="success")
-        self._after_step_success(node, result_wire)
-
     def _build_job_wire(
         self,
         node: ComputeNodeRun,
         registration: AnalyticComputeRegistration,
         step: ComputeStepSpec,
     ) -> object:
-        dependency_outputs = DependencyOutputs()
-        for dependency_scope in node.dependency_scopes:
-            dependency_node = self._nodes[dependency_scope]
-            if dependency_node.result_wire is None:
-                raise RuntimeError(
-                    f"dependency {dependency_scope!r} is complete without a result wire"
-                )
-            dependency_outputs.put(dependency_scope, dependency_node.result_wire)
+        """Build a job wire from live dependency nodes (caller must hold orch lock)."""
+        dependency_outputs = self._snapshot_dependency_outputs(node)
         builder = registration.build_step_job_wire[step.step_kind]
         return builder(
             node.scope,
@@ -634,7 +791,8 @@ class ComputeOrchestrator:
         node.generation_at_submit = None
         node.state = "ready"
         self._enqueue_ready(node.scope)
-        self._dispatch()
+        # Never call pool.submit under the orchestrator lock (deadlocks with workers).
+        self._post_lock_callbacks.append(self.dispatch_ready_work)
 
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):
@@ -651,15 +809,47 @@ class ComputeOrchestrator:
 
         if step_result.outcome == "persist":
             node.result_wire = step_result.payload
-            post_lock_callback = registration.persistence_policy.persist(
-                self._cached_ctx,
-                node.scope,
-                step_result.payload,
-            )
-            if post_lock_callback is not None:
-                self._post_lock_callbacks.append(post_lock_callback)
             self._metrics.persist_calls += 1
-            self._complete_node(node)
+            # Persist must not run under the orchestrator lock: fleet refine/scores
+            # probes take the inference scheduler lock, and scheduler paths call back
+            # into register_dispatch_gate / dispatch_ready_work (ABBA deadlock).
+            #
+            # Ordering invariant (even outside the lock): persist must finish before
+            # ``_complete_node``. Completing first would wake dependents / allow
+            # ``has_final_ledger`` readers to observe a terminal node whose durable
+            # artifact is not written yet (missed overlay, false unsatisfied probes,
+            # or skipped scores reschedule decisions). Notifications returned from
+            # ``persist`` run only after complete so skip-reschedule sees ``complete``.
+            payload = step_result.payload
+
+            def _persist_then_complete(
+                completed_node: ComputeNodeRun = node,
+                completed_payload: object = payload,
+                completed_registration: AnalyticComputeRegistration = registration,
+            ) -> None:
+                try:
+                    post_lock_callback = completed_registration.persistence_policy.persist(
+                        self._cached_ctx,
+                        completed_node.scope,
+                        completed_payload,
+                    )
+                except BaseException as exc:
+                    # Persist runs after step-complete success; a raise must not leave a
+                    # ghost ``running`` node (empty queues, freeze ``nothing_steppable``).
+                    # Do not re-raise: pool workers call complete_pool_step on this thread
+                    # and an escaping exception would kill the worker loop.
+                    with self._condition:
+                        if completed_node.state == "running":
+                            self._fail_node(completed_node, exc)
+                    return
+                with self._condition:
+                    if completed_node.state != "running":
+                        return
+                    self._complete_node(completed_node)
+                    if post_lock_callback is not None:
+                        self._post_lock_callbacks.append(post_lock_callback)
+
+            self._post_lock_callbacks.append(_persist_then_complete)
             return
 
         if step_result.outcome == "complete":
@@ -684,7 +874,8 @@ class ComputeOrchestrator:
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         self._enqueue_ready(node.scope)
-        self._dispatch()
+        # Defer dispatch so pool submit is never nested under this lock.
+        self._post_lock_callbacks.append(self.dispatch_ready_work)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
         node.state = "complete"
@@ -759,7 +950,9 @@ class ComputeOrchestrator:
             if node.state in {"complete", "failed", "running"}:
                 continue
             self._refresh_node_readiness(node)
-        self._dispatch()
+        # Defer dispatch: this runs under the orchestrator lock via
+        # ``_handle_dependency_terminal``, and pool submit must not nest here.
+        self._post_lock_callbacks.append(self.dispatch_ready_work)
 
     def _has_pending_work(self) -> bool:
         return any(

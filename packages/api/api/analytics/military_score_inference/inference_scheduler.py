@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.inference_row_runner import Inferenc
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
     HeldSolutionsUpdated,
+    InferenceStreamDomainEvent,
     RowComplete,
     RowFailed,
     TierProgress,
@@ -24,6 +25,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.inference_table_stream_registry import (
+    controller_for_scope,
     wake_inference_table_stream_multiplex,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
@@ -280,9 +282,13 @@ class InferenceRowScheduler:
             if self._globally_paused:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = True
-            self._apply_dispatch_gates_locked()
+            bindings = tuple(self._stream_bindings.values())
             self._broadcast_global_pause_locked(paused=True)
-            return self._global_pause_status_locked(scope)
+            status = self._global_pause_status_locked(scope)
+        # Never register orchestrator gates while holding the scheduler lock:
+        # job-wire builders / ensure paths take this lock under dispatch.
+        self._sync_pause_dispatch_gates(bindings, paused=True)
+        return status
 
     def resume_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
         with self._lock:
@@ -290,11 +296,14 @@ class InferenceRowScheduler:
             if not self._globally_paused:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = False
-            self._apply_dispatch_gates_locked()
+            bindings = tuple(self._stream_bindings.values())
             self._flush_held_submissions_locked()
-            self._dispatch_ready_orchestrator_work_locked()
             self._broadcast_global_pause_locked(paused=False)
-            return self._global_pause_status_locked(scope)
+            status = self._global_pause_status_locked(scope)
+        self._sync_pause_dispatch_gates(bindings, paused=False)
+        for binding in bindings:
+            binding.orchestrator.dispatch_ready_work()
+        return status
 
     def unregister_session(self, run_id: str) -> None:
         with self._lock:
@@ -308,6 +317,8 @@ class InferenceRowScheduler:
         stream_token: str,
     ) -> None:
         """Cancel all row runs for a table stream and clear global pause on disconnect."""
+        remaining_bindings: tuple[_InferenceStreamOrchestratorBinding, ...] = ()
+        clear_pause_gates = False
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
@@ -318,17 +329,21 @@ class InferenceRowScheduler:
             if binding is not None:
                 self._release_stream_binding_locked(binding)
             if owns_scope:
-                self._clear_global_pause_for_active_scope_locked(scope)
+                clear_pause_gates = self._clear_global_pause_for_active_scope_locked(scope)
+                remaining_bindings = tuple(self._stream_bindings.values())
+        if clear_pause_gates:
+            self._sync_pause_dispatch_gates(remaining_bindings, paused=False)
 
     def _clear_global_pause_for_active_scope_locked(
         self,
         scope: InferenceStreamScope,
-    ) -> None:
+    ) -> bool:
+        """Clear pause flag under lock. Return whether callers must sync gates outside."""
         if self._scope_guard.active_scope != scope:
-            return
+            return False
         self._globally_paused = False
         self._held_initial_submissions.clear()
-        self._apply_dispatch_gates_locked()
+        return True
 
     def cancel_run(self, run_id: str) -> None:
         with self._lock:
@@ -380,10 +395,15 @@ class InferenceRowScheduler:
         self.cancel_run(run_id)
 
     def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
+        bindings: tuple[_InferenceStreamOrchestratorBinding, ...] = ()
+        cleared = False
         with self._lock:
             if self._scope_guard.active_scope == scope:
-                self._clear_global_pause_for_active_scope_locked(scope)
+                cleared = self._clear_global_pause_for_active_scope_locked(scope)
+                bindings = tuple(self._stream_bindings.values())
                 self._broadcast_global_pause_locked(paused=False)
+        if cleared:
+            self._sync_pause_dispatch_gates(bindings, paused=False)
 
     def shutdown(self) -> None:
         """Reset adapter state; safe for test teardown after dropping a service stack."""
@@ -527,8 +547,10 @@ class InferenceRowScheduler:
                     str(node.error) if node.error is not None else "Inference tier solve failed"
                 )
                 if not cancelled:
-                    session.event_queue.put(RowFailed(detail=detail))
-                    self._wake_multiplex_for_session(session)
+                    self._deliver_domain_event_to_open_stream(
+                        session,
+                        RowFailed(detail=detail),
+                    )
                 self._finalize_row_run(session)
                 continue
             if node.state != "complete":
@@ -536,16 +558,63 @@ class InferenceRowScheduler:
             row_complete = self._row_complete_from_result_wire(node.result_wire)
             if row_complete is None:
                 if not cancelled:
-                    session.event_queue.put(
-                        RowFailed(detail="Inference tier solve completed without row payload")
+                    self._deliver_domain_event_to_open_stream(
+                        session,
+                        RowFailed(detail="Inference tier solve completed without row payload"),
                     )
-                    self._wake_multiplex_for_session(session)
                 self._finalize_row_run(session)
                 continue
             if not cancelled:
-                session.event_queue.put(row_complete)
-                self._wake_multiplex_for_session(session)
+                self._deliver_domain_event_to_open_stream(session, row_complete)
             self._finalize_row_run(session)
+
+    def _deliver_domain_event_to_open_stream(
+        self,
+        session: InferenceRowStreamSession,
+        event: InferenceStreamDomainEvent,
+    ) -> None:
+        """Deliver a domain event to the open table stream for ``session``.
+
+        When the session is bound in ``scheduled_rows``, enqueue on the session
+        queue for multiplex drain. When it is not (missed adopt / unbind), push
+        tagged wire events onto ``pending_wire_events`` so an open connect loop
+        still yields terminals instead of staying on preamble-only.
+        """
+        from api.analytics.military_score_inference.inference_stream_rows import (
+            tag_inference_stream_event,
+        )
+        from api.transport.inference_stream_wire import domain_event_to_wire_events
+
+        scope = InferenceStreamScope(
+            game_id=session.game_id,
+            perspective=session.perspective,
+            turn_number=session.turn_number,
+        )
+        controller = controller_for_scope(scope)
+        if controller is None:
+            session.event_queue.put(event)
+            return
+
+        with controller.stream_lock:
+            scheduled = controller.scheduled_rows.get(session.player_id)
+            bound = (
+                scheduled is not None and scheduled.session.run_id == session.run_id
+            )
+            if bound:
+                session.event_queue.put(event)
+            else:
+                for wire in domain_event_to_wire_events(
+                    event,
+                    observation=session.observation,
+                    turn=session.turn,
+                    fleet_torp_input_status=session.fleet_torp_input_status,
+                ):
+                    controller.pending_wire_events.append(
+                        tag_inference_stream_event(wire, player_id=session.player_id)
+                    )
+                    if wire.get("type") in {"complete", "error"}:
+                        controller.finished_run_ids.add(session.run_id)
+        controller.wake_multiplex.set()
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
@@ -635,8 +704,25 @@ class InferenceRowScheduler:
         return held_jobs, held_continuations
 
     def _apply_dispatch_gates_locked(self) -> None:
-        for binding in self._stream_bindings.values():
-            if self._globally_paused:
+        """Apply pause gates for current bindings.
+
+        Prefer ``_sync_pause_dispatch_gates`` outside the scheduler lock when possible.
+        This in-lock path remains for stream-binding setup where the binding is new.
+        """
+        self._sync_pause_dispatch_gates(
+            tuple(self._stream_bindings.values()),
+            paused=self._globally_paused,
+        )
+
+    def _sync_pause_dispatch_gates(
+        self,
+        bindings: tuple[_InferenceStreamOrchestratorBinding, ...],
+        *,
+        paused: bool,
+    ) -> None:
+        """Register or clear pause dispatch gates (must not hold the scheduler lock)."""
+        for binding in bindings:
+            if paused:
                 if binding.unregister_dispatch_gate is None:
                     binding.unregister_dispatch_gate = binding.orchestrator.register_dispatch_gate(
                         self._pause_dispatch_gate
