@@ -22,6 +22,8 @@ export type NextSingleStepTarget = {
   priorityBand: string | null
   backend: string | null
   source: 'held' | 'would_dispatch'
+  /** Pool registration id when the preview is bound to a specific orchestrator. */
+  orchestratorId?: number | null
 }
 
 export type NextSingleStepPreview = {

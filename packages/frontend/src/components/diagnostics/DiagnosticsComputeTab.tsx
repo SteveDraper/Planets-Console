@@ -316,8 +316,9 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     setRunning(true)
     setLoadError(null)
     try {
-      let current =
-        snapshot ?? (await fetchComputeDiagnosticsSnapshot(scope).then((next) => {
+      let current: ComputeDiagnosticsSnapshotResponse =
+        snapshot ??
+        (await fetchComputeDiagnosticsSnapshot(scope).then((next) => {
           applySnapshot(next)
           return next
         }))

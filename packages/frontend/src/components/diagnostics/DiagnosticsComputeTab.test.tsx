@@ -201,7 +201,9 @@ describe('DiagnosticsComputeTab', () => {
       expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      expect(fetchComputeDiagnosticsSnapshot.mock.calls.length).toBeGreaterThanOrEqual(4)
+      expect(vi.mocked(fetchComputeDiagnosticsSnapshot).mock.calls.length).toBeGreaterThanOrEqual(
+        4
+      )
     })
     await waitFor(() => {
       expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
@@ -245,7 +247,9 @@ describe('DiagnosticsComputeTab', () => {
     await user.click(screen.getByTestId('compute-diagnostics-run'))
 
     await waitFor(() => {
-      expect(postComputeDiagnosticsSingleStep.mock.calls.length).toBeGreaterThanOrEqual(3)
+      expect(vi.mocked(postComputeDiagnosticsSingleStep).mock.calls.length).toBeGreaterThanOrEqual(
+        3
+      )
     })
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toMatch(/Run stalled/)
@@ -332,7 +336,7 @@ describe('DiagnosticsComputeTab', () => {
         NEXT_SCOPE_KEY
       )
     })
-    expect(fetchComputeDiagnosticsSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(vi.mocked(fetchComputeDiagnosticsSnapshot).mock.calls.length).toBeGreaterThanOrEqual(3)
   })
 })
 describe('snapshotHasPendingPoolWork', () => {
