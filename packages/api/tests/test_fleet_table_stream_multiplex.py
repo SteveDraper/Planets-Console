@@ -108,8 +108,7 @@ def test_fleet_connect_multiplexes_progress_across_players_before_complete(
 
     def _both_players_scheduled() -> bool:
         return all(
-            scheduler.row_run_for_player(scope, player_id) is not None
-            for player_id in player_ids
+            scheduler.row_run_for_player(scope, player_id) is not None for player_id in player_ids
         )
 
     deadline = time.monotonic() + 2.0
@@ -131,12 +130,8 @@ def test_fleet_connect_multiplexes_progress_across_players_before_complete(
     session_a.event_queue.put(
         fleet_ledger_updated_event(ledger={**empty_ledger, "playerId": player_a})
     )
-    session_b.event_queue.put(
-        fleet_complete_event(is_final=True, summary="player B done")
-    )
-    session_a.event_queue.put(
-        fleet_complete_event(is_final=True, summary="player A done")
-    )
+    session_b.event_queue.put(fleet_complete_event(is_final=True, summary="player B done"))
+    session_a.event_queue.put(fleet_complete_event(is_final=True, summary="player A done"))
     controller = controller_for_scope(scope)
     assert controller is not None
     controller.wake_multiplex.set()
