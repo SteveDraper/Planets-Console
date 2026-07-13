@@ -6,10 +6,11 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from api.compute.diagnostics.controller import BoundOrchestrator
+from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionRecord
 from api.compute.diagnostics.in_flight import InFlightPoolExecution, in_flight_to_wire
+from api.compute.diagnostics.profile_steps import registration_step_kind
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
@@ -18,8 +19,7 @@ from api.compute.diagnostics.single_step_preview import (
     single_step_preview_to_wire,
 )
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import ComputeWorkerPool, PoolWorkItem
-from api.compute.registry import COMPUTE_REGISTRY
+from api.compute.pools import PoolWorkItem
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry_catalog import active_table_stream_bindings
 
@@ -42,6 +42,7 @@ def _node_wire(
     node: OrchestratorNodeSnapshot,
     *,
     registration_step_kind: str | None,
+    orchestrator_id: int | None,
 ) -> dict[str, Any]:
     return {
         "scopeKey": format_compute_scope_key(node.scope),
@@ -51,14 +52,8 @@ def _node_wire(
         "stepIndex": node.step_index,
         "priorityBand": node.priority_band,
         "profileStepIndex": node.profile_step_index,
+        "orchestratorId": orchestrator_id,
     }
-
-
-def _registration_step_kind(node: OrchestratorNodeSnapshot) -> str | None:
-    registration = COMPUTE_REGISTRY.get(node.scope.analytic_id)
-    if registration is None or node.profile_step_index >= len(registration.compute_profile.steps):
-        return None
-    return registration.compute_profile.steps[node.profile_step_index].step_kind
 
 
 def _pool_item_wire(
@@ -98,7 +93,7 @@ def build_compute_diagnostics_snapshot(
     freeze_armed: bool,
     allowlisted_player_ids: frozenset[int],
     bound_orchestrators: tuple[BoundOrchestrator, ...],
-    pool: ComputeWorkerPool | None,
+    pool_queue_items: tuple[PoolWorkItem, ...],
     pool_item_is_runnable: Callable[[PoolWorkItem], bool] | None,
     in_flight: tuple[InFlightPoolExecution, ...],
     next_single_step: SingleStepPreview | None,
@@ -111,26 +106,42 @@ def build_compute_diagnostics_snapshot(
         if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
             continue
         orchestrator_view = bound.orchestrator.diagnostics_snapshot()
+        orch_id = bound.orchestrator.pool_registration_id
         nodes_by_scope = {node.scope: node for node in orchestrator_view.nodes}
         for node in orchestrator_view.nodes:
             if not _scope_in_shell(node.scope, shell=shell, ancestor_turns=ancestor_turns):
                 continue
-            dag_nodes.append(_node_wire(node, registration_step_kind=_registration_step_kind(node)))
+            dag_nodes.append(
+                _node_wire(
+                    node,
+                    registration_step_kind=registration_step_kind(
+                        node.scope.analytic_id,
+                        node.profile_step_index,
+                    ),
+                    orchestrator_id=orch_id,
+                )
+            )
         for ready_scope in orchestrator_view.ready_scopes:
             if not _scope_in_shell(ready_scope, shell=shell, ancestor_turns=ancestor_turns):
                 continue
             node = nodes_by_scope[ready_scope]
             ready_queue.append(
-                _node_wire(node, registration_step_kind=_registration_step_kind(node))
+                _node_wire(
+                    node,
+                    registration_step_kind=registration_step_kind(
+                        node.scope.analytic_id,
+                        node.profile_step_index,
+                    ),
+                    orchestrator_id=orch_id,
+                )
             )
 
     pool_queue: list[dict[str, Any]] = []
-    if pool is not None:
-        for item in pool.snapshot_work_queue():
-            if not _scope_in_shell(item.scope, shell=shell, ancestor_turns=ancestor_turns):
-                continue
-            runnable = pool_item_is_runnable(item) if pool_item_is_runnable is not None else True
-            pool_queue.append(_pool_item_wire(item, runnable=runnable))
+    for item in pool_queue_items:
+        if not _scope_in_shell(item.scope, shell=shell, ancestor_turns=ancestor_turns):
+            continue
+        runnable = pool_item_is_runnable(item) if pool_item_is_runnable is not None else True
+        pool_queue.append(_pool_item_wire(item, runnable=runnable))
 
     in_flight_rows = tuple(
         in_flight_to_wire(record)

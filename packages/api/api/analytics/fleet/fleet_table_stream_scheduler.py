@@ -152,8 +152,15 @@ class FleetTableStreamScheduler:
                 root_scope=root_scope,
             )
             self._runs[session.run_id] = run
+            # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
+            # node may still be ``complete`` on this orchestrator. Without force_fresh,
+            # submit attaches to that terminal node and never rematerializes refined ledgers.
             binding.orchestrator.submit(
-                ComputeRequest(scope=root_scope, priority_band="stream_attached")
+                ComputeRequest(
+                    scope=root_scope,
+                    priority_band="stream_attached",
+                    force_fresh=True,
+                )
             )
             return session
 

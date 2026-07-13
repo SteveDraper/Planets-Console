@@ -22,11 +22,18 @@ export type NextSingleStepTarget = {
   priorityBand: string | null
   backend: string | null
   source: 'held' | 'would_dispatch'
+  /** Pool registration id when the preview is bound to a specific orchestrator. */
+  orchestratorId?: number | null
 }
 
 export type NextSingleStepPreview = {
   target: NextSingleStepTarget | null
-  disabledReason: 'freeze_not_armed' | 'empty_allowlist' | 'nothing_steppable' | null
+  disabledReason:
+    | 'freeze_not_armed'
+    | 'empty_allowlist'
+    | 'nothing_steppable'
+    | 'work_in_progress'
+    | null
 }
 
 export type ComputeDiagnosticsSnapshotResponse = {

@@ -33,13 +33,28 @@ describe('formatSolutionLineItemLabel', () => {
     ).toBe('Ship torpedoes loaded (Mark 8 Photon) (23)')
   })
 
-  it('leaves ship build labels unchanged', () => {
+  it('leaves single-copy ship build labels unchanged', () => {
     expect(
       formatSolutionLineItemLabel({
         ...line('combo_13_9_3_6_8_6', 'Build Missouri: 2x Transwarp Drive'),
         count: 1,
       })
     ).toBe('Build Missouri: 2x Transwarp Drive')
+  })
+
+  it('prefixes multi-copy ship builds with count', () => {
+    expect(
+      formatSolutionLineItemLabel({
+        ...line('combo_freighter', 'Freighter'),
+        count: 2,
+      })
+    ).toBe('2x Freighter')
+    expect(
+      formatSolutionLineItemLabel({
+        ...line('combo_13_9_3_6_8_6', 'Build Missouri: 2x Transwarp Drive'),
+        count: 2,
+      })
+    ).toBe('2x Build Missouri: 2x Transwarp Drive')
   })
 })
 

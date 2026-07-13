@@ -38,6 +38,7 @@ from api.compute.runtime import (
     release_orchestrator_for_context,
     reset_orchestrators_for_tests,
 )
+from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
@@ -275,8 +276,8 @@ def test_single_step_empty_allowlist_is_noop(sample_turn):
     assert controller.single_step(shell) is False
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
-    assert controller._single_step_grants_remaining == 0
-    assert controller._single_step_dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 0
+    assert controller._single_step.dispatch_slots_remaining == 0
     preview, reason = controller.preview_single_step(shell)
     assert preview is None
     assert reason == "empty_allowlist"
@@ -297,11 +298,235 @@ def test_single_step_nothing_steppable_is_noop(sample_turn):
 
     assert controller.single_step(shell) is False
     assert pool_submissions == []
-    assert controller._single_step_grants_remaining == 0
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_shell is None
+    assert controller._single_step.grants_remaining == 0
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.shell is None
     wire = snapshot_to_wire(controller.snapshot(shell))
     assert wire["nextSingleStep"] == {"target": None, "disabledReason": "nothing_steppable"}
+
+
+def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sample_turn):
+    """Regression: persist raise after pool success must not freeze the DAG as running.
+
+    User-visible fingerprint from game 628580 / player 2: last scores tier_solve node
+    stays ``running``, completion history already has pool success, queues/in-flight are
+    empty, and ``nextSingleStep`` is ``nothing_steppable`` so scores never updates.
+    """
+    persist_error = RuntimeError("persist failed")
+
+    class _RaisingPersistence(_StubPersistencePolicy):
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            raise persist_error
+
+    def run_tier_solve(_job):
+        return StepResult(outcome="persist", payload={"result": "tier"})
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=TurnAnalyticCatalogEntry(
+                    id=SHARED_ID,
+                    name=SHARED_ID,
+                    supports_table=True,
+                    supports_map=False,
+                    type="selectable",
+                ),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="tier_solve", backend="thread"),),
+                ),
+                persistence_policy=_RaisingPersistence(),
+                build_step_job_wires=(
+                    ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("tier_solve", run_tier_solve),),
+            ),
+        )
+    )
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool_submissions: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({scope.player_id}))
+    orchestrator.submit(
+        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached")
+    )
+    assert orchestrator.nodes[scope].state == "ready"
+    assert controller.single_step(shell) is True
+    assert pool_submissions == [scope]
+    assert orchestrator.nodes[scope].state == "running"
+
+    # Simulate pool worker finish: step succeeds, then deferred persist raises.
+    orchestrator.complete_pool_step(
+        scope,
+        result_wire=StepResult(outcome="persist", payload={"result": "tier"}),
+    )
+
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert wire["freezeArmed"] is True
+    assert wire["poolQueue"] == []
+    assert wire["inFlight"] == []
+    assert wire["readyQueue"] == []
+    assert wire["nextSingleStep"] == {"target": None, "disabledReason": "nothing_steppable"}
+    # Must not leave a ghost running node after persist failure.
+    assert orchestrator.nodes[scope].state != "running"
+    assert orchestrator.nodes[scope].state == "failed"
+
+
+def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
+    """Regression: persist-before-complete must not present as an idle frozen DAG.
+
+    Empirically (game 628580 p11 t8 pl2): after tier_solve step-complete, a slow
+    scores persist (~80MB rewrite) left the node ``running`` with empty queues and
+    ``nothing_steppable``, so freeze looked stuck and scores never streamed
+    solutions. Outstanding persist work must remain visible to the observer.
+    """
+    persist_entered = threading.Event()
+    persist_release = threading.Event()
+    step_completions: list[str] = []
+
+    class _BlockingPersistence(_StubPersistencePolicy):
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            persist_entered.set()
+            assert persist_release.wait(timeout=5.0), "persist was not released"
+
+    def run_tier_solve(_job):
+        return StepResult(outcome="persist", payload={"result": "tier"})
+
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=TurnAnalyticCatalogEntry(
+                    id=SHARED_ID,
+                    name=SHARED_ID,
+                    supports_table=True,
+                    supports_map=False,
+                    type="selectable",
+                ),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="tier_solve", backend="thread"),),
+                ),
+                persistence_policy=_BlockingPersistence(),
+                build_step_job_wires=(
+                    ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("tier_solve", run_tier_solve),),
+            ),
+        )
+    )
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool_submissions: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    orchestrator.register_step_complete_listener(
+        lambda _scope, _node, step_kind, surface, terminal_state: step_completions.append(
+            f"{surface}:{step_kind}:{terminal_state}"
+        )
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({scope.player_id}))
+    orchestrator.submit(
+        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached")
+    )
+    assert controller.single_step(shell) is True
+    assert pool_submissions == [scope]
+
+    worker_error: list[BaseException] = []
+
+    def complete_on_worker() -> None:
+        try:
+            orchestrator.complete_pool_step(
+                scope,
+                result_wire=StepResult(outcome="persist", payload={"result": "tier"}),
+            )
+        except BaseException as exc:  # noqa: BLE001 - capture for main-thread assert
+            worker_error.append(exc)
+
+    worker = threading.Thread(target=complete_on_worker, name="slow-persist-complete")
+    worker.start()
+    assert persist_entered.wait(timeout=5.0), "persist did not start"
+
+    try:
+        assert step_completions == ["pool:tier_solve:success"]
+        wire = snapshot_to_wire(controller.snapshot(shell))
+        assert wire["nextSingleStep"] == {
+            "target": None,
+            "disabledReason": "work_in_progress",
+        }
+        looks_idle = (
+            wire["poolQueue"] == []
+            and wire["inFlight"] == []
+            and wire["readyQueue"] == []
+            and wire["nextSingleStep"] == {"target": None, "disabledReason": "nothing_steppable"}
+            and orchestrator.nodes[scope].state == "running"
+        )
+        assert not looks_idle, (
+            "persist-before-complete must not look like an idle frozen DAG "
+            f"(wire={wire!r}, state={orchestrator.nodes[scope].state!r})"
+        )
+    finally:
+        persist_release.set()
+        worker.join(timeout=5.0)
+
+    assert not worker.is_alive()
+    assert worker_error == []
+    assert orchestrator.nodes[scope].state == "complete"
 
 
 def test_single_step_redispatches_ready_node_into_pool(sample_turn):
@@ -374,9 +599,9 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
 
     assert controller.single_step(shell) is True
     assert orchestrator.nodes[inline_scope].state == "complete"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 0
-    assert controller._single_step_shell is None
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 0
+    assert controller._single_step.shell is None
 
     registration_id = orchestrator.pool_registration_id
     assert registration_id is not None
@@ -449,8 +674,8 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
     assert released in {scope_a, scope_b}
     assert orchestrator.nodes[released].state == "running"
     assert orchestrator.nodes[held].state == "ready"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 1
 
 
 def test_single_step_only_releases_focus_ready_scope(sample_turn):
@@ -503,6 +728,7 @@ def test_single_step_only_releases_focus_ready_scope(sample_turn):
 
 
 def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
+    """Same-band held beats ready (already queued approximates unfrozen FIFO)."""
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     ctx = make_fixture_query_context(
         sample_turn,
@@ -561,15 +787,272 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
 
     assert controller.single_step(shell) is True
     assert orchestrator.nodes[ready_scope].state == "ready"
-    assert controller._single_step_dispatch_slots_remaining == 0
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 1
     assert controller._pool_item_is_runnable(held_item) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is held_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(held_item) is False
+
+
+def test_single_step_prefers_stream_attached_ready_over_background_held(sample_turn):
+    """Higher-band ready dispatch outranks lower-band held pool work."""
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    stream_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[0].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    held_scope = _player_scope(
+        ctx,
+        player_id=sample_turn.scores[1].ownerid,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    registration_id = orchestrator.pool_registration_id
+    assert registration_id is not None
+    held_item = PoolWorkItem(
+        orchestrator_id=registration_id,
+        scope=held_scope,
+        step_kind="materialize",
+        backend="thread",
+        priority_band="background",
+        step_index=0,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({stream_scope.player_id, held_scope.player_id}))
+    orchestrator.submit(ComputeRequest(scope=stream_scope, priority_band="stream_attached"))
+    pool.enqueue_for_tests(held_item)
+    assert orchestrator.nodes[stream_scope].state == "ready"
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.source == "would_dispatch"
+    assert preview.priority_band == "stream_attached"
+    assert preview.scope_key == format_compute_scope_key(stream_scope)
+
+    assert controller.single_step(shell) is True
+    assert orchestrator.nodes[stream_scope].state == "running"
+    assert controller._pool_item_is_runnable(held_item) is False
+
+
+def test_single_step_prefers_stream_attached_ready_across_orchestrators(sample_turn):
+    """Band order wins even when a lower-band orchestrator was bound first."""
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    background_submissions: list[ComputeScope] = []
+    stream_submissions: list[ComputeScope] = []
+
+    def background_submitter(node, _step) -> None:
+        background_submissions.append(node.scope)
+
+    def stream_submitter(node, _step) -> None:
+        stream_submissions.append(node.scope)
+
+    background_ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    stream_ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    background_orch = ComputeOrchestrator(
+        background_ctx,
+        compute_registry=compute_registry,
+        pool_submitter=background_submitter,
+    )
+    stream_orch = ComputeOrchestrator(
+        stream_ctx,
+        compute_registry=compute_registry,
+        pool_submitter=stream_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(background_orch, background_ctx)
+    controller.bind_orchestrator(stream_orch, stream_ctx)
+    shell = ShellContextKey(
+        game_id=background_ctx.game_id,
+        perspective=background_ctx.perspective,
+        turn=background_ctx.ambient_turn,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    background_scope = _player_scope(
+        background_ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    stream_scope = _player_scope(
+        stream_ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({player_id}))
+    background_orch.submit(ComputeRequest(scope=background_scope, priority_band="background"))
+    stream_orch.submit(ComputeRequest(scope=stream_scope, priority_band="stream_attached"))
+    assert background_submissions == []
+    assert stream_submissions == []
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.priority_band == "stream_attached"
+    assert preview.source == "would_dispatch"
+    assert preview.scope_key == format_compute_scope_key(stream_scope)
+
+    assert controller.single_step(shell) is True
+    assert stream_submissions == [stream_scope]
+    assert background_submissions == []
+    assert stream_orch.nodes[stream_scope].state == "running"
+    assert background_orch.nodes[background_scope].state == "ready"
+
+
+def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
+    """Gate must enforce the same orchestrator pin that commit already uses.
+
+    When a single-step pin targets orch A, a matching ready node on orch B must
+    fail the gate (not only commit) so dispatch does not rotate the ready queue.
+    """
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orch_a = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    orch_b = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orch_a, ctx)
+    controller.bind_orchestrator(orch_b, ctx)
+    id_a = orch_a.pool_registration_id
+    id_b = orch_b.pool_registration_id
+    assert id_a is not None and id_b is not None and id_a != id_b
+
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = _player_scope(
+        ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({player_id}))
+
+    with controller._lock:
+        controller._single_step.shell = shell
+        controller._single_step.target_scope = scope
+        controller._single_step.target_priority_band = "background"
+        controller._single_step.target_orchestrator_id = id_a
+        controller._single_step.dispatch_slots_remaining = 1
+        controller._single_step.grants_remaining = 1
+
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="ready",
+        priority_band="background",
+    )
+    # Bound gates capture each orchestrator's registration id at bind time.
+    assert len(orch_a._dispatch_gates) == 1
+    assert len(orch_b._dispatch_gates) == 1
+    assert orch_a._dispatch_gates[0](node) is True
+    assert orch_b._dispatch_gates[0](node) is False
+    # Commit agrees: wrong orch cannot consume the armed slot.
+    assert controller._commit_single_step_dispatch(node, orchestrator_id=id_b) is False
+    assert controller._single_step.dispatch_slots_remaining == 1
+
+
+def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
+    """A rejecting non-diagnostics gate must not leave the armed slot consumed.
+
+    Scores global-pause registers after the diagnostics gate. If slot consume lived
+    inside ``all(gate)``, pause rejecting tier_solve burned the single-step slot and
+    left Run spinning on the same would_dispatch target.
+    """
+    compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
+    pool_submissions: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    # Reject every node -- models scores pause blocking the selected profile step.
+    orchestrator.register_dispatch_gate(lambda _node: False)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = _player_scope(
+        ctx,
+        player_id=player_id,
+        analytic_id=SHARED_ID,
+        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
+    )
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({player_id}))
+    orchestrator.submit(ComputeRequest(scope=scope, priority_band="stream_attached"))
+    assert orchestrator.nodes[scope].state == "ready"
+
+    assert controller.single_step(shell) is False
+    assert pool_submissions == []
+    assert orchestrator.nodes[scope].state == "ready"
+    assert controller._single_step.dispatch_slots_remaining == 0
+    assert controller._single_step.grants_remaining == 0
+
+    preview, reason = controller.preview_single_step(shell)
+    assert reason is None
+    assert preview is not None
+    assert preview.source == "would_dispatch"
 
 
 def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
@@ -635,7 +1118,7 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
 
     released = pool.take_next_item_for_tests()
     assert released is focus_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (other_item,)
     assert pool.take_next_item_for_tests() is None
 
@@ -649,11 +1132,11 @@ def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
     assert controller._pool_item_is_runnable(item) is False
     controller.single_step(shell)
     assert controller._pool_item_is_runnable(item) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(item) is False
     assert pool.take_next_item_for_tests() is None
 
@@ -691,11 +1174,11 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
     pool.enqueue_for_tests(low_item)
     pool.enqueue_for_tests(high_item)
     assert controller.single_step(shell) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is high_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (low_item,)
     assert controller._pool_item_is_runnable(low_item) is False
     assert pool.take_next_item_for_tests() is None
@@ -734,7 +1217,7 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
 
     first = pool.take_next_item_for_tests()
     assert first is focus_item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (frozen_item,)
     assert pool.take_next_item_for_tests() is None
 
@@ -771,7 +1254,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     pool.enqueue_for_tests(first_item)
     pool.enqueue_for_tests(second_item)
     assert controller.single_step(shell) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     start = threading.Barrier(2)
     released: list[PoolWorkItem | None] = []
@@ -794,7 +1277,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     assert len(released) == 2
     assert len(non_none) == 1
     assert non_none[0] in {first_item, second_item}
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert len(pool.snapshot_work_queue()) == 1
     assert pool.take_next_item_for_tests() is None
 
@@ -872,17 +1355,17 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
     assert controller._pool_item_is_runnable(item) is False
 
     assert controller.single_step(shell) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     wire = snapshot_to_wire(controller.snapshot(shell))
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
     assert any(row["state"] == "queued" for row in wire["poolQueue"])
     assert controller._pool_item_is_runnable(item) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
 
     released = pool.take_next_item_for_tests()
     assert released is item
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(item) is False
     assert pool.take_next_item_for_tests() is None
 
@@ -917,7 +1400,12 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
     }
 
 
-def test_in_flight_appears_on_dequeue_and_clears_on_pool_step_complete(sample_turn):
+def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_turn):
+    """Pool success step-complete keeps in-flight until the pool item finishes.
+
+    Persist-before-complete needs the row to remain visible after solve success while
+    durable write is still outstanding; ``on_item_finished`` is the authoritative clear.
+    """
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
 
@@ -927,18 +1415,16 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_step_complete(sample_tu
 
     released = pool.take_next_item_for_tests()
     assert released is item
-    wire_inflight = snapshot_to_wire(controller.snapshot(shell))
-    assert len(wire_inflight["inFlight"]) == 1
-    assert wire_inflight["poolQueue"] == []
-    row = wire_inflight["inFlight"][0]
-    assert row["scopeKey"]
-    assert row["analyticId"] == item.scope.analytic_id
-    assert row["stepKind"] == item.step_kind
-    assert row["stepIndex"] == item.step_index
-    assert row["priorityBand"] == item.priority_band
-    assert row["backend"] == item.backend
-    assert row["orchestratorId"] == item.orchestrator_id
-    assert isinstance(row["startedAt"], str) and row["startedAt"]
+    assert len(controller._in_flight_snapshot()) == 1
+    record = controller._in_flight_snapshot()[0]
+    assert record.scope == item.scope
+    assert record.analytic_id == item.scope.analytic_id
+    assert record.step_kind == item.step_kind
+    assert record.step_index == item.step_index
+    assert record.priority_band == item.priority_band
+    assert record.backend == item.backend
+    assert record.orchestrator_id == item.orchestrator_id
+    assert isinstance(record.started_at, str) and record.started_at
 
     completed_node = ComputeNodeRun(
         scope=item.scope,
@@ -954,16 +1440,162 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_step_complete(sample_tu
         item.step_kind,
         "pool",
         "success",
+        orchestrator_id=item.orchestrator_id,
     )
+    assert len(controller._in_flight_snapshot()) == 1
+
+    controller._on_pool_item_finished(item)
+    assert controller._in_flight_snapshot() == ()
     wire_after = snapshot_to_wire(controller.snapshot(shell))
     assert wire_after["inFlight"] == []
+
+
+def test_in_flight_clear_is_scoped_to_orchestrator_id(sample_turn):
+    """Same scope on two orchestrators: completing one must not clear the other."""
+    controller, pool, shell, item_a = _pool_held_item_fixture(sample_turn, worker_count=0)
+    item_b = PoolWorkItem(
+        orchestrator_id=item_a.orchestrator_id + 1,
+        scope=item_a.scope,
+        step_kind=item_a.step_kind,
+        backend=item_a.backend,
+        priority_band=item_a.priority_band,
+        step_index=item_a.step_index,
+    )
+    pool.enqueue_for_tests(item_a)
+    pool.enqueue_for_tests(item_b)
+    assert pool.take_next_item_for_tests() is item_a
+    assert pool.take_next_item_for_tests() is item_b
+    assert len(controller._in_flight_snapshot()) == 2
+
+    controller._on_pool_item_finished(item_a)
+    remaining = controller._in_flight_snapshot()
+    assert len(remaining) == 1
+    assert remaining[0].orchestrator_id == item_b.orchestrator_id
+
+
+def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
+    """Worker finish clears in-flight even when complete_pool_step is a no-op."""
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    pool.enqueue_for_tests(item)
+    assert pool.take_next_item_for_tests() is item
+    assert len(controller._in_flight_snapshot()) == 1
+
+    # Simulate abort-before-finish: step-complete already ran; worker still finishes.
+    aborted_node = ComputeNodeRun(
+        scope=item.scope,
+        dependency_scopes=(),
+        state="failed",
+        profile_step_index=0,
+        step_index=item.step_index,
+        priority_band=item.priority_band,
+    )
+    controller._on_step_complete(
+        item.scope,
+        aborted_node,
+        item.step_kind,
+        "pool",
+        "failed",
+        orchestrator_id=item.orchestrator_id,
+    )
+    assert controller._in_flight_snapshot() == ()
+
+    # Re-record a ghost as if abort clear missed, then pool finish must clear it.
+    controller._on_pool_item_dequeued(item)
+    assert len(controller._in_flight_snapshot()) == 1
+    controller._on_pool_item_finished(item)
+    assert controller._in_flight_snapshot() == ()
+    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
+
+
+def test_snapshot_filters_orphan_in_flight_without_mutating(sample_turn):
+    """Orphan in-flight is omitted from the wire; snapshot GET must not purge state."""
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    pool.enqueue_for_tests(item)
+    assert pool.take_next_item_for_tests() is item
+    assert len(controller._in_flight_snapshot()) == 1
+
+    # Node never entered running on the bound orchestrator -- orphan for the wire.
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert wire["inFlight"] == []
+    assert len(controller._in_flight_snapshot()) == 1
+
+
+def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
+    """Orphans are purged on lifecycle reconcile / finish, not on snapshot GET."""
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    other_item = PoolWorkItem(
+        orchestrator_id=item.orchestrator_id,
+        scope=ComputeScope(
+            analytic_id=item.scope.analytic_id,
+            game_id=item.scope.game_id,
+            perspective=item.scope.perspective,
+            turn=item.scope.turn,
+            player_id=(item.scope.player_id or 0) + 1,
+        ),
+        step_kind=item.step_kind,
+        backend=item.backend,
+        priority_band=item.priority_band,
+        step_index=item.step_index,
+    )
+    pool.enqueue_for_tests(item)
+    pool.enqueue_for_tests(other_item)
+    assert pool.take_next_item_for_tests() is item
+    assert pool.take_next_item_for_tests() is other_item
+    assert len(controller._in_flight_snapshot()) == 2
+
+    # Snapshot filters only -- does not mutate controller state.
+    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
+    assert len(controller._in_flight_snapshot()) == 2
+
+    # Pool-failed step-complete clears the matching row and reconciles other orphans.
+    failed_node = ComputeNodeRun(
+        scope=item.scope,
+        dependency_scopes=(),
+        state="failed",
+        profile_step_index=0,
+        step_index=item.step_index,
+        priority_band=item.priority_band,
+    )
+    controller._on_step_complete(
+        item.scope,
+        failed_node,
+        item.step_kind,
+        "pool",
+        "failed",
+        orchestrator_id=item.orchestrator_id,
+    )
+    assert controller._in_flight_snapshot() == ()
+
+    # Finish remains the authoritative clear for the matching row after re-record.
+    controller._on_pool_item_dequeued(item)
+    assert len(controller._in_flight_snapshot()) == 1
+    controller._on_pool_item_finished(item)
+    assert controller._in_flight_snapshot() == ()
+
+
+def test_snapshot_held_preview_matches_empty_pool_queue(sample_turn):
+    """Held next-step cannot appear when the captured pool queue is empty."""
+    controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
+    player_id = item.scope.player_id
+    assert isinstance(player_id, int)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({player_id}))
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    assert wire["poolQueue"] == []
+    target = wire["nextSingleStep"]["target"]
+    if target is not None:
+        assert target.get("source") != "held"
 
 
 def test_in_flight_clears_on_orchestrator_unbind(sample_turn):
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
     assert pool.take_next_item_for_tests() is item
-    assert len(snapshot_to_wire(controller.snapshot(shell))["inFlight"]) == 1
+    # Orphan relative to running nodes; retained until unbind / finish (snapshot
+    # filters only and must not purge).
+    assert len(controller._in_flight_snapshot()) == 1
+    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
+    assert len(controller._in_flight_snapshot()) == 1
 
     # Locate the bound orchestrator for this pool registration and unbind it.
     bound = next(
@@ -972,7 +1604,7 @@ def test_in_flight_clears_on_orchestrator_unbind(sample_turn):
         if entry.orchestrator.pool_registration_id == item.orchestrator_id
     )
     controller.unbind_orchestrator(bound.orchestrator)
-    assert snapshot_to_wire(controller.snapshot(shell))["inFlight"] == []
+    assert controller._in_flight_snapshot() == ()
 
 
 def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
@@ -997,13 +1629,17 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
     assert pool.take_next_item_for_tests() is item
     assert pool.take_next_item_for_tests() is other_item
 
-    # Both recorded on the controller; snapshot for ``shell`` only shows in-scope.
+    # Both recorded on the controller; raw snapshot retains them (no matching
+    # running nodes -- wire live filter would omit them).
     assert len(controller._in_flight_snapshot()) == 2
-    wire = snapshot_to_wire(controller.snapshot(shell))
-    assert len(wire["inFlight"]) == 1
-    assert wire["inFlight"][0]["orchestratorId"] == item.orchestrator_id
-    assert "gameId" not in wire["inFlight"][0]
-    assert item.scope.analytic_id in wire["inFlight"][0]["scopeKey"]
+    in_scope = [
+        record
+        for record in controller._in_flight_snapshot()
+        if record.scope.game_id == item.scope.game_id
+    ]
+    assert len(in_scope) == 1
+    assert in_scope[0].orchestrator_id == item.orchestrator_id
+    assert item.scope.analytic_id in in_scope[0].scope_key
 
 
 def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample_turn):
@@ -1531,9 +2167,9 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
     assert controller.single_step(operator_shell) is True
     assert controller._pool_item_is_runnable(non_focus_held) is False
     assert controller._pool_item_is_runnable(focus_held) is True
-    assert controller._single_step_grants_remaining == 1
+    assert controller._single_step.grants_remaining == 1
     assert pool.take_next_item_for_tests() is focus_held
-    assert controller._single_step_grants_remaining == 0
+    assert controller._single_step.grants_remaining == 0
     assert pool.snapshot_work_queue() == (non_focus_held,)
 
     # Production fleet step kind (history resolves against COMPUTE_REGISTRY).

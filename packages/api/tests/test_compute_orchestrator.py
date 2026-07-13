@@ -917,6 +917,59 @@ def test_step_outcome_persist_calls_persistence_policy(sample_turn):
     assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
 
 
+def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
+    """Durable write must precede complete; notifications must follow complete.
+
+    Historically persist ran under the orch lock with complete so dependents and
+    ``has_final_ledger`` readers never saw a terminal node without a durable
+    artifact. Persist is now outside the lock for deadlock reasons, but that
+    ordering must still hold.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    events: list[str] = []
+    durable_ready = False
+
+    class _OrderingPersistence(_StubPersistencePolicy):
+        def persist(self, _ctx, scope, result_wire):
+            nonlocal durable_ready
+            del scope, result_wire
+            events.append("persist")
+            durable_ready = True
+
+            def _notify() -> None:
+                events.append("notify")
+                assert durable_ready is True
+
+            return _notify
+
+    registry = build_compute_registry(
+        (
+            _outcome_compute_registration(
+                SHARED_ID,
+                outcome="persist",
+                persistence_policy=_OrderingPersistence(),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=registry)
+    scope = _compute_scope(SHARED_ID, export_scope)
+
+    def on_complete(_scope, node) -> None:
+        events.append("complete_listener")
+        assert node.state == "complete"
+        assert durable_ready is True
+
+    orchestrator.register_node_complete_listener(on_complete)
+    handle = orchestrator.submit(ComputeRequest(scope=scope))
+
+    assert handle.state == "complete"
+    assert events == ["persist", "complete_listener", "notify"]
+
+
 def test_step_outcome_complete_skips_persistence_policy(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,
@@ -1091,6 +1144,200 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
     assert orchestrator.ready_scopes() == (branch_b_scope,)
 
 
+def test_pool_submitter_never_runs_while_orchestrator_lock_is_held(sample_turn):
+    """Pool submit must not nest under the orchestrator lock (deadlock with pool→controller)."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    submit_calls = 0
+
+    thread_registry = build_compute_registry(
+        (
+            _thread_compute_registration(ROOT_ID),
+            _thread_compute_registration(BRANCH_B_ID),
+            _thread_compute_registration(BRANCH_C_ID),
+            _thread_compute_registration(SHARED_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=thread_registry,
+        pool_submitter=lambda *_args, **_kwargs: None,
+    )
+
+    def pool_submitter(node, _step, **_kwargs) -> None:
+        nonlocal submit_calls
+        submit_calls += 1
+        assert not orchestrator._lock.locked()  # noqa: SLF001 -- lock-order contract
+
+    orchestrator._pool_submitter = pool_submitter  # noqa: SLF001
+
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    orchestrator.submit(ComputeRequest(scope=root_scope))
+    assert submit_calls >= 1
+
+
+def test_inline_job_wire_builder_never_runs_while_orchestrator_lock_is_held(sample_turn):
+    """Inline builders must not run under the orch lock (deadlock with scheduler→orch)."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    builder_saw_lock_held = False
+    orchestrator_holder: dict[str, ComputeOrchestrator] = {}
+
+    def build_wire(scope, **_kwargs):
+        nonlocal builder_saw_lock_held
+        orch = orchestrator_holder["orch"]
+        builder_saw_lock_held = orch._lock.locked()  # noqa: SLF001
+        return {"scope": scope.analytic_id}
+
+    registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(("materialize", build_wire),),
+                run_steps=(
+                    (
+                        "materialize",
+                        lambda job: {"result": job["scope"]},
+                    ),
+                ),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=registry,
+        pool_submitter=lambda *_args, **_kwargs: None,
+    )
+    orchestrator_holder["orch"] = orchestrator
+    scope = _compute_scope(SHARED_ID, export_scope)
+    orchestrator.submit(ComputeRequest(scope=scope))
+    assert orchestrator.nodes[scope].state == "complete"
+    assert builder_saw_lock_held is False
+
+
+def test_persist_never_runs_while_orchestrator_lock_is_held(sample_turn):
+    """Fleet-style persist must not nest under the orch lock (deadlock with scheduler→orch)."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persist_saw_lock_held = False
+    orchestrator_holder: dict[str, ComputeOrchestrator] = {}
+
+    class _LockCheckingPersistence(_StubPersistencePolicy):
+        def persist(self, _ctx, scope, result_wire):
+            nonlocal persist_saw_lock_held
+            orch = orchestrator_holder["orch"]
+            persist_saw_lock_held = orch._lock.locked()  # noqa: SLF001
+            return None
+
+    registry = build_compute_registry(
+        (
+            _outcome_compute_registration(
+                SHARED_ID,
+                outcome="persist",
+                persistence_policy=_LockCheckingPersistence(),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=registry)
+    orchestrator_holder["orch"] = orchestrator
+    scope = _compute_scope(SHARED_ID, export_scope)
+    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    assert handle.state == "complete"
+    assert persist_saw_lock_held is False
+
+
+def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
+    """Persist runs after step-complete success; a raise must not ghost-leave running.
+
+    Observed fingerprint: completion history records pool success, in-flight/pool are
+    empty, but the DAG node stays ``running`` so freeze single-step reports
+    ``nothing_steppable`` and scores never emits row-complete.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persist_error = RuntimeError("persist failed")
+
+    class _RaisingPersistence(_StubPersistencePolicy):
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            raise persist_error
+
+    def run_tier_solve(_job):
+        return StepResult(outcome="persist", payload={"result": SHARED_ID})
+
+    registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="tier_solve", backend="thread"),),
+                ),
+                persistence_policy=_RaisingPersistence(),
+                build_step_job_wires=(
+                    ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("tier_solve", run_tier_solve),),
+            ),
+        )
+    )
+    pool_submissions: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+    scope = _compute_scope(SHARED_ID, export_scope)
+    orchestrator.submit(
+        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached")
+    )
+    assert pool_submissions == [scope]
+    assert orchestrator.nodes[scope].state == "running"
+
+    step_completions: list[str] = []
+
+    def on_step_complete(_scope, _node, step_kind, surface, terminal_state) -> None:
+        step_completions.append(f"{surface}:{step_kind}:{terminal_state}")
+
+    orchestrator.register_step_complete_listener(on_step_complete)
+
+    orchestrator.complete_pool_step(
+        scope,
+        result_wire=StepResult(outcome="persist", payload={"result": SHARED_ID}),
+    )
+
+    # Step-complete success is recorded before persist; persist failure must fail the node.
+    assert step_completions == ["pool:tier_solve:success"]
+    assert orchestrator.nodes[scope].state != "running"
+    assert orchestrator.nodes[scope].state == "failed"
+    assert orchestrator.nodes[scope].error is persist_error
+
+
 def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_turn):
     """Diagnostics must read nodes and ready queue atomically, not via live mappings."""
     ctx = make_fixture_query_context(
@@ -1177,6 +1424,60 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
     assert pool_submissions == [shared_scope, shared_scope]
     assert orchestrator.nodes[shared_scope].state == "running"
     unregister_pause()
+
+
+def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn):
+    """Provisional continue payload must remain the dependency result_wire.
+
+    Scores materialize→continue→tier_solve skip previously left ``result_wire`` None,
+    so fleet dispatch raised ``complete without a result wire``.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    calls = {"materialize": 0, "tier": 0}
+
+    def run_materialize(_job):
+        calls["materialize"] += 1
+        return StepResult(outcome="continue", payload={"exportTree": {"ok": True}})
+
+    def run_tier(_job):
+        calls["tier"] += 1
+        return StepResult(outcome="complete")
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(
+                ComputeStepSpec(step_kind="materialize", backend="inline"),
+                ComputeStepSpec(step_kind="tier_solve", backend="inline"),
+            ),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+            ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(
+            ("materialize", run_materialize),
+            ("tier_solve", run_tier),
+        ),
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+
+    assert calls == {"materialize": 1, "tier": 1}
+    assert handle.state == "complete"
+    assert handle.result_wire == {"exportTree": {"ok": True}}
 
 
 def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample_turn):

@@ -224,6 +224,84 @@ def test_streaming_refine_updates_option_sets(sample_turn):
     assert any(event.kind == "inference_update" for event in records[0].events)
 
 
+def test_refine_preserves_scoreboard_ship_id_bounds(sample_turn):
+    """Option-set refine must not clear id bounds already applied by observation ingest.
+
+    Persist phase-2 refine runs after materialize has tightened ``lte`` bounds; wiping
+    them left intermediate-turn rows as ``?`` while unreined same-turn rows kept bounds.
+    """
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = sample_turn.scores[0].ownerid
+    turn = replace(
+        sample_turn,
+        ships=[],
+        scores=[
+            replace(
+                score,
+                turn=sample_turn.settings.turn,
+                ownerid=player_id,
+                capitalships=10,
+                freighters=5,
+                shipchange=2,
+                freighterchange=0,
+            )
+            for score in sample_turn.scores
+            if score.ownerid == player_id
+        ],
+    )
+    schedule_row_with_ladder(
+        scheduler,
+        turn,
+        player_id,
+        merged_solutions=[
+            inference_solution(
+                objective_value=90,
+                ship_builds=(
+                    ship_build_domain(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                    ),
+                    ship_build_domain(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                        count=1,
+                    ),
+                ),
+            ),
+        ],
+    )
+    inference = FleetInferenceSupport(
+        scores_services=ScoresExportContext(
+            persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            scheduler=scheduler,
+        ),
+    )
+    bounded = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, perspective(turn), turn),
+        turn,
+    )
+    before = ledger_for_player(bounded, player_id).records
+    assert len(before) == 2
+    bounds_before = [_ship_id_lte_bound(record) for record in before]
+    assert all(bound is not None for bound in bounds_before)
+
+    refined = ingest_turn_inferred_acquisitions(
+        bounded,
+        turn,
+        inference_materialization=_inference_materialization(inference, turn),
+    )
+    after = ledger_for_player(refined, player_id).records
+    assert len(after) == 2
+    assert all(len(record.build_option_sets) > 0 for record in after)
+    assert [_ship_id_lte_bound(record) for record in after] == bounds_before
+    assert all(isinstance(record.fields.hull, FleetFieldUnknown) for record in after)
+
+
 def test_streaming_refine_updates_freighter_option_sets(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)

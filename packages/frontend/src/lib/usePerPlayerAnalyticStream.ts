@@ -56,6 +56,12 @@ export type UsePerPlayerAnalyticStreamOptions<
   TRefState,
   TPublished,
 > = {
+  /**
+   * Stable id for this analytic's table stream (e.g. ``fleet``, ``scores``).
+   * Prefixed onto ``connectionKey`` so diagnostics lifecycle rows do not collide
+   * when multiple analytics share the same shell and player set.
+   */
+  streamId: string
   scope: AnalyticShellScope | null
   enabled: boolean
   playerIdsKey: string
@@ -98,7 +104,7 @@ export function usePerPlayerAnalyticStream<
 >(
   options: UsePerPlayerAnalyticStreamOptions<TEvent, TRefState, TPublished>
 ): UsePerPlayerAnalyticStreamResult<TPublished> {
-  const { scope, enabled, playerIdsKey, policy } = options
+  const { streamId, scope, enabled, playerIdsKey, policy } = options
 
   const diagnosticsEnabled = useComputeDiagnosticsStore((state) => state.enabled)
   const freezeStatus = useComputeDiagnosticsStore((state) => state.freezeStatus)
@@ -116,8 +122,8 @@ export function usePerPlayerAnalyticStream<
   const connectionKey =
     enabled && scopeKey != null && effectivePlayerIdsKey.length > 0
       ? freezeHoldKey.length > 0
-        ? `${scopeKey}:${effectivePlayerIdsKey}:${freezeHoldKey}`
-        : `${scopeKey}:${effectivePlayerIdsKey}`
+        ? `${streamId}:${scopeKey}:${effectivePlayerIdsKey}:${freezeHoldKey}`
+        : `${streamId}:${scopeKey}:${effectivePlayerIdsKey}`
       : null
 
   const [publishedByPlayerId, setPublishedByPlayerId] = useState<Map<number, TPublished>>(
@@ -212,6 +218,7 @@ export function usePerPlayerAnalyticStream<
     if (isNewConnection) {
       streamGenerationRef.current += 1
       recordClientStreamLifecycle({
+        streamId,
         connectionKey,
         generation: streamGenerationRef.current,
         lastEventAt: null,
@@ -252,6 +259,7 @@ export function usePerPlayerAnalyticStream<
     // Freeze + empty allowlist: server narrows to no subscriptions; keep rows pending.
     if (hold.holding && subscribedPlayerIds.length === 0) {
       recordClientStreamLifecycle({
+        streamId,
         connectionKey,
         generation: streamGenerationRef.current,
         lastEventAt: new Date().toISOString(),
@@ -270,6 +278,7 @@ export function usePerPlayerAnalyticStream<
         signal: controller.signal,
         onEvent: (event) => {
           recordClientStreamLifecycle({
+            streamId,
             connectionKey,
             generation: streamGenerationRef.current,
             lastEventAt: new Date().toISOString(),
@@ -293,6 +302,7 @@ export function usePerPlayerAnalyticStream<
           return
         }
         recordClientStreamLifecycle({
+          streamId,
           connectionKey,
           generation: streamGenerationRef.current,
           lastEventAt: new Date().toISOString(),
@@ -313,6 +323,7 @@ export function usePerPlayerAnalyticStream<
         }
         const summary = errorDetailFromUnknown(error)
         recordClientStreamLifecycle({
+          streamId,
           connectionKey,
           generation: streamGenerationRef.current,
           lastEventAt: new Date().toISOString(),
@@ -327,7 +338,7 @@ export function usePerPlayerAnalyticStream<
       streamAbortControllerRef.current = null
       policyRef.current.onConnectionTeardown?.()
     }
-  }, [connectionKey, effectivePlayerIdsKey])
+  }, [connectionKey, effectivePlayerIdsKey, streamId])
 
   return { publishedByPlayerId }
 }

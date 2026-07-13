@@ -64,7 +64,8 @@ function makePolicy(
 }
 
 const sampleEntry = {
-  connectionKey: 'scope:8,9',
+  streamId: 'test',
+  connectionKey: 'test:scope:8,9',
   generation: 1,
   lastEventAt: '2026-07-09T12:00:00.000Z',
   lastEventType: 'row',
@@ -120,6 +121,7 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     const { result } = renderHook(() =>
       usePerPlayerAnalyticStream({
+        streamId: 'test',
         scope,
         enabled: true,
         playerIdsKey: '3,7,11',
@@ -157,6 +159,7 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     const { result } = renderHook(() =>
       usePerPlayerAnalyticStream({
+        streamId: 'test',
         scope,
         enabled: true,
         playerIdsKey: '3,7,11',
@@ -188,6 +191,7 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     const { result } = renderHook(() =>
       usePerPlayerAnalyticStream({
+        streamId: 'test',
         scope,
         enabled: true,
         playerIdsKey: '3,7',
@@ -234,6 +238,7 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     const { result } = renderHook(() =>
       usePerPlayerAnalyticStream({
+        streamId: 'test',
         scope,
         enabled: true,
         playerIdsKey: '3',
@@ -282,6 +287,7 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
 
     const { result } = renderHook(() =>
       usePerPlayerAnalyticStream({
+        streamId: 'test',
         scope: nextTurnScope,
         enabled: true,
         playerIdsKey: '3,7,11',
@@ -300,5 +306,50 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
         detail: null,
       })
     }
+  })
+
+  it('keeps separate clientStreams rows for different streamIds', async () => {
+    const connectUntilComplete = vi.fn(async () => 'ok' as const)
+    const policy = makePolicy(connectUntilComplete)
+
+    useComputeDiagnosticsStore.setState({
+      enabled: true,
+      freezeStatus: {
+        shell: scope,
+        freezeArmed: true,
+        allowlistedPlayerIds: [],
+      },
+      snapshot: null,
+      clientStreams: [],
+    })
+
+    renderHook(() => {
+      usePerPlayerAnalyticStream({
+        streamId: 'fleet',
+        scope,
+        enabled: true,
+        playerIdsKey: '3,7',
+        policy,
+      })
+      usePerPlayerAnalyticStream({
+        streamId: 'scores',
+        scope,
+        enabled: true,
+        playerIdsKey: '3,7',
+        policy,
+      })
+    })
+
+    await waitFor(() => {
+      const streams = useComputeDiagnosticsStore.getState().clientStreams
+      expect(streams).toHaveLength(2)
+    })
+
+    const streams = useComputeDiagnosticsStore.getState().clientStreams
+    const byStreamId = Object.fromEntries(streams.map((entry) => [entry.streamId, entry]))
+    expect(byStreamId.fleet?.connectionKey.startsWith('fleet:')).toBe(true)
+    expect(byStreamId.scores?.connectionKey.startsWith('scores:')).toBe(true)
+    expect(byStreamId.fleet?.lastConnectResult).toBe('freeze_held')
+    expect(byStreamId.scores?.lastConnectResult).toBe('freeze_held')
   })
 })

@@ -165,13 +165,17 @@ def build_scores_tier_solve_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
 ) -> dict[str, Any]:
-    """Assemble a serializable job wire for one scores inference tier step."""
+    """Assemble a serializable job wire for one scores inference tier step.
+
+    When no stream ``RowRun`` is registered (ensure-only materialize continuation),
+    return a skip sentinel so ``run_scores_tier_solve`` can complete without solving.
+    """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
 
     run = get_row_run_for_scope(scope)
     if run is None:
-        raise RuntimeError("scores tier_solve requires a registered RowRun for scope")
+        return {"runId": None}
 
     fleet_resolution = _resolve_prior_fleet_for_tier_wire(
         scope,
@@ -184,8 +188,17 @@ def build_scores_tier_solve_job_wire(
 
 
 def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
-    """Inline scores materialize completes without orchestrator-owned persistence."""
-    return StepResult(outcome="complete", payload=job_wire["exportTree"])
+    """Inline scores materialize then continue into ``tier_solve`` on the same node.
+
+    Fleet ENSURE-depends on same-turn scores. Completing after materialize alone
+    unlocked fleet before inference solutions existed; continuing keeps the scores
+    node non-terminal until tier_solve finishes (or skips when no RowRun).
+
+    The export tree is carried as the continue payload so ensure-only skip paths
+    still leave a dependency ``result_wire`` for fleet dispatch.
+    """
+    export_tree = job_wire["exportTree"]
+    return StepResult(outcome="continue", payload=export_tree)
 
 
 def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> StepResult:
@@ -208,6 +221,9 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier step and return an explicit orchestrator outcome."""
     run_id = job_wire.get("runId")
+    if run_id is None:
+        # Ensure-only continuation after materialize with no stream RowRun.
+        return StepResult(outcome="complete")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
