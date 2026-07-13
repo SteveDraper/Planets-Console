@@ -421,10 +421,10 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Fine-grained slack | Deferred to higher policy steps via **tier aggregate allowlist** (planet/SB defense posts, ship torps); not always-on |
 | Score band + seeding | Exact-first per step; band retry when infeasible and `alpha > 0`; near-solutions seed next step only (max 5); final step `alpha = 0` |
 | User-facing exact | Any policy step may contribute exact solutions to top-K; band results never shown directly |
-| Policy overlay | Hook in #77; merge semantics in #78; signal sources out of scope |
+| Policy overlay | **#78** cancelled; step-local widens (`includeComponentIds` for collision twins, #226) |
 | Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
 | Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
-| Fleet-informed ranking | **#87** torp admission + misalignment prior; **#156** component tech-gap prior; tunables in `fleetInferenceTuning` (tier policy YAML). **#78** tier policy overlay is catalog widening only (parallel axis). Absent fleet overlay == empty belief set. |
+| Fleet-informed ranking | **#87** torp admission + misalignment prior; **#156** component tech-gap prior; tunables in `fleetInferenceTuning` (tier policy YAML). Catalog filter widens are step-local (#226), not a parallel #78 overlay. Absent fleet overlay == empty belief set. |
 | SPA streaming (#71) | One multiplexed **inference table stream** per shell scope |
 | Cross-row scheduling (#71) | **Inference row scheduler**: FIFO tier jobs, default 4 workers (configurable) |
 | Global pause (#71) | Freeze/resume all rows on current scope while stream connected; cleared on disconnect |

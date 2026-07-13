@@ -56,7 +56,7 @@ packages/api/api/analytics/military_score_inference/
 |-- actions.py              # aggregate noisy actions (defense, ammo load, transfers)
 |-- ship_build_combos.py    # eligible hull/engine/beam/torp combos (Phase 1G+)
 |-- component_eligibility.py # hull/component id resolution for policy filters and catalog build
-|-- tier_policy.py          # YAML policy load, resolve, optional overlay hook (#77, #78)
+|-- tier_policy.py          # YAML policy load and resolve (#77)
 |-- policy_ladder.py        # walk YAML policy steps, seed carry-forward, merge top-K
 |-- inference_path.py       # prior-turn gate and InferencePath resolve-then-dispatch
 |-- inference_target.py     # observation/catalog context; accelerated backfill source loading
@@ -541,7 +541,7 @@ Negative actions need explicit upper bounds. Without bounds, positive and negati
 
 ### 8.5 Inference search tier ladder (#77)
 
-**GitHub:** #77 (static YAML policy), #78 (overlay injection follow-on). **Supersedes** interim hardcoded tiers 0--4 (#52, #72) and partial-slot step #54 (absorbed into policy). Glossary: `CONTEXT.md` (**Inference search tier**, **Inference tier policy**, **Fine-grained slack action**, etc.).
+**GitHub:** #77 (static YAML policy). **#78** (global resolve-time overlay) was cancelled; runtime catalog widens use step-local mechanisms such as `includeComponentIds` for **hull collision twin** admission (#226). **Supersedes** interim hardcoded tiers 0--4 (#52, #72) and partial-slot step #54 (absorbed into policy). Glossary: `CONTEXT.md` (**Inference search tier**, **Inference tier policy**, **Fine-grained slack action**, etc.).
 
 A full cross product of buildable hulls times eligible engines, beams, and launcher torpedo types can reach **low thousands to ~10k** combo variables in worst cases. Prefer a **variable-length unified ladder** loaded from static YAML over a fixed four-step ship-build loop with always-on aggregate actions.
 
@@ -552,7 +552,7 @@ Phase 1G shipped `_solve_with_tier_retry` with hardcoded tiers 0--4 in code (`ST
 #### 8.5.2 Policy asset
 
 - **Path:** `assets/analytics/scores/tier_policy.yaml` at repo root (`assets/analytics/<analytic_id>/` pattern for analytic static config; distinct from `packages/api/api/storage/assets/` test/seed JSON).
-- **Loader:** `resolve_tier_policies(base_path, overlay: TierPolicyOverlay | None = None)` in `tier_policy.py`. Overlay types and merge contract documented in #77; merge implementation in #78.
+- **Loader:** `resolve_tier_policies(base_path)` in `tier_policy.py`.
 - **Steps:** ordered list of **inference tier policy** records. Each step is a strict superset of the prior step on every dimension it controls.
 
 Per-step fields (informal schema; exact YAML shape is implementation-owned):
@@ -636,11 +636,11 @@ While search is in flight (#71), show a dashed-border **0** badge until the firs
 
 Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that status remains for future deferred-effect modeling (#49).
 
-#### 8.5.6 Runtime overlay (#78, follow-on)
+#### 8.5.6 Runtime catalog widens (step-local; #78 cancelled)
 
-External signals that **widen the catalog** (append component tech levels, bump aggregate caps, etc.) merge via **inference tier policy overlay** at resolve time. #77 defines the hook (`overlay=None`); #78 implements merge semantics. Overlay producers (UI settings, etc.) are out of scope for #78.
+**#78** proposed a global **inference tier policy overlay** merged at `resolve_tier_policies` time. That mechanism was removed unused: no production caller, and fleet torp needs are covered by **inference fleet probability overlay** (section 8.8). Catalog widening that depends on prior-step solutions uses step-local fields instead -- notably `includeComponentIds` on `collision_hull_widen` for **hull collision twin** admission (#226; section 8.5.7).
 
-**Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not the tier policy overlay. Do not route torp misalignment penalties or belief-set torp admission through `TierPolicyOverlay`.
+**Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not component-filter widens.
 
 #### 8.5.7 Hull collision twin assets and conditional widen (#226)
 
@@ -687,9 +687,9 @@ For **top-K enumeration**, equal score does **not** imply equal probability. Dis
 
 Do not treat score-equivalent combos as interchangeable in the UI ranking solely because the military score constraint cannot distinguish them.
 
-### 8.7 Inference tier policy overlay (#78)
+### 8.7 Inference tier policy overlay (#78) -- cancelled
 
-Solver-side merge of `TierPolicyOverlay` into the resolved policy list before catalog build. Deterministic precedence per constraint type (document augment vs replace). No production caller required in #78. See `CONTEXT.md` **Inference tier policy overlay**.
+**#78** global resolve-time `TierPolicyOverlay` merge was cancelled and removed. Use step-local widens (`includeComponentIds` for collision twins; section 8.5.7) and fleet torp overlay (section 8.8) instead. See `CONTEXT.md` **Inference tier policy asset**.
 
 ### 8.8 Inference fleet overlay (#87, #156)
 
@@ -731,7 +731,7 @@ Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over componen
 
 #### 8.8.4 Integration
 
-- Optional overlay input on `build_action_catalog` / `build_inference_problem` (parallel seam to `TierPolicyOverlay` in #78)
+- Optional fleet overlay input on `build_action_catalog` / `build_inference_problem` (fleet torp path; section 8.8 -- not a global tier-policy overlay)
 - Diagnostics: belief-set summary, escape tier used, tuning constants loaded; `fleetTorpOverlay` on complete payloads when catalog diagnostics are emitted
 
 #### 8.8.5 Production wiring, stream warm, and input-status UX (#133, #158)
@@ -981,7 +981,7 @@ Done when:
 
 Goal: replace hardcoded ship-build tiers 0--4 and always-on aggregate slack with the unified policy ladder (section 8.5).
 
-GitHub: **#77** (supersedes #52, #72, absorbs #54). Follow-on: **#78** (overlay merge).
+GitHub: **#77** (supersedes #52, #72, absorbs #54). **#78** (global overlay merge) cancelled; step-local widens via #226.
 
 Files:
 

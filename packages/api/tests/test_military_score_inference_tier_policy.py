@@ -21,7 +21,6 @@ from api.analytics.military_score_inference.policy_ladder import solve_with_poli
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
-    TierPolicyOverlay,
     compute_aggregate_admission_caps,
     default_tier_policy_path,
     parse_solver_thresholds,
@@ -176,13 +175,8 @@ def test_policy_loader_rejects_missing_final_alpha_zero():
         parse_tier_policy_steps(document)
 
 
-def test_overlay_hook_accepts_none_and_returns_yaml_steps():
-    steps = resolve_tier_policies(overlay=None)
-    assert len(steps) == 10
-
-
-def test_overlay_parameter_is_accepted_without_merge():
-    steps = resolve_tier_policies(overlay=TierPolicyOverlay())
+def test_resolve_tier_policies_returns_yaml_steps():
+    steps = resolve_tier_policies()
     assert len(steps) == 10
 
 

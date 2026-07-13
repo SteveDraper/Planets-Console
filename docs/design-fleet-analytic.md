@@ -395,7 +395,6 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | **Homeworld locator** | SB / planet positions for **region** constraints on inferred builds |
 | **Scores** **#87** | **Inference fleet launcher belief set** from `$.composition` (torp admission + misalignment prior); see below |
 | **Scores** **#156** | Per-axis tech ceilings from same `$.composition` rows (**inference component tech-gap prior**) |
-| **Scores** **#78** | Optional **inference tier policy overlay** (component filter widening); parallel axis, not torp ranking |
 | Reports ingest | Strong evidence for loss/trade row selection |
 | Export ensure orchestration (#109) | Background unwind when fleet@N requires deep scores chain; per-player provenance drives missing-step sets |
 | **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161), scope [#179](https://github.com/SteveDraper/Planets-Console/issues/179)) | Singleflight per `(gameId, perspective, playerId)`; forward unwind; see section 5.1 |

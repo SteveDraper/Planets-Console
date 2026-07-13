@@ -1,12 +1,14 @@
-"""YAML inference search tier policy load, validation, and optional overlay hook.
+"""YAML inference search tier policy load and validation.
 
 Fleet-informed ranking tunables (``fleetInferenceTuning``) and torp escape-tier admission
 are specified in design-military-score-build-inference-implementation.md section 8.8 (#87, #156).
+Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids`` for
+``collision_hull_widen``), not a global resolve-time overlay.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -41,10 +43,10 @@ class ComponentFilter:
     """Catalog filter for one ship-build component axis.
 
     Exactly one primary mode: ``all=True`` (widened) or non-empty ``tech_levels`` (tech band).
-    Optional ``component_ids`` further restricts the resolved set (reserved for future overlay
-    and policy refinement when multiple ids share a tech level).
+    Optional ``component_ids`` further restricts the resolved set (policy refinement when
+    multiple ids share a tech level).
     Optional ``include_component_ids`` unions extra ids into the resolved set (runtime twin
-    overlay for ``collision_hull_widen``; intersected with buildable / catalog ids at resolve).
+    widen for ``collision_hull_widen``; intersected with buildable / catalog ids at resolve).
     """
 
     all: bool = False
@@ -81,30 +83,6 @@ class InferenceCatalogFilters:
 
     def axis_filter(self, axis: FilterAxis) -> ComponentFilter:
         return getattr(self, axis)
-
-
-@dataclass(frozen=True)
-class ComponentFilterOverlay:
-    """Per-axis overlay fragment merged at resolve time (#78)."""
-
-    append_tech_levels: tuple[int, ...] = ()
-    append_component_ids: tuple[int, ...] = ()
-    force_all: bool = False
-
-
-@dataclass(frozen=True)
-class TierPolicyOverlay:
-    """Runtime overlay merged into the static policy at resolve time (#78).
-
-    #78 implements deterministic merge into ``InferenceCatalogFilters`` per step.
-    When ``overlay`` is not ``None``, #77 passes the base YAML steps through unchanged.
-    """
-
-    hulls: ComponentFilterOverlay | None = None
-    engines: ComponentFilterOverlay | None = None
-    beams: ComponentFilterOverlay | None = None
-    launchers: ComponentFilterOverlay | None = None
-    aggregate_cap_bumps: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -583,14 +561,8 @@ def _validate_production_escape_tier(steps: tuple[InferenceTierPolicyStep, ...])
 
 def resolve_tier_policies(
     base_path: Path | None = None,
-    overlay: TierPolicyOverlay | None = None,
 ) -> tuple[InferenceTierPolicyStep, ...]:
-    """Load and validate the static tier policy ladder.
-
-    Returns YAML steps from ``base_path`` (or the default asset). The ``overlay`` parameter
-    is reserved for #78 merge semantics; it is accepted but not applied yet.
-    """
-    del overlay
+    """Load and validate the static tier policy ladder from ``base_path`` (or the default asset)."""
     policy_path = default_tier_policy_path() if base_path is None else base_path
     steps = parse_tier_policy_steps(load_tier_policy_document(policy_path))
     if base_path is None:
