@@ -73,17 +73,14 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
 def upgrade_persisted_inference_row(
     row: PersistedInferenceRow,
 ) -> tuple[PersistedInferenceRow, bool]:
-    """Migrate legacy v1 rows to v2 functional host-turn targets on read.
+    """Normalize a row for durable storage / read: targets yes, diagnostics no.
 
-    Also strips durable ``diagnostics`` after migrating targets so write-back
-    does not re-store bloated action catalogs.
+    Extracts ``host_turn_targets`` from legacy ``diagnostics.accelerated_segments``
+    when targets are missing, then clears diagnostics so action catalogs are never
+    written or left on the in-memory row after upgrade.
     """
     host_turn_targets = row.host_turn_targets
-    needs_version_bump = (
-        row.persistence_version is None
-        or row.persistence_version < INFERENCE_ROW_PERSISTENCE_VERSION
-    )
-    if needs_version_bump and not host_turn_targets and row.diagnostics is not None:
+    if not host_turn_targets and row.diagnostics is not None:
         upgraded_targets = host_turn_targets_from_accelerated_segments(
             row.diagnostics.get("accelerated_segments"),
         )

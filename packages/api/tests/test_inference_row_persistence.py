@@ -70,6 +70,21 @@ def test_persistence_row_round_trip(persistence):
     assert "diagnostics" not in raw
 
 
+def test_put_row_promotes_accelerated_segments_before_dropping_diagnostics(persistence):
+    _, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
+    persistence.put_row(628580, 1, 3, player_id, legacy_row)
+    raw = persistence._storage.get(persistence.row_store_key(628580, 1, 3, player_id))
+    assert isinstance(raw, dict)
+    assert "diagnostics" not in raw
+    assert raw.get("host_turn_targets")
+    assert raw.get("persistence_version") == INFERENCE_ROW_PERSISTENCE_VERSION
+    loaded = persistence.get_row(628580, 1, 3, player_id)
+    assert loaded is not None
+    assert loaded.diagnostics is None
+    assert loaded.host_turn_targets is not None
+    assert loaded.host_turn_targets[0].host_turn
+
+
 def test_persisted_inference_row_from_wire_complete_omits_diagnostics():
     from api.serialization.inference_row_persistence import (
         persisted_inference_row_from_wire_complete,
