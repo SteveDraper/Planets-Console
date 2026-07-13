@@ -98,6 +98,18 @@ def test_list_filesystem_prefix_before_document_exists(backend, storage_root):
     assert backend.list("games/628580") == ["1"]
 
 
+def test_list_turn_analytics_prefix_lists_analytic_documents(backend, storage_root):
+    """…/turns/N/analytics is between breakpoints; list sibling docs, not turn keys."""
+    backend.put(TURN, {"turn": 111, "ships": []})
+    backend.put(f"{TURN}/analytics/fleet", {"ledgers": {}})
+    backend.put(f"{TURN}/analytics/scores", {"inference_rows": {}})
+
+    assert backend.list(f"{TURN}/analytics") == ["fleet", "scores"]
+    # Turn document listing is unchanged.
+    assert "ships" in backend.list(TURN)
+    assert "analytics" not in backend.list(TURN)
+
+
 def test_in_document_delete_rewrites_file(backend, storage_root):
     backend.put(GAME_INFO, {"keep": 1, "drop": 2})
     backend.delete(f"{GAME_INFO}/drop")

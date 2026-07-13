@@ -21,7 +21,12 @@ INFERENCE_ROW_PERSISTENCE_VERSION = 2
 
 @dataclass
 class PersistedInferenceRow:
-    """Terminal wire ``complete`` payload fields (without ``playerId``)."""
+    """Terminal wire ``complete`` payload fields (without ``playerId``).
+
+    Durable storage keeps functional row state: status, summary, solutions, and
+    ``host_turn_targets``. Solver ``diagnostics`` (including full action catalogs)
+    are wire/live-only and must not be written to storage.
+    """
 
     status: str
     summary: str
@@ -55,6 +60,8 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
 
 def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
     payload = dataclass_to_json(row)
+    # Never persist wire/live solver diagnostics (action catalogs can be tens of MB).
+    payload.pop("diagnostics", None)
     if row.host_turn_targets is not None:
         payload["host_turn_targets"] = [
             host_turn_functional_target_to_persistence_dict(target)
@@ -66,15 +73,17 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
 def upgrade_persisted_inference_row(
     row: PersistedInferenceRow,
 ) -> tuple[PersistedInferenceRow, bool]:
-    """Migrate legacy v1 rows to v2 functional host-turn targets on read."""
-    if (
-        row.persistence_version is not None
-        and row.persistence_version >= INFERENCE_ROW_PERSISTENCE_VERSION
-    ):
-        return row, False
+    """Migrate legacy v1 rows to v2 functional host-turn targets on read.
 
+    Also strips durable ``diagnostics`` after migrating targets so write-back
+    does not re-store bloated action catalogs.
+    """
     host_turn_targets = row.host_turn_targets
-    if not host_turn_targets and row.diagnostics is not None:
+    needs_version_bump = (
+        row.persistence_version is None
+        or row.persistence_version < INFERENCE_ROW_PERSISTENCE_VERSION
+    )
+    if needs_version_bump and not host_turn_targets and row.diagnostics is not None:
         upgraded_targets = host_turn_targets_from_accelerated_segments(
             row.diagnostics.get("accelerated_segments"),
         )
@@ -84,6 +93,7 @@ def upgrade_persisted_inference_row(
     upgraded = replace(
         row,
         host_turn_targets=host_turn_targets,
+        diagnostics=None,
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
     return upgraded, upgraded != row
@@ -92,7 +102,10 @@ def upgrade_persisted_inference_row(
 def persisted_inference_row_from_wire_complete(
     wire_event: dict[str, object],
 ) -> PersistedInferenceRow:
-    diagnostics = wire_event.get("diagnostics")
+    """Build a durable row from a wire ``complete`` event.
+
+    Solutions and host-turn targets are kept; solver diagnostics are omitted.
+    """
     wire_solutions = wire_event.get("solutions")
     host_turn_targets = list(host_turn_targets_from_wire_event(wire_event))
     return PersistedInferenceRow(
@@ -101,7 +114,7 @@ def persisted_inference_row_from_wire_complete(
         solution_count=int(wire_event.get("solutionCount", 0)),
         is_complete=bool(wire_event.get("isComplete", True)),
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
-        diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        diagnostics=None,
         host_turn_targets=host_turn_targets or None,
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )

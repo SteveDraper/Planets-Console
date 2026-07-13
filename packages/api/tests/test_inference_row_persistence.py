@@ -55,12 +55,48 @@ def test_persistence_row_round_trip(persistence):
         solution_count=1,
         is_complete=True,
         solutions=[{"objectiveValue": 1.0, "actions": [], "shipBuilds": []}],
-        diagnostics={"playerId": 8},
+        diagnostics={"actionCatalog": {"shipBuildCombos": [{"comboId": "x"}] * 1000}},
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
     persistence.put_row(628580, 1, 111, 8, row)
     loaded = persistence.get_row(628580, 1, 111, 8)
-    assert loaded == row
+    assert loaded is not None
+    assert loaded.status == row.status
+    assert loaded.summary == row.summary
+    assert loaded.solutions == row.solutions
+    assert loaded.diagnostics is None
+    raw = persistence._storage.get(persistence.row_store_key(628580, 1, 111, 8))
+    assert isinstance(raw, dict)
+    assert "diagnostics" not in raw
+
+
+def test_persisted_inference_row_from_wire_complete_omits_diagnostics():
+    from api.serialization.inference_row_persistence import (
+        persisted_inference_row_from_wire_complete,
+        persisted_inference_row_to_json,
+    )
+
+    row = persisted_inference_row_from_wire_complete(
+        {
+            "type": "complete",
+            "status": STATUS_EXACT,
+            "summary": "done",
+            "solutionCount": 1,
+            "isComplete": True,
+            "solutions": [{"objectiveValue": 1.0, "actions": [], "shipBuilds": []}],
+            "diagnostics": {
+                "actionCatalog": {
+                    "shipBuildCombos": [{"comboId": f"combo_{i}"} for i in range(10_000)],
+                    "meta": {"shipBuildComboIds": [f"combo_{i}" for i in range(10_000)]},
+                }
+            },
+        }
+    )
+    assert row.diagnostics is None
+    assert row.solutions
+    stored = persisted_inference_row_to_json(row)
+    assert "diagnostics" not in stored
+    assert stored["solutions"] == row.solutions
 
 
 def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persistence):
@@ -237,33 +273,48 @@ def test_upgrade_persisted_inference_row_copies_accelerated_segments():
         isinstance(target, HostTurnFunctionalTarget) for target in upgraded.host_turn_targets
     )
     assert upgraded.host_turn_targets[0].host_turn
+    assert upgraded.diagnostics is None
 
 
 def test_get_row_upgrades_legacy_v1_split_row_with_write_back(memory_backend):
     turn_three, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
     persistence = InferenceRowPersistenceService(memory_backend)
-    persistence.put_row(628580, 1, turn_three.settings.turn, player_id, legacy_row)
-
     store_key = persistence.row_store_key(
         628580,
         1,
         turn_three.settings.turn,
         player_id,
     )
+    # Seed raw legacy v1 JSON (pre-strip) so diagnostics.accelerated_segments exist on disk.
+    memory_backend.put(
+        store_key,
+        {
+            "status": legacy_row.status,
+            "summary": legacy_row.summary,
+            "solution_count": legacy_row.solution_count,
+            "is_complete": legacy_row.is_complete,
+            "solutions": legacy_row.solutions,
+            "diagnostics": legacy_row.diagnostics,
+        },
+    )
+
     stored_before = memory_backend.get(store_key)
     assert stored_before is not None
     assert stored_before.get("host_turn_targets") is None
     assert stored_before.get("persistence_version") is None
+    assert stored_before.get("diagnostics") is not None
 
     loaded = persistence.get_row(628580, 1, turn_three.settings.turn, player_id)
     assert loaded is not None
     assert loaded.persistence_version == INFERENCE_ROW_PERSISTENCE_VERSION
     assert loaded.host_turn_targets
+    assert loaded.diagnostics is None
 
     stored_after = memory_backend.get(store_key)
     assert stored_after is not None
     assert stored_after.get("persistence_version") == INFERENCE_ROW_PERSISTENCE_VERSION
     assert stored_after.get("host_turn_targets")
+    assert "diagnostics" not in stored_after
 
     reloaded = persistence.get_row(628580, 1, turn_three.settings.turn, player_id)
     assert reloaded == loaded
@@ -285,8 +336,20 @@ def test_legacy_v1_upgrade_enables_functional_backfill_without_diagnostics():
         turn_two,
         scores=[replace(score, turn=2) for score in turn_two.scores],
     )
-    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(628580, 1, turn_three.settings.turn, player_id, legacy_row)
+    backend = MemoryAssetBackend(initial={})
+    persistence = InferenceRowPersistenceService(backend)
+    store_key = persistence.row_store_key(628580, 1, turn_three.settings.turn, player_id)
+    backend.put(
+        store_key,
+        {
+            "status": legacy_row.status,
+            "summary": legacy_row.summary,
+            "solution_count": legacy_row.solution_count,
+            "is_complete": legacy_row.is_complete,
+            "solutions": legacy_row.solutions,
+            "diagnostics": legacy_row.diagnostics,
+        },
+    )
     loaded = persistence.get_row(628580, 1, turn_three.settings.turn, player_id)
     assert loaded is not None
     assert host_turn_targets_from_persisted_row(loaded)

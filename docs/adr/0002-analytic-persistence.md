@@ -27,6 +27,7 @@ Longest-prefix rules match ADR 0001: one JSON **document** per breakpoint; trail
 Logical path: `games/{gameId}/{perspective}/turns/{hostTurn}/analytics/scores/inference_rows/{playerId}` in document `.../turns/{hostTurn}/analytics/scores.json`.
 
 - **Write gate:** persist only terminal `complete` outcomes with status `exact` or `no_exact_solution`.
+- **Durable payload:** status, summary, solutions, and host-turn functional targets. Do **not** persist solver `diagnostics` (action catalogs / ship-build combo lists belong on the wire and in memory only).
 - **Stream replay:** on table-stream open, replay valid rows as a single terminal `complete` event (full solutions embedded); do not schedule tier jobs for cache hits.
 - **Invalidation:** hull catalog mask save/reset for one **Player** clears that row and **in-place row reschedule** on the open stream; turn document `put` at turn *T* deletes `.../turns/{T}/analytics/scores` and, when *T-1 >= 1*, `.../turns/{T-1}/analytics/scores` (pair-aware); if the open stream matches the cleared host turn, **in-place full-table reschedule**. User **scores inference recompute** (`POST .../inference/recompute`) clears host-turn persistence, clears **inference global pause**, and full-table reschedules in-place.
 - **SPA:** no client stream abort on mask save; remove `refreshInference()` token pattern. Product recompute control in the build-inference column header.

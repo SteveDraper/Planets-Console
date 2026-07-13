@@ -52,7 +52,12 @@ class _FleetPlayerOrchestratorRun:
 
 
 class FleetTableStreamScheduler:
-    """Fair scheduler: one orchestrator submission per player on a table stream."""
+    """Table-stream adapter: one orchestrator submission per player (fair submit).
+
+    Fairness is about **submit** grain (one DAG root per player), not wire
+    serialization. The connect path multiplexes all admitted player queues so
+    progress events from any player reach the SPA as compute completes.
+    """
 
     def __init__(self) -> None:
         self._runs: dict[str, _FleetPlayerOrchestratorRun] = {}

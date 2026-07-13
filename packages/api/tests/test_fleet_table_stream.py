@@ -537,6 +537,199 @@ def test_multi_player_stream_emits_tagged_terminal_events(sample_turn):
     assert complete_player_ids == set(player_ids)
 
 
+def test_fleet_connect_multiplexes_progress_across_players_before_complete(
+    sample_turn,
+    monkeypatch,
+):
+    """Admit all players, then interleave progress: B emits before either complete.
+
+    With sequential connect, player B would not even be scheduled until A's
+    host-turn complete drained. Multiplex connect admits both first.
+    """
+    import threading
+    import time
+
+    import api.analytics.fleet.fleet_table_stream_rows as fleet_table_stream_rows
+    from api.analytics.fleet.constants import ANALYTIC_ID
+    from api.analytics.fleet.fleet_table_player_run import (
+        FleetLedgerWireProgressTracker,
+        FleetPlayerStreamSession,
+        _initial_wire_before_ledger,
+    )
+    from api.analytics.fleet.fleet_table_stream_registry import (
+        controller_for_scope,
+        reset_fleet_table_stream_registry_for_tests,
+    )
+    from api.analytics.fleet.fleet_table_stream_scheduler import (
+        _FleetPlayerOrchestratorRun,
+    )
+    from api.compute.scope import ComputeScope
+    from api.transport.fleet_table_stream import (
+        fleet_complete_event,
+        fleet_ledger_updated_event,
+    )
+
+    assert not hasattr(
+        fleet_table_stream_rows,
+        "_iter_fleet_table_stream_connect_sequential",
+    )
+
+    reset_fleet_table_stream_registry_for_tests()
+    reset_fleet_table_stream_scheduler_for_tests()
+    scheduler = FleetTableStreamScheduler()
+    monkeypatch.setattr(
+        "api.analytics.fleet.fleet_table_stream_rows.get_fleet_table_stream_scheduler",
+        lambda: scheduler,
+    )
+
+    def enqueue_without_orchestrator(
+        session: FleetPlayerStreamSession,
+        *,
+        fleet_services: FleetComputeServices,
+        persistence: FleetSnapshotPersistenceService,
+        stream_token: str | None = None,
+    ) -> FleetPlayerStreamSession | None:
+        """Register the player session without submitting compute work."""
+        with scheduler._lock:
+            if (
+                stream_token is not None
+                and scheduler._scope_guard.active_table_stream_token != stream_token
+            ):
+                return None
+            for existing in scheduler._runs.values():
+                if existing.session.player_id == session.player_id:
+                    return existing.session
+            if stream_token is None:
+                return None
+            host_turn_number = session.turn.settings.turn
+            before_persisted = persistence.get_ledger(
+                fleet_services.game_id,
+                fleet_services.perspective,
+                host_turn_number,
+                session.player_id,
+            )
+            progress_tracker = FleetLedgerWireProgressTracker(
+                host_turn=session.turn,
+                wire_before=_initial_wire_before_ledger(
+                    persistence=persistence,
+                    game_id=fleet_services.game_id,
+                    perspective=fleet_services.perspective,
+                    player_id=session.player_id,
+                    host_turn=session.turn,
+                    before_persisted=before_persisted,
+                ),
+            )
+            root_scope = ComputeScope(
+                analytic_id=ANALYTIC_ID,
+                game_id=fleet_services.game_id,
+                perspective=fleet_services.perspective,
+                turn=host_turn_number,
+                player_id=session.player_id,
+            )
+            scheduler._runs[session.run_id] = _FleetPlayerOrchestratorRun(
+                session=session,
+                host_turn_number=host_turn_number,
+                progress_tracker=progress_tracker,
+                root_scope=root_scope,
+            )
+            return session
+
+    monkeypatch.setattr(scheduler, "enqueue_player_run", enqueue_without_orchestrator)
+
+    player_a, player_b = (row.ownerid for row in sample_turn.scores[:2])
+    player_ids = (player_a, player_b)
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    scope = FleetTableStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+
+    events: list[dict[str, object]] = []
+    stream_closed = threading.Event()
+
+    def _collect() -> None:
+        stream = iter_fleet_table_stream_events(
+            sample_turn,
+            player_ids,
+            game_id=628580,
+            perspective=1,
+            fleet_services=services,
+            persistence=services.persistence,
+            scheduler=scheduler,
+        )
+        try:
+            for event in stream:
+                events.append(event)
+        finally:
+            stream_closed.set()
+
+    thread = threading.Thread(target=_collect, daemon=True)
+    thread.start()
+
+    def _both_players_scheduled() -> bool:
+        scheduled = {run.session.player_id for run in scheduler._runs.values()}
+        return set(player_ids) <= scheduled
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if _both_players_scheduled():
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("both players were not admitted before timeout")
+
+    runs_by_player = {run.session.player_id: run.session for run in scheduler._runs.values()}
+    empty_ledger: dict[str, object] = {"ships": []}
+    runs_by_player[player_b].event_queue.put(
+        fleet_ledger_updated_event(ledger={**empty_ledger, "playerId": player_b})
+    )
+    runs_by_player[player_a].event_queue.put(
+        fleet_ledger_updated_event(ledger={**empty_ledger, "playerId": player_a})
+    )
+    runs_by_player[player_b].event_queue.put(
+        fleet_complete_event(is_final=True, summary="player B done")
+    )
+    runs_by_player[player_a].event_queue.put(
+        fleet_complete_event(is_final=True, summary="player A done")
+    )
+    controller = controller_for_scope(scope)
+    assert controller is not None
+    controller.wake_multiplex.set()
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        completes = {event.get("playerId") for event in events if event.get("type") == "complete"}
+        if completes == set(player_ids):
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("both completes not observed before timeout")
+
+    progress_player_ids = {
+        event.get("playerId") for event in events if event.get("type") == "ledger_updated"
+    }
+    assert progress_player_ids == set(player_ids)
+
+    first_complete_index = next(
+        index for index, event in enumerate(events) if event.get("type") == "complete"
+    )
+    progress_before_first_complete = {
+        event.get("playerId")
+        for event in events[:first_complete_index]
+        if event.get("type") == "ledger_updated"
+    }
+    assert progress_before_first_complete == set(player_ids)
+
+    controller.end_stream(scheduler)
+    thread.join(timeout=2.0)
+    assert stream_closed.is_set()
+
+
 def test_player_event_ordering_provenance_before_complete(sample_turn):
     reset_fleet_table_stream_scheduler_for_tests()
     scheduler = FleetTableStreamScheduler()

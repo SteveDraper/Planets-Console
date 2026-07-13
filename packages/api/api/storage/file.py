@@ -12,6 +12,7 @@ from api.storage.base import JSONValue
 from api.storage.boundaries import (
     document_relpath,
     is_navigable_prefix,
+    is_prefix_of_longer_breakpoint,
     resolve_breakpoint,
 )
 from api.storage.path_utils import (
@@ -186,6 +187,12 @@ class FileStorageBackend:
         try:
             breakpoint_path, suffix = resolve_breakpoint(path)
         except ValidationError:
+            return self._list_filesystem_prefix(path)
+
+        # Intermediate prefixes between breakpoints (e.g. …/turns/N/analytics)
+        # must list sibling analytic documents on disk, not a missing key inside
+        # the shorter turn RST document.
+        if suffix is not None and is_prefix_of_longer_breakpoint(path):
             return self._list_filesystem_prefix(path)
 
         file_path = self._document_file(breakpoint_path)
