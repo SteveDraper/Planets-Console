@@ -642,6 +642,26 @@ External signals that **widen the catalog** (append component tech levels, bump 
 
 **Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not the tier policy overlay. Do not route torp misalignment penalties or belief-set torp admission through `TierPolicyOverlay`.
 
+#### 8.5.7 Hull collision twin assets (#226)
+
+Single-warship **score collisions** between early-tier hulls and higher-tech twins can cause ship-only exact early-stop to miss the true build (e.g. Birds Valiant Wind vs Resolute at military change 2749). Checked-in twin tables encode those collisions as `(lowHullId, highHullId, militaryChange)` triples so a later ladder step can admit only the colliding high-tech hulls for the observed score -- not a flat high-tech allowlist.
+
+| Item | Location |
+|------|----------|
+| Assets | `assets/analytics/scores/hull_collision_twins_{standard,epic,campaign}.yaml` |
+| Loader / schema | `hull_collision_twins_asset.py` |
+| Regenerator | `scripts/early_stop_hull_collisions.py --write-asset` |
+
+Regenerate when prior weights or component catalogs change:
+
+```bash
+uv run python scripts/early_stop_hull_collisions.py --game-type epic --game-id 628580 --write-asset
+uv run python scripts/early_stop_hull_collisions.py --game-type standard --game-id 628580 --write-asset
+uv run python scripts/early_stop_hull_collisions.py --game-type campaign --game-id 628580 --write-asset
+```
+
+The human-readable census report remains the default stdout; `--write-asset` also writes the machine-readable twin table (full-race census only -- omit `--race`). Ladder wiring (conditional widen step + per-tier `allowShipOnlyExactEarlyStop`) is specified under #226 and lands with the inference consumer.
+
 ### 8.6 Score-equivalent combos (solver-side merge)
 
 Multiple combos may share the same `(score_delta_2x, warship_delta, freighter_delta)` but differ in labels or probability weights (different hull names with identical construction cost, or different components that collide after scaling).
