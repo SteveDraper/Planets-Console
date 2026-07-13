@@ -741,7 +741,13 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
     assert result.status == STATUS_EXACT
 
 
-def _ship_build_solution(*, combo_id: str, objective_value: int, label: str | None = None):
+def _ship_build_solution(
+    *,
+    combo_id: str,
+    objective_value: int,
+    label: str | None = None,
+    hull_id: int = 1,
+):
     return InferenceSolution(
         objective_value=objective_value,
         actions=(),
@@ -750,7 +756,7 @@ def _ship_build_solution(*, combo_id: str, objective_value: int, label: str | No
                 combo_id=combo_id,
                 label=label or combo_id,
                 count=1,
-                hull_id=1,
+                hull_id=hull_id,
                 engine_id=1,
                 beam_id=None,
                 torp_id=None,
@@ -868,6 +874,130 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         "combo_high",
         "combo_mid",
     }
+
+
+def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
+    sample_turn, monkeypatch
+):
+    """Ship-only exact that meets plausibility must not stop on early ladder steps.
+
+    ``early_game_bands`` / ``widen_launchers`` set ``allowShipOnlyExactEarlyStop: false``;
+    a qualifying exact on those steps must still reach ``collision_hull_widen``.
+    """
+    observation = _observation(military_delta_2x=400, warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    collision = next(step for step in policy_steps if step.id == "collision_hull_widen")
+    assert early.id == "early_game_bands"
+    assert early.allow_ship_only_exact_early_stop is False
+    assert widen_launchers.allow_ship_only_exact_early_stop is False
+    assert collision.allow_ship_only_exact_early_stop is True
+
+    early_exact = _ship_build_solution(combo_id="combo_early", objective_value=-300)
+    widen_exact = _ship_build_solution(combo_id="combo_widen", objective_value=-300)
+
+    def _solve_side_effect(problem, **kwargs):
+        solution = early_exact if problem.policy_step_id == early.id else widen_exact
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
+    _, _, _, attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    assert attempted[:3] == [early.id, widen_launchers.id, collision.id]
+
+
+def test_solve_with_policy_ladder_runs_collision_hull_widen_on_twin_hit(sample_turn, monkeypatch):
+    """When held exact emits a low hull with an epic twin, collision step must solve.
+
+    Valiant (hull 30) at military change 2749 admits Resolute (31); the ladder must
+    invoke the solver for ``collision_hull_widen`` (not only record a skip).
+    """
+    observation = _observation(military_delta_2x=5498, warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    collision = next(step for step in policy_steps if step.id == "collision_hull_widen")
+    valiant = _ship_build_solution(
+        combo_id="valiant",
+        objective_value=-171,
+        label="Valiant",
+        hull_id=30,
+    )
+    call_step_ids: list[str] = []
+
+    def _solve_side_effect(problem, **kwargs):
+        call_step_ids.append(problem.policy_step_id)
+        if problem.policy_step_id == early.id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        if problem.policy_step_id == widen_launchers.id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(valiant,),
+                    diagnostics={"policy_step_id": widen_launchers.id},
+                ),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(valiant,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "_solution_qualifies_for_ship_only_exact_early_stop",
+        lambda *args, **kwargs: False,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.collision_hull_widen.buildable_hull_ids_for_player",
+        lambda *args, **kwargs: frozenset({29, 30, 31, 106}),
+    )
+    _, _, _, attempted, step_diagnostics = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    assert collision.id in attempted
+    assert collision.id in call_step_ids
+    collision_diag = next(diag for diag in step_diagnostics if diag["policyStepId"] == collision.id)
+    collision_widen = collision_diag["collisionHullWiden"]
+    assert collision_widen["skipped"] is False
+    assert collision_widen["admittedHighHullIds"] == [31]
+    assert collision_widen["emittedLowHullIds"] == [30]
+    assert collision_widen["militaryChange"] == 2749
+    hull_snapshot = collision_diag["constraintSnapshot"]["filters"]["hulls"]
+    assert hull_snapshot["includeComponentIds"] == [31]
 
 
 def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_threshold(
