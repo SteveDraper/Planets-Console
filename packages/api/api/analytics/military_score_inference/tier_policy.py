@@ -22,6 +22,7 @@ FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
 DEFAULT_MAX_SEEDS = 5
 
 TORP_ESCAPE_TIER_STEP_ID = "torp_escape_tier"
+COLLISION_HULL_WIDEN_STEP_ID = "collision_hull_widen"
 
 # ``all: true`` widens eligibility on that axis. It does **not** mean "every component id
 # in the turn catalog regardless of player state."
@@ -42,11 +43,14 @@ class ComponentFilter:
     Exactly one primary mode: ``all=True`` (widened) or non-empty ``tech_levels`` (tech band).
     Optional ``component_ids`` further restricts the resolved set (reserved for future overlay
     and policy refinement when multiple ids share a tech level).
+    Optional ``include_component_ids`` unions extra ids into the resolved set (runtime twin
+    overlay for ``collision_hull_widen``; intersected with buildable / catalog ids at resolve).
     """
 
     all: bool = False
     tech_levels: tuple[int, ...] = ()
     component_ids: tuple[int, ...] = ()
+    include_component_ids: tuple[int, ...] = ()
 
     def to_snapshot(self) -> dict[str, object]:
         if self.all:
@@ -55,6 +59,8 @@ class ComponentFilter:
             snapshot = {"techLevels": list(self.tech_levels)}
         if self.component_ids:
             snapshot["componentIds"] = list(self.component_ids)
+        if self.include_component_ids:
+            snapshot["includeComponentIds"] = list(self.include_component_ids)
         return snapshot
 
 
@@ -110,6 +116,7 @@ class InferenceTierPolicyStep:
     aggregate_allowlist: dict[str, int]
     alpha: int
     max_seeds: int = DEFAULT_MAX_SEEDS
+    allow_ship_only_exact_early_stop: bool = False
 
     def constraint_snapshot(self) -> dict[str, object]:
         return {
@@ -120,6 +127,7 @@ class InferenceTierPolicyStep:
             "aggregateAllowlist": dict(self.aggregate_allowlist),
             "alpha": self.alpha,
             "maxSeeds": self.max_seeds,
+            "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
         }
 
 
@@ -171,17 +179,47 @@ def _parse_tech_levels_list(raw: object, *, axis: str, step_id: str) -> tuple[in
     return tuple(sorted(set(levels)))
 
 
+def _parse_include_component_ids(raw: object, *, axis: str, step_id: str) -> tuple[int, ...]:
+    """Parse optional static includeComponentIds (normally set only at runtime)."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"step {step_id}: filters.{axis}.includeComponentIds must be a list")
+    ids: list[int] = []
+    for value in raw:
+        if not isinstance(value, int):
+            raise ValueError(
+                f"step {step_id}: filters.{axis}.includeComponentIds entries must be ints"
+            )
+        ids.append(value)
+    return tuple(sorted(set(ids)))
+
+
 def _parse_component_filter(raw: object, *, axis: str, step_id: str) -> ComponentFilter:
     if not isinstance(raw, dict):
         raise ValueError(f"step {step_id}: filters.{axis} must be a mapping")
     use_all = bool(raw.get("all", False))
     component_ids = _parse_component_ids(raw.get("componentIds"), axis=axis, step_id=step_id)
+    include_component_ids = _parse_include_component_ids(
+        raw.get("includeComponentIds"),
+        axis=axis,
+        step_id=step_id,
+    )
     if use_all:
         if "techLevels" in raw:
             raise ValueError(f"step {step_id}: filters.{axis} cannot set both all and techLevels")
-        return ComponentFilter(all=True, component_ids=component_ids)
+        return ComponentFilter(
+            all=True,
+            component_ids=component_ids,
+            include_component_ids=include_component_ids,
+        )
     tech_levels = _parse_tech_levels_list(raw.get("techLevels"), axis=axis, step_id=step_id)
-    return ComponentFilter(all=False, tech_levels=tech_levels, component_ids=component_ids)
+    return ComponentFilter(
+        all=False,
+        tech_levels=tech_levels,
+        component_ids=component_ids,
+        include_component_ids=include_component_ids,
+    )
 
 
 def _parse_catalog_filters(raw: object, *, step_id: str) -> InferenceCatalogFilters:
@@ -221,6 +259,14 @@ def _parse_aggregate_allowlist(raw: object, *, step_id: str) -> dict[str, int]:
     return allowlist
 
 
+def _parse_allow_ship_only_exact_early_stop(raw: object, *, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(f"step {step_id}: allowShipOnlyExactEarlyStop must be a boolean")
+    return raw
+
+
 def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
@@ -253,6 +299,10 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
         ),
         alpha=alpha,
         max_seeds=max_seeds,
+        allow_ship_only_exact_early_stop=_parse_allow_ship_only_exact_early_stop(
+            raw.get("allowShipOnlyExactEarlyStop"),
+            step_id=step_id,
+        ),
     )
 
 

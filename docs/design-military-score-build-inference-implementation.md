@@ -565,6 +565,7 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | `aggregateAllowlist` | Cumulative **tier aggregate allowlist**: action id -> max count |
 | `alpha` | Military-score band tolerance in **2x** units; **final step must be `0`** |
 | `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
+| `allowShipOnlyExactEarlyStop` | When `true`, the ladder may stop after this step if a ship-builds-only exact meets `shipOnlyExactEarlyStopMinPlausibility`. Default `false` when omitted. |
 
 **`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
 
@@ -591,15 +592,13 @@ Static YAML steps widen by **strict superset on `techLevels` lists** or by switc
 
 Tunable constants in YAML; illustrative starting point from design review:
 
-| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` |
-|------|------------------|---------------------------------------|---------|
-| 0 | Early game: hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 |
-| 1 | Widen launchers to tech 1--8 | none | 50 |
-| 2 | Widen hulls (`filters.hulls.all`) | none | 50 |
-| 3 | All component axes; partial beam/launcher **slot** counts | planet defense max 16; starbase/ship fighters max 50/20; fighter transfers max 50/dir | 50 |
-| 4 | + starbase defense posts | + starbase defense max 5 | 30 |
-| 5 | + ship torpedoes per type | + ship torps max 10 each | 30 |
-| 6 | Full ship-build catalog; slack at full policy caps | full (fighters 200/500, transfers 100/dir) | 0 |
+| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? |
+|------|------------------|---------------------------------------|---------|-------------|
+| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no |
+| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no |
+| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | yes |
+| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | yes |
+| … | (partial slots, aggregates, torp escape, full catalog) | … | … | yes |
 
 #### 8.5.4 Per-player solve loop
 
@@ -620,8 +619,9 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
    - If infeasible, **widen** to a neighborhood around fixed counts.
    - If still infeasible, **free search** on the step catalog.
 7. Band-feasible results are **internal**; they do not appear in the UI unless the full ladder produces zero exact solutions (see section 8.5.5).
+8. **Ship-only exact early-stop (#226):** after a step completes, if that step's `allowShipOnlyExactEarlyStop` is `true` **and** the best held solution is a ship-builds-only exact whose objective meets `solverThresholds.shipOnlyExactEarlyStopMinPlausibility`, stop climbing. Steps with the flag `false` never early-stop on this rule (even when a plausible Valiant-only exact is already held).
 
-Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used.
+Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used, and (for `collision_hull_widen`) twin overlay diagnostics.
 
 #### 8.5.5 User-facing outcomes
 
@@ -642,7 +642,7 @@ External signals that **widen the catalog** (append component tech levels, bump 
 
 **Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not the tier policy overlay. Do not route torp misalignment penalties or belief-set torp admission through `TierPolicyOverlay`.
 
-#### 8.5.7 Hull collision twin assets (#226)
+#### 8.5.7 Hull collision twin assets and conditional widen (#226)
 
 Single-warship **score collisions** between early-tier hulls and higher-tech twins can cause ship-only exact early-stop to miss the true build (e.g. Birds Valiant Wind vs Resolute at military change 2749). Checked-in twin tables encode those collisions as `(lowHullId, highHullId, militaryChange)` triples so a later ladder step can admit only the colliding high-tech hulls for the observed score -- not a flat high-tech allowlist.
 
@@ -651,6 +651,18 @@ Single-warship **score collisions** between early-tier hulls and higher-tech twi
 | Assets | `assets/analytics/scores/hull_collision_twins_{standard,epic,campaign}.yaml` |
 | Loader / schema | `hull_collision_twins_asset.py` |
 | Regenerator | `scripts/early_stop_hull_collisions.py --write-asset` |
+| Ladder step | `collision_hull_widen` in `tier_policy.yaml` (after `widen_launchers`) |
+| Runtime plan | `collision_hull_widen.py` |
+
+**Ordering:** `collision_hull_widen` sits **after `widen_launchers`** (launchers tech 1--8) so twin combos that need launcher tech above the early band (e.g. Gamma Bomb tubes on Resolute) are expressible. Non-hull axes match `widen_launchers`; hulls stay tech 1--6 plus a **runtime** `includeComponentIds` union of admitted twin high-tech hulls.
+
+**Step behavior:**
+
+1. Collect hull ids from exact solutions already in merged top-K.
+2. Look up twin high-tech partners for those lows at `military_change = military_delta_2x // 2`, intersected with buildable hulls.
+3. If the admitted set is empty, **skip** the step (no catalog growth; no `no_new_exact_signatures` stop from the skip itself).
+4. Otherwise solve with prior hull eligibility ∪ admitted ids.
+5. `allowShipOnlyExactEarlyStop: true` on this step (and later steps); `false` on `early_game_bands` and `widen_launchers`.
 
 Regenerate when prior weights or component catalogs change:
 
@@ -660,7 +672,7 @@ uv run python scripts/early_stop_hull_collisions.py --game-type standard --game-
 uv run python scripts/early_stop_hull_collisions.py --game-type campaign --game-id 628580 --write-asset
 ```
 
-The human-readable census report remains the default stdout; `--write-asset` also writes the machine-readable twin table (full-race census only -- omit `--race`). Ladder wiring (conditional widen step + per-tier `allowShipOnlyExactEarlyStop`) is specified under #226 and lands with the inference consumer.
+The human-readable census report remains the default stdout; `--write-asset` also writes the machine-readable twin table (full-race census only -- omit `--race`). Missing category assets fall back to standard (same spirit as prior weights).
 
 ### 8.6 Score-equivalent combos (solver-side merge)
 

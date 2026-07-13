@@ -481,8 +481,12 @@ Per **inference search tier**, the set of aggregate actions permitted at that st
 _Avoid_: noisy action list, tier catalog
 
 **Inference tier policy**:
-The declarative record for one **inference search tier** on the unified ladder -- constraints on the full action catalog (ship-build component filters such as permitted tech levels, **tier aggregate allowlist** and caps, military-score band tolerance `alpha` in 2x units, seed budget). Later tiers loosen constraints; the final tier uses `alpha = 0`. Policies are loaded from a static asset (YAML). Optional **inference tier policy overlay** (#78) widens filters at resolve time. Fleet-informed torp admission and ranking tunables live in the same YAML file under `fleetInferenceTuning` (**#87**, **#156**; section 8.8 of implementation doc) -- distinct merge path from `TierPolicyOverlay`.
+The declarative record for one **inference search tier** on the unified ladder -- constraints on the full action catalog (ship-build component filters such as permitted tech levels, **tier aggregate allowlist** and caps, military-score band tolerance `alpha` in 2x units, seed budget, and optional `allowShipOnlyExactEarlyStop`). Later tiers loosen constraints; the final tier uses `alpha = 0`. Policies are loaded from a static asset (YAML). Optional **inference tier policy overlay** (#78) widens filters at resolve time. Fleet-informed torp admission and ranking tunables live in the same YAML file under `fleetInferenceTuning` (**#87**, **#156**; section 8.8 of implementation doc) -- distinct merge path from `TierPolicyOverlay`.
 _Avoid_: tier config, search phase
+
+**Hull collision twin**:
+A checked-in `(lowHullId, highHullId, militaryChange)` triple recording that a single-warship build of the low-tech hull can score-collide with a higher-tech hull at that military change, so ship-only exact early-stop on the low hull alone would miss the twin. Assets are per game category under `hull_collision_twins_*.yaml`; the `collision_hull_widen` inference search tier admits only matching high-tech partners for emitted lows (#226).
+_Avoid_: high-tech allowlist, early-stop hull list
 
 **Inference catalog constraint**:
 A filter applied at an **inference search tier** to shrink the full turn catalog. Ship-build filters use **explicit tech-level allowlists** per axis -- hulls, engines, beams, and **launcher torpedo types** (tube ammunition tech levels; not hull launcher slot counts). Component ids are derived at runtime by intersecting those tech levels with the turn catalog and player active lists. Aggregate actions use **tier aggregate allowlist** entries with max counts. Tier 0 reflects early-game tech bands from policy, not lowest component id.

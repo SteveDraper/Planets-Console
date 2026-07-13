@@ -313,6 +313,52 @@ def load_hull_collision_twins_for_category(
     return load_hull_collision_twins_asset(path), path
 
 
+def load_hull_collision_twins_for_game_category(
+    category: GameCategory,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[HullCollisionTwinsAsset | None, Path | None, bool]:
+    """Load twin asset for ``category``, falling back to standard when missing.
+
+    Returns ``(asset, path, fell_back_to_standard)``. When neither the category nor
+    standard asset exists, returns ``(None, None, False)``.
+    """
+    if category in TWIN_ASSET_CATEGORIES:
+        path = default_twin_asset_path(category, base_dir=base_dir)
+        if path.is_file():
+            return load_hull_collision_twins_asset(path), path, False
+    standard_path = default_twin_asset_path(GameCategory.STANDARD, base_dir=base_dir)
+    if standard_path.is_file():
+        return load_hull_collision_twins_asset(standard_path), standard_path, True
+    return None, None, False
+
+
+def military_change_from_delta_2x(military_delta_2x: int) -> int:
+    """Convert observation ``military_delta_2x`` to display/military-change units."""
+    return military_delta_2x // 2
+
+
+def admitted_high_hull_ids_for_observation(
+    asset: HullCollisionTwinsAsset,
+    *,
+    emitted_low_hull_ids: frozenset[int],
+    military_change: int,
+    buildable_hull_ids: frozenset[int],
+) -> frozenset[int]:
+    """High-tech hull ids to admit for emitted lows at the observed military change."""
+    if not emitted_low_hull_ids:
+        return frozenset()
+    admitted: set[int] = set()
+    for triple in asset.triples:
+        if triple.low_hull_id not in emitted_low_hull_ids:
+            continue
+        if triple.military_change != military_change:
+            continue
+        if triple.high_hull_id in buildable_hull_ids:
+            admitted.add(triple.high_hull_id)
+    return frozenset(admitted)
+
+
 def write_hull_collision_twins_asset(path: Path, asset: HullCollisionTwinsAsset) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = twins_asset_to_document(asset)

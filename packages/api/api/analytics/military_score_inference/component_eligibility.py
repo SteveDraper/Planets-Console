@@ -66,6 +66,17 @@ def _apply_component_id_allowlist(
     return eligible_ids & allowed
 
 
+def _apply_include_component_ids(
+    eligible_ids: frozenset[int],
+    component_filter: ComponentFilter,
+    *,
+    candidate_ids: frozenset[int],
+) -> frozenset[int]:
+    if not component_filter.include_component_ids:
+        return eligible_ids
+    return eligible_ids | (frozenset(component_filter.include_component_ids) & candidate_ids)
+
+
 def _component_ids_for_tech_levels(
     components_by_id: dict[int, Hull | Engine | Beam | Torpedo],
     *,
@@ -86,24 +97,25 @@ def eligible_hull_ids_for_filter(
     resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> frozenset[int]:
     """Resolve hull ids from a policy ``filters.hulls`` entry."""
+    buildable_hull_ids = buildable_hull_ids_for_player(
+        turn,
+        player_id,
+        resolved_mask=resolved_mask,
+    )
     if hull_filter.all:
-        eligible_ids = buildable_hull_ids_for_player(
-            turn,
-            player_id,
-            resolved_mask=resolved_mask,
-        )
+        eligible_ids = buildable_hull_ids
     else:
-        buildable_hull_ids = buildable_hull_ids_for_player(
-            turn,
-            player_id,
-            resolved_mask=resolved_mask,
-        )
         hulls_by_id = {hull.id: hull for hull in turn.hulls}
         eligible_ids = frozenset(
             hull_id
             for hull_id in buildable_hull_ids
             if hull_id in hulls_by_id and hulls_by_id[hull_id].techlevel in hull_filter.tech_levels
         )
+    eligible_ids = _apply_include_component_ids(
+        eligible_ids,
+        hull_filter,
+        candidate_ids=buildable_hull_ids,
+    )
     return _apply_component_id_allowlist(eligible_ids, hull_filter)
 
 
@@ -125,6 +137,11 @@ def eligible_component_ids_for_filter(
             components_by_id,
             tech_levels=component_filter.tech_levels,
         )
+    eligible_ids = _apply_include_component_ids(
+        eligible_ids,
+        component_filter,
+        candidate_ids=turn_catalog_ids,
+    )
     return _apply_component_id_allowlist(eligible_ids, component_filter)
 
 

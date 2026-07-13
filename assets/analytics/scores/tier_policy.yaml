@@ -108,6 +108,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: false
 
   - id: widen_launchers
     filters:
@@ -124,6 +125,27 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: false
+
+  # After widen_launchers so twin combos that need launcher tech >5 (e.g. Gamma on
+  # Resolute) are expressible. Hull admission is runtime-conditional via twin asset
+  # includeComponentIds overlay (#226); static hull band stays tech 1--6.
+  - id: collision_hull_widen
+    filters:
+      hulls:
+        techLevels: [1, 2, 3, 4, 5, 6]
+      engines:
+        all: true
+      beams:
+        techLevels: [1, 2, 3, 4, 5]
+      launchers:
+        techLevels: [1, 2, 3, 4, 5, 6, 7, 8]
+    beamSlotCounts: none
+    launcherSlotCounts: none
+    aggregateAllowlist: {}
+    alpha: 50
+    maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: widen_hulls
     filters:
@@ -140,6 +162,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: full_components
     filters:
@@ -156,6 +179,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: admit_ship_torpedoes
     filters:
@@ -173,6 +197,7 @@ steps:
       ship_torps_per_type: 40
     alpha: 30
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: full_components_planet_defense
     filters:
@@ -194,6 +219,7 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 50
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: admit_starbase_defense_posts
     filters:
@@ -216,6 +242,7 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 30
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: torp_escape_tier
     filters:
@@ -238,6 +265,7 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 30
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
 
   - id: full_catalog_exact
     filters:
@@ -260,3 +288,4 @@ steps:
       fighter_transfers_per_direction: 100
     alpha: 0
     maxSeeds: 5
+    allowShipOnlyExactEarlyStop: true
