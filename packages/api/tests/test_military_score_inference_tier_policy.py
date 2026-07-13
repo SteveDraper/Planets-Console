@@ -59,9 +59,8 @@ def test_policy_loader_validates_final_alpha_zero():
     assert steps[0].allow_ship_only_exact_early_stop is False
     assert steps[1].allow_ship_only_exact_early_stop is False
     assert steps[2].allow_ship_only_exact_early_stop is True
-    assert all(
-        step.allow_ship_only_exact_early_stop for step in steps[2:]
-    )
+    assert all(step.allow_ship_only_exact_early_stop for step in steps[2:])
+
 
 def test_policy_loader_reads_aggregate_probability_bins():
     from api.analytics.military_score_inference.tier_policy import (

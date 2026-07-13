@@ -95,10 +95,7 @@ def twin_pairs_from_triples(
         )
         for triple in triples
     }
-    return tuple(
-        pairs[key]
-        for key in sorted(pairs)
-    )
+    return tuple(pairs[key] for key in sorted(pairs))
 
 
 def build_twins_asset(
@@ -109,10 +106,7 @@ def build_twins_asset(
 ) -> HullCollisionTwinsAsset:
     unique_triples = tuple(
         sorted(
-            {
-                (t.low_hull_id, t.high_hull_id, t.military_change): t
-                for t in triples
-            }.values(),
+            {(t.low_hull_id, t.high_hull_id, t.military_change): t for t in triples}.values(),
             key=lambda t: (t.low_hull_id, t.high_hull_id, t.military_change),
         )
     )

@@ -113,9 +113,7 @@ def test_birds_epic_census_includes_resolute_allowlist_member() -> None:
     assert any(member.hull_id == 30 for member in collision_2749.early_trigger_members)
     assert any(member.hull_id == 31 for member in collision_2749.high_tech_members)
     valiant = next(
-        member
-        for member in collision_2749.early_trigger_members
-        if member.hull_id == 30
+        member for member in collision_2749.early_trigger_members if member.hull_id == 30
     )
     assert valiant.ship_only_objective is not None
     assert valiant.ship_only_objective >= census.early_stop_min_plausibility

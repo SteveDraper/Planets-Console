@@ -116,9 +116,7 @@ def resolve_collision_hull_widen_plan(
         )
     skipped = not admitted
     resolved_step = (
-        policy_step
-        if skipped
-        else policy_step_with_included_hull_ids(policy_step, admitted)
+        policy_step if skipped else policy_step_with_included_hull_ids(policy_step, admitted)
     )
     return CollisionHullWidenPlan(
         twin_asset_path=str(twins_asset_path) if twins_asset_path is not None else None,
