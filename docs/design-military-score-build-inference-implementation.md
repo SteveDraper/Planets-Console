@@ -566,6 +566,7 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | `alpha` | Military-score band tolerance in **2x** units; **final step must be `0`** |
 | `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
 | `allowShipOnlyExactEarlyStop` | When `true`, the ladder may stop after this step if a ship-builds-only exact meets `shipOnlyExactEarlyStopMinPlausibility`. Default `false` when omitted. |
+| `hullCollisionTwinWiden` | When `true`, the ladder loads hull-collision twin assets and may union admitted high-tech hull ids via runtime `includeComponentIds` (or skip when no partners). Default `false` when omitted. Gated by this flag, not by step `id`. |
 
 **`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
 
@@ -638,7 +639,7 @@ Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that 
 
 #### 8.5.6 Runtime catalog widens (step-local; #78 cancelled)
 
-**#78** proposed a global **inference tier policy overlay** merged at `resolve_tier_policies` time. That mechanism was removed unused: no production caller, and fleet torp needs are covered by **inference fleet probability overlay** (section 8.8). Catalog widening that depends on prior-step solutions uses step-local fields instead -- notably `includeComponentIds` on `collision_hull_widen` for **hull collision twin** admission (#226; section 8.5.7).
+**#78** proposed a global **inference tier policy overlay** merged at `resolve_tier_policies` time. That mechanism was removed unused: no production caller, and fleet torp needs are covered by **inference fleet probability overlay** (section 8.8). Catalog widening that depends on prior-step solutions uses step-local fields instead -- notably `includeComponentIds` on steps with `hullCollisionTwinWiden: true` for **hull collision twin** admission (#226; section 8.5.7).
 
 **Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not component-filter widens.
 
@@ -651,10 +652,10 @@ Single-warship **score collisions** between early-tier hulls and higher-tech twi
 | Assets | `assets/analytics/scores/hull_collision_twins_{standard,epic,campaign}.yaml` |
 | Loader / schema | `hull_collision_twins_asset.py` |
 | Regenerator | `scripts/early_stop_hull_collisions.py --write-asset` |
-| Ladder step | `collision_hull_widen` in `tier_policy.yaml` (after `widen_launchers`) |
+| Ladder step | `collision_hull_widen` in `tier_policy.yaml` (`hullCollisionTwinWiden: true`, after `widen_launchers`) |
 | Runtime plan | `collision_hull_widen.py` |
 
-**Ordering:** `collision_hull_widen` sits **after `widen_launchers`** (launchers tech 1--8) so twin combos that need launcher tech above the early band (e.g. Gamma Bomb tubes on Resolute) are expressible. Non-hull axes match `widen_launchers`; hulls stay tech 1--6 plus a **runtime** `includeComponentIds` union of admitted twin high-tech hulls.
+**Ordering:** `collision_hull_widen` sits **after `widen_launchers`** (launchers tech 1--8) so twin combos that need launcher tech above the early band (e.g. Gamma Bomb tubes on Resolute) are expressible. Non-hull axes match `widen_launchers`; hulls stay tech 1--6 plus a **runtime** `includeComponentIds` union of admitted twin high-tech hulls. Twin load / plan / skip is driven by `hullCollisionTwinWiden`, not by matching step `id`.
 
 **Step behavior:**
 
@@ -663,6 +664,7 @@ Single-warship **score collisions** between early-tier hulls and higher-tech twi
 3. If the admitted set is empty, **skip** the step (no catalog growth; no `no_new_exact_signatures` stop from the skip itself).
 4. Otherwise solve with prior hull eligibility ∪ admitted ids.
 5. `allowShipOnlyExactEarlyStop: true` on this step (and later steps); `false` on `early_game_bands` and `widen_launchers`.
+6. `hullCollisionTwinWiden: true` on this step only.
 
 Regenerate when prior weights or component catalogs change:
 

@@ -18,12 +18,20 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
 )
 from api.analytics.military_score_inference.tier_policy import (
-    COLLISION_HULL_WIDEN_STEP_ID,
+    InferenceTierPolicyStep,
     resolve_tier_policies,
 )
 from api.concepts.game_category import GameCategory
 
 from tests.fixtures.military_score_inference import _observation
+
+COLLISION_HULL_WIDEN_STEP_ID = "collision_hull_widen"
+
+
+def _collision_hull_widen_step(
+    steps: tuple[InferenceTierPolicyStep, ...],
+) -> InferenceTierPolicyStep:
+    return next(step for step in steps if step.hull_collision_twin_widen)
 
 
 def test_military_change_from_delta_2x() -> None:
@@ -69,7 +77,7 @@ def test_emitted_low_hull_ids_from_solutions_reads_ship_builds() -> None:
 
 def test_resolve_collision_plan_admits_resolute_for_birds_2749(sample_turn, monkeypatch) -> None:
     steps = resolve_tier_policies()
-    collision_step = next(step for step in steps if step.id == COLLISION_HULL_WIDEN_STEP_ID)
+    collision_step = _collision_hull_widen_step(steps)
     asset, path = load_hull_collision_twins_for_category(GameCategory.EPIC)
     assert HullCollisionTwinTriple(30, 31, 2749) in asset.triples
 
@@ -114,7 +122,7 @@ def test_resolve_collision_plan_admits_resolute_for_birds_2749(sample_turn, monk
 
 def test_resolve_collision_plan_skips_when_no_partners(sample_turn) -> None:
     steps = resolve_tier_policies()
-    collision_step = next(step for step in steps if step.id == COLLISION_HULL_WIDEN_STEP_ID)
+    collision_step = _collision_hull_widen_step(steps)
     asset, path = load_hull_collision_twins_for_category(GameCategory.EPIC)
     observation = _observation(military_delta_2x=2, warship_delta=1)
     plan = resolve_collision_hull_widen_plan(
@@ -148,8 +156,9 @@ def test_resolve_collision_plan_skips_when_no_partners(sample_turn) -> None:
 
 def test_policy_step_with_included_hull_ids_preserves_step_id() -> None:
     steps = resolve_tier_policies()
-    collision_step = next(step for step in steps if step.id == COLLISION_HULL_WIDEN_STEP_ID)
+    collision_step = _collision_hull_widen_step(steps)
     widened = policy_step_with_included_hull_ids(collision_step, frozenset({31, 29}))
     assert widened.id == COLLISION_HULL_WIDEN_STEP_ID
+    assert widened.hull_collision_twin_widen is True
     assert widened.filters.hulls.include_component_ids == (29, 31)
     assert widened.allow_ship_only_exact_early_stop is True

@@ -59,6 +59,8 @@ def test_policy_loader_validates_final_alpha_zero():
     assert steps[1].allow_ship_only_exact_early_stop is False
     assert steps[2].allow_ship_only_exact_early_stop is True
     assert all(step.allow_ship_only_exact_early_stop for step in steps[2:])
+    assert steps[2].hull_collision_twin_widen is True
+    assert sum(1 for step in steps if step.hull_collision_twin_widen) == 1
 
 
 def test_policy_loader_reads_aggregate_probability_bins():

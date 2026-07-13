@@ -2,8 +2,8 @@
 
 Fleet-informed ranking tunables (``fleetInferenceTuning``) and torp escape-tier admission
 are specified in design-military-score-build-inference-implementation.md section 8.8 (#87, #156).
-Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids`` for
-``collision_hull_widen``), not a global resolve-time overlay.
+Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids`` when
+``hullCollisionTwinWiden`` is set), not a global resolve-time overlay.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
 DEFAULT_MAX_SEEDS = 5
 
 TORP_ESCAPE_TIER_STEP_ID = "torp_escape_tier"
-COLLISION_HULL_WIDEN_STEP_ID = "collision_hull_widen"
 
 # ``all: true`` widens eligibility on that axis. It does **not** mean "every component id
 # in the turn catalog regardless of player state."
@@ -46,7 +45,8 @@ class ComponentFilter:
     Optional ``component_ids`` further restricts the resolved set (policy refinement when
     multiple ids share a tech level).
     Optional ``include_component_ids`` unions extra ids into the resolved set (runtime twin
-    widen for ``collision_hull_widen``; intersected with buildable / catalog ids at resolve).
+    widen when ``hullCollisionTwinWiden`` is set; intersected with buildable / catalog ids
+    at resolve).
     """
 
     all: bool = False
@@ -95,6 +95,7 @@ class InferenceTierPolicyStep:
     alpha: int
     max_seeds: int = DEFAULT_MAX_SEEDS
     allow_ship_only_exact_early_stop: bool = False
+    hull_collision_twin_widen: bool = False
 
     def constraint_snapshot(self) -> dict[str, object]:
         return {
@@ -106,6 +107,7 @@ class InferenceTierPolicyStep:
             "alpha": self.alpha,
             "maxSeeds": self.max_seeds,
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
+            "hullCollisionTwinWiden": self.hull_collision_twin_widen,
         }
 
 
@@ -245,6 +247,14 @@ def _parse_allow_ship_only_exact_early_stop(raw: object, *, step_id: str) -> boo
     return raw
 
 
+def _parse_hull_collision_twin_widen(raw: object, *, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(f"step {step_id}: hullCollisionTwinWiden must be a boolean")
+    return raw
+
+
 def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
@@ -279,6 +289,10 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
         max_seeds=max_seeds,
         allow_ship_only_exact_early_stop=_parse_allow_ship_only_exact_early_stop(
             raw.get("allowShipOnlyExactEarlyStop"),
+            step_id=step_id,
+        ),
+        hull_collision_twin_widen=_parse_hull_collision_twin_widen(
+            raw.get("hullCollisionTwinWiden"),
             step_id=step_id,
         ),
     )

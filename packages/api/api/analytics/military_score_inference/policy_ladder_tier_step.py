@@ -14,7 +14,6 @@ from api.analytics.military_score_inference.actions import (
 )
 from api.analytics.military_score_inference.collision_hull_widen import (
     CollisionHullWidenPlan,
-    is_collision_hull_widen_step,
     load_twins_for_turn,
     resolve_collision_hull_widen_plan,
 )
@@ -262,6 +261,7 @@ def _policy_step_diagnostics(
         "seedCount": seed_count,
         "bandResidual2x": band_residual_2x,
         "allowShipOnlyExactEarlyStop": policy_step.allow_ship_only_exact_early_stop,
+        "hullCollisionTwinWiden": policy_step.hull_collision_twin_widen,
     }
     if collision_widen is not None:
         diagnostics.update(collision_widen.to_diagnostics())
@@ -423,7 +423,7 @@ def run_policy_ladder_tier_step(
     policy_step = state.policy_steps[step_index]
     state.policy_steps_attempted.append(policy_step.id)
     collision_widen: CollisionHullWidenPlan | None = None
-    if is_collision_hull_widen_step(policy_step):
+    if policy_step.hull_collision_twin_widen:
         _ensure_hull_collision_twins_loaded(state, turn)
         collision_widen = resolve_collision_hull_widen_plan(
             policy_step,

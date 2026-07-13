@@ -146,6 +146,7 @@ steps:
     alpha: 50
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
+    hullCollisionTwinWiden: true
 
   - id: widen_hulls
     filters:

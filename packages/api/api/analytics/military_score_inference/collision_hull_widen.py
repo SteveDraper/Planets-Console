@@ -20,10 +20,7 @@ from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceSolution,
 )
-from api.analytics.military_score_inference.tier_policy import (
-    COLLISION_HULL_WIDEN_STEP_ID,
-    InferenceTierPolicyStep,
-)
+from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
 from api.concepts.game_category import GameCategory
 from api.models.game import TurnInfo
 
@@ -141,7 +138,3 @@ def load_twins_for_turn(
     if category == GameCategory.UNKNOWN:
         category = GameCategory.STANDARD
     return load_hull_collision_twins_for_game_category(category, base_dir=base_dir)
-
-
-def is_collision_hull_widen_step(policy_step: InferenceTierPolicyStep) -> bool:
-    return policy_step.id == COLLISION_HULL_WIDEN_STEP_ID
