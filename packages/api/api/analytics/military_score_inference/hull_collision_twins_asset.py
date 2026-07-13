@@ -119,6 +119,7 @@ def build_twins_asset(
 
 
 def twins_asset_to_document(asset: HullCollisionTwinsAsset) -> dict[str, Any]:
+    """Serialize asset for YAML. Persists triples + provenance only; pairs are derived on load."""
     return {
         "version": asset.version,
         "category": asset.category.value,
@@ -138,13 +139,6 @@ def twins_asset_to_document(asset: HullCollisionTwinsAsset) -> dict[str, Any]:
                 "militaryChange": triple.military_change,
             }
             for triple in asset.triples
-        ],
-        "pairs": [
-            {
-                "lowHullId": pair.low_hull_id,
-                "highHullId": pair.high_hull_id,
-            }
-            for pair in asset.pairs
         ],
     }
 
@@ -179,30 +173,6 @@ def _parse_triples(raw: object) -> tuple[HullCollisionTwinTriple, ...]:
             )
         )
     return tuple(triples)
-
-
-def _parse_pairs(raw: object) -> tuple[HullCollisionTwinPair, ...]:
-    if raw is None:
-        return ()
-    if not isinstance(raw, list):
-        raise ValueError("hull collision twins pairs must be a list")
-    pairs: list[HullCollisionTwinPair] = []
-    for index, entry in enumerate(raw):
-        if not isinstance(entry, dict):
-            raise ValueError(f"hull collision twins pairs[{index}] must be a mapping")
-        pairs.append(
-            HullCollisionTwinPair(
-                low_hull_id=_parse_int(
-                    entry.get("lowHullId"),
-                    field_name=f"pairs[{index}].lowHullId",
-                ),
-                high_hull_id=_parse_int(
-                    entry.get("highHullId"),
-                    field_name=f"pairs[{index}].highHullId",
-                ),
-            )
-        )
-    return tuple(pairs)
 
 
 def _parse_provenance(raw: object) -> HullCollisionTwinsProvenance:
@@ -259,18 +229,8 @@ def parse_hull_collision_twins_document(document: dict[str, Any]) -> HullCollisi
         raise ValueError(f"unsupported hull collision twins category {category.value!r}")
 
     triples = _parse_triples(document.get("triples"))
-    pairs = _parse_pairs(document.get("pairs"))
-    if not pairs:
-        pairs = twin_pairs_from_triples(triples)
-    else:
-        expected = set(twin_pairs_from_triples(triples))
-        actual = set(pairs)
-        if actual != expected:
-            raise ValueError(
-                "hull collision twins pairs must match the distinct (lowHullId, highHullId) "
-                "set derived from triples"
-            )
-        pairs = twin_pairs_from_triples(triples)
+    # Ignore any legacy ``pairs`` key; pairs are always derived from triples.
+    pairs = twin_pairs_from_triples(triples)
 
     return HullCollisionTwinsAsset(
         category=category,
@@ -358,8 +318,9 @@ def write_hull_collision_twins_asset(path: Path, asset: HullCollisionTwinsAsset)
     document = twins_asset_to_document(asset)
     header = (
         "# Hull collision twins for conditional early-stop widen (#226).\n"
-        "# Prefer (lowHullId, highHullId, militaryChange) triples over bare pairs so a\n"
-        "# Valiant@2749 admit Resolute without every Dark Wing twin that only collides at 3281.\n"
+        "# Persist (lowHullId, highHullId, militaryChange) triples only; distinct pairs\n"
+        "# are derived at load. Score-scoped triples let Valiant@2749 admit Resolute\n"
+        "# without every Dark Wing twin that only collides at 3281.\n"
         "#\n"
         "# Regenerate (priors / catalogs changed):\n"
         "#   uv run python scripts/early_stop_hull_collisions.py \\\n"

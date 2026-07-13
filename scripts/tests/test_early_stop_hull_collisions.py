@@ -171,7 +171,9 @@ def test_write_twin_asset_round_trip(tmp_path: Path) -> None:
     assert HullCollisionTwinTriple(30, 31, 2749) in loaded.triples
     assert HullCollisionTwinTriple(30, 29, 3281) in loaded.triples
     assert loaded.pairs == twin_pairs_from_triples(loaded.triples)
-    assert parse_hull_collision_twins_document(twins_asset_to_document(loaded)) == loaded
+    serialized = twins_asset_to_document(loaded)
+    assert "pairs" not in serialized
+    assert parse_hull_collision_twins_document(serialized) == loaded
 
 
 def test_checked_in_epic_twin_asset_includes_birds_collision_cases() -> None:

@@ -824,7 +824,7 @@ def main(
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
         typer.echo(
-            f"wrote {out_path} ({len(asset.triples)} triples, {len(asset.pairs)} pairs)",
+            f"wrote {out_path} ({len(asset.triples)} triples)",
             err=True,
         )
 

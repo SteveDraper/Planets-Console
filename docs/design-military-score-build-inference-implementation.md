@@ -645,7 +645,7 @@ Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that 
 
 #### 8.5.7 Hull collision twin assets and conditional widen (#226)
 
-Single-warship **score collisions** between early-tier hulls and higher-tech twins can cause ship-only exact early-stop to miss the true build (e.g. Birds Valiant Wind vs Resolute at military change 2749). Checked-in twin tables encode those collisions as `(lowHullId, highHullId, militaryChange)` triples so a later ladder step can admit only the colliding high-tech hulls for the observed score -- not a flat high-tech allowlist.
+Single-warship **score collisions** between early-tier hulls and higher-tech twins can cause ship-only exact early-stop to miss the true build (e.g. Birds Valiant Wind vs Resolute at military change 2749). Checked-in twin tables encode those collisions as `(lowHullId, highHullId, militaryChange)` triples so a later ladder step can admit only the colliding high-tech hulls for the observed score -- not a flat high-tech allowlist. Assets persist triples and provenance only; distinct `(low, high)` pairs are derived at load for diagnostics and are not written to YAML.
 
 | Item | Location |
 |------|----------|

@@ -1,6 +1,7 @@
 # Hull collision twins for conditional early-stop widen (#226).
-# Prefer (lowHullId, highHullId, militaryChange) triples over bare pairs so a
-# Valiant@2749 admit Resolute without every Dark Wing twin that only collides at 3281.
+# Persist (lowHullId, highHullId, militaryChange) triples only; distinct pairs
+# are derived at load. Score-scoped triples let Valiant@2749 admit Resolute
+# without every Dark Wing twin that only collides at 3281.
 #
 # Regenerate (priors / catalogs changed):
 #   uv run python scripts/early_stop_hull_collisions.py \
@@ -291,76 +292,3 @@ triples:
 - lowHullId: 1090
   highHullId: 89
   militaryChange: 1948
-pairs:
-- lowHullId: 2
-  highHullId: 10
-- lowHullId: 3
-  highHullId: 7
-- lowHullId: 3
-  highHullId: 10
-- lowHullId: 3
-  highHullId: 11
-- lowHullId: 5
-  highHullId: 11
-- lowHullId: 8
-  highHullId: 10
-- lowHullId: 8
-  highHullId: 11
-- lowHullId: 8
-  highHullId: 19
-- lowHullId: 22
-  highHullId: 7
-- lowHullId: 22
-  highHullId: 23
-- lowHullId: 22
-  highHullId: 25
-- lowHullId: 24
-  highHullId: 7
-- lowHullId: 24
-  highHullId: 25
-- lowHullId: 26
-  highHullId: 31
-- lowHullId: 26
-  highHullId: 106
-- lowHullId: 28
-  highHullId: 31
-- lowHullId: 28
-  highHullId: 106
-- lowHullId: 30
-  highHullId: 29
-- lowHullId: 30
-  highHullId: 31
-- lowHullId: 30
-  highHullId: 35
-- lowHullId: 32
-  highHullId: 31
-- lowHullId: 32
-  highHullId: 106
-- lowHullId: 33
-  highHullId: 31
-- lowHullId: 39
-  highHullId: 41
-- lowHullId: 60
-  highHullId: 64
-- lowHullId: 61
-  highHullId: 63
-- lowHullId: 61
-  highHullId: 64
-- lowHullId: 61
-  highHullId: 67
-- lowHullId: 65
-  highHullId: 64
-- lowHullId: 69
-  highHullId: 74
-- lowHullId: 86
-  highHullId: 89
-- lowHullId: 87
-  highHullId: 89
-- lowHullId: 88
-  highHullId: 89
-- lowHullId: 96
-  highHullId: 89
-- lowHullId: 103
-  highHullId: 89
-- lowHullId: 1090
-  highHullId: 89
