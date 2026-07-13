@@ -234,6 +234,10 @@ export interface components {
             serverStreams: {
                 [key: string]: unknown;
             }[];
+            /** Remotepool */
+            remotePool: {
+                [key: string]: unknown;
+            };
         };
         /** HTTPValidationError */
         HTTPValidationError: {

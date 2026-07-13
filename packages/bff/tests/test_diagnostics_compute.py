@@ -101,7 +101,13 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     assert "readyQueue" in body
     assert "completionHistory" in body
     assert "serverStreams" in body
-
+    assert "remotePool" in body
+    assert body["remotePool"]["interpreter"]["counts"] == {
+        "pending": 0,
+        "running": 0,
+        "done": 0,
+        "cancelled": 0,
+    }
     missing_client_streams = client.put(
         "/diagnostics/compute/client-streams?gameId=628580&perspective=1&turn=8",
         json=[],

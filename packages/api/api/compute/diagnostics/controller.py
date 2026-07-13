@@ -239,6 +239,10 @@ class ComputeDiagnosticsController:
             shell,
             pool_queue_items=pool_queue_items,
         )
+        remote_futures = self._pool.snapshot_remote_futures() if self._pool is not None else ()
+        remote_executor_probe = (
+            self._pool.remote_executor_probe() if self._pool is not None else None
+        )
         return build_compute_diagnostics_snapshot(
             shell=shell,
             ancestor_turns=ancestor_turns,
@@ -251,6 +255,8 @@ class ComputeDiagnosticsController:
             next_single_step=preview,
             single_step_disabled_reason=disabled_reason,
             completion_history=self._history_for_shell(shell).recent(),
+            remote_futures=remote_futures,
+            remote_executor_probe=remote_executor_probe,
         )
 
     def preview_single_step(

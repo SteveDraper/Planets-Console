@@ -36,6 +36,18 @@ export type NextSingleStepPreview = {
     | null
 }
 
+export type RemotePoolBackendProbe = {
+  maxWorkers: number | null
+  queueDepth: number | null
+  counts: {
+    pending: number
+    running: number
+    done: number
+    cancelled: number
+  }
+  futures: Record<string, unknown>[]
+}
+
 export type ComputeDiagnosticsSnapshotResponse = {
   shell: AnalyticShellScope
   freezeArmed: boolean
@@ -47,6 +59,10 @@ export type ComputeDiagnosticsSnapshotResponse = {
   nextSingleStep: NextSingleStepPreview
   completionHistory: Record<string, unknown>[]
   serverStreams: Record<string, unknown>[]
+  remotePool: {
+    interpreter: RemotePoolBackendProbe
+    process: RemotePoolBackendProbe
+  }
 }
 
 function normalizeShell(shell: {

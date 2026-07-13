@@ -26,6 +26,7 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     next_single_step: dict = Field(alias="nextSingleStep")
     completion_history: list[dict] = Field(alias="completionHistory")
     server_streams: list[dict] = Field(alias="serverStreams")
+    remote_pool: dict = Field(alias="remotePool")
 
 
 class ComputeDiagnosticsFreezeStatusResponse(BaseModel):
