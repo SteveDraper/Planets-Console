@@ -467,8 +467,9 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
 
     assert events[1]["type"] == "complete"
     assert events[1]["summary"] == "terminal before reconnect"
-    assert isinstance(events[1].get("diagnostics"), dict)
-    assert events[1]["diagnostics"].get("turn") == turn_number
+    assert events[1]["solutionCount"] == 1
+    # Durable rows omit solver diagnostics (action catalogs); replay is solutions-only.
+    assert events[1].get("diagnostics") is None
 
 
 def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
