@@ -1,12 +1,14 @@
-"""YAML inference search tier policy load, validation, and optional overlay hook.
+"""YAML inference search tier policy load and validation.
 
 Fleet-informed ranking tunables (``fleetInferenceTuning``) and torp escape-tier admission
 are specified in design-military-score-build-inference-implementation.md section 8.8 (#87, #156).
+Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids`` when
+``hullCollisionTwinWiden`` is set), not a global resolve-time overlay.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -40,13 +42,17 @@ class ComponentFilter:
     """Catalog filter for one ship-build component axis.
 
     Exactly one primary mode: ``all=True`` (widened) or non-empty ``tech_levels`` (tech band).
-    Optional ``component_ids`` further restricts the resolved set (reserved for future overlay
-    and policy refinement when multiple ids share a tech level).
+    Optional ``component_ids`` further restricts the resolved set (policy refinement when
+    multiple ids share a tech level).
+    Optional ``include_component_ids`` unions extra ids into the resolved set (runtime twin
+    widen when ``hullCollisionTwinWiden`` is set; intersected with buildable / catalog ids
+    at resolve).
     """
 
     all: bool = False
     tech_levels: tuple[int, ...] = ()
     component_ids: tuple[int, ...] = ()
+    include_component_ids: tuple[int, ...] = ()
 
     def to_snapshot(self) -> dict[str, object]:
         if self.all:
@@ -55,6 +61,8 @@ class ComponentFilter:
             snapshot = {"techLevels": list(self.tech_levels)}
         if self.component_ids:
             snapshot["componentIds"] = list(self.component_ids)
+        if self.include_component_ids:
+            snapshot["includeComponentIds"] = list(self.include_component_ids)
         return snapshot
 
 
@@ -78,30 +86,6 @@ class InferenceCatalogFilters:
 
 
 @dataclass(frozen=True)
-class ComponentFilterOverlay:
-    """Per-axis overlay fragment merged at resolve time (#78)."""
-
-    append_tech_levels: tuple[int, ...] = ()
-    append_component_ids: tuple[int, ...] = ()
-    force_all: bool = False
-
-
-@dataclass(frozen=True)
-class TierPolicyOverlay:
-    """Runtime overlay merged into the static policy at resolve time (#78).
-
-    #78 implements deterministic merge into ``InferenceCatalogFilters`` per step.
-    When ``overlay`` is not ``None``, #77 passes the base YAML steps through unchanged.
-    """
-
-    hulls: ComponentFilterOverlay | None = None
-    engines: ComponentFilterOverlay | None = None
-    beams: ComponentFilterOverlay | None = None
-    launchers: ComponentFilterOverlay | None = None
-    aggregate_cap_bumps: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class InferenceTierPolicyStep:
     id: str
     filters: InferenceCatalogFilters
@@ -110,6 +94,8 @@ class InferenceTierPolicyStep:
     aggregate_allowlist: dict[str, int]
     alpha: int
     max_seeds: int = DEFAULT_MAX_SEEDS
+    allow_ship_only_exact_early_stop: bool = False
+    hull_collision_twin_widen: bool = False
 
     def constraint_snapshot(self) -> dict[str, object]:
         return {
@@ -120,6 +106,8 @@ class InferenceTierPolicyStep:
             "aggregateAllowlist": dict(self.aggregate_allowlist),
             "alpha": self.alpha,
             "maxSeeds": self.max_seeds,
+            "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
+            "hullCollisionTwinWiden": self.hull_collision_twin_widen,
         }
 
 
@@ -171,17 +159,47 @@ def _parse_tech_levels_list(raw: object, *, axis: str, step_id: str) -> tuple[in
     return tuple(sorted(set(levels)))
 
 
+def _parse_include_component_ids(raw: object, *, axis: str, step_id: str) -> tuple[int, ...]:
+    """Parse optional static includeComponentIds (normally set only at runtime)."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"step {step_id}: filters.{axis}.includeComponentIds must be a list")
+    ids: list[int] = []
+    for value in raw:
+        if not isinstance(value, int):
+            raise ValueError(
+                f"step {step_id}: filters.{axis}.includeComponentIds entries must be ints"
+            )
+        ids.append(value)
+    return tuple(sorted(set(ids)))
+
+
 def _parse_component_filter(raw: object, *, axis: str, step_id: str) -> ComponentFilter:
     if not isinstance(raw, dict):
         raise ValueError(f"step {step_id}: filters.{axis} must be a mapping")
     use_all = bool(raw.get("all", False))
     component_ids = _parse_component_ids(raw.get("componentIds"), axis=axis, step_id=step_id)
+    include_component_ids = _parse_include_component_ids(
+        raw.get("includeComponentIds"),
+        axis=axis,
+        step_id=step_id,
+    )
     if use_all:
         if "techLevels" in raw:
             raise ValueError(f"step {step_id}: filters.{axis} cannot set both all and techLevels")
-        return ComponentFilter(all=True, component_ids=component_ids)
+        return ComponentFilter(
+            all=True,
+            component_ids=component_ids,
+            include_component_ids=include_component_ids,
+        )
     tech_levels = _parse_tech_levels_list(raw.get("techLevels"), axis=axis, step_id=step_id)
-    return ComponentFilter(all=False, tech_levels=tech_levels, component_ids=component_ids)
+    return ComponentFilter(
+        all=False,
+        tech_levels=tech_levels,
+        component_ids=component_ids,
+        include_component_ids=include_component_ids,
+    )
 
 
 def _parse_catalog_filters(raw: object, *, step_id: str) -> InferenceCatalogFilters:
@@ -221,6 +239,22 @@ def _parse_aggregate_allowlist(raw: object, *, step_id: str) -> dict[str, int]:
     return allowlist
 
 
+def _parse_allow_ship_only_exact_early_stop(raw: object, *, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(f"step {step_id}: allowShipOnlyExactEarlyStop must be a boolean")
+    return raw
+
+
+def _parse_hull_collision_twin_widen(raw: object, *, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(f"step {step_id}: hullCollisionTwinWiden must be a boolean")
+    return raw
+
+
 def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
@@ -253,6 +287,14 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
         ),
         alpha=alpha,
         max_seeds=max_seeds,
+        allow_ship_only_exact_early_stop=_parse_allow_ship_only_exact_early_stop(
+            raw.get("allowShipOnlyExactEarlyStop"),
+            step_id=step_id,
+        ),
+        hull_collision_twin_widen=_parse_hull_collision_twin_widen(
+            raw.get("hullCollisionTwinWiden"),
+            step_id=step_id,
+        ),
     )
 
 
@@ -533,14 +575,8 @@ def _validate_production_escape_tier(steps: tuple[InferenceTierPolicyStep, ...])
 
 def resolve_tier_policies(
     base_path: Path | None = None,
-    overlay: TierPolicyOverlay | None = None,
 ) -> tuple[InferenceTierPolicyStep, ...]:
-    """Load and validate the static tier policy ladder.
-
-    Returns YAML steps from ``base_path`` (or the default asset). The ``overlay`` parameter
-    is reserved for #78 merge semantics; it is accepted but not applied yet.
-    """
-    del overlay
+    """Load and validate the static tier policy ladder from ``base_path`` (or the default asset)."""
     policy_path = default_tier_policy_path() if base_path is None else base_path
     steps = parse_tier_policy_steps(load_tier_policy_document(policy_path))
     if base_path is None:

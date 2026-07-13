@@ -831,8 +831,11 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
     ledger = ledger_for_player(snapshot, player_id)
     warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
     assert len(warship_rows) == 2
+    # Collision twin widen keeps Cobol and Iron Lady visible for military change 2258.
+    expected_combo_ids = {"combo_96_9_5_6_4_2", "combo_89_8_4_3_8_2"}
     for record in warship_rows:
-        assert len(record.build_option_sets) == 1
+        combo_ids = {option.combo_id for option in record.build_option_sets}
+        assert combo_ids == expected_combo_ids
         assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
         inference_event = next(event for event in record.events if event.kind == "inference_update")
         assert inference_event.payload["acceleratedIngest"] is True
@@ -875,8 +878,11 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
     ledger = ledger_for_player(snapshot, player_id)
     warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
     assert len(warship_rows) == 2
+    # Collision twin widen keeps Cobol and Iron Lady visible for military change 2258.
+    expected_combo_ids = {"combo_96_9_5_6_4_2", "combo_89_8_4_3_8_2"}
     for record in warship_rows:
-        assert len(record.build_option_sets) == 1
+        combo_ids = {option.combo_id for option in record.build_option_sets}
+        assert combo_ids == expected_combo_ids
         assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
 
 

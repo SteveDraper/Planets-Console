@@ -1391,9 +1391,24 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "nextSingleStep",
         "completionHistory",
         "serverStreams",
+        "remotePool",
     }
     assert wire["freezeArmed"] is False
     assert wire["inFlight"] == []
+    assert wire["remotePool"] == {
+        "interpreter": {
+            "maxWorkers": None,
+            "queueDepth": None,
+            "counts": {"pending": 0, "running": 0, "done": 0, "cancelled": 0},
+            "futures": [],
+        },
+        "process": {
+            "maxWorkers": None,
+            "queueDepth": None,
+            "counts": {"pending": 0, "running": 0, "done": 0, "cancelled": 0},
+            "futures": [],
+        },
+    }
     assert wire["nextSingleStep"] == {
         "target": None,
         "disabledReason": "freeze_not_armed",

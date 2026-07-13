@@ -29,6 +29,16 @@ const SCOPE = { gameId: '42', perspective: 1, turn: 7 }
 
 const NEXT_SCOPE_KEY = '42:7:1:fleet'
 
+function emptyRemotePool(): ComputeDiagnosticsSnapshotResponse['remotePool'] {
+  const emptyBackend = {
+    maxWorkers: null,
+    queueDepth: null,
+    counts: { pending: 0, running: 0, done: 0, cancelled: 0 },
+    futures: [] as Record<string, unknown>[],
+  }
+  return { interpreter: emptyBackend, process: { ...emptyBackend, futures: [] } }
+}
+
 function snapshotFixture(
   overrides: Partial<ComputeDiagnosticsSnapshotResponse> = {}
 ): ComputeDiagnosticsSnapshotResponse {
@@ -54,6 +64,7 @@ function snapshotFixture(
     },
     completionHistory: [],
     serverStreams: [],
+    remotePool: emptyRemotePool(),
     ...overrides,
   }
 }

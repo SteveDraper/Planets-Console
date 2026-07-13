@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from api.compute.profile import ComputeBackend, ComputeStepSpec
+from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
 from api.compute.wire import RunStepFn
 from api.compute.worker_turn_cache import init_worker_turn_cache, worker_deserialize_calls
@@ -112,6 +113,22 @@ def _pop_at(queue: deque[PoolWorkItem], index: int) -> PoolWorkItem:
     return item
 
 
+def _executor_queue_depth(executor: object | None) -> int | None:
+    """Best-effort pending-work depth for Thread/Interpreter/Process pool executors."""
+    if executor is None:
+        return None
+    work_queue = getattr(executor, "_work_queue", None)
+    if work_queue is None:
+        return None
+    qsize = getattr(work_queue, "qsize", None)
+    if not callable(qsize):
+        return None
+    try:
+        return int(qsize())
+    except Exception:
+        return None
+
+
 class ComputeWorkerPool:
     """Process-wide worker pool with priority dequeue and backend dispatch."""
 
@@ -134,6 +151,15 @@ class ComputeWorkerPool:
         self._on_item_finished: Callable[[PoolWorkItem], None] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
+        # Futures retained from executor.submit until done-callback finishes so
+        # diagnostics can distinguish pending/running/done orphaned in-flight rows.
+        # Dedicated lock: never nest with the diagnostics controller lock. Done
+        # callbacks take controller via on_item_finished then unregister here;
+        # pool workers take the pool condition then controller in on_item_dequeued.
+        # Sharing the pool condition for unregister deadlocks (pool→controller vs
+        # controller→pool).
+        self._remote_futures_lock = threading.Lock()
+        self._remote_futures: list[RemotePoolFutureRecord] = []
         for _ in range(self._worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
             thread.start()
@@ -178,6 +204,24 @@ class ComputeWorkerPool:
     def snapshot_work_queue(self) -> tuple[PoolWorkItem, ...]:
         with self._condition:
             return tuple(self._work_queue)
+
+    def snapshot_remote_futures(self) -> tuple[RemotePoolFutureRecord, ...]:
+        """Return interpreter/process futures still tracked between submit and finish."""
+        with self._remote_futures_lock:
+            return tuple(self._remote_futures)
+
+    def remote_executor_probe(self) -> dict[str, object]:
+        """Best-effort executor sizing / queue depth for diagnostics (may be None)."""
+        with self._condition:
+            interpreter = self._interpreter_executor
+            process = self._process_executor
+            worker_count = self._worker_count
+        return {
+            "interpreterMaxWorkers": worker_count if interpreter is not None else None,
+            "processMaxWorkers": worker_count if process is not None else None,
+            "interpreterQueueDepth": _executor_queue_depth(interpreter),
+            "processQueueDepth": _executor_queue_depth(process),
+        }
 
     def wake_workers(self) -> bool:
         """Wake pool workers waiting on an empty or fully-held queue."""
@@ -360,6 +404,7 @@ class ComputeWorkerPool:
                 else:
                     executor = self._process_executor_locked()
             future = executor.submit(item.run_step, item.job_wire)
+            self._register_remote_future(item, future)
             future.add_done_callback(
                 lambda completed, pool_item=item: self._on_remote_future_done(
                     pool_item,
@@ -369,6 +414,25 @@ class ComputeWorkerPool:
             return
         self._notify_item_finished(item)
         raise RuntimeError(f"unsupported pool backend {item.backend!r}")
+
+    def _register_remote_future(self, item: PoolWorkItem, future: Future[object]) -> None:
+        record = remote_future_record(
+            orchestrator_id=item.orchestrator_id,
+            scope=item.scope,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+            priority_band=item.priority_band,
+            backend=item.backend,
+            future=future,
+        )
+        with self._remote_futures_lock:
+            self._remote_futures.append(record)
+
+    def _unregister_remote_future(self, future: Future[object]) -> None:
+        with self._remote_futures_lock:
+            self._remote_futures = [
+                record for record in self._remote_futures if record.future is not future
+            ]
 
     def _notify_item_finished(self, item: PoolWorkItem) -> None:
         with self._condition:
@@ -380,7 +444,15 @@ class ComputeWorkerPool:
         try:
             self._complete_from_future(item.orchestrator_id, item.scope, future)
         finally:
-            self._notify_item_finished(item)
+            # Unregister after complete/persist so a mid-callback snapshot can still
+            # observe futureState=done while the DAG node remains running.
+            # Use ``_remote_futures_lock`` only -- never the pool condition -- so this
+            # cannot ABBA-deadlock with workers that hold the pool condition while
+            # calling on_item_dequeued (controller lock).
+            try:
+                self._notify_item_finished(item)
+            finally:
+                self._unregister_remote_future(future)
 
     def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
         if self._interpreter_executor is None:

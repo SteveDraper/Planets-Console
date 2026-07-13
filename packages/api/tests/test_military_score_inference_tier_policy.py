@@ -21,7 +21,6 @@ from api.analytics.military_score_inference.policy_ladder import solve_with_poli
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
-    TierPolicyOverlay,
     compute_aggregate_admission_caps,
     default_tier_policy_path,
     parse_solver_thresholds,
@@ -54,6 +53,14 @@ def test_policy_loader_validates_final_alpha_zero():
     steps = resolve_tier_policies()
     assert steps[-1].alpha == 0
     assert steps[0].id == "early_game_bands"
+    assert steps[1].id == "widen_launchers"
+    assert steps[2].id == "collision_hull_widen"
+    assert steps[0].allow_ship_only_exact_early_stop is False
+    assert steps[1].allow_ship_only_exact_early_stop is False
+    assert steps[2].allow_ship_only_exact_early_stop is True
+    assert all(step.allow_ship_only_exact_early_stop for step in steps[2:])
+    assert steps[2].hull_collision_twin_widen is True
+    assert sum(1 for step in steps if step.hull_collision_twin_widen) == 1
 
 
 def test_policy_loader_reads_aggregate_probability_bins():
@@ -170,14 +177,9 @@ def test_policy_loader_rejects_missing_final_alpha_zero():
         parse_tier_policy_steps(document)
 
 
-def test_overlay_hook_accepts_none_and_returns_yaml_steps():
-    steps = resolve_tier_policies(overlay=None)
-    assert len(steps) == 9
-
-
-def test_overlay_parameter_is_accepted_without_merge():
-    steps = resolve_tier_policies(overlay=TierPolicyOverlay())
-    assert len(steps) == 9
+def test_resolve_tier_policies_returns_yaml_steps():
+    steps = resolve_tier_policies()
+    assert len(steps) == 10
 
 
 def test_early_step_uses_tech_level_bands_not_lowest_component_id(sample_turn):
@@ -424,6 +426,49 @@ def test_component_ids_restriction_is_applied_when_present(synthetic_catalog_con
     assert eligible_beam_ids == frozenset({1})
 
 
+def test_include_component_ids_unions_into_tech_band():
+    from api.models.components import Beam
+
+    beams_by_id = {
+        1: Beam(
+            id=1,
+            name="Laser",
+            cost=1,
+            tritanium=1,
+            duranium=0,
+            molybdenum=0,
+            mass=1,
+            techlevel=1,
+            crewkill=1,
+            damage=1,
+        ),
+        10: Beam(
+            id=10,
+            name="Heavy Phaser",
+            cost=1,
+            tritanium=1,
+            duranium=0,
+            molybdenum=0,
+            mass=1,
+            techlevel=10,
+            crewkill=1,
+            damage=1,
+        ),
+    }
+    tech1 = eligible_component_ids_for_filter(
+        ComponentFilter(all=False, tech_levels=(1,)),
+        active_component_csv="",
+        components_by_id=beams_by_id,
+    )
+    widened = eligible_component_ids_for_filter(
+        ComponentFilter(all=False, tech_levels=(1,), include_component_ids=(10,)),
+        active_component_csv="",
+        components_by_id=beams_by_id,
+    )
+    assert tech1 == frozenset({1})
+    assert widened == frozenset({1, 10})
+
+
 def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn, monkeypatch):
     observation = _observation(warship_delta=1, starbases_owned=3)
     solution_a = InferenceSolution(objective_value=100, actions=(), ship_builds=())
@@ -445,30 +490,34 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
         ),
     )
     policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    collision = next(step for step in policy_steps if step.id == "collision_hull_widen")
+    widen_hulls = next(step for step in policy_steps if step.id == "widen_hulls")
     call_step_ids: list[str] = []
 
     def _solve_side_effect(problem, **kwargs):
         call_step_ids.append(problem.policy_step_id)
-        if problem.policy_step_id == policy_steps[0].id:
+        if problem.policy_step_id == early.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[1].id:
+        if problem.policy_step_id == widen_launchers.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
                     solutions=(solution_a,),
-                    diagnostics={"policy_step_id": policy_steps[1].id},
+                    diagnostics={"policy_step_id": widen_launchers.id},
                 ),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[2].id:
+        if problem.policy_step_id == widen_hulls.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
                     solutions=(solution_a, solution_b),
-                    diagnostics={"policy_step_id": policy_steps[2].id},
+                    diagnostics={"policy_step_id": widen_hulls.id},
                 ),
                 **kwargs,
             )
@@ -485,25 +534,26 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
         "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "_solution_qualifies_for_ship_only_exact_early_stop",
+        lambda *args, **kwargs: False,
+    )
     result, catalog, problem, attempted, step_diagnostics = solve_with_policy_ladder(
         observation,
         sample_turn,
     )
 
-    assert attempted[:4] == [
-        policy_steps[0].id,
-        policy_steps[1].id,
-        policy_steps[2].id,
-        policy_steps[3].id,
-    ]
-    assert call_step_ids[0] == policy_steps[0].id
-    assert policy_steps[1].id in call_step_ids
-    assert policy_steps[2].id in call_step_ids
+    assert attempted[:4] == [early.id, widen_launchers.id, collision.id, widen_hulls.id]
+    assert call_step_ids[0] == early.id
+    assert widen_launchers.id in call_step_ids
+    assert collision.id not in call_step_ids  # skipped when no twin partners
+    assert widen_hulls.id in call_step_ids
     assert [solution.objective_value for solution in result.solutions] == [100, 50]
-    assert catalog.policy_step_id == policy_steps[3].id
-    assert problem.policy_step_id == policy_steps[3].id
+    assert catalog.policy_step_id == "full_components"
+    assert problem.policy_step_id == "full_components"
     assert step_diagnostics
-    assert step_diagnostics[0]["policyStepId"] == policy_steps[0].id
+    assert step_diagnostics[0]["policyStepId"] == early.id
     assert "filters" in step_diagnostics[0]["constraintSnapshot"]
     assert result.diagnostics["stopped_reason"] == "no_new_exact_signatures"
 
@@ -513,6 +563,10 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
 ):
     observation = _observation(warship_delta=1)
     policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    widen_hulls = next(step for step in policy_steps if step.id == "widen_hulls")
+    full_components = next(step for step in policy_steps if step.id == "full_components")
     solution_a = InferenceSolution(
         objective_value=100,
         actions=(),
@@ -566,17 +620,17 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
     )
 
     def _solve_side_effect(problem, **kwargs):
-        if problem.policy_step_id == policy_steps[0].id:
+        if problem.policy_step_id == early.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[1].id:
+        if problem.policy_step_id == widen_launchers.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(status=STATUS_EXACT, solutions=(solution_a,), diagnostics={}),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[2].id:
+        if problem.policy_step_id == widen_hulls.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
@@ -585,7 +639,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
                 ),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[3].id:
+        if problem.policy_step_id == full_components.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
@@ -608,8 +662,9 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step._solution_fully_explained_by_ship_builds_only",
-        lambda solution, observation, catalog: False,
+        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "_solution_qualifies_for_ship_only_exact_early_stop",
+        lambda *args, **kwargs: False,
     )
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder.solution_satisfies_exact_hard_equalities",
@@ -686,7 +741,13 @@ def test_solve_with_policy_ladder_reports_exact_when_top_solution_satisfies_hard
     assert result.status == STATUS_EXACT
 
 
-def _ship_build_solution(*, combo_id: str, objective_value: int, label: str | None = None):
+def _ship_build_solution(
+    *,
+    combo_id: str,
+    objective_value: int,
+    label: str | None = None,
+    hull_id: int = 1,
+):
     return InferenceSolution(
         objective_value=objective_value,
         actions=(),
@@ -695,7 +756,7 @@ def _ship_build_solution(*, combo_id: str, objective_value: int, label: str | No
                 combo_id=combo_id,
                 label=label or combo_id,
                 count=1,
-                hull_id=1,
+                hull_id=hull_id,
                 engine_id=1,
                 beam_id=None,
                 torp_id=None,
@@ -709,6 +770,8 @@ def _ship_build_solution(*, combo_id: str, objective_value: int, label: str | No
 def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, monkeypatch):
     observation = _observation(warship_delta=1)
     policy_steps = resolve_tier_policies()
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    collision = next(step for step in policy_steps if step.id == "collision_hull_widen")
     early_solution = _ship_build_solution(combo_id="combo_early", objective_value=100)
 
     def _solve_side_effect(problem, **kwargs):
@@ -717,12 +780,12 @@ def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, 
                 InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[1].id:
+        if problem.policy_step_id == widen_launchers.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
                     solutions=(early_solution,),
-                    diagnostics={"policy_step_id": policy_steps[1].id},
+                    diagnostics={"policy_step_id": widen_launchers.id},
                 ),
                 **kwargs,
             )
@@ -744,14 +807,16 @@ def test_solve_with_policy_ladder_retains_exact_across_combo_widen(sample_turn, 
         sample_turn,
     )
 
-    assert policy_steps[1].id in attempted
-    assert policy_steps[2].id in attempted
+    assert widen_launchers.id in attempted
+    assert collision.id in attempted
     assert any(solution.ship_builds[0].combo_id == "combo_early" for solution in result.solutions)
 
 
 def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, monkeypatch):
     observation = _observation(warship_delta=1)
     policy_steps = resolve_tier_policies()
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    widen_hulls = next(step for step in policy_steps if step.id == "widen_hulls")
     low_solution = _ship_build_solution(combo_id="combo_low", objective_value=40)
     mid_solution = _ship_build_solution(combo_id="combo_mid", objective_value=50)
     high_solution = _ship_build_solution(combo_id="combo_high", objective_value=100)
@@ -762,21 +827,21 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
                 InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[1].id:
+        if problem.policy_step_id == widen_launchers.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
                     solutions=(mid_solution, low_solution),
-                    diagnostics={"policy_step_id": policy_steps[1].id},
+                    diagnostics={"policy_step_id": widen_launchers.id},
                 ),
                 **kwargs,
             )
-        if problem.policy_step_id == policy_steps[2].id:
+        if problem.policy_step_id == widen_hulls.id:
             return _emit_mock_solver_solutions(
                 InferenceResult(
                     status=STATUS_EXACT,
                     solutions=(high_solution,),
-                    diagnostics={"policy_step_id": policy_steps[2].id},
+                    diagnostics={"policy_step_id": widen_hulls.id},
                 ),
                 **kwargs,
             )
@@ -793,6 +858,11 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
     )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "_solution_qualifies_for_ship_only_exact_early_stop",
+        lambda *args, **kwargs: False,
+    )
     result, _, _, _, _ = solve_with_policy_ladder(
         observation,
         sample_turn,
@@ -804,6 +874,130 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         "combo_high",
         "combo_mid",
     }
+
+
+def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
+    sample_turn, monkeypatch
+):
+    """Ship-only exact that meets plausibility must not stop on early ladder steps.
+
+    ``early_game_bands`` / ``widen_launchers`` set ``allowShipOnlyExactEarlyStop: false``;
+    a qualifying exact on those steps must still reach ``collision_hull_widen``.
+    """
+    observation = _observation(military_delta_2x=400, warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    collision = next(step for step in policy_steps if step.id == "collision_hull_widen")
+    assert early.id == "early_game_bands"
+    assert early.allow_ship_only_exact_early_stop is False
+    assert widen_launchers.allow_ship_only_exact_early_stop is False
+    assert collision.allow_ship_only_exact_early_stop is True
+
+    early_exact = _ship_build_solution(combo_id="combo_early", objective_value=-300)
+    widen_exact = _ship_build_solution(combo_id="combo_widen", objective_value=-300)
+
+    def _solve_side_effect(problem, **kwargs):
+        solution = early_exact if problem.policy_step_id == early.id else widen_exact
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
+    _, _, _, attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    assert attempted[:3] == [early.id, widen_launchers.id, collision.id]
+
+
+def test_solve_with_policy_ladder_runs_collision_hull_widen_on_twin_hit(sample_turn, monkeypatch):
+    """When held exact emits a low hull with an epic twin, collision step must solve.
+
+    Valiant (hull 30) at military change 2749 admits Resolute (31); the ladder must
+    invoke the solver for ``collision_hull_widen`` (not only record a skip).
+    """
+    observation = _observation(military_delta_2x=5498, warship_delta=1)
+    policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    collision = next(step for step in policy_steps if step.id == "collision_hull_widen")
+    valiant = _ship_build_solution(
+        combo_id="valiant",
+        objective_value=-171,
+        label="Valiant",
+        hull_id=30,
+    )
+    call_step_ids: list[str] = []
+
+    def _solve_side_effect(problem, **kwargs):
+        call_step_ids.append(problem.policy_step_id)
+        if problem.policy_step_id == early.id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        if problem.policy_step_id == widen_launchers.id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(valiant,),
+                    diagnostics={"policy_step_id": widen_launchers.id},
+                ),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(valiant,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "_solution_qualifies_for_ship_only_exact_early_stop",
+        lambda *args, **kwargs: False,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.collision_hull_widen.buildable_hull_ids_for_player",
+        lambda *args, **kwargs: frozenset({29, 30, 31, 106}),
+    )
+    _, _, _, attempted, step_diagnostics = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+        time_limit_seconds=60.0,
+    )
+
+    assert collision.id in attempted
+    assert collision.id in call_step_ids
+    collision_diag = next(diag for diag in step_diagnostics if diag["policyStepId"] == collision.id)
+    collision_widen = collision_diag["collisionHullWiden"]
+    assert collision_widen["skipped"] is False
+    assert collision_widen["admittedHighHullIds"] == [31]
+    assert collision_widen["emittedLowHullIds"] == [30]
+    assert collision_widen["militaryChange"] == 2749
+    hull_snapshot = collision_diag["constraintSnapshot"]["filters"]["hulls"]
+    assert hull_snapshot["includeComponentIds"] == [31]
 
 
 def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_threshold(
@@ -842,7 +1036,11 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
         time_limit_seconds=60.0,
     )
 
-    assert attempted == [policy_steps[0].id, policy_steps[1].id]
+    assert attempted == [
+        policy_steps[0].id,
+        policy_steps[1].id,
+        policy_steps[2].id,
+    ]
 
 
 def test_solve_with_policy_ladder_continues_when_ship_only_exact_below_plausibility_threshold(

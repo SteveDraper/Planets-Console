@@ -504,7 +504,7 @@ composition = ctx.query(
 
 **#156 (follow-on):** per-axis tech ceilings from the same composition rows; **inference component tech-gap prior** via `fleetInferenceTuning.componentTechGapLogPenaltyPerLevel`. No positive histogram boosts beyond **inference build prior** (#86).
 
-Production wiring: **#133**. Parallel axis: **#78** **inference tier policy overlay** (catalog filter widening only). Stream diagnostics and SPA UX: **#158** (see [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.8.5).
+Production wiring: **#133**. Stream diagnostics and SPA UX: **#158** (see [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.8.5). Catalog filter widens for collision twins use step-local `includeComponentIds` (#226), not a cancelled #78 resolve-time overlay.
 
 See [design-military-score-build-inference-implementation.md](design-military-score-build-inference-implementation.md) section 8.8.
 

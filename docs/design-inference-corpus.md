@@ -469,7 +469,7 @@ Print summary counts and optional `--json` array of per-case records (`caseId`, 
 | #65 | 10–11, 12 |
 | #66 | 4, 8, manifest `requiredPerspectives` |
 | #77 | Tier policy refactor; refresh fixtures when diagnostics or tier metadata change |
-| #78 | Overlay merge; corpus unchanged until a production caller exists |
+| #78 | Cancelled (unused global overlay); corpus unaffected |
 
 **Solver epic ordering:** #62 parallel #50; refresh fixtures after #51; **#77** supersedes #52/#72 (YAML tier policy, slack deferral, band seeding -- see implementation doc section 8.5); re-run corpus after #77 before hardening #65 top-K checks. #66 with #49 when trades modeled.
 

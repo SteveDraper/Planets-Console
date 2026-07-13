@@ -568,6 +568,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           />
           <SectionPanel title="Pool queue" value={snapshot.poolQueue} onCopy={onCopy} />
           <SectionPanel title="In-flight" value={snapshot.inFlight} onCopy={onCopy} />
+          <SectionPanel title="Remote pool" value={snapshot.remotePool} onCopy={onCopy} />
           <SectionPanel title="DAG nodes" value={snapshot.dagNodes} onCopy={onCopy} />
           <SectionPanel title="Ready queue" value={snapshot.readyQueue} onCopy={onCopy} />
           <SectionPanel title="Completion history" value={snapshot.completionHistory} onCopy={onCopy} />

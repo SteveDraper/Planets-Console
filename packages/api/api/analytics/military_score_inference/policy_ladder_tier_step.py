@@ -5,11 +5,17 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_action_catalog_from_turn,
     build_inference_problem,
+)
+from api.analytics.military_score_inference.collision_hull_widen import (
+    CollisionHullWidenPlan,
+    load_twins_for_turn,
+    resolve_collision_hull_widen_plan,
 )
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
@@ -229,18 +235,19 @@ def _policy_step_diagnostics(
     *,
     policy_step: InferenceTierPolicyStep,
     policy_step_index: int,
-    catalog: ActionCatalog,
+    catalog: ActionCatalog | None,
     turn: TurnInfo,
     observation: InferenceObservation,
     seed_count: int,
     band_residual_2x: int | None,
+    collision_widen: CollisionHullWidenPlan | None = None,
 ) -> dict[str, object]:
     catalog_context = turn_catalog_context_for_policy_step(
         turn,
         observation.player_id,
         policy_step,
     )
-    return {
+    diagnostics: dict[str, object] = {
         "policyStepId": policy_step.id,
         "policyStepIndex": policy_step_index,
         "policyStepsAttempted": policy_step_index + 1,
@@ -250,10 +257,85 @@ def _policy_step_diagnostics(
         "resolvedEligibleTorpIds": sorted(catalog_context.eligible_torp_ids),
         "resolvedBuildableHullIds": sorted(catalog_context.buildable_hull_ids),
         "alpha": policy_step.alpha,
-        "comboCount": len(catalog.ship_build_combos),
+        "comboCount": len(catalog.ship_build_combos) if catalog is not None else 0,
         "seedCount": seed_count,
         "bandResidual2x": band_residual_2x,
+        "allowShipOnlyExactEarlyStop": policy_step.allow_ship_only_exact_early_stop,
+        "hullCollisionTwinWiden": policy_step.hull_collision_twin_widen,
     }
+    if collision_widen is not None:
+        diagnostics.update(collision_widen.to_diagnostics())
+    return diagnostics
+
+
+def _ensure_hull_collision_twins_loaded(state: PolicyLadderState, turn: TurnInfo) -> None:
+    if state.hull_collision_twins_loaded:
+        return
+    asset, path, fell_back = load_twins_for_turn(turn)
+    state.hull_collision_twins = asset
+    state.hull_collision_twins_path = str(path) if path is not None else None
+    state.hull_collision_twins_fell_back = fell_back
+    state.hull_collision_twins_loaded = True
+
+
+def _maybe_early_stop_after_step(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+    observation: InferenceObservation,
+    catalog: ActionCatalog | None,
+) -> bool:
+    """Return True when the ladder should stop after this completed step."""
+    if not policy_step.allow_ship_only_exact_early_stop:
+        return False
+    if catalog is None:
+        return False
+    best_solution = _best_merged_solution(state.merged_solutions)
+    if best_solution is None:
+        return False
+    if not _solution_qualifies_for_ship_only_exact_early_stop(
+        best_solution,
+        observation,
+        catalog,
+    ):
+        return False
+    state.ladder_complete = True
+    state.ladder_early_stop_reason = "ship_only_exact_early_stop"
+    return True
+
+
+def _finish_skipped_collision_widen_step(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+    policy_step_index: int,
+    turn: TurnInfo,
+    observation: InferenceObservation,
+    collision_widen: CollisionHullWidenPlan,
+    seed_count: int,
+) -> None:
+    state.step_diagnostics.append(
+        _policy_step_diagnostics(
+            policy_step=policy_step,
+            policy_step_index=policy_step_index,
+            catalog=state.catalog,
+            turn=turn,
+            observation=observation,
+            seed_count=seed_count,
+            band_residual_2x=None,
+            collision_widen=collision_widen,
+        )
+    )
+    state.next_step_index = policy_step_index + 1
+    if _maybe_early_stop_after_step(
+        state,
+        policy_step=policy_step,
+        observation=observation,
+        catalog=state.catalog,
+    ):
+        return
+    if state.next_step_index >= len(state.policy_steps):
+        state.ladder_complete = True
 
 
 def _make_incremental_admitter(
@@ -340,6 +422,37 @@ def run_policy_ladder_tier_step(
     step_index = state.next_step_index
     policy_step = state.policy_steps[step_index]
     state.policy_steps_attempted.append(policy_step.id)
+    collision_widen: CollisionHullWidenPlan | None = None
+    if policy_step.hull_collision_twin_widen:
+        _ensure_hull_collision_twins_loaded(state, turn)
+        collision_widen = resolve_collision_hull_widen_plan(
+            policy_step,
+            observation=observation,
+            turn=turn,
+            merged_solutions=state.merged_solutions,
+            prior_catalog=state.catalog,
+            resolved_mask=state.resolved_mask,
+            twins_asset=state.hull_collision_twins,
+            twins_asset_path=(
+                Path(state.hull_collision_twins_path)
+                if state.hull_collision_twins_path is not None
+                else None
+            ),
+            twins_fell_back=state.hull_collision_twins_fell_back,
+        )
+        if collision_widen.skipped:
+            _finish_skipped_collision_widen_step(
+                state,
+                policy_step=policy_step,
+                policy_step_index=step_index,
+                turn=turn,
+                observation=observation,
+                collision_widen=collision_widen,
+                seed_count=len(state.band_seeds),
+            )
+            return
+        policy_step = collision_widen.policy_step
+
     player_race_id = player_by_id(turn, observation.player_id).raceid
     catalog = build_action_catalog_from_turn(
         observation,
@@ -473,18 +586,18 @@ def run_policy_ladder_tier_step(
             observation=observation,
             seed_count=len(seeds_for_step),
             band_residual_2x=band_residual_2x,
+            collision_widen=collision_widen,
         )
     )
 
     state.next_step_index = step_index + 1
 
-    best_solution = _best_merged_solution(state.merged_solutions)
-    if best_solution is not None and _solution_qualifies_for_ship_only_exact_early_stop(
-        best_solution,
-        observation,
-        catalog,
+    if _maybe_early_stop_after_step(
+        state,
+        policy_step=policy_step,
+        observation=observation,
+        catalog=catalog,
     ):
-        state.ladder_complete = True
         return
 
     if (
