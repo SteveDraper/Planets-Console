@@ -364,6 +364,94 @@ def test_pool_dispatches_interpreter_backend(sample_turn):
     assert pool.metrics.interpreter_executions == 1
 
 
+def test_shutdown_releases_pool_condition_before_waiting_on_executors():
+    """Remote done-callbacks take the pool condition; shutdown must not hold it while waiting.
+
+    Regression for CI hangs after fleet stream tests: ``reset_compute_worker_pool_for_tests``
+    called ``InterpreterPoolExecutor.shutdown(wait=True)`` under ``self._condition``, so
+    in-flight done-callbacks deadlocked and the next test never started.
+    """
+    pool = ComputeWorkerPool(worker_count=0)
+    entered_shutdown = threading.Event()
+    callback_acquired_condition = threading.Event()
+    allow_shutdown_return = threading.Event()
+
+    class _FakeExecutor:
+        def shutdown(self, wait: bool = False, cancel_futures: bool = False) -> None:
+            del cancel_futures
+            entered_shutdown.set()
+            if not wait:
+                return
+
+            def _done_callback_needs_condition() -> None:
+                with pool._condition:
+                    callback_acquired_condition.set()
+
+            callback_thread = threading.Thread(
+                target=_done_callback_needs_condition,
+                daemon=True,
+            )
+            callback_thread.start()
+            assert callback_acquired_condition.wait(timeout=2.0), (
+                "shutdown held pool condition while waiting; done-callback deadlocked"
+            )
+            allow_shutdown_return.wait(timeout=2.0)
+            callback_thread.join(timeout=1.0)
+
+    with pool._condition:
+        pool._interpreter_executor = _FakeExecutor()
+
+    shutdown_thread = threading.Thread(
+        target=lambda: pool.shutdown(wait_for_interpreters=True),
+        daemon=True,
+    )
+    shutdown_thread.start()
+    assert entered_shutdown.wait(timeout=2.0)
+    allow_shutdown_return.set()
+    shutdown_thread.join(timeout=2.0)
+    assert not shutdown_thread.is_alive()
+
+
+def test_reset_compute_worker_pool_does_not_hold_singleton_lock_across_shutdown():
+    """Singleton reset must clear the global slot before waiting on executor shutdown."""
+    from api.compute.pools import (
+        get_compute_worker_pool,
+        reset_compute_worker_pool_for_tests,
+    )
+
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    pool = get_compute_worker_pool()
+    entered_shutdown = threading.Event()
+    got_pool_during_shutdown = threading.Event()
+    allow_shutdown_return = threading.Event()
+
+    class _FakeExecutor:
+        def shutdown(self, wait: bool = False, cancel_futures: bool = False) -> None:
+            del cancel_futures
+            entered_shutdown.set()
+            if wait:
+                # Re-entering the singleton during wait must not deadlock.
+                get_compute_worker_pool()
+                got_pool_during_shutdown.set()
+                allow_shutdown_return.wait(timeout=2.0)
+
+    with pool._condition:
+        pool._interpreter_executor = _FakeExecutor()
+
+    reset_thread = threading.Thread(
+        target=lambda: reset_compute_worker_pool_for_tests(worker_count=0),
+        daemon=True,
+    )
+    reset_thread.start()
+    assert entered_shutdown.wait(timeout=2.0)
+    assert got_pool_during_shutdown.wait(timeout=2.0), (
+        "reset held singleton lock across executor shutdown wait"
+    )
+    allow_shutdown_return.set()
+    reset_thread.join(timeout=2.0)
+    assert not reset_thread.is_alive()
+
+
 def _process_backend_registration() -> TurnAnalyticRegistration:
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(_FLEET_ANALYTIC_ID),

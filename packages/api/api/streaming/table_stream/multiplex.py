@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from collections.abc import Callable, Iterator
 from typing import Protocol, TypeVar
 
@@ -106,6 +107,20 @@ def iter_multiplexed_stream_events(
             pending.add(row.session.run_id)
         return pending
 
+    def wait_and_refresh_pending() -> set[str]:
+        """Block briefly, then rebuild pending from current rows.
+
+        Must not busy-spin: mid-reschedule windows can leave pending run ids with
+        an empty ``row_provider`` result, and ``continue`` without a wait pegs CPU.
+        """
+        if wake_event is not None:
+            wake_event.wait(timeout=multiplex_wait_seconds)
+            if wake_event.is_set():
+                wake_event.clear()
+        else:
+            time.sleep(multiplex_wait_seconds)
+        return refresh_pending_run_ids()
+
     pending_run_ids = refresh_pending_run_ids()
     cursor = 0
 
@@ -121,18 +136,19 @@ def iter_multiplexed_stream_events(
             for event in pending_events_provider():
                 yield event
         if not pending_run_ids:
-            if wake_event is not None:
-                wake_event.wait(timeout=multiplex_wait_seconds)
-                if wake_event.is_set():
-                    wake_event.clear()
-                pending_run_ids = refresh_pending_run_ids()
+            pending_run_ids = wait_and_refresh_pending()
             continue
         current_rows = list(active_rows())
         if not current_rows:
+            pending_run_ids = wait_and_refresh_pending()
             continue
         row = current_rows[cursor % len(current_rows)]
         cursor += 1
         if row.session.run_id not in pending_run_ids:
+            # Stale pending vs current rows (e.g. reschedule replaced run_id). After a
+            # full pass with no match, wait and rebuild pending instead of spinning.
+            if cursor % len(current_rows) == 0:
+                pending_run_ids = wait_and_refresh_pending()
             continue
         if session_is_cancelled(row.session):
             finish_cancelled_run(row)

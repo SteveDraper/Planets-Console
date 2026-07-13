@@ -111,6 +111,31 @@ def is_navigable_prefix(prefix: str) -> bool:
     return any(_pattern_prefix_matches(pattern, segments) for pattern in BREAKPOINT_PATTERNS)
 
 
+def is_prefix_of_longer_breakpoint(path: str) -> bool:
+    """Return whether ``path`` is a strict prefix of a longer breakpoint pattern.
+
+    When true, ``path`` sits between breakpoints (e.g. ``…/turns/N/analytics``
+    under the turn document breakpoint but before ``…/analytics/{id}``). File
+    ``list`` should enumerate the filesystem there instead of looking up a
+    suffix inside the shorter document.
+    """
+    segments = _path_segments(path)
+    if not segments:
+        return False
+    try:
+        breakpoint_path, _suffix = resolve_breakpoint(path)
+    except ValidationError:
+        return any(
+            len(pattern) > len(segments) and _pattern_prefix_matches(pattern, segments)
+            for pattern in BREAKPOINT_PATTERNS
+        )
+    matched_len = len(_path_segments(breakpoint_path))
+    return any(
+        len(pattern) > matched_len and _pattern_prefix_matches(pattern, segments)
+        for pattern in BREAKPOINT_PATTERNS
+    )
+
+
 def document_relpath(breakpoint_path: str) -> Path:
     """Map a breakpoint path to its relative JSON file path under ``storage_root``."""
     _path_segments(breakpoint_path)

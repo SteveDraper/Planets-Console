@@ -399,13 +399,19 @@ class ComputeWorkerPool:
         return self._process_executor
 
     def _shutdown_executors(self, *, wait: bool = False) -> None:
+        # Drop executor refs under the pool lock, then shut down outside it.
+        # Interpreter/process done-callbacks take ``self._condition`` (via
+        # ``_notify_item_finished``); waiting on ``shutdown(wait=True)`` while
+        # holding that lock deadlocks when in-flight remote work completes.
         with self._condition:
-            if self._interpreter_executor is not None:
-                self._interpreter_executor.shutdown(wait=wait, cancel_futures=wait)
-                self._interpreter_executor = None
-            if self._process_executor is not None:
-                self._process_executor.shutdown(wait=wait, cancel_futures=wait)
-                self._process_executor = None
+            interpreter = self._interpreter_executor
+            process = self._process_executor
+            self._interpreter_executor = None
+            self._process_executor = None
+        if interpreter is not None:
+            interpreter.shutdown(wait=wait, cancel_futures=wait)
+        if process is not None:
+            process.shutdown(wait=wait, cancel_futures=wait)
 
     def _complete_from_callable(
         self,
@@ -471,15 +477,21 @@ def shutdown_compute_worker_pool_for_tests() -> None:
     """Tear down the process-wide pool singleton (tests only)."""
     global _global_worker_pool
     with _global_worker_pool_lock:
-        if _global_worker_pool is not None:
-            _global_worker_pool.shutdown(wait_for_interpreters=True)
-            _global_worker_pool = None
+        pool = _global_worker_pool
+        _global_worker_pool = None
+    # Shut down outside the singleton lock: completion callbacks may re-enter
+    # ``get_compute_worker_pool`` / pool internals while ``wait=True``.
+    if pool is not None:
+        pool.shutdown(wait_for_interpreters=True)
 
 
 def reset_compute_worker_pool_for_tests(*, worker_count: int = 0) -> ComputeWorkerPool:
     global _global_worker_pool
     with _global_worker_pool_lock:
-        if _global_worker_pool is not None:
-            _global_worker_pool.shutdown(wait_for_interpreters=True)
+        previous = _global_worker_pool
+        _global_worker_pool = None
+    if previous is not None:
+        previous.shutdown(wait_for_interpreters=True)
+    with _global_worker_pool_lock:
         _global_worker_pool = ComputeWorkerPool(worker_count=worker_count)
         return _global_worker_pool

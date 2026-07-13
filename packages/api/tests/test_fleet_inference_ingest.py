@@ -799,6 +799,8 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
     score = next(entry for entry in turn.scores if entry.ownerid == player_id)
     inference_payload = infer_military_score_build(score, turn)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    # Put may still receive wire diagnostics; persistence must promote accelerated
+    # segments to host_turn_targets and drop the catalog before writing.
     persistence.put_row(
         628580,
         1,
@@ -813,6 +815,10 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
             diagnostics=inference_payload["diagnostics"],
         ),
     )
+    stored = persistence.get_row(628580, 1, 3, player_id)
+    assert stored is not None
+    assert stored.diagnostics is None
+    assert stored.host_turn_targets
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,

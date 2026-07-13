@@ -95,9 +95,10 @@ class InferenceRowPersistenceService:
         player_id: int,
         row: PersistedInferenceRow,
     ) -> None:
+        prepared, _ = upgrade_persisted_inference_row(row)
         self._storage.put(
             self.row_store_key(game_id, perspective, host_turn, player_id),
-            persisted_inference_row_to_json(row),
+            persisted_inference_row_to_json(prepared),
         )
         if self._on_row_persisted is not None:
             self._on_row_persisted(game_id, perspective, host_turn, player_id)
