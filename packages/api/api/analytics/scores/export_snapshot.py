@@ -203,9 +203,7 @@ def gather_scores_inference_snapshot(
     # Ensure-ephemeral terminals already own precedence; skip live stream admission
     # so cheap-path helpers (immediate_row_inference_events) are not re-run.
     stream_admission = (
-        None
-        if ensure_sync_admission is not None
-        else _row_admission(ctx, services, scope, turn)
+        None if ensure_sync_admission is not None else _row_admission(ctx, services, scope, turn)
     )
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
