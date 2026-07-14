@@ -22,8 +22,8 @@ def _percentile(sorted_values: list[float], pct: float) -> float | None:
 
 
 def _player_id_from_scope_key(scope_key: str) -> int | None:
-    """Best-effort player id from a formatted scope key (``.../plN/...``)."""
-    for part in scope_key.split("/"):
+    """Best-effort player id from a formatted scope key (``...@plN`` or ``.../plN/...``)."""
+    for part in scope_key.replace("/", "@").split("@"):
         if part.startswith("pl") and part[2:].isdigit():
             return int(part[2:])
     return None

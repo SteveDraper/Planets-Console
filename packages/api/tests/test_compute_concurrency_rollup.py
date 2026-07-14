@@ -51,9 +51,9 @@ def test_rollup_empty_events():
 
 def test_rollup_unique_players_backend_histogram_and_depths():
     events = (
-        _event(scope_key="g1/p1/t8/pl3/scores", backend="thread", ready=1, global_if=1),
-        _event(scope_key="g1/p1/t8/pl7/fleet", backend="interpreter", ready=3, global_if=4),
-        _event(scope_key="g1/p1/t8/pl3/scores", backend="thread", ready=2, global_if=2),
+        _event(scope_key="scores@g1@p1@t8@pl3", backend="thread", ready=1, global_if=1),
+        _event(scope_key="fleet@g1@p1@t8@pl7", backend="interpreter", ready=3, global_if=4),
+        _event(scope_key="scores@g1@p1@t8@pl3", backend="thread", ready=2, global_if=2),
     )
     rollup = build_concurrency_timeline_rollup(events)  # type: ignore[arg-type]
     assert rollup.unique_players == (3, 7)

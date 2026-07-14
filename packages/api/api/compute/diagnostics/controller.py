@@ -1121,9 +1121,12 @@ class ComputeDiagnosticsController:
         if shell is None:
             return
         step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
-        if step_spec is None or step_spec.step_kind != step_kind:
+        if step_spec is not None and step_spec.step_kind != step_kind:
             return
-        backend = "inline" if surface == "inline" else step_spec.backend
+        if step_spec is None:
+            backend = "inline" if surface == "inline" else None
+        else:
+            backend = "inline" if surface == "inline" else step_spec.backend
         self._record_finish(
             shell,
             scope=scope,
