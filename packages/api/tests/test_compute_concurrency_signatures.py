@@ -412,3 +412,122 @@ def test_orchestrator_parallel_thread_plants_class_c_in_flight(sample_turn):
     assert "complete" in kinds
     assert saw_parallel or wire["concurrencyRollup"]["maxScopedInFlight"] >= 2
     assert wire["concurrencyRollup"]["backendHistogram"].get("thread", 0) >= 1
+
+
+def test_fail_from_ready_does_not_inflate_enqueue_ready_depth(sample_turn):
+    """Aborting a ready node must not leave sticky ready-depth overcount on enqueue.
+
+    The old ±1 shadow counter only decremented on enqueue/inline_start, so
+    fail-from-ready drifted high and pool-lock enqueue gauges stayed inflated.
+    """
+    compute_registry = build_compute_registry((_probe_registration(backend="thread"),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(_probe_export_catalog()),
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=2)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    controller.on_shell_context(shell)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+
+    player_ids = [score.ownerid for score in sample_turn.scores[:2]]
+    handles = _submit_probe_players(
+        orchestrator,
+        compute_registry,
+        ctx,
+        sample_turn,
+        player_ids,
+    )
+    assert all(handle.state == "ready" for handle in handles)
+    assert len(orchestrator.ready_scopes()) == 2
+
+    aborted = handles[0].scope
+    assert orchestrator.abort_scope(aborted, RuntimeError("fail-from-ready")) is True
+    assert orchestrator.nodes[aborted].state == "failed"
+    assert len(orchestrator.ready_scopes()) == 1
+
+    controller.set_freeze_armed(shell, freeze_armed=False)
+
+    remaining = handles[1]
+    deadline = time.monotonic() + 2.0
+    while remaining.state not in {"complete", "failed"} and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert remaining.state == "complete"
+
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    enqueue_events = [event for event in wire["concurrencyTimeline"] if event["kind"] == "enqueue"]
+    assert enqueue_events, "expected pool enqueue after disarm"
+    # After fail-from-ready left one ready node, dispatching it must record depth 0
+    # on enqueue (node already left ready under the orch lock before pool submit).
+    assert enqueue_events[-1]["gauges"]["scopedReadyDepth"] == 0
+    assert wire["concurrencyRollup"]["maxScopedReadyDepth"] <= 2
+
+
+def test_ready_to_waiting_deps_notifies_ready_queue_depth(sample_turn):
+    """Dispatch dropping a stale ready entry to waiting_deps must notify depth listeners."""
+    compute_registry = build_compute_registry((_probe_registration(backend="thread"),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(_probe_export_catalog()),
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        pool_submitter=lambda _node, _step: None,
+    )
+    snapshots: list[tuple] = []
+    orchestrator.register_ready_queue_listener(lambda scopes: snapshots.append(scopes))
+
+    player_id = sample_turn.scores[0].ownerid
+    scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=player_id,
+        ),
+        analytic_id="probe",
+        scope_key_spec=compute_registry["probe"].scope_key_spec,
+    )
+    # No dependencies: plant a ready-queue entry whose deps are incomplete by
+    # pointing at a missing dependency scope, then dispatch.
+    missing_dep = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=player_id + 10_000,
+        ),
+        analytic_id="probe",
+        scope_key_spec=compute_registry["probe"].scope_key_spec,
+    )
+    with orchestrator._condition:
+        from api.compute.orchestrator import ComputeNodeRun
+
+        node = ComputeNodeRun(
+            scope=scope,
+            dependency_scopes=(missing_dep,),
+            state="ready",
+        )
+        orchestrator._nodes[scope] = node
+        orchestrator._ready_queue.append(scope)
+        snapshots.clear()
+        pending_inline, pending_pool = orchestrator._dispatch()
+
+    assert pending_inline == ()
+    assert pending_pool == ()
+    assert node.state == "waiting_deps"
+    assert orchestrator.ready_scopes() == ()
+    assert snapshots, "expected ready-queue-changed after waiting_deps drop"
+    assert snapshots[-1] == ()

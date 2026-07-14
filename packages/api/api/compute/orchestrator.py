@@ -24,6 +24,10 @@ StepCompleteListener = Callable[
 ]
 # Fired when a node first enters the ready queue (deps satisfied).
 ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+# Fired under the orchestrator lock whenever the ready-queue membership of
+# ``state == "ready"`` scopes may have changed. Argument is the current ready
+# scopes snapshot. Listeners must not re-enter this orchestrator's condition.
+ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
 # Fired when an inline step begins execution outside the orchestrator lock.
 InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
@@ -181,6 +185,7 @@ class ComputeOrchestrator:
         self._node_complete_listeners: list[NodeCompleteListener] = []
         self._step_complete_listeners: list[StepCompleteListener] = []
         self._ready_listeners: list[ReadyListener] = []
+        self._ready_queue_listeners: list[ReadyQueueChangedListener] = []
         self._inline_start_listeners: list[InlineStartListener] = []
         self._dispatch_gates: list[NodeDispatchGate] = []
         self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
@@ -312,6 +317,30 @@ class ComputeOrchestrator:
             with self._condition:
                 try:
                     self._ready_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
+    def register_ready_queue_listener(
+        self,
+        listener: ReadyQueueChangedListener,
+    ) -> Callable[[], None]:
+        """Register a ready-queue depth listener; return an unregister callable.
+
+        Listeners run under the orchestrator lock with the current ready-scopes
+        snapshot whenever membership may have changed (enqueue, dequeue, dispatch
+        pop including ready→waiting_deps). They must not re-enter this
+        orchestrator's condition. Taking the diagnostics controller lock is OK
+        (same order as dispatch gates: orch → controller).
+        """
+        with self._condition:
+            self._ready_queue_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._ready_queue_listeners.remove(listener)
                 except ValueError:
                     return
 
@@ -621,12 +650,14 @@ class ComputeOrchestrator:
     def _enqueue_ready(self, scope: ComputeScope) -> None:
         if scope not in self._ready_queue:
             self._ready_queue.append(scope)
+            self._notify_ready_queue_changed()
 
     def _dequeue_ready(self, scope: ComputeScope) -> None:
         try:
             self._ready_queue.remove(scope)
         except ValueError:
             return
+        self._notify_ready_queue_changed()
 
     def _dispatch(
         self,
@@ -639,6 +670,7 @@ class ComputeOrchestrator:
         """
         pending_inline: list[_PendingInlineExecution] = []
         pending_pool: list[_PendingPoolSubmission] = []
+        initial_ready_depth = self._ready_depth()
         while self._ready_queue:
             scope, node = self._dequeue_dispatchable_ready_node()
             if scope is None or node is None:
@@ -672,6 +704,10 @@ class ComputeOrchestrator:
             )
             self._metrics.pool_submissions += 1
             break
+        # Cover successful pops and ready→waiting_deps drops. ``_enqueue_ready`` /
+        # ``_dequeue_ready`` notify on their own paths; this catches dispatch-only leaves.
+        if self._ready_depth() != initial_ready_depth:
+            self._notify_ready_queue_changed()
         return tuple(pending_inline), tuple(pending_pool)
 
     def _snapshot_dependency_outputs(self, node: ComputeNodeRun) -> DependencyOutputs:
@@ -973,6 +1009,20 @@ class ComputeOrchestrator:
             self._post_lock_callbacks.append(
                 lambda listener=listener, node=node: listener(node.scope, node),
             )
+
+    def _ready_depth(self) -> int:
+        return sum(1 for scope in self._ready_queue if self._nodes[scope].state == "ready")
+
+    def _notify_ready_queue_changed(self) -> None:
+        """Push the current ready-scopes snapshot to depth listeners (caller holds lock)."""
+        listeners = tuple(self._ready_queue_listeners)
+        if not listeners:
+            return
+        ready_scopes = tuple(
+            scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
+        )
+        for listener in listeners:
+            listener(ready_scopes)
 
     def _notify_inline_start(self, node: ComputeNodeRun, step_kind: str) -> None:
         with self._condition:

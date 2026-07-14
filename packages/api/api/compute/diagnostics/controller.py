@@ -104,6 +104,7 @@ class ComputeDiagnosticsController:
             configured_workers=self._configured_workers,
             ancestor_turns=self._ancestor_turns_for_shell,
             history_for_shell=self._history_for_shell,
+            active_shell=self._active_shell_context,
         )
 
     def is_enabled(self) -> bool:
@@ -180,6 +181,18 @@ class ComputeDiagnosticsController:
                 orchestrator_id=_orch_id,
             )
         )
+        unregister_ready_queue = orchestrator.register_ready_queue_listener(
+            lambda ready_scopes,
+            _orch_id=registration_id,
+            _game_id=ctx.game_id,
+            _perspective=ctx.perspective,
+            _fallback=id(orchestrator): self._timeline.note_ready_queue_for_bound_orch(
+                ready_scopes,
+                orchestrator_id=_orch_id if _orch_id is not None else _fallback,
+                game_id=_game_id,
+                perspective=_perspective,
+            )
+        )
         unregister_inline_start = orchestrator.register_inline_start_listener(
             lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
                 scope,
@@ -195,6 +208,7 @@ class ComputeDiagnosticsController:
                     unregister_dispatch_commit()
                     unregister_step_complete()
                     unregister_ready()
+                    unregister_ready_queue()
                     unregister_inline_start()
                     return
             self._bound_orchestrators.append(
@@ -207,6 +221,7 @@ class ComputeDiagnosticsController:
                     unregister_dispatch_commit_hook=unregister_dispatch_commit,
                     unregister_step_complete_listener=unregister_step_complete,
                     unregister_ready_listener=unregister_ready,
+                    unregister_ready_queue_listener=unregister_ready_queue,
                     unregister_inline_start_listener=unregister_inline_start,
                 )
             )
@@ -237,7 +252,12 @@ class ComputeDiagnosticsController:
         bound.unregister_dispatch_commit_hook()
         bound.unregister_step_complete_listener()
         bound.unregister_ready_listener()
+        bound.unregister_ready_queue_listener()
         bound.unregister_inline_start_listener()
+        orch_key = (
+            registration_id if registration_id is not None else id(orchestrator)
+        )
+        self._timeline.clear_orchestrator_ready_depth(orch_key)
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
         if not self.is_enabled():
@@ -421,6 +441,7 @@ class ComputeDiagnosticsController:
             entry.unregister_dispatch_commit_hook()
             entry.unregister_step_complete_listener()
             entry.unregister_ready_listener()
+            entry.unregister_ready_queue_listener()
             entry.unregister_inline_start_listener()
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
@@ -554,6 +575,10 @@ class ComputeDiagnosticsController:
             export_registry=EXPORT_REGISTRY,
             compute_analytic_ids=frozenset(COMPUTE_REGISTRY),
         )
+
+    def _active_shell_context(self) -> ShellContextKey | None:
+        with self._lock:
+            return self._last_shell_context
 
     def _scope_matches_active_shell(self, scope: ComputeScope) -> ShellContextKey | None:
         """Return the operator shell when ``scope`` is in its diagnostic scope.
@@ -832,7 +857,6 @@ class ComputeDiagnosticsController:
             step_index=item.step_index,
             priority_band=item.priority_band,
             backend=item.backend,
-            ready_depth_delta=-1,
             global_queue_depth=queue_depth,
         )
 
@@ -887,7 +911,6 @@ class ComputeDiagnosticsController:
             step_index=node.step_index,
             priority_band=node.priority_band,
             backend=step_spec.backend if step_spec is not None else None,
-            ready_depth_delta=1,
             sample_ready_from_orchestrators=True,
         )
 
@@ -911,7 +934,6 @@ class ComputeDiagnosticsController:
             step_index=node.step_index,
             priority_band=node.priority_band,
             backend="inline",
-            ready_depth_delta=-1,
             open_execution=True,
             sample_ready_from_orchestrators=True,
         )

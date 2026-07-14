@@ -32,8 +32,9 @@ class ConcurrencyTimelineRecorder:
     """Records occupancy gauges and concurrency timeline events for one controller.
 
     Owns shell-scoped timeline rings, the open-execution duration tracker, and the
-    ready-depth shadow counter. Gauge sampling reads live in-flight / orchestrator
-    state via injected callbacks so the controller retains those collections.
+    ready-depth cache fed by orchestrator ready-queue snapshots (absolute depths,
+    not ±1 deltas). Gauge sampling reads live in-flight state via injected
+    callbacks so the controller retains those collections.
 
     Lock order: this recorder's lock must never be held while acquiring a callback
     that takes the controller lock *after* the controller already holds its lock
@@ -51,6 +52,7 @@ class ConcurrencyTimelineRecorder:
         configured_workers: Callable[[], int],
         ancestor_turns: Callable[[ShellContextKey], frozenset[int]],
         history_for_shell: Callable[[ShellContextKey], ComputeCompletionHistory],
+        active_shell: Callable[[], ShellContextKey | None],
     ) -> None:
         self._timeline_capacity = timeline_capacity
         self._bound_orchestrators = bound_orchestrators
@@ -59,20 +61,79 @@ class ConcurrencyTimelineRecorder:
         self._configured_workers = configured_workers
         self._ancestor_turns = ancestor_turns
         self._history_for_shell = history_for_shell
+        self._active_shell = active_shell
         self._timelines: dict[ShellContextKey, ComputeConcurrencyTimeline] = {}
         self._open_executions = OpenExecutionTracker()
-        self._ready_depth_by_shell: dict[ShellContextKey, int] = {}
+        # Per-shell ready depth as sum of per-orchestrator contributions from
+        # ready-queue-changed snapshots (complete lifecycle, no ±1 drift).
+        self._ready_depth_parts: dict[ShellContextKey, dict[int, int]] = {}
         self._lock = threading.Lock()
 
     def clear(self) -> None:
         with self._lock:
             self._timelines.clear()
-            self._ready_depth_by_shell.clear()
+            self._ready_depth_parts.clear()
         self._open_executions.clear()
+
+    def clear_orchestrator_ready_depth(self, orchestrator_id: int) -> None:
+        """Drop one orchestrator's ready-depth contribution (unbind)."""
+        with self._lock:
+            empty_shells: list[ShellContextKey] = []
+            for shell, parts in self._ready_depth_parts.items():
+                parts.pop(orchestrator_id, None)
+                if not parts:
+                    empty_shells.append(shell)
+            for shell in empty_shells:
+                del self._ready_depth_parts[shell]
 
     def recent(self, shell: ShellContextKey) -> tuple:
         """Return recent concurrency timeline events for ``shell``."""
         return self._timeline_for_shell(shell).recent()
+
+    def note_ready_queue(
+        self,
+        shell: ShellContextKey,
+        *,
+        orchestrator_id: int,
+        ready_scopes: tuple[ComputeScope, ...],
+    ) -> None:
+        """Set one orchestrator's ready-depth contribution from a live snapshot.
+
+        Called under the orchestrator lock (via ready-queue-changed). Must not
+        call back into that orchestrator.
+        """
+        ancestor_turns = self._ancestor_turns(shell)
+        depth = sum(
+            1
+            for scope in ready_scopes
+            if scope_in_diagnostic_scope(
+                scope,
+                game_id=shell.game_id,
+                perspective=shell.perspective,
+                ancestor_turns=ancestor_turns,
+            )
+        )
+        with self._lock:
+            parts = self._ready_depth_parts.setdefault(shell, {})
+            parts[orchestrator_id] = depth
+
+    def note_ready_queue_for_bound_orch(
+        self,
+        ready_scopes: tuple[ComputeScope, ...],
+        *,
+        orchestrator_id: int,
+        game_id: int,
+        perspective: int,
+    ) -> None:
+        """Ready-queue-changed entry: update cache when the active shell matches."""
+        shell = self._active_shell()
+        if shell is None or shell.game_id != game_id or shell.perspective != perspective:
+            return
+        self.note_ready_queue(
+            shell,
+            orchestrator_id=orchestrator_id,
+            ready_scopes=ready_scopes,
+        )
 
     def record(
         self,
@@ -85,14 +146,11 @@ class ConcurrencyTimelineRecorder:
         step_index: int,
         priority_band: ComputePriorityBand | None = None,
         backend: str | None = None,
-        ready_depth_delta: int = 0,
         open_execution: bool = False,
         global_queue_depth: int | None = None,
         sample_ready_from_orchestrators: bool = False,
     ) -> None:
         """Append one lifecycle timeline event (ready / enqueue / start / inline_start)."""
-        if ready_depth_delta:
-            self._adjust_ready_depth(shell, ready_depth_delta)
         scope_key = format_compute_scope_key(scope)
         execution_key = format_execution_key(
             orchestrator_id=orchestrator_id,
@@ -142,7 +200,11 @@ class ConcurrencyTimelineRecorder:
         )
         duration_ms, opened_backend = self._open_executions.close(execution_key)
         resolved_backend = backend if backend is not None else opened_backend
-        gauges = self._occupancy_gauges(shell, global_queue_depth=global_queue_depth)
+        gauges = self._occupancy_gauges(
+            shell,
+            global_queue_depth=global_queue_depth,
+            sample_ready_from_orchestrators=True,
+        )
         timeline_kind: TimelineEventKind = (
             "inline_complete" if surface == "inline" else "complete"
         )
@@ -178,10 +240,12 @@ class ConcurrencyTimelineRecorder:
                 self._timelines[shell] = timeline
             return timeline
 
-    def _adjust_ready_depth(self, shell: ShellContextKey, delta: int) -> None:
+    def _cached_ready_depth(self, shell: ShellContextKey) -> int:
         with self._lock:
-            next_depth = max(0, self._ready_depth_by_shell.get(shell, 0) + delta)
-            self._ready_depth_by_shell[shell] = next_depth
+            parts = self._ready_depth_parts.get(shell)
+            if not parts:
+                return 0
+            return sum(parts.values())
 
     def _occupancy_gauges(
         self,
@@ -192,18 +256,23 @@ class ConcurrencyTimelineRecorder:
     ) -> OccupancyGauges:
         """Sample occupancy gauges for a timeline event.
 
-        Ready depth prefers the ready-event counter so pool-lock callbacks never
-        nest into orchestrator locks. When ``sample_ready_from_orchestrators`` is
-        true (outside the pool lock), the live orchestrator ready queues are used
-        instead.
+        Ready depth prefers the ready-queue-changed cache so pool-lock callbacks
+        never nest into orchestrator locks. When ``sample_ready_from_orchestrators``
+        is true (outside the pool lock), live orchestrator ready queues are used
+        and the cache is refreshed to match.
         """
         ancestor_turns = self._ancestor_turns(shell)
         if sample_ready_from_orchestrators:
             ready_depth = 0
+            live_parts: dict[int, int] = {}
             for bound in self._bound_orchestrators():
                 if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
                     continue
                 view = bound.orchestrator.diagnostics_snapshot()
+                orch_id = bound.orchestrator.pool_registration_id
+                if orch_id is None:
+                    orch_id = id(bound.orchestrator)
+                part = 0
                 for ready_scope in view.ready_scopes:
                     if scope_in_diagnostic_scope(
                         ready_scope,
@@ -211,10 +280,16 @@ class ConcurrencyTimelineRecorder:
                         perspective=shell.perspective,
                         ancestor_turns=ancestor_turns,
                     ):
-                        ready_depth += 1
-        else:
+                        part += 1
+                live_parts[orch_id] = part
+                ready_depth += part
             with self._lock:
-                ready_depth = self._ready_depth_by_shell.get(shell, 0)
+                if live_parts:
+                    self._ready_depth_parts[shell] = live_parts
+                else:
+                    self._ready_depth_parts.pop(shell, None)
+        else:
+            ready_depth = self._cached_ready_depth(shell)
         in_flight = self._in_flight_records()
         scoped_in_flight = sum(
             1
