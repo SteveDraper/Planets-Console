@@ -299,9 +299,15 @@ class InferenceRowScheduler:
                 return self._global_pause_status_locked(scope)
             self._globally_paused = False
             bindings = tuple(self._stream_bindings.values())
-            self._flush_held_submissions_locked()
+            held = tuple(self._held_initial_submissions)
+            self._held_initial_submissions.clear()
             self._broadcast_global_pause_locked(paused=False)
             status = self._global_pause_status_locked(scope)
+        # Submit held work outside the scheduler lock (same ABBA risk as enqueue).
+        for held_item in held:
+            binding = self._stream_bindings.get(held_item.stream_token)
+            if binding is not None:
+                self._submit_tier_solve_locked(binding, held_item.root_scope)
         self._sync_pause_dispatch_gates(bindings, paused=False)
         for binding in bindings:
             binding.orchestrator.dispatch_ready_work()
@@ -364,6 +370,8 @@ class InferenceRowScheduler:
         orchestration: InferenceStreamOrchestration | None = None,
         stream_token: str | None = None,
     ) -> None:
+        submit_binding: _InferenceStreamOrchestratorBinding | None = None
+        submit_scope: ComputeScope | None = None
         with self._lock:
             resolved_token = (
                 stream_token
@@ -390,7 +398,12 @@ class InferenceRowScheduler:
                     _HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
                 )
                 return
-            self._submit_tier_solve_locked(binding, root_scope)
+            # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
+            # listeners that must not nest scheduler <-> orchestrator locks.
+            submit_binding = binding
+            submit_scope = root_scope
+        if submit_binding is not None and submit_scope is not None:
+            self._submit_tier_solve_locked(submit_binding, submit_scope)
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run."""
@@ -676,13 +689,6 @@ class InferenceRowScheduler:
                 force_fresh=True,
             )
         )
-
-    def _flush_held_submissions_locked(self) -> None:
-        for held in self._held_initial_submissions:
-            binding = self._stream_bindings.get(held.stream_token)
-            if binding is not None:
-                self._submit_tier_solve_locked(binding, held.root_scope)
-        self._held_initial_submissions.clear()
 
     def _drop_held_for_stream_locked(self, stream_token: str) -> None:
         self._held_initial_submissions = [
