@@ -196,6 +196,7 @@ def schedule_inference_row(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     export_services: Mapping[str, object] | None = None,
     stream_token: str | None = None,
 ) -> ScheduledInferenceRow | None:
@@ -222,6 +223,7 @@ def schedule_inference_row(
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
     )
     orchestration = create_inference_stream_orchestration(
         path,

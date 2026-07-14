@@ -66,6 +66,7 @@ def test_resolve_prior_turn_overlay_readonly_skips_query_when_unpersisted(sample
 
     assert resolution.overlay is None
     assert resolution.input_status == "pending"
+    assert resolution.max_tech_by_axis == {}
 
 
 def test_resolve_prior_turn_overlay_readonly_pending_on_partial_ledger(sample_turn, persistence):
@@ -189,6 +190,7 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
     assert resolution.overlay is not None
     assert resolution.overlay.belief_set.torp_ids == frozenset({4, 8})
     assert resolution.input_status == "applied"
+    assert isinstance(resolution.max_tech_by_axis, dict)
 
 
 def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, persistence):

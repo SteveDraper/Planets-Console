@@ -50,6 +50,7 @@ def initialize_tier_ladder_state(
         run.ladder_state = orchestration.new_ladder_state(
             resolved_mask=session.resolved_mask,
             fleet_torp_overlay=session.fleet_torp_overlay,
+            prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
         )
         return
     policy_steps = tuple(resolve_tier_policies(None))
@@ -57,6 +58,7 @@ def initialize_tier_ladder_state(
         policy_steps=policy_steps,
         resolved_mask=session.resolved_mask,
         fleet_torp_overlay=session.fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
     )
 
 

@@ -1,6 +1,11 @@
 # Inference search tier ladder (sketch A, section 8.5.3).
 # filters.*.all widens eligibility (see tier_policy.py module docstring).
 # filters.*.techLevels narrows by component techlevel; ids derived at runtime.
+# filters.*.raiseMaxTechFromPriorFleet (#227): raise techLevels ceiling from
+# prior-turn fleet max tech when that overlay is applied; omit the step when
+# every flagged axis already saturates the turn catalog. Distinct from #226
+# hullCollisionTwinWiden (score twins without fleet proof) and from
+# allowShipOnlyExactEarlyStop (ladder stop after a ship-only exact).
 #
 # Fleet-informed torp admission + ranking (#87, section 8.8): early torp tiers use
 # belief-set ids only; inference torp escape tier (penultimate step, alpha > 0) admits
@@ -97,12 +102,15 @@ steps:
     filters:
       hulls:
         techLevels: [1, 2, 3, 4, 5, 6]
+        raiseMaxTechFromPriorFleet: true
       engines:
         all: true
       beams:
         techLevels: [1, 2, 3, 4, 5]
+        raiseMaxTechFromPriorFleet: true
       launchers:
         techLevels: [1, 2, 3, 4, 5]
+        raiseMaxTechFromPriorFleet: true
     beamSlotCounts: none
     launcherSlotCounts: none
     aggregateAllowlist: {}
@@ -114,12 +122,15 @@ steps:
     filters:
       hulls:
         techLevels: [1, 2, 3, 4, 5, 6]
+        raiseMaxTechFromPriorFleet: true
       engines:
         all: true
       beams:
         techLevels: [1, 2, 3, 4, 5]
+        raiseMaxTechFromPriorFleet: true
       launchers:
         techLevels: [1, 2, 3, 4, 5, 6, 7, 8]
+        raiseMaxTechFromPriorFleet: true
     beamSlotCounts: none
     launcherSlotCounts: none
     aggregateAllowlist: {}
@@ -129,17 +140,21 @@ steps:
 
   # After widen_launchers so twin combos that need launcher tech >5 (e.g. Gamma on
   # Resolute) are expressible. Hull admission is runtime-conditional via twin asset
-  # includeComponentIds overlay (#226); static hull band stays tech 1--6.
+  # includeComponentIds overlay (#226); static hull band stays tech 1--6, raised from
+  # prior fleet when raiseMaxTechFromPriorFleet applies (#227).
   - id: collision_hull_widen
     filters:
       hulls:
         techLevels: [1, 2, 3, 4, 5, 6]
+        raiseMaxTechFromPriorFleet: true
       engines:
         all: true
       beams:
         techLevels: [1, 2, 3, 4, 5]
+        raiseMaxTechFromPriorFleet: true
       launchers:
         techLevels: [1, 2, 3, 4, 5, 6, 7, 8]
+        raiseMaxTechFromPriorFleet: true
     beamSlotCounts: none
     launcherSlotCounts: none
     aggregateAllowlist: {}
@@ -156,8 +171,10 @@ steps:
         all: true
       beams:
         techLevels: [1, 2, 3, 4, 5]
+        raiseMaxTechFromPriorFleet: true
       launchers:
         techLevels: [1, 2, 3, 4, 5, 6, 7, 8]
+        raiseMaxTechFromPriorFleet: true
     beamSlotCounts: none
     launcherSlotCounts: none
     aggregateAllowlist: {}

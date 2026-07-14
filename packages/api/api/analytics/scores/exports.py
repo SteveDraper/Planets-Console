@@ -222,6 +222,11 @@ def _run_prior_turn_sync_ensure(
         resolved_mask=inputs.resolved_mask,
         fleet_torp_overlay=fleet_resolution.overlay,
         fleet_torp_input_status=fleet_resolution.input_status,
+        prior_fleet_max_tech_by_axis=(
+            dict(fleet_resolution.max_tech_by_axis)
+            if fleet_resolution.input_status == "applied"
+            else None
+        ),
     )
     status = str(inference.get("status", ""))
     if services.persistence is not None and is_persistable_inference_status(status):
@@ -310,6 +315,11 @@ def _ensure_current_turn_scheduler(
         resolved_mask=inputs.resolved_mask,
         fleet_torp_overlay=fleet_resolution.overlay,
         fleet_torp_input_status=fleet_resolution.input_status,
+        prior_fleet_max_tech_by_axis=(
+            dict(fleet_resolution.max_tech_by_axis)
+            if fleet_resolution.input_status == "applied"
+            else None
+        ),
         export_services=ctx.export_services,
         stream_token=inputs.stream_token,
     )

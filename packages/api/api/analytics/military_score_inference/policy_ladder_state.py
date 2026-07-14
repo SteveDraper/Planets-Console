@@ -45,6 +45,7 @@ class PolicyLadderState:
     started_at: float = field(default_factory=time.monotonic)
     resolved_mask: ResolvedHullCatalogMask | None = None
     fleet_torp_overlay: FleetTorpOverlay | None = None
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None
     hull_collision_twins: HullCollisionTwinsAsset | None = None
     hull_collision_twins_path: str | None = None
     hull_collision_twins_fell_back: bool = False

@@ -47,12 +47,15 @@ class ComponentFilter:
     Optional ``include_component_ids`` unions extra ids into the resolved set (runtime twin
     widen when ``hullCollisionTwinWiden`` is set; intersected with buildable / catalog ids
     at resolve).
+    Optional ``raise_max_tech_from_prior_fleet`` raises the tech band ceiling from prior-turn
+    fleet max tech when that overlay is applied (#227).
     """
 
     all: bool = False
     tech_levels: tuple[int, ...] = ()
     component_ids: tuple[int, ...] = ()
     include_component_ids: tuple[int, ...] = ()
+    raise_max_tech_from_prior_fleet: bool = False
 
     def to_snapshot(self) -> dict[str, object]:
         if self.all:
@@ -63,6 +66,8 @@ class ComponentFilter:
             snapshot["componentIds"] = list(self.component_ids)
         if self.include_component_ids:
             snapshot["includeComponentIds"] = list(self.include_component_ids)
+        if self.raise_max_tech_from_prior_fleet:
+            snapshot["raiseMaxTechFromPriorFleet"] = True
         return snapshot
 
 
@@ -175,6 +180,16 @@ def _parse_include_component_ids(raw: object, *, axis: str, step_id: str) -> tup
     return tuple(sorted(set(ids)))
 
 
+def _parse_raise_max_tech_from_prior_fleet(raw: object, *, axis: str, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(
+            f"step {step_id}: filters.{axis}.raiseMaxTechFromPriorFleet must be a boolean"
+        )
+    return raw
+
+
 def _parse_component_filter(raw: object, *, axis: str, step_id: str) -> ComponentFilter:
     if not isinstance(raw, dict):
         raise ValueError(f"step {step_id}: filters.{axis} must be a mapping")
@@ -185,9 +200,18 @@ def _parse_component_filter(raw: object, *, axis: str, step_id: str) -> Componen
         axis=axis,
         step_id=step_id,
     )
+    raise_max_tech = _parse_raise_max_tech_from_prior_fleet(
+        raw.get("raiseMaxTechFromPriorFleet"),
+        axis=axis,
+        step_id=step_id,
+    )
     if use_all:
         if "techLevels" in raw:
             raise ValueError(f"step {step_id}: filters.{axis} cannot set both all and techLevels")
+        if raise_max_tech:
+            raise ValueError(
+                f"step {step_id}: filters.{axis}.raiseMaxTechFromPriorFleet requires techLevels"
+            )
         return ComponentFilter(
             all=True,
             component_ids=component_ids,
@@ -199,6 +223,7 @@ def _parse_component_filter(raw: object, *, axis: str, step_id: str) -> Componen
         tech_levels=tech_levels,
         component_ids=component_ids,
         include_component_ids=include_component_ids,
+        raise_max_tech_from_prior_fleet=raise_max_tech,
     )
 
 

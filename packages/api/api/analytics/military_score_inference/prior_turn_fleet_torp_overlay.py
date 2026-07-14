@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.export_scope import ledgers_for_scope
+from api.analytics.fleet.max_tech import max_tech_by_axis_from_fleet_records
 from api.analytics.fleet.types import FleetShipRecord, FleetTurnSnapshot
 from api.analytics.military_score_inference.fleet_torp_overlay import (
     FleetTorpOverlay,
@@ -26,10 +27,41 @@ FleetTorpInputStatus = Literal["not_applicable", "pending", "applied", "unavaila
 
 @dataclass(frozen=True)
 class PriorTurnFleetTorpResolution:
-    """Prior-turn fleet torp overlay plus provenance for inference diagnostics."""
+    """Prior-turn fleet torp overlay plus provenance for inference diagnostics.
+
+    When ``input_status`` is ``applied``, ``max_tech_by_axis`` holds per-axis max
+    catalog techlevels observed on the prior fleet (keys ``hulls``/``engines``/
+    ``beams``/``launchers``; axes with no evidence omitted). Otherwise the mapping
+    is empty and early tech gates keep their YAML constants (#227).
+    """
 
     overlay: FleetTorpOverlay | None
     input_status: FleetTorpInputStatus
+    max_tech_by_axis: dict[str, int] = field(default_factory=dict)
+
+
+def records_for_scope(
+    snapshot: FleetTurnSnapshot,
+    scope: ExportScope,
+) -> list[FleetShipRecord]:
+    records: list[FleetShipRecord] = []
+    for ledger in ledgers_for_scope(snapshot, scope):
+        records.extend(ledger.records)
+    return records
+
+
+def resolution_from_fleet_records(
+    records: list[FleetShipRecord],
+    *,
+    prior_turn: TurnInfo,
+    input_status: FleetTorpInputStatus = "applied",
+) -> PriorTurnFleetTorpResolution:
+    belief = launcher_belief_set_from_fleet_records(records)
+    return PriorTurnFleetTorpResolution(
+        overlay=FleetTorpOverlay(belief_set=belief),
+        input_status=input_status,
+        max_tech_by_axis=max_tech_by_axis_from_fleet_records(records, prior_turn),
+    )
 
 
 _FLEET_TORP_INPUT_STATUSES: frozenset[str] = frozenset(
@@ -180,12 +212,10 @@ def _load_prior_turn_fleet_snapshot(
 def _overlay_from_snapshot(
     snapshot: FleetTurnSnapshot,
     scope: ExportScope,
-) -> FleetTorpOverlay:
-    records: list[FleetShipRecord] = []
-    for ledger in ledgers_for_scope(snapshot, scope):
-        records.extend(ledger.records)
-    belief = launcher_belief_set_from_fleet_records(records)
-    return FleetTorpOverlay(belief_set=belief)
+    *,
+    prior_turn: TurnInfo,
+) -> PriorTurnFleetTorpResolution:
+    return resolution_from_fleet_records(records_for_scope(snapshot, scope), prior_turn=prior_turn)
 
 
 def resolve_prior_turn_fleet_torp_overlay(
@@ -201,7 +231,8 @@ def resolve_prior_turn_fleet_torp_overlay(
 
     Returns overlay plus ``input_status`` for inference diagnostics. Callers
     treat ``overlay is None`` as an empty belief set via
-    ``effective_fleet_torp_overlay``.
+    ``effective_fleet_torp_overlay``. When applied, also returns
+    ``max_tech_by_axis`` for early tech-gate admission (#227).
 
     When ``ensure`` is false, reads only persisted fleet snapshots and does not
     run export ensure (for inference table-stream scheduling).
@@ -240,10 +271,7 @@ def resolve_prior_turn_fleet_torp_overlay(
     if snapshot is None:
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
 
-    return PriorTurnFleetTorpResolution(
-        overlay=_overlay_from_snapshot(snapshot, scope),
-        input_status="applied",
-    )
+    return _overlay_from_snapshot(snapshot, scope, prior_turn=prior_turn_info)
 
 
 def schedule_background_prior_turn_fleet_warm(

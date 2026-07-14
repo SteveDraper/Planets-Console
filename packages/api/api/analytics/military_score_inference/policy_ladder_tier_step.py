@@ -32,6 +32,10 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.prior_fleet_tech_raise import (
+    PriorFleetTechRaisePlan,
+    resolve_prior_fleet_tech_raise_plan,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_STOPPED,
@@ -241,6 +245,7 @@ def _policy_step_diagnostics(
     seed_count: int,
     band_residual_2x: int | None,
     collision_widen: CollisionHullWidenPlan | None = None,
+    prior_fleet_tech_raise: PriorFleetTechRaisePlan | None = None,
 ) -> dict[str, object]:
     catalog_context = turn_catalog_context_for_policy_step(
         turn,
@@ -265,6 +270,8 @@ def _policy_step_diagnostics(
     }
     if collision_widen is not None:
         diagnostics.update(collision_widen.to_diagnostics())
+    if prior_fleet_tech_raise is not None:
+        diagnostics.update(prior_fleet_tech_raise.to_diagnostics())
     return diagnostics
 
 
@@ -304,15 +311,16 @@ def _maybe_early_stop_after_step(
     return True
 
 
-def _finish_skipped_collision_widen_step(
+def _finish_skipped_policy_step(
     state: PolicyLadderState,
     *,
     policy_step: InferenceTierPolicyStep,
     policy_step_index: int,
     turn: TurnInfo,
     observation: InferenceObservation,
-    collision_widen: CollisionHullWidenPlan,
     seed_count: int,
+    collision_widen: CollisionHullWidenPlan | None = None,
+    prior_fleet_tech_raise: PriorFleetTechRaisePlan | None = None,
 ) -> None:
     state.step_diagnostics.append(
         _policy_step_diagnostics(
@@ -324,6 +332,7 @@ def _finish_skipped_collision_widen_step(
             seed_count=seed_count,
             band_residual_2x=None,
             collision_widen=collision_widen,
+            prior_fleet_tech_raise=prior_fleet_tech_raise,
         )
     )
     state.next_step_index = policy_step_index + 1
@@ -336,6 +345,27 @@ def _finish_skipped_collision_widen_step(
         return
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
+
+
+def _finish_skipped_collision_widen_step(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+    policy_step_index: int,
+    turn: TurnInfo,
+    observation: InferenceObservation,
+    collision_widen: CollisionHullWidenPlan,
+    seed_count: int,
+) -> None:
+    _finish_skipped_policy_step(
+        state,
+        policy_step=policy_step,
+        policy_step_index=policy_step_index,
+        turn=turn,
+        observation=observation,
+        seed_count=seed_count,
+        collision_widen=collision_widen,
+    )
 
 
 def _make_incremental_admitter(
@@ -452,6 +482,26 @@ def run_policy_ladder_tier_step(
             )
             return
         policy_step = collision_widen.policy_step
+
+    prior_fleet_tech_raise = resolve_prior_fleet_tech_raise_plan(
+        policy_step,
+        turn=turn,
+        prior_fleet_max_tech_by_axis=state.prior_fleet_max_tech_by_axis,
+    )
+    if prior_fleet_tech_raise is not None:
+        if prior_fleet_tech_raise.skipped:
+            _finish_skipped_policy_step(
+                state,
+                policy_step=prior_fleet_tech_raise.policy_step,
+                policy_step_index=step_index,
+                turn=turn,
+                observation=observation,
+                seed_count=len(state.band_seeds),
+                collision_widen=collision_widen,
+                prior_fleet_tech_raise=prior_fleet_tech_raise,
+            )
+            return
+        policy_step = prior_fleet_tech_raise.policy_step
 
     player_race_id = player_by_id(turn, observation.player_id).raceid
     catalog = build_action_catalog_from_turn(
@@ -587,6 +637,7 @@ def run_policy_ladder_tier_step(
             seed_count=len(seeds_for_step),
             band_residual_2x=band_residual_2x,
             collision_widen=collision_widen,
+            prior_fleet_tech_raise=prior_fleet_tech_raise,
         )
     )
 
