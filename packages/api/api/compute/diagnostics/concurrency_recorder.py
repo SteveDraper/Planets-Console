@@ -135,6 +135,27 @@ class ConcurrencyTimelineRecorder:
             ready_scopes=ready_scopes,
         )
 
+    def bind_ready_queue_listener(
+        self,
+        *,
+        orchestrator_id: int | None,
+        game_id: int,
+        perspective: int,
+        fallback_id: int,
+    ) -> Callable[[tuple[ComputeScope, ...]], None]:
+        """Return a ready-queue-changed listener closed over one bound orchestrator."""
+        resolved_id = orchestrator_id if orchestrator_id is not None else fallback_id
+
+        def on_ready_queue_changed(ready_scopes: tuple[ComputeScope, ...]) -> None:
+            self.note_ready_queue_for_bound_orch(
+                ready_scopes,
+                orchestrator_id=resolved_id,
+                game_id=game_id,
+                perspective=perspective,
+            )
+
+        return on_ready_queue_changed
+
     def record(
         self,
         shell: ShellContextKey,
