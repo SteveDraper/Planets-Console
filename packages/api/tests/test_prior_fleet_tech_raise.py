@@ -16,6 +16,10 @@ from api.analytics.fleet.types import (
 from api.analytics.military_score_inference.component_eligibility import (
     turn_catalog_context_for_policy_step,
 )
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
+    run_policy_ladder_tier_step,
+)
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
     resolve_prior_fleet_tech_raise_plan,
 )
@@ -149,21 +153,142 @@ def test_raise_hull_band_to_include_tech_7(sample_turn):
     assert hull_diag["effectiveMaxTech"] == 7
 
 
-def test_skip_when_all_flagged_axes_saturate_catalog(sample_turn):
-    early = resolve_tier_policies()[0]
-    observed = {
+def _saturated_prior_fleet_max_tech(sample_turn) -> dict[str, int]:
+    return {
         "hulls": max_tech_in_turn_catalog(sample_turn, "hulls"),
         "beams": max_tech_in_turn_catalog(sample_turn, "beams"),
         "launchers": max_tech_in_turn_catalog(sample_turn, "launchers"),
     }
+
+
+def test_skip_when_all_flagged_axes_saturate_catalog(sample_turn):
+    early = resolve_tier_policies()[0]
     plan = resolve_prior_fleet_tech_raise_plan(
         early,
         turn=sample_turn,
-        prior_fleet_max_tech_by_axis=observed,
+        prior_fleet_max_tech_by_axis=_saturated_prior_fleet_max_tech(sample_turn),
     )
     assert plan is not None
     assert plan.skipped is True
     assert plan.to_diagnostics()["priorFleetTechRaise"]["skippedDueToPriorFleetTechSaturation"]
+
+
+def test_ladder_skips_early_step_when_prior_fleet_tech_saturates(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    """Saturation skip must advance the ladder without invoking the solver."""
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+
+    early = resolve_tier_policies()[0]
+    assert early.filters.hulls.raise_max_tech_from_prior_fleet is True
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies()),
+        prior_fleet_max_tech_by_axis=_saturated_prior_fleet_max_tech(sample_turn),
+    )
+    observation = build_inference_observation(sample_turn.scores[0], sample_turn)
+
+    def _solver_must_not_run(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("solver must not run when prior-fleet tech saturates")
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_seed_progression",
+        _solver_must_not_run,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
+        _solver_must_not_run,
+    )
+
+    run_policy_ladder_tier_step(
+        state,
+        observation,
+        sample_turn,
+        time_limit_seconds=None,
+    )
+
+    assert early.id in state.policy_steps_attempted
+    assert state.next_step_index == 1
+    assert state.ladder_complete is False
+    assert len(state.step_diagnostics) == 1
+    diag = state.step_diagnostics[0]
+    assert diag["policyStepId"] == early.id
+    raise_diag = diag["priorFleetTechRaise"]
+    assert raise_diag["skippedDueToPriorFleetTechSaturation"] is True
+    axes = {row["axis"]: row for row in raise_diag["axes"]}
+    assert set(axes) == {"hulls", "beams", "launchers"}
+    assert all(row["saturated"] is True for row in axes.values())
+
+
+def test_ladder_does_not_skip_early_step_when_prior_fleet_pending(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    """Pending prior-fleet max tech keeps the YAML band and still solves."""
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.models import InferenceResult
+    from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
+
+    early = resolve_tier_policies()[0]
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies()),
+        prior_fleet_max_tech_by_axis=None,
+    )
+    observation = build_inference_observation(sample_turn.scores[0], sample_turn)
+    solve_calls: list[str] = []
+
+    def fake_solve_catalog(
+        _observation,
+        _catalog,
+        *,
+        race_id=None,
+        max_solutions,
+        time_limit_seconds,
+        military_score_alpha=0,
+        fixed_combo_counts=None,
+        combo_count_neighborhood=0,
+        cancel_token=None,
+        on_solution=None,
+    ):
+        del race_id, max_solutions, time_limit_seconds, military_score_alpha
+        del fixed_combo_counts, combo_count_neighborhood, cancel_token, on_solution
+        solve_calls.append(_catalog.policy_step_id)
+        from api.analytics.military_score_inference.actions import build_inference_problem
+
+        problem = build_inference_problem(_observation, _catalog, max_solutions=1)
+        return (
+            InferenceResult(
+                status=STATUS_NO_EXACT_SOLUTION,
+                solutions=(),
+                diagnostics={},
+            ),
+            problem,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_seed_progression",
+        lambda *args, **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
+        fake_solve_catalog,
+    )
+
+    run_policy_ladder_tier_step(
+        state,
+        observation,
+        sample_turn,
+        time_limit_seconds=None,
+    )
+
+    assert early.id in state.policy_steps_attempted
+    assert early.id in solve_calls
+    assert state.next_step_index == 1
+    diag = state.step_diagnostics[0]
+    assert diag["policyStepId"] == early.id
+    raise_diag = diag["priorFleetTechRaise"]
+    assert raise_diag["skippedDueToPriorFleetTechSaturation"] is False
 
 
 def test_widen_hulls_does_not_skip_when_beams_launchers_saturate(sample_turn):
