@@ -165,6 +165,135 @@ function SectionPanel({
   )
 }
 
+const BOTTLENECK_CLASS_GUIDE = [
+  {
+    id: 'A',
+    title: 'Serial ready-set',
+    detail:
+      'At most ~1 node is ready/running because dependencies or submission keep the chain serial.',
+  },
+  {
+    id: 'B',
+    title: 'Dispatch starvation',
+    detail:
+      'Ready set could be deep, but workers are not fed (orchestrator/inline/gates), including cross-shell pool contention.',
+  },
+  {
+    id: 'C',
+    title: 'Backend / GIL ceiling',
+    detail:
+      'Multiple workers in flight, but thread/interpreter choice keeps host CPU near one core except solver spikes.',
+  },
+  {
+    id: 'D',
+    title: 'Scope under-submission',
+    detail:
+      'Gap work for only one player (or one analytic) enters the DAG; cross-player parallelism never appears.',
+  },
+] as const
+
+function BottleneckClassificationGuide() {
+  const [open, setOpen] = useState(false)
+  return (
+    <details
+      className="rounded border border-[#52575d] bg-[#40454a] p-3"
+      open={open}
+      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
+      data-testid="compute-bottleneck-guide"
+    >
+      <summary className="cursor-pointer text-xs font-medium text-slate-200">
+        Bottleneck classes A–D (manual classification)
+      </summary>
+      <ul className="mt-2 space-y-2 text-[11px] text-slate-300">
+        {BOTTLENECK_CLASS_GUIDE.map((entry) => (
+          <li key={entry.id}>
+            <span className="font-medium text-slate-100">
+              {entry.id}. {entry.title}
+            </span>
+            <span className="text-slate-400"> -- {entry.detail}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[10px] text-slate-500">
+        Use the summary strip, timeline, and rollup to classify. The rollup does not auto-label a
+        class.
+      </p>
+    </details>
+  )
+}
+
+function formatBackendMix(mix: Record<string, number> | undefined): string {
+  if (mix == null) {
+    return '—'
+  }
+  const entries = Object.entries(mix)
+  if (entries.length === 0) {
+    return 'none'
+  }
+  return entries.map(([backend, count]) => `${backend}:${count}`).join(' ')
+}
+
+function ConcurrencySummaryStrip({
+  snapshot,
+}: {
+  snapshot: ComputeDiagnosticsSnapshotResponse
+}) {
+  const occupancy = snapshot.liveOccupancy
+  const rollup = snapshot.concurrencyRollup
+  return (
+    <section
+      className="rounded border border-[#52575d] bg-[#40454a] p-3"
+      data-testid="compute-concurrency-summary"
+    >
+      <h3 className="mb-2 text-xs font-medium text-slate-200">Concurrency summary</h3>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 sm:grid-cols-3">
+        <div>
+          <dt className="text-slate-500">Workers</dt>
+          <dd className="font-mono text-slate-100">{occupancy.configuredWorkers}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Scoped ready / in-flight</dt>
+          <dd className="font-mono text-slate-100">
+            {occupancy.scopedReadyDepth} / {occupancy.scopedInFlightCount}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Global in-flight / queue</dt>
+          <dd className="font-mono text-slate-100">
+            {occupancy.globalInFlightCount} / {occupancy.globalQueueDepth}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Live backend mix</dt>
+          <dd className="font-mono text-slate-100">{formatBackendMix(occupancy.backendMix)}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Timeline events</dt>
+          <dd className="font-mono text-slate-100">{rollup.eventCount}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Unique players (timeline)</dt>
+          <dd className="font-mono text-slate-100">
+            {rollup.uniquePlayers.length === 0 ? '—' : rollup.uniquePlayers.join(', ')}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Max ready / scoped IF / global IF</dt>
+          <dd className="font-mono text-slate-100">
+            {rollup.maxScopedReadyDepth} / {rollup.maxScopedInFlight} / {rollup.maxGlobalInFlight}
+          </dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-slate-500">Backend histogram (timeline)</dt>
+          <dd className="font-mono text-slate-100">
+            {formatBackendMix(rollup.backendHistogram)}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  )
+}
+
 function nextStepSummary(preview: NextSingleStepPreview | undefined): string {
   const target = preview?.target
   if (target == null) {
@@ -556,6 +685,8 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
         </p>
       ) : (
         <div className="flex flex-col gap-3">
+          <BottleneckClassificationGuide />
+          <ConcurrencySummaryStrip snapshot={snapshot} />
           <SectionPanel
             title="Freeze state"
             value={{
@@ -564,6 +695,17 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
               shell: snapshot.shell,
               nextSingleStep: snapshot.nextSingleStep,
             }}
+            onCopy={onCopy}
+          />
+          <SectionPanel title="Live occupancy" value={snapshot.liveOccupancy} onCopy={onCopy} />
+          <SectionPanel
+            title="Concurrency timeline"
+            value={snapshot.concurrencyTimeline}
+            onCopy={onCopy}
+          />
+          <SectionPanel
+            title="Concurrency rollup"
+            value={snapshot.concurrencyRollup}
             onCopy={onCopy}
           />
           <SectionPanel title="Pool queue" value={snapshot.poolQueue} onCopy={onCopy} />

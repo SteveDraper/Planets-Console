@@ -48,6 +48,29 @@ export type RemotePoolBackendProbe = {
   futures: Record<string, unknown>[]
 }
 
+export type ComputeDiagnosticsLiveOccupancy = {
+  configuredWorkers: number
+  scopedReadyDepth: number
+  scopedInFlightCount: number
+  globalInFlightCount: number
+  globalQueueDepth: number
+  backendMix: Record<string, number>
+}
+
+export type ComputeDiagnosticsConcurrencyRollup = {
+  eventCount: number
+  uniquePlayers: number[]
+  backendHistogram: Record<string, number>
+  durationByBackendMs: Record<string, Record<string, number | null>>
+  scopedReadyDepth: Record<string, number | null>
+  scopedInFlight: Record<string, number | null>
+  globalInFlight: Record<string, number | null>
+  maxScopedReadyDepth: number
+  maxScopedInFlight: number
+  maxGlobalInFlight: number
+  configuredWorkers: number | null
+}
+
 export type ComputeDiagnosticsSnapshotResponse = {
   shell: AnalyticShellScope
   freezeArmed: boolean
@@ -63,6 +86,9 @@ export type ComputeDiagnosticsSnapshotResponse = {
     interpreter: RemotePoolBackendProbe
     process: RemotePoolBackendProbe
   }
+  liveOccupancy: ComputeDiagnosticsLiveOccupancy
+  concurrencyTimeline: Record<string, unknown>[]
+  concurrencyRollup: ComputeDiagnosticsConcurrencyRollup
 }
 
 function normalizeShell(shell: {
