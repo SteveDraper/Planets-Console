@@ -991,10 +991,10 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
         priority_band="background",
     )
     # Bound gates capture each orchestrator's registration id at bind time.
-    assert len(orch_a._dispatch_gates) == 1
-    assert len(orch_b._dispatch_gates) == 1
-    assert orch_a._dispatch_gates[0](node) is True
-    assert orch_b._dispatch_gates[0](node) is False
+    assert len(orch_a._observers.dispatch_gates) == 1
+    assert len(orch_b._observers.dispatch_gates) == 1
+    assert orch_a._observers.dispatch_gates[0](node) is True
+    assert orch_b._observers.dispatch_gates[0](node) is False
     # Commit agrees: wrong orch cannot consume the armed slot.
     assert controller._commit_single_step_dispatch(node, orchestrator_id=id_b) is False
     assert controller._single_step.dispatch_slots_remaining == 1
@@ -1688,8 +1688,8 @@ def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample
     controller = get_compute_diagnostics_controller()
     controller.bind_orchestrator(orchestrator, ctx)
     assert len(controller._bound_orchestrators) == 1
-    assert len(orchestrator._dispatch_gates) == 1
-    assert len(orchestrator._step_complete_listeners) == 1
+    assert len(orchestrator._observers.dispatch_gates) == 1
+    assert len(orchestrator._observers._step_complete_listeners) == 1
 
     shell = ShellContextKey(
         game_id=ctx.game_id,
@@ -1714,8 +1714,8 @@ def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample
     controller.unbind_orchestrator(orchestrator)
 
     assert controller._bound_orchestrators == []
-    assert orchestrator._dispatch_gates == []
-    assert orchestrator._step_complete_listeners == []
+    assert orchestrator._observers.dispatch_gates == []
+    assert orchestrator._observers._step_complete_listeners == []
     wire_after = snapshot_to_wire(controller.snapshot(shell))
     assert wire_after["dagNodes"] == []
     # Safe when already unbound.
@@ -1729,14 +1729,14 @@ def test_release_orchestrator_for_context_unbinds_diagnostics(sample_turn):
     orchestrator = orchestrator_for_context(ctx, worker_pool=pool)
     controller = get_compute_diagnostics_controller()
     assert len(controller._bound_orchestrators) == 1
-    assert len(orchestrator._dispatch_gates) == 1
-    assert len(orchestrator._step_complete_listeners) == 1
+    assert len(orchestrator._observers.dispatch_gates) == 1
+    assert len(orchestrator._observers._step_complete_listeners) == 1
 
     release_orchestrator_for_context(ctx)
 
     assert controller._bound_orchestrators == []
-    assert orchestrator._dispatch_gates == []
-    assert orchestrator._step_complete_listeners == []
+    assert orchestrator._observers.dispatch_gates == []
+    assert orchestrator._observers._step_complete_listeners == []
     # Safe when already released / never bound.
     release_orchestrator_for_context(ctx)
 

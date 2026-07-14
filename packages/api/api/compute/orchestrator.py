@@ -10,31 +10,22 @@ from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
+from api.compute.orchestrator_observers import (
+    InlineStartListener,
+    NodeCompleteListener,
+    NodeDispatchCommitHook,
+    NodeDispatchGate,
+    OrchestratorObservers,
+    ReadyListener,
+    ReadyQueueChangedListener,
+    StepCompleteListener,
+)
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs, coerce_step_result
-
-NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
-StepCompleteListener = Callable[
-    [ComputeScope, "ComputeNodeRun", str, Literal["inline", "pool"], Literal["success", "failed"]],
-    None,
-]
-# Fired when a node first enters the ready queue (deps satisfied).
-ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
-# Fired under the orchestrator lock whenever the ready-queue membership of
-# ``state == "ready"`` scopes may have changed. Argument is the current ready
-# scopes snapshot. Listeners must not re-enter this orchestrator's condition.
-ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
-# Fired when an inline step begins execution outside the orchestrator lock.
-InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
-NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
-# Side-effecting accept after all gates pass (e.g. consume a single-step slot).
-# Must be idempotent-safe under reject: return False to leave the node ready.
-NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
-PostLockCallback = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -182,14 +173,7 @@ class ComputeOrchestrator:
         self._metrics = OrchestratorMetrics()
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
-        self._node_complete_listeners: list[NodeCompleteListener] = []
-        self._step_complete_listeners: list[StepCompleteListener] = []
-        self._ready_listeners: list[ReadyListener] = []
-        self._ready_queue_listeners: list[ReadyQueueChangedListener] = []
-        self._inline_start_listeners: list[InlineStartListener] = []
-        self._dispatch_gates: list[NodeDispatchGate] = []
-        self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
-        self._post_lock_callbacks: list[PostLockCallback] = []
+        self._observers = OrchestratorObservers(self._condition)
 
     def dispatch_ready_work(self) -> None:
         """Dispatch any ready nodes allowed by the current gates.
@@ -204,7 +188,7 @@ class ComputeOrchestrator:
             pending_inline, pending_pool = self._dispatch()
         self._execute_pending_inlines(pending_inline)
         self._flush_pending_pool_submissions(pending_pool)
-        self._drain_post_lock_callbacks()
+        self._observers.drain_post_lock_callbacks()
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -234,17 +218,7 @@ class ComputeOrchestrator:
 
         Returns an unregister callable that removes only this gate.
         """
-        with self._condition:
-            self._dispatch_gates.append(gate)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._dispatch_gates.remove(gate)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_dispatch_gate(gate)
 
     def register_dispatch_commit_hook(
         self,
@@ -254,51 +228,21 @@ class ComputeOrchestrator:
 
         Returns an unregister callable that removes only this hook.
         """
-        with self._condition:
-            self._dispatch_commit_hooks.append(hook)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._dispatch_commit_hooks.remove(hook)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_dispatch_commit_hook(hook)
 
     def register_node_complete_listener(
         self,
         listener: NodeCompleteListener,
     ) -> Callable[[], None]:
         """Register a node completion listener; return an unregister callable."""
-        with self._condition:
-            self._node_complete_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._node_complete_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_node_complete_listener(listener)
 
     def register_step_complete_listener(
         self,
         listener: StepCompleteListener,
     ) -> Callable[[], None]:
         """Register a step completion listener; return an unregister callable."""
-        with self._condition:
-            self._step_complete_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._step_complete_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_step_complete_listener(listener)
 
     def register_ready_listener(
         self,
@@ -310,17 +254,7 @@ class ComputeOrchestrator:
         callbacks) so observers may take other locks without nesting under the
         orchestrator condition.
         """
-        with self._condition:
-            self._ready_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._ready_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_ready_listener(listener)
 
     def register_ready_queue_listener(
         self,
@@ -334,17 +268,7 @@ class ComputeOrchestrator:
         orchestrator's condition. Taking the diagnostics controller lock is OK
         (same order as dispatch gates: orch → controller).
         """
-        with self._condition:
-            self._ready_queue_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._ready_queue_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_ready_queue_listener(listener)
 
     def register_inline_start_listener(
         self,
@@ -355,17 +279,7 @@ class ComputeOrchestrator:
         Listeners run outside the orchestrator lock at the start of inline
         execution (before job-wire build / ``run_step``).
         """
-        with self._condition:
-            self._inline_start_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._inline_start_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._observers.register_inline_start_listener(listener)
 
     @property
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
@@ -426,7 +340,7 @@ class ComputeOrchestrator:
                 pending_inline, pending_pool = self._dispatch()
         self._execute_pending_inlines(pending_inline)
         self._flush_pending_pool_submissions(pending_pool)
-        self._drain_post_lock_callbacks()
+        self._observers.drain_post_lock_callbacks()
         return handle
 
     def execute_pool_step(self, scope: ComputeScope) -> object:
@@ -459,10 +373,10 @@ class ComputeOrchestrator:
                 has_running = any(node.state == "running" for node in self._nodes.values())
             self._execute_pending_inlines(pending_inline)
             self._flush_pending_pool_submissions(pending_pool)
-            self._drain_post_lock_callbacks()
+            self._observers.drain_post_lock_callbacks()
             if has_running:
                 break
-        self._drain_post_lock_callbacks()
+        self._observers.drain_post_lock_callbacks()
 
     def complete_pool_step(
         self,
@@ -484,7 +398,7 @@ class ComputeOrchestrator:
                     node,
                     self._compute_registry[node.scope.analytic_id],
                 ).step_kind
-                self._notify_step_complete(
+                self._observers.notify_step_complete(
                     node,
                     step_kind,
                     surface="pool",
@@ -496,14 +410,14 @@ class ComputeOrchestrator:
                     node,
                     self._compute_registry[node.scope.analytic_id],
                 ).step_kind
-                self._notify_step_complete(
+                self._observers.notify_step_complete(
                     node,
                     step_kind,
                     surface="pool",
                     terminal_state="success",
                 )
                 self._after_step_success(node, result_wire)
-        self._drain_post_lock_callbacks()
+        self._observers.drain_post_lock_callbacks()
 
     def abort_scope(self, scope: ComputeScope, error: BaseException) -> bool:
         """Fail a non-terminal node so a later ``force_fresh`` submit can replace it.
@@ -520,14 +434,14 @@ class ComputeOrchestrator:
                 registration = self._compute_registry.get(node.scope.analytic_id)
                 if registration is not None:
                     step_kind = self._current_step_spec(node, registration).step_kind
-                    self._notify_step_complete(
+                    self._observers.notify_step_complete(
                         node,
                         step_kind,
                         surface="pool",
                         terminal_state="failed",
                     )
             self._fail_node(node, error)
-        self._drain_post_lock_callbacks()
+        self._observers.drain_post_lock_callbacks()
         return True
 
     def _attach_to_existing(self, node: ComputeNodeRun) -> ComputeHandle:
@@ -628,7 +542,7 @@ class ComputeOrchestrator:
             if node.state != "ready":
                 node.state = "ready"
                 self._enqueue_ready(node.scope)
-                self._notify_ready(node)
+                self._observers.notify_ready(node)
         else:
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
@@ -732,7 +646,7 @@ class ComputeOrchestrator:
 
     def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
         node = pending.node
-        self._notify_inline_start(node, pending.step.step_kind)
+        self._observers.notify_inline_start(node, pending.step.step_kind)
         try:
             builder = pending.registration.build_step_job_wire[pending.step.step_kind]
             job_wire = builder(
@@ -744,7 +658,7 @@ class ComputeOrchestrator:
         except BaseException as exc:
             with self._condition:
                 self._metrics.inline_executions += 1
-                self._notify_step_complete(
+                self._observers.notify_step_complete(
                     node,
                     pending.step.step_kind,
                     surface="inline",
@@ -754,7 +668,7 @@ class ComputeOrchestrator:
             return
         with self._condition:
             self._metrics.inline_executions += 1
-            self._notify_step_complete(
+            self._observers.notify_step_complete(
                 node,
                 pending.step.step_kind,
                 surface="inline",
@@ -794,7 +708,7 @@ class ComputeOrchestrator:
             except BaseException as exc:
                 with self._condition:
                     if node.state == "running":
-                        self._notify_step_complete(
+                        self._observers.notify_step_complete(
                             node,
                             step.step_kind,
                             surface="pool",
@@ -819,10 +733,10 @@ class ComputeOrchestrator:
             # Gates first (side-effect free), then commit hooks (may consume slots).
             # Evaluating commits inside ``all(gate)`` burned single-step slots when a
             # later gate (e.g. scores global-pause) rejected the same node.
-            if not all(gate(node) for gate in self._dispatch_gates):
+            if not all(gate(node) for gate in self._observers.dispatch_gates):
                 self._ready_queue.append(scope)
                 continue
-            if not all(hook(node) for hook in self._dispatch_commit_hooks):
+            if not all(hook(node) for hook in self._observers.dispatch_commit_hooks):
                 self._ready_queue.append(scope)
                 continue
             return scope, node
@@ -878,9 +792,9 @@ class ComputeOrchestrator:
         node.generation_at_submit = None
         node.state = "ready"
         self._enqueue_ready(node.scope)
-        self._notify_ready(node)
+        self._observers.notify_ready(node)
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
-        self._post_lock_callbacks.append(self.dispatch_ready_work)
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):
@@ -937,9 +851,9 @@ class ComputeOrchestrator:
                         return
                     self._complete_node(completed_node)
                     if post_lock_callback is not None:
-                        self._post_lock_callbacks.append(post_lock_callback)
+                        self._observers.schedule_post_lock(post_lock_callback)
 
-            self._post_lock_callbacks.append(_persist_then_complete)
+            self._observers.schedule_post_lock(_persist_then_complete)
             return
 
         if step_result.outcome == "complete":
@@ -967,9 +881,9 @@ class ComputeOrchestrator:
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         self._enqueue_ready(node.scope)
-        self._notify_ready(node)
+        self._observers.notify_ready(node)
         # Defer dispatch so pool submit is never nested under this lock.
-        self._post_lock_callbacks.append(self.dispatch_ready_work)
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
         node.state = "complete"
@@ -977,8 +891,8 @@ class ComputeOrchestrator:
         for waiter in node.waiters:
             waiter._waiter_error = None
         node.waiters.clear()
-        self._notify_node_complete(node)
-        self._post_lock_callbacks.append(
+        self._observers.notify_node_complete(node)
+        self._observers.schedule_post_lock(
             lambda completed_scope=node.scope: self._handle_dependency_terminal(completed_scope),
         )
 
@@ -991,74 +905,20 @@ class ComputeOrchestrator:
         for waiter in node.waiters:
             waiter._waiter_error = error
         node.waiters.clear()
-        self._notify_node_complete(node)
-        self._post_lock_callbacks.append(
+        self._observers.notify_node_complete(node)
+        self._observers.schedule_post_lock(
             lambda completed_scope=node.scope: self._handle_dependency_terminal(completed_scope),
         )
-
-    def _notify_node_complete(self, node: ComputeNodeRun) -> None:
-        listeners = tuple(self._node_complete_listeners)
-        for listener in listeners:
-            self._post_lock_callbacks.append(
-                lambda listener=listener, node=node: listener(node.scope, node),
-            )
-
-    def _notify_ready(self, node: ComputeNodeRun) -> None:
-        listeners = tuple(self._ready_listeners)
-        for listener in listeners:
-            self._post_lock_callbacks.append(
-                lambda listener=listener, node=node: listener(node.scope, node),
-            )
 
     def _ready_depth(self) -> int:
         return sum(1 for scope in self._ready_queue if self._nodes[scope].state == "ready")
 
     def _notify_ready_queue_changed(self) -> None:
         """Push the current ready-scopes snapshot to depth listeners (caller holds lock)."""
-        listeners = tuple(self._ready_queue_listeners)
-        if not listeners:
-            return
         ready_scopes = tuple(
             scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
         )
-        for listener in listeners:
-            listener(ready_scopes)
-
-    def _notify_inline_start(self, node: ComputeNodeRun, step_kind: str) -> None:
-        with self._condition:
-            listeners = tuple(self._inline_start_listeners)
-        for listener in listeners:
-            listener(node.scope, node, step_kind)
-
-    def _notify_step_complete(
-        self,
-        node: ComputeNodeRun,
-        step_kind: str,
-        *,
-        surface: Literal["inline", "pool"],
-        terminal_state: Literal["success", "failed"],
-    ) -> None:
-        listeners = tuple(self._step_complete_listeners)
-        for listener in listeners:
-            self._post_lock_callbacks.append(
-                lambda listener=listener, node=node, step_kind=step_kind: listener(
-                    node.scope,
-                    node,
-                    step_kind,
-                    surface,
-                    terminal_state,
-                ),
-            )
-
-    def _drain_post_lock_callbacks(self) -> None:
-        while True:
-            with self._condition:
-                callbacks = tuple(self._post_lock_callbacks)
-                self._post_lock_callbacks.clear()
-            if not callbacks:
-                return
-            for callback in callbacks:
-                callback()
+        self._observers.notify_ready_queue_changed(ready_scopes)
 
     def _handle_dependency_terminal(self, completed_scope: ComputeScope) -> None:
         with self._condition:
@@ -1073,7 +933,7 @@ class ComputeOrchestrator:
             self._refresh_node_readiness(node)
         # Defer dispatch: this runs under the orchestrator lock via
         # ``_handle_dependency_terminal``, and pool submit must not nest here.
-        self._post_lock_callbacks.append(self.dispatch_ready_work)
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _has_pending_work(self) -> bool:
         return any(
