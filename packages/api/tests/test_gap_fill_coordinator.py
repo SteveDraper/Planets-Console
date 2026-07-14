@@ -889,3 +889,50 @@ def test_joiner_on_progress_receives_incremental_events_during_inflight_gap_fill
     assert progress_turns == sorted(progress_turns)
     assert min(progress_turns) <= 111
     assert max(progress_turns) >= 112
+
+
+def test_result_for_request_returns_non_final_ledger_when_result_cleared(
+    persistence,
+    load_turn,
+):
+    """Completed cycle with cleared result_ledger must still return a non-final write.
+
+    Phase C leaves many ledgers non-final until scores turn-evidence closes. Leaders
+    return those via ``result_ledger``; waiters that lose that pointer (extended
+    re-lead clears it) must not raise ``completed without a cache hit`` when the
+    ledger for the requested turn is present.
+    """
+    from api.analytics.fleet.gap_fill_coordinator import _InflightMaterialization
+    from api.analytics.fleet.types import (
+        FleetAcquisitionLedger,
+        FleetMaterializationProvenance,
+    )
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_id = _first_player_id(turn_111)
+    non_final = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=player_id),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=False,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    persistence.put_ledger(628580, 1, 111, player_id, non_final)
+    assert non_final.provenance.is_final is False
+
+    coordinator = coordinator_for(persistence, 628580, 1, player_id)
+    inflight = _InflightMaterialization(
+        target_turn=111,
+        generation=coordinator.epoch,
+        load_turn=load_turn,
+        inference_materialization=None,
+        query_context=None,
+    )
+    inflight.event.set()
+    inflight.result_ledger = None
+
+    result = coordinator._result_for_request(inflight, 111, turn_111)
+    assert result.ledger.player_id == player_id
+    assert result.provenance.is_final is False
+

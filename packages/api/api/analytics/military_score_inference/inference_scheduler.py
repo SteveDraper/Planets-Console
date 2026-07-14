@@ -88,6 +88,9 @@ class InferenceRowScheduler:
         self._stream_bindings: dict[str, _InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
         self._held_initial_submissions: list[_HeldTierSubmission] = []
+        # run_ids that already emitted a terminal stream event; used so a late peer
+        # failure cannot clobber an earlier successful completion for the same row.
+        self._terminal_stream_events_delivered: set[str] = set()
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._lock:
@@ -525,6 +528,9 @@ class InferenceRowScheduler:
         if scope.player_id == "*" or not isinstance(scope.player_id, int):
             return
 
+        wire_run_id = self._run_id_from_result_wire(getattr(node, "result_wire", None))
+        sibling_still_active = self._scope_has_live_nonterminal_work(scope)
+
         with self._lock:
             matching_run_ids = [
                 run_id
@@ -534,6 +540,8 @@ class InferenceRowScheduler:
                 and root_scope.perspective == scope.perspective
                 and scope.turn == root_scope.turn
             ]
+            if wire_run_id is not None:
+                matching_run_ids = [run_id for run_id in matching_run_ids if run_id == wire_run_id]
 
         for run_id in matching_run_ids:
             row_run = self._adapter_row_run(run_id)
@@ -542,6 +550,14 @@ class InferenceRowScheduler:
             session = row_run.session
             cancelled = session.cancel_token.is_cancelled()
             if node.state == "failed":
+                if sibling_still_active:
+                    # Peer binding (e.g. stream_attached) still owns the shared RowRun.
+                    # Do not fail the stream or unregister -- the peer may still succeed.
+                    continue
+                if run_id in self._terminal_stream_events_delivered:
+                    # Peer already delivered success; just release when last binding ends.
+                    self._finalize_row_run(session)
+                    continue
                 detail = (
                     str(node.error) if node.error is not None else "Inference tier solve failed"
                 )
@@ -550,26 +566,62 @@ class InferenceRowScheduler:
                         session,
                         RowFailed(detail=detail),
                     )
+                    self._terminal_stream_events_delivered.add(run_id)
                 self._finalize_row_run(session)
                 continue
             if node.state != "complete":
                 continue
             row_complete = self._row_complete_from_result_wire(node.result_wire)
             if row_complete is None:
+                if sibling_still_active:
+                    continue
+                if run_id in self._terminal_stream_events_delivered:
+                    self._finalize_row_run(session)
+                    continue
                 if not cancelled:
                     deliver_inference_domain_event_to_open_stream(
                         session,
                         RowFailed(detail="Inference tier solve completed without row payload"),
                     )
+                    self._terminal_stream_events_delivered.add(run_id)
                 self._finalize_row_run(session)
                 continue
-            if not cancelled:
+            if not cancelled and run_id not in self._terminal_stream_events_delivered:
                 deliver_inference_domain_event_to_open_stream(session, row_complete)
+                self._terminal_stream_events_delivered.add(run_id)
+            if sibling_still_active:
+                # Keep the process-wide RowRun registered until the last binding
+                # for this scope reaches a terminal state (background + stream share it).
+                continue
             self._finalize_row_run(session)
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
             self._remove_run_locked(session.run_id)
+
+
+    @staticmethod
+    def _run_id_from_result_wire(result_wire: object | None) -> str | None:
+        if not isinstance(result_wire, dict):
+            return None
+        run_id = result_wire.get("runId")
+        return run_id if isinstance(run_id, str) else None
+
+    @staticmethod
+    def _scope_has_live_nonterminal_work(scope: ComputeScope) -> bool:
+        """True when any process-wide orchestrator still has non-terminal work for scope.
+
+        Background warm and stream_attached bindings each own an orchestrator; they can
+        share one RowRun. Finalizing on the first terminal node unregisters that run and
+        races the sibling's continuing ``tier_solve`` wire (missing registered RowRun).
+        """
+        from api.compute.runtime import live_orchestrators
+
+        for orchestrator in live_orchestrators():
+            node = orchestrator.nodes.get(scope)
+            if node is not None and node.state not in {"complete", "failed"}:
+                return True
+        return False
 
     def _release_stream_binding_locked(
         self,
@@ -700,6 +752,7 @@ class InferenceRowScheduler:
 
         root_scope = self._runs.pop(run_id, None)
         unregister_row_run(run_id)
+        self._terminal_stream_events_delivered.discard(run_id)
         if root_scope is None:
             return
         self._held_initial_submissions = [

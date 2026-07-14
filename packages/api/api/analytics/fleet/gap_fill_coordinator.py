@@ -369,7 +369,12 @@ class FleetGapFillCoordinator:
             turn_number,
             self._player_id,
         )
-        if cached is not None and _is_fleet_ledger_cache_hit(cached):
+        # Post-completion: return any ledger the cycle wrote for this turn, including
+        # non-final provenance. ``materialize_ledger`` entry still requires ``is_final``
+        # so partials rematerialize; requiring final here races with Phase C (scores
+        # turn-evidence closed only when terminal) when ``result_ledger`` is cleared by
+        # an extended re-lead before waiters read it.
+        if cached is not None and turn_number <= inflight.target_turn:
             return cached
 
         if inflight.generation != self.epoch:

@@ -16,6 +16,10 @@ from api.analytics.fleet.chain import (
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.turn_context import FleetTurnContext
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    reset_inference_row_scheduler_for_tests,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.turn_roster import iter_turn_players
@@ -23,6 +27,8 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
+
+from tests.scores_exports_helpers import inference_solution, schedule_row_with_ladder
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -91,6 +97,42 @@ def test_partial_scores_closure_persists_non_final_provenance(persistence, load_
     assert loaded.provenance.is_final is False
     assert persistence.has_ledger(628580, 1, 111, player_id) is True
     assert persistence.has_final_ledger(628580, 1, 111, player_id) is False
+
+
+def test_scheduler_row_run_persists_non_final_fleet_provenance(persistence, load_turn):
+    """Scheduled scores RowRun must not close turnEvidenceAtN on fleet write."""
+    turn = load_turn(111)
+    assert turn is not None
+    player_id = turn.scores[0].ownerid
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    schedule_row_with_ladder(
+        scheduler,
+        turn,
+        player_id,
+        merged_solutions=[inference_solution(objective_value=12)],
+        game_id=628580,
+    )
+    scores_services = ScoresExportContext(scheduler=scheduler, persistence=None)
+    inference_materialization = FleetInferenceMaterialization(
+        inference=FleetInferenceSupport(scores_services=scores_services),
+        load_turn=load_turn,
+    )
+
+    get_or_materialize_fleet_ledger_for_player(
+        persistence,
+        628580,
+        1,
+        player_id,
+        turn,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    loaded = persistence.get_ledger(628580, 1, 111, player_id)
+    assert loaded is not None
+    assert loaded.provenance.turn_evidence_at_n is False
+    assert loaded.provenance.is_final is False
 
 
 def test_complete_scores_closure_persists_final_provenance_when_prior_final(

@@ -230,7 +230,10 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        raise RuntimeError(f"scores tier_solve missing registered RowRun for runId {run_id!r}")
+        # Cross-binding race: a peer orchestrator finalized/unregistered the shared
+        # RowRun while this binding still had a queued or continuing tier_solve wire.
+        # Treat as idempotent terminal -- the peer already delivered completion.
+        return StepResult(outcome="complete")
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:
@@ -251,12 +254,13 @@ class ScoresPersistencePolicy:
     """Orchestrator persistence hooks for per-player scores inference scopes."""
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
-        from api.analytics.scores.exports import is_scores_export_ensure_satisfied
+        """True when scores@N has terminal evidence (not merely a scheduled RowRun)."""
+        from api.analytics.scores.exports import is_scores_export_turn_evidence_closed
 
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None:
             return False
-        return is_scores_export_ensure_satisfied(ctx, export_scope)
+        return is_scores_export_turn_evidence_closed(ctx, export_scope)
 
     def persist(
         self,

@@ -14,7 +14,7 @@ from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
-    is_scores_export_ensure_satisfied_from_snapshot,
+    is_scores_export_turn_evidence_closed_from_snapshot,
 )
 from api.analytics.scores.export_snapshot import (
     gather_scores_materialization_probe_snapshot,
@@ -40,8 +40,8 @@ def resolve_fleet_materialization_provenance(
     (scoreboard ingest, ship sightings, ship-id bound tightening, and optional
     scores refinement, e.g. via ``apply_fleet_turn_delta_for_player``) before
     calling this function. ``turnEvidenceAtN`` checks RST@*N* availability and
-    ``scores@N`` ensure satisfaction only; ingest and sightings are not
-    re-verified here.
+    terminal ``scores@N`` evidence for this player (not merely an ensure-admitted
+    in-progress ``RowRun``); ingest and sightings are not re-verified here.
     """
     prior_ledger_at_n_minus_1 = materialize_turn == 1 or (
         prior_persisted is not None and prior_persisted.provenance.is_final
@@ -73,7 +73,7 @@ def _is_turn_evidence_closed(
 ) -> bool:
     if load_turn(materialize_turn) is None:
         return False
-    if not _scores_ensure_satisfied_for_player(
+    if not _scores_turn_evidence_closed_for_player(
         game_id=game_id,
         perspective=perspective,
         turn_number=materialize_turn,
@@ -86,7 +86,7 @@ def _is_turn_evidence_closed(
     return True
 
 
-def _scores_ensure_satisfied_for_player(
+def _scores_turn_evidence_closed_for_player(
     *,
     game_id: int,
     perspective: int,
@@ -137,7 +137,7 @@ def _scores_ensure_satisfied_for_player(
         get_persisted_row=get_persisted_row,
         player_score=player_score,
     )
-    return is_scores_export_ensure_satisfied_from_snapshot(
+    return is_scores_export_turn_evidence_closed_from_snapshot(
         snapshot,
         resolution_context=resolution_context,
     )

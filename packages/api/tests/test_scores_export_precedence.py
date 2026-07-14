@@ -265,6 +265,7 @@ def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolutio
         "ensure_satisfied",
         "needs_ensure_work",
         "search_status",
+        "turn_evidence_closed",
     ),
     [
         (
@@ -285,6 +286,7 @@ def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolutio
             True,
             False,
             "complete",
+            True,
         ),
         (
             ScoresInferenceSnapshot(
@@ -307,6 +309,7 @@ def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolutio
             True,
             False,
             "complete",
+            True,
         ),
         (
             ScoresInferenceSnapshot(
@@ -320,6 +323,7 @@ def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolutio
             False,
             True,
             "not_started",
+            False,
         ),
         (
             ScoresInferenceSnapshot(
@@ -339,6 +343,7 @@ def test_ensure_sync_admission_overrides_stream_admission_for_terminal_resolutio
             True,
             False,
             "complete",
+            True,
         ),
     ],
     ids=[
@@ -354,6 +359,7 @@ def test_ensure_satisfied_tracks_precedence_branch(
     ensure_satisfied: bool,
     needs_ensure_work: bool,
     search_status: str,
+    turn_evidence_closed: bool,
     sample_turn,
 ):
     resolved = resolve_scores_export(
@@ -363,6 +369,7 @@ def test_ensure_satisfied_tracks_precedence_branch(
     assert resolved.decision.branch == expected_branch
     assert resolved.decision.needs_ensure_work is needs_ensure_work
     assert resolved.decision.is_ensure_satisfied is ensure_satisfied
+    assert resolved.decision.is_turn_evidence_closed is turn_evidence_closed
     assert resolved.decision.search_status == search_status
     _ = resolved.payload
 
@@ -394,6 +401,7 @@ def test_scheduler_branch_ensure_satisfied_without_complete(sample_turn):
     assert resolved.decision.branch == "scheduler"
     assert resolved.decision.needs_ensure_work is False
     assert resolved.decision.is_ensure_satisfied is True
+    assert resolved.decision.is_turn_evidence_closed is False
     assert resolved.decision.search_status == "in_progress"
     _ = resolved.payload
 

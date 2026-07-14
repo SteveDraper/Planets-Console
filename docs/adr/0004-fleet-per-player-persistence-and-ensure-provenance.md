@@ -39,7 +39,7 @@ Each persisted ledger carries a **fleet materialization provenance** pair:
 
 | Flag | Meaning when `true` |
 |------|------------------------|
-| `turnEvidenceAtN` | Turn-*N* leg closed: RST@N available; turn-*N* scoreboard ingest and sightings applied for this player; `scores@N` ensure-satisfied for this `player_id` |
+| `turnEvidenceAtN` | Turn-*N* leg closed: RST@N available; turn-*N* scoreboard ingest and sightings applied for this player; **terminal** `scores@N` evidence for this `player_id` (persisted / terminal admission / functional backfill -- not merely an ensure-admitted in-progress scheduler `RowRun`) |
 | `priorLedgerAtNMinus1` | Prior-leg closed: `fleet@(N-1)` for this `player_id` exists and its provenance is `(true, true)`, or *N* = 1 (**fleet ensure baseline**) |
 
 **Final** persisted ledger at `fleet@N` for player P: both flags `true`.

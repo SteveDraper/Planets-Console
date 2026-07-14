@@ -81,6 +81,18 @@ class InferenceStreamOrchestration:
             raise RuntimeError("accelerated stream orchestration has no active segment")
         return observation_from_accelerated_segment(self.solve_score, self.solve_turn, segment)
 
+    def exhausted_segments_row_complete(self) -> RowComplete | None:
+        """Return a terminal row when segments are already consumed; else None.
+
+        Used when a late or duplicate tier job finds no active segment (e.g. after
+        a serialized peer finished the accelerated path).
+        """
+        if self.current_segment() is not None:
+            return None
+        if self.segment_solves:
+            return self._accelerated_stream_row_complete()
+        return None
+
     def current_solve_turn(self) -> TurnInfo:
         return self.solve_turn
 

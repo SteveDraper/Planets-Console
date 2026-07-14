@@ -24,6 +24,7 @@ from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
     is_scores_export_authoritatively_persisted,
     is_scores_export_ensure_satisfied_from_snapshot,
+    is_scores_export_turn_evidence_closed_from_snapshot,
     resolve_scores_export,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
@@ -184,6 +185,35 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     )
     resolution_context = _scores_resolution_context(ctx, services, scope, turn)
     return is_scores_export_ensure_satisfied_from_snapshot(
+        snapshot,
+        resolution_context=resolution_context,
+    )
+
+
+def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """True when scores@N is terminal for fleet ``turnEvidenceAtN``.
+
+    Unlike ``is_scores_export_ensure_satisfied``, an in-progress scheduler ``RowRun``
+    does not count -- fleet must wait for persisted or otherwise terminal scores.
+    """
+    if scope.player_id is None:
+        return True
+    if scope.turn <= 1:
+        return True
+
+    services = resolve_scores_services(ctx)
+    turn = ctx.load_turn(scope.turn)
+    if turn is None:
+        return True
+
+    snapshot = gather_scores_ensure_probe_snapshot(
+        ctx,
+        services,
+        scope,
+        turn,
+    )
+    resolution_context = _scores_resolution_context(ctx, services, scope, turn)
+    return is_scores_export_turn_evidence_closed_from_snapshot(
         snapshot,
         resolution_context=resolution_context,
     )

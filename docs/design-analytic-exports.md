@@ -107,8 +107,12 @@ when defined, otherwise `is_persisted`, plus `is_scope_ensured` on the query
 context to **omit** already-satisfied scopes from the walk. Baseline scopes are
 also skipped. **`is_persisted`** remains chain-complete / authoritative
 persistence only; **`is_ensure_satisfied`** means probe/ensure should skip
-because no further ensure work is possible or needed (e.g. scores stopped
-persisted rows). Steps that need work appear in `missing_steps` with
+because no further ensure *admit* work is needed (including an in-progress
+scores scheduler `RowRun` -- attach, do not re-schedule). That is weaker than
+**terminal scores evidence** used by fleet `turnEvidenceAtN`
+(`ScoresExportDecision.is_turn_evidence_closed`): a scheduled RowRun must not
+close fleet provenance, because later scores persist invalidates fleet ledgers
+from that host turn. Steps that need work appear in `missing_steps` with
 `status: "not_persisted"` only -- satisfied, in-progress, and baseline scopes
 are omitted rather than returned with `persisted`, `in_progress`, or
 `baseline`. Full status discrimination is planned for

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
 )
@@ -12,12 +14,18 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 
 
 class RowRun:
-    """One scoreboard row's ladder state and stream orchestration."""
+    """One scoreboard row's ladder state and stream orchestration.
+
+    ``tier_lock`` serializes ``run_inference_tier_job`` so duplicate concurrent
+    ``tier_solve`` dispatches (cross-binding) cannot race ``orchestration``
+    segment indexes or ladder state.
+    """
 
     def __init__(self, session: InferenceRowStreamSession) -> None:
         self.session = session
         self.ladder_state: PolicyLadderState | None = None
         self.orchestration: InferenceStreamOrchestration | None = None
+        self.tier_lock = threading.RLock()
 
     @property
     def run_id(self) -> str:

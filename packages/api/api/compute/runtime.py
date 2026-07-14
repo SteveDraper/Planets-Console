@@ -50,6 +50,12 @@ def release_orchestrator_for_context(ctx: AnalyticQueryContext) -> None:
     get_compute_diagnostics_controller().unbind_orchestrator(orchestrator)
 
 
+def live_orchestrators() -> tuple[ComputeOrchestrator, ...]:
+    """Return all query-context-bound orchestrators currently cached process-wide."""
+    with _orchestrator_lock:
+        return tuple(_orchestrators_by_ctx_id.values())
+
+
 def reset_orchestrators_for_tests() -> None:
     """Clear cached orchestrators (tests only)."""
     with _orchestrator_lock:
