@@ -212,6 +212,29 @@ def test_load_config_compute_diagnostics_start_frozen_string_raises():
         )
 
 
+def test_load_config_compute_diagnostics_timeline_capacity():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["api.compute_diagnostics_timeline_capacity=2500"],
+        default_config_path=base,
+    )
+    assert root.api.compute_diagnostics_timeline_capacity == 2500
+
+
+def test_load_config_compute_diagnostics_timeline_capacity_invalid_raises():
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(TypeError, match="compute_diagnostics_timeline_capacity"):
+        load_config(
+            override_specs=["api.compute_diagnostics_timeline_capacity=nope"],
+            default_config_path=base,
+        )
+    with pytest.raises(ValueError, match="compute_diagnostics_timeline_capacity"):
+        load_config(
+            override_specs=["api.compute_diagnostics_timeline_capacity=0"],
+            default_config_path=base,
+        )
+
+
 def test_load_config_include_dummy_data_bool():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(

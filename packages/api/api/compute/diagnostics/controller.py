@@ -49,6 +49,14 @@ from api.compute.diagnostics.single_step_preview import (
     resolve_single_step_preview,
     single_step_pin_matches,
 )
+from api.compute.diagnostics.timeline import (
+    ComputeConcurrencyTimeline,
+    OccupancyGauges,
+    OpenExecutionTracker,
+    TimelineEventKind,
+    format_execution_key,
+    make_concurrency_event,
+)
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OrchestratorNodeSnapshot
 from api.compute.pools import (
     ComputeWorkerPool,
@@ -77,12 +85,20 @@ def compute_diagnostics_start_frozen() -> bool:
     return cfg.compute_diagnostics and cfg.compute_diagnostics_start_frozen
 
 
+def compute_diagnostics_timeline_capacity() -> int:
+    """Return configured concurrency-timeline ring capacity (at least 1)."""
+    return max(1, get_config().compute_diagnostics_timeline_capacity)
+
+
 class ComputeDiagnosticsController:
     """Analytic-agnostic observer and freeze controller for compute orchestration."""
 
     def __init__(self) -> None:
         self._freeze_state = ComputeDiagnosticsFreezeState()
         self._histories: dict[ShellContextKey, ComputeCompletionHistory] = {}
+        self._timelines: dict[ShellContextKey, ComputeConcurrencyTimeline] = {}
+        self._open_executions = OpenExecutionTracker()
+        self._ready_depth_by_shell: dict[ShellContextKey, int] = {}
         self._in_flight: list[InFlightPoolExecution] = []
         self._bound_orchestrators: list[BoundOrchestrator] = []
         self._lock = threading.Lock()
@@ -107,6 +123,7 @@ class ComputeDiagnosticsController:
         # take ``_lock`` (pool -> controller). Controller -> pool here would ABBA.
         pool.set_dequeue_predicate(self._pool_item_is_runnable)
         pool.set_on_item_dequeued(self._on_pool_item_dequeued)
+        pool.set_on_item_enqueued(self._on_pool_item_enqueued)
         pool.set_on_item_finished(self._on_pool_item_finished)
         with self._lock:
             if self._wired and self._pool is pool:
@@ -158,12 +175,29 @@ class ComputeDiagnosticsController:
                 )
             )
         )
+        unregister_ready = orchestrator.register_ready_listener(
+            lambda scope, node, _orch_id=registration_id: self._on_node_ready(
+                scope,
+                node,
+                orchestrator_id=_orch_id,
+            )
+        )
+        unregister_inline_start = orchestrator.register_inline_start_listener(
+            lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
+                scope,
+                node,
+                step_kind,
+                orchestrator_id=_orch_id,
+            )
+        )
         with self._lock:
             for bound in self._bound_orchestrators:
                 if bound.orchestrator is orchestrator:
                     unregister_dispatch_gate()
                     unregister_dispatch_commit()
                     unregister_step_complete()
+                    unregister_ready()
+                    unregister_inline_start()
                     return
             self._bound_orchestrators.append(
                 BoundOrchestrator(
@@ -174,6 +208,8 @@ class ComputeDiagnosticsController:
                     unregister_dispatch_gate=unregister_dispatch_gate,
                     unregister_dispatch_commit_hook=unregister_dispatch_commit,
                     unregister_step_complete_listener=unregister_step_complete,
+                    unregister_ready_listener=unregister_ready,
+                    unregister_inline_start_listener=unregister_inline_start,
                 )
             )
 
@@ -202,6 +238,8 @@ class ComputeDiagnosticsController:
         bound.unregister_dispatch_gate()
         bound.unregister_dispatch_commit_hook()
         bound.unregister_step_complete_listener()
+        bound.unregister_ready_listener()
+        bound.unregister_inline_start_listener()
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
         if not self.is_enabled():
@@ -372,6 +410,9 @@ class ComputeDiagnosticsController:
             bound = list(self._bound_orchestrators)
             self._bound_orchestrators.clear()
             self._histories.clear()
+            self._timelines.clear()
+            self._open_executions.clear()
+            self._ready_depth_by_shell.clear()
             self._in_flight.clear()
             self._single_step.clear()
             self._active_game_id = None
@@ -380,10 +421,13 @@ class ComputeDiagnosticsController:
             entry.unregister_dispatch_gate()
             entry.unregister_dispatch_commit_hook()
             entry.unregister_step_complete_listener()
+            entry.unregister_ready_listener()
+            entry.unregister_inline_start_listener()
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)
             self._pool.set_on_item_dequeued(None)
+            self._pool.set_on_item_enqueued(None)
             self._pool.set_on_item_finished(None)
         self._pool = None
         self._wired = False
@@ -395,6 +439,162 @@ class ComputeDiagnosticsController:
                 history = ComputeCompletionHistory(capacity=DEFAULT_COMPLETION_HISTORY_CAP)
                 self._histories[shell] = history
             return history
+
+    def _timeline_for_shell(self, shell: ShellContextKey) -> ComputeConcurrencyTimeline:
+        with self._lock:
+            timeline = self._timelines.get(shell)
+            if timeline is None:
+                timeline = ComputeConcurrencyTimeline(
+                    capacity=compute_diagnostics_timeline_capacity()
+                )
+                self._timelines[shell] = timeline
+            return timeline
+
+    def timeline_recent(self, shell: ShellContextKey) -> tuple:
+        """Return recent concurrency timeline events for ``shell`` (tests / snapshot)."""
+        return self._timeline_for_shell(shell).recent()
+
+    def _occupancy_gauges(
+        self,
+        shell: ShellContextKey,
+        *,
+        global_queue_depth: int | None = None,
+        sample_ready_from_orchestrators: bool = False,
+    ) -> OccupancyGauges:
+        """Sample occupancy gauges for a timeline event.
+
+        Ready depth prefers the controller's ready-event counter so pool-lock
+        callbacks never nest into orchestrator locks. When
+        ``sample_ready_from_orchestrators`` is true (outside the pool lock),
+        the live orchestrator ready queues are used instead.
+        """
+        ancestor_turns = self._ancestor_turns_for_shell(shell)
+        if sample_ready_from_orchestrators:
+            ready_depth = 0
+            for bound in self._bound_orchestrators_snapshot():
+                if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
+                    continue
+                view = bound.orchestrator.diagnostics_snapshot()
+                for ready_scope in view.ready_scopes:
+                    if scope_in_diagnostic_scope(
+                        ready_scope,
+                        game_id=shell.game_id,
+                        perspective=shell.perspective,
+                        ancestor_turns=ancestor_turns,
+                    ):
+                        ready_depth += 1
+        else:
+            with self._lock:
+                ready_depth = self._ready_depth_by_shell.get(shell, 0)
+        with self._lock:
+            scoped_in_flight = sum(
+                1
+                for record in self._in_flight
+                if scope_in_diagnostic_scope(
+                    record.scope,
+                    game_id=shell.game_id,
+                    perspective=shell.perspective,
+                    ancestor_turns=ancestor_turns,
+                )
+            )
+            global_in_flight = len(self._in_flight)
+        if global_queue_depth is None:
+            if self._pool is not None:
+                global_queue_depth = len(self._pool.snapshot_work_queue())
+            else:
+                global_queue_depth = 0
+        configured_workers = self._pool.worker_count if self._pool is not None else 0
+        return OccupancyGauges(
+            scoped_ready_depth=ready_depth,
+            scoped_in_flight_count=scoped_in_flight,
+            global_in_flight_count=global_in_flight,
+            global_queue_depth=global_queue_depth,
+            configured_workers=configured_workers,
+        )
+
+    def _adjust_ready_depth(self, shell: ShellContextKey, delta: int) -> None:
+        with self._lock:
+            next_depth = max(0, self._ready_depth_by_shell.get(shell, 0) + delta)
+            self._ready_depth_by_shell[shell] = next_depth
+
+    def _append_timeline_event(
+        self,
+        shell: ShellContextKey,
+        *,
+        kind: TimelineEventKind,
+        scope_key: str,
+        execution_key: str,
+        gauges: OccupancyGauges,
+        step_kind: str | None = None,
+        step_index: int | None = None,
+        priority_band=None,
+        backend: str | None = None,
+        terminal_state: str | None = None,
+        duration_ms: float | None = None,
+    ) -> None:
+        self._timeline_for_shell(shell).append(
+            make_concurrency_event(
+                kind=kind,
+                scope_key=scope_key,
+                execution_key=execution_key,
+                gauges=gauges,
+                step_kind=step_kind,
+                step_index=step_index,
+                priority_band=priority_band,
+                backend=backend,
+                terminal_state=terminal_state,
+                duration_ms=duration_ms,
+            )
+        )
+
+    def _record_finish(
+        self,
+        shell: ShellContextKey,
+        *,
+        scope: ComputeScope,
+        node: ComputeNodeRun,
+        step_kind: str,
+        surface: CompletionSurface,
+        terminal_state: CompletionTerminalState,
+        orchestrator_id: int | None,
+        backend: str | None,
+        global_queue_depth: int | None = None,
+    ) -> None:
+        """One finish sink: timeline complete/inline_complete + completion history."""
+        scope_key = format_compute_scope_key(scope)
+        execution_key = format_execution_key(
+            orchestrator_id=orchestrator_id,
+            scope_key=scope_key,
+            step_kind=step_kind,
+            step_index=node.step_index,
+        )
+        duration_ms, opened_backend = self._open_executions.close(execution_key)
+        resolved_backend = backend if backend is not None else opened_backend
+        gauges = self._occupancy_gauges(shell, global_queue_depth=global_queue_depth)
+        timeline_kind = "inline_complete" if surface == "inline" else "complete"
+        self._append_timeline_event(
+            shell,
+            kind=timeline_kind,
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=step_kind,
+            step_index=node.step_index,
+            priority_band=node.priority_band,
+            backend=resolved_backend,
+            terminal_state=terminal_state,
+            duration_ms=duration_ms,
+        )
+        self._history_for_shell(shell).append(
+            scope_key=scope_key,
+            surface=surface,
+            terminal_state=terminal_state,
+            step_kind=step_kind,
+            step_index=node.step_index,
+            priority_band=node.priority_band,
+            backend=resolved_backend,
+            duration_ms=duration_ms,
+        )
 
     def _bound_orchestrators_snapshot(self) -> tuple[BoundOrchestrator, ...]:
         with self._lock:
@@ -728,7 +928,7 @@ class ComputeDiagnosticsController:
             return True
         return not self._is_scope_frozen(item.scope, shell)
 
-    def _on_pool_item_dequeued(self, item: PoolWorkItem) -> None:
+    def _on_pool_item_dequeued(self, item: PoolWorkItem, queue_depth: int = 0) -> None:
         """Record in-flight work and consume a single-step grant when applicable.
 
         Invoked under the pool lock after pop so concurrent workers cannot both
@@ -736,17 +936,64 @@ class ComputeDiagnosticsController:
         """
         with self._lock:
             self._in_flight.append(in_flight_from_pool_item(item))
-            if self._single_step.grants_remaining <= 0:
-                return
-            if not self._single_step_may_release(
-                item.scope,
-                priority_band=item.priority_band,
-                orchestrator_id=item.orchestrator_id,
-            ):
-                return
-            self._single_step.grants_remaining -= 1
-            if self._single_step.grants_remaining == 0:
-                self._single_step.clear()
+            if self._single_step.grants_remaining > 0:
+                if self._single_step_may_release(
+                    item.scope,
+                    priority_band=item.priority_band,
+                    orchestrator_id=item.orchestrator_id,
+                ):
+                    self._single_step.grants_remaining -= 1
+                    if self._single_step.grants_remaining == 0:
+                        self._single_step.clear()
+        shell = self._scope_matches_active_shell(item.scope)
+        if shell is None:
+            return
+        scope_key = format_compute_scope_key(item.scope)
+        execution_key = format_execution_key(
+            orchestrator_id=item.orchestrator_id,
+            scope_key=scope_key,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+        )
+        self._open_executions.open(execution_key, backend=item.backend)
+        gauges = self._occupancy_gauges(shell, global_queue_depth=queue_depth)
+        self._append_timeline_event(
+            shell,
+            kind="start",
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+            priority_band=item.priority_band,
+            backend=item.backend,
+        )
+
+    def _on_pool_item_enqueued(self, item: PoolWorkItem, queue_depth: int) -> None:
+        """Record a pool enqueue timeline event when the scope matches the operator shell."""
+        shell = self._scope_matches_active_shell(item.scope)
+        if shell is None:
+            return
+        self._adjust_ready_depth(shell, -1)
+        scope_key = format_compute_scope_key(item.scope)
+        execution_key = format_execution_key(
+            orchestrator_id=item.orchestrator_id,
+            scope_key=scope_key,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+        )
+        gauges = self._occupancy_gauges(shell, global_queue_depth=queue_depth)
+        self._append_timeline_event(
+            shell,
+            kind="enqueue",
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+            priority_band=item.priority_band,
+            backend=item.backend,
+        )
 
     def _on_pool_item_finished(self, item: PoolWorkItem) -> None:
         """Clear the matching in-flight record after a pool worker finishes the item.
@@ -779,6 +1026,73 @@ class ComputeDiagnosticsController:
                 orchestrator_id=orchestrator_id,
             )
 
+    def _on_node_ready(
+        self,
+        scope: ComputeScope,
+        node: ComputeNodeRun,
+        *,
+        orchestrator_id: int | None = None,
+    ) -> None:
+        shell = self._scope_matches_active_shell(scope)
+        if shell is None:
+            return
+        self._adjust_ready_depth(shell, 1)
+        scope_key = format_compute_scope_key(scope)
+        step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
+        step_kind = step_spec.step_kind if step_spec is not None else None
+        backend = step_spec.backend if step_spec is not None else None
+        execution_key = format_execution_key(
+            orchestrator_id=orchestrator_id,
+            scope_key=scope_key,
+            step_kind=step_kind or "",
+            step_index=node.step_index,
+        )
+        gauges = self._occupancy_gauges(shell, sample_ready_from_orchestrators=True)
+        self._append_timeline_event(
+            shell,
+            kind="ready",
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=step_kind,
+            step_index=node.step_index,
+            priority_band=node.priority_band,
+            backend=backend,
+        )
+
+    def _on_inline_start(
+        self,
+        scope: ComputeScope,
+        node: ComputeNodeRun,
+        step_kind: str,
+        *,
+        orchestrator_id: int | None = None,
+    ) -> None:
+        shell = self._scope_matches_active_shell(scope)
+        if shell is None:
+            return
+        self._adjust_ready_depth(shell, -1)
+        scope_key = format_compute_scope_key(scope)
+        execution_key = format_execution_key(
+            orchestrator_id=orchestrator_id,
+            scope_key=scope_key,
+            step_kind=step_kind,
+            step_index=node.step_index,
+        )
+        self._open_executions.open(execution_key, backend="inline")
+        gauges = self._occupancy_gauges(shell, sample_ready_from_orchestrators=True)
+        self._append_timeline_event(
+            shell,
+            kind="inline_start",
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=step_kind,
+            step_index=node.step_index,
+            priority_band=node.priority_band,
+            backend="inline",
+        )
+
     def _on_step_complete(
         self,
         scope: ComputeScope,
@@ -806,13 +1120,16 @@ class ComputeDiagnosticsController:
         step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
         if step_spec is None or step_spec.step_kind != step_kind:
             return
-        self._history_for_shell(shell).append(
-            scope_key=format_compute_scope_key(scope),
+        backend = "inline" if surface == "inline" else step_spec.backend
+        self._record_finish(
+            shell,
+            scope=scope,
+            node=node,
+            step_kind=step_kind,
             surface=surface,
             terminal_state=terminal_state,
-            step_kind=step_kind,
-            step_index=node.step_index,
-            priority_band=node.priority_band,
+            orchestrator_id=orchestrator_id,
+            backend=backend,
         )
 
 

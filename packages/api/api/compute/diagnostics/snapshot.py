@@ -233,6 +233,8 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
             "stepIndex": record["step_index"],
             "priorityBand": record["priority_band"],
             "completedAt": record["completed_at"],
+            "backend": record.get("backend"),
+            "durationMs": record.get("duration_ms"),
         }
         for record in snapshot.completion_history
     ]

@@ -22,6 +22,10 @@ StepCompleteListener = Callable[
     [ComputeScope, "ComputeNodeRun", str, Literal["inline", "pool"], Literal["success", "failed"]],
     None,
 ]
+# Fired when a node first enters the ready queue (deps satisfied).
+ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+# Fired when an inline step begins execution outside the orchestrator lock.
+InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Side-effecting accept after all gates pass (e.g. consume a single-step slot).
 # Must be idempotent-safe under reject: return False to leave the node ready.
@@ -176,6 +180,8 @@ class ComputeOrchestrator:
         self._condition = threading.Condition(self._lock)
         self._node_complete_listeners: list[NodeCompleteListener] = []
         self._step_complete_listeners: list[StepCompleteListener] = []
+        self._ready_listeners: list[ReadyListener] = []
+        self._inline_start_listeners: list[InlineStartListener] = []
         self._dispatch_gates: list[NodeDispatchGate] = []
         self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
@@ -284,6 +290,49 @@ class ComputeOrchestrator:
             with self._condition:
                 try:
                     self._step_complete_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
+    def register_ready_listener(
+        self,
+        listener: ReadyListener,
+    ) -> Callable[[], None]:
+        """Register a ready-queue listener; return an unregister callable.
+
+        Listeners run after the orchestrator lock is released (via post-lock
+        callbacks) so observers may take other locks without nesting under the
+        orchestrator condition.
+        """
+        with self._condition:
+            self._ready_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._ready_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
+    def register_inline_start_listener(
+        self,
+        listener: InlineStartListener,
+    ) -> Callable[[], None]:
+        """Register an inline-step start listener; return an unregister callable.
+
+        Listeners run outside the orchestrator lock at the start of inline
+        execution (before job-wire build / ``run_step``).
+        """
+        with self._condition:
+            self._inline_start_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._inline_start_listeners.remove(listener)
                 except ValueError:
                     return
 
@@ -550,6 +599,7 @@ class ComputeOrchestrator:
             if node.state != "ready":
                 node.state = "ready"
                 self._enqueue_ready(node.scope)
+                self._notify_ready(node)
         else:
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
@@ -646,6 +696,7 @@ class ComputeOrchestrator:
 
     def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
         node = pending.node
+        self._notify_inline_start(node, pending.step.step_kind)
         try:
             builder = pending.registration.build_step_job_wire[pending.step.step_kind]
             job_wire = builder(
@@ -791,6 +842,7 @@ class ComputeOrchestrator:
         node.generation_at_submit = None
         node.state = "ready"
         self._enqueue_ready(node.scope)
+        self._notify_ready(node)
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._post_lock_callbacks.append(self.dispatch_ready_work)
 
@@ -879,6 +931,7 @@ class ComputeOrchestrator:
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         self._enqueue_ready(node.scope)
+        self._notify_ready(node)
         # Defer dispatch so pool submit is never nested under this lock.
         self._post_lock_callbacks.append(self.dispatch_ready_work)
 
@@ -913,6 +966,19 @@ class ComputeOrchestrator:
             self._post_lock_callbacks.append(
                 lambda listener=listener, node=node: listener(node.scope, node),
             )
+
+    def _notify_ready(self, node: ComputeNodeRun) -> None:
+        listeners = tuple(self._ready_listeners)
+        for listener in listeners:
+            self._post_lock_callbacks.append(
+                lambda listener=listener, node=node: listener(node.scope, node),
+            )
+
+    def _notify_inline_start(self, node: ComputeNodeRun, step_kind: str) -> None:
+        with self._condition:
+            listeners = tuple(self._inline_start_listeners)
+        for listener in listeners:
+            listener(node.scope, node, step_kind)
 
     def _notify_step_complete(
         self,

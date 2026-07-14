@@ -147,7 +147,8 @@ class ComputeWorkerPool:
         self._workers: list[threading.Thread] = []
         self._metrics = PoolMetrics()
         self._dequeue_predicate: Callable[[PoolWorkItem], bool] | None = None
-        self._on_item_dequeued: Callable[[PoolWorkItem], None] | None = None
+        self._on_item_dequeued: Callable[[PoolWorkItem, int], None] | None = None
+        self._on_item_enqueued: Callable[[PoolWorkItem, int], None] | None = None
         self._on_item_finished: Callable[[PoolWorkItem], None] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
@@ -183,11 +184,25 @@ class ComputeWorkerPool:
 
     def set_on_item_dequeued(
         self,
-        callback: Callable[[PoolWorkItem], None] | None,
+        callback: Callable[[PoolWorkItem, int], None] | None,
     ) -> None:
-        """Set a hook invoked once under the pool lock for the item actually dequeued."""
+        """Set a hook invoked once under the pool lock for the item actually dequeued.
+
+        The second argument is the work-queue depth after the item was popped.
+        """
         with self._condition:
             self._on_item_dequeued = callback
+
+    def set_on_item_enqueued(
+        self,
+        callback: Callable[[PoolWorkItem, int], None] | None,
+    ) -> None:
+        """Set a hook invoked under the pool lock after an item is enqueued.
+
+        The second argument is the work-queue depth after the append.
+        """
+        with self._condition:
+            self._on_item_enqueued = callback
 
     def set_on_item_finished(
         self,
@@ -246,7 +261,7 @@ class ComputeWorkerPool:
             self._metrics.dequeues += 1
             # Same critical section as pop -- grant burn must be atomic with selection.
             if on_dequeued is not None:
-                on_dequeued(item)
+                on_dequeued(item, len(self._work_queue))
             return item
 
     def register(self, orchestrator: ComputeOrchestrator) -> int:
@@ -282,18 +297,21 @@ class ComputeWorkerPool:
     ) -> None:
         """Enqueue one ready orchestrator step for pool execution."""
         with self._condition:
-            self._work_queue.append(
-                PoolWorkItem(
-                    orchestrator_id=orchestrator_id,
-                    scope=node.scope,
-                    step_kind=step.step_kind,
-                    backend=step.backend,
-                    priority_band=priority_band,
-                    step_index=node.step_index,
-                    job_wire=job_wire,
-                    run_step=run_step,
-                )
+            item = PoolWorkItem(
+                orchestrator_id=orchestrator_id,
+                scope=node.scope,
+                step_kind=step.step_kind,
+                backend=step.backend,
+                priority_band=priority_band,
+                step_index=node.step_index,
+                job_wire=job_wire,
+                run_step=run_step,
             )
+            self._work_queue.append(item)
+            on_enqueued = self._on_item_enqueued
+            queue_depth = len(self._work_queue)
+            if on_enqueued is not None:
+                on_enqueued(item, queue_depth)
             self._condition.notify()
 
     def shutdown(self, *, wait_for_interpreters: bool = False) -> None:
@@ -349,7 +367,7 @@ class ComputeWorkerPool:
                     # Same critical section as pop -- grant burn must be atomic with selection.
                     # Callback may take the diagnostics controller lock (pool -> controller).
                     if on_dequeued is not None:
-                        on_dequeued(item)
+                        on_dequeued(item, len(self._work_queue))
                     return item
                 self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
             return None

@@ -19,3 +19,5 @@ class BoundOrchestrator:
     unregister_dispatch_gate: Callable[[], None]
     unregister_dispatch_commit_hook: Callable[[], None]
     unregister_step_complete_listener: Callable[[], None]
+    unregister_ready_listener: Callable[[], None]
+    unregister_inline_start_listener: Callable[[], None]

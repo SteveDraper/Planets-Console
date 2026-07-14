@@ -30,6 +30,9 @@ class ApiConfig:
     compute_diagnostics_start_frozen: bool = False
     """When compute_diagnostics is on, arm freeze on first shell/game contact (empty allowlist)."""
 
+    compute_diagnostics_timeline_capacity: int = 5000
+    """Ring-buffer capacity for the compute concurrency timeline (drop oldest on wrap)."""
+
 
 def get_config() -> ApiConfig:
     """Return the current API config. Defaults if not yet set by server."""
