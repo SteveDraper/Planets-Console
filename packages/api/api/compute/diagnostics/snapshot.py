@@ -15,6 +15,12 @@ from api.compute.diagnostics.remote_futures import (
     build_remote_pool_wire,
     index_remote_futures_by_key,
 )
+from api.compute.diagnostics.rollup import (
+    build_concurrency_timeline_rollup,
+    event_to_wire,
+    live_occupancy_to_wire,
+    rollup_to_wire,
+)
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
@@ -22,6 +28,7 @@ from api.compute.diagnostics.single_step_preview import (
     SingleStepPreview,
     single_step_preview_to_wire,
 )
+from api.compute.diagnostics.timeline import ComputeConcurrencyEvent
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import PoolWorkItem
 from api.compute.remote_futures import (
@@ -46,6 +53,9 @@ class ComputeDiagnosticsSnapshot:
     completion_history: tuple[dict[str, Any], ...]
     server_streams: tuple[dict[str, Any], ...]
     remote_pool: dict[str, Any]
+    live_occupancy: dict[str, Any]
+    concurrency_timeline: tuple[dict[str, Any], ...]
+    concurrency_rollup: dict[str, Any]
 
 
 def _node_wire(
@@ -109,6 +119,9 @@ def build_compute_diagnostics_snapshot(
     next_single_step: SingleStepPreview | None,
     single_step_disabled_reason: SingleStepDisabledReason | None,
     completion_history: tuple[ComputeCompletionRecord, ...],
+    concurrency_timeline: tuple[ComputeConcurrencyEvent, ...] = (),
+    global_in_flight_count: int = 0,
+    configured_workers: int = 0,
     remote_futures: tuple[RemotePoolFutureRecord, ...] = (),
     remote_executor_probe: dict[str, object] | None = None,
 ) -> ComputeDiagnosticsSnapshot:
@@ -197,6 +210,25 @@ def build_compute_diagnostics_snapshot(
         process_queue_depth=_optional_int(probe.get("processQueueDepth")),
     )
 
+    backend_mix: dict[str, int] = {}
+    for record in in_flight:
+        backend_mix[record.backend] = backend_mix.get(record.backend, 0) + 1
+    for item in pool_queue_items:
+        if not _scope_in_shell(item.scope, shell=shell, ancestor_turns=ancestor_turns):
+            continue
+        backend_mix[item.backend] = backend_mix.get(item.backend, 0) + 1
+
+    live_occupancy = live_occupancy_to_wire(
+        configured_workers=configured_workers,
+        scoped_ready_depth=len(ready_queue),
+        scoped_in_flight_count=len(in_flight_rows),
+        global_in_flight_count=global_in_flight_count,
+        global_queue_depth=len(pool_queue_items),
+        backend_mix=dict(sorted(backend_mix.items())),
+    )
+    timeline_wire = tuple(event_to_wire(event) for event in concurrency_timeline)
+    concurrency_rollup = rollup_to_wire(build_concurrency_timeline_rollup(concurrency_timeline))
+
     return ComputeDiagnosticsSnapshot(
         shell=shell,
         freeze_armed=freeze_armed,
@@ -212,6 +244,9 @@ def build_compute_diagnostics_snapshot(
         completion_history=tuple(asdict(record) for record in completion_history),
         server_streams=server_streams,
         remote_pool=remote_pool,
+        live_occupancy=live_occupancy,
+        concurrency_timeline=timeline_wire,
+        concurrency_rollup=concurrency_rollup,
     )
 
 
@@ -254,4 +289,7 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
         "completionHistory": completion_history,
         "serverStreams": list(snapshot.server_streams),
         "remotePool": snapshot.remote_pool,
+        "liveOccupancy": snapshot.live_occupancy,
+        "concurrencyTimeline": list(snapshot.concurrency_timeline),
+        "concurrencyRollup": snapshot.concurrency_rollup,
     }

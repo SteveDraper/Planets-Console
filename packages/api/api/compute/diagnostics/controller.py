@@ -293,6 +293,9 @@ class ComputeDiagnosticsController:
             next_single_step=preview,
             single_step_disabled_reason=disabled_reason,
             completion_history=self._history_for_shell(shell).recent(),
+            concurrency_timeline=self._timeline_for_shell(shell).recent(),
+            global_in_flight_count=len(self._in_flight_snapshot()),
+            configured_workers=self._pool.worker_count if self._pool is not None else 0,
             remote_futures=remote_futures,
             remote_executor_probe=remote_executor_probe,
         )

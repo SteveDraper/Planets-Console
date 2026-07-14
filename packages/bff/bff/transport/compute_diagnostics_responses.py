@@ -27,6 +27,9 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     completion_history: list[dict] = Field(alias="completionHistory")
     server_streams: list[dict] = Field(alias="serverStreams")
     remote_pool: dict = Field(alias="remotePool")
+    live_occupancy: dict = Field(alias="liveOccupancy")
+    concurrency_timeline: list[dict] = Field(alias="concurrencyTimeline")
+    concurrency_rollup: dict = Field(alias="concurrencyRollup")
 
 
 class ComputeDiagnosticsFreezeStatusResponse(BaseModel):

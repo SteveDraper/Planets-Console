@@ -1392,9 +1392,16 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "completionHistory",
         "serverStreams",
         "remotePool",
+        "liveOccupancy",
+        "concurrencyTimeline",
+        "concurrencyRollup",
     }
     assert wire["freezeArmed"] is False
     assert wire["inFlight"] == []
+    assert wire["liveOccupancy"]["scopedReadyDepth"] == 0
+    assert wire["concurrencyTimeline"] == []
+    assert wire["concurrencyRollup"]["eventCount"] == 0
+    assert "bottleneckClass" not in wire["concurrencyRollup"]
     assert wire["remotePool"] == {
         "interpreter": {
             "maxWorkers": None,

@@ -102,6 +102,12 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     assert "completionHistory" in body
     assert "serverStreams" in body
     assert "remotePool" in body
+    assert "liveOccupancy" in body
+    assert "concurrencyTimeline" in body
+    assert "concurrencyRollup" in body
+    assert body["liveOccupancy"]["configuredWorkers"] >= 0
+    assert body["concurrencyRollup"]["eventCount"] == 0
+    assert "bottleneckClass" not in body["concurrencyRollup"]
     assert body["remotePool"]["interpreter"]["counts"] == {
         "pending": 0,
         "running": 0,
