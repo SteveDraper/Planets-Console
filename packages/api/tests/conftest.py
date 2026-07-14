@@ -114,8 +114,6 @@ _SLOW_TEST_NAMES = frozenset(
     {
         "test_628580_accel_window_ranks_ten_planet_defense_first",
         "test_corpus_case_still_infers_exact_with_accelerated_adjustment",
-        "test_ensure_prior_turn_sync_passes_fleet_torp_input_status",
-        "test_ensure_prior_turn_sync_puts_persistable_row",
         "test_fixed_corpus_coverage_case_has_ground_truth_available",
         "test_fixed_corpus_host2_hard_ranking_lock_passes",
         "test_fixed_inference_corpus_tier1_passes",

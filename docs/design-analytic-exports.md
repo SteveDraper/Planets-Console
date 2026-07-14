@@ -84,9 +84,10 @@ Export materialization is **not** read-only. `ctx.query(...)` runs **analytic ex
 | **In-flight attach** | If the same scope is already on the inference scheduler/stream, ensure attaches and reflects live state -- no duplicate jobs. |
 | **Ensure scope** | Typically `(game_id, perspective, turn, player_id)` for row-scoped exports (e.g. **scores** `$.solutions.*`). No batch ensure API in v1. |
 | **Unwind direction** | Turn *N* reads *N−1* only. Example chain: Fleet@N <- Scores@N <- Fleet@N−1 <- Scores@N−1 <- … |
-| **Small probe** | Inline ensure allowed; prior turns may sync-ensure when step count is at or below threshold. |
+| **Small probe** | Inline ensure allowed for cheap probe/schedule admission when step count is at or below threshold. |
 | **Large probe** | Block inline ensure; user confirms; **background full-unwind job** with progress stream. |
 | **Current shell turn** | Expensive work (e.g. scores inference) stays **async** -- attach stream / return `in_progress`. |
+| **Historical scores** | Same admission as ambient: schedule a ``RowRun``; CP-SAT runs only on orchestrator ``tier_solve`` (thread pool), never sync on materialize/ensure. |
 | **Persistence gate** | Only full-unwind authoritative results are persistable for chain use (no approximate rows in #93). |
 
 Ensure does **not** rely on the user having opened each analytic in visit order.

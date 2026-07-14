@@ -41,7 +41,7 @@ def _reset_inference_stream_registry() -> None:
 
 def _assert_probe_does_not_compute(monkeypatch):
     """Fail the test if probe invokes inference, stream resolution, or payload materialization."""
-    from api.analytics.scores import export_precedence, exports
+    from api.analytics.scores import export_precedence, exports, inference
     from api.analytics.scores import export_snapshot as export_snapshot_module
 
     monkeypatch.setattr(
@@ -53,6 +53,13 @@ def _assert_probe_does_not_compute(monkeypatch):
     )
     monkeypatch.setattr(
         exports,
+        "schedule_inference_row",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe must not schedule inference rows")
+        ),
+    )
+    monkeypatch.setattr(
+        inference,
         "get_scores_row_inference",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("probe must not run scores row inference")
@@ -151,7 +158,7 @@ def test_probe_reports_prior_turn_work_without_running_ensure(sample_turn, persi
 
     with (
         patch(
-            "api.analytics.scores.exports.get_scores_row_inference",
+            "api.analytics.scores.inference.get_scores_row_inference",
         ) as mock_inference,
         patch(
             "api.analytics.scores.exports.schedule_inference_row",
@@ -195,85 +202,109 @@ def test_probe_reports_current_turn_work_without_scheduling(sample_turn, persist
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
 
-def test_ensure_prior_turn_sync_puts_persistable_row(sample_turn, persistence):
-    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
+def test_ensure_prior_turn_schedules_inference_row_without_sync_solve(sample_turn, persistence):
+    """Historical ensure admits via schedule; never sync CP-SAT or put_row."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    stream_scope = stream_scope_for_turn(sample_turn, turn_number=110)
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
-    EXPORT_CATALOG.ensure_export(ctx, scope)
+    with (
+        patch(
+            "api.analytics.scores.inference.get_scores_row_inference",
+        ) as mock_inference,
+        patch.object(persistence, "put_row") as mock_put_row,
+    ):
+        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        mock_inference.assert_not_called()
+        mock_put_row.assert_not_called()
 
-    row = persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id)
-    assert row is not None
-    assert row.status in {STATUS_EXACT, "no_exact_solution"}
+    assert scheduler.row_run_for_player(stream_scope, player_id) is not None
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
 
 
-def test_ensure_prior_turn_sync_passes_fleet_torp_input_status(sample_turn, persistence):
-    from api.analytics.scores.inference import get_scores_row_inference as real_inference
-
-    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
+def test_ensure_prior_turn_scheduler_passes_fleet_torp_input_status(sample_turn, persistence):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
     captured: dict[str, object] = {}
 
-    def capture_and_run(*args, **kwargs):
+    def capture_and_schedule(*args, **kwargs):
         captured.update(kwargs)
-        return real_inference(*args, **kwargs)
+        return schedule_inference_row(*args, **kwargs)
 
     with patch(
-        "api.analytics.scores.exports.get_scores_row_inference",
-        side_effect=capture_and_run,
+        "api.analytics.scores.exports.schedule_inference_row",
+        side_effect=capture_and_schedule,
     ):
         EXPORT_CATALOG.ensure_export(ctx, scope)
 
     assert captured.get("fleet_torp_input_status") == "applied"
 
 
-def test_ensure_no_op_when_prior_turn_inference_non_persistable(sample_turn, persistence):
-    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
-    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+def test_ensure_prior_turn_no_schedule_when_already_persisted(sample_turn, persistence):
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="cached",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=110,
+    )
+    stream_scope = stream_scope_for_turn(sample_turn, turn_number=110)
 
-    stopped_inference = {
-        "playerId": player_id,
-        "status": STATUS_STOPPED,
-        "summary": "stopped",
-        "solutionCount": 1,
-        "isComplete": True,
-        "solutions": [],
-        "diagnostics": {"turn": 110},
-    }
     with patch(
-        "api.analytics.scores.exports.get_scores_row_inference",
-        return_value=stopped_inference,
-    ) as mock_inference:
+        "api.analytics.scores.exports.schedule_inference_row",
+    ) as mock_schedule:
         assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
-        mock_inference.assert_called_once()
+        mock_schedule.assert_not_called()
 
-    assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
 
 
-def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn, persistence):
-    """After ensure stashes terminal sync admission, probe and is_ensure_satisfied agree."""
-    ctx, scope, player_id, _, _ = prior_turn_ensure_context(sample_turn, persistence)
-    stopped_inference = {
-        "playerId": player_id,
-        "status": STATUS_STOPPED,
-        "summary": "stopped",
-        "solutionCount": 1,
-        "isComplete": True,
-        "solutions": [],
-        "diagnostics": {"turn": 110},
-    }
-    with patch(
-        "api.analytics.scores.exports.get_scores_row_inference",
-        return_value=stopped_inference,
-    ):
-        result = ctx.query(
-            "scores",
-            ["$.meta.searchStatus"],
-            {"turn": 110, "player_id": player_id},
-            force_inline_ensure=True,
-        )
+def test_probe_after_prior_turn_schedule_omits_missing_step(sample_turn, persistence):
+    """After historical ensure schedules a RowRun, probe treats ensure as satisfied."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+
+    result = ctx.query(
+        "scores",
+        ["$.meta.searchStatus"],
+        {"turn": 110, "player_id": player_id},
+        force_inline_ensure=True,
+    )
 
     assert result.status == "ok"
-    assert result.paths["$.meta.searchStatus"].value == "stopped"
+    assert result.paths["$.meta.searchStatus"].value == "in_progress"
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
@@ -284,6 +315,35 @@ def test_probe_after_non_persistable_prior_ensure_omits_missing_step(sample_turn
     assert probe.status == "ok"
     assert probe.total_missing == 0
     assert probe.missing_steps == ()
+
+
+def test_ensure_player_not_found_records_ephemeral_without_schedule(sample_turn, persistence):
+    """Missing scoreboard row is a cheap terminal; no RowRun and no CP-SAT."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    missing_player_id = 9_999_999
+    ctx, scope, _, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    scope = ExportScope(
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        player_id=missing_player_id,
+    )
+    stream_scope = stream_scope_for_turn(sample_turn, turn_number=110)
+
+    with patch(
+        "api.analytics.scores.exports.schedule_inference_row",
+    ) as mock_schedule:
+        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        mock_schedule.assert_not_called()
+
+    assert scheduler.row_run_for_player(stream_scope, missing_player_id) is None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
+    assert ctx.ensure_ephemeral("scores", scope) is not None
 
 
 def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):

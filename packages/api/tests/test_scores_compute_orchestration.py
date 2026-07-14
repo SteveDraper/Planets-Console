@@ -170,7 +170,7 @@ def test_run_scores_materialize_continues_to_tier_solve() -> None:
 def test_scores_tier_solve_without_row_run_completes_after_materialize_continue(
     sample_turn,
 ) -> None:
-    """Ensure-only scores scopes (no stream RowRun) still terminate after materialize."""
+    """No-work scopes (already satisfied / no RowRun needed) still terminate after materialize."""
     from api.analytics.scores.compute_orchestration import (
         build_scores_tier_solve_job_wire,
         run_scores_materialize,
@@ -200,10 +200,122 @@ def test_scores_tier_solve_without_row_run_completes_after_materialize_continue(
     assert tier.outcome == "complete"
 
 
+def test_historical_materialize_schedules_row_run_for_tier_solve(
+    sample_turn,
+    persistence,
+) -> None:
+    """Historical gap-fill: materialize schedules RowRun; no sync CP-SAT; tier has runId."""
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.compute_orchestration import (
+        build_scores_materialize_job_wire,
+        build_scores_tier_solve_job_wire,
+    )
+    from api.analytics.scores.tier_row_run_registry import get_row_run_for_scope
+
+    from tests.scores_exports_helpers import prior_turn_ensure_context
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, export_scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=export_scope.game_id,
+        perspective=export_scope.perspective,
+        turn=export_scope.turn,
+        player_id=player_id,
+    )
+
+    with patch("api.analytics.scores.inference.get_scores_row_inference") as mock_inference:
+        materialize_wire = build_scores_materialize_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+        mock_inference.assert_not_called()
+
+    assert "exportTree" in materialize_wire
+    assert get_row_run_for_scope(scope) is not None
+
+    tier_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert tier_wire.get("runId") is not None
+
+
+def test_historical_materialize_skips_tier_when_already_persisted(
+    sample_turn,
+    persistence,
+) -> None:
+    """Persisted historical scope: materialize short-circuits; tier_solve gets skip sentinel."""
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.compute_orchestration import (
+        build_scores_materialize_job_wire,
+        build_scores_tier_solve_job_wire,
+    )
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.scores_exports_helpers import prior_turn_ensure_context, put_persisted_row
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, export_scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="cached",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=export_scope.turn,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=export_scope.game_id,
+        perspective=export_scope.perspective,
+        turn=export_scope.turn,
+        player_id=player_id,
+    )
+
+    with patch("api.analytics.scores.exports.schedule_inference_row") as mock_schedule:
+        build_scores_materialize_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+        mock_schedule.assert_not_called()
+
+    tier_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert tier_wire == {"runId": None}
+
+
 def test_build_scores_tier_solve_job_wire_skips_without_registered_row_run(
     sample_turn,
 ) -> None:
-    """No stream RowRun: tier_solve wire is a skip sentinel so materialize can continue."""
+    """No RowRun: tier_solve wire is a skip sentinel so materialize can continue."""
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),

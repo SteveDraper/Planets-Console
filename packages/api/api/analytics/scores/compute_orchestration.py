@@ -167,8 +167,10 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    When no stream ``RowRun`` is registered (ensure-only materialize continuation),
-    return a skip sentinel so ``run_scores_tier_solve`` can complete without solving.
+    When no ``RowRun`` is registered (already satisfied / non-solve terminal; no
+    inference work required), return a skip sentinel so ``run_scores_tier_solve``
+    can complete without solving. Scopes that need CP-SAT must have registered a
+    run during materialize/ensure schedule -- including historical gap-fill.
     """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
@@ -192,10 +194,10 @@ def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
 
     Fleet ENSURE-depends on same-turn scores. Completing after materialize alone
     unlocked fleet before inference solutions existed; continuing keeps the scores
-    node non-terminal until tier_solve finishes (or skips when no RowRun).
+    node non-terminal until tier_solve finishes (or skips when no RowRun is needed).
 
-    The export tree is carried as the continue payload so ensure-only skip paths
-    still leave a dependency ``result_wire`` for fleet dispatch.
+    The export tree is carried as the continue payload so no-work skip paths still
+    leave a dependency ``result_wire`` for fleet dispatch.
     """
     export_tree = job_wire["exportTree"]
     return StepResult(outcome="continue", payload=export_tree)
@@ -222,7 +224,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier step and return an explicit orchestrator outcome."""
     run_id = job_wire.get("runId")
     if run_id is None:
-        # Ensure-only continuation after materialize with no stream RowRun.
+        # No RowRun: ensure already satisfied or non-solve terminal -- no CP-SAT.
         return StepResult(outcome="complete")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")

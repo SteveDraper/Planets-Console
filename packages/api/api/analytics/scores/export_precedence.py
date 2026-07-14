@@ -61,8 +61,8 @@ class ScoresExportDecision:
     """Precedence branch and lifecycle status for one snapshot.
 
     Attributes:
-        needs_ensure_work: Driver for export ensure (prior-turn sync). Today only
-            the empty branch sets this; other branches may set it in future.
+        needs_ensure_work: Driver for export ensure (schedule RowRun when empty).
+            Today only the empty branch sets this; other branches may set it in future.
     """
 
     branch: ScoresExportPrecedenceBranch
