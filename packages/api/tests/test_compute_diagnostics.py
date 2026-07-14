@@ -991,10 +991,10 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
         priority_band="background",
     )
     # Bound gates capture each orchestrator's registration id at bind time.
-    assert len(orch_a._dispatch_gates) == 1
-    assert len(orch_b._dispatch_gates) == 1
-    assert orch_a._dispatch_gates[0](node) is True
-    assert orch_b._dispatch_gates[0](node) is False
+    assert len(orch_a._observers.dispatch_gates) == 1
+    assert len(orch_b._observers.dispatch_gates) == 1
+    assert orch_a._observers.dispatch_gates[0](node) is True
+    assert orch_b._observers.dispatch_gates[0](node) is False
     # Commit agrees: wrong orch cannot consume the armed slot.
     assert controller._commit_single_step_dispatch(node, orchestrator_id=id_b) is False
     assert controller._single_step.dispatch_slots_remaining == 1
@@ -1392,9 +1392,16 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "completionHistory",
         "serverStreams",
         "remotePool",
+        "liveOccupancy",
+        "concurrencyTimeline",
+        "concurrencyRollup",
     }
     assert wire["freezeArmed"] is False
     assert wire["inFlight"] == []
+    assert wire["liveOccupancy"]["scopedReadyDepth"] == 0
+    assert wire["concurrencyTimeline"] == []
+    assert wire["concurrencyRollup"]["eventCount"] == 0
+    assert "bottleneckClass" not in wire["concurrencyRollup"]
     assert wire["remotePool"] == {
         "interpreter": {
             "maxWorkers": None,
@@ -1681,8 +1688,8 @@ def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample
     controller = get_compute_diagnostics_controller()
     controller.bind_orchestrator(orchestrator, ctx)
     assert len(controller._bound_orchestrators) == 1
-    assert len(orchestrator._dispatch_gates) == 1
-    assert len(orchestrator._step_complete_listeners) == 1
+    assert len(orchestrator._observers.dispatch_gates) == 1
+    assert len(orchestrator._observers._step_complete_listeners) == 1
 
     shell = ShellContextKey(
         game_id=ctx.game_id,
@@ -1707,8 +1714,8 @@ def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample
     controller.unbind_orchestrator(orchestrator)
 
     assert controller._bound_orchestrators == []
-    assert orchestrator._dispatch_gates == []
-    assert orchestrator._step_complete_listeners == []
+    assert orchestrator._observers.dispatch_gates == []
+    assert orchestrator._observers._step_complete_listeners == []
     wire_after = snapshot_to_wire(controller.snapshot(shell))
     assert wire_after["dagNodes"] == []
     # Safe when already unbound.
@@ -1722,14 +1729,14 @@ def test_release_orchestrator_for_context_unbinds_diagnostics(sample_turn):
     orchestrator = orchestrator_for_context(ctx, worker_pool=pool)
     controller = get_compute_diagnostics_controller()
     assert len(controller._bound_orchestrators) == 1
-    assert len(orchestrator._dispatch_gates) == 1
-    assert len(orchestrator._step_complete_listeners) == 1
+    assert len(orchestrator._observers.dispatch_gates) == 1
+    assert len(orchestrator._observers._step_complete_listeners) == 1
 
     release_orchestrator_for_context(ctx)
 
     assert controller._bound_orchestrators == []
-    assert orchestrator._dispatch_gates == []
-    assert orchestrator._step_complete_listeners == []
+    assert orchestrator._observers.dispatch_gates == []
+    assert orchestrator._observers._step_complete_listeners == []
     # Safe when already released / never bound.
     release_orchestrator_for_context(ctx)
 
@@ -1819,6 +1826,8 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
         "stepIndex",
         "priorityBand",
         "completedAt",
+        "backend",
+        "durationMs",
     }
     assert entry["scopeKey"] == format_compute_scope_key(scope)
     assert entry["surface"] == "inline"
@@ -1826,7 +1835,70 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     assert entry["stepKind"] == SCORES_MATERIALIZE
     assert entry["stepIndex"] == 0
     assert entry["priorityBand"] == "background"
+    assert entry["backend"] == "inline"
+    assert entry["durationMs"] is not None
+    assert entry["durationMs"] >= 0
     datetime.fromisoformat(entry["completedAt"])
+
+
+def test_concurrency_timeline_records_inline_lifecycle_and_shares_finish_sink(sample_turn):
+    """Inline ready/start/complete appear on the timeline; history duration matches."""
+    from api.analytics.exports.catalog import AnalyticExportCatalog
+    from api.analytics.exports.registry import merge_export_registry
+    from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
+    from api.compute.diagnostics.scope_key import format_compute_scope_key
+
+    scores_stub_export = AnalyticExportCatalog(
+        analytic_id="scores",
+        is_ensure_satisfied=lambda _ctx, _scope: True,
+    )
+    compute_registry = build_compute_registry((_scores_inline_materialize_registration(),))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(scores_stub_export),
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    controller.on_shell_context(shell)
+    scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=sample_turn.scores[0].ownerid,
+        ),
+        analytic_id="scores",
+        scope_key_spec=compute_registry["scores"].scope_key_spec,
+    )
+
+    handle = orchestrator.submit(
+        ComputeRequest(scope=scope, step_kind=SCORES_MATERIALIZE),
+    )
+    assert handle.state == "complete"
+
+    events = controller.timeline_recent(shell)
+    kinds = [event.kind for event in events]
+    assert "ready" in kinds
+    assert "inline_start" in kinds
+    assert "inline_complete" in kinds
+    complete = next(event for event in events if event.kind == "inline_complete")
+    assert complete.scope_key == format_compute_scope_key(scope)
+    assert complete.backend == "inline"
+    assert complete.duration_ms is not None
+    assert complete.gauges.configured_workers == 0
+    history = snapshot_to_wire(controller.snapshot(shell))["completionHistory"]
+    assert history[-1]["durationMs"] == complete.duration_ms
 
 
 def test_same_shell_freeze_status_preserves_allowlist_across_refetch():

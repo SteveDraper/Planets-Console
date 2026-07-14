@@ -27,6 +27,8 @@ class ComputeCompletionRecord:
     step_index: int
     priority_band: ComputePriorityBand
     completed_at: str
+    backend: str | None = None
+    duration_ms: float | None = None
 
 
 class ComputeCompletionHistory:
@@ -46,6 +48,8 @@ class ComputeCompletionHistory:
         step_kind: str,
         step_index: int,
         priority_band: ComputePriorityBand,
+        backend: str | None = None,
+        duration_ms: float | None = None,
     ) -> None:
         record = ComputeCompletionRecord(
             scope_key=scope_key,
@@ -55,6 +59,8 @@ class ComputeCompletionHistory:
             step_index=step_index,
             priority_band=priority_band,
             completed_at=datetime.now(UTC).isoformat(),
+            backend=backend,
+            duration_ms=duration_ms,
         )
         with self._lock:
             self._entries.append(record)

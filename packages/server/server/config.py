@@ -193,6 +193,19 @@ def load_config(
             f"api.compute_diagnostics_start_frozen must be a boolean, got "
             f"{type(raw_start_frozen).__name__}: {raw_start_frozen!r}"
         )
+    raw_timeline_capacity = api_dict.get(
+        "compute_diagnostics_timeline_capacity",
+        ApiConfig().compute_diagnostics_timeline_capacity,
+    )
+    if isinstance(raw_timeline_capacity, bool) or not isinstance(raw_timeline_capacity, int):
+        raise TypeError(
+            f"api.compute_diagnostics_timeline_capacity must be an int, got "
+            f"{type(raw_timeline_capacity).__name__}: {raw_timeline_capacity!r}"
+        )
+    if raw_timeline_capacity < 1:
+        raise ValueError(
+            f"api.compute_diagnostics_timeline_capacity must be >= 1, got {raw_timeline_capacity}"
+        )
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_root=_parse_api_storage_root(api_dict.get("storage_root")),
@@ -203,6 +216,7 @@ def load_config(
         ),
         compute_diagnostics=raw_compute_diag,
         compute_diagnostics_start_frozen=raw_start_frozen,
+        compute_diagnostics_timeline_capacity=raw_timeline_capacity,
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):

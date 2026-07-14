@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.exports.registry import EXPORT_REGISTRY
 from api.compute.diagnostics.bindings import BoundOrchestrator
+from api.compute.diagnostics.concurrency_recorder import ConcurrencyTimelineRecorder
 from api.compute.diagnostics.freeze import (
     ComputeDiagnosticsFreezeState,
     ShellContextKey,
@@ -38,7 +39,6 @@ from api.compute.diagnostics.scope import (
     player_id_from_scope,
     scope_in_diagnostic_scope,
 )
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
     SingleStepArm,
     SingleStepDisabledReason,
@@ -77,6 +77,11 @@ def compute_diagnostics_start_frozen() -> bool:
     return cfg.compute_diagnostics and cfg.compute_diagnostics_start_frozen
 
 
+def compute_diagnostics_timeline_capacity() -> int:
+    """Return configured concurrency-timeline ring capacity (at least 1)."""
+    return max(1, get_config().compute_diagnostics_timeline_capacity)
+
+
 class ComputeDiagnosticsController:
     """Analytic-agnostic observer and freeze controller for compute orchestration."""
 
@@ -91,6 +96,16 @@ class ComputeDiagnosticsController:
         self._wired = False
         self._active_game_id: int | None = None
         self._last_shell_context: ShellContextKey | None = None
+        self._timeline = ConcurrencyTimelineRecorder(
+            timeline_capacity=compute_diagnostics_timeline_capacity,
+            bound_orchestrators=self._bound_orchestrators_snapshot,
+            in_flight_records=self._in_flight_snapshot,
+            global_queue_depth=self._global_queue_depth,
+            configured_workers=self._configured_workers,
+            ancestor_turns=self._ancestor_turns_for_shell,
+            history_for_shell=self._history_for_shell,
+            active_shell=self._active_shell_context,
+        )
 
     def is_enabled(self) -> bool:
         return compute_diagnostics_enabled()
@@ -107,6 +122,7 @@ class ComputeDiagnosticsController:
         # take ``_lock`` (pool -> controller). Controller -> pool here would ABBA.
         pool.set_dequeue_predicate(self._pool_item_is_runnable)
         pool.set_on_item_dequeued(self._on_pool_item_dequeued)
+        pool.set_on_item_enqueued(self._on_pool_item_enqueued)
         pool.set_on_item_finished(self._on_pool_item_finished)
         with self._lock:
             if self._wired and self._pool is pool:
@@ -158,12 +174,38 @@ class ComputeDiagnosticsController:
                 )
             )
         )
+        unregister_ready = orchestrator.register_ready_listener(
+            lambda scope, node, _orch_id=registration_id: self._on_node_ready(
+                scope,
+                node,
+                orchestrator_id=_orch_id,
+            )
+        )
+        unregister_ready_queue = orchestrator.register_ready_queue_listener(
+            self._timeline.bind_ready_queue_listener(
+                orchestrator_id=registration_id,
+                game_id=ctx.game_id,
+                perspective=ctx.perspective,
+                fallback_id=id(orchestrator),
+            )
+        )
+        unregister_inline_start = orchestrator.register_inline_start_listener(
+            lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
+                scope,
+                node,
+                step_kind,
+                orchestrator_id=_orch_id,
+            )
+        )
         with self._lock:
             for bound in self._bound_orchestrators:
                 if bound.orchestrator is orchestrator:
                     unregister_dispatch_gate()
                     unregister_dispatch_commit()
                     unregister_step_complete()
+                    unregister_ready()
+                    unregister_ready_queue()
+                    unregister_inline_start()
                     return
             self._bound_orchestrators.append(
                 BoundOrchestrator(
@@ -174,6 +216,9 @@ class ComputeDiagnosticsController:
                     unregister_dispatch_gate=unregister_dispatch_gate,
                     unregister_dispatch_commit_hook=unregister_dispatch_commit,
                     unregister_step_complete_listener=unregister_step_complete,
+                    unregister_ready_listener=unregister_ready,
+                    unregister_ready_queue_listener=unregister_ready_queue,
+                    unregister_inline_start_listener=unregister_inline_start,
                 )
             )
 
@@ -202,6 +247,11 @@ class ComputeDiagnosticsController:
         bound.unregister_dispatch_gate()
         bound.unregister_dispatch_commit_hook()
         bound.unregister_step_complete_listener()
+        bound.unregister_ready_listener()
+        bound.unregister_ready_queue_listener()
+        bound.unregister_inline_start_listener()
+        orch_key = registration_id if registration_id is not None else id(orchestrator)
+        self._timeline.clear_orchestrator_ready_depth(orch_key)
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
         if not self.is_enabled():
@@ -255,6 +305,9 @@ class ComputeDiagnosticsController:
             next_single_step=preview,
             single_step_disabled_reason=disabled_reason,
             completion_history=self._history_for_shell(shell).recent(),
+            concurrency_timeline=self._timeline.recent(shell),
+            global_in_flight_count=len(self._in_flight_snapshot()),
+            configured_workers=self._configured_workers(),
             remote_futures=remote_futures,
             remote_executor_probe=remote_executor_probe,
         )
@@ -376,14 +429,19 @@ class ComputeDiagnosticsController:
             self._single_step.clear()
             self._active_game_id = None
             self._last_shell_context = None
+        self._timeline.clear()
         for entry in bound:
             entry.unregister_dispatch_gate()
             entry.unregister_dispatch_commit_hook()
             entry.unregister_step_complete_listener()
+            entry.unregister_ready_listener()
+            entry.unregister_ready_queue_listener()
+            entry.unregister_inline_start_listener()
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)
             self._pool.set_on_item_dequeued(None)
+            self._pool.set_on_item_enqueued(None)
             self._pool.set_on_item_finished(None)
         self._pool = None
         self._wired = False
@@ -395,6 +453,18 @@ class ComputeDiagnosticsController:
                 history = ComputeCompletionHistory(capacity=DEFAULT_COMPLETION_HISTORY_CAP)
                 self._histories[shell] = history
             return history
+
+    def timeline_recent(self, shell: ShellContextKey) -> tuple:
+        """Return recent concurrency timeline events for ``shell`` (tests / snapshot)."""
+        return self._timeline.recent(shell)
+
+    def _global_queue_depth(self) -> int:
+        if self._pool is not None:
+            return len(self._pool.snapshot_work_queue())
+        return 0
+
+    def _configured_workers(self) -> int:
+        return self._pool.worker_count if self._pool is not None else 0
 
     def _bound_orchestrators_snapshot(self) -> tuple[BoundOrchestrator, ...]:
         with self._lock:
@@ -499,6 +569,10 @@ class ComputeDiagnosticsController:
             export_registry=EXPORT_REGISTRY,
             compute_analytic_ids=frozenset(COMPUTE_REGISTRY),
         )
+
+    def _active_shell_context(self) -> ShellContextKey | None:
+        with self._lock:
+            return self._last_shell_context
 
     def _scope_matches_active_shell(self, scope: ComputeScope) -> ShellContextKey | None:
         """Return the operator shell when ``scope`` is in its diagnostic scope.
@@ -728,7 +802,7 @@ class ComputeDiagnosticsController:
             return True
         return not self._is_scope_frozen(item.scope, shell)
 
-    def _on_pool_item_dequeued(self, item: PoolWorkItem) -> None:
+    def _on_pool_item_dequeued(self, item: PoolWorkItem, queue_depth: int = 0) -> None:
         """Record in-flight work and consume a single-step grant when applicable.
 
         Invoked under the pool lock after pop so concurrent workers cannot both
@@ -736,17 +810,49 @@ class ComputeDiagnosticsController:
         """
         with self._lock:
             self._in_flight.append(in_flight_from_pool_item(item))
-            if self._single_step.grants_remaining <= 0:
-                return
-            if not self._single_step_may_release(
-                item.scope,
-                priority_band=item.priority_band,
-                orchestrator_id=item.orchestrator_id,
-            ):
-                return
-            self._single_step.grants_remaining -= 1
-            if self._single_step.grants_remaining == 0:
-                self._single_step.clear()
+            if self._single_step.grants_remaining > 0:
+                if self._single_step_may_release(
+                    item.scope,
+                    priority_band=item.priority_band,
+                    orchestrator_id=item.orchestrator_id,
+                ):
+                    self._single_step.grants_remaining -= 1
+                    if self._single_step.grants_remaining == 0:
+                        self._single_step.clear()
+        shell = self._scope_matches_active_shell(item.scope)
+        if shell is None:
+            return
+        # Release controller lock before timeline recording (recorder may sample
+        # in-flight under ``_lock`` via snapshot callbacks).
+        self._timeline.record(
+            shell,
+            kind="start",
+            scope=item.scope,
+            orchestrator_id=item.orchestrator_id,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+            priority_band=item.priority_band,
+            backend=item.backend,
+            open_execution=True,
+            global_queue_depth=queue_depth,
+        )
+
+    def _on_pool_item_enqueued(self, item: PoolWorkItem, queue_depth: int) -> None:
+        """Record a pool enqueue timeline event when the scope matches the operator shell."""
+        shell = self._scope_matches_active_shell(item.scope)
+        if shell is None:
+            return
+        self._timeline.record(
+            shell,
+            kind="enqueue",
+            scope=item.scope,
+            orchestrator_id=item.orchestrator_id,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
+            priority_band=item.priority_band,
+            backend=item.backend,
+            global_queue_depth=queue_depth,
+        )
 
     def _on_pool_item_finished(self, item: PoolWorkItem) -> None:
         """Clear the matching in-flight record after a pool worker finishes the item.
@@ -779,6 +885,53 @@ class ComputeDiagnosticsController:
                 orchestrator_id=orchestrator_id,
             )
 
+    def _on_node_ready(
+        self,
+        scope: ComputeScope,
+        node: ComputeNodeRun,
+        *,
+        orchestrator_id: int | None = None,
+    ) -> None:
+        shell = self._scope_matches_active_shell(scope)
+        if shell is None:
+            return
+        step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
+        self._timeline.record(
+            shell,
+            kind="ready",
+            scope=scope,
+            orchestrator_id=orchestrator_id,
+            step_kind=step_spec.step_kind if step_spec is not None else None,
+            step_index=node.step_index,
+            priority_band=node.priority_band,
+            backend=step_spec.backend if step_spec is not None else None,
+            sample_ready_from_orchestrators=True,
+        )
+
+    def _on_inline_start(
+        self,
+        scope: ComputeScope,
+        node: ComputeNodeRun,
+        step_kind: str,
+        *,
+        orchestrator_id: int | None = None,
+    ) -> None:
+        shell = self._scope_matches_active_shell(scope)
+        if shell is None:
+            return
+        self._timeline.record(
+            shell,
+            kind="inline_start",
+            scope=scope,
+            orchestrator_id=orchestrator_id,
+            step_kind=step_kind,
+            step_index=node.step_index,
+            priority_band=node.priority_band,
+            backend="inline",
+            open_execution=True,
+            sample_ready_from_orchestrators=True,
+        )
+
     def _on_step_complete(
         self,
         scope: ComputeScope,
@@ -804,15 +957,21 @@ class ComputeDiagnosticsController:
         if shell is None:
             return
         step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
-        if step_spec is None or step_spec.step_kind != step_kind:
+        if step_spec is not None and step_spec.step_kind != step_kind:
             return
-        self._history_for_shell(shell).append(
-            scope_key=format_compute_scope_key(scope),
+        if step_spec is None:
+            backend = "inline" if surface == "inline" else None
+        else:
+            backend = "inline" if surface == "inline" else step_spec.backend
+        self._timeline.record_finish(
+            shell,
+            scope=scope,
+            node=node,
+            step_kind=step_kind,
             surface=surface,
             terminal_state=terminal_state,
-            step_kind=step_kind,
-            step_index=node.step_index,
-            priority_band=node.priority_band,
+            orchestrator_id=orchestrator_id,
+            backend=backend,
         )
 
 

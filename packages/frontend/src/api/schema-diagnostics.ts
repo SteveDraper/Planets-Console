@@ -238,6 +238,18 @@ export interface components {
             remotePool: {
                 [key: string]: unknown;
             };
+            /** Liveoccupancy */
+            liveOccupancy: {
+                [key: string]: unknown;
+            };
+            /** Concurrencytimeline */
+            concurrencyTimeline: {
+                [key: string]: unknown;
+            }[];
+            /** Concurrencyrollup */
+            concurrencyRollup: {
+                [key: string]: unknown;
+            };
         };
         /** HTTPValidationError */
         HTTPValidationError: {

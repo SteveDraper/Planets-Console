@@ -39,6 +39,33 @@ function emptyRemotePool(): ComputeDiagnosticsSnapshotResponse['remotePool'] {
   return { interpreter: emptyBackend, process: { ...emptyBackend, futures: [] } }
 }
 
+function emptyLiveOccupancy(): ComputeDiagnosticsSnapshotResponse['liveOccupancy'] {
+  return {
+    configuredWorkers: 4,
+    scopedReadyDepth: 0,
+    scopedInFlightCount: 0,
+    globalInFlightCount: 0,
+    globalQueueDepth: 0,
+    backendMix: {},
+  }
+}
+
+function emptyConcurrencyRollup(): ComputeDiagnosticsSnapshotResponse['concurrencyRollup'] {
+  return {
+    eventCount: 0,
+    uniquePlayers: [],
+    backendHistogram: {},
+    durationByBackendMs: {},
+    scopedReadyDepth: { p50: null, p95: null, max: null },
+    scopedInFlight: { p50: null, p95: null, max: null },
+    globalInFlight: { p50: null, p95: null, max: null },
+    maxScopedReadyDepth: 0,
+    maxScopedInFlight: 0,
+    maxGlobalInFlight: 0,
+    configuredWorkers: null,
+  }
+}
+
 function snapshotFixture(
   overrides: Partial<ComputeDiagnosticsSnapshotResponse> = {}
 ): ComputeDiagnosticsSnapshotResponse {
@@ -65,6 +92,9 @@ function snapshotFixture(
     completionHistory: [],
     serverStreams: [],
     remotePool: emptyRemotePool(),
+    liveOccupancy: emptyLiveOccupancy(),
+    concurrencyTimeline: [],
+    concurrencyRollup: emptyConcurrencyRollup(),
     ...overrides,
   }
 }
@@ -120,6 +150,57 @@ describe('DiagnosticsComputeTab', () => {
     expect(copied).toContain(NEXT_SCOPE_KEY)
     expect(copied).not.toContain('_nextSingleStep')
     expect(JSON.parse(copied)).toEqual(snapshotFixture().poolQueue)
+  })
+
+  it('shows A-D guide, concurrency summary strip, and copyable timeline/rollup', async () => {
+    const user = userEvent.setup()
+    const onCopy = vi.fn()
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockResolvedValue(
+      snapshotFixture({
+        liveOccupancy: {
+          configuredWorkers: 4,
+          scopedReadyDepth: 2,
+          scopedInFlightCount: 1,
+          globalInFlightCount: 3,
+          globalQueueDepth: 5,
+          backendMix: { thread: 1 },
+        },
+        concurrencyTimeline: [{ kind: 'ready', scopeKey: NEXT_SCOPE_KEY }],
+        concurrencyRollup: {
+          ...emptyConcurrencyRollup(),
+          eventCount: 1,
+          uniquePlayers: [1],
+          backendHistogram: { thread: 1 },
+          maxScopedReadyDepth: 2,
+          maxScopedInFlight: 1,
+          maxGlobalInFlight: 3,
+          configuredWorkers: 4,
+        },
+      })
+    )
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={onCopy} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compute-concurrency-summary')).toBeTruthy()
+    })
+    const summary = screen.getByTestId('compute-concurrency-summary')
+    expect(summary.textContent).toContain('4')
+    expect(summary.textContent).toContain('2 / 1')
+    expect(summary.textContent).toContain('thread:1')
+
+    expect(screen.getByTestId('compute-bottleneck-guide').textContent).toContain(
+      'Bottleneck classes A–D'
+    )
+    expect(screen.getByText('Concurrency timeline')).toBeTruthy()
+    expect(screen.getByText('Concurrency rollup')).toBeTruthy()
+
+    const timelineHeading = screen.getByText('Concurrency timeline')
+    const timelineSection = timelineHeading.closest('section')
+    expect(timelineSection).not.toBeNull()
+    await user.click(within(timelineSection as HTMLElement).getByRole('button', { name: 'Copy' }))
+    expect(JSON.parse(onCopy.mock.calls[0]?.[0] as string)).toEqual([
+      { kind: 'ready', scopeKey: NEXT_SCOPE_KEY },
+    ])
   })
 
   it('Run single-steps until the focus set has no remaining work, refreshing each step', async () => {
