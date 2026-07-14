@@ -312,6 +312,81 @@ def test_historical_materialize_skips_tier_when_already_persisted(
     assert tier_wire == {"runId": None}
 
 
+def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
+    sample_turn,
+    persistence,
+) -> None:
+    """Historical gap-fill: schedule without sync ensure; tier_solve persists via policy."""
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.compute_orchestration import (
+        build_scores_materialize_job_wire,
+        build_scores_tier_solve_job_wire,
+    )
+
+    from tests.scores_exports_helpers import GAME_ID, perspective, prior_turn_ensure_context
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    ctx, export_scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=export_scope.game_id,
+        perspective=export_scope.perspective,
+        turn=export_scope.turn,
+        player_id=player_id,
+    )
+    host_turn = export_scope.turn
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), host_turn, player_id) is None
+
+    with (
+        patch("api.analytics.scores.inference.get_scores_row_inference") as mock_inference,
+        patch.object(persistence, "put_row") as mock_put_row,
+    ):
+        build_scores_materialize_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+        mock_inference.assert_not_called()
+        mock_put_row.assert_not_called()
+
+    assert get_row_run_for_scope(scope) is not None
+    assert persistence.get_row(GAME_ID, perspective(sample_turn), host_turn, player_id) is None
+
+    tier_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert tier_wire.get("runId") is not None
+
+    outcome = TierJobOutcome(
+        row_complete=row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+            summary="historical persist via orchestrator",
+        ),
+    )
+    with patch(
+        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
+        return_value=outcome,
+    ):
+        result = run_scores_tier_solve(tier_wire)
+
+    assert result.outcome == "persist"
+    ScoresPersistencePolicy().persist(ctx, scope, result.payload)
+
+    stored = persistence.get_row(GAME_ID, perspective(sample_turn), host_turn, player_id)
+    assert stored is not None
+    assert stored.summary == "historical persist via orchestrator"
+
+
 def test_build_scores_tier_solve_job_wire_skips_without_registered_row_run(
     sample_turn,
 ) -> None:
