@@ -205,9 +205,7 @@ class ConcurrencyTimelineRecorder:
             global_queue_depth=global_queue_depth,
             sample_ready_from_orchestrators=True,
         )
-        timeline_kind: TimelineEventKind = (
-            "inline_complete" if surface == "inline" else "complete"
-        )
+        timeline_kind: TimelineEventKind = "inline_complete" if surface == "inline" else "complete"
         self._append(
             shell,
             kind=timeline_kind,

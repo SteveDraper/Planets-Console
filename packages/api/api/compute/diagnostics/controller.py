@@ -182,15 +182,13 @@ class ComputeDiagnosticsController:
             )
         )
         unregister_ready_queue = orchestrator.register_ready_queue_listener(
-            lambda ready_scopes,
-            _orch_id=registration_id,
-            _game_id=ctx.game_id,
-            _perspective=ctx.perspective,
-            _fallback=id(orchestrator): self._timeline.note_ready_queue_for_bound_orch(
-                ready_scopes,
-                orchestrator_id=_orch_id if _orch_id is not None else _fallback,
-                game_id=_game_id,
-                perspective=_perspective,
+            lambda ready_scopes, _orch_id=registration_id, _game_id=ctx.game_id, _perspective=ctx.perspective, _fallback=id(orchestrator): (
+                self._timeline.note_ready_queue_for_bound_orch(
+                    ready_scopes,
+                    orchestrator_id=_orch_id if _orch_id is not None else _fallback,
+                    game_id=_game_id,
+                    perspective=_perspective,
+                )
             )
         )
         unregister_inline_start = orchestrator.register_inline_start_listener(
@@ -254,9 +252,7 @@ class ComputeDiagnosticsController:
         bound.unregister_ready_listener()
         bound.unregister_ready_queue_listener()
         bound.unregister_inline_start_listener()
-        orch_key = (
-            registration_id if registration_id is not None else id(orchestrator)
-        )
+        orch_key = registration_id if registration_id is not None else id(orchestrator)
         self._timeline.clear_orchestrator_ready_depth(orch_key)
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
