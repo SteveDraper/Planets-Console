@@ -935,4 +935,3 @@ def test_result_for_request_returns_non_final_ledger_when_result_cleared(
     result = coordinator._result_for_request(inflight, 111, turn_111)
     assert result.ledger.player_id == player_id
     assert result.provenance.is_final is False
-

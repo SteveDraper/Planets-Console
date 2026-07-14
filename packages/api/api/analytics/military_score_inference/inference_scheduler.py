@@ -599,7 +599,6 @@ class InferenceRowScheduler:
         with self._lock:
             self._remove_run_locked(session.run_id)
 
-
     @staticmethod
     def _run_id_from_result_wire(result_wire: object | None) -> str | None:
         if not isinstance(result_wire, dict):
