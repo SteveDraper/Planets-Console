@@ -556,6 +556,17 @@ class InferenceRowScheduler:
             if wire_run_id is not None:
                 matching_run_ids = [run_id for run_id in matching_run_ids if run_id == wire_run_id]
 
+        if not matching_run_ids:
+            # Peer may have unregistered the RowRun before this binding's terminal
+            # notification (idempotent empty tier_solve). Open multiplex can still be
+            # waiting on that player with no matching scheduler run left to notify.
+            if (
+                getattr(node, "state", None) in {"complete", "failed"}
+                and not sibling_still_active
+            ):
+                self._deliver_orphan_stream_terminal_if_needed(scope, node)
+            return
+
         for run_id in matching_run_ids:
             row_run = self._adapter_row_run(run_id)
             if row_run is None:
@@ -608,6 +619,63 @@ class InferenceRowScheduler:
                 continue
             self._finalize_row_run(session)
 
+    def _deliver_orphan_stream_terminal_if_needed(
+        self,
+        scope: ComputeScope,
+        node: object,
+    ) -> None:
+        """Deliver a terminal to an open stream still waiting after scheduler run drop.
+
+        When ``matching_run_ids`` is empty the normal path is a no-op. That is correct
+        when the stream already finished the row, but leaves multiplex hung when a peer
+        unregistered the RowRun without ever delivering ``RowComplete`` / ``RowFailed``.
+        """
+        from api.analytics.military_score_inference.inference_table_stream_registry import (
+            controller_for_scope,
+        )
+
+        player_id = scope.player_id
+        turn_number = scope.turn
+        if not isinstance(player_id, int) or not isinstance(turn_number, int):
+            return
+        stream_scope = InferenceStreamScope(
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn_number=turn_number,
+        )
+        controller = controller_for_scope(stream_scope)
+        if controller is None:
+            return
+        scheduled = controller.scheduled_rows.get(player_id)
+        if scheduled is None:
+            return
+        session = scheduled.session
+        if session.run_id in controller.finished_run_ids:
+            return
+        if session.cancel_token.is_cancelled():
+            return
+        with self._lock:
+            if session.run_id in self._runs:
+                # Still tracked; a later matching-run notification owns delivery.
+                return
+            if session.run_id in self._terminal_stream_events_delivered:
+                return
+            self._terminal_stream_events_delivered.add(session.run_id)
+
+        row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
+        if row_complete is not None:
+            deliver_inference_domain_event_to_open_stream(session, row_complete)
+            return
+        if node.state == "failed":
+            detail = (
+                str(node.error)
+                if getattr(node, "error", None) is not None
+                else "Inference tier solve failed"
+            )
+        else:
+            detail = "Inference tier solve completed without row payload"
+        deliver_inference_domain_event_to_open_stream(session, RowFailed(detail=detail))
+
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
             self._remove_run_locked(session.run_id)
@@ -657,6 +725,7 @@ class InferenceRowScheduler:
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
             self._remove_run_locked(run_id)
+        self._terminal_stream_events_delivered.clear()
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
             self._release_stream_binding_locked(binding)
@@ -757,7 +826,9 @@ class InferenceRowScheduler:
 
         root_scope = self._runs.pop(run_id, None)
         unregister_row_run(run_id)
-        self._terminal_stream_events_delivered.discard(run_id)
+        # Keep ``_terminal_stream_events_delivered`` entries so a late peer binding
+        # that finds no matching run cannot orphan-deliver RowFailed after a prior
+        # RowComplete for the same run_id.
         if root_scope is None:
             return
         self._held_initial_submissions = [
