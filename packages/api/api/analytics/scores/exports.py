@@ -10,9 +10,9 @@ from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefix
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_api_payload import STATUS_PLAYER_NOT_FOUND
 from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
+    immediate_row_inference_events,
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -38,7 +38,6 @@ from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.models.player import Score
 from api.serialization.inference_row_persistence import PersistedInferenceRow
-from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -190,39 +189,18 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     )
 
 
-def _record_player_not_found_admission(
-    ctx: AnalyticQueryContext,
-    scope: ExportScope,
-    *,
-    player_id: int,
-    turn: TurnInfo,
-) -> None:
-    """Cheap non-solve terminal: missing scoreboard row needs no CP-SAT."""
-    inference: dict[str, object] = {
-        "playerId": player_id,
-        "status": STATUS_PLAYER_NOT_FOUND,
-        "summary": f"No score row for player {player_id}",
-        "solutionCount": 0,
-        "isComplete": True,
-        "solutions": [],
-        "diagnostics": {"playerId": player_id, "turn": turn.settings.turn},
-    }
-    wire_event = inference_api_payload_to_wire_complete(inference)
-    ctx.record_ensure_ephemeral(
-        ANALYTIC_ID,
-        scope,
-        ImmediateRowAdmission(events=(wire_event,)),
-    )
-
-
 def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     """Admit scores work for one scope without running CP-SAT on this thread.
 
-    Ambient and historical turns share the same path: schedule a ``RowRun`` so
-    orchestrator ``tier_solve`` (thread pool) owns inference. Missing scoreboard
-    rows short-circuit to an ephemeral terminal admission with no solver.
+    Ambient and historical turns share the same path. Satisfaction is probe-aligned
+    (persistence, scheduler, ensure-ephemeral) so cheap terminals from
+    ``immediate_row_inference_events`` are stashed for probe; real solve work
+    schedules a ``RowRun`` for orchestrator ``tier_solve``.
     """
     if scope.player_id is None:
+        return True
+    if scope.turn <= 1:
+        # Game-start neutral priors; fleet@0 is not a valid ensure target.
         return True
 
     services = resolve_scores_services(ctx)
@@ -230,45 +208,56 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if turn is None:
         return True
 
-    score = next((row for row in turn.scores if row.ownerid == scope.player_id), None)
-    if score is None:
-        if ctx.ensure_ephemeral(ANALYTIC_ID, scope) is None:
-            _record_player_not_found_admission(
-                ctx,
-                scope,
-                player_id=scope.player_id,
-                turn=turn,
-            )
-            ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+    snapshot = gather_scores_ensure_probe_snapshot(ctx, services, scope, turn)
+    resolution_context = _scores_resolution_context(ctx, services, scope, turn)
+    if is_scores_export_ensure_satisfied_from_snapshot(
+        snapshot,
+        resolution_context=resolution_context,
+    ):
         return True
 
-    _, resolved = _scores_resolved(ctx, scope)
-
-    if resolved.decision.is_ensure_satisfied:
-        return True
-
-    mutated = False
-    if resolved.decision.needs_ensure_work:
-        mutated = _ensure_schedule_inference_row(ctx, services, scope, turn)
-
+    mutated = _ensure_admit_inference_row(ctx, services, scope, turn)
     if not mutated:
-        return resolved.decision.is_ensure_satisfied
+        return is_scores_export_ensure_satisfied_from_snapshot(
+            gather_scores_ensure_probe_snapshot(ctx, services, scope, turn),
+            resolution_context=resolution_context,
+        )
 
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-    _, resolved = _scores_resolved(ctx, scope)
+    _, resolved = _scores_resolved(ctx, scope, turn=turn)
     return resolved.decision.is_ensure_satisfied
 
 
-def _ensure_schedule_inference_row(
+def _ensure_admit_inference_row(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo,
 ) -> bool:
-    """Register a RowRun so tier_solve can run CP-SAT for this scope."""
-    inputs = _scores_row_ensure_inputs(services, scope, turn)
-    if inputs is None or inputs.score is None:
+    """Admit cheap terminals via ephemeral events, else schedule a RowRun for CP-SAT."""
+    player_id = scope.player_id
+    if player_id is None:
         return False
+
+    immediate = immediate_row_inference_events(
+        turn,
+        player_id,
+        load_scoreboard_turn=ctx.load_turn,
+    )
+    if immediate is not None:
+        ctx.record_ensure_ephemeral(
+            ANALYTIC_ID,
+            scope,
+            ImmediateRowAdmission(events=immediate),
+        )
+        return True
+
+    inputs = _scores_row_ensure_inputs(services, scope, turn)
+    if inputs is None:
+        return False
+    score = inputs.score
+    # immediate_row_inference_events admits missing scoreboard rows above.
+    assert score is not None
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
 
@@ -280,7 +269,7 @@ def _ensure_schedule_inference_row(
     )
     schedule_inference_row(
         services.scheduler,
-        score=inputs.score,
+        score=score,
         turn=turn,
         player_id=inputs.player_id,
         game_id=scope.game_id,

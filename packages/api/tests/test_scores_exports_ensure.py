@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
@@ -344,6 +345,46 @@ def test_ensure_player_not_found_records_ephemeral_without_schedule(sample_turn,
     assert scheduler.row_run_for_player(stream_scope, missing_player_id) is None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
     assert ctx.ensure_ephemeral("scores", scope) is not None
+
+
+def test_ensure_no_prior_turn_records_ephemeral_without_schedule(sample_turn, persistence):
+    """Accelerated-window turn with no prior score data: cheap terminal, no RowRun."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    assert sample_turn.settings.acceleratedturns == 3
+
+    turn_2 = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=2),
+        game=replace(sample_turn.game, turn=2),
+    )
+    player_id = first_player_id(turn_2)
+    # No turn 3 in storage → accelerated backfill unavailable → no_prior_turn.
+    ctx = scores_query_context(
+        turn_2,
+        persistence=persistence,
+        scheduler=scheduler,
+        stored_turns={2: turn_2},
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+    stream_scope = stream_scope_for_turn(turn_2, turn_number=2)
+
+    with patch(
+        "api.analytics.scores.exports.schedule_inference_row",
+    ) as mock_schedule:
+        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        mock_schedule.assert_not_called()
+
+    assert scheduler.row_run_for_player(stream_scope, player_id) is None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
+    ephemeral = ctx.ensure_ephemeral("scores", scope)
+    assert ephemeral is not None
+    assert ephemeral.events[-1].get("status") == "no_prior_turn"
 
 
 def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):
