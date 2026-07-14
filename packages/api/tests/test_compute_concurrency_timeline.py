@@ -25,12 +25,8 @@ def _gauges(**overrides: int) -> OccupancyGauges:
         return base
     return OccupancyGauges(
         scoped_ready_depth=overrides.get("scoped_ready_depth", base.scoped_ready_depth),
-        scoped_in_flight_count=overrides.get(
-            "scoped_in_flight_count", base.scoped_in_flight_count
-        ),
-        global_in_flight_count=overrides.get(
-            "global_in_flight_count", base.global_in_flight_count
-        ),
+        scoped_in_flight_count=overrides.get("scoped_in_flight_count", base.scoped_in_flight_count),
+        global_in_flight_count=overrides.get("global_in_flight_count", base.global_in_flight_count),
         global_queue_depth=overrides.get("global_queue_depth", base.global_queue_depth),
         configured_workers=overrides.get("configured_workers", base.configured_workers),
     )
