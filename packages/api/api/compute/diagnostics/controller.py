@@ -181,16 +181,24 @@ class ComputeDiagnosticsController:
                 orchestrator_id=_orch_id,
             )
         )
-        unregister_ready_queue = orchestrator.register_ready_queue_listener(
-            lambda ready_scopes, _orch_id=registration_id, _game_id=ctx.game_id, _perspective=ctx.perspective, _fallback=id(orchestrator): (
-                self._timeline.note_ready_queue_for_bound_orch(
-                    ready_scopes,
-                    orchestrator_id=_orch_id if _orch_id is not None else _fallback,
-                    game_id=_game_id,
-                    perspective=_perspective,
-                )
+        orch_fallback_id = id(orchestrator)
+
+        def _on_ready_queue_changed(
+            ready_scopes: tuple,
+            *,
+            _orch_id: int | None = registration_id,
+            _game_id: int = ctx.game_id,
+            _perspective: int = ctx.perspective,
+            _fallback: int = orch_fallback_id,
+        ) -> None:
+            self._timeline.note_ready_queue_for_bound_orch(
+                ready_scopes,
+                orchestrator_id=_orch_id if _orch_id is not None else _fallback,
+                game_id=_game_id,
+                perspective=_perspective,
             )
-        )
+
+        unregister_ready_queue = orchestrator.register_ready_queue_listener(_on_ready_queue_changed)
         unregister_inline_start = orchestrator.register_inline_start_listener(
             lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
                 scope,
