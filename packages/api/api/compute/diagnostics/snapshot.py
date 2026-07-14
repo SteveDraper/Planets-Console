@@ -17,8 +17,6 @@ from api.compute.diagnostics.remote_futures import (
 )
 from api.compute.diagnostics.rollup import (
     build_concurrency_timeline_rollup,
-    event_to_wire,
-    live_occupancy_to_wire,
     rollup_to_wire,
 )
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
@@ -38,6 +36,49 @@ from api.compute.remote_futures import (
 )
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry_catalog import active_table_stream_bindings
+
+
+def event_to_wire(event: ComputeConcurrencyEvent) -> dict[str, Any]:
+    """CamelCase wire shape for one concurrency timeline event."""
+    return {
+        "kind": event.kind,
+        "timestamp": event.timestamp,
+        "scopeKey": event.scope_key,
+        "stepKind": event.step_kind,
+        "stepIndex": event.step_index,
+        "priorityBand": event.priority_band,
+        "backend": event.backend,
+        "executionKey": event.execution_key,
+        "terminalState": event.terminal_state,
+        "durationMs": event.duration_ms,
+        "gauges": {
+            "scopedReadyDepth": event.gauges.scoped_ready_depth,
+            "scopedInFlightCount": event.gauges.scoped_in_flight_count,
+            "globalInFlightCount": event.gauges.global_in_flight_count,
+            "globalQueueDepth": event.gauges.global_queue_depth,
+            "configuredWorkers": event.gauges.configured_workers,
+        },
+    }
+
+
+def live_occupancy_to_wire(
+    *,
+    configured_workers: int,
+    scoped_ready_depth: int,
+    scoped_in_flight_count: int,
+    global_in_flight_count: int,
+    global_queue_depth: int,
+    backend_mix: dict[str, int],
+) -> dict[str, Any]:
+    """CamelCase live occupancy snapshot fields."""
+    return {
+        "configuredWorkers": configured_workers,
+        "scopedReadyDepth": scoped_ready_depth,
+        "scopedInFlightCount": scoped_in_flight_count,
+        "globalInFlightCount": global_in_flight_count,
+        "globalQueueDepth": global_queue_depth,
+        "backendMix": backend_mix,
+    }
 
 
 @dataclass(frozen=True)
