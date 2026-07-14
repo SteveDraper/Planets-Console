@@ -93,11 +93,13 @@ class InferenceStreamOrchestration:
         *,
         resolved_mask: ResolvedHullCatalogMask | None = None,
         fleet_torp_overlay: FleetTorpOverlay | None = None,
+        prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     ) -> PolicyLadderState:
         return PolicyLadderState(
             policy_steps=tuple(resolve_tier_policies(None)),
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
+            prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         )
 
     def record_segment_ladder_complete(

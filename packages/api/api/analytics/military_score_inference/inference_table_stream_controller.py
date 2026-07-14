@@ -98,6 +98,7 @@ class InferenceTableStreamController(
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_resolution.overlay,
             fleet_torp_input_status=fleet_resolution.input_status,
+            prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
             export_services=self.export_services,
             stream_token=self.stream_token,
         )

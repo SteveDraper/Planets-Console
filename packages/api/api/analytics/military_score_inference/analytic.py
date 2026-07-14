@@ -233,6 +233,7 @@ def _run_accelerated_backfill_inference(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     backfill = _try_accelerated_backfill_inference(
         score,
@@ -240,6 +241,7 @@ def _run_accelerated_backfill_inference(
         load_scoreboard_turn=load_scoreboard_turn,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
     )
     if backfill is not None:
         return backfill
@@ -253,6 +255,7 @@ def _run_accelerated_split_inference_path(
     *,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     payload, reported_observation, reported_catalog, _ = run_accelerated_split_inference(
         score,
@@ -260,6 +263,7 @@ def _run_accelerated_split_inference_path(
         segments,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
     )
     return payload, reported_observation, reported_catalog
 
@@ -270,6 +274,7 @@ def _run_policy_ladder_inference(
     *,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[
     InferenceResult,
@@ -283,6 +288,7 @@ def _run_policy_ladder_inference(
         turn,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         time_limit_seconds=time_limit_seconds,
     )
 
@@ -336,6 +342,7 @@ def _run_solver_inference_path(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     if path == InferencePath.ACCELERATED_SPLIT:
@@ -346,6 +353,7 @@ def _run_solver_inference_path(
             accelerated_segments,
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
+            prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         )
 
     solve_catalog = catalog
@@ -357,6 +365,7 @@ def _run_solver_inference_path(
                     turn,
                     resolved_mask=resolved_mask,
                     fleet_torp_overlay=fleet_torp_overlay,
+                    prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
                     time_limit_seconds=time_limit_seconds,
                 )
             )
@@ -415,6 +424,7 @@ def run_inference_with_artifacts(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     """Run inference once; return API payload plus observation and catalog for re-checks.
@@ -445,6 +455,7 @@ def run_inference_with_artifacts(
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
             fleet_torp_input_status=fleet_torp_input_status,
+            prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         )
     return _run_solver_inference_path(
         path,
@@ -456,6 +467,7 @@ def run_inference_with_artifacts(
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         time_limit_seconds=time_limit_seconds,
     )
 
@@ -467,6 +479,7 @@ def _try_accelerated_backfill_inference(
     load_scoreboard_turn: ScoreboardTurnLoader | None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None] | None:
     """Fill unreliable accelerated rows from the first reliable split when that turn is stored."""
     if load_scoreboard_turn is None:
@@ -491,6 +504,7 @@ def _try_accelerated_backfill_inference(
         backfill_source.segments,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
     )
     segment_payload = _segment_payload_for_host_turn(
         payload,

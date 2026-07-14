@@ -2,22 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
 
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.belief_set_components import component_ids_for_record_on_axis
 from api.analytics.fleet.export_scope import ledgers_for_scope
+from api.analytics.fleet.max_tech import max_tech_by_axis_from_fleet_records
 from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetTurnSnapshot,
-)
-from api.concepts.turn_component_catalog import (
-    beams_by_id,
-    engines_by_id,
-    hulls_by_id,
-    torpedos_by_id,
 )
 from api.models.game import TurnInfo
 
@@ -26,39 +19,19 @@ from api.models.game import TurnInfo
 class _CompositionAxisSpec:
     field_name: str
     histogram_output_key: str
-    max_tech_key: str
-    catalog_key: str
 
 
 _COMPOSITION_AXIS_SPECS: tuple[_CompositionAxisSpec, ...] = (
-    _CompositionAxisSpec("hull", "hullTypes", "hulls", "hulls"),
-    _CompositionAxisSpec("engine", "engineTypes", "engines", "engines"),
-    _CompositionAxisSpec("beams", "beamTypes", "beams", "beams"),
-    _CompositionAxisSpec("launchers", "launcherTypes", "launchers", "launchers"),
+    _CompositionAxisSpec("hull", "hullTypes"),
+    _CompositionAxisSpec("engine", "engineTypes"),
+    _CompositionAxisSpec("beams", "beamTypes"),
+    _CompositionAxisSpec("launchers", "launcherTypes"),
 )
-
-
-class _TechLevelComponent(Protocol):
-    techlevel: int
 
 
 def _increment_histogram(histogram: dict[str, int], component_id: int) -> None:
     key = str(component_id)
     histogram[key] = histogram.get(key, 0) + 1
-
-
-def _max_tech_level(
-    component_ids: Iterable[int],
-    catalog: dict[int, _TechLevelComponent],
-) -> int | None:
-    max_level: int | None = None
-    for component_id in component_ids:
-        component = catalog.get(component_id)
-        if component is None:
-            continue
-        if max_level is None or component.techlevel > max_level:
-            max_level = component.techlevel
-    return max_level
 
 
 def _active_records_for_scope(
@@ -103,33 +76,19 @@ def build_fleet_composition_branch(
     if scope.player_id is None:
         return _empty_fleet_composition_branch()
 
+    active_records = _active_records_for_scope(snapshot, scope)
     histograms: dict[str, dict[str, int]] = {
         axis.histogram_output_key: {} for axis in _COMPOSITION_AXIS_SPECS
     }
 
-    for record in _active_records_for_scope(snapshot, scope):
+    for record in active_records:
         for axis in _COMPOSITION_AXIS_SPECS:
             histogram = histograms[axis.histogram_output_key]
             for component_id in component_ids_for_record_on_axis(record, axis.field_name):
                 _increment_histogram(histogram, component_id)
 
-    catalogs: dict[str, dict[int, _TechLevelComponent]] = {
-        "hulls": hulls_by_id(turn),
-        "engines": engines_by_id(turn),
-        "beams": beams_by_id(turn),
-        "launchers": torpedos_by_id(turn),
-    }
-
-    max_tech_level: dict[str, int] = {}
-    for axis in _COMPOSITION_AXIS_SPECS:
-        if axis_max := _max_tech_level(
-            (int(key) for key in histograms[axis.histogram_output_key]),
-            catalogs[axis.catalog_key],
-        ):
-            max_tech_level[axis.max_tech_key] = axis_max
-
     return {
         **histograms,
         "torpedoTypesLoaded": {},
-        "maxTechLevel": max_tech_level,
+        "maxTechLevel": max_tech_by_axis_from_fleet_records(active_records, turn),
     }

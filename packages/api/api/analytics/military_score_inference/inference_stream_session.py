@@ -36,6 +36,7 @@ class InferenceRowStreamSession:
     resolved_mask: ResolvedHullCatalogMask | None = None
     fleet_torp_overlay: FleetTorpOverlay | None = None
     fleet_torp_input_status: FleetTorpInputStatus | None = None
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))

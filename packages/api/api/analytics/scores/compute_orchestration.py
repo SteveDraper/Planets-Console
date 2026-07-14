@@ -7,13 +7,8 @@ from typing import Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import FleetTurnSnapshot
-from api.analytics.military_score_inference.fleet_torp_overlay import (
-    FleetTorpOverlay,
-    launcher_belief_set_from_fleet_records,
-)
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -22,6 +17,8 @@ from api.analytics.military_score_inference.inference_row_runner import (
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
+    records_for_scope,
+    resolution_from_fleet_records,
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
@@ -71,10 +68,12 @@ def _scores_prior_fleet_scope(scope: ComputeScope) -> ComputeScope | None:
     )
 
 
-def _overlay_from_persisted_fleet_wire(
+def _resolution_from_persisted_fleet_wire(
     persisted_wire: dict[str, object],
     export_scope: ExportScope,
-) -> FleetTorpOverlay:
+    *,
+    prior_turn,
+) -> PriorTurnFleetTorpResolution:
     persisted = persisted_fleet_ledger_from_json(persisted_wire)
     snapshot = FleetTurnSnapshot(
         analytic_id=FLEET_ANALYTIC_ID,
@@ -83,11 +82,8 @@ def _overlay_from_persisted_fleet_wire(
         turn=export_scope.turn,
         players=[persisted.ledger],
     )
-    records = []
-    for ledger in ledgers_for_scope(snapshot, export_scope):
-        records.extend(ledger.records)
-    belief = launcher_belief_set_from_fleet_records(records)
-    return FleetTorpOverlay(belief_set=belief)
+    records = records_for_scope(snapshot, export_scope)
+    return resolution_from_fleet_records(records, prior_turn=prior_turn)
 
 
 def _resolve_prior_fleet_for_tier_wire(
@@ -107,13 +103,15 @@ def _resolve_prior_fleet_for_tier_wire(
         return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
 
     prior_export_scope = compute_scope_to_export_scope(prior_fleet_scope)
+    prior_turn = ctx.load_turn(prior_fleet_scope.turn)
     fleet_result_wire = dependency_outputs.get(prior_fleet_scope)
-    if isinstance(fleet_result_wire, dict):
+    if isinstance(fleet_result_wire, dict) and prior_turn is not None:
         persisted_wire = fleet_result_wire.get("persistedLedgerWire")
         if isinstance(persisted_wire, dict):
-            return PriorTurnFleetTorpResolution(
-                overlay=_overlay_from_persisted_fleet_wire(persisted_wire, prior_export_scope),
-                input_status="applied",
+            return _resolution_from_persisted_fleet_wire(
+                persisted_wire,
+                prior_export_scope,
+                prior_turn=prior_turn,
             )
 
     turn = ctx.load_turn(export_scope.turn)
@@ -136,9 +134,11 @@ def _apply_fleet_resolution_to_row_run(
     session = run.session
     session.fleet_torp_overlay = resolution.overlay
     session.fleet_torp_input_status = resolution.input_status
+    session.prior_fleet_max_tech_by_axis = resolution.prior_fleet_max_tech_for_admission()
     ladder_state = run.ladder_state
     if ladder_state is not None:
         ladder_state.fleet_torp_overlay = resolution.overlay
+        ladder_state.prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
 
 
 def build_scores_materialize_job_wire(

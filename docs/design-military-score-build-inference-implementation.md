@@ -574,6 +574,7 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 |----------|---------|
 | `all: true` | **Widened** eligibility on that axis (not "every turn-catalog id"). **hulls:** all buildable hull ids for the player, no tech band. **engines / beams / launchers:** player `active*` intersect turn catalog; **empty active list jumps to full turn catalog** for that axis. Mutually exclusive with `techLevels`. |
 | `techLevels: [...]` | Non-empty tech-level allowlist; component ids derived at runtime. **hulls:** intersect buildable hull set. **Other axes:** filter turn catalog by `techlevel`. Required when `all` is false or absent. |
+| `raiseMaxTechFromPriorFleet` | When `true` on a `techLevels` axis, raise the band ceiling from prior-turn fleet max tech (`1..max(configured_max, observed_max)`) when fleet input status is `applied` (#227; section 8.5.8). Mutually exclusive with `all`. Default `false`. |
 | `componentIds: [...]` | Optional future refinement: further restrict resolved ids (e.g. when multiple ids share a tech level). Parsed but unused in v1 eligibility unless non-empty. |
 
 Static YAML steps widen by **strict superset on `techLevels` lists** or by switching an axis from `techLevels` to `all: true` (one-way; cannot narrow back).
@@ -641,7 +642,7 @@ Do not emit `exact-with-deferred-risk` for band-feasible multisets in #77; that 
 
 **#78** proposed a global **inference tier policy overlay** merged at `resolve_tier_policies` time. That mechanism was removed unused: no production caller, and fleet torp needs are covered by **inference fleet probability overlay** (section 8.8). Catalog widening that depends on prior-step solutions uses step-local fields instead -- notably `includeComponentIds` on steps with `hullCollisionTwinWiden: true` for **hull collision twin** admission (#226; section 8.5.7).
 
-**Distinct from #87 / #156:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8), not component-filter widens.
+**Distinct from #87 / #156 / #227:** fleet-informed **ranking** and torp **aggregate admission** use **inference fleet probability overlay** (section 8.8). Early **tech-band admission** raises from prior-fleet max tech use step-local `raiseMaxTechFromPriorFleet` (section 8.5.8), not a global resolve-time overlay.
 
 #### 8.5.7 Hull collision twin assets and conditional widen (#226)
 
@@ -675,6 +676,18 @@ uv run python scripts/early_stop_hull_collisions.py --game-type campaign --game-
 ```
 
 The human-readable census report remains the default stdout; `--write-asset` also writes the machine-readable twin table (full-race census only -- omit `--race`). Missing category assets fall back to standard (same spirit as prior weights).
+
+#### 8.5.8 Raise early tech gates from prior-turn fleet (#227)
+
+Companion to hull collision twin widen (#226). Twins cover **score collisions without fleet proof**; this mechanism covers **tech already evidenced on the prior-turn fleet**.
+
+When a step axis sets `raiseMaxTechFromPriorFleet: true` and prior-fleet input status is `applied`, replace that axis's `techLevels` with `1 .. max(configured_constant, observed_max)` where `configured_constant = max(techLevels)` and `observed_max` is the max catalog `techlevel` over component ids on that axis from the player's prior-turn fleet records (same `has_final_ledger` provenance as section 8.8 torp overlay; empty/pending/unavailable leaves the YAML constant unchanged).
+
+**Skip:** when prior-fleet input is **applied** and every flagged axis on the step saturates (`effective_max >= max techlevel in the turn catalog` for that axis) and the step does **not** open hulls via `filters.hulls.all`, omit the step (no solve; advance; do not treat as `no_new_exact_signatures`). Pending/unavailable fleet never skips via this rule (YAML constants unchanged; step still solves). Steps such as `widen_hulls` still run so hull `all` widening is not dropped.
+
+**Production YAML:** flag enabled on hulls/beams/launchers for `early_game_bands`, `widen_launchers`, and `collision_hull_widen`, and on beams/launchers for `widen_hulls` (monotonicity when earlier steps raised those axes). Distinct from #156 tech-gap **penalties** (ranking only).
+
+Diagnostics under `priorFleetTechRaise`: per-axis configured/observed/effective/catalog max, `saturated`, and `skippedDueToPriorFleetTechSaturation`.
 
 ### 8.6 Score-equivalent combos (solver-side merge)
 
@@ -714,6 +727,8 @@ fleetInferenceTuning:
 - Ambiguous rows: **union** of launcher ids across all **fleet build option set** tuples
 
 Empty when no active row has a positive launcher id in any option set. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
+
+The same prior-turn fleet resolution also exposes **per-axis max tech** (`max_tech_by_axis`: `hulls` / `engines` / `beams` / `launchers`) for early tech-gate **admission** (#227; section 8.5.8). That path reuses final-ledger provenance; it does not read `$.composition.maxTechLevel` from the export tree. #156 tech-gap penalties (when implemented) remain ranking-only and are separate from admission.
 
 #### 8.8.2 Torp aggregate (#87)
 

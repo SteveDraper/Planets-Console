@@ -25,6 +25,7 @@ def get_scores_row_inference(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
@@ -48,5 +49,6 @@ def get_scores_row_inference(
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
             fleet_torp_input_status=fleet_torp_input_status,
+            prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         )
     return {"playerId": player_id, **inference}

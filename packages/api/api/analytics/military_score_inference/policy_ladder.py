@@ -155,6 +155,7 @@ def solve_with_policy_ladder(
     on_admitted: Callable[[InferenceSolution], None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> tuple[
     InferenceResult,
     ActionCatalog | None,
@@ -169,6 +170,7 @@ def solve_with_policy_ladder(
         resolved_max_solutions=resolved_max_solutions,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
     )
     while not state.ladder_complete and state.next_step_index < len(state.policy_steps):
         if cancel_token is not None and cancel_token.is_cancelled():

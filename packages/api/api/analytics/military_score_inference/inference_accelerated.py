@@ -98,6 +98,7 @@ def run_accelerated_segment_policy_ladder(
     on_admitted: Callable[[InferenceSolution], None] | None = None,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> AcceleratedSegmentResult:
     """Run the policy ladder for one accelerated segment."""
     observation = observation_from_accelerated_segment(score, turn, segment)
@@ -115,6 +116,7 @@ def run_accelerated_segment_policy_ladder(
         on_admitted=on_admitted,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
     )
     return AcceleratedSegmentResult(
         segment=segment,
@@ -226,6 +228,7 @@ def run_accelerated_split_inference(
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
 ) -> tuple[
     dict[str, object],
     InferenceObservation,
@@ -255,6 +258,7 @@ def run_accelerated_split_inference(
             time_limit_seconds=per_segment_time,
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
+            prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         )
         if segment.is_streaming_target:
             reported_observation = ladder_result.observation
