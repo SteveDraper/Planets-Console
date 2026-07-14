@@ -39,6 +39,16 @@ class PriorTurnFleetTorpResolution:
     input_status: FleetTorpInputStatus
     max_tech_by_axis: dict[str, int] = field(default_factory=dict)
 
+    def prior_fleet_max_tech_for_admission(self) -> dict[str, int] | None:
+        """Prior-fleet max tech for early inference gates, or ``None`` when not applied.
+
+        Callers that admit prior-fleet tech into inference must use this helper
+        rather than re-encoding the ``input_status == "applied"`` gate.
+        """
+        if self.input_status != "applied":
+            return None
+        return dict(self.max_tech_by_axis)
+
 
 def records_for_scope(
     snapshot: FleetTurnSnapshot,

@@ -134,9 +134,7 @@ def _apply_fleet_resolution_to_row_run(
     session = run.session
     session.fleet_torp_overlay = resolution.overlay
     session.fleet_torp_input_status = resolution.input_status
-    session.prior_fleet_max_tech_by_axis = (
-        dict(resolution.max_tech_by_axis) if resolution.input_status == "applied" else None
-    )
+    session.prior_fleet_max_tech_by_axis = resolution.prior_fleet_max_tech_for_admission()
     ladder_state = run.ladder_state
     if ladder_state is not None:
         ladder_state.fleet_torp_overlay = resolution.overlay

@@ -19,6 +19,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    PriorTurnFleetTorpResolution,
     resolve_prior_turn_fleet_torp_overlay,
     schedule_background_prior_turn_fleet_warm,
 )
@@ -26,6 +27,27 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
+
+
+def test_prior_fleet_max_tech_for_admission_applied_returns_copy():
+    resolution = PriorTurnFleetTorpResolution(
+        overlay=None,
+        input_status="applied",
+        max_tech_by_axis={"hulls": 7, "engines": 5},
+    )
+    admitted = resolution.prior_fleet_max_tech_for_admission()
+    assert admitted == {"hulls": 7, "engines": 5}
+    assert admitted is not resolution.max_tech_by_axis
+
+
+def test_prior_fleet_max_tech_for_admission_non_applied_returns_none():
+    for status in ("not_applicable", "pending", "unavailable"):
+        resolution = PriorTurnFleetTorpResolution(
+            overlay=None,
+            input_status=status,
+            max_tech_by_axis={"hulls": 7},
+        )
+        assert resolution.prior_fleet_max_tech_for_admission() is None
 
 
 def _host_turn_context(sample_turn, persistence, *, seed_player_ids: int | None = None):

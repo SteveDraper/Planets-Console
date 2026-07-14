@@ -201,11 +201,7 @@ class TurnAnalyticService:
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_resolution.overlay,
             fleet_torp_input_status=fleet_resolution.input_status,
-            prior_fleet_max_tech_by_axis=(
-                dict(fleet_resolution.max_tech_by_axis)
-                if fleet_resolution.input_status == "applied"
-                else None
-            ),
+            prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
         )
 
     def iter_scores_table_inference_stream(
