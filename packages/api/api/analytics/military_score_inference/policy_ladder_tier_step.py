@@ -347,27 +347,6 @@ def _finish_skipped_policy_step(
         state.ladder_complete = True
 
 
-def _finish_skipped_collision_widen_step(
-    state: PolicyLadderState,
-    *,
-    policy_step: InferenceTierPolicyStep,
-    policy_step_index: int,
-    turn: TurnInfo,
-    observation: InferenceObservation,
-    collision_widen: CollisionHullWidenPlan,
-    seed_count: int,
-) -> None:
-    _finish_skipped_policy_step(
-        state,
-        policy_step=policy_step,
-        policy_step_index=policy_step_index,
-        turn=turn,
-        observation=observation,
-        seed_count=seed_count,
-        collision_widen=collision_widen,
-    )
-
-
 def _make_incremental_admitter(
     state: PolicyLadderState,
     on_admitted: Callable[[InferenceSolution], None] | None,
@@ -471,14 +450,14 @@ def run_policy_ladder_tier_step(
             twins_fell_back=state.hull_collision_twins_fell_back,
         )
         if collision_widen.skipped:
-            _finish_skipped_collision_widen_step(
+            _finish_skipped_policy_step(
                 state,
                 policy_step=policy_step,
                 policy_step_index=step_index,
                 turn=turn,
                 observation=observation,
-                collision_widen=collision_widen,
                 seed_count=len(state.band_seeds),
+                collision_widen=collision_widen,
             )
             return
         policy_step = collision_widen.policy_step
