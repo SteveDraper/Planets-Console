@@ -560,10 +560,7 @@ class InferenceRowScheduler:
             # Peer may have unregistered the RowRun before this binding's terminal
             # notification (idempotent empty tier_solve). Open multiplex can still be
             # waiting on that player with no matching scheduler run left to notify.
-            if (
-                getattr(node, "state", None) in {"complete", "failed"}
-                and not sibling_still_active
-            ):
+            if getattr(node, "state", None) in {"complete", "failed"} and not sibling_still_active:
                 self._deliver_orphan_stream_terminal_if_needed(scope, node)
             return
 

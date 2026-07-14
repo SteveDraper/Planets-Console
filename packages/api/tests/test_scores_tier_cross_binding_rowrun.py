@@ -342,9 +342,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
             queued.append(session.event_queue.get_nowait())
         except queue.Empty:
             break
-    domain_terminals = [
-        event for event in queued if isinstance(event, (RowComplete, RowFailed))
-    ]
+    domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals, (
         "orchestrator node complete after idempotent empty tier_solve with no "
         f"matching scheduler run left open stream without terminal "
