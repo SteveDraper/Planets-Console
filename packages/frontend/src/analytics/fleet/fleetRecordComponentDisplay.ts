@@ -110,6 +110,9 @@ export function formatFleetBeamsDisplay(
   optionSet: FleetBuildOptionSet | null = defaultBuildOptionSet(record)
 ): string {
   if (optionSet != null) {
+    if (optionSet.beamCount == null) {
+      return '?'
+    }
     return formatComponentQuantityLabel(
       optionSet.beamCount,
       optionSet.beamId != null ? fleetBeamName(catalog, optionSet.beamId) : null,
@@ -133,6 +136,9 @@ export function formatFleetLaunchersDisplay(
   optionSet: FleetBuildOptionSet | null = defaultBuildOptionSet(record)
 ): string {
   if (optionSet != null) {
+    if (optionSet.launcherCount == null) {
+      return '?'
+    }
     return formatComponentQuantityLabel(
       optionSet.launcherCount,
       optionSet.torpId != null ? fleetTorpedoName(catalog, optionSet.torpId) : null,
@@ -164,18 +170,22 @@ export function formatBuildOptionSetComponentSummary(
     parts.push(fleetEngineName(catalog, optionSet.engineId) ?? `engine ${optionSet.engineId}`)
   }
   parts.push(
-    formatComponentQuantityLabel(
-      optionSet.beamCount,
-      optionSet.beamId != null ? fleetBeamName(catalog, optionSet.beamId) : null,
-      optionSet.beamId ?? null
-    )
+    optionSet.beamCount == null
+      ? '?'
+      : formatComponentQuantityLabel(
+          optionSet.beamCount,
+          optionSet.beamId != null ? fleetBeamName(catalog, optionSet.beamId) : null,
+          optionSet.beamId ?? null
+        )
   )
   parts.push(
-    formatComponentQuantityLabel(
-      optionSet.launcherCount,
-      optionSet.torpId != null ? fleetTorpedoName(catalog, optionSet.torpId) : null,
-      optionSet.torpId ?? null
-    )
+    optionSet.launcherCount == null
+      ? '?'
+      : formatComponentQuantityLabel(
+          optionSet.launcherCount,
+          optionSet.torpId != null ? fleetTorpedoName(catalog, optionSet.torpId) : null,
+          optionSet.torpId ?? null
+        )
   )
   return parts.join(' · ')
 }

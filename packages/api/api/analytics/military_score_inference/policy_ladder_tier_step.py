@@ -311,6 +311,34 @@ def _maybe_early_stop_after_step(
     return True
 
 
+def _maybe_no_new_exact_signatures_early_stop(
+    state: PolicyLadderState,
+    *,
+    added_combo_ids: frozenset[str],
+    added_aggregate_action_ids: frozenset[str],
+    new_exact_before_step: int,
+) -> bool:
+    """Return True when catalog growth was a noop and best exact is plausible enough."""
+    if len(state.merged_solutions) != new_exact_before_step:
+        return False
+    if not state.merged_solutions:
+        return False
+    if added_combo_ids or added_aggregate_action_ids:
+        return False
+    best_solution = _best_merged_solution(state.merged_solutions)
+    # Emptiness already gated above; _best_merged_solution only returns None for [].
+    assert best_solution is not None
+    thresholds = resolve_solver_thresholds()
+    if (
+        best_solution.objective_value
+        < thresholds.no_new_exact_signatures_early_stop_min_plausibility
+    ):
+        return False
+    state.ladder_complete = True
+    state.ladder_early_stop_reason = "no_new_exact_signatures"
+    return True
+
+
 def _finish_skipped_policy_step(
     state: PolicyLadderState,
     *,
@@ -630,14 +658,12 @@ def run_policy_ladder_tier_step(
     ):
         return
 
-    if (
-        len(state.merged_solutions) == new_exact_before_step
-        and len(state.merged_solutions) > 0
-        and not added_combo_ids
-        and not added_aggregate_action_ids
+    if _maybe_no_new_exact_signatures_early_stop(
+        state,
+        added_combo_ids=added_combo_ids,
+        added_aggregate_action_ids=added_aggregate_action_ids,
+        new_exact_before_step=new_exact_before_step,
     ):
-        state.ladder_early_stop_reason = "no_new_exact_signatures"
-        state.ladder_complete = True
         return
 
     if state.next_step_index >= len(state.policy_steps):

@@ -94,8 +94,9 @@ class FleetBuildOptionSet:
     engine_id: int | None = None
     beam_id: int | None = None
     torp_id: int | None = None
-    beam_count: int = 0
-    launcher_count: int = 0
+    # None = unknown slot fill (e.g. fog-of-war); 0 = confirmed empty; >0 = fitted count.
+    beam_count: int | None = None
+    launcher_count: int | None = None
 
 
 @dataclass(frozen=True)

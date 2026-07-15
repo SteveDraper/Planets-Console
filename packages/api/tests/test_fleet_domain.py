@@ -101,6 +101,21 @@ def test_fleet_build_option_set_round_trip():
     assert fleet_build_option_set_to_json(restored) == wire
 
 
+def test_fleet_build_option_set_round_trip_unknown_counts():
+    option_set = FleetBuildOptionSet(
+        hull_id=13,
+        label="Fog hull only",
+        beam_count=None,
+        launcher_count=None,
+    )
+    wire = fleet_build_option_set_to_json(option_set)
+    assert wire["beamCount"] is None
+    assert wire["launcherCount"] is None
+    restored = fleet_build_option_set_from_json(wire)
+    assert restored == option_set
+    assert fleet_build_option_set_to_json(restored) == wire
+
+
 def test_fleet_ship_record_round_trip_with_qualifiers_and_fields():
     record = FleetShipRecord(
         record_id="rec-1",

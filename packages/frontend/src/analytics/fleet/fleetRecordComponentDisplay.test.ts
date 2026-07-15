@@ -73,6 +73,85 @@ describe('fleetRecordComponentDisplay', () => {
     expect(formatFleetEngineDisplay(observed, catalog)).toBe('Transwarp Drive')
   })
 
+  it('formats observed beam and launcher counts from the confirmed option set', () => {
+    const observed: FleetTableRecord = {
+      ...inferredRecord,
+      fields: {
+        ...inferredRecord.fields,
+        hull: { kind: 'known', value: 17 },
+        engine: { kind: 'known', value: 9 },
+        beams: { kind: 'known', value: 2 },
+        launchers: { kind: 'known', value: 6 },
+      },
+      buildOptionSets: [
+        {
+          hullId: 17,
+          engineId: 9,
+          beamId: 2,
+          torpId: 6,
+          beamCount: 2,
+          launcherCount: 2,
+          label: '',
+          solutionRankWeight: 0,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+    expect(formatFleetBeamsDisplay(observed, catalog)).toBe('2 X-Ray Laser')
+    expect(formatFleetLaunchersDisplay(observed, catalog)).toBe('2 Mark 4 Photon')
+  })
+
+  it('shows ? for unknown option-set weapon counts (fog null type and count)', () => {
+    const fogObserved: FleetTableRecord = {
+      ...inferredRecord,
+      fields: {
+        ...inferredRecord.fields,
+        hull: { kind: 'known', value: 17 },
+        engine: { kind: 'unknown' },
+        beams: { kind: 'unknown' },
+        launchers: { kind: 'unknown' },
+      },
+      buildOptionSets: [
+        {
+          hullId: 17,
+          label: '',
+          solutionRankWeight: 0,
+          beamCount: null,
+          launcherCount: null,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+    expect(formatFleetBeamsDisplay(fogObserved, catalog)).toBe('?')
+    expect(formatFleetLaunchersDisplay(fogObserved, catalog)).toBe('?')
+  })
+
+  it('shows 0 for confirmed-empty option-set weapon counts', () => {
+    const unarmed: FleetTableRecord = {
+      ...inferredRecord,
+      fields: {
+        ...inferredRecord.fields,
+        hull: { kind: 'known', value: 17 },
+        engine: { kind: 'known', value: 9 },
+        beams: { kind: 'known', value: 0 },
+        launchers: { kind: 'known', value: 0 },
+      },
+      buildOptionSets: [
+        {
+          hullId: 17,
+          engineId: 9,
+          label: '',
+          solutionRankWeight: 0,
+          beamCount: 0,
+          launcherCount: 0,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+    expect(formatFleetBeamsDisplay(unarmed, catalog)).toBe('0')
+    expect(formatFleetLaunchersDisplay(unarmed, catalog)).toBe('0')
+  })
+
   it('shows generic freighter label instead of LDSF catalog name', () => {
     const genericFreighter: FleetTableRecord = {
       ...inferredRecord,

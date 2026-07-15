@@ -60,7 +60,7 @@ One **fleet ship record** = one acquired ship tracked across turns until retired
 | `lastSeen` | Turn, `x/y`, optional planet id |
 | `disposition` | **Fleet ship disposition**: `active`, `lost`, `traded`, `unknown` |
 | `qualifiers` | **Fleet possibly lost**, **fleet alibi** (row-level; not disposition) |
-| `buildOptionSets` | List of **fleet build option set** while ambiguous |
+| `buildOptionSets` | List of **fleet build option set** while ambiguous; observed rows carry a single confirmed fit for slot fills |
 | `events` | Append-only **fleet evidence event** timeline |
 
 ### 3.2 Field constraint shapes
@@ -80,6 +80,8 @@ When top-K **scores** solutions disagree on a build, attach a list of **fleet bu
 **Do not** expose independent per-field unions (e.g. `(Cruiser | Destroyer) x (W6 | Transwarp)`) that admit impossible combinations.
 
 Display default: highest **inference solution rank weight** option set. Row expander lists alternates.
+
+**Observed ships:** direct `TurnInfo.ships` sightings also attach option-set ground truth for fitted components. Full-information sightings (`ledger.player_id == perspective`) attach a **single confirmed** option set carrying fitted beam/launcher slot fills (`ship.beams` / `ship.torps`) alongside type ids, and lock all component fields (including known-zero weapons). Partial foreign sightings typically lock **hull** only; fog-of-war zeros are left unknown (`beamId`/`torpId` null and `beamCount`/`launcherCount` null on the option set -- display as `?`) and must not be treated as confirmed empty weapons. `fields.beams` / `fields.launchers` remain type-id constraints for belief-set and reconciliation; counts are not stored on those fields. A lone confirmed set is not ambiguity -- the row expander stays collapsed.
 
 ### 3.4 Disposition vs qualifiers
 
@@ -114,9 +116,14 @@ When a sighting arrives:
 
 1. Match spec to a **fleet build option set** on an unmatched inferred row (exact component match on visible fields)
 2. Tie-break: earliest inferred row without linked id that lists the matching set (FIFO by `builtTurn`)
-3. On match: append event, collapse fields to **known**, link `shipId` if visible
+3. On match: append event, collapse **observation-reliable** fields to **known**, link `shipId` if visible
 4. No match: new **fleet observed ship** row
 5. Never delete prior events -- support future **fleet reconciliation correction**
+
+**Refine must not overwrite observation-known elements.** After a sighting has linked a scoreboard placeholder:
+
+- **Full-information** (`ledger.player_id == perspective`): confirmed option set and known component fields are locked; later scores refine is a no-op for that row's fit.
+- **Partial** (foreign ship): preserve observation-known axes (typically hull; other axes only when positively observed). Refine may still attach inferred option sets for unknown axes, forcing known hull/component ids onto those sets. Fog zeros are not observation locks.
 
 ### 4.4 Id bounds
 

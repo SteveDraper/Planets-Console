@@ -96,6 +96,9 @@ aggregateProbabilityBins:
 
 solverThresholds:
   shipOnlyExactEarlyStopMinPlausibility: -300
+  # Same floor as ship-only exact early-stop: a no-op tier may halt the ladder only
+  # when the best held exact already meets this plausibility (#236).
+  noNewExactSignaturesEarlyStopMinPlausibility: -300
 
 steps:
   - id: early_game_bands

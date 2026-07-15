@@ -81,8 +81,9 @@ export const fleetBuildOptionSetSchema = z.object({
   engineId: z.number().int().optional(),
   beamId: z.number().int().optional(),
   torpId: z.number().int().optional(),
-  beamCount: z.number().int(),
-  launcherCount: z.number().int(),
+  // null = unknown slot fill (fog); 0 = confirmed empty; >0 = fitted count.
+  beamCount: z.number().int().nullable(),
+  launcherCount: z.number().int().nullable(),
 })
 
 export const fleetLastSeenSchema = z.object({
