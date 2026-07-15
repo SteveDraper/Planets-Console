@@ -89,8 +89,12 @@ def build_fleet_materialization_leg_job_wire(
     prior_persisted: PersistedFleetLedger | None = None
     if prior_scope is not None:
         prior_wire = dependency_outputs.get(prior_scope)
-        if prior_wire is not None:
-            prior_persisted = persisted_fleet_ledger_from_json(prior_wire["persistedLedgerWire"])
+        # Satisfaction short-circuit may leave ``{}`` (or a wire without ledger).
+        # Treat missing ``persistedLedgerWire`` like an absent prior and reload.
+        if isinstance(prior_wire, dict):
+            persisted_wire = prior_wire.get("persistedLedgerWire")
+            if isinstance(persisted_wire, dict):
+                prior_persisted = persisted_fleet_ledger_from_json(persisted_wire)
         if prior_persisted is None:
             prior_persisted = services.persistence.get_ledger(
                 scope.game_id,
@@ -164,6 +168,29 @@ class FleetPersistencePolicy:
             scope.turn,
             scope.player_id,
         )
+
+    def satisfied_result_wire(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+    ) -> dict[str, object] | None:
+        """Hydrate short-circuit completes with the durable final ledger wire."""
+        from api.analytics.fleet.compute_services import resolve_fleet_services
+
+        if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
+            return None
+        if scope.turn == WILDCARD or not isinstance(scope.turn, int):
+            return None
+        services = resolve_fleet_services(ctx)
+        persisted = services.persistence.get_ledger(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+        )
+        if persisted is None or not persisted.provenance.is_final:
+            return None
+        return {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)}
 
     def persist(
         self,

@@ -578,6 +578,90 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
     assert stale_run_id not in scheduler._runs
 
 
+def test_matching_run_empty_complete_uses_admission_before_row_failed(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    """Matching-run empty complete must try admission before RowFailed (orphan parity)."""
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        ImmediateRowAdmission,
+    )
+
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    background, stream = _peer_orchestrators(sample_turn)
+    background._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="background",
+        result_wire={"exportTree": {"ok": True}},
+    )
+    stream._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"exportTree": {"ok": True}},
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    immediate = ImmediateRowAdmission(
+        events=({"type": "complete", "status": "noPriorTurn", "playerId": session.player_id},),
+    )
+    monkeypatch.setattr(
+        controller,
+        "resolve_row_admission",
+        lambda _player_id, **_kwargs: immediate,
+    )
+
+    empty_complete = SimpleNamespace(
+        state="complete",
+        result_wire={"exportTree": {"ok": True}},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    assert [e for e in queued if isinstance(e, RowFailed)] == []
+    pending = controller.drain_pending_wire_events()
+    assert any(event.get("type") == "complete" for event in pending), (
+        f"expected admission complete on pending wire, got pending={pending!r} queued={queued!r}"
+    )
+    assert session.run_id in controller.finished_run_ids
+    assert get_row_run(run.run_id) is None
+
+
 def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event(
     sample_turn,
 ) -> None:

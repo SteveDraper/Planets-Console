@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
     RowStreamAdmission,
     ScheduledInferenceRow,
+    ScheduleRowAdmission,
     resolve_row_stream_admission,
     schedule_inference_row,
     tag_inference_stream_event,
@@ -191,6 +192,43 @@ class InferenceTableStreamController(
             row,
             cancel_run_id=self.scheduler.cancel_row_run,
         )
+
+    def push_admission_wire_terminal(self, session: InferenceRowStreamSession) -> bool:
+        """Push immediate/cached admission wire for an empty peer complete.
+
+        Used when ``tier_solve`` completes without a ``rowComplete`` payload but
+        admission can still finish the multiplex row (skip / cached / immediate).
+        Returns True when client-visible terminal wire was delivered.
+        """
+        admission = self.resolve_row_admission(session.player_id)
+        if isinstance(admission, ScheduleRowAdmission):
+            return False
+        wires = list(self.dispatch_admission(session.player_id, admission).wire_events)
+        if not wires:
+            return False
+        with self.stream_lock:
+            self.pending_wire_events.extend(wires)
+            self.finished_run_ids.add(session.run_id)
+        self.wake_multiplex.set()
+        return True
+
+    def push_domain_event_pending_wire(
+        self,
+        session: InferenceRowStreamSession,
+        event: InferenceStreamDomainEvent,
+    ) -> None:
+        """Append tagged domain-event wire to pending (finished_run_ids suppress path)."""
+        with self.stream_lock:
+            for wire in domain_event_to_wire_events(
+                event,
+                observation=session.observation,
+                turn=session.turn,
+                fleet_torp_input_status=session.fleet_torp_input_status,
+            ):
+                self.pending_wire_events.append(
+                    tag_inference_stream_event(wire, player_id=session.player_id)
+                )
+        self.wake_multiplex.set()
 
     def deliver_domain_event(
         self,

@@ -179,6 +179,7 @@ The orchestrator honors the entry step when creating or attaching to a node.
 
 ```text
 waiting_deps → ready → running → complete | failed
+                    ↘ parked (process-wide scope lease; peer binding holds claim)
                     ↘ attach_inflight (waiter; no pool worker)
 ```
 
@@ -187,10 +188,31 @@ waiting_deps → ready → running → complete | failed
 | **waiting_deps** | Ancestor nodes incomplete; not in ready queue |
 | **ready** | Dependencies satisfied; eligible for pool |
 | **running** | Leader step executing on a worker (or inline) |
+| **parked** | Waiting on the process-wide scope lease for this `scope` + `step_kind`; peer binding is leader |
 | **attach_inflight** | Duplicate request joins leader; **no second pool worker** |
 | **complete** | Node terminal (persisted / satisfied per analytic policy) |
 
 **Hard invariant:** pool workers never call `ensure_export` or block on another node's completion.
+
+### Process-wide scope lease ([#222](https://github.com/SteveDraper/Planets-Console/issues/222))
+
+Singleflight above is **per orchestrator**. Fleet table stream, scores inference stream, and background prior-turn warm each bind a separate `ComputeOrchestrator`. The same logical scope can therefore be ready on multiple DAGs at once.
+
+The **process-wide scope lease** closes that hole:
+
+| Rule | Behavior |
+|------|----------|
+| **Claim key** | Normalized `ComputeScope` + `step_kind` (so distinct *entry* points -- scores `materialize` vs `tier_solve` -- do not incorrectly suppress each other) |
+| **On dispatch** | If `PersistencePolicy.is_satisfied` → complete without running; else try claim; if held by a peer → **park** (not failure), unless a higher `priority_band` can **adopt** (see below) |
+| **Priority adopt** | While a claim is held but **not yet sealed** for execution, a strictly higher `priority_band` (e.g. `stream_attached` over `background`) **adopts**: becomes leader; the demoted holder parks when it reaches seal (`lost`) |
+| **Seal before work** | Immediately before expensive work (inline `run_step` or pool submit), the holder **seals**. Seal runs after job-wire construction (orchestrator lock released) so a higher-priority peer can adopt during that window |
+| **Profile continue** | When the same node advances to a different `step_kind` (e.g. scores `materialize` → `tier_solve`), **retain** prior step claims until node terminal. Peers must not rematerialize while the leader is still non-terminal on a later step. The node may hold multiple claim keys; all release together on complete/fail |
+| **On leader terminal** | Release all held claims for the node; wake waiters (higher `priority_band` first); followers re-dispatch |
+| **On follower wake** | Satisfaction short-circuit if durable result exists; else become the next leader |
+| **Backends** | Applies to inline and pool steps (pool-queue uniqueness alone is insufficient) |
+| **No mid-run preempt** | Once sealed, the leader runs to completion. A higher-priority peer that arrives after seal parks until release (residual: background already in expensive work can still finish before a late stream claim) |
+
+Scores stream terminals use the process-wide scope-terminal fan-out as the sole delivery path (own binding and peer bindings such as fleet DAG empty `tier_solve` skip). Fleet table stream remains local orchestrator listener only.
 
 ### Terminal reuse and `force_fresh`
 
@@ -199,7 +221,7 @@ waiting_deps → ready → running → complete | failed
 | `force_fresh` | Existing node state | Behavior |
 |---------------|---------------------|----------|
 | `False` (default) | `complete` or `failed` | Attach to the terminal node; return its cached `result_wire` or error. No new pool work. |
-| `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. |
+| `False` (default) | `waiting_deps`, `ready`, `running`, `parked` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
 | `True` | non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
 
@@ -395,6 +417,8 @@ Until phase 2, table/map REST responses may still call `compute()` handlers dire
 ```text
 packages/api/api/compute/
   scope.py           # ComputeScope, ScopeKeySpec, normalization
+  scope_lease.py     # Process-wide scope+step claim (cross-binding singleflight)
+  scope_terminal_fanout.py  # Process-wide terminal notify for stream adapters
   profile.py         # AnalyticComputeProfile, ComputeStepSpec
   orchestrator.py    # DAG, singleflight, submit, complete
   pools.py           # Global pool, priority dequeue, backend dispatch

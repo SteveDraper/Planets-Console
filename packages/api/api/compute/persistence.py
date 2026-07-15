@@ -17,6 +17,19 @@ class PersistencePolicy(Protocol):
         """Return whether the scope already has a durable satisfied result."""
         ...
 
+    def satisfied_result_wire(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+    ) -> object | None:
+        """Result wire for satisfaction short-circuit, or None for ``{}``.
+
+        When durable satisfaction holds, dependents and stream listeners may need a
+        real wire (e.g. fleet ``persistedLedgerWire``). Return None only when the
+        analytic has no wire shape for a cheap complete.
+        """
+        ...
+
     def persist(
         self,
         ctx: AnalyticQueryContext,

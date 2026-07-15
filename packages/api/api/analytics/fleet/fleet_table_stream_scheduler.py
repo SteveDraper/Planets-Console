@@ -259,22 +259,18 @@ class FleetTableStreamScheduler:
                 continue
             if node.state != "complete" or node.result_wire is None:
                 continue
-            if not isinstance(node.result_wire, dict):
+            persisted = _persisted_ledger_from_node_or_storage(
+                scope,
+                node,
+                stream_bindings=self._stream_bindings,
+            )
+            if persisted is None:
                 _emit_fleet_materialization_error(
                     session,
                     cancelled=cancelled,
                     detail="Fleet ledger materialization failed",
                 )
                 continue
-            persisted_wire = node.result_wire.get("persistedLedgerWire")
-            if not isinstance(persisted_wire, dict):
-                _emit_fleet_materialization_error(
-                    session,
-                    cancelled=cancelled,
-                    detail="Fleet ledger materialization failed",
-                )
-                continue
-            persisted = persisted_fleet_ledger_from_json(persisted_wire)
             stream_events = _node_complete_stream_events(
                 scope_turn=scope.turn,
                 host_turn_number=run.host_turn_number,
@@ -316,6 +312,40 @@ def _emit_fleet_materialization_error(
     if not cancelled:
         session.event_queue.put(fleet_error_event(detail))
         _wake_multiplex_for_session(session)
+
+
+def _persisted_ledger_from_node_or_storage(
+    scope: ComputeScope,
+    node: ComputeNodeRun,
+    *,
+    stream_bindings: dict[str, _FleetStreamOrchestratorBinding],
+) -> PersistedFleetLedger | None:
+    """Resolve a final ledger from the node wire or durable persistence.
+
+    Satisfaction short-circuit may complete with ``{}``; reload from storage so
+    the stream still emits progress instead of a false materialization error.
+    """
+    if isinstance(node.result_wire, dict):
+        persisted_wire = node.result_wire.get("persistedLedgerWire")
+        if isinstance(persisted_wire, dict):
+            return persisted_fleet_ledger_from_json(persisted_wire)
+    if scope.player_id == "*" or not isinstance(scope.player_id, int):
+        return None
+    if scope.turn == "*" or not isinstance(scope.turn, int):
+        return None
+    from api.analytics.fleet.compute_services import resolve_fleet_services
+
+    for binding in stream_bindings.values():
+        services = resolve_fleet_services(binding.query_context)
+        persisted = services.persistence.get_ledger(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+        )
+        if persisted is not None and persisted.provenance.is_final:
+            return persisted
+    return None
 
 
 def _wake_multiplex_for_session(session: FleetPlayerStreamSession) -> None:

@@ -43,6 +43,7 @@ def release_orchestrator_for_context(ctx: AnalyticQueryContext) -> None:
         orchestrator = _orchestrators_by_ctx_id.pop(id(ctx), None)
     if orchestrator is None:
         return
+    orchestrator.release_held_scope_leases()
     registration_id = orchestrator.pool_registration_id
     worker_pool = orchestrator.worker_pool
     if registration_id is not None and worker_pool is not None:
@@ -58,5 +59,8 @@ def live_orchestrators() -> tuple[ComputeOrchestrator, ...]:
 
 def reset_orchestrators_for_tests() -> None:
     """Clear cached orchestrators (tests only)."""
+    from api.compute.scope_lease import reset_process_scope_lease_for_tests
+
     with _orchestrator_lock:
         _orchestrators_by_ctx_id.clear()
+    reset_process_scope_lease_for_tests()

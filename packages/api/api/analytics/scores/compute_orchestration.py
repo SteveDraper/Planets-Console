@@ -167,17 +167,35 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    When no ``RowRun`` is registered (already satisfied / non-solve terminal; no
-    inference work required), return a skip sentinel so ``run_scores_tier_solve``
-    can complete without solving. Scopes that need CP-SAT must have registered a
-    run during materialize/ensure schedule -- including historical gap-fill.
+    Skip sentinel (``runId: None``) is allowed only when turn evidence is already
+    closed (persisted / cheap terminal). A missing ``RowRun`` while evidence is
+    still open must not complete the scores node -- that falsely unlocks fleet
+    materialization with ``turnEvidenceAtN=False`` and leaves the scores stream
+    without a rowComplete (in-progress hang).
     """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
 
+    export_scope = _export_scope_for_compute(scope)
+    if export_scope is None:
+        raise ValueError("scores tier_solve requires concrete scores scope")
+
     run = get_row_run_for_scope(scope)
     if run is None:
-        return {"runId": None}
+        # Materialize already ensures; re-ensure covers tier_solve entry submits and
+        # races where the stream has not registered yet but admit can still schedule.
+        from api.analytics.scores.exports import ensure_scores_export
+
+        ensure_scores_export(ctx, export_scope)
+        run = get_row_run_for_scope(scope)
+    if run is None:
+        if ScoresPersistencePolicy().is_satisfied(ctx, scope):
+            return {"runId": None}
+        raise RuntimeError(
+            "scores tier_solve requires a registered RowRun when turn evidence "
+            f"is not closed (game_id={scope.game_id}, perspective={scope.perspective}, "
+            f"turn={scope.turn}, player_id={scope.player_id})"
+        )
 
     fleet_resolution = _resolve_prior_fleet_for_tier_wire(
         scope,
@@ -224,7 +242,8 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier step and return an explicit orchestrator outcome."""
     run_id = job_wire.get("runId")
     if run_id is None:
-        # No RowRun: ensure already satisfied or non-solve terminal -- no CP-SAT.
+        # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn evidence
+        # is already closed -- no CP-SAT.
         return StepResult(outcome="complete")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
@@ -263,6 +282,15 @@ class ScoresPersistencePolicy:
         if export_scope is None:
             return False
         return is_scores_export_turn_evidence_closed(ctx, export_scope)
+
+    def satisfied_result_wire(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+    ) -> None:
+        """Scores short-circuit has no cheap rowComplete wire; stream uses admission."""
+        del ctx, scope
+        return None
 
     def persist(
         self,
