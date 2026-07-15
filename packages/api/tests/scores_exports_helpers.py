@@ -156,6 +156,7 @@ def prior_turn_ensure_context(
     *,
     prior_turn: int = 110,
     game_id: int = GAME_ID,
+    scheduler: InferenceRowScheduler | None = None,
 ):
     from tests.export_chain_test_fixtures import (
         export_chain_query_context,
@@ -171,6 +172,7 @@ def prior_turn_ensure_context(
     ctx = export_chain_query_context(
         sample_turn,
         persistence=persistence,
+        scheduler=scheduler,
         stored_turns=stored_turns,
     )
     seed_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)

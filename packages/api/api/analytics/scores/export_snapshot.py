@@ -199,10 +199,16 @@ def gather_scores_inference_snapshot(
 
     stream_scope = scores_inference_stream_scope(scope)
     pause_status = services.scheduler.global_pause_status(stream_scope)
+    ensure_sync_admission = _ensure_sync_admission_from_context(ctx, scope)
+    # Ensure-ephemeral terminals already own precedence; skip live stream admission
+    # so cheap-path helpers (immediate_row_inference_events) are not re-run.
+    stream_admission = (
+        None if ensure_sync_admission is not None else _row_admission(ctx, services, scope, turn)
+    )
     return ScoresInferenceSnapshot(
         persisted_row=persisted_row,
-        stream_admission=_row_admission(ctx, services, scope, turn),
-        ensure_sync_admission=_ensure_sync_admission_from_context(ctx, scope),
+        stream_admission=stream_admission,
+        ensure_sync_admission=ensure_sync_admission,
         scheduler_run=_scheduler_row_run(services, scope),
         globally_paused=bool(pause_status.get("paused")),
     )

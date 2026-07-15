@@ -84,9 +84,10 @@ Export materialization is **not** read-only. `ctx.query(...)` runs **analytic ex
 | **In-flight attach** | If the same scope is already on the inference scheduler/stream, ensure attaches and reflects live state -- no duplicate jobs. |
 | **Ensure scope** | Typically `(game_id, perspective, turn, player_id)` for row-scoped exports (e.g. **scores** `$.solutions.*`). No batch ensure API in v1. |
 | **Unwind direction** | Turn *N* reads *N−1* only. Example chain: Fleet@N <- Scores@N <- Fleet@N−1 <- Scores@N−1 <- … |
-| **Small probe** | Inline ensure allowed; prior turns may sync-ensure when step count is at or below threshold. |
+| **Small probe** | Inline ensure allowed for cheap probe/schedule admission when step count is at or below threshold. |
 | **Large probe** | Block inline ensure; user confirms; **background full-unwind job** with progress stream. |
 | **Current shell turn** | Expensive work (e.g. scores inference) stays **async** -- attach stream / return `in_progress`. |
+| **Historical scores** | Same admission as ambient: schedule a ``RowRun``; CP-SAT runs only on orchestrator ``tier_solve`` (thread pool), never sync on materialize/ensure. |
 | **Persistence gate** | Only full-unwind authoritative results are persistable for chain use (no approximate rows in #93). |
 
 Ensure does **not** rely on the user having opened each analytic in visit order.
@@ -106,8 +107,12 @@ when defined, otherwise `is_persisted`, plus `is_scope_ensured` on the query
 context to **omit** already-satisfied scopes from the walk. Baseline scopes are
 also skipped. **`is_persisted`** remains chain-complete / authoritative
 persistence only; **`is_ensure_satisfied`** means probe/ensure should skip
-because no further ensure work is possible or needed (e.g. scores stopped
-persisted rows). Steps that need work appear in `missing_steps` with
+because no further ensure *admit* work is needed (including an in-progress
+scores scheduler `RowRun` -- attach, do not re-schedule). That is weaker than
+**terminal scores evidence** used by fleet `turnEvidenceAtN`
+(`ScoresExportDecision.is_turn_evidence_closed`): a scheduled RowRun must not
+close fleet provenance, because later scores persist invalidates fleet ledgers
+from that host turn. Steps that need work appear in `missing_steps` with
 `status: "not_persisted"` only -- satisfied, in-progress, and baseline scopes
 are omitted rather than returned with `persisted`, `in_progress`, or
 `baseline`. Full status discrimination is planned for

@@ -896,6 +896,8 @@ class ComputeDiagnosticsController:
         if shell is None:
             return
         step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
+        # Cache-only gauges: ready listeners drain under paths that may hold the scores
+        # scheduler lock (enqueue -> submit -> drain). Live orch sampling deadlocks.
         self._timeline.record(
             shell,
             kind="ready",
@@ -905,7 +907,7 @@ class ComputeDiagnosticsController:
             step_index=node.step_index,
             priority_band=node.priority_band,
             backend=step_spec.backend if step_spec is not None else None,
-            sample_ready_from_orchestrators=True,
+            sample_ready_from_orchestrators=False,
         )
 
     def _on_inline_start(
@@ -919,6 +921,8 @@ class ComputeDiagnosticsController:
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return
+        # Cache-only gauges: inline_start runs before heavy ensure work and must not
+        # nest into other orchestrators' locks (same ABBA risk as ready/finish).
         self._timeline.record(
             shell,
             kind="inline_start",
@@ -929,7 +933,7 @@ class ComputeDiagnosticsController:
             priority_band=node.priority_band,
             backend="inline",
             open_execution=True,
-            sample_ready_from_orchestrators=True,
+            sample_ready_from_orchestrators=False,
         )
 
     def _on_step_complete(

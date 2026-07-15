@@ -162,7 +162,12 @@ def iter_multiplexed_stream_events(
             continue
         for event in event_to_wire_events(row, raw_event):
             if event.get("type") in terminal_types:
+                # Must mirror drain_available_multiplex_events: discard alone is not
+                # enough. With is_stream_active, refresh_pending_run_ids rebuilds from
+                # finished_run_ids; omitting finished.add leaves rows pending forever
+                # (serverStreams linger, idle CPU -- manual hang fingerprint).
                 pending_run_ids.discard(row.session.run_id)
+                finished.add(row.session.run_id)
             if tag_player_id and tag_event is not None:
                 yield tag_event(event, row.player_id)
             else:

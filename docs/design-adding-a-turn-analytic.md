@@ -116,10 +116,12 @@ ENSURE_DEPENDENCIES = (
 )
 
 def ensure_export(ctx, scope) -> bool:
-    """Idempotent: persist/scheduler attach/sync ensure for this scope before materialize.
+    """Idempotent: persist/scheduler attach for this scope before materialize.
 
     Return True when the scope needs no further ensure work (already satisfied or
     terminal with no persistable row). ctx.query marks the scope ensured only on True.
+    Expensive solve work (e.g. scores CP-SAT) must not run on the ensure/materialize
+    thread -- schedule a RowRun so orchestrator ``tier_solve`` owns it.
     """
     ...
 

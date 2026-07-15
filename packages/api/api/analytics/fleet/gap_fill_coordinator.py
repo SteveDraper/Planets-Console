@@ -369,7 +369,12 @@ class FleetGapFillCoordinator:
             turn_number,
             self._player_id,
         )
-        if cached is not None and _is_fleet_ledger_cache_hit(cached):
+        # Post-completion: return any ledger the cycle wrote for this turn, including
+        # non-final provenance. ``materialize_ledger`` entry still requires ``is_final``
+        # so partials rematerialize; requiring final here races with Phase C (scores
+        # turn-evidence closed only when terminal) when ``result_ledger`` is cleared by
+        # an extended re-lead before waiters read it.
+        if cached is not None and turn_number <= inflight.target_turn:
             return cached
 
         if inflight.generation != self.epoch:
@@ -421,6 +426,7 @@ class FleetGapFillCoordinator:
         query_context: AnalyticQueryContext | None,
     ) -> None:
         complete_before: frozenset[int] | None = None
+        post_coherence_ledger_misses = 0
         query_ctx = _resolve_query_context(
             self._persistence,
             self._game_id,
@@ -573,11 +579,19 @@ class FleetGapFillCoordinator:
                 self._player_id,
             )
             if persisted is None:
-                raise ConflictError(
-                    f"fleet ledger gap-fill produced no ledger "
-                    f"for game {self._game_id} perspective {self._perspective} "
-                    f"player {self._player_id} turn {final_target}"
-                )
+                # Scores ``on_row_persisted`` deletes fleet ledgers from the host turn
+                # when inference evidence updates. That can race after coherence exits
+                # (and after deferred notifications) so the final read sees None.
+                # Rematerialize instead of failing the stream with ``produced no ledger``.
+                post_coherence_ledger_misses += 1
+                if post_coherence_ledger_misses >= GAP_FILL_MAX_RETRIES:
+                    raise ConflictError(
+                        f"fleet ledger gap-fill produced no ledger "
+                        f"for game {self._game_id} perspective {self._perspective} "
+                        f"player {self._player_id} turn {final_target}"
+                    )
+                complete_before = None
+                continue
             inflight.result_ledger = persisted
             return
 

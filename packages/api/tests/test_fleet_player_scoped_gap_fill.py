@@ -39,6 +39,7 @@ from tests.fleet_player_scoped_gap_fill_helpers import (
 from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_persistence import (
     _inference_materialization_for_fleet,
+    _seed_scores_rows_for_all_players,
 )
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -320,6 +321,9 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
         fleet_persistence=persistence,
     )
     invalidation.wire_scores_invalidation_to_fleet_persistence()
+    # Terminal scores@111 closes turn evidence so fleet@111 is final and may
+    # invalidate scores@112. scores@112 for Q stays incomplete (incident shape).
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
 
     inference_persistence.put_row(
         628580,
@@ -362,7 +366,7 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
         inference_materialization=inference_materialization,
     )
 
-    assert persistence.has_ledger(628580, 1, 111, player_p)
+    assert persistence.has_final_ledger(628580, 1, 111, player_p)
     assert not persistence.has_ledger(628580, 1, 111, player_q)
     snapshot_111 = persistence.get_snapshot(628580, 1, 111)
     assert snapshot_111 is None or player_q not in {
@@ -377,19 +381,6 @@ def test_per_player_gap_fill_emits_deferred_scores_invalidation_for_player(
     load_turn,
     memory_backend,
 ):
-    from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
-    from api.services.inference_invalidation_service import InferenceInvalidationService
-
-    from tests.fleet_player_scoped_gap_fill_helpers import (
-        require_turns,
-        seed_provenance_snapshot,
-        two_players_from_turn,
-    )
-    from tests.test_fleet_persistence import (
-        _inference_materialization_for_fleet,
-        _seed_scores_rows_for_all_players,
-    )
-
     turn_110, turn_111, turn_112 = require_turns(load_turn, 110, 111, 112)
     player_p, player_q = two_players_from_turn(turn_112)
     seed_provenance_snapshot(persistence, load_turn, from_turn=110)
@@ -403,6 +394,8 @@ def test_per_player_gap_fill_emits_deferred_scores_invalidation_for_player(
         fleet_persistence=persistence,
     )
     invalidation.wire_scores_invalidation_to_fleet_persistence()
+    # Terminal scores@111 required for final fleet@111 -> scores@112 invalidation.
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
     _seed_scores_rows_for_all_players(inference_persistence, turn_112)
 
     get_or_materialize_fleet_ledger_for_player(
@@ -415,6 +408,7 @@ def test_per_player_gap_fill_emits_deferred_scores_invalidation_for_player(
         inference_materialization=inference_materialization,
     )
 
+    assert persistence.has_final_ledger(628580, 1, 111, player_p)
     assert inference_persistence.get_row(628580, 1, 112, player_p) is None
     assert inference_persistence.get_row(628580, 1, 112, player_q) is not None
 

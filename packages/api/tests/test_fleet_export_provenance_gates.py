@@ -234,6 +234,22 @@ def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
         stored_turns=stored_turns,
     )
     fleet_services = ctx.export_services["fleet"]
+    # Terminal scores@N for each rematerialized turn so provenance can close honestly
+    # (in-progress RowRun alone must not close turnEvidenceAtN).
+    for host_turn in range(2, turn_number + 1):
+        put_persisted_row(
+            persistence,
+            stored_turns[host_turn],
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seed",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=host_turn,
+        )
     fleet_services.persistence.put_ledger(
         GAME_ID,
         perspective(sample_turn),

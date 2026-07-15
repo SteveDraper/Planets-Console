@@ -61,8 +61,8 @@ class ScoresExportDecision:
     """Precedence branch and lifecycle status for one snapshot.
 
     Attributes:
-        needs_ensure_work: Driver for export ensure (prior-turn sync). Today only
-            the empty branch sets this; other branches may set it in future.
+        needs_ensure_work: Driver for export ensure (schedule RowRun when empty).
+            Today only the empty branch sets this; other branches may set it in future.
     """
 
     branch: ScoresExportPrecedenceBranch
@@ -71,7 +71,24 @@ class ScoresExportDecision:
 
     @property
     def is_ensure_satisfied(self) -> bool:
+        """True when probe/ensure should skip further admit work for this scope.
+
+        Includes an in-progress scheduler ``RowRun`` (attach, do not re-schedule).
+        That is weaker than terminal scores evidence -- see ``is_turn_evidence_closed``.
+        """
         return not self.needs_ensure_work
+
+    @property
+    def is_turn_evidence_closed(self) -> bool:
+        """True when scores@N is terminal for fleet ``turnEvidenceAtN``.
+
+        A scheduled / in-progress ``RowRun`` (``scheduler`` branch) is ensure-satisfied
+        for admit idempotency but must not close fleet turn evidence: scores persist
+        later invalidates fleet ledgers from that host turn.
+        """
+        if self.branch in {"empty", "scheduler"}:
+            return False
+        return self.search_status in {"complete", "stopped"}
 
 
 def is_persistable_inference_status(status: str) -> bool:
@@ -209,6 +226,24 @@ def is_scores_export_ensure_satisfied_from_snapshot(
         resolution_context=resolution_context,
         functional_payload=functional_payload,
     ).needs_ensure_work
+
+
+def is_scores_export_turn_evidence_closed_from_snapshot(
+    snapshot: ScoresInferenceSnapshot,
+    *,
+    resolution_context: ScoresExportResolutionContext,
+) -> bool:
+    """True when scores@N is terminal enough to close fleet ``turnEvidenceAtN``.
+
+    Distinct from ``is_scores_export_ensure_satisfied_from_snapshot``: an in-progress
+    scheduler ``RowRun`` satisfies ensure admit but does not close turn evidence.
+    """
+    functional_payload = _resolve_functional_payload(snapshot, resolution_context)
+    return classify_scores_export_decision(
+        snapshot,
+        resolution_context=resolution_context,
+        functional_payload=functional_payload,
+    ).is_turn_evidence_closed
 
 
 def resolve_scores_export(

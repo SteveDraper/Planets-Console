@@ -889,3 +889,96 @@ def test_joiner_on_progress_receives_incremental_events_during_inflight_gap_fill
     assert progress_turns == sorted(progress_turns)
     assert min(progress_turns) <= 111
     assert max(progress_turns) >= 112
+
+
+def test_result_for_request_returns_non_final_ledger_when_result_cleared(
+    persistence,
+    load_turn,
+):
+    """Completed cycle with cleared result_ledger must still return a non-final write.
+
+    Phase C leaves many ledgers non-final until scores turn-evidence closes. Leaders
+    return those via ``result_ledger``; waiters that lose that pointer (extended
+    re-lead clears it) must not raise ``completed without a cache hit`` when the
+    ledger for the requested turn is present.
+    """
+    from api.analytics.fleet.gap_fill_coordinator import _InflightMaterialization
+    from api.analytics.fleet.types import (
+        FleetAcquisitionLedger,
+        FleetMaterializationProvenance,
+    )
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_id = _first_player_id(turn_111)
+    non_final = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=player_id),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=False,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    persistence.put_ledger(628580, 1, 111, player_id, non_final)
+    assert non_final.provenance.is_final is False
+
+    coordinator = coordinator_for(persistence, 628580, 1, player_id)
+    inflight = _InflightMaterialization(
+        target_turn=111,
+        generation=coordinator.epoch,
+        load_turn=load_turn,
+        inference_materialization=None,
+        query_context=None,
+    )
+    inflight.event.set()
+    inflight.result_ledger = None
+
+    result = coordinator._result_for_request(inflight, 111, turn_111)
+    assert result.ledger.player_id == player_id
+    assert result.provenance.is_final is False
+
+
+def test_gap_fill_retries_when_ledger_cleared_after_coherence(persistence, load_turn):
+    """Concurrent scores evidence invalidation can delete fleet after coherence exits.
+
+    ``on_row_persisted`` clears fleet ledgers from the host turn. When that races after
+    gap-fill leaves coherence (and during/after deferred notifications), the final
+    ``get_ledger`` used to raise ``produced no ledger``. Rematerialize instead.
+    """
+    from api.analytics.fleet import gap_fill_coordinator as gap_fill_mod
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_id = _first_player_id(turn_111)
+
+    original_emit = gap_fill_mod.emit_deferred_fleet_ledger_notifications
+    clear_count = 0
+
+    def clear_target_ledger_then_emit(*args, **kwargs):
+        nonlocal clear_count
+        if clear_count == 0:
+            clear_count += 1
+            persistence.delete_ledger(628580, 1, 111, player_id)
+        return original_emit(*args, **kwargs)
+
+    with patch.object(
+        gap_fill_mod,
+        "emit_deferred_fleet_ledger_notifications",
+        side_effect=clear_target_ledger_then_emit,
+    ):
+        result = get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            628580,
+            1,
+            player_id,
+            turn_111,
+            load_turn=load_turn,
+        )
+
+    assert clear_count == 1
+    assert result.ledger.player_id == player_id
+    assert persistence.get_ledger(628580, 1, 111, player_id) is not None

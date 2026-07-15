@@ -221,10 +221,14 @@ class ConcurrencyTimelineRecorder:
         )
         duration_ms, opened_backend = self._open_executions.close(execution_key)
         resolved_backend = backend if backend is not None else opened_backend
+        # Use the ready-queue cache only. Live ``diagnostics_snapshot`` here deadlocks:
+        # finish listeners run from ``drain_post_lock_callbacks`` while a peer may hold
+        # the scores scheduler lock and wait on an orchestrator condition (or the reverse
+        # via ``submit`` / ``_plan_and_register`` probing the scheduler under the orch lock).
         gauges = self._occupancy_gauges(
             shell,
             global_queue_depth=global_queue_depth,
-            sample_ready_from_orchestrators=True,
+            sample_ready_from_orchestrators=False,
         )
         timeline_kind: TimelineEventKind = "inline_complete" if surface == "inline" else "complete"
         self._append(
@@ -275,9 +279,12 @@ class ConcurrencyTimelineRecorder:
     ) -> OccupancyGauges:
         """Sample occupancy gauges for a timeline event.
 
-        Ready depth prefers the ready-queue-changed cache so pool-lock callbacks
-        never nest into orchestrator locks. When ``sample_ready_from_orchestrators``
-        is true (outside the pool lock), live orchestrator ready queues are used
+        Ready depth prefers the ready-queue-changed cache so listener callbacks
+        (ready / inline_start / finish) never nest into orchestrator locks -- that
+        ABBA-deadlocks with ``submit`` / ``_plan_and_register`` paths that hold an
+        orch lock while probing the scores scheduler. When
+        ``sample_ready_from_orchestrators`` is true (snapshot assembly only, never
+        from drain_post_lock listeners), live orchestrator ready queues are used
         and the cache is refreshed to match.
         """
         ancestor_turns = self._ancestor_turns(shell)

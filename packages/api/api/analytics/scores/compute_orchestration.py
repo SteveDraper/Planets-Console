@@ -167,8 +167,10 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    When no stream ``RowRun`` is registered (ensure-only materialize continuation),
-    return a skip sentinel so ``run_scores_tier_solve`` can complete without solving.
+    When no ``RowRun`` is registered (already satisfied / non-solve terminal; no
+    inference work required), return a skip sentinel so ``run_scores_tier_solve``
+    can complete without solving. Scopes that need CP-SAT must have registered a
+    run during materialize/ensure schedule -- including historical gap-fill.
     """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
@@ -192,10 +194,10 @@ def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
 
     Fleet ENSURE-depends on same-turn scores. Completing after materialize alone
     unlocked fleet before inference solutions existed; continuing keeps the scores
-    node non-terminal until tier_solve finishes (or skips when no RowRun).
+    node non-terminal until tier_solve finishes (or skips when no RowRun is needed).
 
-    The export tree is carried as the continue payload so ensure-only skip paths
-    still leave a dependency ``result_wire`` for fleet dispatch.
+    The export tree is carried as the continue payload so no-work skip paths still
+    leave a dependency ``result_wire`` for fleet dispatch.
     """
     export_tree = job_wire["exportTree"]
     return StepResult(outcome="continue", payload=export_tree)
@@ -222,13 +224,18 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier step and return an explicit orchestrator outcome."""
     run_id = job_wire.get("runId")
     if run_id is None:
-        # Ensure-only continuation after materialize with no stream RowRun.
+        # No RowRun: ensure already satisfied or non-solve terminal -- no CP-SAT.
         return StepResult(outcome="complete")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        raise RuntimeError(f"scores tier_solve missing registered RowRun for runId {run_id!r}")
+        # Cross-binding race: a peer orchestrator finalized/unregistered the shared
+        # RowRun while this binding still had a queued or continuing tier_solve wire.
+        # Treat as idempotent terminal -- the peer already delivered completion.
+        # Cross-binding stream terminal delivery is owned by process-wide scope lease
+        # (#222), not by a side-channel notify from this empty path.
+        return StepResult(outcome="complete")
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:
@@ -249,12 +256,13 @@ class ScoresPersistencePolicy:
     """Orchestrator persistence hooks for per-player scores inference scopes."""
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
-        from api.analytics.scores.exports import is_scores_export_ensure_satisfied
+        """True when scores@N has terminal evidence (not merely a scheduled RowRun)."""
+        from api.analytics.scores.exports import is_scores_export_turn_evidence_closed
 
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None:
             return False
-        return is_scores_export_ensure_satisfied(ctx, export_scope)
+        return is_scores_export_turn_evidence_closed(ctx, export_scope)
 
     def persist(
         self,

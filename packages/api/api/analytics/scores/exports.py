@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +12,7 @@ from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
+    immediate_row_inference_events,
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -22,9 +22,9 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
-    is_persistable_inference_status,
     is_scores_export_authoritatively_persisted,
     is_scores_export_ensure_satisfied_from_snapshot,
+    is_scores_export_turn_evidence_closed_from_snapshot,
     resolve_scores_export,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
@@ -34,17 +34,11 @@ from api.analytics.scores.export_snapshot import (
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
 )
-from api.analytics.scores.export_wire import is_terminal_inference_api_payload
-from api.analytics.scores.inference import get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.models.player import Score
-from api.serialization.inference_row_persistence import (
-    PersistedInferenceRow,
-    persisted_inference_row_from_wire_complete,
-)
-from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -196,101 +190,104 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
     )
 
 
-def _run_prior_turn_sync_ensure(
-    ctx: AnalyticQueryContext,
-    *,
-    services: ScoresExportContext,
-    scope: ExportScope,
-    turn: TurnInfo,
-    load_scoreboard_turn: Callable[[int], TurnInfo | None],
-) -> bool:
-    """Run prior-turn sync inference once; persist or stash terminal admission."""
-    inputs = _scores_row_ensure_inputs(services, scope, turn)
-    if inputs is None:
-        return False
+def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """True when scores@N is terminal for fleet ``turnEvidenceAtN``.
 
-    fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=turn,
-        player_id=inputs.player_id,
-        load_turn=load_scoreboard_turn,
-        query_context=ctx,
-    )
-    inference = get_scores_row_inference(
-        turn,
-        inputs.player_id,
-        load_scoreboard_turn=load_scoreboard_turn,
-        resolved_mask=inputs.resolved_mask,
-        fleet_torp_overlay=fleet_resolution.overlay,
-        fleet_torp_input_status=fleet_resolution.input_status,
-        prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
-    )
-    status = str(inference.get("status", ""))
-    if services.persistence is not None and is_persistable_inference_status(status):
-        wire_event = inference_api_payload_to_wire_complete(inference)
-        row = persisted_inference_row_from_wire_complete(wire_event)
-        services.persistence.put_row(
-            scope.game_id,
-            scope.perspective,
-            scope.turn,
-            inputs.player_id,
-            row,
-        )
-        ctx.clear_ensure_ephemeral(ANALYTIC_ID, scope)
-    elif is_terminal_inference_api_payload(inference):
-        wire_event = inference_api_payload_to_wire_complete(inference)
-        ctx.record_ensure_ephemeral(
-            ANALYTIC_ID,
-            scope,
-            ImmediateRowAdmission(events=(wire_event,)),
-        )
-    else:
-        return False
-
-    return True
-
-
-def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    Unlike ``is_scores_export_ensure_satisfied``, an in-progress scheduler ``RowRun``
+    does not count -- fleet must wait for persisted or otherwise terminal scores.
+    """
     if scope.player_id is None:
         return True
+    if scope.turn <= 1:
+        return True
 
-    services, resolved = _scores_resolved(ctx, scope)
+    services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return True
 
-    if resolved.decision.is_ensure_satisfied:
+    snapshot = gather_scores_ensure_probe_snapshot(
+        ctx,
+        services,
+        scope,
+        turn,
+    )
+    resolution_context = _scores_resolution_context(ctx, services, scope, turn)
+    return is_scores_export_turn_evidence_closed_from_snapshot(
+        snapshot,
+        resolution_context=resolution_context,
+    )
+
+
+def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Admit scores work for one scope without running CP-SAT on this thread.
+
+    Ambient and historical turns share the same path. Satisfaction is probe-aligned
+    (persistence, scheduler, ensure-ephemeral) so cheap terminals from
+    ``immediate_row_inference_events`` are stashed for probe; real solve work
+    schedules a ``RowRun`` for orchestrator ``tier_solve``.
+    """
+    if scope.player_id is None:
+        return True
+    if scope.turn <= 1:
+        # Game-start neutral priors; fleet@0 is not a valid ensure target.
         return True
 
-    mutated = False
-    if scope.turn < ctx.ambient_turn:
-        if resolved.decision.needs_ensure_work:
-            mutated = _run_prior_turn_sync_ensure(
-                ctx,
-                services=services,
-                scope=scope,
-                turn=turn,
-                load_scoreboard_turn=ctx.load_turn,
-            )
-    else:
-        mutated = _ensure_current_turn_scheduler(ctx, services, scope, turn)
+    services = resolve_scores_services(ctx)
+    turn = ctx.load_turn(scope.turn)
+    if turn is None:
+        return True
 
+    snapshot = gather_scores_ensure_probe_snapshot(ctx, services, scope, turn)
+    resolution_context = _scores_resolution_context(ctx, services, scope, turn)
+    if is_scores_export_ensure_satisfied_from_snapshot(
+        snapshot,
+        resolution_context=resolution_context,
+    ):
+        return True
+
+    mutated = _ensure_admit_inference_row(ctx, services, scope, turn)
     if not mutated:
-        return resolved.decision.is_ensure_satisfied
+        return is_scores_export_ensure_satisfied_from_snapshot(
+            gather_scores_ensure_probe_snapshot(ctx, services, scope, turn),
+            resolution_context=resolution_context,
+        )
 
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-    _, resolved = _scores_resolved(ctx, scope)
+    _, resolved = _scores_resolved(ctx, scope, turn=turn)
     return resolved.decision.is_ensure_satisfied
 
 
-def _ensure_current_turn_scheduler(
+def _ensure_admit_inference_row(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo,
 ) -> bool:
-    inputs = _scores_row_ensure_inputs(services, scope, turn)
-    if inputs is None or inputs.score is None:
+    """Admit cheap terminals via ephemeral events, else schedule a RowRun for CP-SAT."""
+    player_id = scope.player_id
+    if player_id is None:
         return False
+
+    immediate = immediate_row_inference_events(
+        turn,
+        player_id,
+        load_scoreboard_turn=ctx.load_turn,
+    )
+    if immediate is not None:
+        ctx.record_ensure_ephemeral(
+            ANALYTIC_ID,
+            scope,
+            ImmediateRowAdmission(events=immediate),
+        )
+        return True
+
+    inputs = _scores_row_ensure_inputs(services, scope, turn)
+    if inputs is None:
+        return False
+    score = inputs.score
+    # immediate_row_inference_events admits missing scoreboard rows above.
+    assert score is not None
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
 
@@ -302,7 +299,7 @@ def _ensure_current_turn_scheduler(
     )
     schedule_inference_row(
         services.scheduler,
-        score=inputs.score,
+        score=score,
         turn=turn,
         player_id=inputs.player_id,
         game_id=scope.game_id,

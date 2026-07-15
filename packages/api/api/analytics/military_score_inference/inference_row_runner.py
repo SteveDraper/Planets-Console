@@ -56,13 +56,41 @@ def solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
     return run.session.observation, run.session.turn
 
 
+def _session_solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
+    return run.session.observation, run.session.turn
+
+
 def build_stopped_row_complete(run: RowRun) -> RowComplete:
     orchestration = run.orchestration
     state = run.ladder_state
+    if orchestration is not None and orchestration.current_segment() is None:
+        exhausted = orchestration.exhausted_segments_row_complete()
+        if exhausted is not None:
+            return row_complete_stopped(base=exhausted)
+        observation, turn = _session_solve_context(run)
+        return row_complete_stopped(ladder_state=state, observation=observation, turn=turn)
     observation, turn = solve_context(run)
     if orchestration is not None:
         return orchestration.build_stopped_row_complete(state, observation, turn)
     return row_complete_stopped(ladder_state=state, observation=observation, turn=turn)
+
+
+def _outcome_when_accelerated_segments_exhausted(run: RowRun) -> TierJobOutcome:
+    """Idempotent terminal outcome for a duplicate/late tier after segments finish."""
+    orchestration = run.orchestration
+    if orchestration is None:
+        return TierJobOutcome()
+    exhausted = orchestration.exhausted_segments_row_complete()
+    if exhausted is not None:
+        return TierJobOutcome(row_complete=exhausted)
+    observation, turn = _session_solve_context(run)
+    return TierJobOutcome(
+        row_complete=row_complete_stopped(
+            ladder_state=run.ladder_state,
+            observation=observation,
+            turn=turn,
+        )
+    )
 
 
 def _outcome_after_ladder_complete(
@@ -109,7 +137,21 @@ def run_inference_tier_job(
     run: RowRun,
     callbacks: InferenceTierJobCallbacks,
 ) -> TierJobOutcome:
-    """Run one policy-ladder tier step and return the scheduler's next action."""
+    """Run one policy-ladder tier step and return the scheduler's next action.
+
+    Holds ``run.tier_lock`` for the whole job so duplicate concurrent dispatches
+    serialize on shared orchestration / ladder state. When accelerated segments
+    are already exhausted, returns an idempotent terminal outcome instead of
+    raising.
+    """
+    with run.tier_lock:
+        return _run_inference_tier_job_locked(run, callbacks)
+
+
+def _run_inference_tier_job_locked(
+    run: RowRun,
+    callbacks: InferenceTierJobCallbacks,
+) -> TierJobOutcome:
     session = run.session
     if session.cancel_token.is_cancelled():
         return TierJobOutcome(row_complete=build_stopped_row_complete(run))
@@ -118,8 +160,11 @@ def run_inference_tier_job(
     if state is None:
         return TierJobOutcome()
 
-    observation, turn = solve_context(run)
     orchestration = run.orchestration
+    if orchestration is not None and orchestration.current_segment() is None:
+        return _outcome_when_accelerated_segments_exhausted(run)
+
+    observation, turn = solve_context(run)
 
     def on_admitted(_solution: InferenceSolution) -> None:
         if orchestration is None or orchestration.should_emit_streaming_solutions():
@@ -142,4 +187,7 @@ def run_inference_tier_job(
     if not state.ladder_complete:
         return TierJobOutcome(enqueue_continuation=True)
 
-    return _outcome_after_ladder_complete(run, state, observation, turn)
+    outcome = _outcome_after_ladder_complete(run, state, observation, turn)
+    if outcome.next_ladder_state is not None:
+        run.ladder_state = outcome.next_ladder_state
+    return outcome
