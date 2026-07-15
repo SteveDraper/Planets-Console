@@ -426,6 +426,7 @@ class FleetGapFillCoordinator:
         query_context: AnalyticQueryContext | None,
     ) -> None:
         complete_before: frozenset[int] | None = None
+        post_coherence_ledger_misses = 0
         query_ctx = _resolve_query_context(
             self._persistence,
             self._game_id,
@@ -578,11 +579,19 @@ class FleetGapFillCoordinator:
                 self._player_id,
             )
             if persisted is None:
-                raise ConflictError(
-                    f"fleet ledger gap-fill produced no ledger "
-                    f"for game {self._game_id} perspective {self._perspective} "
-                    f"player {self._player_id} turn {final_target}"
-                )
+                # Scores ``on_row_persisted`` deletes fleet ledgers from the host turn
+                # when inference evidence updates. That can race after coherence exits
+                # (and after deferred notifications) so the final read sees None.
+                # Rematerialize instead of failing the stream with ``produced no ledger``.
+                post_coherence_ledger_misses += 1
+                if post_coherence_ledger_misses >= GAP_FILL_MAX_RETRIES:
+                    raise ConflictError(
+                        f"fleet ledger gap-fill produced no ledger "
+                        f"for game {self._game_id} perspective {self._perspective} "
+                        f"player {self._player_id} turn {final_target}"
+                    )
+                complete_before = None
+                continue
             inflight.result_ledger = persisted
             return
 

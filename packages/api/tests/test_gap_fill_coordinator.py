@@ -935,3 +935,50 @@ def test_result_for_request_returns_non_final_ledger_when_result_cleared(
     result = coordinator._result_for_request(inflight, 111, turn_111)
     assert result.ledger.player_id == player_id
     assert result.provenance.is_final is False
+
+
+def test_gap_fill_retries_when_ledger_cleared_after_coherence(persistence, load_turn):
+    """Concurrent scores evidence invalidation can delete fleet after coherence exits.
+
+    ``on_row_persisted`` clears fleet ledgers from the host turn. When that races after
+    gap-fill leaves coherence (and during/after deferred notifications), the final
+    ``get_ledger`` used to raise ``produced no ledger``. Rematerialize instead.
+    """
+    from api.analytics.fleet import gap_fill_coordinator as gap_fill_mod
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    player_id = _first_player_id(turn_111)
+
+    original_emit = gap_fill_mod.emit_deferred_fleet_ledger_notifications
+    clear_count = 0
+
+    def clear_target_ledger_then_emit(*args, **kwargs):
+        nonlocal clear_count
+        if clear_count == 0:
+            clear_count += 1
+            persistence.delete_ledger(628580, 1, 111, player_id)
+        return original_emit(*args, **kwargs)
+
+    with patch.object(
+        gap_fill_mod,
+        "emit_deferred_fleet_ledger_notifications",
+        side_effect=clear_target_ledger_then_emit,
+    ):
+        result = get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            628580,
+            1,
+            player_id,
+            turn_111,
+            load_turn=load_turn,
+        )
+
+    assert clear_count == 1
+    assert result.ledger.player_id == player_id
+    assert persistence.get_ledger(628580, 1, 111, player_id) is not None

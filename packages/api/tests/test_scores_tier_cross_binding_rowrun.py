@@ -425,3 +425,218 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
             break
     assert len([e for e in queued if isinstance(e, RowComplete)]) == 1
     assert [e for e in queued if isinstance(e, RowFailed)] == []
+
+
+def test_empty_complete_delivers_to_stream_session_not_ensure_session(
+    sample_turn,
+) -> None:
+    """Regression: DAG complete with no rowComplete must finish the multiplex session.
+
+    Background/ensure can register a different ``RowRun`` session than the table stream
+    adopted. Delivering only to the ensure session leaves multiplex waiting on the
+    stream session -- UI stays in-progress with idle CPU (manual hang fingerprint).
+    """
+    ensure_session = _session(sample_turn)
+    stream_session = _session(sample_turn)
+    assert ensure_session.run_id != stream_session.run_id
+    assert ensure_session.player_id == stream_session.player_id
+
+    run = RowRun(ensure_session)
+    register_row_run(run)
+    scope = _scope_for(ensure_session)
+    stream_scope = InferenceStreamScope(
+        game_id=stream_session.game_id,
+        perspective=stream_session.perspective,
+        turn_number=stream_session.turn_number,
+    )
+
+    background, stream = _peer_orchestrators(sample_turn)
+    background._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="background",
+        result_wire={"exportTree": {"ok": True}},
+    )
+    stream._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"exportTree": {"ok": True}},
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(stream_session.player_id,),
+        scheduler=scheduler,
+        game_id=stream_session.game_id,
+        perspective=stream_session.perspective,
+    )
+    controller.register_scheduled_row(
+        stream_session.player_id,
+        ScheduledInferenceRow(player_id=stream_session.player_id, session=stream_session),
+    )
+    controller.attach()
+
+    empty_complete = SimpleNamespace(
+        state="complete",
+        result_wire={"exportTree": {"ok": True}},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+
+    ensure_queued: list[object] = []
+    while True:
+        try:
+            ensure_queued.append(ensure_session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    stream_queued: list[object] = []
+    while True:
+        try:
+            stream_queued.append(stream_session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+
+    assert not any(isinstance(e, (RowComplete, RowFailed)) for e in ensure_queued)
+    stream_terminals = [e for e in stream_queued if isinstance(e, (RowComplete, RowFailed))]
+    assert stream_terminals, (
+        "empty tier_solve complete left stream session without terminal "
+        f"(ensure_queued={ensure_queued!r}, stream_queued={stream_queued!r})"
+    )
+    assert isinstance(stream_terminals[0], RowFailed)
+
+
+def test_stale_scheduler_run_without_registry_still_finishes_stream(
+    sample_turn,
+) -> None:
+    """Stale ``_runs`` entry with no registry RowRun must not skip stream terminal."""
+    session = _session(sample_turn)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    background, stream = _peer_orchestrators(sample_turn)
+    background._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="background",
+        result_wire={"exportTree": {"ok": True}},
+    )
+    stream._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"exportTree": {"ok": True}},
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    stale_run_id = "stale-run-without-registry"
+    scheduler._runs[stale_run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    empty_complete = SimpleNamespace(
+        state="complete",
+        result_wire={"exportTree": {"ok": True}},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    terminals = [e for e in queued if isinstance(e, (RowComplete, RowFailed))]
+    assert terminals, f"stale _runs skip left stream without terminal (queued={queued!r})"
+    assert stale_run_id not in scheduler._runs
+
+
+def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event(
+    sample_turn,
+) -> None:
+    """Cancel-silent finished_run_ids must not suppress the orphan stream terminal.
+
+    Multiplex can mark a run finished when the cancel token trips without yielding a
+    wire event. Orphan delivery used to bail on finished_run_ids and leave the
+    scoreboard in-progress while the DAG was already complete.
+    """
+    session = _session(sample_turn)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    background, stream = _peer_orchestrators(sample_turn)
+    background._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="background",
+        result_wire={"exportTree": {"ok": True}},
+    )
+    stream._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"exportTree": {"ok": True}},
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.finished_run_ids.add(session.run_id)
+    controller.attach()
+
+    empty_complete = SimpleNamespace(
+        state="complete",
+        result_wire={"exportTree": {"ok": True}},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+
+    pending = controller.drain_pending_wire_events()
+    assert any(event.get("type") in {"complete", "error"} for event in pending), (
+        f"expected pending-wire terminal after finished_run_ids suppress, got {pending!r}"
+    )

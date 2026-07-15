@@ -983,3 +983,144 @@ def test_adopt_admission_rejects_cancelled_connect_run(
 
     controller.end_stream(scheduler)
     reset_inference_table_stream_registry_for_tests()
+
+
+def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeypatch, request):
+    """Cancel/abort must not re-enter stream_lock via node-complete delivery.
+
+    Production hang: fleet ledger persist -> reschedule_row (held stream_lock) ->
+    cancel_run (held scheduler lock) -> abort_scope -> orphan terminal ->
+    deliver_domain_event (re-enter stream_lock) -> permanent deadlock, no CPU.
+    """
+    import concurrent.futures
+
+    from api.compute.dag import PlannedComputeNode
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+    from api.compute.scope import ComputeScope
+
+    reset_inference_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = InferenceRowScheduler()
+    controller: InferenceTableStreamController | None = None
+
+    def cleanup() -> None:
+        if controller is not None:
+            controller.end_stream(scheduler)
+        reset_orchestrators_for_tests()
+        reset_compute_worker_pool_for_tests(worker_count=1)
+
+    request.addfinalizer(cleanup)
+
+    player_ids = (sample_turn.scores[0].ownerid,)
+    target_player_id = player_ids[0]
+    scope_key = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope_key)
+    controller = InferenceTableStreamController(
+        scope=scope_key,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=player_ids,
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+    )
+    controller.attach()
+
+    def scores_only_dag(_ctx, analytic_id, export_scope, **_kwargs):
+        return (
+            PlannedComputeNode(
+                scope=ComputeScope(
+                    analytic_id=analytic_id,
+                    game_id=export_scope.game_id,
+                    perspective=export_scope.perspective,
+                    turn=export_scope.turn,
+                    player_id=export_scope.player_id,
+                ),
+                export_scope=export_scope,
+                dependency_scopes=(),
+            ),
+        )
+
+    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+
+    scheduled = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=target_player_id,
+        stream_token=stream_token,
+    )
+    controller.register_scheduled_row(target_player_id, scheduled)
+    before_run_id = scheduled.session.run_id
+    binding = next(iter(scheduler._stream_bindings.values()))
+    scope = scheduler._root_scope_for_session(scheduled.session)
+    assert binding.orchestrator.nodes[scope].state == "running"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(controller.reschedule_row, target_player_id)
+        try:
+            assert future.result(timeout=5.0) is True
+        except concurrent.futures.TimeoutError as exc:
+            raise AssertionError(
+                "reschedule_row deadlocked (cancel/abort re-entered stream_lock)"
+            ) from exc
+
+    after = controller.scheduled_rows.get(target_player_id)
+    assert after is not None
+    assert after.session.run_id != before_run_id
+    # Cancel abort must not mark the replacement run finished / fail the stream.
+    assert after.session.run_id not in controller.finished_run_ids
+    from api.analytics.military_score_inference.inference_stream_domain_events import RowFailed
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(after.session.event_queue.get_nowait())
+        except Exception:
+            break
+    assert not any(isinstance(e, RowFailed) for e in queued)
+
+
+def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monkeypatch):
+    """Intentional cancel aborts must not RowFailed the open multiplex session."""
+    from types import SimpleNamespace
+
+    from api.analytics.military_score_inference.inference_stream_domain_events import RowFailed
+    from api.compute.scope import ComputeScope
+
+    reset_inference_table_stream_registry_for_tests()
+    scheduler = _install_workerless_scheduler(monkeypatch)
+    player_ids = (sample_turn.scores[0].ownerid,)
+    controller, scheduled_rows, _finished, _wake = _attach_active_table_stream(
+        sample_turn,
+        scheduler,
+        player_ids,
+    )
+    session = scheduled_rows[player_ids[0]].session
+    scope = ComputeScope(
+        analytic_id="scores",
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn=session.turn_number,
+        player_id=session.player_id,
+    )
+    delivered: list[object] = []
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_scheduler."
+        "deliver_inference_domain_event_to_open_stream",
+        lambda _session, event: delivered.append(event),
+    )
+    # Simulate post-cancel abort (run already removed from scheduler).
+    with scheduler._lock:
+        scheduler._runs.pop(session.run_id, None)
+    cancelled_node = SimpleNamespace(
+        state="failed",
+        result_wire=None,
+        error=RuntimeError("scores inference row run cancelled"),
+    )
+    scheduler._on_orchestrator_node_complete(scope, cancelled_node)
+    assert delivered == []
+    assert not any(isinstance(e, RowFailed) for e in delivered)
+    controller.end_stream(scheduler)
+    reset_inference_table_stream_registry_for_tests()

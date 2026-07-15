@@ -106,6 +106,8 @@ class FleetTableStreamScheduler:
         persistence: FleetSnapshotPersistenceService,
         stream_token: str | None = None,
     ) -> FleetPlayerStreamSession | None:
+        submit_binding: _FleetStreamOrchestratorBinding | None = None
+        submit_scope: ComputeScope | None = None
         with self._lock:
             if (
                 stream_token is not None
@@ -157,17 +159,24 @@ class FleetTableStreamScheduler:
                 root_scope=root_scope,
             )
             self._runs[session.run_id] = run
+            # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
+            # listeners and may re-enter scores persist / fleet reschedule paths that need
+            # this lock (ABBA with pool workers finishing ``tier_solve`` persist).
             # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
             # node may still be ``complete`` on this orchestrator. Without force_fresh,
             # submit attaches to that terminal node and never rematerializes refined ledgers.
-            binding.orchestrator.submit(
+            submit_binding = binding
+            submit_scope = root_scope
+
+        if submit_binding is not None and submit_scope is not None:
+            submit_binding.orchestrator.submit(
                 ComputeRequest(
-                    scope=root_scope,
+                    scope=submit_scope,
                     priority_band="stream_attached",
                     force_fresh=True,
                 )
             )
-            return session
+        return session
 
     def cancel_player_run(self, run_id: str) -> None:
         with self._lock:

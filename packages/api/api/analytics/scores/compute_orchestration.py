@@ -233,6 +233,8 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         # Cross-binding race: a peer orchestrator finalized/unregistered the shared
         # RowRun while this binding still had a queued or continuing tier_solve wire.
         # Treat as idempotent terminal -- the peer already delivered completion.
+        # Cross-binding stream terminal delivery is owned by process-wide scope lease
+        # (#222), not by a side-channel notify from this empty path.
         return StepResult(outcome="complete")
 
     callbacks = get_tier_callbacks(run_id)

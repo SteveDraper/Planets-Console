@@ -153,18 +153,28 @@ class InferenceTableStreamController(
             self.turn = self.reload_host_turn()
 
     def reschedule_row(self, player_id: int) -> bool:
+        cancel_run_ids: list[str] = []
         with self.stream_lock:
             self._refresh_host_turn()
             old_row = self.scheduled_rows.get(player_id)
             if old_row is not None:
-                self.cancel_player_row(player_id)
+                cancel_run_ids.append(old_row.session.run_id)
                 self.finished_run_ids.discard(old_row.session.run_id)
+                self.scheduled_rows.pop(player_id, None)
             else:
                 active = self.scheduler.row_run_for_player(self.scope, player_id)
                 if active is not None:
-                    self.scheduler.cancel_row_run(active.session.run_id)
+                    cancel_run_ids.append(active.session.run_id)
                     self.finished_run_ids.discard(active.session.run_id)
-            self.scheduled_rows.pop(player_id, None)
+        # Cancel outside stream_lock: cancel aborts orchestrator scopes and drains
+        # node-complete listeners that call ``deliver_domain_event`` (needs this lock).
+        for run_id in cancel_run_ids:
+            self.scheduler.cancel_row_run(run_id)
+        with self.stream_lock:
+            if player_id in self.scheduled_rows:
+                # Concurrent admit/reschedule already replaced the row.
+                self.wake_multiplex.set()
+                return True
             admission = self.resolve_row_admission(player_id)
             if not self.register_admitted_schedule(player_id, admission):
                 return False
@@ -209,16 +219,28 @@ class InferenceTableStreamController(
                         tag_inference_stream_event(wire, player_id=session.player_id)
                     )
                     if wire.get("type") in _TERMINAL_EVENT_TYPES:
+                        # Finish both the delivering session and the currently scheduled
+                        # run for this player. Unbound terminals used to mark only the
+                        # delivering run_id; multiplex kept waiting on the adopted
+                        # session forever while the UI stayed in-progress.
                         self.finished_run_ids.add(session.run_id)
+                        if scheduled is not None:
+                            self.finished_run_ids.add(scheduled.session.run_id)
         self.wake_multiplex.set()
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
+        cancel_run_ids: list[str] = []
         with self.stream_lock:
             self._refresh_host_turn()
             for player_id in self.player_ids:
-                self.cancel_player_row(player_id)
+                old_row = self.scheduled_rows.get(player_id)
+                if old_row is not None:
+                    cancel_run_ids.append(old_row.session.run_id)
             self.finished_run_ids.clear()
             self.scheduled_rows.clear()
+        for run_id in cancel_run_ids:
+            self.scheduler.cancel_row_run(run_id)
+        with self.stream_lock:
             for player_id in self.player_ids:
                 admission = self.resolve_row_admission(
                     player_id,
