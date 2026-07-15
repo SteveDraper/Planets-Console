@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
@@ -34,6 +35,11 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.inference_table_stream_controller import (
+        InferenceTableStreamController,
+    )
 
 __all__ = [
     "InferenceRowScheduler",
@@ -615,10 +621,8 @@ class InferenceRowScheduler:
                 if deliver_session.run_id in self._terminal_stream_events_delivered:
                     self._finalize_row_run(session)
                     continue
-                self._deliver_stream_terminal(
-                    deliver_session,
-                    RowFailed(detail="Inference tier solve completed without row payload"),
-                )
+                # Parity with orphan empty-complete: admission before RowFailed.
+                self._deliver_empty_complete_terminal(scope, deliver_session)
                 self._finalize_row_run(session)
                 continue
             if deliver_session.run_id not in self._terminal_stream_events_delivered:
@@ -649,6 +653,26 @@ class InferenceRowScheduler:
             self._terminal_stream_events_delivered.add(session.run_id)
         deliver_inference_domain_event_to_open_stream(session, event)
 
+    def _controller_for_compute_scope(
+        self,
+        scope: ComputeScope,
+    ) -> InferenceTableStreamController | None:
+        from api.analytics.military_score_inference.inference_table_stream_registry import (
+            controller_for_scope,
+        )
+
+        player_id = scope.player_id
+        turn_number = scope.turn
+        if not isinstance(player_id, int) or not isinstance(turn_number, int):
+            return None
+        return controller_for_scope(
+            InferenceStreamScope(
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                turn_number=turn_number,
+            )
+        )
+
     def _open_stream_session_for_scope(
         self,
         scope: ComputeScope,
@@ -659,27 +683,43 @@ class InferenceRowScheduler:
         different session than the table stream adopted, and delivering to the wrong
         queue leaves multiplex waiting forever while the UI stays in-progress.
         """
-        from api.analytics.military_score_inference.inference_table_stream_registry import (
-            controller_for_scope,
-        )
-
-        player_id = scope.player_id
-        turn_number = scope.turn
-        if not isinstance(player_id, int) or not isinstance(turn_number, int):
-            return None
-        controller = controller_for_scope(
-            InferenceStreamScope(
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn_number=turn_number,
-            )
-        )
+        controller = self._controller_for_compute_scope(scope)
         if controller is None:
+            return None
+        player_id = scope.player_id
+        if not isinstance(player_id, int):
             return None
         scheduled = controller.scheduled_rows.get(player_id)
         if scheduled is None:
             return None
         return scheduled.session
+
+    def _deliver_empty_complete_terminal(
+        self,
+        scope: ComputeScope,
+        session: InferenceRowStreamSession,
+    ) -> bool:
+        """Claim and deliver admission wire or RowFailed for empty complete.
+
+        Returns True when a terminal was delivered (admission or RowFailed).
+        Matching-run and orphan empty-complete share this path.
+        """
+        with self._lock:
+            if session.run_id in self._terminal_stream_events_delivered:
+                return False
+            # Claim before emit so concurrent peer notifications cannot double-send.
+            self._terminal_stream_events_delivered.add(session.run_id)
+
+        controller = self._controller_for_compute_scope(scope)
+        if controller is not None and controller.push_admission_wire_terminal(session):
+            return True
+
+        event = RowFailed(detail="Inference tier solve completed without row payload")
+        if controller is not None and session.run_id in controller.finished_run_ids:
+            controller.push_domain_event_pending_wire(session, event)
+        else:
+            deliver_inference_domain_event_to_open_stream(session, event)
+        return True
 
     def _deliver_orphan_stream_terminal_if_needed(
         self,
@@ -696,28 +736,16 @@ class InferenceRowScheduler:
         session = self._open_stream_session_for_scope(scope)
         if session is None:
             return
-        from api.analytics.military_score_inference.inference_table_stream_registry import (
-            controller_for_scope,
-        )
-
-        controller = controller_for_scope(
-            InferenceStreamScope(
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn_number=scope.turn if isinstance(scope.turn, int) else -1,
-            )
-        )
+        controller = self._controller_for_compute_scope(scope)
         if controller is None:
             return
         with self._lock:
             if session.run_id in self._terminal_stream_events_delivered:
                 return
-            # Claim delivery before emit so concurrent peer notifications cannot double-send.
-            self._terminal_stream_events_delivered.add(session.run_id)
 
         row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
         if row_complete is not None:
-            event: RowComplete | RowFailed | None = row_complete
+            event: RowComplete | RowFailed = row_complete
         elif getattr(node, "state", None) == "failed":
             detail = (
                 str(node.error)
@@ -725,77 +753,23 @@ class InferenceRowScheduler:
                 else "Inference tier solve failed"
             )
             event = RowFailed(detail=detail)
-        elif self._deliver_admission_wire_terminal(controller, session):
-            with self._lock:
-                self._remove_run_locked(session.run_id)
-            return
         else:
-            event = RowFailed(detail="Inference tier solve completed without row payload")
+            if self._deliver_empty_complete_terminal(scope, session):
+                with self._lock:
+                    self._remove_run_locked(session.run_id)
+            return
+
+        with self._lock:
+            if session.run_id in self._terminal_stream_events_delivered:
+                return
+            self._terminal_stream_events_delivered.add(session.run_id)
 
         if session.run_id in controller.finished_run_ids:
-            from api.analytics.military_score_inference.inference_stream_rows import (
-                tag_inference_stream_event,
-            )
-            from api.transport.inference_stream_wire import domain_event_to_wire_events
-
-            with controller.stream_lock:
-                for wire in domain_event_to_wire_events(
-                    event,
-                    observation=session.observation,
-                    turn=session.turn,
-                    fleet_torp_input_status=session.fleet_torp_input_status,
-                ):
-                    controller.pending_wire_events.append(
-                        tag_inference_stream_event(wire, player_id=session.player_id)
-                    )
-            controller.wake_multiplex.set()
+            controller.push_domain_event_pending_wire(session, event)
         else:
             deliver_inference_domain_event_to_open_stream(session, event)
         with self._lock:
             self._remove_run_locked(session.run_id)
-
-    def _deliver_admission_wire_terminal(
-        self,
-        controller: object,
-        session: InferenceRowStreamSession,
-    ) -> bool:
-        """Push immediate/cached admission wire when peer complete has no row payload.
-
-        Returns True when a client-visible terminal was delivered from admission.
-        """
-        from api.analytics.military_score_inference.inference_stream_rows import (
-            CachedCompleteRowAdmission,
-            ImmediateRowAdmission,
-            tag_inference_stream_event,
-        )
-
-        resolve = getattr(controller, "resolve_row_admission", None)
-        if not callable(resolve):
-            return False
-        admission = resolve(session.player_id)
-        wires: list[dict[str, object]] = []
-        if isinstance(admission, ImmediateRowAdmission):
-            wires = [
-                tag_inference_stream_event(event, player_id=session.player_id)
-                for event in admission.events
-            ]
-        elif isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
-            wires = [
-                tag_inference_stream_event(admission.event, player_id=session.player_id),
-            ]
-        if not wires:
-            return False
-        pending = getattr(controller, "pending_wire_events", None)
-        finished = getattr(controller, "finished_run_ids", None)
-        wake = getattr(controller, "wake_multiplex", None)
-        stream_lock = getattr(controller, "stream_lock", None)
-        if pending is None or finished is None or wake is None or stream_lock is None:
-            return False
-        with stream_lock:
-            pending.extend(wires)
-            finished.add(session.run_id)
-        wake.set()
-        return True
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
