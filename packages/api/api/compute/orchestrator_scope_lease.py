@@ -299,9 +299,7 @@ class OrchestratorScopeLeaseMixin:
         wake_callbacks: list[Callable[[], None]] = []
         for kind in to_release:
             key = ScopeStepClaimKey(scope=node.scope, step_kind=kind)
-            wake_callbacks.extend(
-                self._scope_lease.release(key, orchestrator_id=id(self))
-            )
+            wake_callbacks.extend(self._scope_lease.release(key, orchestrator_id=id(self)))
         if schedule_wakes:
             for wake in wake_callbacks:
                 self._observers.schedule_post_lock(wake)

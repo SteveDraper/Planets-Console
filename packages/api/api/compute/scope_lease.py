@@ -91,8 +91,7 @@ class ProcessWideScopeLease:
                 return "acquired"
             if (
                 not claim.execution_started
-                and PRIORITY_BAND_RANK[priority_band]
-                < PRIORITY_BAND_RANK[claim.priority_band]
+                and PRIORITY_BAND_RANK[priority_band] < PRIORITY_BAND_RANK[claim.priority_band]
             ):
                 # Transfer leadership only. The demoted holder is still on its
                 # execute path and re-parks (or short-circuits) at seal.
