@@ -133,6 +133,7 @@ class OrchestratorMetrics:
     persist_calls: int = 0
     lease_parks: int = 0
     lease_acquires: int = 0
+    lease_adopts: int = 0
     satisfaction_short_circuits: int = 0
 
 
@@ -643,7 +644,6 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                     dependency_outputs=self._snapshot_dependency_outputs(node),
                 )
             )
-            self._metrics.pool_submissions += 1
             break
         # Cover successful pops and ready→waiting_deps drops. ``_enqueue_ready`` /
         # ``_dequeue_ready`` notify on their own paths; this catches dispatch-only leaves.
@@ -673,7 +673,6 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
 
     def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
         node = pending.node
-        self._observers.notify_inline_start(node, pending.step.step_kind)
         try:
             builder = pending.registration.build_step_job_wire[pending.step.step_kind]
             job_wire = builder(
@@ -681,6 +680,23 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                 dependency_outputs=pending.dependency_outputs,
                 ctx=self._cached_ctx,
             )
+        except BaseException as exc:
+            with self._condition:
+                self._metrics.inline_executions += 1
+                self._observers.notify_step_complete(
+                    node,
+                    pending.step.step_kind,
+                    surface="inline",
+                    terminal_state="failed",
+                )
+                self._fail_node(node, exc)
+            return
+        # Seal after job-wire build so a higher-priority peer can adopt during
+        # that window.
+        if not self._seal_scope_lease_or_park(node, pending.step):
+            return
+        self._observers.notify_inline_start(node, pending.step.step_kind)
+        try:
             result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
         except BaseException as exc:
             with self._condition:
@@ -723,6 +739,8 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                         dependency_outputs=submission.dependency_outputs,
                         ctx=self._cached_ctx,
                     )
+                    if not self._seal_scope_lease_or_park(node, step):
+                        continue
                     run_step = submission.registration.run_step[step.step_kind]
                     self._pool_submitter(
                         node,
@@ -731,7 +749,10 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                         run_step=run_step,
                     )
                 else:
+                    if not self._seal_scope_lease_or_park(node, step):
+                        continue
                     self._pool_submitter(node, step)
+                self._metrics.pool_submissions += 1
             except BaseException as exc:
                 with self._condition:
                     if node.state == "running":

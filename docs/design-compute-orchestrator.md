@@ -203,10 +203,13 @@ The **process-wide scope lease** closes that hole:
 | Rule | Behavior |
 |------|----------|
 | **Claim key** | Normalized `ComputeScope` + `step_kind` (so scores `materialize` and `tier_solve` do not suppress each other) |
-| **On dispatch** | If `PersistencePolicy.is_satisfied` → complete without running; else try claim; if held by a peer → **park** (not failure) |
+| **On dispatch** | If `PersistencePolicy.is_satisfied` → complete without running; else try claim; if held by a peer → **park** (not failure), unless a higher `priority_band` can **adopt** (see below) |
+| **Priority adopt** | While a claim is held but **not yet sealed** for execution, a strictly higher `priority_band` (e.g. `stream_attached` over `background`) **adopts**: becomes leader; the demoted holder parks when it reaches seal (`lost`) |
+| **Seal before work** | Immediately before expensive work (inline `run_step` or pool submit), the holder **seals**. Seal runs after job-wire construction (orchestrator lock released) so a higher-priority peer can adopt during that window |
 | **On leader terminal** | Release claim; wake waiters (higher `priority_band` first); followers re-dispatch |
 | **On follower wake** | Satisfaction short-circuit if durable result exists; else become the next leader |
 | **Backends** | Applies to inline and pool steps (pool-queue uniqueness alone is insufficient) |
+| **No mid-run preempt** | Once sealed, the leader runs to completion. A higher-priority peer that arrives after seal parks until release (residual: background already in expensive work can still finish before a late stream claim) |
 
 Scores stream terminals use the process-wide scope-terminal fan-out as the sole delivery path (own binding and peer bindings such as fleet DAG empty `tier_solve` skip). Fleet table stream remains local orchestrator listener only.
 

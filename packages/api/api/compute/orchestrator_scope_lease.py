@@ -69,7 +69,12 @@ class OrchestratorScopeLeaseMixin:
         node: ComputeNodeRun,
         step: ComputeStepSpec,
     ) -> bool:
-        """Acquire the process-wide claim or park the node. True when acquired."""
+        """Acquire the process-wide claim or park the node. True when acquired.
+
+        Does not seal for execution -- the caller must
+        :meth:`_seal_scope_lease_or_park` immediately before expensive work so a
+        higher-priority peer can adopt during the post-dispatch job-wire window.
+        """
         if node.lease_step_kind == step.step_kind:
             # Continuing the same step kind (e.g. tier_solve ladder) keeps the claim.
             self._metrics.lease_acquires += 1
@@ -86,9 +91,56 @@ class OrchestratorScopeLeaseMixin:
             node.state = "parked"
             node.lease_step_kind = None
             return False
+        if outcome == "adopted":
+            self._metrics.lease_adopts += 1
         self._metrics.lease_acquires += 1
         node.lease_step_kind = step.step_kind
         return True
+
+    def _seal_scope_lease_or_park(
+        self,
+        node: ComputeNodeRun,
+        step: ComputeStepSpec,
+    ) -> bool:
+        """Seal the claim for expensive work, or recover after losing an adopt.
+
+        True when sealed (caller must run). False when the node was parked or
+        short-circuited after another binding adopted the claim.
+        """
+        key = ScopeStepClaimKey(scope=node.scope, step_kind=step.step_kind)
+        result = self._scope_lease.seal_for_execution(key, orchestrator_id=id(self))
+        if result.outcome == "sealed":
+            return True
+        with self._condition:
+            node.lease_step_kind = None
+            node.generation_at_submit = None
+            registration = self._compute_registry.get(node.scope.analytic_id)
+            if registration is not None and self._maybe_short_circuit_satisfied(
+                node,
+                registration,
+            ):
+                return False
+            outcome = self._scope_lease.try_acquire(
+                key,
+                orchestrator_id=id(self),
+                priority_band=node.priority_band,
+                on_wake=lambda: self._wake_parked_for_lease(node.scope, step.step_kind),
+            )
+            if outcome == "parked":
+                self._metrics.lease_parks += 1
+                node.state = "parked"
+                return False
+            if outcome == "adopted":
+                self._metrics.lease_adopts += 1
+            self._metrics.lease_acquires += 1
+            node.lease_step_kind = step.step_kind
+            retry = self._scope_lease.seal_for_execution(key, orchestrator_id=id(self))
+            if retry.outcome == "sealed":
+                return True
+            self._metrics.lease_parks += 1
+            node.state = "parked"
+            node.lease_step_kind = None
+            return False
 
     def _wake_parked_for_lease(self, scope: ComputeScope, step_kind: str) -> None:
         """Resume a parked node after a peer binding released the scope lease."""

@@ -5,6 +5,12 @@ logical ``(ComputeScope, step_kind)`` can become ready on multiple bindings
 (fleet stream, scores stream, background warm). This lease ensures at most one
 leader executes expensive work process-wide; followers park and resume after
 the leader releases.
+
+Priority preference: while a claim is held but not yet sealed for execution, a
+strictly higher ``priority_band`` **adopts** (e.g. ``stream_attached`` takes the
+claim from ``background``). The demoted holder discovers the loss at
+``seal_for_execution`` and parks. Once sealed, the leader runs to completion
+(no mid-execution preempt).
 """
 
 from __future__ import annotations
@@ -17,7 +23,8 @@ from typing import Literal
 from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.scope import ComputeScope
 
-ClaimOutcome = Literal["acquired", "parked"]
+ClaimOutcome = Literal["acquired", "parked", "adopted"]
+SealOutcome = Literal["sealed", "lost"]
 
 WakeCallback = Callable[[], None]
 
@@ -41,7 +48,16 @@ class _LeaseWaiter:
 class _LeaseClaim:
     orchestrator_id: int
     priority_band: ComputePriorityBand
+    leader_on_wake: WakeCallback
     waiters: list[_LeaseWaiter] = field(default_factory=list)
+    execution_started: bool = False
+
+
+@dataclass(frozen=True)
+class SealResult:
+    """Outcome of sealing a held claim for expensive work."""
+
+    outcome: SealOutcome
 
 
 class ProcessWideScopeLease:
@@ -59,17 +75,31 @@ class ProcessWideScopeLease:
         priority_band: ComputePriorityBand,
         on_wake: WakeCallback,
     ) -> ClaimOutcome:
-        """Acquire the claim or park as a waiter until the leader releases."""
+        """Acquire the claim, adopt from a lower-priority unsealed holder, or park."""
         with self._lock:
             claim = self._claims.get(key)
             if claim is None:
                 self._claims[key] = _LeaseClaim(
                     orchestrator_id=orchestrator_id,
                     priority_band=priority_band,
+                    leader_on_wake=on_wake,
                 )
                 return "acquired"
             if claim.orchestrator_id == orchestrator_id:
+                claim.leader_on_wake = on_wake
+                claim.priority_band = priority_band
                 return "acquired"
+            if (
+                not claim.execution_started
+                and PRIORITY_BAND_RANK[priority_band]
+                < PRIORITY_BAND_RANK[claim.priority_band]
+            ):
+                # Transfer leadership only. The demoted holder is still on its
+                # execute path and re-parks (or short-circuits) at seal.
+                claim.orchestrator_id = orchestrator_id
+                claim.priority_band = priority_band
+                claim.leader_on_wake = on_wake
+                return "adopted"
             self._upsert_waiter(
                 claim,
                 orchestrator_id=orchestrator_id,
@@ -77,6 +107,25 @@ class ProcessWideScopeLease:
                 on_wake=on_wake,
             )
             return "parked"
+
+    def seal_for_execution(
+        self,
+        key: ScopeStepClaimKey,
+        *,
+        orchestrator_id: int,
+    ) -> SealResult:
+        """Mark a held claim past the adopt-safe point, or report loss.
+
+        Call immediately before expensive work (inline ``run_step`` or pool
+        submit). Returns ``sealed`` when the caller still holds the claim, or
+        ``lost`` when a higher-priority peer adopted it away.
+        """
+        with self._lock:
+            claim = self._claims.get(key)
+            if claim is None or claim.orchestrator_id != orchestrator_id:
+                return SealResult(outcome="lost")
+            claim.execution_started = True
+            return SealResult(outcome="sealed")
 
     def release(
         self,
@@ -131,6 +180,12 @@ class ProcessWideScopeLease:
             if claim is None:
                 return None
             return claim.orchestrator_id, claim.priority_band
+
+    def is_execution_started(self, key: ScopeStepClaimKey) -> bool:
+        """Return True when the claim is held and sealed for expensive work."""
+        with self._lock:
+            claim = self._claims.get(key)
+            return claim is not None and claim.execution_started
 
     def reset_for_tests(self) -> None:
         """Drop all claims (tests only)."""

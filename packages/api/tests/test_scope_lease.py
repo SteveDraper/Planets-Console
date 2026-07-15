@@ -101,7 +101,7 @@ def _build_wire_with_owner(owner: str):
     return build
 
 
-def test_scope_lease_try_acquire_parks_second_claimant() -> None:
+def test_scope_lease_try_acquire_parks_same_or_lower_priority() -> None:
     lease = get_process_scope_lease()
     scope = ComputeScope(
         analytic_id="a",
@@ -116,7 +116,7 @@ def test_scope_lease_try_acquire_parks_second_claimant() -> None:
         lease.try_acquire(
             key,
             orchestrator_id=1,
-            priority_band="background",
+            priority_band="stream_attached",
             on_wake=lambda: wakes.append("a"),
         )
         == "acquired"
@@ -125,7 +125,7 @@ def test_scope_lease_try_acquire_parks_second_claimant() -> None:
         lease.try_acquire(
             key,
             orchestrator_id=2,
-            priority_band="stream_attached",
+            priority_band="background",
             on_wake=lambda: wakes.append("b"),
         )
         == "parked"
@@ -134,6 +134,73 @@ def test_scope_lease_try_acquire_parks_second_claimant() -> None:
     assert len(callbacks) == 1
     callbacks[0]()
     assert wakes == ["b"]
+
+
+def test_scope_lease_higher_priority_adopts_unsealed_claim() -> None:
+    lease = get_process_scope_lease()
+    scope = ComputeScope(
+        analytic_id="a",
+        game_id=1,
+        perspective=1,
+        turn=1,
+        player_id=1,
+    )
+    key = ScopeStepClaimKey(scope=scope, step_kind="materialize")
+    assert (
+        lease.try_acquire(
+            key,
+            orchestrator_id=1,
+            priority_band="background",
+            on_wake=lambda: None,
+        )
+        == "acquired"
+    )
+    assert (
+        lease.try_acquire(
+            key,
+            orchestrator_id=2,
+            priority_band="stream_attached",
+            on_wake=lambda: None,
+        )
+        == "adopted"
+    )
+    assert lease.holder(key) == (2, "stream_attached")
+    assert not lease.is_execution_started(key)
+    assert lease.seal_for_execution(key, orchestrator_id=1).outcome == "lost"
+    assert lease.seal_for_execution(key, orchestrator_id=2).outcome == "sealed"
+    assert lease.is_execution_started(key)
+
+
+def test_scope_lease_adopt_blocked_after_seal() -> None:
+    lease = get_process_scope_lease()
+    scope = ComputeScope(
+        analytic_id="a",
+        game_id=1,
+        perspective=1,
+        turn=1,
+        player_id=1,
+    )
+    key = ScopeStepClaimKey(scope=scope, step_kind="materialize")
+    assert (
+        lease.try_acquire(
+            key,
+            orchestrator_id=1,
+            priority_band="background",
+            on_wake=lambda: None,
+        )
+        == "acquired"
+    )
+    assert lease.seal_for_execution(key, orchestrator_id=1).outcome == "sealed"
+    assert (
+        lease.try_acquire(
+            key,
+            orchestrator_id=2,
+            priority_band="stream_attached",
+            on_wake=lambda: None,
+        )
+        == "parked"
+    )
+    assert lease.holder(key) == (1, "background")
 
 
 def test_scope_lease_distinguishes_step_kind() -> None:
@@ -231,6 +298,79 @@ def test_two_orchestrators_only_one_runs_expensive_work(sample_turn) -> None:
     assert persistence.expensive_runs == 1
     assert persistence.persist_calls == 1
     assert orch_b.metrics.satisfaction_short_circuits == 1
+
+
+def test_stream_attached_adopts_unsealed_background_claim(sample_turn) -> None:
+    """Higher-priority stream adopts before background seals expensive work."""
+    persistence = _SatisfiedAfterPersistPolicy()
+    wire_started = threading.Event()
+    allow_wire = threading.Event()
+    run_owners: list[str] = []
+
+    def build_wire(scope, **_kwargs):
+        wire_started.set()
+        assert allow_wire.wait(timeout=5)
+        return {"scope": scope.analytic_id, "owner": "background-wire"}
+
+    def run_step(job: dict[str, Any]) -> StepResult:
+        run_owners.append(job.get("owner", "unknown"))
+        persistence.expensive_runs += 1
+        return StepResult(outcome="persist", payload={"ok": True})
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=persistence,
+        build_step_job_wires=(("materialize", build_wire),),
+        run_steps=(("materialize", run_step),),
+    )
+    registry = build_compute_registry((registration,))
+    compute = registry[SHARED_ID]
+    assert isinstance(compute.build_step_job_wire, dict)
+
+    ctx_a = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    ctx_b = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    orch_a = ComputeOrchestrator(ctx_a, compute_registry=registry)
+    orch_b = ComputeOrchestrator(ctx_b, compute_registry=registry)
+    scope = _shared_scope(sample_turn)
+
+    handle_a = None
+    error: list[BaseException] = []
+
+    def run_background() -> None:
+        nonlocal handle_a
+        try:
+            handle_a = orch_a.submit(
+                ComputeRequest(scope=scope, priority_band="background"),
+            )
+        except BaseException as exc:  # noqa: BLE001
+            error.append(exc)
+
+    background_thread = threading.Thread(target=run_background)
+    background_thread.start()
+    assert wire_started.wait(timeout=5)
+
+    compute.build_step_job_wire["materialize"] = _build_wire_with_owner("stream")
+    handle_b = orch_b.submit(
+        ComputeRequest(scope=scope, priority_band="stream_attached"),
+    )
+    assert orch_b.metrics.lease_adopts == 1
+
+    allow_wire.set()
+    background_thread.join(timeout=5)
+    assert not error
+    assert handle_a is not None
+    assert handle_a.state == "complete"
+    assert handle_b.state == "complete"
+    assert run_owners == ["stream"]
+    assert persistence.expensive_runs == 1
+    assert orch_a.metrics.satisfaction_short_circuits == 1
+    assert orch_a.metrics.inline_executions == 0
 
 
 def test_waiter_short_circuit_does_not_beat_leader_fanout_into_stream_terminal(
