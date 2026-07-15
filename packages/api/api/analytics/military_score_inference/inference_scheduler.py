@@ -52,7 +52,6 @@ _SCORES_ROW_RUN_CANCELLED_MESSAGE = "scores inference row run cancelled"
 @dataclass
 class _InferenceStreamOrchestratorBinding:
     orchestrator: object
-    unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
     unregister_dispatch_gate: Callable[[], None] | None = None
 
@@ -97,8 +96,9 @@ class InferenceRowScheduler:
         self._terminal_stream_events_delivered: set[str] = set()
         from api.compute.scope_terminal_fanout import register_process_scope_terminal_listener
 
-        # Peer bindings (fleet DAG) may complete scores scopes without this
-        # scheduler's local orchestrator listener. Fan-out delivers those terminals.
+        # Sole terminal delivery path: process-wide fan-out covers this binding and
+        # peer bindings (e.g. fleet DAG empty tier_solve skip). Do not also register
+        # a per-orchestrator node-complete listener -- that double-invokes on own completes.
         self._unregister_scope_terminal = register_process_scope_terminal_listener(
             self._on_orchestrator_node_complete,
             analytic_id=SCORES_ANALYTIC_ID,
@@ -539,12 +539,8 @@ class InferenceRowScheduler:
             return existing
         query_ctx = _query_context_for_session(session, scheduler=self)
         orchestrator = orchestrator_for_context(query_ctx)
-        unregister = orchestrator.register_node_complete_listener(
-            lambda scope, node: self._on_orchestrator_node_complete(scope, node)
-        )
         binding = _InferenceStreamOrchestratorBinding(
             orchestrator=orchestrator,
-            unregister_listener=unregister,
             query_context=query_ctx,
         )
         self._stream_bindings[stream_token] = binding
@@ -837,7 +833,6 @@ class InferenceRowScheduler:
         if binding.unregister_dispatch_gate is not None:
             binding.unregister_dispatch_gate()
             binding.unregister_dispatch_gate = None
-        binding.unregister_listener()
         ctx_id = id(binding.query_context)
         if not any(id(other.query_context) == ctx_id for other in self._stream_bindings.values()):
             release_orchestrator_for_context(binding.query_context)

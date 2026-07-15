@@ -1,9 +1,9 @@
 """Process-wide fan-out for compute scope terminal outcomes.
 
-Stream adapters register listeners on their binding's orchestrator. When the same
-logical scope completes on a peer binding (e.g. scores ``tier_solve`` on the fleet
-DAG), the scores stream listener never fires. This registry delivers terminal
-notifications to analytic adapters regardless of which orchestrator completed.
+Scores ``InferenceRowScheduler`` registers here as its sole terminal path so
+completions on any orchestrator binding (stream or peer, e.g. fleet DAG
+``tier_solve``) reach the adapter. Fleet table stream keeps a local orchestrator
+listener and does not use this registry.
 """
 
 from __future__ import annotations

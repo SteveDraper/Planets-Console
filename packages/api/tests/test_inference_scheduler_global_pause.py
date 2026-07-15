@@ -128,16 +128,12 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn):
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1
 
-        def register_node_complete_listener(self, _listener: object) -> object:
-            return lambda: None
-
     fake_orchestrator = FakeOrchestrator()
     scheduler._stream_bindings[stream_token] = type(
         "FakeBinding",
         (),
         {
             "orchestrator": fake_orchestrator,
-            "unregister_listener": lambda: None,
             "unregister_dispatch_gate": None,
             "query_context": object(),
         },
@@ -219,7 +215,6 @@ def test_resume_dispatches_orchestrator_ready_work(sample_turn):
         (),
         {
             "orchestrator": fake_orchestrator,
-            "unregister_listener": lambda: None,
             "unregister_dispatch_gate": None,
             "query_context": object(),
         },

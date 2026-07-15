@@ -208,7 +208,7 @@ The **process-wide scope lease** closes that hole:
 | **On follower wake** | Satisfaction short-circuit if durable result exists; else become the next leader |
 | **Backends** | Applies to inline and pool steps (pool-queue uniqueness alone is insufficient) |
 
-Stream adapters that need client-visible terminals when a peer binding completes the scope (scores empty `tier_solve` skip on the fleet DAG) register on the process-wide scope-terminal fan-out in addition to their local orchestrator listener.
+Scores stream terminals use the process-wide scope-terminal fan-out as the sole delivery path (own binding and peer bindings such as fleet DAG empty `tier_solve` skip). Fleet table stream remains local orchestrator listener only.
 
 ### Terminal reuse and `force_fresh`
 

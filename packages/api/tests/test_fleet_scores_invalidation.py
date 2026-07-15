@@ -359,7 +359,6 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
                     },
                 },
             )(),
-            "unregister_listener": lambda: None,
             "query_context": query_context,
         },
     )()
@@ -441,7 +440,6 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_waiting_on_
                     },
                 },
             )(),
-            "unregister_listener": lambda: None,
             "query_context": object(),
         },
     )()
@@ -528,7 +526,6 @@ def test_fleet_ledger_persist_reschedules_when_stream_fleet_version_differs(
                     },
                 },
             )(),
-            "unregister_listener": lambda: None,
             "query_context": query_context,
         },
     )()
@@ -615,7 +612,6 @@ def test_fleet_ledger_persist_skips_when_stream_wire_lacks_version_stamp(
                     },
                 },
             )(),
-            "unregister_listener": lambda: None,
             "query_context": query_context,
         },
     )()
@@ -688,7 +684,6 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_stream_flee
                     },
                 },
             )(),
-            "unregister_listener": lambda: None,
             "query_context": object(),
         },
     )()
