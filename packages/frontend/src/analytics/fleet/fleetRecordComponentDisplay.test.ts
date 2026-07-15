@@ -101,6 +101,57 @@ describe('fleetRecordComponentDisplay', () => {
     expect(formatFleetLaunchersDisplay(observed, catalog)).toBe('2 Mark 4 Photon')
   })
 
+  it('shows ? for unknown option-set weapon counts (fog null type and count)', () => {
+    const fogObserved: FleetTableRecord = {
+      ...inferredRecord,
+      fields: {
+        ...inferredRecord.fields,
+        hull: { kind: 'known', value: 17 },
+        engine: { kind: 'unknown' },
+        beams: { kind: 'unknown' },
+        launchers: { kind: 'unknown' },
+      },
+      buildOptionSets: [
+        {
+          hullId: 17,
+          label: '',
+          solutionRankWeight: 0,
+          beamCount: null,
+          launcherCount: null,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+    expect(formatFleetBeamsDisplay(fogObserved, catalog)).toBe('?')
+    expect(formatFleetLaunchersDisplay(fogObserved, catalog)).toBe('?')
+  })
+
+  it('shows 0 for confirmed-empty option-set weapon counts', () => {
+    const unarmed: FleetTableRecord = {
+      ...inferredRecord,
+      fields: {
+        ...inferredRecord.fields,
+        hull: { kind: 'known', value: 17 },
+        engine: { kind: 'known', value: 9 },
+        beams: { kind: 'known', value: 0 },
+        launchers: { kind: 'known', value: 0 },
+      },
+      buildOptionSets: [
+        {
+          hullId: 17,
+          engineId: 9,
+          label: '',
+          solutionRankWeight: 0,
+          beamCount: 0,
+          launcherCount: 0,
+        },
+      ],
+      displayDefaultOptionSetIndex: 0,
+    }
+    expect(formatFleetBeamsDisplay(unarmed, catalog)).toBe('0')
+    expect(formatFleetLaunchersDisplay(unarmed, catalog)).toBe('0')
+  })
+
   it('shows generic freighter label instead of LDSF catalog name', () => {
     const genericFreighter: FleetTableRecord = {
       ...inferredRecord,

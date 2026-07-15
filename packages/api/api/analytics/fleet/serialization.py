@@ -227,13 +227,15 @@ def fleet_build_option_set_from_json(data: dict[str, Any]) -> FleetBuildOptionSe
     if not isinstance(solution_rank_weight, int) or isinstance(solution_rank_weight, bool):
         raise ValidationError("fleet build option set solutionRankWeight must be an int")
 
-    beam_count = data.get("beamCount", 0)
-    if not isinstance(beam_count, int) or isinstance(beam_count, bool):
-        raise ValidationError("fleet build option set beamCount must be an int")
+    beam_count = data.get("beamCount")
+    if beam_count is not None and (not isinstance(beam_count, int) or isinstance(beam_count, bool)):
+        raise ValidationError("fleet build option set beamCount must be an int or null")
 
-    launcher_count = data.get("launcherCount", 0)
-    if not isinstance(launcher_count, int) or isinstance(launcher_count, bool):
-        raise ValidationError("fleet build option set launcherCount must be an int")
+    launcher_count = data.get("launcherCount")
+    if launcher_count is not None and (
+        not isinstance(launcher_count, int) or isinstance(launcher_count, bool)
+    ):
+        raise ValidationError("fleet build option set launcherCount must be an int or null")
 
     hull_id = data.get("hullId")
     if hull_id is not None and (not isinstance(hull_id, int) or isinstance(hull_id, bool)):

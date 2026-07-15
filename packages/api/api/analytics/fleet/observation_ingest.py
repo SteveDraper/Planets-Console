@@ -200,9 +200,13 @@ def _merge_option_set_observation_locks(
         engine_id=observed.engine_id if observed.engine_id is not None else existing.engine_id,
         beam_id=observed.beam_id if observed.beam_id is not None else existing.beam_id,
         torp_id=observed.torp_id if observed.torp_id is not None else existing.torp_id,
-        beam_count=observed.beam_count if observed.beam_count > 0 else existing.beam_count,
+        beam_count=(
+            observed.beam_count if observed.beam_count is not None else existing.beam_count
+        ),
         launcher_count=(
-            observed.launcher_count if observed.launcher_count > 0 else existing.launcher_count
+            observed.launcher_count
+            if observed.launcher_count is not None
+            else existing.launcher_count
         ),
     )
 
@@ -300,8 +304,8 @@ def _observed_build_option_set_from_ship(
     """Fitted option set from a sighting.
 
     Full-information: single confirmed fit including known-zero weapon slot fills.
-    Partial: only positively observed components -- never claim fog zeros as fitted
-    empty weapons.
+    Partial: only positively observed components -- fog zeros leave type ids and
+    counts null so display can show ``?`` rather than claiming empty weapons.
     """
     hull_id = ship.hullid if ship.hullid > 0 else None
     if full_information:
@@ -315,13 +319,13 @@ def _observed_build_option_set_from_ship(
             beam_count=beam_count,
             launcher_count=launcher_count,
         )
-    beam_count = ship.beams if ship.beams > 0 else 0
-    launcher_count = ship.torps if ship.torps > 0 else 0
+    beam_count = ship.beams if ship.beams > 0 else None
+    launcher_count = ship.torps if ship.torps > 0 else None
     return FleetBuildOptionSet(
         hull_id=hull_id,
         engine_id=ship.engineid if ship.engineid > 0 else None,
-        beam_id=ship.beamid if beam_count > 0 and ship.beamid > 0 else None,
-        torp_id=ship.torpedoid if launcher_count > 0 and ship.torpedoid > 0 else None,
+        beam_id=ship.beamid if beam_count is not None and ship.beamid > 0 else None,
+        torp_id=(ship.torpedoid if launcher_count is not None and ship.torpedoid > 0 else None),
         beam_count=beam_count,
         launcher_count=launcher_count,
     )

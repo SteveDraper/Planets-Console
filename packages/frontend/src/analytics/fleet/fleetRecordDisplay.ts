@@ -92,9 +92,9 @@ function optionSetFieldFallback(
       return engineId != null ? String(engineId) : null
     }
     case 'beams':
-      return String(optionSet.beamCount)
+      return optionSet.beamCount == null ? null : String(optionSet.beamCount)
     case 'launchers':
-      return String(optionSet.launcherCount)
+      return optionSet.launcherCount == null ? null : String(optionSet.launcherCount)
     default:
       return null
   }
@@ -165,8 +165,10 @@ export function formatBuildOptionSetSummary(optionSet: FleetBuildOptionSet): str
     optionSet.label,
     optionSet.hullId != null ? `hull ${optionSet.hullId}` : null,
     optionSet.engineId != null ? `engine ${optionSet.engineId}` : null,
-    `beams ${optionSet.beamCount}`,
-    `launchers ${optionSet.launcherCount}`,
+    optionSet.beamCount == null ? 'beams ?' : `beams ${optionSet.beamCount}`,
+    optionSet.launcherCount == null
+      ? 'launchers ?'
+      : `launchers ${optionSet.launcherCount}`,
   ].filter((part): part is string => part != null)
   return parts.join(' · ')
 }

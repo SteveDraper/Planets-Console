@@ -81,7 +81,7 @@ When top-K **scores** solutions disagree on a build, attach a list of **fleet bu
 
 Display default: highest **inference solution rank weight** option set. Row expander lists alternates.
 
-**Observed ships:** direct `TurnInfo.ships` sightings also attach option-set ground truth for fitted components. Full-information sightings (`ledger.player_id == perspective`) attach a **single confirmed** option set carrying fitted beam/launcher slot fills (`ship.beams` / `ship.torps`) alongside type ids, and lock all component fields (including known-zero weapons). Partial foreign sightings typically lock **hull** only; fog-of-war zeros are left unknown and must not be treated as confirmed empty weapons. `fields.beams` / `fields.launchers` remain type-id constraints for belief-set and reconciliation; counts are not stored on those fields. A lone confirmed set is not ambiguity -- the row expander stays collapsed.
+**Observed ships:** direct `TurnInfo.ships` sightings also attach option-set ground truth for fitted components. Full-information sightings (`ledger.player_id == perspective`) attach a **single confirmed** option set carrying fitted beam/launcher slot fills (`ship.beams` / `ship.torps`) alongside type ids, and lock all component fields (including known-zero weapons). Partial foreign sightings typically lock **hull** only; fog-of-war zeros are left unknown (`beamId`/`torpId` null and `beamCount`/`launcherCount` null on the option set -- display as `?`) and must not be treated as confirmed empty weapons. `fields.beams` / `fields.launchers` remain type-id constraints for belief-set and reconciliation; counts are not stored on those fields. A lone confirmed set is not ambiguity -- the row expander stays collapsed.
 
 ### 3.4 Disposition vs qualifiers
 

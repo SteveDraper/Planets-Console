@@ -338,7 +338,14 @@ def test_partial_sighting_does_not_lock_fog_zero_weapons():
     assert record.fields.beams == FleetFieldUnknown()
     assert record.fields.launchers == FleetFieldUnknown()
     assert record.build_option_sets == [
-        FleetBuildOptionSet(hull_id=13, engine_id=None, beam_id=None, torp_id=None)
+        FleetBuildOptionSet(
+            hull_id=13,
+            engine_id=None,
+            beam_id=None,
+            torp_id=None,
+            beam_count=None,
+            launcher_count=None,
+        )
     ]
 
 
