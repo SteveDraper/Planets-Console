@@ -233,6 +233,109 @@ def test_two_orchestrators_only_one_runs_expensive_work(sample_turn) -> None:
     assert orch_b.metrics.satisfaction_short_circuits == 1
 
 
+def test_waiter_short_circuit_does_not_beat_leader_fanout_into_stream_terminal(
+    sample_turn,
+) -> None:
+    """Lease wake must run after process terminal fan-out (#222 stream race).
+
+    Without wake-after-fanout ordering, the waiter's satisfaction short-circuit
+    completes with ``result_wire={}`` and its process fan-out reaches a
+    scores-like stream listener *before* the leader's real ``rowComplete``, so
+    the first-wins terminal becomes ``RowFailed``.
+    """
+    persistence = _SatisfiedAfterPersistPolicy()
+    started = threading.Event()
+    release = threading.Event()
+    leader_row_complete = {"summary": "leader-exact"}
+
+    def run_step(_job: dict[str, Any]) -> StepResult:
+        persistence.expensive_runs += 1
+        started.set()
+        assert release.wait(timeout=5)
+        return StepResult(
+            outcome="persist",
+            payload={"ok": True, "rowComplete": leader_row_complete},
+        )
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=persistence,
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_step),),
+    )
+    registry = build_compute_registry((registration,))
+    ctx_a = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    ctx_b = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    orch_a = ComputeOrchestrator(ctx_a, compute_registry=registry)
+    orch_b = ComputeOrchestrator(ctx_b, compute_registry=registry)
+    scope = _shared_scope(sample_turn)
+
+    # Mimic scores stream: first process-terminal wins; empty complete → failed.
+    stream_terminals: list[str] = []
+    claimed = False
+
+    def stream_like_listener(_scope: ComputeScope, node: ComputeNodeRun) -> None:
+        nonlocal claimed
+        if claimed:
+            return
+        wire = node.result_wire
+        if isinstance(wire, dict) and wire.get("rowComplete") is not None:
+            stream_terminals.append("row_complete")
+            claimed = True
+            return
+        if node.state == "complete":
+            stream_terminals.append("row_failed_empty")
+            claimed = True
+
+    unregister = register_process_scope_terminal_listener(
+        stream_like_listener,
+        analytic_id=SHARED_ID,
+    )
+    try:
+        handle_a = None
+        error: list[BaseException] = []
+
+        def run_leader() -> None:
+            nonlocal handle_a
+            try:
+                handle_a = orch_a.submit(
+                    ComputeRequest(scope=scope, priority_band="background"),
+                )
+            except BaseException as exc:  # noqa: BLE001
+                error.append(exc)
+
+        leader_thread = threading.Thread(target=run_leader)
+        leader_thread.start()
+        assert started.wait(timeout=5)
+
+        handle_b = orch_b.submit(
+            ComputeRequest(scope=scope, priority_band="stream_attached"),
+        )
+        assert orch_b.nodes[scope].state == "parked"
+
+        release.set()
+        leader_thread.join(timeout=5)
+        assert not error
+        assert handle_a is not None
+        assert handle_a.state == "complete"
+        assert handle_b.state == "complete"
+        assert orch_b.metrics.satisfaction_short_circuits == 1
+        assert stream_terminals == ["row_complete"], (
+            "leader rowComplete must win the stream terminal; empty waiter "
+            f"short-circuit must not claim first (got {stream_terminals!r})"
+        )
+    finally:
+        unregister()
+
+
 def test_leader_failure_releases_claim_so_waiter_becomes_leader(sample_turn) -> None:
     runs: list[str] = []
 

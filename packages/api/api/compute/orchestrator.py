@@ -888,16 +888,30 @@ class ComputeOrchestrator:
             # schedule -- nothing else drains this orchestrator's callbacks.
             self.dispatch_ready_work()
 
-    def _release_scope_lease(self, node: ComputeNodeRun) -> None:
-        """Release any process-wide claim held by ``node`` and schedule waiter wakes."""
+    def _release_scope_lease(
+        self,
+        node: ComputeNodeRun,
+        *,
+        schedule_wakes: bool = True,
+    ) -> tuple[Callable[[], None], ...]:
+        """Release any process-wide claim held by ``node``.
+
+        When ``schedule_wakes`` is True (default), waiter wake callbacks go onto the
+        post-lock queue immediately -- correct for mid-profile step-kind handoff
+        and teardown. Terminal complete/fail paths pass False and schedule wakes
+        *after* process-scope terminal fan-out so stream listeners see the leader
+        ``result_wire`` before a waiter short-circuits with ``{}``.
+        """
         step_kind = node.lease_step_kind
         if step_kind is None:
-            return
+            return ()
         key = ScopeStepClaimKey(scope=node.scope, step_kind=step_kind)
         node.lease_step_kind = None
         wake_callbacks = self._scope_lease.release(key, orchestrator_id=id(self))
-        for wake in wake_callbacks:
-            self._observers.schedule_post_lock(wake)
+        if schedule_wakes:
+            for wake in wake_callbacks:
+                self._observers.schedule_post_lock(wake)
+        return wake_callbacks
 
     def _current_invalidation_generation(self, node: ComputeNodeRun) -> int:
         registration = self._compute_registry[node.scope.analytic_id]
@@ -1009,7 +1023,8 @@ class ComputeOrchestrator:
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
-        self._release_scope_lease(node)
+        # Defer lease wakes until after process terminal fan-out (below).
+        wake_callbacks = self._release_scope_lease(node, schedule_wakes=False)
         node.state = "complete"
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:
@@ -1024,11 +1039,14 @@ class ComputeOrchestrator:
         self._observers.schedule_post_lock(
             lambda: notify_process_scope_terminal(completed_scope, completed_node),
         )
+        for wake in wake_callbacks:
+            self._observers.schedule_post_lock(wake)
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
         if node.state == "failed":
             return
-        self._release_scope_lease(node)
+        # Same wake-after-fanout ordering as ``_complete_node`` (peer stream listeners).
+        wake_callbacks = self._release_scope_lease(node, schedule_wakes=False)
         node.state = "failed"
         node.error = error
         self._dequeue_ready(node.scope)
@@ -1044,6 +1062,8 @@ class ComputeOrchestrator:
         self._observers.schedule_post_lock(
             lambda: notify_process_scope_terminal(completed_scope, completed_node),
         )
+        for wake in wake_callbacks:
+            self._observers.schedule_post_lock(wake)
 
     def _ready_depth(self) -> int:
         return sum(1 for scope in self._ready_queue if self._nodes[scope].state == "ready")
