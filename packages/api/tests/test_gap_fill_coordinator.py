@@ -17,7 +17,7 @@ from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coor
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.turn_roster import iter_turn_players
-from api.errors import ConflictError, FleetMaterializationTimeoutError
+from api.errors import ConflictError, FleetGapFillEpochInvalidated, FleetMaterializationTimeoutError
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -590,7 +590,7 @@ def test_gap_fill_with_inference_fails_when_query_context_unresolved(
 
 
 def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, load_turn):
-    """Waiter blocked on inflight work retries with the leader after invalidation bumps epoch."""
+    """Mid-chain invalidation aborts once; external re-queue completes after epoch settles."""
     from api.analytics.fleet.chain import ensure_fleet_baseline
 
     turn_110 = load_turn(110)
@@ -618,14 +618,11 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
 
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
 
-    leader_result: PersistedFleetLedger | None = None
-    waiter_result: PersistedFleetLedger | None = None
     errors: list[BaseException] = []
 
     def run_leader() -> None:
-        nonlocal leader_result
         try:
-            leader_result = get_or_materialize_fleet_ledger_for_player(
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
@@ -637,11 +634,10 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
             errors.append(exc)
 
     def run_waiter() -> None:
-        nonlocal waiter_result
         assert leader_mid_chain.wait(timeout=5)
         waiter_joined.set()
         try:
-            waiter_result = get_or_materialize_fleet_ledger_for_player(
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
@@ -662,11 +658,20 @@ def test_coordinator_waiter_retries_with_leader_after_epoch_bump(persistence, lo
     leader.join(timeout=30)
     waiter.join(timeout=30)
 
-    assert not errors
-    assert leader_result is not None
-    assert waiter_result is not None
-    assert leader_result.ledger.player_id == player_id
-    assert waiter_result.ledger.player_id == player_id
+    assert errors
+    assert all(isinstance(exc, FleetGapFillEpochInvalidated) for exc in errors)
+
+    # External re-queue after invalidation settles (orchestrator / ensure pattern).
+    persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
+    result = get_or_materialize_fleet_ledger_for_player(
+        persistence,
+        628580,
+        1,
+        player_id,
+        turn_112,
+        load_turn=load_turn,
+    )
+    assert result.ledger.player_id == player_id
     assert persistence.get_ledger(628580, 1, 112, player_id) is not None
 
 
@@ -674,7 +679,7 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
     persistence,
     load_turn,
 ):
-    """Invalidation mid-chain with waiters retries once, not N independent gap-fill storms."""
+    """Invalidation mid-chain aborts the leg once -- no sync rematerialization spin."""
     from api.analytics.fleet.chain import ensure_fleet_baseline
 
     turn_110 = load_turn(110)
@@ -735,14 +740,11 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
             query_context=query_context,
         )
 
-    leader_result: PersistedFleetLedger | None = None
-    waiter_result: PersistedFleetLedger | None = None
     errors: list[BaseException] = []
 
     def run_leader() -> None:
-        nonlocal leader_result
         try:
-            leader_result = get_or_materialize_fleet_ledger_for_player(
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
@@ -754,11 +756,10 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
             errors.append(exc)
 
     def run_waiter() -> None:
-        nonlocal waiter_result
         assert leader_mid_chain.wait(timeout=5)
         waiter_joined.set()
         try:
-            waiter_result = get_or_materialize_fleet_ledger_for_player(
+            get_or_materialize_fleet_ledger_for_player(
                 persistence,
                 628580,
                 1,
@@ -786,16 +787,24 @@ def test_coordinator_invalidation_mid_chain_with_waiters_does_not_storm(
         leader_thread.join(timeout=30)
         waiter_thread.join(timeout=30)
 
-    assert not errors
-    assert leader_result is not None
-    assert waiter_result is not None
-    assert leader_result.ledger.player_id == player_id
-    assert waiter_result.ledger.player_id == player_id
-    assert persistence.get_ledger(628580, 1, 112, player_id) is not None
+    assert errors
+    assert all(isinstance(exc, FleetGapFillEpochInvalidated) for exc in errors)
     assert leader_unwind_calls == 1, f"expected one leader unwind, got {leader_unwind_calls}"
-    assert materialize_calls <= 2, (
-        f"expected at most one invalidation retry on the chain, got {materialize_calls}"
+    assert materialize_calls == 1, (
+        f"expected a single chain attempt (no sync spin), got {materialize_calls}"
     )
+
+    persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
+    result = get_or_materialize_fleet_ledger_for_player(
+        persistence,
+        628580,
+        1,
+        player_id,
+        turn_112,
+        load_turn=load_turn,
+    )
+    assert result.ledger.player_id == player_id
+    assert persistence.get_ledger(628580, 1, 112, player_id) is not None
 
 
 def test_joiner_on_progress_receives_incremental_events_during_inflight_gap_fill(
@@ -937,12 +946,12 @@ def test_result_for_request_returns_non_final_ledger_when_result_cleared(
     assert result.provenance.is_final is False
 
 
-def test_gap_fill_retries_when_ledger_cleared_after_coherence(persistence, load_turn):
+def test_gap_fill_aborts_when_ledger_cleared_after_coherence(persistence, load_turn):
     """Concurrent scores evidence invalidation can delete fleet after coherence exits.
 
     ``on_row_persisted`` clears fleet ledgers from the host turn. When that races after
-    gap-fill leaves coherence (and during/after deferred notifications), the final
-    ``get_ledger`` used to raise ``produced no ledger``. Rematerialize instead.
+    gap-fill leaves coherence, the leg aborts with ``FleetGapFillEpochInvalidated`` so
+    orchestrator / ensure can re-queue -- it does not sync-rematerialize in-leg.
     """
     from api.analytics.fleet import gap_fill_coordinator as gap_fill_mod
     from api.analytics.fleet.chain import ensure_fleet_baseline
@@ -970,15 +979,26 @@ def test_gap_fill_retries_when_ledger_cleared_after_coherence(persistence, load_
         "emit_deferred_fleet_ledger_notifications",
         side_effect=clear_target_ledger_then_emit,
     ):
-        result = get_or_materialize_fleet_ledger_for_player(
-            persistence,
-            628580,
-            1,
-            player_id,
-            turn_111,
-            load_turn=load_turn,
-        )
+        with pytest.raises(FleetGapFillEpochInvalidated, match="produced no ledger"):
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                628580,
+                1,
+                player_id,
+                turn_111,
+                load_turn=load_turn,
+            )
 
     assert clear_count == 1
+
+    # External re-queue after the race settles.
+    result = get_or_materialize_fleet_ledger_for_player(
+        persistence,
+        628580,
+        1,
+        player_id,
+        turn_111,
+        load_turn=load_turn,
+    )
     assert result.ledger.player_id == player_id
     assert persistence.get_ledger(628580, 1, 111, player_id) is not None

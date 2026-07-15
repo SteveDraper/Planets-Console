@@ -19,7 +19,7 @@ from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coor
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.errors import FleetMaterializationTimeoutError
+from api.errors import FleetGapFillEpochInvalidated, FleetMaterializationTimeoutError
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -797,7 +797,7 @@ def test_forward_unwind_scores_before_fleet_per_player(
 
 
 def test_invalidation_mid_chain_same_player_waiters_retry_once(persistence, load_turn):
-    """P invalidation aborts P's chain and waiters retry; Q's in-flight chain is unaffected."""
+    """P invalidation aborts P once (no sync spin); Q's in-flight chain is unaffected."""
     turn_109, turn_112 = require_turns(load_turn, 109, 112)
     player_p, player_q = two_players_from_turn(turn_112)
     seed_provenance_snapshot(persistence, load_turn, from_turn=109)
@@ -920,21 +920,32 @@ def test_invalidation_mid_chain_same_player_waiters_retry_once(persistence, load
         p_waiter_thread.join(timeout=30)
         q_thread.join(timeout=30)
 
-    assert not errors
-    assert p_leader_result is not None
-    assert p_waiter_result is not None
-    assert p_leader_result.ledger.player_id == player_p
-    assert p_waiter_result.ledger.player_id == player_p
-    assert persistence.get_ledger(628580, 1, 112, player_p) is not None
+    assert p_leader_result is None
+    assert p_waiter_result is None
+    assert errors
+    assert all(isinstance(exc, FleetGapFillEpochInvalidated) for exc in errors)
+    # P aborted once with no sync spin; Q completed independently.
+    assert persistence.get_ledger(628580, 1, 112, player_p) is None
     assert persistence.get_ledger(628580, 1, 112, player_q) is not None
     assert leader_unwind_calls == 1, f"expected one P leader unwind, got {leader_unwind_calls}"
-    assert p_materialize_calls <= 2, (
-        f"expected at most one P invalidation retry, got {p_materialize_calls}"
+    assert p_materialize_calls == 1, (
+        f"expected a single P chain attempt (no sync spin), got {p_materialize_calls}"
     )
     assert q_materialize_calls == 1, (
         f"expected one Q materialization chain, got {q_materialize_calls}"
     )
     assert coordinator_p is not coordinator_q
+
+    result = get_or_materialize_fleet_ledger_for_player(
+        persistence,
+        628580,
+        1,
+        player_p,
+        turn_112,
+        load_turn=load_turn,
+    )
+    assert result.ledger.player_id == player_p
+    assert persistence.get_ledger(628580, 1, 112, player_p) is not None
 
 
 def test_coordinator_q_unaffected_when_p_epoch_bumps_mid_chain(persistence, load_turn):
@@ -1037,7 +1048,8 @@ def test_coordinator_q_unaffected_when_p_epoch_bumps_mid_chain(persistence, load
         p_leader_thread.join(timeout=30)
         q_thread.join(timeout=30)
 
-    assert not errors
+    assert errors
+    assert all(isinstance(exc, FleetGapFillEpochInvalidated) for exc in errors)
     assert persistence.get_ledger(628580, 1, 112, player_q) is not None
     assert q_epoch_at_start is not None
     assert coordinator_q.epoch == q_epoch_at_start

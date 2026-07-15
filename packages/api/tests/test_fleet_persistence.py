@@ -25,7 +25,7 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
-from api.errors import ConflictError, NotFoundError, ValidationError
+from api.errors import NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -684,6 +684,8 @@ def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
 
 
 def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memory_backend):
+    from api.errors import FleetGapFillEpochInvalidated
+
     turn_110 = load_turn(110)
     assert turn_110 is not None
     prior = ensure_fleet_baseline(628580, 1, turn_110)
@@ -711,12 +713,11 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
 
     gap_fill_error: BaseException | None = None
-    snapshot: FleetTurnSnapshot | None = None
 
     def run_gap_fill() -> None:
-        nonlocal gap_fill_error, snapshot
+        nonlocal gap_fill_error
         try:
-            snapshot = get_or_materialize_fleet_snapshot(
+            get_or_materialize_fleet_snapshot(
                 persistence,
                 628580,
                 1,
@@ -733,31 +734,27 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     sync.wait()
     gap_fill_thread.join()
 
-    assert gap_fill_error is None
-    assert snapshot is not None
+    assert isinstance(gap_fill_error, FleetGapFillEpochInvalidated)
+    # Torn-tail guard: abort before persisting later turns on a stale generation.
+    assert persistence.get_snapshot(628580, 1, 112) is None
+
+    persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+    )
     assert snapshot.turn == 112
-    assert put_records[0][1] == 0
-    for player_id in {recorded_player_id for recorded_player_id, _ in put_records}:
-        player_generations = [
-            generation
-            for recorded_player_id, generation in put_records
-            if recorded_player_id == player_id
-        ]
-        if 1 not in player_generations:
-            continue
-        last_generation_zero_index = max(
-            index for index, generation in enumerate(player_generations) if generation == 0
-        )
-        post_invalidation_generations = player_generations[last_generation_zero_index + 1 :]
-        assert post_invalidation_generations
-        assert post_invalidation_generations == [1] * len(post_invalidation_generations)
-    assert persistence.get_snapshot(628580, 1, 111) is not None
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
     assert len(snapshot.players[0].records) == 6
     assert snapshot.players[0].records[0].record_id == "gap-rec"
 
 
 def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persistence, load_turn):
+    from api.errors import FleetGapFillEpochInvalidated
+
     turn_110 = load_turn(110)
     assert turn_110 is not None
     persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
@@ -806,12 +803,11 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
 
     gap_fill_error: BaseException | None = None
-    snapshot: FleetTurnSnapshot | None = None
 
     def run_gap_fill() -> None:
-        nonlocal gap_fill_error, snapshot
+        nonlocal gap_fill_error
         try:
-            snapshot = get_or_materialize_fleet_snapshot(
+            get_or_materialize_fleet_snapshot(
                 persistence,
                 628580,
                 1,
@@ -830,14 +826,26 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
     gap_fill_thread.join(timeout=5)
 
     assert not gap_fill_thread.is_alive()
-    assert gap_fill_error is None
-    assert snapshot is not None
+    assert isinstance(gap_fill_error, FleetGapFillEpochInvalidated)
     assert attempt_puts[0] == [111]
+    assert persistence.get_snapshot(628580, 1, 112) is None
+
+    persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+    )
     assert snapshot.turn == 112
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
-def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, load_turn):
+def test_gap_fill_aborts_on_mid_chain_invalidation_without_spin(persistence, load_turn):
+    """Single-attempt abort: continuous put-time invalidation must not spin retries."""
+    from api.errors import FleetGapFillEpochInvalidated
+
     turn_110 = load_turn(110)
     assert turn_110 is not None
     persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
@@ -869,18 +877,74 @@ def test_gap_fill_raises_conflict_after_max_invalidation_retries(persistence, lo
     from api.analytics.turn_roster import iter_turn_players
 
     first_player_id = next(iter_turn_players(turn_111)).id
-    with patch("api.analytics.fleet.gap_fill_coordinator.GAP_FILL_MAX_RETRIES", 3):
-        with pytest.raises(ConflictError, match="exceeded 3 invalidation retries"):
-            get_or_materialize_fleet_snapshot(
-                persistence,
-                628580,
-                1,
-                turn_111,
-                load_turn=load_turn,
-            )
+    with pytest.raises(FleetGapFillEpochInvalidated, match="aborted: invalidation generation"):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_111,
+            load_turn=load_turn,
+        )
 
     assert persistence.get_snapshot(628580, 1, 111) is None
-    assert persistence.invalidation_generation(628580, 1, first_player_id) == 3
+    # One coherent attempt bumps generation once via the hooked put -- not N spins.
+    assert persistence.invalidation_generation(628580, 1, first_player_id) == 1
+
+
+def test_gap_fill_succeeds_on_retry_after_invalidation_stops(persistence, load_turn):
+    """After epoch abort, a later materialize completes once invalidation stops."""
+    from api.errors import FleetGapFillEpochInvalidated
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    original_put_ledger = persistence.put_ledger
+    invalidate_once = {"done": False}
+
+    def put_ledger_invalidate_once(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        persisted,
+        **kwargs,
+    ) -> None:
+        original_put_ledger(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+            **kwargs,
+        )
+        if not invalidate_once["done"]:
+            invalidate_once["done"] = True
+            persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
+
+    persistence.put_ledger = put_ledger_invalidate_once  # type: ignore[method-assign]
+
+    with pytest.raises(FleetGapFillEpochInvalidated):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_111,
+            load_turn=load_turn,
+        )
+
+    persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
+    snapshot = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_111,
+        load_turn=load_turn,
+    )
+    assert snapshot.turn == 111
+    assert persistence.get_snapshot(628580, 1, 111) is not None
 
 
 def _put_provenance_final_snapshot(
@@ -952,7 +1016,7 @@ def _seed_scores_rows_for_all_players(
 
 
 def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(persistence, load_turn):
-    """After invalidation retries, return a peer-written snapshot instead of ConflictError."""
+    """On invalidation abort, return a peer-written final snapshot instead of raising."""
     from api.analytics.fleet.chain import _FleetSnapshotInvalidated
 
     turn_110 = load_turn(110)
@@ -976,6 +1040,103 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
         )
 
     assert result == winner
+
+
+def test_ensure_fleet_export_returns_false_on_epoch_abort_without_final(
+    sample_turn, memory_backend
+):
+    """Ensure catches epoch abort as unsatisfied; non-final ledger is not ensure-final."""
+    from dataclasses import replace
+
+    from api.analytics.export_types import ExportScope
+    from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
+    from api.analytics.fleet.exports import (
+        EXPORT_CATALOG,
+        ensure_fleet_export,
+        is_fleet_export_ensure_satisfied,
+    )
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.errors import FleetGapFillEpochInvalidated
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.export_chain_test_fixtures import export_chain_query_context
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        first_player_id,
+        perspective,
+        put_persisted_row,
+    )
+
+    player_id = first_player_id(sample_turn)
+    turn_number = 8
+    host_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    stored_turns = turn_chain_through(host_turn)
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=inference_persistence,
+        stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    put_persisted_row(
+        inference_persistence,
+        host_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=turn_number,
+        player_id=player_id,
+    )
+
+    with patch(
+        "api.analytics.fleet.exports.get_or_materialize_fleet_ledger_for_player",
+        side_effect=FleetGapFillEpochInvalidated(
+            "fleet gap-fill aborted: invalidation generation bumped mid-chain"
+        ),
+    ):
+        assert ensure_fleet_export(ctx, scope) is False
+
+    assert is_fleet_export_ensure_satisfied(ctx, scope) is False
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
+
+    # Counter-check: a persisted non-final ledger still leaves ensure unsatisfied.
+    fleet_services = resolve_fleet_services(ctx)
+    player_ledger = ensure_fleet_baseline(GAME_ID, perspective(sample_turn), host_turn).players
+    ledger = next(entry for entry in player_ledger if entry.player_id == player_id)
+    fleet_services.persistence.put_ledger(
+        GAME_ID,
+        perspective(sample_turn),
+        turn_number,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ledger,
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=False,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+    assert fleet_services.persistence.has_ledger(
+        GAME_ID, perspective(sample_turn), turn_number, player_id
+    )
+    assert not fleet_services.persistence.has_final_ledger(
+        GAME_ID, perspective(sample_turn), turn_number, player_id
+    )
+    assert is_fleet_export_ensure_satisfied(ctx, scope) is False
 
 
 def test_put_snapshot_stamps_current_materialization_version(persistence, load_turn):

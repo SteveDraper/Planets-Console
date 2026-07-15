@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from api.exceptions import (
     ConflictError,
     CoreAPIError,
+    FleetGapFillEpochInvalidated,
     FleetMaterializationTimeoutError,
     LoginCredentialsRequiredError,
     NotFoundError,
@@ -23,6 +24,7 @@ from api.exceptions import (
 __all__ = [
     "ConflictError",
     "CoreAPIError",
+    "FleetGapFillEpochInvalidated",
     "FleetMaterializationTimeoutError",
     "LoginCredentialsRequiredError",
     "NotFoundError",

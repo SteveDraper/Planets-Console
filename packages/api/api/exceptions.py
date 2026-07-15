@@ -72,3 +72,14 @@ class FleetMaterializationTimeoutError(CoreAPIError):
     """Coordinated fleet gap-fill did not complete within the waiter timeout."""
 
     http_error: int = 504
+
+
+class FleetGapFillEpochInvalidated(CoreAPIError):
+    """Fleet gap-fill aborted because invalidation generation bumped mid-chain.
+
+    Callers should treat this as retryable: exit the current leg and re-queue
+    (orchestrator epoch discard, stream reschedule, or a later ensure) rather
+    than spinning synchronous rematerializations on the same worker.
+    """
+
+    http_error: int = 409

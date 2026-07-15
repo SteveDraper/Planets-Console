@@ -4,9 +4,6 @@ ANALYTIC_ID = "fleet"
 
 FLEET_LEDGERS_KEY = "ledgers"
 
-# Bounded retries when gap-fill is aborted by concurrent fleet snapshot invalidation.
-GAP_FILL_MAX_RETRIES = 10
-
 # Max seconds a waiter blocks on an in-flight coordinated gap-fill before surfacing error.
 GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC = 300
 
