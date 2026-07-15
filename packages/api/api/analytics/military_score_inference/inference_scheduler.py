@@ -95,6 +95,14 @@ class InferenceRowScheduler:
         # run_ids that already emitted a terminal stream event; used so a late peer
         # failure cannot clobber an earlier successful completion for the same row.
         self._terminal_stream_events_delivered: set[str] = set()
+        from api.compute.scope_terminal_fanout import register_process_scope_terminal_listener
+
+        # Peer bindings (fleet DAG) may complete scores scopes without this
+        # scheduler's local orchestrator listener. Fan-out delivers those terminals.
+        self._unregister_scope_terminal = register_process_scope_terminal_listener(
+            self._on_orchestrator_node_complete,
+            analytic_id=SCORES_ANALYTIC_ID,
+        )
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
         with self._lock:
@@ -432,6 +440,10 @@ class InferenceRowScheduler:
 
     def shutdown(self) -> None:
         """Reset adapter state; safe for test teardown after dropping a service stack."""
+        unregister = getattr(self, "_unregister_scope_terminal", None)
+        if callable(unregister):
+            unregister()
+            self._unregister_scope_terminal = None
         with self._lock:
             self._invalidate_retained_state_locked()
 
@@ -682,7 +694,8 @@ class InferenceRowScheduler:
 
         Covers: matching-run path missed the stream session; peer unregistered the
         RowRun; stale ``_runs`` entries were swept; cancelled sessions that would
-        otherwise be marked finished by multiplex without a wire event.
+        otherwise be marked finished by multiplex without a wire event; empty
+        ``tier_solve`` skips on a peer binding with no ``rowComplete`` payload.
         """
         session = self._open_stream_session_for_scope(scope)
         if session is None:
@@ -706,21 +719,20 @@ class InferenceRowScheduler:
             # Claim delivery before emit so concurrent peer notifications cannot double-send.
             self._terminal_stream_events_delivered.add(session.run_id)
 
-        # Do not bail on ``finished_run_ids`` alone. Multiplex can mark a run finished
-        # when the session cancel token trips (reschedule race) without yielding a
-        # client-visible terminal; skipping here leaves the scoreboard in-progress
-        # while the DAG is already complete. Mirror onto pending wire so drain cannot
-        # strand the event on a finished/cancelled session queue.
         row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
         if row_complete is not None:
-            event: RowComplete | RowFailed = row_complete
-        elif node.state == "failed":
+            event: RowComplete | RowFailed | None = row_complete
+        elif getattr(node, "state", None) == "failed":
             detail = (
                 str(node.error)
                 if getattr(node, "error", None) is not None
                 else "Inference tier solve failed"
             )
             event = RowFailed(detail=detail)
+        elif self._deliver_admission_wire_terminal(controller, session):
+            with self._lock:
+                self._remove_run_locked(session.run_id)
+            return
         else:
             event = RowFailed(detail="Inference tier solve completed without row payload")
 
@@ -745,6 +757,49 @@ class InferenceRowScheduler:
             deliver_inference_domain_event_to_open_stream(session, event)
         with self._lock:
             self._remove_run_locked(session.run_id)
+
+    def _deliver_admission_wire_terminal(
+        self,
+        controller: object,
+        session: InferenceRowStreamSession,
+    ) -> bool:
+        """Push immediate/cached admission wire when peer complete has no row payload.
+
+        Returns True when a client-visible terminal was delivered from admission.
+        """
+        from api.analytics.military_score_inference.inference_stream_rows import (
+            CachedCompleteRowAdmission,
+            ImmediateRowAdmission,
+            tag_inference_stream_event,
+        )
+
+        resolve = getattr(controller, "resolve_row_admission", None)
+        if not callable(resolve):
+            return False
+        admission = resolve(session.player_id)
+        wires: list[dict[str, object]] = []
+        if isinstance(admission, ImmediateRowAdmission):
+            wires = [
+                tag_inference_stream_event(event, player_id=session.player_id)
+                for event in admission.events
+            ]
+        elif isinstance(admission, CachedCompleteRowAdmission) and admission.event is not None:
+            wires = [
+                tag_inference_stream_event(admission.event, player_id=session.player_id),
+            ]
+        if not wires:
+            return False
+        pending = getattr(controller, "pending_wire_events", None)
+        finished = getattr(controller, "finished_run_ids", None)
+        wake = getattr(controller, "wake_multiplex", None)
+        stream_lock = getattr(controller, "stream_lock", None)
+        if pending is None or finished is None or wake is None or stream_lock is None:
+            return False
+        with stream_lock:
+            pending.extend(wires)
+            finished.add(session.run_id)
+        wake.set()
+        return True
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
@@ -1031,11 +1086,13 @@ def reset_inference_row_scheduler_for_tests() -> None:
     global _scheduler
     from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
+    from api.compute.scope_terminal_fanout import reset_process_scope_terminal_fanout_for_tests
 
     with _scheduler_lock:
         if _scheduler is not None:
             _scheduler.shutdown()
         _scheduler = None
+    reset_process_scope_terminal_fanout_for_tests()
     reset_orchestrators_for_tests()
     reset_tier_row_run_registry_for_tests()
     from api.compute.pools import shutdown_compute_worker_pool_for_tests

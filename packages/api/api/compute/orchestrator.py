@@ -24,6 +24,8 @@ from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmit
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.scope_lease import ScopeStepClaimKey, get_process_scope_lease
+from api.compute.scope_terminal_fanout import notify_process_scope_terminal
 from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import DependencyOutputs, coerce_step_result
 
@@ -58,6 +60,7 @@ NodeState = Literal[
     "waiting_deps",
     "ready",
     "running",
+    "parked",
     "attach_inflight",
     "complete",
     "failed",
@@ -116,6 +119,8 @@ class ComputeNodeRun:
     result_wire: object | None = None
     error: BaseException | None = None
     waiters: list[ComputeHandle] = field(default_factory=list)
+    # Step kind for the process-wide claim currently held by this node, if any.
+    lease_step_kind: str | None = None
 
 
 @dataclass
@@ -126,6 +131,9 @@ class OrchestratorMetrics:
     pool_submissions: int = 0
     epoch_discards: int = 0
     persist_calls: int = 0
+    lease_parks: int = 0
+    lease_acquires: int = 0
+    satisfaction_short_circuits: int = 0
 
 
 @dataclass(frozen=True)
@@ -148,7 +156,12 @@ class OrchestratorDiagnosticsSnapshot:
 
 
 class ComputeOrchestrator:
-    """DAG scheduler with singleflight per normalized compute scope."""
+    """DAG scheduler with singleflight per normalized compute scope.
+
+    Cross-binding dedupe uses the process-wide scope lease
+    (``scope`` + ``step_kind``): followers park while a peer binding holds the
+    claim, then resume via satisfaction short-circuit or as the next leader.
+    """
 
     def __init__(
         self,
@@ -174,6 +187,18 @@ class ComputeOrchestrator:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._observers = OrchestratorObservers(self._condition)
+        self._scope_lease = get_process_scope_lease()
+
+    def release_held_scope_leases(self) -> None:
+        """Release all process-wide claims held by this orchestrator (teardown)."""
+        wake_callbacks = self._scope_lease.release_all_for_orchestrator(id(self))
+        with self._condition:
+            for node in self._nodes.values():
+                if node.lease_step_kind is not None:
+                    node.lease_step_kind = None
+            for wake in wake_callbacks:
+                self._observers.schedule_post_lock(wake)
+        self._observers.drain_post_lock_callbacks()
 
     def dispatch_ready_work(self) -> None:
         """Dispatch any ready nodes allowed by the current gates.
@@ -527,12 +552,12 @@ class ComputeOrchestrator:
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
-            if node.state in {"complete", "failed", "running"}:
+            if node.state in {"complete", "failed", "running", "parked"}:
                 continue
             self._refresh_node_readiness(node)
 
     def _refresh_node_readiness(self, node: ComputeNodeRun) -> None:
-        if node.state in {"complete", "failed", "running"}:
+        if node.state in {"complete", "failed", "running", "parked"}:
             return
         failed_dependency_error = self._failed_dependency_error(node)
         if failed_dependency_error is not None:
@@ -581,6 +606,10 @@ class ComputeOrchestrator:
         Inline and pool steps are prepared here (state → running, dependency wires
         snapshotted) but job-wire construction and execution happen only after the
         caller releases the orchestrator lock.
+
+        Before execution, durable satisfaction short-circuits the node, and the
+        process-wide scope lease parks followers while a peer binding holds the
+        claim for the same ``scope`` + ``step_kind``.
         """
         pending_inline: list[_PendingInlineExecution] = []
         pending_pool: list[_PendingPoolSubmission] = []
@@ -592,8 +621,13 @@ class ComputeOrchestrator:
 
             registration = self._compute_registry[node.scope.analytic_id]
             step = self._current_step_spec(node, registration)
+            if self._maybe_short_circuit_satisfied(node, registration):
+                continue
+            if not self._acquire_scope_lease_or_park(node, step):
+                continue
+
             if step.backend == "inline":
-                self._begin_step_execution(node)
+                self._begin_step_execution(node, step_kind=step.step_kind)
                 pending_inline.append(
                     _PendingInlineExecution(
                         node=node,
@@ -605,9 +639,13 @@ class ComputeOrchestrator:
                 continue
 
             if self._pool_submitter is None:
+                # Cannot run yet; release the claim so peers are not stuck, then
+                # leave the node ready for a later dispatch once a submitter exists.
+                self._release_scope_lease(node)
                 self._enqueue_ready(scope)
+                node.state = "ready"
                 break
-            self._begin_step_execution(node)
+            self._begin_step_execution(node, step_kind=step.step_kind)
             pending_pool.append(
                 _PendingPoolSubmission(
                     node=node,
@@ -770,13 +808,96 @@ class ComputeOrchestrator:
             ctx=self._cached_ctx,
         )
 
-    def _begin_step_execution(self, node: ComputeNodeRun) -> None:
+    def _begin_step_execution(self, node: ComputeNodeRun, *, step_kind: str) -> None:
         registration = self._compute_registry[node.scope.analytic_id]
         node.state = "running"
+        node.lease_step_kind = step_kind
         node.generation_at_submit = registration.persistence_policy.invalidation_generation(
             self._ctx,
             node.scope,
         )
+
+    def _maybe_short_circuit_satisfied(
+        self,
+        node: ComputeNodeRun,
+        registration: AnalyticComputeRegistration,
+    ) -> bool:
+        """Complete ``node`` without running when durable satisfaction already holds.
+
+        Returns True when the node was short-circuited (caller must not execute).
+        """
+        if not registration.persistence_policy.is_satisfied(self._cached_ctx, node.scope):
+            return False
+        self._metrics.satisfaction_short_circuits += 1
+        # Dependents require a non-None result wire; content is analytic-owned and
+        # readers that need durable artifacts re-load from persistence.
+        if node.result_wire is None:
+            node.result_wire = {}
+        self._complete_node(node)
+        return True
+
+    def _acquire_scope_lease_or_park(
+        self,
+        node: ComputeNodeRun,
+        step: ComputeStepSpec,
+    ) -> bool:
+        """Acquire the process-wide claim or park the node. True when acquired."""
+        if node.lease_step_kind == step.step_kind:
+            # Continuing the same step kind (e.g. tier_solve ladder) keeps the claim.
+            self._metrics.lease_acquires += 1
+            return True
+        key = ScopeStepClaimKey(scope=node.scope, step_kind=step.step_kind)
+        outcome = self._scope_lease.try_acquire(
+            key,
+            orchestrator_id=id(self),
+            priority_band=node.priority_band,
+            on_wake=lambda: self._wake_parked_for_lease(node.scope, step.step_kind),
+        )
+        if outcome == "parked":
+            self._metrics.lease_parks += 1
+            node.state = "parked"
+            node.lease_step_kind = None
+            return False
+        self._metrics.lease_acquires += 1
+        node.lease_step_kind = step.step_kind
+        return True
+
+    def _wake_parked_for_lease(self, scope: ComputeScope, step_kind: str) -> None:
+        """Resume a parked node after a peer binding released the scope lease."""
+        should_dispatch = False
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None or node.state != "parked":
+                return
+            registration = self._compute_registry.get(node.scope.analytic_id)
+            if registration is None:
+                return
+            try:
+                current_step = self._current_step_spec(node, registration)
+            except RuntimeError:
+                return
+            if current_step.step_kind != step_kind:
+                return
+            node.state = "ready"
+            self._enqueue_ready(scope)
+            self._observers.notify_ready(node)
+            should_dispatch = True
+        if should_dispatch:
+            # Run dispatch on this (follower) orchestrator. The wake callback is
+            # invoked from the leader's post-lock drain, so we must not only
+            # schedule -- nothing else drains this orchestrator's callbacks.
+            self.dispatch_ready_work()
+
+    def _release_scope_lease(self, node: ComputeNodeRun) -> None:
+        """Release any process-wide claim held by ``node`` and schedule waiter wakes."""
+        step_kind = node.lease_step_kind
+        if step_kind is None:
+            return
+        key = ScopeStepClaimKey(scope=node.scope, step_kind=step_kind)
+        node.lease_step_kind = None
+        wake_callbacks = self._scope_lease.release(key, orchestrator_id=id(self))
+        for wake in wake_callbacks:
+            self._observers.schedule_post_lock(wake)
 
     def _current_invalidation_generation(self, node: ComputeNodeRun) -> int:
         registration = self._compute_registry[node.scope.analytic_id]
@@ -878,6 +999,8 @@ class ComputeOrchestrator:
         if next_profile_index < len(steps):
             next_step = steps[next_profile_index]
             if next_step.step_kind != current_step.step_kind:
+                # Different step kind needs its own claim; release before re-queue.
+                self._release_scope_lease(node)
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         self._enqueue_ready(node.scope)
@@ -886,19 +1009,26 @@ class ComputeOrchestrator:
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
+        self._release_scope_lease(node)
         node.state = "complete"
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:
             waiter._waiter_error = None
         node.waiters.clear()
         self._observers.notify_node_complete(node)
+        completed_scope = node.scope
+        completed_node = node
         self._observers.schedule_post_lock(
-            lambda completed_scope=node.scope: self._handle_dependency_terminal(completed_scope),
+            lambda: self._handle_dependency_terminal(completed_scope),
+        )
+        self._observers.schedule_post_lock(
+            lambda: notify_process_scope_terminal(completed_scope, completed_node),
         )
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
         if node.state == "failed":
             return
+        self._release_scope_lease(node)
         node.state = "failed"
         node.error = error
         self._dequeue_ready(node.scope)
@@ -906,8 +1036,13 @@ class ComputeOrchestrator:
             waiter._waiter_error = error
         node.waiters.clear()
         self._observers.notify_node_complete(node)
+        completed_scope = node.scope
+        completed_node = node
         self._observers.schedule_post_lock(
-            lambda completed_scope=node.scope: self._handle_dependency_terminal(completed_scope),
+            lambda: self._handle_dependency_terminal(completed_scope),
+        )
+        self._observers.schedule_post_lock(
+            lambda: notify_process_scope_terminal(completed_scope, completed_node),
         )
 
     def _ready_depth(self) -> int:
@@ -928,7 +1063,7 @@ class ComputeOrchestrator:
         for node in self._nodes.values():
             if completed_scope not in node.dependency_scopes:
                 continue
-            if node.state in {"complete", "failed", "running"}:
+            if node.state in {"complete", "failed", "running", "parked"}:
                 continue
             self._refresh_node_readiness(node)
         # Defer dispatch: this runs under the orchestrator lock via
@@ -937,5 +1072,6 @@ class ComputeOrchestrator:
 
     def _has_pending_work(self) -> bool:
         return any(
-            node.state in {"waiting_deps", "ready", "running"} for node in self._nodes.values()
+            node.state in {"waiting_deps", "ready", "running", "parked"}
+            for node in self._nodes.values()
         )
