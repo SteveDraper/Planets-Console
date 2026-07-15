@@ -119,8 +119,8 @@ class ComputeNodeRun:
     result_wire: object | None = None
     error: BaseException | None = None
     waiters: list[ComputeHandle] = field(default_factory=list)
-    # Step kind for the process-wide claim currently held by this node, if any.
-    lease_step_kind: str | None = None
+    # Process-wide claims held until node terminal (includes prior profile steps).
+    held_lease_step_kinds: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -617,7 +617,7 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                 continue
 
             if step.backend == "inline":
-                self._begin_step_execution(node, step_kind=step.step_kind)
+                self._begin_step_execution(node)
                 pending_inline.append(
                     _PendingInlineExecution(
                         node=node,
@@ -629,13 +629,13 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                 continue
 
             if self._pool_submitter is None:
-                # Cannot run yet; release the claim so peers are not stuck, then
-                # leave the node ready for a later dispatch once a submitter exists.
-                self._release_scope_lease(node)
+                # Cannot run yet; release only this step's claim so peers for it are
+                # not stuck. Prior profile-step claims stay held until terminal.
+                self._release_scope_lease(node, step_kind=step.step_kind)
                 self._enqueue_ready(scope)
                 node.state = "ready"
                 break
-            self._begin_step_execution(node, step_kind=step.step_kind)
+            self._begin_step_execution(node)
             pending_pool.append(
                 _PendingPoolSubmission(
                     node=node,
@@ -725,10 +725,9 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
             ctx=self._cached_ctx,
         )
 
-    def _begin_step_execution(self, node: ComputeNodeRun, *, step_kind: str) -> None:
+    def _begin_step_execution(self, node: ComputeNodeRun) -> None:
         registration = self._compute_registry[node.scope.analytic_id]
         node.state = "running"
-        node.lease_step_kind = step_kind
         node.generation_at_submit = registration.persistence_policy.invalidation_generation(
             self._ctx,
             node.scope,
@@ -834,8 +833,8 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
         if next_profile_index < len(steps):
             next_step = steps[next_profile_index]
             if next_step.step_kind != current_step.step_kind:
-                # Different step kind needs its own claim; release before re-queue.
-                self._release_scope_lease(node)
+                # Advance profile; retain prior step claims until node terminal so
+                # peers cannot rematerialize while this node is still non-terminal.
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         self._enqueue_ready(node.scope)

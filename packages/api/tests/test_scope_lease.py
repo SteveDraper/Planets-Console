@@ -553,6 +553,171 @@ def test_process_scope_terminal_fanout_notifies_across_bindings(sample_turn) -> 
     unregister()
 
 
+def test_profile_continue_retains_materialize_claim_during_later_step(sample_turn) -> None:
+    """Leader materialize→tier_solve must not free materialize for peer rematerialize.
+
+    Releasing the materialize claim on profile continue would let a peer binding
+    rematerialize while the leader is still non-terminal on tier_solve, defeating
+    cross-binding dedupe for the inline leg the lease protects (#222 / review 06).
+    """
+    persistence = _SatisfiedAfterPersistPolicy()
+    materialize_runs = 0
+    tier_started = threading.Event()
+    tier_release = threading.Event()
+
+    def run_materialize(_job: dict[str, Any]) -> StepResult:
+        nonlocal materialize_runs
+        materialize_runs += 1
+        return StepResult(outcome="continue", payload={"materialized": True})
+
+    def run_tier_solve(_job: dict[str, Any]) -> StepResult:
+        tier_started.set()
+        assert tier_release.wait(timeout=5)
+        return StepResult(outcome="persist", payload={"ok": True})
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(
+                ComputeStepSpec(step_kind="materialize", backend="inline"),
+                ComputeStepSpec(step_kind="tier_solve", backend="inline"),
+            ),
+        ),
+        persistence_policy=persistence,
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+            ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(
+            ("materialize", run_materialize),
+            ("tier_solve", run_tier_solve),
+        ),
+    )
+    registry = build_compute_registry((registration,))
+    ctx_a = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    ctx_b = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    orch_a = ComputeOrchestrator(ctx_a, compute_registry=registry)
+    orch_b = ComputeOrchestrator(ctx_b, compute_registry=registry)
+    scope = _shared_scope(sample_turn)
+
+    handle_a = None
+    error: list[BaseException] = []
+
+    def run_leader() -> None:
+        nonlocal handle_a
+        try:
+            handle_a = orch_a.submit(
+                ComputeRequest(scope=scope, priority_band="background"),
+            )
+        except BaseException as exc:  # noqa: BLE001
+            error.append(exc)
+
+    leader_thread = threading.Thread(target=run_leader)
+    leader_thread.start()
+    assert tier_started.wait(timeout=5)
+    assert materialize_runs == 1
+    assert "materialize" in orch_a.nodes[scope].held_lease_step_kinds
+    assert "tier_solve" in orch_a.nodes[scope].held_lease_step_kinds
+
+    handle_b = orch_b.submit(
+        ComputeRequest(scope=scope, priority_band="stream_attached"),
+    )
+    assert orch_b.nodes[scope].state == "parked"
+    assert orch_b.metrics.lease_parks == 1
+    assert materialize_runs == 1
+
+    tier_release.set()
+    leader_thread.join(timeout=5)
+    assert not error
+    assert handle_a is not None
+    assert handle_a.state == "complete"
+    assert handle_b.state == "complete"
+    assert materialize_runs == 1
+    assert persistence.persist_calls == 1
+    assert orch_b.metrics.satisfaction_short_circuits == 1
+
+
+def test_distinct_entry_step_kinds_do_not_suppress_each_other(sample_turn) -> None:
+    """Independent entry at tier_solve must not park behind a materialize-only claim.
+
+    Claim keys remain scope+step_kind: a peer that enters at tier_solve while the
+    leader still holds only materialize (before continue) may acquire tier_solve.
+    """
+    materialize_started = threading.Event()
+    materialize_release = threading.Event()
+    tier_runs = 0
+
+    def run_materialize(_job: dict[str, Any]) -> StepResult:
+        materialize_started.set()
+        assert materialize_release.wait(timeout=5)
+        return StepResult(outcome="persist", payload={"m": True})
+
+    def run_tier_solve(_job: dict[str, Any]) -> StepResult:
+        nonlocal tier_runs
+        tier_runs += 1
+        return StepResult(outcome="complete", payload={"t": True})
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(
+                ComputeStepSpec(step_kind="materialize", backend="inline"),
+                ComputeStepSpec(step_kind="tier_solve", backend="inline"),
+            ),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+            ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(
+            ("materialize", run_materialize),
+            ("tier_solve", run_tier_solve),
+        ),
+    )
+    registry = build_compute_registry((registration,))
+    ctx_a = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    ctx_b = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    orch_a = ComputeOrchestrator(ctx_a, compute_registry=registry)
+    orch_b = ComputeOrchestrator(ctx_b, compute_registry=registry)
+    scope = _shared_scope(sample_turn)
+
+    handle_a = None
+    error: list[BaseException] = []
+
+    def run_leader() -> None:
+        nonlocal handle_a
+        try:
+            handle_a = orch_a.submit(
+                ComputeRequest(scope=scope, priority_band="background"),
+            )
+        except BaseException as exc:  # noqa: BLE001
+            error.append(exc)
+
+    leader_thread = threading.Thread(target=run_leader)
+    leader_thread.start()
+    assert materialize_started.wait(timeout=5)
+
+    handle_b = orch_b.submit(
+        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached"),
+    )
+    assert handle_b.state == "complete"
+    assert tier_runs == 1
+    assert orch_b.metrics.lease_parks == 0
+
+    materialize_release.set()
+    leader_thread.join(timeout=5)
+    assert not error
+    assert handle_a is not None
+    assert handle_a.state == "complete"
+
+
 def test_force_fresh_after_invalidate_reruns_when_unsatisfied(sample_turn) -> None:
     persistence = _SatisfiedAfterPersistPolicy()
 

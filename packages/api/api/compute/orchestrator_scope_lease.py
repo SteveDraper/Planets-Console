@@ -45,8 +45,7 @@ class OrchestratorScopeLeaseMixin:
         wake_callbacks = self._scope_lease.release_all_for_orchestrator(id(self))
         with self._condition:
             for node in self._nodes.values():
-                if node.lease_step_kind is not None:
-                    node.lease_step_kind = None
+                node.held_lease_step_kinds.clear()
             for wake in wake_callbacks:
                 self._observers.schedule_post_lock(wake)
         self._observers.drain_post_lock_callbacks()
@@ -80,8 +79,11 @@ class OrchestratorScopeLeaseMixin:
         Does not seal for execution -- the caller must
         :meth:`_seal_scope_lease_or_park` immediately before expensive work so a
         higher-priority peer can adopt during the post-dispatch job-wire window.
+
+        Prior profile-step claims on the same node are retained (see
+        :meth:`_continue_node_step`); only the current ``step_kind`` is acquired.
         """
-        if node.lease_step_kind == step.step_kind:
+        if step.step_kind in node.held_lease_step_kinds:
             # Continuing the same step kind (e.g. tier_solve ladder) keeps the claim.
             self._metrics.lease_acquires += 1
             return True
@@ -95,12 +97,11 @@ class OrchestratorScopeLeaseMixin:
         if outcome == "parked":
             self._metrics.lease_parks += 1
             node.state = "parked"
-            node.lease_step_kind = None
             return False
         if outcome == "adopted":
             self._metrics.lease_adopts += 1
         self._metrics.lease_acquires += 1
-        node.lease_step_kind = step.step_kind
+        node.held_lease_step_kinds.add(step.step_kind)
         return True
 
     def _seal_scope_lease_or_park(
@@ -118,7 +119,8 @@ class OrchestratorScopeLeaseMixin:
         if result.outcome == "sealed":
             return True
         with self._condition:
-            node.lease_step_kind = None
+            # Lost adopt: drop only this step's claim; prior profile steps stay held.
+            node.held_lease_step_kinds.discard(step.step_kind)
             node.generation_at_submit = None
             registration = self._compute_registry.get(node.scope.analytic_id)
             if registration is not None and self._maybe_short_circuit_satisfied(
@@ -139,13 +141,13 @@ class OrchestratorScopeLeaseMixin:
             if outcome == "adopted":
                 self._metrics.lease_adopts += 1
             self._metrics.lease_acquires += 1
-            node.lease_step_kind = step.step_kind
+            node.held_lease_step_kinds.add(step.step_kind)
             retry = self._scope_lease.seal_for_execution(key, orchestrator_id=id(self))
             if retry.outcome == "sealed":
                 return True
             self._metrics.lease_parks += 1
             node.state = "parked"
-            node.lease_step_kind = None
+            node.held_lease_step_kinds.discard(step.step_kind)
             return False
 
     def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
@@ -272,23 +274,35 @@ class OrchestratorScopeLeaseMixin:
         self,
         node: ComputeNodeRun,
         *,
+        step_kind: str | None = None,
         schedule_wakes: bool = True,
     ) -> tuple[Callable[[], None], ...]:
-        """Release any process-wide claim held by ``node``.
+        """Release process-wide claim(s) held by ``node``.
+
+        When ``step_kind`` is set, release only that claim (e.g. deferred pool
+        submit). When omitted, release every held claim -- the terminal
+        complete/fail path.
 
         When ``schedule_wakes`` is True (default), waiter wake callbacks go onto the
-        post-lock queue immediately -- correct for mid-profile step-kind handoff
-        and teardown. Terminal complete/fail paths pass False and schedule wakes
-        *after* process-scope terminal fan-out so stream listeners see the leader
-        ``result_wire`` before a waiter short-circuits with ``{}``.
+        post-lock queue immediately. Terminal complete/fail paths pass False and
+        schedule wakes *after* process-scope terminal fan-out so stream listeners
+        see the leader ``result_wire`` before a waiter short-circuits with ``{}``.
         """
-        step_kind = node.lease_step_kind
         if step_kind is None:
-            return ()
-        key = ScopeStepClaimKey(scope=node.scope, step_kind=step_kind)
-        node.lease_step_kind = None
-        wake_callbacks = self._scope_lease.release(key, orchestrator_id=id(self))
+            to_release = tuple(node.held_lease_step_kinds)
+            node.held_lease_step_kinds.clear()
+        else:
+            if step_kind not in node.held_lease_step_kinds:
+                return ()
+            node.held_lease_step_kinds.discard(step_kind)
+            to_release = (step_kind,)
+        wake_callbacks: list[Callable[[], None]] = []
+        for kind in to_release:
+            key = ScopeStepClaimKey(scope=node.scope, step_kind=kind)
+            wake_callbacks.extend(
+                self._scope_lease.release(key, orchestrator_id=id(self))
+            )
         if schedule_wakes:
             for wake in wake_callbacks:
                 self._observers.schedule_post_lock(wake)
-        return wake_callbacks
+        return tuple(wake_callbacks)
