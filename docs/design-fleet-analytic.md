@@ -60,7 +60,7 @@ One **fleet ship record** = one acquired ship tracked across turns until retired
 | `lastSeen` | Turn, `x/y`, optional planet id |
 | `disposition` | **Fleet ship disposition**: `active`, `lost`, `traded`, `unknown` |
 | `qualifiers` | **Fleet possibly lost**, **fleet alibi** (row-level; not disposition) |
-| `buildOptionSets` | List of **fleet build option set** while ambiguous |
+| `buildOptionSets` | List of **fleet build option set** while ambiguous; observed rows carry a single confirmed fit for slot fills |
 | `events` | Append-only **fleet evidence event** timeline |
 
 ### 3.2 Field constraint shapes
@@ -80,6 +80,8 @@ When top-K **scores** solutions disagree on a build, attach a list of **fleet bu
 **Do not** expose independent per-field unions (e.g. `(Cruiser | Destroyer) x (W6 | Transwarp)`) that admit impossible combinations.
 
 Display default: highest **inference solution rank weight** option set. Row expander lists alternates.
+
+**Observed ships:** direct `TurnInfo.ships` sightings also attach a **single confirmed** option set carrying fitted beam/launcher slot fills (`ship.beams` / `ship.torps`) alongside type ids. `fields.beams` / `fields.launchers` remain type-id constraints for belief-set and reconciliation; counts are not stored on those fields. A lone confirmed set is not ambiguity -- the row expander stays collapsed.
 
 ### 3.4 Disposition vs qualifiers
 

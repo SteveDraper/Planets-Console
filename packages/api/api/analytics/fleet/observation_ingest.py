@@ -10,6 +10,7 @@ from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetAlibi,
+    FleetBuildOptionSet,
     FleetEvidenceEvent,
     FleetEvidenceEventKind,
     FleetFieldBounded,
@@ -76,11 +77,14 @@ def _ingest_ship_sighting(
         planet_id=_planet_id_at_coordinates(turn, ship.x, ship.y),
     )
     observed_fields = _observed_fields_from_ship(ship)
+    observed_option_set = _observed_build_option_set_from_ship(ship)
 
     if record is None:
         record = FleetShipRecord(
             record_id=str(uuid.uuid4()),
             fields=observed_fields,
+            build_option_sets=[observed_option_set],
+            display_default_option_set_index=0,
             last_seen=last_seen,
         )
         append_fleet_evidence_event(
@@ -99,6 +103,10 @@ def _ingest_ship_sighting(
         prior_last_seen is None or prior_last_seen.x != ship.x or prior_last_seen.y != ship.y
     )
     record.fields = _merge_observed_fields(record.fields, observed_fields)
+    # Sighting is ground truth for fitted slot fills; replace any prior option sets
+    # (including inferred alternates) with the single confirmed observed fit.
+    record.build_option_sets = [observed_option_set]
+    record.display_default_option_set_index = 0
     record.last_seen = last_seen
     append_fleet_evidence_event(
         record,
@@ -164,6 +172,24 @@ def _observed_fields_from_ship(ship: Ship) -> FleetShipRecordFields:
         launchers=launchers,
         built_turn=built_turn,
         location=FleetFieldUnknown(),
+    )
+
+
+def _observed_build_option_set_from_ship(ship: Ship) -> FleetBuildOptionSet:
+    """Single confirmed fitted spec so UI can show beam/launcher slot fills.
+
+    ``fields.beams`` / ``fields.launchers`` remain type-id constraints; counts live
+    on the option set (same home as inferred fits).
+    """
+    beam_count = ship.beams
+    launcher_count = ship.torps
+    return FleetBuildOptionSet(
+        hull_id=ship.hullid if ship.hullid > 0 else None,
+        engine_id=ship.engineid if ship.engineid > 0 else None,
+        beam_id=ship.beamid if beam_count > 0 and ship.beamid > 0 else None,
+        torp_id=ship.torpedoid if launcher_count > 0 and ship.torpedoid > 0 else None,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
     )
 
 
@@ -253,6 +279,8 @@ def _ship_sighting_payload(ship: Ship) -> dict[str, object]:
         "engineId": ship.engineid,
         "beamId": ship.beamid,
         "torpId": ship.torpedoid,
+        "beamCount": ship.beams,
+        "launcherCount": ship.torps,
     }
 
 

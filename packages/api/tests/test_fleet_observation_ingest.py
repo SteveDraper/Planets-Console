@@ -10,6 +10,7 @@ from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.scoreboard_counts import compute_max_ship_id_bound
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
+    FleetBuildOptionSet,
     FleetEvidenceEvent,
     FleetFieldBounded,
     FleetFieldKnown,
@@ -44,6 +45,50 @@ def test_new_sighting_creates_observed_ship_row():
     assert record.events[0].kind == "sighting"
     assert record.events[0].source == "turnInfo.ships"
     assert record.events[0].payload["shipId"] == 42
+    assert record.events[0].payload["beamCount"] == 8
+    assert record.events[0].payload["launcherCount"] == 6
+    assert record.build_option_sets == [
+        FleetBuildOptionSet(
+            hull_id=13,
+            engine_id=9,
+            beam_id=3,
+            torp_id=6,
+            beam_count=8,
+            launcher_count=6,
+        )
+    ]
+    assert record.display_default_option_set_index == 0
+
+
+def test_repeat_sighting_refreshes_confirmed_build_option_set():
+    turn_one = single_ship_turn(turn_number=1, ship_id=42, owner_id=8, x=1000, y=2000)
+    snapshot = ingest_turn_ship_observations(ensure_fleet_baseline(628580, 1, turn_one), turn_one)
+    record = ledger_for_player(snapshot, 8).records[0]
+    record.build_option_sets = [
+        FleetBuildOptionSet(label="stale inferred", beam_count=1, launcher_count=1),
+        FleetBuildOptionSet(label="alternate", beam_count=2, launcher_count=2),
+    ]
+    record.display_default_option_set_index = 1
+
+    turn_two = single_ship_turn(turn_number=2, ship_id=42, owner_id=8, x=1100, y=2100)
+    turn_two = replace(
+        turn_two,
+        scores=[replace(score, turn=2) for score in turn_two.scores],
+    )
+    result = ingest_turn_ship_observations(snapshot, turn_two)
+
+    refreshed = ledger_for_player(result, 8).records[0]
+    assert refreshed.build_option_sets == [
+        FleetBuildOptionSet(
+            hull_id=13,
+            engine_id=9,
+            beam_id=3,
+            torp_id=6,
+            beam_count=8,
+            launcher_count=6,
+        )
+    ]
+    assert refreshed.display_default_option_set_index == 0
 
 
 def test_repeat_sighting_appends_events_and_updates_position():
