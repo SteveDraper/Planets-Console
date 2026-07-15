@@ -45,11 +45,15 @@ def memory_backend():
 
 
 def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
+    from api.analytics.military_score_inference.inference_scheduler import (
+        reset_inference_row_scheduler_for_tests,
+    )
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
+    reset_inference_row_scheduler_for_tests()
     reset_fleet_table_stream_scheduler_for_tests()
     scheduler = FleetTableStreamScheduler()
 

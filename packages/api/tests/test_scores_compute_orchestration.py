@@ -278,7 +278,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert skip_wire == {"runId": None}
+    assert skip_wire == {"runId": None, "evidenceClosed": True}
 
 
 def test_historical_materialize_schedules_row_run_for_tier_solve(
@@ -390,7 +390,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert tier_wire == {"runId": None}
+    assert tier_wire == {"runId": None, "evidenceClosed": True}
 
 
 def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(

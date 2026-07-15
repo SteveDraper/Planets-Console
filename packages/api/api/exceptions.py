@@ -83,3 +83,15 @@ class FleetGapFillEpochInvalidated(CoreAPIError):
     """
 
     http_error: int = 409
+
+
+class FleetScoresEvidenceOpenError(CoreAPIError):
+    """Fleet host-turn persist refused because same-turn scores evidence is open.
+
+    Completing the fleet node would unlock dependents and park a non-final ledger
+    with no automatic rematerialization. Fail the fleet node (dependents stay
+    waiting_deps rather than cascade-fail). Scores evidence updates always wake
+    ``fleet@host_turn`` so a later scores close force_fresh rematerializes.
+    """
+
+    http_error: int = 409

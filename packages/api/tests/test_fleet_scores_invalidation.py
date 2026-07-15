@@ -773,3 +773,78 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
     assert inference_persistence.get_row(628580, 1, 112, player_p) is None
     assert inference_persistence.get_row(628580, 1, 112, player_q) is not None
     assert rescheduled_players == [player_p]
+
+
+def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
+    persistence,
+    monkeypatch,
+):
+    """Refused fleet persist leaves no ledger; scores re-close must still force_fresh fleet@N."""
+    rescheduled: list[tuple[int, int]] = []
+
+    def spy_reschedule(scope, player_id):
+        rescheduled.append((scope.turn_number, player_id))
+
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        spy_reschedule,
+    )
+    inference_persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=persistence,
+    )
+    gen_before = persistence.invalidation_generation(628580, 1, 8)
+
+    woken = invalidation.on_inference_evidence_updated(628580, 1, 4, 8)
+
+    assert woken == {4}
+    assert rescheduled == [(4, 8)]
+    assert persistence.invalidation_generation(628580, 1, 8) == gen_before + 1
+
+
+def test_open_evidence_fleet_fail_does_not_cascade_to_dependents(sample_turn):
+    """Dependents of a FleetScoresEvidenceOpenError failure stay waiting_deps."""
+    from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
+    from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+    from api.compute.registry import build_compute_registry
+    from api.errors import FleetScoresEvidenceOpenError
+
+    registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
+    ctx = make_analytic_query_context(sample_turn, TurnAnalyticsOptions(), export_services={})
+    orchestrator = ComputeOrchestrator(ctx, compute_registry=registry)
+
+    fleet_scope = ComputeScope(
+        analytic_id="fleet",
+        game_id=628580,
+        perspective=1,
+        turn=4,
+        player_id=2,
+    )
+    scores_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=5,
+        player_id=2,
+    )
+    fleet_node = ComputeNodeRun(
+        scope=fleet_scope,
+        dependency_scopes=(),
+        state="failed",
+        error=FleetScoresEvidenceOpenError("scores turn evidence is not closed"),
+    )
+    scores_node = ComputeNodeRun(
+        scope=scores_scope,
+        dependency_scopes=(fleet_scope,),
+        state="waiting_deps",
+    )
+    orchestrator._nodes[fleet_scope] = fleet_node
+    orchestrator._nodes[scores_scope] = scores_node
+
+    orchestrator._refresh_node_readiness(scores_node)
+
+    assert scores_node.state == "waiting_deps"
+    assert scores_node.error is None

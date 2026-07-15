@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import ensure_fleet_baseline
 from api.analytics.fleet.compute_orchestration import (
@@ -44,6 +46,7 @@ from tests.scores_exports_helpers import (
     perspective,
     schedule_row_with_ladder,
     ship_build_domain,
+    ship_build_wire,
 )
 
 _FLEET_ANALYTIC_ID = "fleet"
@@ -98,6 +101,40 @@ def _inference_support(scheduler: InferenceRowScheduler) -> FleetInferenceSuppor
     )
 
 
+def _close_scores_turn_evidence(
+    inference: FleetInferenceSupport,
+    turn,
+    player_id: int,
+    *,
+    game_perspective: int,
+    solutions: list[dict[str, object]] | None = None,
+) -> None:
+    """Persist exact scores@N so fleet persist may close turnEvidenceAtN.
+
+    Solutions must be the wire payloads refine will read -- an empty exact row
+    closes evidence but starves option-set assignment.
+    """
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    persistence = inference.scores_services.persistence
+    assert persistence is not None
+    closed_solutions = list(solutions) if solutions is not None else []
+    persistence.put_row(
+        628580,
+        game_perspective,
+        turn.settings.turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed-closed",
+            solution_count=len(closed_solutions),
+            is_complete=True,
+            solutions=closed_solutions,
+        ),
+    )
+
+
 def test_persist_writes_refined_option_sets_onto_result_wire(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
@@ -129,6 +166,33 @@ def test_persist_writes_refined_option_sets_onto_result_wire(sample_turn):
         ],
     )
     inference = _inference_support(scheduler)
+    _close_scores_turn_evidence(
+        inference,
+        turn,
+        player_id,
+        game_perspective=game_perspective,
+        solutions=[
+            {
+                "objectiveValue": 90,
+                "actions": [],
+                "shipBuilds": [
+                    ship_build_wire(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                    ),
+                    ship_build_wire(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                        count=1,
+                    ),
+                ],
+            }
+        ],
+    )
     fleet_services = build_ephemeral_fleet_compute_services(
         turn,
         game_id=628580,
@@ -209,6 +273,29 @@ def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample
         merged_solutions=[],
     )
     inference = _inference_support(scheduler)
+    _close_scores_turn_evidence(
+        inference,
+        turn_n,
+        player_id,
+        game_perspective=game_perspective,
+        solutions=[
+            {
+                "objectiveValue": 90,
+                "actions": [],
+                "shipBuilds": [
+                    ship_build_wire(
+                        combo_id="combo-prior",
+                        label="Prior Hull",
+                        hull_id=13,
+                        engine_id=9,
+                    ),
+                ],
+            }
+        ],
+    )
+    _close_scores_turn_evidence(
+        inference, turn_n1, player_id, game_perspective=game_perspective
+    )
     fleet_services = build_ephemeral_fleet_compute_services(
         turn_n1,
         game_id=628580,
@@ -329,3 +416,52 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
     assert FleetPersistencePolicy().satisfied_result_wire(ctx, prior_scope) == {
         "persistedLedgerWire": persisted_fleet_ledger_to_json(stored)
     }
+
+
+def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
+    """Open scores evidence must fail the fleet node, not quiet non-final complete."""
+    from api.errors import FleetScoresEvidenceOpenError
+
+    reset_inference_row_scheduler_for_tests()
+    turn, player_id = _turn_with_warship_delta(sample_turn, shipchange=2, turn_number=8)
+    game_perspective = perspective(turn)
+    fleet_services = build_ephemeral_fleet_compute_services(
+        turn,
+        game_id=628580,
+        perspective=game_perspective,
+        stored_turns={turn.settings.turn: turn},
+        inference=_inference_support(InferenceRowScheduler(worker_count=0)),
+    )
+    ctx = make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        load_turn=fleet_services.load_turn,
+        export_services={
+            _FLEET_ANALYTIC_ID: fleet_services,
+            SCORES_ANALYTIC_ID: ScoresExportContext(),
+        },
+    )
+    phase1 = _phase1_persisted_with_placeholders(
+        turn, player_id=player_id, game_perspective=game_perspective
+    )
+    result_wire = {
+        "persistedLedgerWire": persisted_fleet_ledger_to_json(phase1),
+        "materializeTurn": turn.settings.turn,
+    }
+    scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=game_perspective,
+        turn=turn.settings.turn,
+        player_id=player_id,
+    )
+
+    with pytest.raises(FleetScoresEvidenceOpenError):
+        FleetPersistencePolicy().persist(ctx, scope, result_wire)
+
+    assert (
+        fleet_services.persistence.get_ledger(
+            628580, game_perspective, turn.settings.turn, player_id
+        )
+        is None
+    )

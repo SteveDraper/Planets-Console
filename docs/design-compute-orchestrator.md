@@ -214,6 +214,8 @@ The **process-wide scope lease** closes that hole:
 
 Scores stream terminals use the process-wide scope-terminal fan-out as the sole delivery path (own binding and peer bindings such as fleet DAG empty `tier_solve` skip). Fleet table stream remains local orchestrator listener only.
 
+**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed. A missing `RowRun` while evidence is open must `continue` (rebuild wire / re-ensure), not empty-complete -- that falsely unlocks same-turn fleet and leaves the scoreboard without `rowComplete`.
+
 ### Terminal reuse and `force_fresh`
 
 `ComputeRequest.force_fresh` controls whether a duplicate submission for an already-terminal scope starts new work or reuses the cached node outcome.

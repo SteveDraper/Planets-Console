@@ -167,11 +167,11 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    Skip sentinel (``runId: None``) is allowed only when turn evidence is already
-    closed (persisted / cheap terminal). A missing ``RowRun`` while evidence is
-    still open must not complete the scores node -- that falsely unlocks fleet
-    materialization with ``turnEvidenceAtN=False`` and leaves the scores stream
-    without a rowComplete (in-progress hang).
+    Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
+    turn evidence is already closed (persisted / cheap terminal). A missing
+    ``RowRun`` while evidence is still open must not complete the scores node --
+    that falsely unlocks fleet materialization with ``turnEvidenceAtN=False`` and
+    leaves the scores stream without a rowComplete (in-progress hang).
     """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
@@ -190,7 +190,7 @@ def build_scores_tier_solve_job_wire(
         run = get_row_run_for_scope(scope)
     if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
-            return {"runId": None}
+            return {"runId": None, "evidenceClosed": True}
         raise RuntimeError(
             "scores tier_solve requires a registered RowRun when turn evidence "
             f"is not closed (game_id={scope.game_id}, perspective={scope.perspective}, "
@@ -239,22 +239,30 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
-    """Run one scores inference tier step and return an explicit orchestrator outcome."""
+    """Run one scores inference tier step and return an explicit orchestrator outcome.
+
+    Empty complete is allowed only for the evidence-closed skip sentinel. If a
+    ``runId`` was issued but the ``RowRun`` is already gone, return ``continue`` so
+    the orchestrator rebuilds the wire: either evidence is closed (skip complete),
+    a new RowRun is scheduled, or wire-build raises instead of unlocking fleet.
+    """
     run_id = job_wire.get("runId")
     if run_id is None:
-        # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn evidence
-        # is already closed -- no CP-SAT.
-        return StepResult(outcome="complete")
+        if job_wire.get("evidenceClosed") is True:
+            # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
+            # evidence is already closed -- no CP-SAT.
+            return StepResult(outcome="complete")
+        # Stale or forged skip without the closed-evidence marker: rebuild wire.
+        return StepResult(outcome="continue")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        # Cross-binding race: a peer orchestrator finalized/unregistered the shared
-        # RowRun while this binding still had a queued or continuing tier_solve wire.
-        # Treat as idempotent terminal -- the peer already delivered completion.
-        # Cross-binding stream terminal delivery is owned by process-wide scope lease
-        # (#222), not by a side-channel notify from this empty path.
-        return StepResult(outcome="complete")
+        # Cross-binding race: peer may have finalized/unregistered the shared RowRun.
+        # Do not empty-complete here -- that unlocked fleet with open scores evidence
+        # and left the scoreboard in-progress. Continue so wire-build re-checks
+        # ``is_satisfied`` / re-ensures a RowRun.
+        return StepResult(outcome="continue")
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:

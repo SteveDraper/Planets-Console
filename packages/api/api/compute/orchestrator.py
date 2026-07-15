@@ -563,9 +563,16 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
             self._dequeue_ready(node.scope)
 
     def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
+        from api.errors import FleetScoresEvidenceOpenError
+
         for dependency_scope in node.dependency_scopes:
             dependency = self._nodes.get(dependency_scope)
             if dependency is not None and dependency.state == "failed":
+                # Open-scores refuse is retryable via scores re-close + fleet force_fresh.
+                # Do not cascade-fail dependents -- leave them waiting_deps until fleet
+                # rematerializes successfully.
+                if isinstance(dependency.error, FleetScoresEvidenceOpenError):
+                    continue
                 return dependency.error
         return None
 
