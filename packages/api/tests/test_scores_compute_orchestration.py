@@ -167,21 +167,42 @@ def test_run_scores_materialize_continues_to_tier_solve() -> None:
     assert result.payload == export_tree
 
 
-def test_scores_tier_solve_without_row_run_completes_after_materialize_continue(
+def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
     sample_turn,
 ) -> None:
-    """No-work scopes (already satisfied / no RowRun needed) still terminate after materialize."""
+    """Unsatisfied scope with no RowRun: tier wire re-ensures and schedules instead of skipping.
+
+    False ``runId: None`` skips unlocked fleet with non-final provenance and left the
+    scores multiplex in-progress (Fury/Colonies hang on game 628580 t8).
+    """
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
     from api.analytics.scores.compute_orchestration import (
         build_scores_tier_solve_job_wire,
         run_scores_materialize,
-        run_scores_tier_solve,
     )
-    from api.compute.wire import StepResult
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run_for_scope,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+    from api.storage.memory_asset import MemoryAssetBackend
 
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
-        export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
+        export_services={
+            SCORES_ANALYTIC_ID: ScoresExportContext(
+                persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+                scheduler=scheduler,
+            )
+        },
     )
     player_id = sample_turn.scores[0].ownerid
     scope = _scores_scope(sample_turn, player_id)
@@ -194,10 +215,70 @@ def test_scores_tier_solve_without_row_run_completes_after_materialize_continue(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert job_wire.get("runId") is None
-    tier = run_scores_tier_solve(job_wire)
-    assert isinstance(tier, StepResult)
-    assert tier.outcome == "complete"
+    assert job_wire.get("runId") is not None
+    assert get_row_run_for_scope(scope) is not None
+
+
+def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
+    sample_turn,
+    persistence,
+) -> None:
+    """``runId: None`` skip requires closed turn evidence, not merely a missing RowRun."""
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
+    from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.scores_exports_helpers import prior_turn_ensure_context, put_persisted_row
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    ctx, export_scope, player_id, _, _ = prior_turn_ensure_context(
+        sample_turn,
+        persistence,
+        scheduler=scheduler,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=export_scope.game_id,
+        perspective=export_scope.perspective,
+        turn=export_scope.turn,
+        player_id=player_id,
+    )
+
+    # Open evidence + no RowRun after ensure would schedule -- here we patch schedule
+    # away so ensure cannot create a run, proving we refuse the false skip.
+    with patch("api.analytics.scores.exports.schedule_inference_row"):
+        with pytest.raises(RuntimeError, match="requires a registered RowRun"):
+            build_scores_tier_solve_job_wire(
+                scope,
+                dependency_outputs=DependencyOutputs(),
+                ctx=ctx,
+            )
+
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="cached",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=export_scope.turn,
+    )
+    skip_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert skip_wire == {"runId": None}
 
 
 def test_historical_materialize_schedules_row_run_for_tier_solve(
@@ -385,34 +466,6 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
     stored = persistence.get_row(GAME_ID, perspective(sample_turn), host_turn, player_id)
     assert stored is not None
     assert stored.summary == "historical persist via orchestrator"
-
-
-def test_build_scores_tier_solve_job_wire_skips_without_registered_row_run(
-    sample_turn,
-) -> None:
-    """No RowRun: tier_solve wire is a skip sentinel so materialize can continue."""
-    ctx = make_analytic_query_context(
-        sample_turn,
-        TurnAnalyticsOptions(),
-        export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
-    )
-    player_id = sample_turn.scores[0].ownerid
-    scope = _scores_scope(sample_turn, player_id)
-
-    skip_wire = build_scores_tier_solve_job_wire(
-        scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ctx,
-    )
-    assert skip_wire == {"runId": None}
-
-    run = _register_run(sample_turn, player_id=player_id)
-    job_wire = build_scores_tier_solve_job_wire(
-        scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ctx,
-    )
-    assert job_wire == {"runId": run.run_id}
 
 
 def test_build_scores_tier_solve_job_wire_uses_fleet_dependency_output(sample_turn, persistence):
