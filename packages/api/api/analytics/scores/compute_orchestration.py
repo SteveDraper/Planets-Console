@@ -306,7 +306,6 @@ class ScoresPersistencePolicy:
         scope: ComputeScope,
         result_wire: object,
     ) -> None:
-        del scope
         if not isinstance(result_wire, dict):
             raise TypeError(
                 f"scores persist result wire must be dict, got {type(result_wire).__name__}"
@@ -314,14 +313,23 @@ class ScoresPersistencePolicy:
         run_id = result_wire.get("runId")
         if not isinstance(run_id, str):
             raise TypeError("scores persist result wire missing string runId")
-        run = get_row_run(run_id)
-        if run is None:
-            return
-        if run.session.cancel_token.is_cancelled():
-            return
         row_complete = result_wire.get("rowComplete")
         if not isinstance(row_complete, RowComplete):
             raise TypeError("scores persist result wire missing RowComplete payload")
+
+        run = get_row_run(run_id)
+        if run is None:
+            # Peer unregistered the RowRun after a persist outcome. Completing without
+            # a durable row unlocks fleet with open turn evidence -- refuse so the
+            # orchestrator fails/retries instead of quiet-complete.
+            raise RuntimeError(
+                "scores persist missing RowRun for persistable tier outcome "
+                f"(game_id={scope.game_id}, perspective={scope.perspective}, "
+                f"turn={scope.turn}, player_id={scope.player_id}, run_id={run_id})"
+            )
+        if run.session.cancel_token.is_cancelled():
+            # Cancelled rows are aborted off ``running`` before persist; no-op is safe.
+            return
 
         services = resolve_scores_services(ctx)
         if services.persistence is None:

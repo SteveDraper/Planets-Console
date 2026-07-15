@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import ensure_fleet_baseline
 from api.analytics.fleet.compute_orchestration import (
@@ -293,9 +292,7 @@ def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample
             }
         ],
     )
-    _close_scores_turn_evidence(
-        inference, turn_n1, player_id, game_perspective=game_perspective
-    )
+    _close_scores_turn_evidence(inference, turn_n1, player_id, game_perspective=game_perspective)
     fleet_services = build_ephemeral_fleet_compute_services(
         turn_n1,
         game_id=628580,

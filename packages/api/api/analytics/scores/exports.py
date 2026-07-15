@@ -193,8 +193,9 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
 def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     """True when scores@N is terminal for fleet ``turnEvidenceAtN``.
 
-    Unlike ``is_scores_export_ensure_satisfied``, an in-progress scheduler ``RowRun``
-    does not count -- fleet must wait for persisted or otherwise terminal scores.
+    Uses the same materialization probe fleet uses (no ensure-ephemeral). Ensure-only
+    cheap terminals must not mark scores ``is_satisfied`` / skip-complete -- that
+    unlocked same-turn fleet while fleet still saw open evidence and no disk row.
     """
     if scope.player_id is None:
         return True
@@ -206,8 +207,9 @@ def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: Expo
     if turn is None:
         return True
 
-    snapshot = gather_scores_ensure_probe_snapshot(
-        ctx,
+    from api.analytics.scores.export_snapshot import gather_scores_materialization_probe_snapshot
+
+    snapshot = gather_scores_materialization_probe_snapshot(
         services,
         scope,
         turn,

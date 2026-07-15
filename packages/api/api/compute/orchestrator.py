@@ -758,6 +758,46 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
+    def _recover_fleet_after_open_scores_evidence(self, node: ComputeNodeRun) -> None:
+        """Park fleet@N and force_fresh same-turn scores after open-evidence persist refuse.
+
+        Failing the fleet node left dependents in ``waiting_deps`` with no wake when the
+        open stream is only ambient turn (historical fleet has no table-stream controller).
+        Re-queue alone can spin while scores stays falsely terminal. Force-freshing
+        scores@N reopens the ENSURE dep; when it closes for real, fleet rematerializes.
+        """
+        from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+
+        scores_scope = ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=node.scope.game_id,
+            perspective=node.scope.perspective,
+            turn=node.scope.turn,
+            player_id=node.scope.player_id,
+            parameters=node.scope.parameters,
+        )
+        priority_band = node.priority_band
+        with self._condition:
+            if node.state != "running":
+                return
+            node.generation_at_submit = None
+            node.error = None
+            node.state = "waiting_deps"
+            self._dequeue_ready(node.scope)
+            self._metrics.epoch_discards += 1
+
+        def _force_fresh_scores() -> None:
+            self.submit(
+                ComputeRequest(
+                    scope=scores_scope,
+                    priority_band=priority_band,
+                    force_fresh=True,
+                    step_kind="tier_solve",
+                )
+            )
+
+        self._observers.schedule_post_lock(_force_fresh_scores)
+
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
@@ -804,6 +844,15 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                     # ghost ``running`` node (empty queues, freeze ``nothing_steppable``).
                     # Do not re-raise: pool workers call complete_pool_step on this thread
                     # and an escaping exception would kill the worker loop.
+                    from api.errors import FleetScoresEvidenceOpenError
+
+                    if isinstance(exc, FleetScoresEvidenceOpenError):
+                        # Transient race: scores@N was unlocked then invalidated before
+                        # fleet persist. Park fleet on deps and force_fresh scores so a
+                        # real close can wake rematerialization (stream-only reschedule
+                        # cannot recover background DAG nodes).
+                        self._recover_fleet_after_open_scores_evidence(completed_node)
+                        return
                     with self._condition:
                         if completed_node.state == "running":
                             self._fail_node(completed_node, exc)
