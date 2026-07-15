@@ -250,8 +250,8 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         player_id=player_id,
     )
 
-    # Open evidence + no RowRun after ensure would schedule -- here we patch schedule
-    # away so ensure cannot create a run, proving we refuse the false skip.
+    # Open evidence + ensure still needs work (schedule patched away): hard fail --
+    # not empty-complete, and not a soft continue that would spin forever.
     with patch("api.analytics.scores.exports.schedule_inference_row"):
         with pytest.raises(RuntimeError, match="requires a registered RowRun"):
             build_scores_tier_solve_job_wire(
@@ -279,6 +279,73 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         ctx=ctx,
     )
     assert skip_wire == {"runId": None, "evidenceClosed": True}
+
+
+def test_build_scores_tier_solve_job_wire_continues_when_ensure_admitted_without_rowrun(
+    sample_turn,
+    persistence,
+) -> None:
+    """Cheap ensure-ephemeral admit with open turn evidence waits via continue wire.
+
+    Must not raise RuntimeError (that failed ambient/historical DAG paths) and must
+    not emit the evidence-closed skip sentinel (that unlocked fleet without durable
+    scores evidence).
+    """
+    from dataclasses import replace
+
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.compute_orchestration import (
+        build_scores_tier_solve_job_wire,
+        run_scores_tier_solve,
+    )
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run_for_scope,
+        reset_tier_row_run_registry_for_tests,
+    )
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        first_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    assert sample_turn.settings.acceleratedturns == 3
+
+    turn_2 = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=2),
+        game=replace(sample_turn.game, turn=2),
+    )
+    player_id = first_player_id(turn_2)
+    ctx = scores_query_context(
+        turn_2,
+        persistence=persistence,
+        scheduler=scheduler,
+        stored_turns={2: turn_2},
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+
+    wait_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert wait_wire == {"runId": None}
+    assert get_row_run_for_scope(scope) is None
+    assert run_scores_tier_solve(wait_wire).outcome == "continue"
 
 
 def test_historical_materialize_schedules_row_run_for_tier_solve(
