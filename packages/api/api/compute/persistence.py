@@ -3,11 +3,41 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
+
+from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
-    from api.compute.scope import ComputeScope
+
+
+@dataclass(frozen=True)
+class PersistDependencyRecovery:
+    """Park the persisting node on ``waiting_deps`` and optionally re-submit a dependency.
+
+    Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
+    carrying this when a durable write cannot complete until another scope is
+    re-run (typically ``force_fresh``). The orchestrator handles the signal
+    generically -- no analytic ids or feature exceptions in the shared path.
+    """
+
+    dependency_scope: ComputeScope
+    force_fresh: bool = True
+    step_kind: str | None = None
+
+
+class PersistDeferredError(Exception):
+    """Raised from ``PersistencePolicy.persist`` when the write must wait on a dependency.
+
+    The orchestrator parks the node on ``waiting_deps`` (not ``failed``) and, when
+    ``recovery.force_fresh`` is true, submits ``recovery.dependency_scope`` so a
+    durable dependency close can wake rematerialization.
+    """
+
+    def __init__(self, message: str, *, recovery: PersistDependencyRecovery) -> None:
+        super().__init__(message)
+        self.recovery = recovery
 
 
 class PersistencePolicy(Protocol):
@@ -45,6 +75,10 @@ class PersistencePolicy(Protocol):
         Return an optional side-effect callback (e.g. ledger-persisted notification)
         to run after the node has been marked complete and the orchestrator lock
         is released again.
+
+        May raise :class:`PersistDeferredError` when the durable write cannot
+        complete until a dependency is force-freshed; the orchestrator parks the
+        node on ``waiting_deps`` and applies ``recovery`` generically.
         """
         ...
 

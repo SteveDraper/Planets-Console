@@ -21,6 +21,7 @@ from api.compute.orchestrator_observers import (
     StepCompleteListener,
 )
 from api.compute.orchestrator_scope_lease import OrchestratorScopeLeaseMixin
+from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
@@ -563,15 +564,15 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
             self._dequeue_ready(node.scope)
 
     def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
-        from api.errors import FleetScoresEvidenceOpenError
-
         for dependency_scope in node.dependency_scopes:
             dependency = self._nodes.get(dependency_scope)
             if dependency is not None and dependency.state == "failed":
-                # Open-scores refuse is retryable via scores re-close + fleet force_fresh.
-                # Do not cascade-fail dependents -- leave them waiting_deps until fleet
-                # rematerializes successfully.
-                if isinstance(dependency.error, FleetScoresEvidenceOpenError):
+                # Issue 4 leftover: production open-evidence refuse parks via
+                # PersistDeferredError recovery (never fails the node). This
+                # cascade-skip still treats a *failed* PersistDeferredError as
+                # non-cascading so dependents stay waiting_deps. Collapse fail vs
+                # recover into one protocol in issue 4.
+                if isinstance(dependency.error, PersistDeferredError):
                     continue
                 return dependency.error
         return None
@@ -758,24 +759,19 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
-    def _recover_fleet_after_open_scores_evidence(self, node: ComputeNodeRun) -> None:
-        """Park fleet@N and force_fresh same-turn scores after open-evidence persist refuse.
+    def _recover_after_persist_deferred(
+        self,
+        node: ComputeNodeRun,
+        recovery: PersistDependencyRecovery,
+    ) -> None:
+        """Park the node on ``waiting_deps`` and optionally force_fresh a dependency.
 
-        Failing the fleet node left dependents in ``waiting_deps`` with no wake when the
-        open stream is only ambient turn (historical fleet has no table-stream controller).
-        Re-queue alone can spin while scores stays falsely terminal. Force-freshing
-        scores@N reopens the ENSURE dep; when it closes for real, fleet rematerializes.
+        Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
+        when a durable write cannot complete until a dependency re-closes.
+        Failing the node left dependents waiting with no wake for background DAG
+        nodes (no table-stream controller). Force-freshing the declared dependency
+        reopens the ENSURE edge; when it completes, readiness promotes this node.
         """
-        from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-
-        scores_scope = ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=node.scope.game_id,
-            perspective=node.scope.perspective,
-            turn=node.scope.turn,
-            player_id=node.scope.player_id,
-            parameters=node.scope.parameters,
-        )
         priority_band = node.priority_band
         with self._condition:
             if node.state != "running":
@@ -786,17 +782,23 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
             self._dequeue_ready(node.scope)
             self._metrics.epoch_discards += 1
 
-        def _force_fresh_scores() -> None:
+        if not recovery.force_fresh:
+            return
+
+        dependency_scope = recovery.dependency_scope
+        step_kind = recovery.step_kind
+
+        def _force_fresh_dependency() -> None:
             self.submit(
                 ComputeRequest(
-                    scope=scores_scope,
+                    scope=dependency_scope,
                     priority_band=priority_band,
                     force_fresh=True,
-                    step_kind="tier_solve",
+                    step_kind=step_kind,
                 )
             )
 
-        self._observers.schedule_post_lock(_force_fresh_scores)
+        self._observers.schedule_post_lock(_force_fresh_dependency)
 
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):
@@ -844,14 +846,13 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                     # ghost ``running`` node (empty queues, freeze ``nothing_steppable``).
                     # Do not re-raise: pool workers call complete_pool_step on this thread
                     # and an escaping exception would kill the worker loop.
-                    from api.errors import FleetScoresEvidenceOpenError
-
-                    if isinstance(exc, FleetScoresEvidenceOpenError):
-                        # Transient race: scores@N was unlocked then invalidated before
-                        # fleet persist. Park fleet on deps and force_fresh scores so a
-                        # real close can wake rematerialization (stream-only reschedule
-                        # cannot recover background DAG nodes).
-                        self._recover_fleet_after_open_scores_evidence(completed_node)
+                    if isinstance(exc, PersistDeferredError):
+                        # Analytic-owned recovery: park waiting_deps and optionally
+                        # force_fresh the declared dependency (e.g. open scores evidence).
+                        self._recover_after_persist_deferred(
+                            completed_node,
+                            exc.recovery,
+                        )
                         return
                     with self._condition:
                         if completed_node.state == "running":

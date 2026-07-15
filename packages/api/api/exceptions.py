@@ -7,6 +7,8 @@ HTTP status returned to the client when handled by the FastAPI layer.
 
 from __future__ import annotations
 
+from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
 
 class PlanetsConsoleError(Exception):
     """Base for all server-side exceptions that map to an HTTP status.
@@ -85,13 +87,16 @@ class FleetGapFillEpochInvalidated(CoreAPIError):
     http_error: int = 409
 
 
-class FleetScoresEvidenceOpenError(CoreAPIError):
+class FleetScoresEvidenceOpenError(PersistDeferredError, CoreAPIError):
     """Fleet host-turn persist refused because same-turn scores evidence is open.
 
     Completing the fleet node would unlock dependents and park a non-final ledger
-    with no automatic rematerialization. The orchestrator parks fleet on
-    ``waiting_deps`` and force_freshes same-turn scores so a durable close can
-    wake rematerialization (including background DAG nodes with no table stream).
+    with no automatic rematerialization. Carries a :class:`PersistDependencyRecovery`
+    that force_freshes same-turn scores; the orchestrator handles the base
+    :class:`PersistDeferredError` generically (park ``waiting_deps`` + dep submit).
     """
 
     http_error: int = 409
+
+    def __init__(self, message: str = "", *, recovery: PersistDependencyRecovery) -> None:
+        PersistDeferredError.__init__(self, message, recovery=recovery)

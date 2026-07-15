@@ -417,6 +417,7 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
 
 def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
     """Open scores evidence must fail the fleet node, not quiet non-final complete."""
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
     from api.errors import FleetScoresEvidenceOpenError
 
     reset_inference_row_scheduler_for_tests()
@@ -453,9 +454,21 @@ def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
         player_id=player_id,
     )
 
-    with pytest.raises(FleetScoresEvidenceOpenError):
+    with pytest.raises(FleetScoresEvidenceOpenError) as raised:
         FleetPersistencePolicy().persist(ctx, scope, result_wire)
 
+    assert isinstance(raised.value, PersistDeferredError)
+    assert raised.value.recovery == PersistDependencyRecovery(
+        dependency_scope=ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=628580,
+            perspective=game_perspective,
+            turn=turn.settings.turn,
+            player_id=player_id,
+        ),
+        force_fresh=True,
+        step_kind="tier_solve",
+    )
     assert (
         fleet_services.persistence.get_ledger(
             628580, game_perspective, turn.settings.turn, player_id

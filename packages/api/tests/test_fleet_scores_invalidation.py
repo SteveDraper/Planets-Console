@@ -804,11 +804,17 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
 
 
 def test_open_evidence_fleet_fail_does_not_cascade_to_dependents(sample_turn):
-    """Dependents of a FleetScoresEvidenceOpenError failure stay waiting_deps."""
+    """Dependents of a failed PersistDeferredError stay waiting_deps.
+
+    Issue 4 leftover: production open-evidence refuse parks via recovery and never
+    fails the fleet node. This keeps the cascade-skip path for a *failed*
+    PersistDeferredError until fail vs recover collapse into one protocol.
+    """
     from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
     from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+    from api.compute.persistence import PersistDependencyRecovery
     from api.compute.registry import build_compute_registry
     from api.errors import FleetScoresEvidenceOpenError
 
@@ -834,7 +840,14 @@ def test_open_evidence_fleet_fail_does_not_cascade_to_dependents(sample_turn):
         scope=fleet_scope,
         dependency_scopes=(),
         state="failed",
-        error=FleetScoresEvidenceOpenError("scores turn evidence is not closed"),
+        error=FleetScoresEvidenceOpenError(
+            "scores turn evidence is not closed",
+            recovery=PersistDependencyRecovery(
+                dependency_scope=scores_scope,
+                force_fresh=True,
+                step_kind="tier_solve",
+            ),
+        ),
     )
     scores_node = ComputeNodeRun(
         scope=scores_scope,
