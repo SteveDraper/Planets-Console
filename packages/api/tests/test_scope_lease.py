@@ -300,6 +300,134 @@ def test_two_orchestrators_only_one_runs_expensive_work(sample_turn) -> None:
     assert orch_b.metrics.satisfaction_short_circuits == 1
 
 
+def test_seal_retry_second_loss_registers_waiter_and_wakes(sample_turn) -> None:
+    """Second seal lost must park via try_acquire so leader release wakes (#222).
+
+    Race: first seal lost → claim freed → re-acquire → adopted again before retry
+    seal. Parking on that second lost without registering a waiter deadlocks.
+    """
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(
+            (
+                "materialize",
+                lambda _job: StepResult(outcome="persist", payload={"ok": True}),
+            ),
+        ),
+    )
+    registry = build_compute_registry((registration,))
+    ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    orch = ComputeOrchestrator(ctx, compute_registry=registry)
+    scope = _shared_scope(sample_turn)
+    step = ComputeStepSpec(step_kind="materialize", backend="inline")
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="running",
+        priority_band="background",
+    )
+    node.held_lease_step_kinds.add("materialize")
+    orch._nodes[scope] = node
+
+    lease = get_process_scope_lease()
+    key = ScopeStepClaimKey(scope=scope, step_kind="materialize")
+    peer_id = id(orch) + 1
+    assert (
+        lease.try_acquire(
+            key,
+            orchestrator_id=id(orch),
+            priority_band="background",
+            on_wake=lambda: None,
+        )
+        == "acquired"
+    )
+    assert (
+        lease.try_acquire(
+            key,
+            orchestrator_id=peer_id,
+            priority_band="stream_attached",
+            on_wake=lambda: None,
+        )
+        == "adopted"
+    )
+
+    real_seal = lease.seal_for_execution
+    real_acquire = lease.try_acquire
+    seal_losses = 0
+    steal_after_victim_reacquire = True
+
+    def seal_freeing_peer_after_first_loss(claim_key, *, orchestrator_id):
+        nonlocal seal_losses
+        result = real_seal(claim_key, orchestrator_id=orchestrator_id)
+        if result.outcome == "lost":
+            seal_losses += 1
+            if seal_losses == 1:
+                # Free the claim so recovery re-acquires, enabling a second adopt.
+                lease.release(claim_key, orchestrator_id=peer_id)
+        return result
+
+    def acquire_then_steal_once(
+        claim_key,
+        *,
+        orchestrator_id,
+        priority_band,
+        on_wake,
+    ):
+        nonlocal steal_after_victim_reacquire
+        outcome = real_acquire(
+            claim_key,
+            orchestrator_id=orchestrator_id,
+            priority_band=priority_band,
+            on_wake=on_wake,
+        )
+        if (
+            steal_after_victim_reacquire
+            and orchestrator_id == id(orch)
+            and outcome in {"acquired", "adopted"}
+        ):
+            steal_after_victim_reacquire = False
+            assert (
+                real_acquire(
+                    claim_key,
+                    orchestrator_id=peer_id,
+                    priority_band="stream_attached",
+                    on_wake=lambda: None,
+                )
+                == "adopted"
+            )
+        return outcome
+
+    lease.seal_for_execution = seal_freeing_peer_after_first_loss  # type: ignore[method-assign]
+    lease.try_acquire = acquire_then_steal_once  # type: ignore[method-assign]
+    try:
+        assert orch._seal_scope_lease_or_park(node, step) is False
+    finally:
+        lease.seal_for_execution = real_seal  # type: ignore[method-assign]
+        lease.try_acquire = real_acquire  # type: ignore[method-assign]
+
+    assert seal_losses >= 2
+    assert node.state == "parked"
+    assert "materialize" not in node.held_lease_step_kinds
+    assert orch.metrics.lease_parks == 1
+    assert lease.holder(key) == (peer_id, "stream_attached")
+
+    wake_callbacks = lease.release(key, orchestrator_id=peer_id)
+    assert len(wake_callbacks) == 1
+    wake_callbacks[0]()
+    # Wake re-queues and dispatches; unsatisfied stub policy runs the step to complete.
+    assert node.state == "complete"
+
+
 def test_stream_attached_adopts_unsealed_background_claim(sample_turn) -> None:
     """Higher-priority stream adopts before background seals expensive work."""
     persistence = _SatisfiedAfterPersistPolicy()

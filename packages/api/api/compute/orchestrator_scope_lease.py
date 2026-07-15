@@ -128,27 +128,27 @@ class OrchestratorScopeLeaseMixin:
                 registration,
             ):
                 return False
-            outcome = self._scope_lease.try_acquire(
-                key,
-                orchestrator_id=id(self),
-                priority_band=node.priority_band,
-                on_wake=lambda: self._wake_parked_for_lease(node.scope, step.step_kind),
-            )
-            if outcome == "parked":
-                self._metrics.lease_parks += 1
-                node.state = "parked"
-                return False
-            if outcome == "adopted":
-                self._metrics.lease_adopts += 1
-            self._metrics.lease_acquires += 1
-            node.held_lease_step_kinds.add(step.step_kind)
-            retry = self._scope_lease.seal_for_execution(key, orchestrator_id=id(self))
-            if retry.outcome == "sealed":
-                return True
-            self._metrics.lease_parks += 1
-            node.state = "parked"
-            node.held_lease_step_kinds.discard(step.step_kind)
-            return False
+            # Re-acquire and seal until sealed or parked-as-waiter. A bare park on
+            # seal-lost would leave the node with no wake callback (deadlock).
+            while True:
+                outcome = self._scope_lease.try_acquire(
+                    key,
+                    orchestrator_id=id(self),
+                    priority_band=node.priority_band,
+                    on_wake=lambda: self._wake_parked_for_lease(node.scope, step.step_kind),
+                )
+                if outcome == "parked":
+                    self._metrics.lease_parks += 1
+                    node.state = "parked"
+                    return False
+                if outcome == "adopted":
+                    self._metrics.lease_adopts += 1
+                self._metrics.lease_acquires += 1
+                node.held_lease_step_kinds.add(step.step_kind)
+                retry = self._scope_lease.seal_for_execution(key, orchestrator_id=id(self))
+                if retry.outcome == "sealed":
+                    return True
+                node.held_lease_step_kinds.discard(step.step_kind)
 
     def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
         """Build wire, seal (adopt-safe), then run an inline step without the orch lock."""
