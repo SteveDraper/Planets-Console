@@ -26,7 +26,6 @@ from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
     GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC,
-    GAP_FILL_MAX_RETRIES,
     GAP_FILL_TARGET_TURN_COLLECT_SEC,
 )
 from api.analytics.fleet.exports import ensure_fleet_export
@@ -38,7 +37,12 @@ from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
-from api.errors import ConflictError, FleetMaterializationTimeoutError, NotFoundError
+from api.errors import (
+    ConflictError,
+    FleetGapFillEpochInvalidated,
+    FleetMaterializationTimeoutError,
+    NotFoundError,
+)
 from api.models.game import TurnInfo
 
 _CoordinatorKey = tuple[int, int, int, int]
@@ -359,16 +363,20 @@ class FleetGapFillCoordinator:
         turn_number: int,
         turn: TurnInfo,
     ) -> PersistedFleetLedger:
-        if inflight.error is not None:
-            raise inflight.error
-        if inflight.result_ledger is not None:
-            return inflight.result_ledger
         cached = self._persistence.get_ledger(
             self._game_id,
             self._perspective,
             turn_number,
             self._player_id,
         )
+        if inflight.error is not None:
+            # Peer (or a racing writer) may have finished a final ledger while this
+            # cycle aborted on an epoch bump -- short-circuit without rematerializing.
+            if cached is not None and _is_fleet_ledger_cache_hit(cached):
+                return cached
+            raise inflight.error
+        if inflight.result_ledger is not None:
+            return inflight.result_ledger
         # Post-completion: return any ledger the cycle wrote for this turn, including
         # non-final provenance. ``materialize_ledger`` entry still requires ``is_final``
         # so partials rematerialize; requiring final here races with Phase C (scores
@@ -426,7 +434,6 @@ class FleetGapFillCoordinator:
         query_context: AnalyticQueryContext | None,
     ) -> None:
         complete_before: frozenset[int] | None = None
-        post_coherence_ledger_misses = 0
         query_ctx = _resolve_query_context(
             self._persistence,
             self._game_id,
@@ -450,103 +457,92 @@ class FleetGapFillCoordinator:
                     load_turn,
                 )
 
-            materialized_target: int | None = None
-            for attempt in range(GAP_FILL_MAX_RETRIES):
-                current_target = inflight.target_turn
-                generation = self.epoch
-                inflight.generation = generation
-                coherence = _GapFillCoherence(
-                    self._persistence,
-                    self._game_id,
-                    self._perspective,
-                    self._player_id,
-                    generation,
-                )
-                try:
-                    with gap_fill_coherence_scope(coherence):
-                        gap_start = _find_gap_start_turn_for_player(
-                            self._persistence,
-                            self._game_id,
-                            self._perspective,
-                            self._player_id,
-                            current_target,
-                            load_turn,
-                        )
-                        if gap_start <= current_target:
-                            if inference_materialization is not None and query_ctx is None:
-                                raise ConflictError(
-                                    "fleet gap-fill requires query context when "
-                                    "inference materialization is configured for "
-                                    f"game {self._game_id} perspective "
-                                    f"{self._perspective} player {self._player_id}"
-                                )
-
-                            materialized_via_export = False
-                            if _can_forward_unwind_via_export(
-                                query_ctx,
-                                inference_materialization,
-                            ):
-                                materialized_via_export = self._forward_unwind_via_export_ensure(
-                                    query_ctx,
-                                    gap_start,
-                                    current_target,
-                                    load_turn,
-                                    inference_materialization=inference_materialization,
-                                )
-
-                            if not materialized_via_export:
-                                target_turn_info = load_turn(current_target)
-                                if target_turn_info is None:
-                                    if current_target == turn.settings.turn:
-                                        target_turn_info = turn
-                                    else:
-                                        raise NotFoundError(
-                                            f"fleet gap-fill requires stored turn "
-                                            f"{current_target} for game {self._game_id} "
-                                            f"perspective {self._perspective} "
-                                            f"player {self._player_id}"
-                                        )
-                                from api.analytics.fleet.turn_context import FleetTurnContext
-
-                                turn_context_cache: dict[int, FleetTurnContext] = {}
-                                _materialize_fleet_ledger_chain_for_player(
-                                    self._persistence,
-                                    self._game_id,
-                                    self._perspective,
-                                    self._player_id,
-                                    target_turn_info,
-                                    load_turn=load_turn,
-                                    inference_materialization=inference_materialization,
-                                    coherence=coherence,
-                                    turn_context_cache=turn_context_cache,
-                                )
-                    materialized_target = current_target
-                    break
-                except _FleetSnapshotInvalidated:
-                    cached = self._persistence.get_ledger(
+            current_target = inflight.target_turn
+            generation = self.epoch
+            inflight.generation = generation
+            coherence = _GapFillCoherence(
+                self._persistence,
+                self._game_id,
+                self._perspective,
+                self._player_id,
+                generation,
+            )
+            try:
+                with gap_fill_coherence_scope(coherence):
+                    gap_start = _find_gap_start_turn_for_player(
+                        self._persistence,
                         self._game_id,
                         self._perspective,
-                        current_target,
                         self._player_id,
+                        current_target,
+                        load_turn,
                     )
-                    if cached is not None and _is_fleet_ledger_cache_hit(cached):
-                        inflight.result_ledger = cached
-                        return
-                    if attempt + 1 >= GAP_FILL_MAX_RETRIES:
-                        raise ConflictError(
-                            f"fleet gap-fill for game {self._game_id} "
-                            f"perspective {self._perspective} "
-                            f"player {self._player_id} turn {inflight.target_turn} "
-                            f"exceeded {GAP_FILL_MAX_RETRIES} invalidation retries"
-                        ) from None
-                    continue
-            if materialized_target is None:
-                raise ConflictError(
-                    f"fleet gap-fill for game {self._game_id} perspective {self._perspective} "
-                    f"player {self._player_id} turn {inflight.target_turn} exceeded "
-                    f"{GAP_FILL_MAX_RETRIES} invalidation retries"
-                )
+                    if gap_start <= current_target:
+                        if inference_materialization is not None and query_ctx is None:
+                            raise ConflictError(
+                                "fleet gap-fill requires query context when "
+                                "inference materialization is configured for "
+                                f"game {self._game_id} perspective "
+                                f"{self._perspective} player {self._player_id}"
+                            )
 
+                        materialized_via_export = False
+                        if _can_forward_unwind_via_export(
+                            query_ctx,
+                            inference_materialization,
+                        ):
+                            materialized_via_export = self._forward_unwind_via_export_ensure(
+                                query_ctx,
+                                gap_start,
+                                current_target,
+                                load_turn,
+                                inference_materialization=inference_materialization,
+                            )
+
+                        if not materialized_via_export:
+                            target_turn_info = load_turn(current_target)
+                            if target_turn_info is None:
+                                if current_target == turn.settings.turn:
+                                    target_turn_info = turn
+                                else:
+                                    raise NotFoundError(
+                                        f"fleet gap-fill requires stored turn "
+                                        f"{current_target} for game {self._game_id} "
+                                        f"perspective {self._perspective} "
+                                        f"player {self._player_id}"
+                                    )
+                            from api.analytics.fleet.turn_context import FleetTurnContext
+
+                            turn_context_cache: dict[int, FleetTurnContext] = {}
+                            _materialize_fleet_ledger_chain_for_player(
+                                self._persistence,
+                                self._game_id,
+                                self._perspective,
+                                self._player_id,
+                                target_turn_info,
+                                load_turn=load_turn,
+                                inference_materialization=inference_materialization,
+                                coherence=coherence,
+                                turn_context_cache=turn_context_cache,
+                            )
+            except _FleetSnapshotInvalidated:
+                cached = self._persistence.get_ledger(
+                    self._game_id,
+                    self._perspective,
+                    current_target,
+                    self._player_id,
+                )
+                if cached is not None and _is_fleet_ledger_cache_hit(cached):
+                    inflight.result_ledger = cached
+                    return
+                raise FleetGapFillEpochInvalidated(
+                    f"fleet gap-fill for game {self._game_id} "
+                    f"perspective {self._perspective} "
+                    f"player {self._player_id} turn {inflight.target_turn} "
+                    "aborted: invalidation generation bumped mid-chain"
+                ) from None
+
+            materialized_target = current_target
             if inflight.target_turn > materialized_target:
                 continue
 
@@ -582,16 +578,13 @@ class FleetGapFillCoordinator:
                 # Scores ``on_row_persisted`` deletes fleet ledgers from the host turn
                 # when inference evidence updates. That can race after coherence exits
                 # (and after deferred notifications) so the final read sees None.
-                # Rematerialize instead of failing the stream with ``produced no ledger``.
-                post_coherence_ledger_misses += 1
-                if post_coherence_ledger_misses >= GAP_FILL_MAX_RETRIES:
-                    raise ConflictError(
-                        f"fleet ledger gap-fill produced no ledger "
-                        f"for game {self._game_id} perspective {self._perspective} "
-                        f"player {self._player_id} turn {final_target}"
-                    )
-                complete_before = None
-                continue
+                # Exit retryable so orchestrator / ensure can re-queue after evidence closes.
+                raise FleetGapFillEpochInvalidated(
+                    f"fleet ledger gap-fill produced no ledger "
+                    f"for game {self._game_id} perspective {self._perspective} "
+                    f"player {self._player_id} turn {final_target} "
+                    "(invalidated after coherence; re-queue required)"
+                ) from None
             inflight.result_ledger = persisted
             return
 

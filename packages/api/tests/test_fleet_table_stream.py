@@ -905,6 +905,7 @@ def test_concurrent_multi_player_materialization_completes(
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
     scores_services = ScoresExportContext(persistence=inference_persistence)
+    # Stream/orchestrator scopes use perspective 1; turn_111.player.id may differ.
     for player_id in player_ids:
         put_persisted_row(
             inference_persistence,
@@ -918,6 +919,7 @@ def test_concurrent_multi_player_materialization_completes(
                 solutions=[],
             ),
             host_turn=111,
+            perspective_id=1,
         )
 
     reset_fleet_table_stream_scheduler_for_tests()

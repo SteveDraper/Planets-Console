@@ -250,8 +250,8 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         player_id=player_id,
     )
 
-    # Open evidence + no RowRun after ensure would schedule -- here we patch schedule
-    # away so ensure cannot create a run, proving we refuse the false skip.
+    # Open evidence + ensure still needs work (schedule patched away): hard fail --
+    # not empty-complete, and not a soft continue that would spin forever.
     with patch("api.analytics.scores.exports.schedule_inference_row"):
         with pytest.raises(RuntimeError, match="requires a registered RowRun"):
             build_scores_tier_solve_job_wire(
@@ -278,7 +278,153 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert skip_wire == {"runId": None}
+    assert skip_wire == {"runId": None, "evidenceClosed": True}
+
+
+def test_build_scores_tier_solve_job_wire_continues_when_ensure_admitted_without_rowrun(
+    sample_turn,
+    persistence,
+) -> None:
+    """Transient ensure-satisfied / no-RowRun race waits via continue, not hard-fail.
+
+    Permanent cheap ImmediateRowAdmission is durable on ensure and skip-completes
+    (see ``test_cheap_immediate_admission_closes_materialization_evidence_and_skip_completes``).
+    This covers the remaining open-evidence path: ensure reports satisfied while no
+    registry/scheduler RowRun is visible yet and materialization evidence is still
+    open -- rebuild via continue; do not ``RuntimeError`` or empty-complete.
+    """
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        first_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    player_id = first_player_id(sample_turn)
+    ctx = scores_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
+
+    with (
+        patch(
+            "api.analytics.scores.exports.ensure_scores_export",
+            return_value=True,
+        ),
+        patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
+    ):
+        wait_wire = build_scores_tier_solve_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+    assert wait_wire == {"runId": None}
+    assert get_row_run_for_scope(scope) is None
+    assert run_scores_tier_solve(wait_wire).outcome == "continue"
+
+
+def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_completes(
+    sample_turn,
+    persistence,
+) -> None:
+    """ImmediateRowAdmission must not leave tier_solve in a forever-continue loop.
+
+    Accelerated-window ``no_prior_turn`` is a permanent cheap terminal: ensure admits
+    via ensure-ephemeral and never schedules a ``RowRun``. Materialization-aligned
+    turn evidence (the probe fleet and ``ScoresPersistencePolicy.is_satisfied`` use)
+    must see that terminal so wire-build emits the ``evidenceClosed`` skip and
+    ``run_scores_tier_solve`` completes -- not ``{runId: None}`` + ``continue`` on
+    every rebuild (busy hang that also blocks fleet finality after open-evidence
+    persist refuse).
+    """
+    from dataclasses import replace
+
+    from api.analytics.export_types import ExportScope
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.exports import (
+        ensure_scores_export,
+        is_scores_export_ensure_satisfied,
+        is_scores_export_turn_evidence_closed,
+    )
+    from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        first_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    assert sample_turn.settings.acceleratedturns == 3
+
+    turn_2 = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=2),
+        game=replace(sample_turn.game, turn=2),
+    )
+    player_id = first_player_id(turn_2)
+    ctx = scores_query_context(
+        turn_2,
+        persistence=persistence,
+        scheduler=scheduler,
+        stored_turns={2: turn_2},
+    )
+    export_scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+
+    assert ensure_scores_export(ctx, export_scope) is True
+    assert is_scores_export_ensure_satisfied(ctx, export_scope) is True
+    assert get_row_run_for_scope(scope) is None
+
+    # Materialization probe (fleet provenance / orchestrator satisfaction) must
+    # agree with ensure that this cheap terminal closed turn evidence.
+    assert is_scores_export_turn_evidence_closed(ctx, export_scope) is True
+    assert ScoresPersistencePolicy().is_satisfied(ctx, scope) is True
+
+    skip_wires = [
+        build_scores_tier_solve_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+        for _ in range(3)
+    ]
+    assert skip_wires == [{"runId": None, "evidenceClosed": True}] * 3
+    assert all(run_scores_tier_solve(wire).outcome == "complete" for wire in skip_wires)
 
 
 def test_historical_materialize_schedules_row_run_for_tier_solve(
@@ -390,7 +536,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert tier_wire == {"runId": None}
+    assert tier_wire == {"runId": None, "evidenceClosed": True}
 
 
 def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(

@@ -466,6 +466,15 @@ class FleetSnapshotPersistenceService:
             self._bump_invalidation_generation(game_id, perspective, player_id)
         return cleared
 
+    def bump_invalidation_generation(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+    ) -> None:
+        """Advance the per-player materialization epoch (scores evidence wake, tests)."""
+        self._bump_invalidation_generation(game_id, perspective, player_id)
+
     def _bump_invalidation_generation(
         self,
         game_id: int,

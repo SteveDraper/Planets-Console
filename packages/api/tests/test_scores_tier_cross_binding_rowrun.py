@@ -94,7 +94,8 @@ def _peer_orchestrators(sample_turn):
     return orchestrator_for_context(background_ctx), orchestrator_for_context(stream_ctx)
 
 
-def test_run_scores_tier_solve_idempotent_when_rowrun_unregistered(sample_turn) -> None:
+def test_run_scores_tier_solve_continues_when_rowrun_unregistered(sample_turn) -> None:
+    """Missing RowRun must continue (rebuild wire), not empty-complete and unlock fleet."""
     session = _session(sample_turn)
     run = RowRun(session)
     register_row_run(run)
@@ -102,7 +103,12 @@ def test_run_scores_tier_solve_idempotent_when_rowrun_unregistered(sample_turn) 
 
     result = run_scores_tier_solve({"runId": run.run_id})
 
-    assert result.outcome == "complete"
+    assert result.outcome == "continue"
+
+
+def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:
+    assert run_scores_tier_solve({"runId": None, "evidenceClosed": True}).outcome == "complete"
+    assert run_scores_tier_solve({"runId": None}).outcome == "continue"
 
 
 def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, monkeypatch) -> None:
@@ -326,8 +332,8 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
     assert session.player_id in controller.scheduled_rows
     assert session.run_id not in controller.finished_run_ids
 
-    # Idempotent empty complete (same outcome as run_scores_tier_solve with missing RowRun).
-    assert run_scores_tier_solve({"runId": run.run_id}).outcome == "complete"
+    # Missing RowRun continues so wire-build can re-check evidence / reschedule.
+    assert run_scores_tier_solve({"runId": run.run_id}).outcome == "continue"
 
     empty_complete = SimpleNamespace(
         state="complete",

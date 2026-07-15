@@ -21,7 +21,7 @@ from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.exports import held_scores_for_scope
-from api.errors import ValidationError
+from api.errors import FleetGapFillEpochInvalidated, ValidationError
 from api.models.game import TurnInfo
 
 PATH_PREFIX_SCOPE_RULES = (
@@ -114,7 +114,13 @@ def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if ctx.ensure_declared_dependencies(ANALYTIC_ID, scope) is not None:
         return is_fleet_export_ensure_satisfied(ctx, scope)
 
-    _fleet_snapshot_for_scope(ctx, scope, turn=turn)
+    try:
+        _fleet_snapshot_for_scope(ctx, scope, turn=turn)
+    except FleetGapFillEpochInvalidated:
+        # Mid-chain invalidation: leave ensure unsatisfied so orchestrator /
+        # stream adapters re-queue after the epoch advances or scores evidence closes.
+        ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+        return is_fleet_export_ensure_satisfied(ctx, scope)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     return is_fleet_export_ensure_satisfied(ctx, scope)
 

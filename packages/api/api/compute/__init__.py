@@ -1,6 +1,10 @@
 """Compute orchestrator foundation types and registry."""
 
-from api.compute.persistence import PersistencePolicy
+from api.compute.persistence import (
+    PersistDeferredError,
+    PersistDependencyRecovery,
+    PersistencePolicy,
+)
 from api.compute.profile import (
     VALID_COMPUTE_BACKENDS,
     AnalyticComputeProfile,
@@ -107,6 +111,8 @@ __all__ = [
     "DependencyOutputs",
     "NodeState",
     "OrchestratorMetrics",
+    "PersistDeferredError",
+    "PersistDependencyRecovery",
     "PersistencePolicy",
     "PlannedComputeNode",
     "PoolMetrics",

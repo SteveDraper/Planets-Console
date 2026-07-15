@@ -31,6 +31,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,
+    register_row_run,
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
@@ -167,11 +168,17 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    Skip sentinel (``runId: None``) is allowed only when turn evidence is already
-    closed (persisted / cheap terminal). A missing ``RowRun`` while evidence is
-    still open must not complete the scores node -- that falsely unlocks fleet
-    materialization with ``turnEvidenceAtN=False`` and leaves the scores stream
-    without a rowComplete (in-progress hang).
+    Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
+    turn evidence is already closed (persisted / durable terminal under the same
+    materialization probe fleet uses). A missing ``RowRun`` while evidence is still
+    open must not empty-complete the scores node -- that falsely unlocks fleet with
+    ``turnEvidenceAtN=False`` and leaves the scores stream without a rowComplete.
+
+    When ensure has admitted (cheap ephemeral, scheduler attach race, etc.) but no
+    registry ``RowRun`` is ready yet, return ``{runId: None}`` so
+    ``run_scores_tier_solve`` continues and rebuilds after admit -- not a hard
+    ``RuntimeError``. Raise only when ensure still needs work after the admit attempt
+    (invariant: schedule/admit should have produced a RowRun).
     """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
@@ -181,19 +188,27 @@ def build_scores_tier_solve_job_wire(
         raise ValueError("scores tier_solve requires concrete scores scope")
 
     run = get_row_run_for_scope(scope)
+    ensure_satisfied = True
     if run is None:
         # Materialize already ensures; re-ensure covers tier_solve entry submits and
         # races where the stream has not registered yet but admit can still schedule.
         from api.analytics.scores.exports import ensure_scores_export
 
-        ensure_scores_export(ctx, export_scope)
+        ensure_satisfied = ensure_scores_export(ctx, export_scope)
         run = get_row_run_for_scope(scope)
     if run is None:
+        run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
+    if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
+            return {"runId": None, "evidenceClosed": True}
+        if ensure_satisfied:
+            # Ensure admitted without a registry RowRun (e.g. cheap ephemeral) or a
+            # peer is still registering: wait via continue rebuild.
             return {"runId": None}
         raise RuntimeError(
             "scores tier_solve requires a registered RowRun when turn evidence "
-            f"is not closed (game_id={scope.game_id}, perspective={scope.perspective}, "
+            f"is not closed and ensure still needs work "
+            f"(game_id={scope.game_id}, perspective={scope.perspective}, "
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
 
@@ -205,6 +220,29 @@ def build_scores_tier_solve_job_wire(
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 
     return {"runId": run.run_id}
+
+
+def _adopt_scheduler_row_run_for_tier_wire(
+    ctx: AnalyticQueryContext,
+    export_scope: ExportScope,
+) -> RowRun | None:
+    """Attach an in-progress scheduler RowRun into the tier registry when missing."""
+    if export_scope.player_id is None:
+        return None
+    from api.analytics.scores.export_snapshot import scores_inference_stream_scope
+
+    services = resolve_scores_services(ctx)
+    scheduler_run = services.scheduler.row_run_for_player(
+        scores_inference_stream_scope(export_scope),
+        export_scope.player_id,
+    )
+    if scheduler_run is None:
+        return None
+    register_row_run(
+        scheduler_run,
+        initialize_ladder=scheduler_run.ladder_state is None,
+    )
+    return scheduler_run
 
 
 def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
@@ -239,22 +277,31 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
-    """Run one scores inference tier step and return an explicit orchestrator outcome."""
+    """Run one scores inference tier step and return an explicit orchestrator outcome.
+
+    Empty complete is allowed only for the evidence-closed skip sentinel. Open-evidence
+    wait wires (``runId: None`` without ``evidenceClosed``) and missing ``RowRun``
+    lookups return ``continue`` so the orchestrator rebuilds: evidence closes (skip),
+    a RowRun is scheduled/adopted, or wire-build raises only when ensure still needs
+    work after admit failed.
+    """
     run_id = job_wire.get("runId")
     if run_id is None:
-        # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn evidence
-        # is already closed -- no CP-SAT.
-        return StepResult(outcome="complete")
+        if job_wire.get("evidenceClosed") is True:
+            # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
+            # evidence is already closed -- no CP-SAT.
+            return StepResult(outcome="complete")
+        # Open-evidence wait / stale skip without closed marker: rebuild wire.
+        return StepResult(outcome="continue")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        # Cross-binding race: a peer orchestrator finalized/unregistered the shared
-        # RowRun while this binding still had a queued or continuing tier_solve wire.
-        # Treat as idempotent terminal -- the peer already delivered completion.
-        # Cross-binding stream terminal delivery is owned by process-wide scope lease
-        # (#222), not by a side-channel notify from this empty path.
-        return StepResult(outcome="complete")
+        # Cross-binding race: peer may have finalized/unregistered the shared RowRun.
+        # Do not empty-complete here -- that unlocked fleet with open scores evidence
+        # and left the scoreboard in-progress. Continue so wire-build re-checks
+        # ``is_satisfied`` / re-ensures a RowRun.
+        return StepResult(outcome="continue")
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:
@@ -298,7 +345,6 @@ class ScoresPersistencePolicy:
         scope: ComputeScope,
         result_wire: object,
     ) -> None:
-        del scope
         if not isinstance(result_wire, dict):
             raise TypeError(
                 f"scores persist result wire must be dict, got {type(result_wire).__name__}"
@@ -306,14 +352,23 @@ class ScoresPersistencePolicy:
         run_id = result_wire.get("runId")
         if not isinstance(run_id, str):
             raise TypeError("scores persist result wire missing string runId")
-        run = get_row_run(run_id)
-        if run is None:
-            return
-        if run.session.cancel_token.is_cancelled():
-            return
         row_complete = result_wire.get("rowComplete")
         if not isinstance(row_complete, RowComplete):
             raise TypeError("scores persist result wire missing RowComplete payload")
+
+        run = get_row_run(run_id)
+        if run is None:
+            # Peer unregistered the RowRun after a persist outcome. Completing without
+            # a durable row unlocks fleet with open turn evidence -- refuse so the
+            # orchestrator fails/retries instead of quiet-complete.
+            raise RuntimeError(
+                "scores persist missing RowRun for persistable tier outcome "
+                f"(game_id={scope.game_id}, perspective={scope.perspective}, "
+                f"turn={scope.turn}, player_id={scope.player_id}, run_id={run_id})"
+            )
+        if run.session.cancel_token.is_cancelled():
+            # Cancelled rows are aborted off ``running`` before persist; no-op is safe.
+            return
 
         services = resolve_scores_services(ctx)
         if services.persistence is None:

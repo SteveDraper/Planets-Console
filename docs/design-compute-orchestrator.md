@@ -214,6 +214,8 @@ The **process-wide scope lease** closes that hole:
 
 Scores stream terminals use the process-wide scope-terminal fan-out as the sole delivery path (own binding and peer bindings such as fleet DAG empty `tier_solve` skip). Fleet table stream remains local orchestrator listener only.
 
+**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; a missing `RowRun` while evidence is still open must `continue` (rebuild wire / re-ensure), not empty-complete -- that falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
+
 ### Terminal reuse and `force_fresh`
 
 `ComputeRequest.force_fresh` controls whether a duplicate submission for an already-terminal scope starts new work or reuses the cached node outcome.
@@ -334,7 +336,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
 | **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
 
-Same semantics as gap-fill coordinator leader/waiter retry, applied to all node kinds. Scores `invalidation_generation` aligns with per-player fleet epoch so in-flight `tier_solve` work is discarded when `fleet@(host_turn - 1)` lands; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
+Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` aligns with per-player fleet epoch so in-flight `tier_solve` work is discarded when `fleet@(host_turn - 1)` lands; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
 
 ---
 
@@ -342,8 +344,8 @@ Same semantics as gap-fill coordinator leader/waiter retry, applied to all node 
 
 | Owner | Responsibility |
 |-------|----------------|
-| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome |
-| **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules; terminal-quality metadata on stored artifacts |
+| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (park `waiting_deps` + optional dependency `force_fresh`) |
+| **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules; terminal-quality metadata on stored artifacts; map write-gate refuses to `PersistDeferredError` + `PersistDependencyRecovery` when rematerialization must wait on a dependency |
 
 Storage paths remain per [ADR 0002](adr/0002-analytic-persistence.md). Orchestrator is cache **coordinator**, not cache **schema** owner.
 

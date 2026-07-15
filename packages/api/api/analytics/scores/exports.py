@@ -34,11 +34,15 @@ from api.analytics.scores.export_snapshot import (
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
 )
+from api.analytics.scores.export_wire import wire_complete_event_from_terminal_admission
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.models.player import Score
-from api.serialization.inference_row_persistence import PersistedInferenceRow
+from api.serialization.inference_row_persistence import (
+    PersistedInferenceRow,
+    persisted_inference_row_from_wire_complete,
+)
 
 PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.solutions", requires=("player_id",)),
@@ -193,8 +197,9 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
 def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     """True when scores@N is terminal for fleet ``turnEvidenceAtN``.
 
-    Unlike ``is_scores_export_ensure_satisfied``, an in-progress scheduler ``RowRun``
-    does not count -- fleet must wait for persisted or otherwise terminal scores.
+    Uses the same materialization probe fleet uses (no ensure-ephemeral). Ensure-only
+    cheap terminals must not mark scores ``is_satisfied`` / skip-complete -- that
+    unlocked same-turn fleet while fleet still saw open evidence and no disk row.
     """
     if scope.player_id is None:
         return True
@@ -206,8 +211,9 @@ def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: Expo
     if turn is None:
         return True
 
-    snapshot = gather_scores_ensure_probe_snapshot(
-        ctx,
+    from api.analytics.scores.export_snapshot import gather_scores_materialization_probe_snapshot
+
+    snapshot = gather_scores_materialization_probe_snapshot(
         services,
         scope,
         turn,
@@ -223,9 +229,10 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     """Admit scores work for one scope without running CP-SAT on this thread.
 
     Ambient and historical turns share the same path. Satisfaction is probe-aligned
-    (persistence, scheduler, ensure-ephemeral) so cheap terminals from
-    ``immediate_row_inference_events`` are stashed for probe; real solve work
-    schedules a ``RowRun`` for orchestrator ``tier_solve``.
+    (persistence, scheduler, ensure-ephemeral). Cheap ImmediateRowAdmission terminals
+    are recorded as ensure-ephemeral and also written to inference-row storage when
+    missing so the materialization probe (fleet provenance) can close; real solve
+    work schedules a ``RowRun`` for orchestrator ``tier_solve``.
     """
     if scope.player_id is None:
         return True
@@ -275,11 +282,12 @@ def _ensure_admit_inference_row(
         load_scoreboard_turn=ctx.load_turn,
     )
     if immediate is not None:
-        ctx.record_ensure_ephemeral(
-            ANALYTIC_ID,
-            scope,
-            ImmediateRowAdmission(events=immediate),
-        )
+        admission = ImmediateRowAdmission(events=immediate)
+        ctx.record_ensure_ephemeral(ANALYTIC_ID, scope, admission)
+        # Disk evidence so the materialization probe (fleet provenance /
+        # ScoresPersistencePolicy.is_satisfied) agrees with ensure -- ephemeral
+        # alone cannot close turnEvidenceAtN.
+        _persist_immediate_row_admission(services, scope, admission)
         return True
 
     inputs = _scores_row_ensure_inputs(services, scope, turn)
@@ -313,6 +321,44 @@ def _ensure_admit_inference_row(
         stream_token=inputs.stream_token,
     )
     return True
+
+
+def _persist_immediate_row_admission(
+    services: ScoresExportContext,
+    scope: ExportScope,
+    admission: ImmediateRowAdmission,
+) -> None:
+    """Write ImmediateRowAdmission to inference-row storage when missing.
+
+    ``no_prior_turn`` / ``player_not_found`` are fallback-complete statuses: once
+    on disk, materialization probe and fleet ``turnEvidenceAtN`` see a closed
+    terminal without relying on ensure-ephemeral.
+    """
+    if services.persistence is None or scope.player_id is None:
+        return
+    if (
+        services.persistence.get_row(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+        )
+        is not None
+    ):
+        return
+    wire_event = wire_complete_event_from_terminal_admission(admission)
+    services.persistence.put_row(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        scope.player_id,
+        persisted_inference_row_from_wire_complete(wire_event),
+        # Establishing cheap terminal disk evidence must not fire fleet
+        # invalidation: on_row_persisted would bump generation mid gap-fill
+        # (FleetGapFillEpochInvalidated → 409 on sync table/map). Fleet sees
+        # closed evidence on the next provenance resolve via get_row.
+        notify=False,
+    )
 
 
 def _hull_catalog_mask_branch(enabled_hull_ids: frozenset[int] | set[int]) -> dict[str, object]:

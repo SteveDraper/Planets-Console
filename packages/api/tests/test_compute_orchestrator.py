@@ -1341,6 +1341,112 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
     assert orchestrator.nodes[scope].error is persist_error
 
 
+def test_persist_deferred_parks_waiting_deps_and_force_freshes_dependency(sample_turn):
+    """PersistDeferredError parks the node and force_freshes the declared dependency.
+
+    Mirrors fleet open-evidence recovery without fleet/scores imports in the
+    orchestrator: refuse persist → waiting_deps (not failed) → dependency
+    force_fresh submitted → after dependency completes again, dependent is ready.
+    """
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_persistence = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_persistence,
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        ctx,
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(scope=branch_b_scope))
+    assert pool_submissions == [(SHARED_ID, "materialize")]
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+    assert pool_submissions == [
+        (SHARED_ID, "materialize"),
+        (BRANCH_B_ID, "materialize"),
+    ]
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+
+    assert deferred_persistence.calls == 1
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[branch_b_scope].error is None
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert pool_submissions == [
+        (SHARED_ID, "materialize"),
+        (BRANCH_B_ID, "materialize"),
+        (SHARED_ID, "materialize"),
+    ]
+    assert orchestrator.metrics.epoch_discards == 1
+
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+    assert pool_submissions[-1] == (BRANCH_B_ID, "materialize")
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert deferred_persistence.calls == 2
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].error is None
+
+
 def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_turn):
     """Diagnostics must read nodes and ready queue atomically, not via live mappings."""
     ctx = make_fixture_query_context(

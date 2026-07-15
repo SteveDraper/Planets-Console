@@ -58,7 +58,13 @@ class InferenceInvalidationService:
         host_turn: int,
         player_id: int,
     ) -> set[int]:
-        """Drop one player's fleet ledgers at turns >= host_turn after scores evidence changes."""
+        """Drop fleet ledgers >= host_turn and wake same-turn fleet after scores evidence changes.
+
+        Always reschedules ``fleet@host_turn`` for this player, even when no ledger was
+        cleared. A prior fleet persist may have refused with open scores evidence (no
+        ``put_ledger``); without this wake, scores re-close would never rematerialize
+        that failed/empty scope.
+        """
         if self._fleet_persistence is None:
             return set()
         cleared_turns = self._fleet_persistence.invalidate_player_ledgers_from_turn(
@@ -67,7 +73,17 @@ class InferenceInvalidationService:
             host_turn,
             player_id,
         )
-        for fleet_turn in cleared_turns:
+        if host_turn not in cleared_turns:
+            # No ledger deleted -- still bump epoch so in-flight fleet@N can discard
+            # before writing, and wake the open stream / force_fresh path.
+            self._fleet_persistence.bump_invalidation_generation(
+                game_id,
+                perspective,
+                player_id,
+            )
+        turns_to_reschedule = set(cleared_turns)
+        turns_to_reschedule.add(host_turn)
+        for fleet_turn in sorted(turns_to_reschedule):
             reschedule_fleet_table_player(
                 FleetTableStreamScope(
                     game_id=game_id,
@@ -76,7 +92,7 @@ class InferenceInvalidationService:
                 ),
                 player_id,
             )
-        return cleared_turns
+        return turns_to_reschedule
 
     def wire_fleet_invalidation_to_persistence(self) -> None:
         """Register fleet snapshot invalidation on inference row persistence writes."""

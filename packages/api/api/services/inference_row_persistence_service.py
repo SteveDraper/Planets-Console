@@ -94,13 +94,23 @@ class InferenceRowPersistenceService:
         host_turn: int,
         player_id: int,
         row: PersistedInferenceRow,
+        *,
+        notify: bool = True,
     ) -> None:
+        """Store one inference row.
+
+        When ``notify`` is true (default), invoke ``on_row_persisted`` so fleet
+        invalidation can clear ledgers from this host turn. Pass ``notify=False``
+        for first-write cheap terminals (``no_prior_turn`` / ``player_not_found``)
+        established during ensure: those close materialization evidence without
+        being a scores refine that should abort an in-flight fleet gap-fill.
+        """
         prepared, _ = upgrade_persisted_inference_row(row)
         self._storage.put(
             self.row_store_key(game_id, perspective, host_turn, player_id),
             persisted_inference_row_to_json(prepared),
         )
-        if self._on_row_persisted is not None:
+        if notify and self._on_row_persisted is not None:
             self._on_row_persisted(game_id, perspective, host_turn, player_id)
 
     @property

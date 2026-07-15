@@ -21,6 +21,7 @@ from api.compute.orchestrator_observers import (
     StepCompleteListener,
 )
 from api.compute.orchestrator_scope_lease import OrchestratorScopeLeaseMixin
+from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
@@ -751,6 +752,47 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
+    def _recover_after_persist_deferred(
+        self,
+        node: ComputeNodeRun,
+        recovery: PersistDependencyRecovery,
+    ) -> None:
+        """Park the node on ``waiting_deps`` and optionally force_fresh a dependency.
+
+        Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
+        when a durable write cannot complete until a dependency re-closes.
+        Failing the node left dependents waiting with no wake for background DAG
+        nodes (no table-stream controller). Force-freshing the declared dependency
+        reopens the ENSURE edge; when it completes, readiness promotes this node.
+        """
+        priority_band = node.priority_band
+        with self._condition:
+            if node.state != "running":
+                return
+            node.generation_at_submit = None
+            node.error = None
+            node.state = "waiting_deps"
+            self._dequeue_ready(node.scope)
+            self._metrics.epoch_discards += 1
+
+        if not recovery.force_fresh:
+            return
+
+        dependency_scope = recovery.dependency_scope
+        step_kind = recovery.step_kind
+
+        def _force_fresh_dependency() -> None:
+            self.submit(
+                ComputeRequest(
+                    scope=dependency_scope,
+                    priority_band=priority_band,
+                    force_fresh=True,
+                    step_kind=step_kind,
+                )
+            )
+
+        self._observers.schedule_post_lock(_force_fresh_dependency)
+
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
@@ -797,6 +839,14 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
                     # ghost ``running`` node (empty queues, freeze ``nothing_steppable``).
                     # Do not re-raise: pool workers call complete_pool_step on this thread
                     # and an escaping exception would kill the worker loop.
+                    if isinstance(exc, PersistDeferredError):
+                        # Analytic-owned recovery: park waiting_deps and optionally
+                        # force_fresh the declared dependency (e.g. open scores evidence).
+                        self._recover_after_persist_deferred(
+                            completed_node,
+                            exc.recovery,
+                        )
+                        return
                     with self._condition:
                         if completed_node.state == "running":
                             self._fail_node(completed_node, exc)

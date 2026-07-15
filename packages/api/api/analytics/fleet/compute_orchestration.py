@@ -255,6 +255,33 @@ class FleetPersistencePolicy:
             )
             persisted = PersistedFleetLedger(ledger=persisted.ledger, provenance=provenance)
 
+        if not persisted.provenance.turn_evidence_at_n:
+            # Same-turn scores evidence is still open. Persisting and completing the
+            # fleet node would unlock dependents and park a non-final ledger with no
+            # automatic rematerialization (empty scores complete hang fingerprint).
+            # Recovery is owned here: orchestrator only sees PersistDeferredError.
+            from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+            from api.compute.persistence import PersistDependencyRecovery
+            from api.errors import FleetScoresEvidenceOpenError
+
+            raise FleetScoresEvidenceOpenError(
+                f"fleet persist refused for game {scope.game_id} perspective "
+                f"{scope.perspective} player {scope.player_id} turn {scope.turn}: "
+                "scores turn evidence is not closed",
+                recovery=PersistDependencyRecovery(
+                    dependency_scope=ComputeScope(
+                        analytic_id=SCORES_ANALYTIC_ID,
+                        game_id=scope.game_id,
+                        perspective=scope.perspective,
+                        turn=scope.turn,
+                        player_id=scope.player_id,
+                        parameters=scope.parameters,
+                    ),
+                    force_fresh=True,
+                    step_kind="tier_solve",
+                ),
+            )
+
         # Stamp current materialization version and publish onto result_wire so
         # stream listeners and DependencyOutputs match what put_ledger stores.
         persisted = PersistedFleetLedger(

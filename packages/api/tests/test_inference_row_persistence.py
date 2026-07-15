@@ -70,6 +70,25 @@ def test_persistence_row_round_trip(persistence):
     assert "diagnostics" not in raw
 
 
+def test_put_row_notify_false_skips_on_row_persisted(persistence):
+    notified: list[tuple[int, int, int, int]] = []
+    persistence.on_row_persisted = lambda game_id, perspective, host_turn, player_id: (
+        notified.append((game_id, perspective, host_turn, player_id))
+    )
+    row = PersistedInferenceRow(
+        status=STATUS_EXACT,
+        summary="cached",
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+    )
+    persistence.put_row(628580, 1, 111, 8, row, notify=False)
+    assert persistence.get_row(628580, 1, 111, 8) is not None
+    assert notified == []
+    persistence.put_row(628580, 1, 111, 8, row, notify=True)
+    assert notified == [(628580, 1, 111, 8)]
+
+
 def test_put_row_promotes_accelerated_segments_before_dropping_diagnostics(persistence):
     _, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
     persistence.put_row(628580, 1, 3, player_id, legacy_row)
@@ -523,4 +542,70 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
         step_result.payload,
     )
 
+    assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None
+
+
+def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
+    sample_turn,
+    memory_backend,
+):
+    """Persistable tier outcome without a live RowRun must not quiet-complete."""
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_stream_session import (
+        InferenceRowStreamSession,
+    )
+    from api.analytics.military_score_inference.models import InferenceResult
+    from api.analytics.military_score_inference.row_complete_factory import (
+        row_complete_with_summary,
+    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+        unregister_row_run,
+    )
+    from api.compute.scope import ComputeScope
+
+    reset_tier_row_run_registry_for_tests()
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    run = RowRun(session)
+    register_row_run(run)
+    run_id = run.run_id
+    unregister_row_run(run_id)
+
+    persistence = InferenceRowPersistenceService(memory_backend)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={"scores": ScoresExportContext(persistence=persistence)},
+    )
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="orphan persist",
+    )
+    with pytest.raises(RuntimeError, match="missing RowRun"):
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id="scores",
+                game_id=628580,
+                perspective=1,
+                turn=sample_turn.settings.turn,
+                player_id=score.ownerid,
+            ),
+            {"runId": run_id, "rowComplete": row_complete},
+        )
     assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None
