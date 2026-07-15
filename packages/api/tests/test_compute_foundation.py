@@ -24,6 +24,9 @@ class _StubPersistencePolicy:
     def is_satisfied(self, _ctx, _scope) -> bool:
         return False
 
+    def satisfied_result_wire(self, _ctx, _scope) -> None:
+        return None
+
     def persist(self, _ctx, _scope, _result_wire) -> None:
         return None
 

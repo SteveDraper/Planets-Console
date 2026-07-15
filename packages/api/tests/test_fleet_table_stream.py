@@ -762,6 +762,107 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
     assert events[-1]["type"] == "complete"
 
 
+def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
+    persistence,
+    load_turn,
+):
+    """Satisfaction short-circuit ``{}`` must not emit fleet materialization error."""
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
+    from api.analytics.fleet.constants import ANALYTIC_ID
+    from api.analytics.fleet.fleet_table_player_run import (
+        FleetLedgerWireProgressTracker,
+        FleetPlayerStreamSession,
+        _initial_wire_before_ledger,
+    )
+    from api.analytics.fleet.fleet_table_stream_scheduler import (
+        FleetTableStreamScheduler,
+        _FleetPlayerOrchestratorRun,
+        _FleetStreamOrchestratorBinding,
+    )
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.scope import ComputeScope
+
+    turn = load_turn(112)
+    assert turn is not None
+    player_id = turn.scores[0].ownerid
+    final_persisted = PersistedFleetLedger(
+        ledger=ensure_fleet_baseline_for_player(628580, 1, turn, player_id),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    persistence.put_ledger(628580, 1, 112, player_id, final_persisted)
+
+    session = FleetPlayerStreamSession(
+        player_id=player_id,
+        turn=turn,
+        game_id=628580,
+        perspective=1,
+    )
+    progress_tracker = FleetLedgerWireProgressTracker(
+        host_turn=turn,
+        wire_before=_initial_wire_before_ledger(
+            persistence=persistence,
+            game_id=628580,
+            perspective=1,
+            player_id=player_id,
+            host_turn=turn,
+            before_persisted=None,
+        ),
+    )
+    scope = ComputeScope(
+        analytic_id=ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=112,
+        player_id=player_id,
+    )
+    fleet_services = FleetComputeServices(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        load_turn=lambda turn_number: turn if turn_number == 112 else None,
+    )
+    ctx = make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        load_turn=fleet_services.load_turn,
+        export_services={ANALYTIC_ID: fleet_services},
+    )
+    scheduler = FleetTableStreamScheduler()
+    scheduler._stream_bindings["tok"] = _FleetStreamOrchestratorBinding(
+        orchestrator=None,  # type: ignore[arg-type]
+        unregister_listener=lambda: None,
+        query_context=ctx,
+    )
+    scheduler._runs[session.run_id] = _FleetPlayerOrchestratorRun(
+        session=session,
+        host_turn_number=112,
+        progress_tracker=progress_tracker,
+        root_scope=scope,
+    )
+    scheduler._on_orchestrator_node_complete(
+        scope,
+        ComputeNodeRun(
+            scope=scope,
+            dependency_scopes=(),
+            state="complete",
+            result_wire={},
+        ),
+    )
+
+    events: list[dict[str, object]] = []
+    while not session.event_queue.empty():
+        events.append(session.event_queue.get_nowait())
+
+    assert not any(event.get("type") == "error" for event in events), events
+    assert any(event.get("type") == "complete" for event in events)
+
+
 @pytest.mark.slow
 def test_concurrent_multi_player_materialization_completes(
     persistence,

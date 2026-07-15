@@ -264,6 +264,15 @@ class ScoresPersistencePolicy:
             return False
         return is_scores_export_turn_evidence_closed(ctx, export_scope)
 
+    def satisfied_result_wire(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+    ) -> None:
+        """Scores short-circuit has no cheap rowComplete wire; stream uses admission."""
+        del ctx, scope
+        return None
+
     def persist(
         self,
         ctx: AnalyticQueryContext,

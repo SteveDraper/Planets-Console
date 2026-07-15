@@ -62,10 +62,15 @@ class OrchestratorScopeLeaseMixin:
         if not registration.persistence_policy.is_satisfied(self._cached_ctx, node.scope):
             return False
         self._metrics.satisfaction_short_circuits += 1
-        # Dependents require a non-None result wire; content is analytic-owned and
-        # readers that need durable artifacts re-load from persistence.
+        # Dependents and stream listeners need a non-None wire. Prefer the analytic's
+        # satisfied wire (e.g. fleet ledger); otherwise ``{}`` and readers fall back
+        # to persistence.
         if node.result_wire is None:
-            node.result_wire = {}
+            hydrated = registration.persistence_policy.satisfied_result_wire(
+                self._cached_ctx,
+                node.scope,
+            )
+            node.result_wire = {} if hydrated is None else hydrated
         self._complete_node(node)
         return True
 

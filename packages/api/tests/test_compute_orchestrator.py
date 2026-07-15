@@ -638,6 +638,9 @@ class _RecordingPersistencePolicy:
     def is_satisfied(self, _ctx, _scope) -> bool:
         return False
 
+    def satisfied_result_wire(self, _ctx, _scope) -> None:
+        return None
+
     def persist(self, _ctx, scope, result_wire) -> None:
         self.persist_calls.append((scope, result_wire))
 

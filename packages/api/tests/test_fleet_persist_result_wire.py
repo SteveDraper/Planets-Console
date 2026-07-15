@@ -263,3 +263,69 @@ def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample
         any(option.combo_id == "combo-prior" for option in record.build_option_sets)
         for record in prior.ledger.records
     )
+
+
+def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
+    """Satisfaction short-circuit leaves ``{}``; next leg must not KeyError (#222)."""
+    reset_inference_row_scheduler_for_tests()
+    turn_n, player_id = _turn_with_warship_delta(sample_turn, shipchange=1, turn_number=5)
+    turn_n1, _ = _turn_with_warship_delta(sample_turn, shipchange=0, turn_number=6)
+    game_perspective = perspective(turn_n)
+    fleet_services = build_ephemeral_fleet_compute_services(
+        turn_n1,
+        game_id=628580,
+        perspective=game_perspective,
+        stored_turns={5: turn_n, 6: turn_n1},
+        inference=_inference_support(InferenceRowScheduler(worker_count=0)),
+    )
+    ctx = make_analytic_query_context(
+        turn_n1,
+        TurnAnalyticsOptions(),
+        load_turn=fleet_services.load_turn,
+        export_services={
+            _FLEET_ANALYTIC_ID: fleet_services,
+            SCORES_ANALYTIC_ID: ScoresExportContext(),
+        },
+    )
+    snapshot = ensure_fleet_baseline(628580, game_perspective, turn_n)
+    prior_persisted = PersistedFleetLedger(
+        ledger=ledger_for_player(snapshot, player_id),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    fleet_services.persistence.put_ledger(
+        628580,
+        game_perspective,
+        5,
+        player_id,
+        prior_persisted,
+    )
+    prior_scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=game_perspective,
+        turn=5,
+        player_id=player_id,
+    )
+    dependency_outputs = DependencyOutputs()
+    dependency_outputs.put(prior_scope, {})
+
+    job_wire = build_fleet_materialization_leg_job_wire(
+        ComputeScope(
+            analytic_id=_FLEET_ANALYTIC_ID,
+            game_id=628580,
+            perspective=game_perspective,
+            turn=6,
+            player_id=player_id,
+        ),
+        dependency_outputs=dependency_outputs,
+        ctx=ctx,
+    )
+    assert job_wire["priorLedgerWire"] is not None
+    stored = fleet_services.persistence.get_ledger(628580, game_perspective, 5, player_id)
+    assert stored is not None
+    assert FleetPersistencePolicy().satisfied_result_wire(ctx, prior_scope) == {
+        "persistedLedgerWire": persisted_fleet_ledger_to_json(stored)
+    }
