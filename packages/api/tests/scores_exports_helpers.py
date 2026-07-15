@@ -282,10 +282,17 @@ def put_persisted_row(
     *,
     game_id: int = GAME_ID,
     host_turn: int | None = None,
+    perspective_id: int | None = None,
 ) -> None:
+    """Persist a scores inference row for tests.
+
+    ``perspective_id`` defaults to ``sample_turn.player.id``. When the game
+    perspective under test differs (e.g. fleet streams hard-code perspective 1
+    while the sample turn's logged-in player is another id), pass it explicitly.
+    """
     persistence.put_row(
         game_id,
-        perspective(sample_turn),
+        perspective_id if perspective_id is not None else perspective(sample_turn),
         host_turn if host_turn is not None else sample_turn.settings.turn,
         player_id,
         row,

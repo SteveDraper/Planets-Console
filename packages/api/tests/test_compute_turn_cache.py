@@ -272,13 +272,41 @@ def test_worker_turn_cache_reuses_turn_wire_deserialize(sample_turn) -> None:
 
 
 def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> None:
+    from api.analytics.fleet.held_solutions import FleetInferenceSupport
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    from tests.scores_exports_helpers import put_persisted_row
+
     reset_worker_deserialize_calls_for_tests()
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    player_id = next(row.ownerid for row in sample_turn.scores)
+    inference_persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    # Fleet@2 ENSURE-depends on scores@2; durable closed evidence under the same
+    # perspective lets scores skip-complete so the fleet pool leg can finish.
+    put_persisted_row(
+        inference_persistence,
+        stored_turns[2],
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seeded for turn-cache fleet pool",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        host_turn=2,
+        perspective_id=1,
+    )
     fleet_services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
         perspective=1,
         stored_turns=stored_turns,
+        inference=FleetInferenceSupport(scores_services=scores_services),
     )
     ctx = make_analytic_query_context(
         stored_turns[2],
@@ -286,13 +314,12 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_services,
         },
     )
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     pool = ComputeWorkerPool(worker_count=1)
     orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
-    player_id = next(row.ownerid for row in sample_turn.scores)
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
         game_id=628580,
