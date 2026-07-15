@@ -1,8 +1,9 @@
 """Process-wide scope lease and satisfaction short-circuit for ComputeOrchestrator.
 
-Owns acquire/park/wake/release and durable-satisfaction short-circuit so the DAG
-scheduler stays focused on readiness and step execution. Cross-binding dedupe
-semantics live in ``scope_lease``; this module is the orchestrator integration.
+Owns acquire/park/wake/release, durable-satisfaction short-circuit, and
+seal-before-expensive-work so the DAG scheduler stays focused on readiness.
+Cross-binding dedupe semantics live in ``scope_lease``; this module is the
+orchestrator integration (including post-lock execute paths that must seal).
 """
 
 from __future__ import annotations
@@ -14,7 +15,11 @@ from api.compute.scope import ComputeScope
 from api.compute.scope_lease import ScopeStepClaimKey, get_process_scope_lease
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.orchestrator import (
+        ComputeNodeRun,
+        _PendingInlineExecution,
+        _PendingPoolSubmission,
+    )
     from api.compute.profile import ComputeStepSpec
     from api.compute.registry import AnalyticComputeRegistration
     from api.compute.scope_lease import ProcessWideScopeLease
@@ -25,7 +30,8 @@ class OrchestratorScopeLeaseMixin:
 
     Expects the concrete orchestrator to provide ``_condition``, ``_nodes``,
     ``_metrics``, ``_observers``, ``_compute_registry``, ``_cached_ctx``,
-    ``_complete_node``, ``_current_step_spec``, ``_enqueue_ready``, and
+    ``_complete_node``, ``_fail_node``, ``_after_step_success``,
+    ``_current_step_spec``, ``_enqueue_ready``, ``_pool_submitter``, and
     ``dispatch_ready_work``.
     """
 
@@ -141,6 +147,100 @@ class OrchestratorScopeLeaseMixin:
             node.state = "parked"
             node.lease_step_kind = None
             return False
+
+    def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
+        """Build wire, seal (adopt-safe), then run an inline step without the orch lock."""
+        node = pending.node
+        try:
+            builder = pending.registration.build_step_job_wire[pending.step.step_kind]
+            job_wire = builder(
+                node.scope,
+                dependency_outputs=pending.dependency_outputs,
+                ctx=self._cached_ctx,
+            )
+        except BaseException as exc:
+            with self._condition:
+                self._metrics.inline_executions += 1
+                self._observers.notify_step_complete(
+                    node,
+                    pending.step.step_kind,
+                    surface="inline",
+                    terminal_state="failed",
+                )
+                self._fail_node(node, exc)
+            return
+        # Seal after job-wire build so a higher-priority peer can adopt during
+        # that window.
+        if not self._seal_scope_lease_or_park(node, pending.step):
+            return
+        self._observers.notify_inline_start(node, pending.step.step_kind)
+        try:
+            result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
+        except BaseException as exc:
+            with self._condition:
+                self._metrics.inline_executions += 1
+                self._observers.notify_step_complete(
+                    node,
+                    pending.step.step_kind,
+                    surface="inline",
+                    terminal_state="failed",
+                )
+                self._fail_node(node, exc)
+            return
+        with self._condition:
+            self._metrics.inline_executions += 1
+            self._observers.notify_step_complete(
+                node,
+                pending.step.step_kind,
+                surface="inline",
+                terminal_state="success",
+            )
+            self._after_step_success(node, result_wire)
+
+    def _flush_pending_pool_submissions(
+        self,
+        pending: tuple[_PendingPoolSubmission, ...],
+    ) -> None:
+        """Build job wires, seal, and submit pool work without the orchestrator lock."""
+        if not pending:
+            return
+        if self._pool_submitter is None:
+            raise RuntimeError("pool_submitter is not configured")
+        for submission in pending:
+            node = submission.node
+            step = submission.step
+            try:
+                if step.backend in {"interpreter", "process"}:
+                    builder = submission.registration.build_step_job_wire[step.step_kind]
+                    job_wire = builder(
+                        node.scope,
+                        dependency_outputs=submission.dependency_outputs,
+                        ctx=self._cached_ctx,
+                    )
+                    if not self._seal_scope_lease_or_park(node, step):
+                        continue
+                    run_step = submission.registration.run_step[step.step_kind]
+                    self._pool_submitter(
+                        node,
+                        step,
+                        job_wire=job_wire,
+                        run_step=run_step,
+                    )
+                else:
+                    if not self._seal_scope_lease_or_park(node, step):
+                        continue
+                    self._pool_submitter(node, step)
+                self._metrics.pool_submissions += 1
+            except BaseException as exc:
+                with self._condition:
+                    if node.state == "running":
+                        self._observers.notify_step_complete(
+                            node,
+                            step.step_kind,
+                            surface="pool",
+                            terminal_state="failed",
+                        )
+                        self._fail_node(node, exc)
 
     def _wake_parked_for_lease(self, scope: ComputeScope, step_kind: str) -> None:
         """Resume a parked node after a peer binding released the scope lease."""
