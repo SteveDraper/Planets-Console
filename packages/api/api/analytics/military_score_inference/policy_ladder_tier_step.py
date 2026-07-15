@@ -636,9 +636,16 @@ def run_policy_ladder_tier_step(
         and not added_combo_ids
         and not added_aggregate_action_ids
     ):
-        state.ladder_early_stop_reason = "no_new_exact_signatures"
-        state.ladder_complete = True
-        return
+        best_solution = _best_merged_solution(state.merged_solutions)
+        thresholds = resolve_solver_thresholds()
+        if (
+            best_solution is not None
+            and best_solution.objective_value
+            >= thresholds.no_new_exact_signatures_early_stop_min_plausibility
+        ):
+            state.ladder_early_stop_reason = "no_new_exact_signatures"
+            state.ladder_complete = True
+            return
 
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True

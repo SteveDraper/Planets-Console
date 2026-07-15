@@ -568,6 +568,13 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | `allowShipOnlyExactEarlyStop` | When `true`, the ladder may stop after this step if a ship-builds-only exact meets `shipOnlyExactEarlyStopMinPlausibility`. Default `false` when omitted. |
 | `hullCollisionTwinWiden` | When `true`, the ladder loads hull-collision twin assets and may union admitted high-tech hull ids via runtime `includeComponentIds` (or skip when no partners). Default `false` when omitted. Gated by this flag, not by step `id`. |
 
+Top-level `solverThresholds` (required ints):
+
+| Key | Meaning |
+|-----|---------|
+| `shipOnlyExactEarlyStopMinPlausibility` | Minimum `objectiveValue` for ship-only exact early-stop (#226). |
+| `noNewExactSignaturesEarlyStopMinPlausibility` | Minimum best-held `objectiveValue` before a catalog-noop / no-new-signature step may halt the ladder (#236). Production YAML uses the same value as ship-only exact early-stop. |
+
 **`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
 
 | Subfield | Meaning |
@@ -622,6 +629,7 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
    - If still infeasible, **free search** on the step catalog.
 7. Band-feasible results are **internal**; they do not appear in the UI unless the full ladder produces zero exact solutions (see section 8.5.5).
 8. **Ship-only exact early-stop (#226):** after a step completes, if that step's `allowShipOnlyExactEarlyStop` is `true` **and** the best held solution is a ship-builds-only exact whose objective meets `solverThresholds.shipOnlyExactEarlyStopMinPlausibility`, stop climbing. Steps with the flag `false` never early-stop on this rule (even when a plausible Valiant-only exact is already held).
+9. **No-new-signatures early-stop (#236):** after a step completes with held exact(s), if the step added neither new ship-build combo ids nor new aggregate action ids **and** admitted no new exact signatures, stop climbing **only when** the best held solution's objective meets `solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility`. Below that floor the ladder continues so later aggregate-widening tiers can still run (e.g. empty-belief `admit_ship_torpedoes` must not cut off planet/SB defense). Production YAML uses the same numeric floor as ship-only exact early-stop (`-300`).
 
 Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used, and (for `collision_hull_widen`) twin overlay diagnostics.
 
@@ -788,7 +796,7 @@ Use these bounds before building the CP-SAT model:
 - **Count-delta bound:** warship and freighter build actions are bounded by the observed count deltas when losses and trades are out of scope.
 - **Capacity bound:** ship fighters and torpedoes should be capped by plausible loadout capacity where known.
 - **Noisy-action cap:** defense posts, starbase fighters, and generic ammo adjustments should have conservative caps and lower probability weights.
-- **Policy step cap:** stop climbing the inference search tier ladder when a step adds no new exact signatures, the stream is cancelled (#71 SPA), or the **batch** per-case time budget is exhausted (section 8.5.4).
+- **Policy step cap:** stop climbing the inference search tier ladder when a step adds no new exact signatures **and** the best held exact meets `noNewExactSignaturesEarlyStopMinPlausibility` (#236), the stream is cancelled (#71 SPA), or the **batch** per-case time budget is exhausted (section 8.5.4).
 - **Top-K cap:** default to 20 per player; when combo cardinality exceeds **5000**, interim policy forces `max_solutions=1` on the batch path so enumeration finishes within the time budget (revisit after #71 streaming + global pause ship; may no longer be needed).
 - **Time cap (batch / corpus only):** default **20 seconds** per case (`DEFAULT_INFERENCE_TIME_LIMIT_SECONDS` in `actions.py`) on the batch JSON path. **SPA NDJSON streams have no row time budget** -- global pause freezes rows; implicit scope cancel ends them. Corpus orchestration may additionally cap whole probe runs (`--probe-time-limit-seconds`).
 

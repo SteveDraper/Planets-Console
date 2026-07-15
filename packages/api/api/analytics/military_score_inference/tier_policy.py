@@ -119,6 +119,7 @@ class InferenceTierPolicyStep:
 @dataclass(frozen=True)
 class SolverThresholds:
     ship_only_exact_early_stop_min_plausibility: int
+    no_new_exact_signatures_early_stop_min_plausibility: int
 
 
 @dataclass(frozen=True)
@@ -523,8 +524,17 @@ def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
         raise ValueError(
             "tier policy solverThresholds.shipOnlyExactEarlyStopMinPlausibility must be an int"
         )
+    no_new_signatures_threshold = raw_thresholds.get(
+        "noNewExactSignaturesEarlyStopMinPlausibility"
+    )
+    if not isinstance(no_new_signatures_threshold, int):
+        raise ValueError(
+            "tier policy solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility "
+            "must be an int"
+        )
     return SolverThresholds(
         ship_only_exact_early_stop_min_plausibility=ship_only_threshold,
+        no_new_exact_signatures_early_stop_min_plausibility=no_new_signatures_threshold,
     )
 
 

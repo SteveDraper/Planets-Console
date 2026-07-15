@@ -78,6 +78,7 @@ def test_policy_loader_reads_aggregate_probability_bins():
 def test_policy_loader_reads_solver_thresholds():
     thresholds = resolve_solver_thresholds()
     assert thresholds.ship_only_exact_early_stop_min_plausibility == -300
+    assert thresholds.no_new_exact_signatures_early_stop_min_plausibility == -300
 
 
 def test_policy_loader_rejects_non_int_solver_threshold():
@@ -86,6 +87,21 @@ def test_policy_loader_rejects_non_int_solver_threshold():
             {
                 "solverThresholds": {
                     "shipOnlyExactEarlyStopMinPlausibility": "-300",
+                    "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+                }
+            }
+        )
+
+
+def test_policy_loader_rejects_non_int_no_new_exact_signatures_threshold():
+    with pytest.raises(
+        ValueError, match="noNewExactSignaturesEarlyStopMinPlausibility must be an int"
+    ):
+        parse_solver_thresholds(
+            {
+                "solverThresholds": {
+                    "shipOnlyExactEarlyStopMinPlausibility": -300,
+                    "noNewExactSignaturesEarlyStopMinPlausibility": "-300",
                 }
             }
         )
@@ -556,6 +572,112 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
     assert step_diagnostics[0]["policyStepId"] == early.id
     assert "filters" in step_diagnostics[0]["constraintSnapshot"]
     assert result.diagnostics["stopped_reason"] == "no_new_exact_signatures"
+
+
+def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_threshold(
+    sample_turn, monkeypatch
+):
+    """#236: implausible held exacts must not cut off later aggregate-widening tiers."""
+    observation = _observation(warship_delta=1, starbases_owned=3)
+    # Below noNewExactSignaturesEarlyStopMinPlausibility (-300); mirrors issue repro.
+    weak_exact = InferenceSolution(
+        objective_value=-1133,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(
+                combo_id="combo_weak",
+                label="Weak exact",
+                count=1,
+                hull_id=1,
+                engine_id=1,
+                beam_id=None,
+                torp_id=None,
+                beam_count=0,
+                launcher_count=0,
+            ),
+        ),
+    )
+    later_exact = InferenceSolution(
+        objective_value=-200,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(
+                combo_id="combo_later",
+                label="Later exact",
+                count=1,
+                hull_id=1,
+                engine_id=1,
+                beam_id=None,
+                torp_id=None,
+                beam_count=0,
+                launcher_count=0,
+            ),
+        ),
+    )
+    policy_steps = resolve_tier_policies()
+    early = policy_steps[0]
+    widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
+    widen_hulls = next(step for step in policy_steps if step.id == "widen_hulls")
+    planet_defense = next(
+        step for step in policy_steps if step.id == "full_components_planet_defense"
+    )
+
+    def _solve_side_effect(problem, **kwargs):
+        if problem.policy_step_id == early.id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        if problem.policy_step_id in {widen_launchers.id, widen_hulls.id, "full_components"}:
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(weak_exact,),
+                    diagnostics={"policy_step_id": problem.policy_step_id},
+                ),
+                **kwargs,
+            )
+        if problem.policy_step_id == planet_defense.id:
+            return _emit_mock_solver_solutions(
+                InferenceResult(
+                    status=STATUS_EXACT,
+                    solutions=(later_exact,),
+                    diagnostics={"policy_step_id": problem.policy_step_id},
+                ),
+                **kwargs,
+            )
+        return _emit_mock_solver_solutions(
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(weak_exact,),
+                diagnostics={"policy_step_id": problem.policy_step_id},
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "_solution_qualifies_for_ship_only_exact_early_stop",
+        lambda *args, **kwargs: False,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder.solution_satisfies_exact_hard_equalities",
+        lambda solution, observation, catalog: True,
+    )
+    result, _, _, attempted, _ = solve_with_policy_ladder(
+        observation,
+        sample_turn,
+    )
+
+    # Empty-belief admit_ship_torpedoes is a catalog no-op, but the weak held exact
+    # is below the plausibility floor so the ladder must continue into aggregate tiers.
+    assert "admit_ship_torpedoes" in attempted
+    assert "full_components_planet_defense" in attempted
+    assert [solution.objective_value for solution in result.solutions] == [-200, -1133]
 
 
 def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
