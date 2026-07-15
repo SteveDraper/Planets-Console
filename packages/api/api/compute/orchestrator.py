@@ -567,13 +567,6 @@ class ComputeOrchestrator(OrchestratorScopeLeaseMixin):
         for dependency_scope in node.dependency_scopes:
             dependency = self._nodes.get(dependency_scope)
             if dependency is not None and dependency.state == "failed":
-                # Issue 4 leftover: production open-evidence refuse parks via
-                # PersistDeferredError recovery (never fails the node). This
-                # cascade-skip still treats a *failed* PersistDeferredError as
-                # non-cascading so dependents stay waiting_deps. Collapse fail vs
-                # recover into one protocol in issue 4.
-                if isinstance(dependency.error, PersistDeferredError):
-                    continue
                 return dependency.error
         return None
 

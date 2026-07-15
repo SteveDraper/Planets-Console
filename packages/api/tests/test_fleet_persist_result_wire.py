@@ -416,7 +416,7 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
 
 
 def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
-    """Open scores evidence must fail the fleet node, not quiet non-final complete."""
+    """Open scores evidence must raise PersistDeferredError, not quiet non-final complete."""
     from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
     from api.errors import FleetScoresEvidenceOpenError
 

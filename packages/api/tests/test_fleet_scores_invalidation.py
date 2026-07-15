@@ -803,20 +803,19 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
     assert persistence.invalidation_generation(628580, 1, 8) == gen_before + 1
 
 
-def test_open_evidence_fleet_fail_does_not_cascade_to_dependents(sample_turn):
-    """Dependents of a failed PersistDeferredError stay waiting_deps.
+def test_parked_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_turn):
+    """Open-evidence recovery parks fleet; only a real failed fleet cascades.
 
-    Issue 4 leftover: production open-evidence refuse parks via recovery and never
-    fails the fleet node. This keeps the cascade-skip path for a *failed*
-    PersistDeferredError until fail vs recover collapse into one protocol.
+    PersistDeferredError recovery leaves the fleet node ``waiting_deps`` (not
+    ``failed``), so scores dependents stay ``waiting_deps``. A normal fleet
+    failure cascades like any other failed dependency -- no PersistDeferredError
+    cascade-skip special case.
     """
     from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
     from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
-    from api.compute.persistence import PersistDependencyRecovery
     from api.compute.registry import build_compute_registry
-    from api.errors import FleetScoresEvidenceOpenError
 
     registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     ctx = make_analytic_query_context(sample_turn, TurnAnalyticsOptions(), export_services={})
@@ -836,28 +835,41 @@ def test_open_evidence_fleet_fail_does_not_cascade_to_dependents(sample_turn):
         turn=5,
         player_id=2,
     )
-    fleet_node = ComputeNodeRun(
+
+    parked_fleet = ComputeNodeRun(
         scope=fleet_scope,
         dependency_scopes=(),
-        state="failed",
-        error=FleetScoresEvidenceOpenError(
-            "scores turn evidence is not closed",
-            recovery=PersistDependencyRecovery(
-                dependency_scope=scores_scope,
-                force_fresh=True,
-                step_kind="tier_solve",
-            ),
-        ),
+        state="waiting_deps",
     )
-    scores_node = ComputeNodeRun(
+    waiting_scores = ComputeNodeRun(
         scope=scores_scope,
         dependency_scopes=(fleet_scope,),
         state="waiting_deps",
     )
-    orchestrator._nodes[fleet_scope] = fleet_node
-    orchestrator._nodes[scores_scope] = scores_node
+    orchestrator._nodes[fleet_scope] = parked_fleet
+    orchestrator._nodes[scores_scope] = waiting_scores
 
-    orchestrator._refresh_node_readiness(scores_node)
+    orchestrator._refresh_node_readiness(waiting_scores)
 
-    assert scores_node.state == "waiting_deps"
-    assert scores_node.error is None
+    assert waiting_scores.state == "waiting_deps"
+    assert waiting_scores.error is None
+
+    fleet_failure = RuntimeError("fleet step failed")
+    failed_fleet = ComputeNodeRun(
+        scope=fleet_scope,
+        dependency_scopes=(),
+        state="failed",
+        error=fleet_failure,
+    )
+    cascade_scores = ComputeNodeRun(
+        scope=scores_scope,
+        dependency_scopes=(fleet_scope,),
+        state="waiting_deps",
+    )
+    orchestrator._nodes[fleet_scope] = failed_fleet
+    orchestrator._nodes[scores_scope] = cascade_scores
+
+    orchestrator._refresh_node_readiness(cascade_scores)
+
+    assert cascade_scores.state == "failed"
+    assert cascade_scores.error is fleet_failure
