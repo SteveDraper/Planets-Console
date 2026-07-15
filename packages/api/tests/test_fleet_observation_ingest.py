@@ -62,7 +62,8 @@ def test_new_sighting_creates_observed_ship_row():
 
 def test_repeat_sighting_refreshes_confirmed_build_option_set():
     turn_one = single_ship_turn(turn_number=1, ship_id=42, owner_id=8, x=1000, y=2000)
-    snapshot = ingest_turn_ship_observations(ensure_fleet_baseline(628580, 1, turn_one), turn_one)
+    # Full-information rematch replaces inferred alternates with the confirmed fit.
+    snapshot = ingest_turn_ship_observations(ensure_fleet_baseline(628580, 8, turn_one), turn_one)
     record = ledger_for_player(snapshot, 8).records[0]
     record.build_option_sets = [
         FleetBuildOptionSet(label="stale inferred", beam_count=1, launcher_count=1),
@@ -278,6 +279,67 @@ def test_killed_ships_are_ignored():
     result = ingest_turn_ship_observations(ensure_fleet_baseline(628580, 1, turn), turn)
 
     assert ledger_for_player(result, 8).records == []
+
+
+def test_full_information_sighting_locks_all_components_including_zero_weapons():
+    """Own-perspective ships: beams==0 is known-empty, not fog."""
+    turn = single_ship_turn(turn_number=1, ship_id=42, owner_id=8, x=1000, y=2000)
+    ship = replace(
+        turn.ships[0],
+        beams=0,
+        beamid=0,
+        torps=0,
+        torpedoid=0,
+        bays=0,
+        engineid=9,
+    )
+    turn = replace(turn, ships=[ship])
+
+    result = ingest_turn_ship_observations(ensure_fleet_baseline(628580, 8, turn), turn)
+
+    record = ledger_for_player(result, 8).records[0]
+    assert record.fields.hull == FleetFieldKnown(value=13)
+    assert record.fields.engine == FleetFieldKnown(value=9)
+    assert record.fields.beams == FleetFieldKnown(value=0)
+    assert record.fields.launchers == FleetFieldKnown(value=0)
+    assert record.build_option_sets == [
+        FleetBuildOptionSet(
+            hull_id=13,
+            engine_id=9,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+        )
+    ]
+
+
+def test_partial_sighting_does_not_lock_fog_zero_weapons():
+    """Foreign ships: fog-of-war zeros stay unknown; only hull is reliable."""
+    turn = single_ship_turn(turn_number=1, ship_id=42, owner_id=8, x=1000, y=2000)
+    ship = replace(
+        turn.ships[0],
+        beams=0,
+        beamid=0,
+        torps=0,
+        torpedoid=0,
+        bays=0,
+        engineid=0,
+    )
+    turn = replace(turn, ships=[ship])
+
+    # Perspective 1 observing player 8's ship -- partial information.
+    result = ingest_turn_ship_observations(ensure_fleet_baseline(628580, 1, turn), turn)
+
+    record = ledger_for_player(result, 8).records[0]
+    assert record.fields.ship_id == FleetFieldKnown(value=42)
+    assert record.fields.hull == FleetFieldKnown(value=13)
+    assert record.fields.engine == FleetFieldUnknown()
+    assert record.fields.beams == FleetFieldUnknown()
+    assert record.fields.launchers == FleetFieldUnknown()
+    assert record.build_option_sets == [
+        FleetBuildOptionSet(hull_id=13, engine_id=None, beam_id=None, torp_id=None)
+    ]
 
 
 def test_alibi_from_scoreboard_delta_event_on_record():

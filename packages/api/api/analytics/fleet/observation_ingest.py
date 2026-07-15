@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
 from api.analytics.fleet.serialization import append_fleet_evidence_event
@@ -27,6 +28,8 @@ from api.models.ship import Ship
 
 TURN_SHIPS_SOURCE = "turnInfo.ships"
 
+_DIRECT_OBSERVATION_EVENT_KINDS = frozenset({"sighting", "position_update"})
+
 
 def ingest_turn_ship_observations(
     snapshot: FleetTurnSnapshot,
@@ -39,27 +42,64 @@ def ingest_turn_ship_observations(
         turn_context if turn_context is not None else FleetTurnContext.from_turn(turn)
     )
     for ledger in snapshot.players:
-        ingest_player_ship_observations(ledger, resolved_context)
+        ingest_player_ship_observations(
+            ledger,
+            resolved_context,
+            perspective=snapshot.perspective,
+        )
     return snapshot
 
 
 def ingest_player_ship_observations(
     ledger: FleetAcquisitionLedger,
     turn_context: FleetTurnContext,
+    *,
+    perspective: int,
 ) -> None:
     """Apply turn-T ship sightings and id-bound tightening for one player ledger."""
     turn = turn_context.turn
     turn_number = turn.settings.turn
+    full_information = ledger.player_id == perspective
 
     for ship in turn.ships:
         if ship.turnkilled != 0:
             continue
         if ship.ownerid != ledger.player_id:
             continue
-        _ingest_ship_sighting(ledger, ship, turn, turn_number=turn_number)
+        _ingest_ship_sighting(
+            ledger,
+            ship,
+            turn,
+            turn_number=turn_number,
+            full_information=full_information,
+        )
 
     if turn_context.max_ship_id_bound is not None:
         tighten_inferred_ship_id_bounds(ledger, turn, shell_turn=turn_number)
+
+
+def record_has_direct_observation(record: FleetShipRecord) -> bool:
+    """True when the record carries a turnInfo.ships sighting or position update."""
+    return any(event.kind in _DIRECT_OBSERVATION_EVENT_KINDS for event in record.events)
+
+
+def observation_established_full_fit(record: FleetShipRecord) -> bool:
+    """True when a direct observation locked a complete component fit.
+
+    Full-information sightings (``ledger.player_id == perspective``) always lock
+    hull, engine, beams, and launchers -- including known-zero weapon axes.
+    Partial foreign sightings leave unreliable axes unknown, so they do not
+    satisfy this predicate unless every component was positively observed.
+    """
+    if not record_has_direct_observation(record):
+        return False
+    fields = record.fields
+    return (
+        isinstance(fields.hull, FleetFieldKnown)
+        and isinstance(fields.engine, FleetFieldKnown)
+        and isinstance(fields.beams, FleetFieldKnown)
+        and isinstance(fields.launchers, FleetFieldKnown)
+    )
 
 
 def _ingest_ship_sighting(
@@ -68,6 +108,7 @@ def _ingest_ship_sighting(
     turn: TurnInfo,
     *,
     turn_number: int,
+    full_information: bool,
 ) -> None:
     record = _find_active_record_for_ship(ledger, ship.id)
     last_seen = FleetLastSeen(
@@ -76,8 +117,11 @@ def _ingest_ship_sighting(
         y=ship.y,
         planet_id=_planet_id_at_coordinates(turn, ship.x, ship.y),
     )
-    observed_fields = _observed_fields_from_ship(ship)
-    observed_option_set = _observed_build_option_set_from_ship(ship)
+    observed_fields = _observed_fields_from_ship(ship, full_information=full_information)
+    observed_option_set = _observed_build_option_set_from_ship(
+        ship,
+        full_information=full_information,
+    )
 
     if record is None:
         record = FleetShipRecord(
@@ -103,10 +147,11 @@ def _ingest_ship_sighting(
         prior_last_seen is None or prior_last_seen.x != ship.x or prior_last_seen.y != ship.y
     )
     record.fields = _merge_observed_fields(record.fields, observed_fields)
-    # Sighting is ground truth for fitted slot fills; replace any prior option sets
-    # (including inferred alternates) with the single confirmed observed fit.
-    record.build_option_sets = [observed_option_set]
-    record.display_default_option_set_index = 0
+    _apply_observed_option_set(
+        record,
+        observed_option_set,
+        full_information=full_information,
+    )
     record.last_seen = last_seen
     append_fleet_evidence_event(
         record,
@@ -117,6 +162,49 @@ def _ingest_ship_sighting(
         ),
     )
     _apply_alibi_if_needed(record, sighting_turn=turn_number)
+
+
+def _apply_observed_option_set(
+    record: FleetShipRecord,
+    observed_option_set: FleetBuildOptionSet,
+    *,
+    full_information: bool,
+) -> None:
+    """Write observation option-set ground truth without clobbering partial unknowns.
+
+    Full-information sightings replace any prior sets with the single confirmed fit.
+    Partial sightings only lock positively observed axes onto existing inferred
+    alternates (or seed a hull-centric set when none exist yet).
+    """
+    if full_information:
+        record.build_option_sets = [observed_option_set]
+        record.display_default_option_set_index = 0
+        return
+    if not record.build_option_sets:
+        record.build_option_sets = [observed_option_set]
+        record.display_default_option_set_index = 0
+        return
+    record.build_option_sets = [
+        _merge_option_set_observation_locks(existing, observed_option_set)
+        for existing in record.build_option_sets
+    ]
+
+
+def _merge_option_set_observation_locks(
+    existing: FleetBuildOptionSet,
+    observed: FleetBuildOptionSet,
+) -> FleetBuildOptionSet:
+    return replace(
+        existing,
+        hull_id=observed.hull_id if observed.hull_id is not None else existing.hull_id,
+        engine_id=observed.engine_id if observed.engine_id is not None else existing.engine_id,
+        beam_id=observed.beam_id if observed.beam_id is not None else existing.beam_id,
+        torp_id=observed.torp_id if observed.torp_id is not None else existing.torp_id,
+        beam_count=observed.beam_count if observed.beam_count > 0 else existing.beam_count,
+        launcher_count=(
+            observed.launcher_count if observed.launcher_count > 0 else existing.launcher_count
+        ),
+    )
 
 
 def _find_active_record_for_ship(
@@ -151,23 +239,54 @@ def ship_id_matches_constraint(constraint: FleetFieldConstraint, ship_id: int) -
     return False
 
 
-def _observed_fields_from_ship(ship: Ship) -> FleetShipRecordFields:
+def _observed_fields_from_ship(
+    ship: Ship,
+    *,
+    full_information: bool,
+) -> FleetShipRecordFields:
+    built_turn = FleetFieldKnown(ship.turn) if ship.turn > 0 else FleetFieldUnknown()
+    hull = FleetFieldKnown(ship.hullid) if ship.hullid > 0 else FleetFieldUnknown()
+    if full_information:
+        beams = (
+            FleetFieldKnown(ship.beamid)
+            if ship.beams > 0 and ship.beamid > 0
+            else FleetFieldKnown(0)
+            if ship.beams == 0
+            else FleetFieldUnknown()
+        )
+        if ship.bays > 0 or ship.torps > 0:
+            launchers = (
+                FleetFieldKnown(ship.torpedoid) if ship.torpedoid > 0 else FleetFieldUnknown()
+            )
+        else:
+            launchers = FleetFieldKnown(0)
+        return FleetShipRecordFields(
+            ship_id=FleetFieldKnown(ship.id),
+            hull=hull,
+            engine=FleetFieldKnown(ship.engineid),
+            beams=beams,
+            launchers=launchers,
+            built_turn=built_turn,
+            location=FleetFieldUnknown(),
+        )
+
+    # Partial (foreign) sighting: hull is reliable; other axes only on positive signal.
+    # Fog-of-war zeros must not become Known(0) "no weapons".
+    engine = FleetFieldKnown(ship.engineid) if ship.engineid > 0 else FleetFieldUnknown()
     beams = (
         FleetFieldKnown(ship.beamid)
         if ship.beams > 0 and ship.beamid > 0
-        else FleetFieldKnown(0)
-        if ship.beams == 0
         else FleetFieldUnknown()
     )
-    if ship.bays > 0 or ship.torps > 0:
-        launchers = FleetFieldKnown(ship.torpedoid) if ship.torpedoid > 0 else FleetFieldUnknown()
-    else:
-        launchers = FleetFieldKnown(0)
-    built_turn = FleetFieldKnown(ship.turn) if ship.turn > 0 else FleetFieldUnknown()
+    launchers = (
+        FleetFieldKnown(ship.torpedoid)
+        if ship.torpedoid > 0 and (ship.torps > 0 or ship.bays > 0)
+        else FleetFieldUnknown()
+    )
     return FleetShipRecordFields(
         ship_id=FleetFieldKnown(ship.id),
-        hull=FleetFieldKnown(ship.hullid),
-        engine=FleetFieldKnown(ship.engineid),
+        hull=hull,
+        engine=engine,
         beams=beams,
         launchers=launchers,
         built_turn=built_turn,
@@ -175,16 +294,33 @@ def _observed_fields_from_ship(ship: Ship) -> FleetShipRecordFields:
     )
 
 
-def _observed_build_option_set_from_ship(ship: Ship) -> FleetBuildOptionSet:
-    """Single confirmed fitted spec so UI can show beam/launcher slot fills.
+def _observed_build_option_set_from_ship(
+    ship: Ship,
+    *,
+    full_information: bool,
+) -> FleetBuildOptionSet:
+    """Fitted option set from a sighting.
 
-    ``fields.beams`` / ``fields.launchers`` remain type-id constraints; counts live
-    on the option set (same home as inferred fits).
+    Full-information: single confirmed fit including known-zero weapon slot fills.
+    Partial: only positively observed components -- never claim fog zeros as fitted
+    empty weapons.
     """
-    beam_count = ship.beams
-    launcher_count = ship.torps
+    hull_id = ship.hullid if ship.hullid > 0 else None
+    if full_information:
+        beam_count = ship.beams
+        launcher_count = ship.torps
+        return FleetBuildOptionSet(
+            hull_id=hull_id,
+            engine_id=ship.engineid if ship.engineid > 0 else None,
+            beam_id=ship.beamid if beam_count > 0 and ship.beamid > 0 else None,
+            torp_id=ship.torpedoid if launcher_count > 0 and ship.torpedoid > 0 else None,
+            beam_count=beam_count,
+            launcher_count=launcher_count,
+        )
+    beam_count = ship.beams if ship.beams > 0 else 0
+    launcher_count = ship.torps if ship.torps > 0 else 0
     return FleetBuildOptionSet(
-        hull_id=ship.hullid if ship.hullid > 0 else None,
+        hull_id=hull_id,
         engine_id=ship.engineid if ship.engineid > 0 else None,
         beam_id=ship.beamid if beam_count > 0 and ship.beamid > 0 else None,
         torp_id=ship.torpedoid if launcher_count > 0 and ship.torpedoid > 0 else None,

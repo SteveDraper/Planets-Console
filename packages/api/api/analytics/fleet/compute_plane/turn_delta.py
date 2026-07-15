@@ -46,5 +46,5 @@ def apply_fleet_turn_delta_for_player(
         perspective=perspective,
         inference_materialization=inference_materialization,
     )
-    ingest_player_ship_observations(ledger, turn_context)
+    ingest_player_ship_observations(ledger, turn_context, perspective=perspective)
     return ledger
