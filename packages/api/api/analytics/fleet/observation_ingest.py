@@ -274,9 +274,7 @@ def _observed_fields_from_ship(
     # Fog-of-war zeros must not become Known(0) "no weapons".
     engine = FleetFieldKnown(ship.engineid) if ship.engineid > 0 else FleetFieldUnknown()
     beams = (
-        FleetFieldKnown(ship.beamid)
-        if ship.beams > 0 and ship.beamid > 0
-        else FleetFieldUnknown()
+        FleetFieldKnown(ship.beamid) if ship.beams > 0 and ship.beamid > 0 else FleetFieldUnknown()
     )
     launchers = (
         FleetFieldKnown(ship.torpedoid)
