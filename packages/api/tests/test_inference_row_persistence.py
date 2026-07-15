@@ -70,6 +70,25 @@ def test_persistence_row_round_trip(persistence):
     assert "diagnostics" not in raw
 
 
+def test_put_row_notify_false_skips_on_row_persisted(persistence):
+    notified: list[tuple[int, int, int, int]] = []
+    persistence.on_row_persisted = lambda game_id, perspective, host_turn, player_id: (
+        notified.append((game_id, perspective, host_turn, player_id))
+    )
+    row = PersistedInferenceRow(
+        status=STATUS_EXACT,
+        summary="cached",
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+    )
+    persistence.put_row(628580, 1, 111, 8, row, notify=False)
+    assert persistence.get_row(628580, 1, 111, 8) is not None
+    assert notified == []
+    persistence.put_row(628580, 1, 111, 8, row, notify=True)
+    assert notified == [(628580, 1, 111, 8)]
+
+
 def test_put_row_promotes_accelerated_segments_before_dropping_diagnostics(persistence):
     _, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
     persistence.put_row(628580, 1, 3, player_id, legacy_row)

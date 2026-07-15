@@ -319,7 +319,11 @@ def test_probe_after_prior_turn_schedule_omits_missing_step(sample_turn, persist
 
 
 def test_ensure_player_not_found_records_ephemeral_without_schedule(sample_turn, persistence):
-    """Missing scoreboard row is a cheap terminal; no RowRun and no CP-SAT."""
+    """Missing scoreboard row is a cheap terminal; no RowRun and no CP-SAT.
+
+    Ensure also persists disk evidence so materialization probe / fleet turn evidence
+    can close without ensure-ephemeral.
+    """
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     missing_player_id = 9_999_999
@@ -345,10 +349,21 @@ def test_ensure_player_not_found_records_ephemeral_without_schedule(sample_turn,
     assert scheduler.row_run_for_player(stream_scope, missing_player_id) is None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
     assert ctx.ensure_ephemeral("scores", scope) is not None
+    persisted = persistence.get_row(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        missing_player_id,
+    )
+    assert persisted is not None
+    assert persisted.status == "player_not_found"
 
 
 def test_ensure_no_prior_turn_records_ephemeral_without_schedule(sample_turn, persistence):
-    """Accelerated-window turn with no prior score data: cheap terminal, no RowRun."""
+    """Accelerated-window turn with no prior score data: cheap terminal, no RowRun.
+
+    Ensure persists ``no_prior_turn`` so materialization-aligned turn evidence closes.
+    """
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     assert sample_turn.settings.acceleratedturns == 3
@@ -385,6 +400,50 @@ def test_ensure_no_prior_turn_records_ephemeral_without_schedule(sample_turn, pe
     ephemeral = ctx.ensure_ephemeral("scores", scope)
     assert ephemeral is not None
     assert ephemeral.events[-1].get("status") == "no_prior_turn"
+    persisted = persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id)
+    assert persisted is not None
+    assert persisted.status == "no_prior_turn"
+
+
+def test_ensure_cheap_terminal_persist_does_not_notify_row_persisted(
+    sample_turn,
+    persistence,
+) -> None:
+    """First-write ImmediateRowAdmission must not fire fleet invalidation.
+
+    ``on_row_persisted`` bumps fleet generation mid gap-fill; that aborted sync
+    fleet table/map with FleetGapFillEpochInvalidated (HTTP 409).
+    """
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    assert sample_turn.settings.acceleratedturns == 3
+
+    turn_2 = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=2),
+        game=replace(sample_turn.game, turn=2),
+    )
+    player_id = first_player_id(turn_2)
+    notified: list[tuple[int, int, int, int]] = []
+    persistence.on_row_persisted = lambda game_id, perspective_id, host_turn, row_player_id: (
+        notified.append((game_id, perspective_id, host_turn, row_player_id))
+    )
+    ctx = scores_query_context(
+        turn_2,
+        persistence=persistence,
+        scheduler=scheduler,
+        stored_turns={2: turn_2},
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+
+    assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+    assert persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id) is not None
+    assert notified == []
 
 
 def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):
