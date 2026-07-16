@@ -253,16 +253,6 @@ class FleetTableStreamScheduler:
             session = run.session
             cancelled = session.cancel_token.is_cancelled()
             if node.state == "failed":
-                from api.compute.errors import ComputeScopeAbortedError
-
-                # Scores row cancel aborts the singleton scores node; that must not
-                # surface as a fleet table error while dependents wait for reschedule.
-                if isinstance(node.error, ComputeScopeAbortedError):
-                    continue
-                if node.error is not None and "scores inference row run cancelled" in str(
-                    node.error
-                ):
-                    continue
                 detail = (
                     str(node.error)
                     if node.error is not None

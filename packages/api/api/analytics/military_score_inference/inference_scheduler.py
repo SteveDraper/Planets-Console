@@ -995,14 +995,9 @@ class InferenceRowScheduler:
     def _is_cancel_abort_failure(node: object) -> bool:
         if getattr(node, "state", None) != "failed":
             return False
-        error = getattr(node, "error", None)
-        if error is None:
-            return False
         from api.compute.errors import ComputeScopeAbortedError
 
-        if isinstance(error, ComputeScopeAbortedError):
-            return True
-        return _SCORES_ROW_RUN_CANCELLED_MESSAGE in str(error)
+        return isinstance(getattr(node, "error", None), ComputeScopeAbortedError)
 
     @staticmethod
     def _adapter_row_run(run_id: str) -> RowRun | None:
