@@ -190,7 +190,8 @@ Unwind stops when:
 
 1. **Already satisfied** -- step is persisted/terminal or in-flight with attachable state.
 2. **Analytic-specific baseline** -- e.g. **fleet** @ turn 1 has implicit empty composition; **scores** @ turn 1 has no **fleet** @ turn 0 (game-start neutral priors).
-3. **Storage floor** -- if turn *T−1* is not stored for the **perspective**, probe reports `turn_not_stored` (root **unavailable**), not a neutral baseline.
+3. **Accelerated-start floor** -- when `settings.acceleratedturns = N` (`N > 0`) and the requesting scope turn is **at or above N**, ensure unwind and fleet gap-fill treat turn **N** (first reliable scoreboard row) as the baseline. Dependencies on turns `1..N-1` are skipped (same as turn 0), even if those turns are stored, because scoreboard data there is unreliable and peer views are often missing while accelerated start is still open. Scopes below N still use the ordinary turn-1 baseline.
+4. **Storage floor** -- if a dependency turn *at or above* the ensure floor is not stored for the **perspective**, probe reports `turn_not_stored` (root **unavailable**), not a neutral baseline.
 
 ---
 

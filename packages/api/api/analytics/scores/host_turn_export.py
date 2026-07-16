@@ -19,7 +19,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_TIME_LIMITED,
 )
 from api.analytics.scores.export_wire import ranked_solutions_from_wire
-from api.models.game import TurnInfo
+from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -110,6 +110,52 @@ def _payload_for_host_turn_from_row(
 
 
 PersistedRowLoader = Callable[[int, int], PersistedInferenceRow | None]
+
+
+def functional_host_turn_payload_from_persisted_row(
+    row: PersistedInferenceRow,
+    *,
+    source_scoreboard_turn: int,
+    target_host_turn: int,
+) -> FunctionalHostTurnPayload | None:
+    """Select held solutions for ``target_host_turn`` from one persisted inference row."""
+    return _payload_for_host_turn_from_row(
+        row,
+        scoreboard_turn=source_scoreboard_turn,
+        target_host_turn=target_host_turn,
+    )
+
+
+def resolve_accelerated_backfill_payload_when_scoreboard_turn_missing(
+    *,
+    scoreboard_turn: int,
+    settings: GameSettings,
+    get_persisted_row: PersistedRowLoader,
+    player_id: int,
+) -> FunctionalHostTurnPayload | None:
+    """Load host-turn solutions from the first reliable row when ``scoreboard_turn`` is absent.
+
+    Unreliable accelerated scoreboard turns (``1..N-1``) may be missing from storage
+    while accelerated start is still open. Fleet placeholder refine still maps
+    ``builtTurn`` to ``scores@(builtTurn + 1)``; this helper resolves the same
+    functional payload from ``scores@N`` ``hostTurnTargets``.
+    """
+    if not needs_accelerated_backfill(scoreboard_turn, settings):
+        return None
+    target_host_turn = scoreboard_host_turn(scoreboard_turn)
+    if target_host_turn is None:
+        return None
+    source_turn_number = first_reliable_accelerated_scoreboard_turn(settings)
+    if source_turn_number is None:
+        return None
+    source_row = get_persisted_row(source_turn_number, player_id)
+    if source_row is None:
+        return None
+    return functional_host_turn_payload_from_persisted_row(
+        source_row,
+        source_scoreboard_turn=source_turn_number,
+        target_host_turn=target_host_turn,
+    )
 
 
 def resolve_functional_host_turn_payload(

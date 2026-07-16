@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_dependency_walk import (
     dependency_scope_for,
+    ensure_dependency_turn_floor,
     walk_dependency_tree,
 )
 from api.analytics.export_types import ExportScope
@@ -75,7 +76,13 @@ def plan_compute_dag(
         dependency_scopes: list[ComputeScope] = []
         for dependency in catalog.ensure_dependencies:
             dependency_export_scope = dependency_scope_for(pending_scope, dependency)
-            if dependency_export_scope.turn < 1:
+            turn_floor = ensure_dependency_turn_floor(
+                ctx,
+                pending_scope,
+                analytic_id=pending_analytic_id,
+                dependency_analytic_id=dependency.analytic_id,
+            )
+            if dependency_export_scope.turn < turn_floor:
                 continue
             dependency_key = _pending_key(dependency.analytic_id, dependency_export_scope)
             if dependency_key not in pending_by_key:

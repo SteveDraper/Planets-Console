@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     launcher_belief_set_from_fleet_records,
 )
 from api.analytics.options import TurnAnalyticsOptions
+from api.concepts.accelerated_scoreboard import fleet_chain_start_floor
 from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
@@ -248,7 +249,8 @@ def resolve_prior_turn_fleet_torp_overlay(
     run export ensure (for inference table-stream scheduling).
     """
     host_turn = turn.settings.turn
-    if host_turn <= 1:
+    prior_turn = host_turn - 1
+    if prior_turn < fleet_chain_start_floor(host_turn, turn.settings):
         return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
 
     fleet_services = _resolve_fleet_services(
@@ -258,7 +260,6 @@ def resolve_prior_turn_fleet_torp_overlay(
     if fleet_services is None:
         return PriorTurnFleetTorpResolution(overlay=None, input_status="unavailable")
 
-    prior_turn = host_turn - 1
     prior_turn_info = load_turn(prior_turn)
     if prior_turn_info is None:
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
@@ -293,7 +294,8 @@ def schedule_background_prior_turn_fleet_warm(
 ) -> None:
     """Kick off non-blocking per-player materialization of fleet@(host_turn - 1)."""
     host_turn = turn.settings.turn
-    if host_turn <= 1 or not player_ids:
+    prior_turn = host_turn - 1
+    if prior_turn < fleet_chain_start_floor(host_turn, turn.settings) or not player_ids:
         return
 
     fleet_services = _resolve_fleet_services(
@@ -303,7 +305,6 @@ def schedule_background_prior_turn_fleet_warm(
     if fleet_services is None:
         return
 
-    prior_turn = host_turn - 1
     prior_turn_info = load_turn(prior_turn)
     if prior_turn_info is None:
         return

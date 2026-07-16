@@ -56,6 +56,54 @@ def accelerated_turn_count(settings: GameSettings) -> int:
     return max(0, settings.acceleratedturns)
 
 
+def first_reliable_accelerated_scoreboard_turn(settings: GameSettings) -> int | None:
+    """Scoreboard turn N when accelerated start is enabled; otherwise None."""
+    accelerated = accelerated_turn_count(settings)
+    return accelerated if accelerated > 0 else None
+
+
+def fleet_chain_start_floor(turn_number: int, settings: GameSettings) -> int:
+    """Lowest turn fleet gap-fill may materialize when targeting ``turn_number``.
+
+    Normal games and unreliable accelerated turns (``turn_number < N``): turn 1.
+    Once the target is at or above the first reliable scoreboard turn N, chain from
+    N so missing/unreliable turns ``1..N-1`` are not required.
+    """
+    accelerated = accelerated_turn_count(settings)
+    if accelerated > 0 and turn_number >= accelerated:
+        return accelerated
+    return 1
+
+
+def export_ensure_turn_floor(settings: GameSettings, *, scope_turn: int) -> int:
+    """Ensure-unwind floor for dependencies of a scope at ``scope_turn``.
+
+    Same rule as ``fleet_chain_start_floor``: accelerated floor N applies only
+    when the requesting scope is at or above N.
+    """
+    return fleet_chain_start_floor(scope_turn, settings)
+
+
+def is_below_export_ensure_turn_floor(
+    turn_number: int,
+    settings: GameSettings,
+    *,
+    scope_turn: int,
+) -> bool:
+    """Whether a dependency turn is below the ensure floor for ``scope_turn``."""
+    return turn_number < export_ensure_turn_floor(settings, scope_turn=scope_turn)
+
+
+def is_export_ensure_baseline_turn(turn_number: int, settings: GameSettings) -> bool:
+    """Whether this turn is a fleet/scores ensure baseline (no prior fleet leg)."""
+    return turn_number == fleet_chain_start_floor(turn_number, settings)
+
+
+def is_unreliable_accelerated_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
+    accelerated = accelerated_turn_count(settings)
+    return accelerated > 0 and 1 <= turn_number < accelerated
+
+
 def is_first_reliable_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
     accelerated = accelerated_turn_count(settings)
     return accelerated > 0 and turn_number == accelerated
