@@ -12,7 +12,7 @@ from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import held_scores_for_scope
 from api.analytics.scores.host_turn_export import (
-    resolve_accelerated_backfill_payload_when_scoreboard_turn_missing,
+    accelerated_backfill_host_turn_payload,
     scores_scoreboard_turn_for_placeholder_refine,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
@@ -80,7 +80,7 @@ class FleetInferenceSupport:
         def get_persisted_row(row_turn: int, row_player_id: int):
             return persistence.get_row(game_id, perspective, row_turn, row_player_id)
 
-        backfill = resolve_accelerated_backfill_payload_when_scoreboard_turn_missing(
+        backfill = accelerated_backfill_host_turn_payload(
             scoreboard_turn=scoreboard_turn,
             settings=turn.settings,
             get_persisted_row=get_persisted_row,
