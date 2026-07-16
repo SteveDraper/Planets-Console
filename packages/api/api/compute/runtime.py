@@ -4,63 +4,56 @@ from __future__ import annotations
 
 import threading
 
-from api.analytics.export_context import AnalyticQueryContext
 from api.compute.diagnostics import compute_diagnostics_enabled, get_compute_diagnostics_controller
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.pools import ComputeWorkerPool, get_compute_worker_pool
 from api.compute.registry import COMPUTE_REGISTRY
 
 _orchestrator_lock = threading.Lock()
-_orchestrators_by_ctx_id: dict[int, ComputeOrchestrator] = {}
+_process_orchestrator: ComputeOrchestrator | None = None
 
 
-def orchestrator_for_context(
-    ctx: AnalyticQueryContext,
+def get_compute_orchestrator(
     *,
     worker_pool: ComputeWorkerPool | None = None,
 ) -> ComputeOrchestrator:
-    """Return a compute orchestrator bound to one query context and the global worker pool."""
-    ctx_id = id(ctx)
+    """Return the process-wide compute orchestrator (lazy singleton)."""
+    global _process_orchestrator
     with _orchestrator_lock:
-        existing = _orchestrators_by_ctx_id.get(ctx_id)
-        if existing is not None:
-            return existing
+        if _process_orchestrator is not None:
+            return _process_orchestrator
         pool = worker_pool if worker_pool is not None else get_compute_worker_pool()
         orchestrator = ComputeOrchestrator(
-            ctx,
             compute_registry=COMPUTE_REGISTRY,
             worker_pool=pool,
         )
-        _orchestrators_by_ctx_id[ctx_id] = orchestrator
+        _process_orchestrator = orchestrator
         if compute_diagnostics_enabled():
-            get_compute_diagnostics_controller().bind_orchestrator(orchestrator, ctx)
+            get_compute_diagnostics_controller().bind_orchestrator(orchestrator)
         return orchestrator
 
 
-def release_orchestrator_for_context(ctx: AnalyticQueryContext) -> None:
-    """Drop a cached orchestrator for one query context (stream teardown)."""
+def shutdown_compute_orchestrator_for_tests() -> None:
+    """Unregister the singleton from the pool and clear process state (tests only)."""
+    global _process_orchestrator
     with _orchestrator_lock:
-        orchestrator = _orchestrators_by_ctx_id.pop(id(ctx), None)
+        orchestrator = _process_orchestrator
+        _process_orchestrator = None
     if orchestrator is None:
         return
-    orchestrator.release_held_scope_leases()
     registration_id = orchestrator.pool_registration_id
     worker_pool = orchestrator.worker_pool
     if registration_id is not None and worker_pool is not None:
         worker_pool.unregister(registration_id)
+    orchestrator.turn_cache.clear()
     get_compute_diagnostics_controller().unbind_orchestrator(orchestrator)
 
 
-def live_orchestrators() -> tuple[ComputeOrchestrator, ...]:
-    """Return all query-context-bound orchestrators currently cached process-wide."""
-    with _orchestrator_lock:
-        return tuple(_orchestrators_by_ctx_id.values())
-
-
 def reset_orchestrators_for_tests() -> None:
-    """Clear cached orchestrators (tests only)."""
-    from api.compute.scope_lease import reset_process_scope_lease_for_tests
+    """Clear the process-wide orchestrator (tests only; keeps historical name)."""
+    shutdown_compute_orchestrator_for_tests()
 
-    with _orchestrator_lock:
-        _orchestrators_by_ctx_id.clear()
-    reset_process_scope_lease_for_tests()
+
+def reset_compute_orchestrator_for_tests() -> None:
+    """Alias for :func:`reset_orchestrators_for_tests`."""
+    shutdown_compute_orchestrator_for_tests()

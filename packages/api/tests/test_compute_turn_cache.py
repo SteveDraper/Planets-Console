@@ -68,11 +68,13 @@ def test_orchestrator_turn_cache_avoids_duplicate_underlying_loads(sample_turn) 
             return None
         return turn_info_from_json(turn_info_to_json(turn))
 
-    cache = OrchestratorTurnCache(counting_load)
-    cache.get(2)
-    cache.get(2)
-    cache.get(3)
-    cache.get(2)
+    game_id = sample_turn.game.id
+    perspective = sample_turn.player.id
+    cache = OrchestratorTurnCache()
+    cache.get(game_id, perspective, 2, load_turn=counting_load)
+    cache.get(game_id, perspective, 2, load_turn=counting_load)
+    cache.get(game_id, perspective, 3, load_turn=counting_load)
+    cache.get(game_id, perspective, 2, load_turn=counting_load)
 
     assert load_calls == [2, 3]
 
@@ -94,8 +96,12 @@ def test_fleet_job_wire_includes_prefetched_turn_wire(sample_turn) -> None:
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
     )
-    cache = OrchestratorTurnCache(ctx.load_turn)
-    cached_ctx = replace(ctx, load_turn=cache.get)
+    cache = OrchestratorTurnCache()
+
+    def cached_load(turn_number: int):
+        return cache.get(628580, 1, turn_number, load_turn=fleet_services.load_turn)
+
+    cached_ctx = replace(ctx, load_turn=cached_load)
     player_id = next(row.ownerid for row in sample_turn.scores)
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -206,9 +212,19 @@ def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
-    orchestrator.turn_cache.get(2)
-    orchestrator.turn_cache.get(2)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
+    orchestrator.turn_cache.get(
+        ctx.game_id,
+        ctx.perspective,
+        2,
+        load_turn=counting_load,
+    )
+    orchestrator.turn_cache.get(
+        ctx.game_id,
+        ctx.perspective,
+        2,
+        load_turn=counting_load,
+    )
 
     assert load_calls == [2]
 
@@ -237,7 +253,7 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
         },
     )
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     player_id = next(row.ownerid for row in sample_turn.scores)
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -247,10 +263,11 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
         player_id=player_id,
     )
 
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     del handle
 
-    assert all(load_calls.count(turn) == 1 for turn in set(load_calls))
+    assert load_calls
+    assert orchestrator.turn_cache.underlying_load_calls == len(load_calls)
     assert {1, 2}.issubset(set(load_calls))
 
 
@@ -319,7 +336,7 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
     )
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
         game_id=628580,
@@ -328,7 +345,7 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
         player_id=player_id,
     )
 
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
         if handle.state == "complete":

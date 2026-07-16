@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Sequence
 
-from api.compute.diagnostics.bindings import BoundOrchestrator
+from api.compute.diagnostics.bindings import BoundOrchestrator, bound_matches_shell
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import (
     CompletionSurface,
@@ -122,13 +122,20 @@ class ConcurrencyTimelineRecorder:
         ready_scopes: tuple[ComputeScope, ...],
         *,
         orchestrator_id: int,
-        game_id: int,
-        perspective: int,
+        game_id: int | None,
+        perspective: int | None,
     ) -> None:
-        """Ready-queue-changed entry: update cache when the active shell matches."""
+        """Ready-queue-changed entry: update cache when the active shell matches.
+
+        Process-wide bindings pass ``game_id`` / ``perspective`` as ``None`` and
+        always refresh against the active shell (node filters still apply).
+        """
         shell = self._active_shell()
-        if shell is None or shell.game_id != game_id or shell.perspective != perspective:
+        if shell is None:
             return
+        if game_id is not None and perspective is not None:
+            if shell.game_id != game_id or shell.perspective != perspective:
+                return
         self.note_ready_queue(
             shell,
             orchestrator_id=orchestrator_id,
@@ -139,8 +146,8 @@ class ConcurrencyTimelineRecorder:
         self,
         *,
         orchestrator_id: int | None,
-        game_id: int,
-        perspective: int,
+        game_id: int | None,
+        perspective: int | None,
         fallback_id: int,
     ) -> Callable[[tuple[ComputeScope, ...]], None]:
         """Return a ready-queue-changed listener closed over one bound orchestrator."""
@@ -292,7 +299,7 @@ class ConcurrencyTimelineRecorder:
             ready_depth = 0
             live_parts: dict[int, int] = {}
             for bound in self._bound_orchestrators():
-                if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
+                if not bound_matches_shell(bound, shell):
                     continue
                 view = bound.orchestrator.diagnostics_snapshot()
                 orch_id = bound.orchestrator.pool_registration_id

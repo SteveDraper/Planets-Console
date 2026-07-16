@@ -255,19 +255,19 @@ def test_pool_tier_one_jobs_run_before_continuations_from_other_scopes(sample_tu
     )
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
 
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     scope_a = _scope_for_player(sample_turn, player_ids[0])
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
     orchestrator.submit(
-        ComputeRequest(scope=scope_a, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=scope_a, priority_band="stream_attached"),
     )
     gate.clear()
     time.sleep(0.05)
     orchestrator.submit(
-        ComputeRequest(scope=scope_b, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=scope_b, priority_band="stream_attached"),
     )
     gate.set()
 
@@ -294,14 +294,14 @@ def test_pool_continuation_jobs_round_robin_across_scopes(sample_turn):
     )
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
 
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     scope_a = _scope_for_player(sample_turn, player_ids[0])
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
-    orchestrator.submit(ComputeRequest(scope=scope_a, priority_band="stream_attached"))
-    orchestrator.submit(ComputeRequest(scope=scope_b, priority_band="stream_attached"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a, priority_band="stream_attached"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b, priority_band="stream_attached"))
     gate.set()
 
     deadline = time.monotonic() + 3.0
@@ -340,7 +340,7 @@ def test_pool_dispatches_interpreter_backend(sample_turn):
     compute_registry = build_compute_registry((_interpreter_backend_registration(),))
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
     scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -350,7 +350,7 @@ def test_pool_dispatches_interpreter_backend(sample_turn):
         player_id=scope.player_id,
     )
 
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
@@ -473,7 +473,7 @@ def test_pool_dispatches_process_backend(sample_turn):
     compute_registry = build_compute_registry((_process_backend_registration(),))
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
     scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -483,7 +483,7 @@ def test_pool_dispatches_process_backend(sample_turn):
         player_id=scope.player_id,
     )
 
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
@@ -545,24 +545,22 @@ def _gated_single_step_thread_registration(
 
 
 def test_two_orchestrators_shared_pool_interleaved_submits(sample_turn):
-    """Two orchestrators on one pool each receive their own pool completions."""
+    """One orchestrator on a shared pool completes interleaved cross-scope submits."""
     gate = threading.Event()
     compute_registry = build_compute_registry((_gated_single_step_thread_registration(gate),))
-    ctx_a = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
-    ctx_b = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator_a = ComputeOrchestrator(ctx_a, compute_registry=compute_registry, worker_pool=pool)
-    orchestrator_b = ComputeOrchestrator(ctx_b, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
 
     player_ids = [row.ownerid for row in sample_turn.scores[:2]]
     scope_a = _scope_for_player(sample_turn, player_ids[0])
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
     gate.set()
-    handle_a = orchestrator_a.submit(ComputeRequest(scope=scope_a))
+    handle_a = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a))
     gate.clear()
     time.sleep(0.05)
-    handle_b = orchestrator_b.submit(ComputeRequest(scope=scope_b))
+    handle_b = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b))
     gate.set()
 
     deadline = time.monotonic() + 3.0
@@ -574,10 +572,8 @@ def test_two_orchestrators_shared_pool_interleaved_submits(sample_turn):
     pool.shutdown()
     assert handle_a.state == "complete", handle_a.error
     assert handle_b.state == "complete", handle_b.error
-    assert orchestrator_a.nodes[scope_a].result_wire == {"result": player_ids[0]}
-    assert orchestrator_b.nodes[scope_b].result_wire == {"result": player_ids[1]}
-    assert scope_b not in orchestrator_a.nodes
-    assert scope_a not in orchestrator_b.nodes
+    assert orchestrator.nodes[scope_a].result_wire == {"result": player_ids[0]}
+    assert orchestrator.nodes[scope_b].result_wire == {"result": player_ids[1]}
 
 
 def test_concurrent_submit_with_multiple_pool_workers(sample_turn):
@@ -585,7 +581,7 @@ def test_concurrent_submit_with_multiple_pool_workers(sample_turn):
     compute_registry = build_compute_registry((_single_step_thread_registration(),))
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=2)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
 
     player_ids = [row.ownerid for row in sample_turn.scores[:4]]
     scopes = [_scope_for_player(sample_turn, player_id) for player_id in player_ids]
@@ -594,7 +590,7 @@ def test_concurrent_submit_with_multiple_pool_workers(sample_turn):
 
     def submit_scope(scope: ComputeScope) -> None:
         try:
-            handle = orchestrator.submit(ComputeRequest(scope=scope))
+            handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
             deadline = time.monotonic() + 3.0
             while time.monotonic() < deadline:
                 if handle.state in {"complete", "failed"}:
@@ -680,7 +676,7 @@ def test_pool_dispatches_fleet_materialization_leg_interpreter(sample_turn):
     compute_registry = build_compute_registry((_fleet_materialization_leg_registration(),))
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
     scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -690,7 +686,7 @@ def test_pool_dispatches_fleet_materialization_leg_interpreter(sample_turn):
         player_id=scope.player_id,
     )
 
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:

@@ -217,10 +217,10 @@ def test_orchestrator_runs_diamond_dag_in_dependency_order(sample_turn):
     )
     export_scope = _export_scope(sample_turn)
     compute_registry = _diamond_compute_registry()
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
 
     root_scope = _compute_scope(ROOT_ID, export_scope)
-    handle = orchestrator.submit(ComputeRequest(scope=root_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert handle.state == "complete"
     assert handle.result_wire == {"result": ROOT_ID}
@@ -258,13 +258,12 @@ def test_blocked_nodes_are_not_ready_until_dependencies_complete(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
 
     root_scope = _compute_scope(ROOT_ID, export_scope)
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
@@ -287,13 +286,12 @@ def test_attach_inflight_while_leader_not_terminal(sample_turn):
     thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
 
     ready_orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=None,
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
-    ready_leader = ready_orchestrator.submit(ComputeRequest(scope=shared_scope))
-    ready_waiter = ready_orchestrator.submit(ComputeRequest(scope=shared_scope))
+    ready_leader = ready_orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    ready_waiter = ready_orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert ready_orchestrator.nodes[shared_scope].state == "ready"
     assert ready_leader.state == "ready"
@@ -308,17 +306,113 @@ def test_attach_inflight_while_leader_not_terminal(sample_turn):
         )
     )
     deps_orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=diamond_registry,
         pool_submitter=lambda _node, _step: None,
     )
     root_scope = _compute_scope(ROOT_ID, export_scope)
-    deps_leader = deps_orchestrator.submit(ComputeRequest(scope=root_scope))
-    deps_waiter = deps_orchestrator.submit(ComputeRequest(scope=root_scope))
+    deps_leader = deps_orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
+    deps_waiter = deps_orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert deps_orchestrator.nodes[root_scope].state == "waiting_deps"
     assert deps_leader.state == "waiting_deps"
     assert deps_waiter.state == "attach_inflight"
+
+
+def test_attach_adopts_priority_band_before_execution_seal(sample_turn):
+    """Higher-priority attach upgrades band until expensive execution seals (#209)."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    # No pool submitter: node stays ready (unsealed) so adopt can still run.
+    orchestrator = ComputeOrchestrator(
+        compute_registry=thread_registry,
+        pool_submitter=None,
+    )
+    orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="background"),
+    )
+    assert orchestrator.nodes[shared_scope].priority_band == "background"
+    assert orchestrator.nodes[shared_scope].execution_sealed is False
+
+    waiter = orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="stream_attached"),
+    )
+    assert waiter.state == "attach_inflight"
+    assert orchestrator.nodes[shared_scope].priority_band == "stream_attached"
+
+
+def test_attach_does_not_adopt_priority_after_execution_seal(sample_turn):
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    pool_submissions: list[str] = []
+
+    def pool_submitter(node, _step) -> None:
+        pool_submissions.append(node.scope.analytic_id)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=thread_registry,
+        pool_submitter=pool_submitter,
+    )
+    orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="background"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[shared_scope].execution_sealed is True
+    assert orchestrator.nodes[shared_scope].priority_band == "background"
+
+    waiter = orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="stream_attached"),
+    )
+    assert waiter.state == "attach_inflight"
+    assert orchestrator.nodes[shared_scope].priority_band == "background"
+    assert pool_submissions == [SHARED_ID]
+
+
+def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
+    """Scores row cancel must not fail fleet dependents on the singleton DAG (#209)."""
+    from api.compute.errors import ComputeScopeAbortedError
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    compute_registry = build_compute_registry(
+        (
+            _thread_compute_registration(ROOT_ID),
+            _thread_compute_registration(BRANCH_B_ID),
+            _thread_compute_registration(BRANCH_C_ID),
+            _thread_compute_registration(SHARED_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        pool_submitter=lambda _node, _step: None,
+    )
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
+
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+
+    assert orchestrator.abort_scope(
+        shared_scope,
+        ComputeScopeAbortedError("scores inference row run cancelled"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].error is None
 
 
 def test_attach_inflight_does_not_double_pool_workers(sample_turn):
@@ -334,14 +428,13 @@ def test_attach_inflight_does_not_double_pool_workers(sample_turn):
         pool_submissions.append(node.scope.analytic_id)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    leader = orchestrator.submit(ComputeRequest(scope=shared_scope))
-    waiter = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    leader = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    waiter = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert leader.state == "running"
     assert waiter.state == "attach_inflight"
@@ -382,14 +475,13 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
         run_steps=(("materialize", run_step),),
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=build_compute_registry((registration,)),
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    first = orchestrator.submit(ComputeRequest(scope=shared_scope))
-    duplicate = orchestrator.submit(ComputeRequest(scope=shared_scope))
-    fresh = orchestrator.submit(ComputeRequest(scope=shared_scope, force_fresh=True))
+    first = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    duplicate = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    fresh = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
 
     assert run_payloads == [1, 2]
     assert first.result_wire == {"run": 1}
@@ -428,13 +520,12 @@ def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
         run_steps=(("materialize", run_step),),
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=build_compute_registry((registration,)),
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    failed = orchestrator.submit(ComputeRequest(scope=shared_scope))
-    fresh = orchestrator.submit(ComputeRequest(scope=shared_scope, force_fresh=True))
+    failed = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    fresh = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
 
     assert failed.state == "failed"
     assert isinstance(failed.error, ValueError)
@@ -476,7 +567,6 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
     )
     compute_registry = build_compute_registry(registrations)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=lambda _node, _step: None,
     )
@@ -486,7 +576,7 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
     branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
 
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert inline_calls == []
     assert orchestrator.nodes[root_scope].state == "waiting_deps"
@@ -519,7 +609,6 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=lambda _node, _step: None,
     )
@@ -529,7 +618,7 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
     branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
 
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     shared_failure = RuntimeError("shared step failed")
     orchestrator.complete_pool_step(shared_scope, error=shared_failure)
@@ -574,10 +663,10 @@ def test_leader_handle_exposes_error_after_inline_failure(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "failed"
     assert handle.error is inline_failure
@@ -593,10 +682,10 @@ def test_orchestrator_runs_multi_step_inline_profile_in_order(sample_turn):
     compute_registry = build_compute_registry(
         (_two_step_inline_compute_registration(SHARED_ID, step_calls),)
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
     assert handle.result_wire == {"result": "tier2", "scope": SHARED_ID}
@@ -615,13 +704,12 @@ def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
     thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
     pool_failure = RuntimeError("pool step failed")
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=lambda _node, _step: None,
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
 
     orchestrator.complete_pool_step(shared_scope, error=pool_failure)
@@ -722,10 +810,10 @@ def test_wire_builder_receives_dependency_slices(sample_turn):
             _inline_compute_registration(SHARED_ID),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     root_scope = _compute_scope(ROOT_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=root_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert handle.state == "complete"
     assert len(captured) == 1
@@ -759,13 +847,12 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
     assert pool_submissions == [(SHARED_ID, backend)]
     assert orchestrator.nodes[shared_scope].generation_at_submit == 0
@@ -823,9 +910,9 @@ def test_stale_epoch_discards_result_and_requeues_inline(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
     assert run_attempts == 2
@@ -860,10 +947,10 @@ def test_orchestrator_persists_after_inline_node_completes(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
     assert orchestrator.metrics.persist_calls == 1
@@ -909,10 +996,10 @@ def test_step_outcome_persist_calls_persistence_policy(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
     assert handle.result_wire == {"result": SHARED_ID}
@@ -958,7 +1045,7 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=registry)
+    orchestrator = ComputeOrchestrator(compute_registry=registry)
     scope = _compute_scope(SHARED_ID, export_scope)
 
     def on_complete(_scope, node) -> None:
@@ -967,7 +1054,7 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
         assert durable_ready is True
 
     orchestrator.register_node_complete_listener(on_complete)
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     assert handle.state == "complete"
     assert events == ["persist", "complete_listener", "notify"]
@@ -987,10 +1074,10 @@ def test_step_outcome_complete_skips_persistence_policy(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
     assert handle.result_wire == {"result": SHARED_ID}
@@ -1034,10 +1121,10 @@ def test_step_outcome_continue_requeues_same_step_kind(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
     assert run_attempts == 3
@@ -1086,11 +1173,11 @@ def test_submit_entry_step_kind_selects_profile_step(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=compute_registry)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(
-        ComputeRequest(scope=shared_scope, step_kind="tier_solve"),
+        ComputeRequest(ctx=ctx, scope=shared_scope, step_kind="tier_solve"),
     )
 
     assert handle.state == "complete"
@@ -1120,7 +1207,6 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
@@ -1133,7 +1219,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
     branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
 
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert orchestrator.nodes[shared_scope].state == "running"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
@@ -1165,7 +1251,6 @@ def test_pool_submitter_never_runs_while_orchestrator_lock_is_held(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=lambda *_args, **_kwargs: None,
     )
@@ -1178,7 +1263,7 @@ def test_pool_submitter_never_runs_while_orchestrator_lock_is_held(sample_turn):
     orchestrator._pool_submitter = pool_submitter  # noqa: SLF001
 
     root_scope = _compute_scope(ROOT_ID, export_scope)
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     assert submit_calls >= 1
 
 
@@ -1220,13 +1305,12 @@ def test_inline_job_wire_builder_never_runs_while_orchestrator_lock_is_held(samp
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=registry,
         pool_submitter=lambda *_args, **_kwargs: None,
     )
     orchestrator_holder["orch"] = orchestrator
     scope = _compute_scope(SHARED_ID, export_scope)
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert orchestrator.nodes[scope].state == "complete"
     assert builder_saw_lock_held is False
 
@@ -1257,10 +1341,10 @@ def test_persist_never_runs_while_orchestrator_lock_is_held(sample_turn):
             ),
         )
     )
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=registry)
+    orchestrator = ComputeOrchestrator(compute_registry=registry)
     orchestrator_holder["orch"] = orchestrator
     scope = _compute_scope(SHARED_ID, export_scope)
-    handle = orchestrator.submit(ComputeRequest(scope=scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert handle.state == "complete"
     assert persist_saw_lock_held is False
 
@@ -1311,13 +1395,17 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=registry,
         pool_submitter=pool_submitter,
     )
     scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator.submit(
-        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached")
+        ComputeRequest(
+            ctx=ctx,
+            scope=scope,
+            step_kind="tier_solve",
+            priority_band="stream_attached",
+        )
     )
     assert pool_submissions == [scope]
     assert orchestrator.nodes[scope].state == "running"
@@ -1393,12 +1481,11 @@ def test_persist_deferred_parks_waiting_deps_and_force_freshes_dependency(sample
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=registry,
         pool_submitter=pool_submitter,
     )
 
-    orchestrator.submit(ComputeRequest(scope=branch_b_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
     assert pool_submissions == [(SHARED_ID, "materialize")]
     assert orchestrator.nodes[shared_scope].state == "running"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
@@ -1468,7 +1555,6 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
@@ -1481,7 +1567,7 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
     branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
 
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
 
     view = orchestrator.diagnostics_snapshot()
@@ -1512,14 +1598,13 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
         (_pool_compute_registration(SHARED_ID, backend="thread"),)
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
     unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not is_paused)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    orchestrator.submit(ComputeRequest(scope=shared_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     is_paused = True
     orchestrator.complete_pool_step(shared_scope, result_wire=StepResult(outcome="continue"))
 
@@ -1578,11 +1663,10 @@ def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn
         ),
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=build_compute_registry((registration,)),
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
-    handle = orchestrator.submit(ComputeRequest(scope=shared_scope))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert calls == {"materialize": 1, "tier": 1}
     assert handle.state == "complete"
@@ -1612,7 +1696,6 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
         )
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
@@ -1626,7 +1709,7 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
     branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
 
-    orchestrator.submit(ComputeRequest(scope=root_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     assert pool_submissions == [SHARED_ID]
 
     pause_blocks = True

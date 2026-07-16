@@ -46,12 +46,8 @@ def _install_admit_only_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTable
     stub = _AdmitOnlyOrchestrator()
 
     monkeypatch.setattr(
-        "api.analytics.fleet.fleet_table_stream_scheduler.orchestrator_for_context",
-        lambda ctx: stub,
-    )
-    monkeypatch.setattr(
-        "api.analytics.fleet.fleet_table_stream_scheduler.release_orchestrator_for_context",
-        lambda ctx: None,
+        "api.analytics.fleet.fleet_table_stream_scheduler.get_compute_orchestrator",
+        lambda: stub,
     )
     monkeypatch.setattr(
         "api.analytics.fleet.fleet_table_stream_rows.get_fleet_table_stream_scheduler",

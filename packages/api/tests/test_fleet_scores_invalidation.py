@@ -369,7 +369,6 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
         fleet_turn=111,
         player_id=8,
         materialization_version=FLEET_MATERIALIZATION_VERSION,
-        source_context_id=id(query_context),
     )
     assert (
         scheduler.should_reschedule_scores_row_after_fleet_persist(
@@ -536,7 +535,6 @@ def test_fleet_ledger_persist_reschedules_when_stream_fleet_version_differs(
         fleet_turn=111,
         player_id=8,
         materialization_version=FLEET_MATERIALIZATION_VERSION,
-        source_context_id=id(query_context),
     )
     assert (
         scheduler.should_reschedule_scores_row_after_fleet_persist(
@@ -622,7 +620,6 @@ def test_fleet_ledger_persist_skips_when_stream_wire_lacks_version_stamp(
         fleet_turn=111,
         player_id=8,
         materialization_version=FLEET_MATERIALIZATION_VERSION,
-        source_context_id=id(query_context),
     )
     assert (
         scheduler.should_reschedule_scores_row_after_fleet_persist(
@@ -637,7 +634,7 @@ def test_fleet_ledger_persist_skips_when_stream_wire_lacks_version_stamp(
 def test_fleet_ledger_persist_reschedules_for_external_persist_while_stream_fleet_dep_in_flight(
     memory_backend,
 ):
-    """External fleet persist should reschedule even when the stream dep is still running."""
+    """In-DAG fleet work skips external persist reschedule while the dep is non-terminal."""
     from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
     from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -803,8 +800,8 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
     assert persistence.invalidation_generation(628580, 1, 8) == gen_before + 1
 
 
-def test_parked_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_turn):
-    """Open-evidence recovery parks fleet; only a real failed fleet cascades.
+def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_turn):
+    """Persist recovery leaves fleet waiting_deps; only a real failed fleet cascades.
 
     PersistDeferredError recovery leaves the fleet node ``waiting_deps`` (not
     ``failed``), so scores dependents stay ``waiting_deps``. A normal fleet
@@ -818,8 +815,8 @@ def test_parked_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_tur
     from api.compute.registry import build_compute_registry
 
     registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
-    ctx = make_analytic_query_context(sample_turn, TurnAnalyticsOptions(), export_services={})
-    orchestrator = ComputeOrchestrator(ctx, compute_registry=registry)
+    make_analytic_query_context(sample_turn, TurnAnalyticsOptions(), export_services={})
+    orchestrator = ComputeOrchestrator(compute_registry=registry)
 
     fleet_scope = ComputeScope(
         analytic_id="fleet",
@@ -836,7 +833,7 @@ def test_parked_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_tur
         player_id=2,
     )
 
-    parked_fleet = ComputeNodeRun(
+    waiting_fleet = ComputeNodeRun(
         scope=fleet_scope,
         dependency_scopes=(),
         state="waiting_deps",
@@ -846,7 +843,7 @@ def test_parked_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_tur
         dependency_scopes=(fleet_scope,),
         state="waiting_deps",
     )
-    orchestrator._nodes[fleet_scope] = parked_fleet
+    orchestrator._nodes[fleet_scope] = waiting_fleet
     orchestrator._nodes[scores_scope] = waiting_scores
 
     orchestrator._refresh_node_readiness(waiting_scores)

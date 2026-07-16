@@ -60,6 +60,7 @@ _COMPUTE_ORCHESTRATOR_EXPORTS = frozenset(
         "ComputeRequest",
         "NodeState",
         "OrchestratorMetrics",
+        "OrchestrationBundle",
     }
 )
 
@@ -110,6 +111,7 @@ __all__ = [
     "ComputeWorkerPool",
     "DependencyOutputs",
     "NodeState",
+    "OrchestrationBundle",
     "OrchestratorMetrics",
     "PersistDeferredError",
     "PersistDependencyRecovery",

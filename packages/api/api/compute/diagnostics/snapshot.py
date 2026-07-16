@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from api.compute.diagnostics.bindings import BoundOrchestrator
+from api.compute.diagnostics.bindings import BoundOrchestrator, bound_matches_shell
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionRecord
 from api.compute.diagnostics.in_flight import InFlightPoolExecution, in_flight_to_wire
@@ -169,7 +169,7 @@ def build_compute_diagnostics_snapshot(
     dag_nodes: list[dict[str, Any]] = []
     ready_queue: list[dict[str, Any]] = []
     for bound in bound_orchestrators:
-        if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
+        if not bound_matches_shell(bound, shell):
             continue
         orchestrator_view = bound.orchestrator.diagnostics_snapshot()
         orch_id = bound.orchestrator.pool_registration_id

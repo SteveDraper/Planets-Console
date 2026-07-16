@@ -256,7 +256,7 @@ def _submit_probe_players(orchestrator, compute_registry, ctx, sample_turn, play
         )
         handles.append(
             orchestrator.submit(
-                ComputeRequest(scope=scope, step_kind="materialize", force_fresh=True),
+                ComputeRequest(ctx=ctx, scope=scope, step_kind="materialize", force_fresh=True),
             )
         )
     return handles
@@ -271,7 +271,6 @@ def test_orchestrator_serial_inline_plants_class_a_shape(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -314,7 +313,6 @@ def test_orchestrator_freeze_holds_ready_set_plants_class_b_shape(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=2)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -366,7 +364,6 @@ def test_orchestrator_parallel_thread_plants_class_c_in_flight(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=3)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -427,7 +424,6 @@ def test_fail_from_ready_does_not_inflate_enqueue_ready_depth(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=2)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -482,7 +478,6 @@ def test_ready_to_waiting_deps_notifies_ready_queue_depth(sample_turn):
         registry=merge_export_registry(_probe_export_catalog()),
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=lambda _node, _step: None,
     )

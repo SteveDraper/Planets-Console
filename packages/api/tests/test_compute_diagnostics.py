@@ -32,12 +32,8 @@ from api.compute.diagnostics.scope import (
 )
 from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.orchestrator import ComputeNodeRun
-from api.compute.pools import PoolWorkItem
-from api.compute.runtime import (
-    orchestrator_for_context,
-    release_orchestrator_for_context,
-    reset_orchestrators_for_tests,
-)
+from api.compute.pools import ComputePriorityBand, PoolWorkItem
+from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -100,7 +96,6 @@ def test_freeze_dispatch_gate_blocks_frozen_scope(sample_turn):
     ctx = make_fixture_query_context(sample_turn)
     pool = reset_compute_worker_pool_for_tests(worker_count=1)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=build_compute_registry(()),
         worker_pool=pool,
     )
@@ -193,7 +188,6 @@ def _bound_pool_orchestrator(sample_turn):
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -215,7 +209,7 @@ def _bound_pool_orchestrator(sample_turn):
         analytic_id=SHARED_ID,
         scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
     )
-    return controller, orchestrator, shell, scope, pool_submissions
+    return controller, orchestrator, shell, scope, pool_submissions, ctx
 
 
 def _player_scope(
@@ -239,10 +233,12 @@ def _player_scope(
 
 
 def test_disarm_redispatches_ready_node_without_unrelated_completion(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
     assert orchestrator.ready_scopes() == (scope,)
@@ -254,10 +250,12 @@ def test_disarm_redispatches_ready_node_without_unrelated_completion(sample_turn
 
 def test_allowlist_does_not_free_run_ready_node(sample_turn):
     """Focus allowlist must not redispatch; work advances only via single-step."""
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
 
@@ -267,10 +265,12 @@ def test_allowlist_does_not_free_run_ready_node(sample_turn):
 
 
 def test_single_step_empty_allowlist_is_noop(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
 
     assert controller.single_step(shell) is False
@@ -287,7 +287,9 @@ def test_single_step_empty_allowlist_is_noop(sample_turn):
 
 def test_single_step_nothing_steppable_is_noop(sample_turn):
     """Non-empty focus + freeze must not arm latent grants when preview has no target."""
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({scope.player_id}))
@@ -356,7 +358,6 @@ def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sam
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -377,7 +378,12 @@ def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sam
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({scope.player_id}))
     orchestrator.submit(
-        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached")
+        ComputeRequest(
+            ctx=ctx,
+            scope=scope,
+            step_kind="tier_solve",
+            priority_band="stream_attached",
+        )
     )
     assert orchestrator.nodes[scope].state == "ready"
     assert controller.single_step(shell) is True
@@ -456,7 +462,6 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -482,7 +487,12 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({scope.player_id}))
     orchestrator.submit(
-        ComputeRequest(scope=scope, step_kind="tier_solve", priority_band="stream_attached")
+        ComputeRequest(
+            ctx=ctx,
+            scope=scope,
+            step_kind="tier_solve",
+            priority_band="stream_attached",
+        )
     )
     assert controller.single_step(shell) is True
     assert pool_submissions == [scope]
@@ -530,11 +540,13 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
 
 
 def test_single_step_redispatches_ready_node_into_pool(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({scope.player_id}))
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
 
@@ -567,7 +579,6 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -592,7 +603,7 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({inline_scope.player_id}))
     handle = orchestrator.submit(
-        ComputeRequest(scope=inline_scope, step_kind=SCORES_MATERIALIZE),
+        ComputeRequest(ctx=ctx, scope=inline_scope, step_kind=SCORES_MATERIALIZE),
     )
     assert handle.state == "ready"
     assert orchestrator.nodes[inline_scope].state == "ready"
@@ -635,7 +646,6 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -661,8 +671,8 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({scope_a.player_id, scope_b.player_id}))
-    orchestrator.submit(ComputeRequest(scope=scope_a))
-    orchestrator.submit(ComputeRequest(scope=scope_b))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b))
     assert pool_submissions == []
     assert orchestrator.nodes[scope_a].state == "ready"
     assert orchestrator.nodes[scope_b].state == "ready"
@@ -690,7 +700,6 @@ def test_single_step_only_releases_focus_ready_scope(sample_turn):
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -717,8 +726,8 @@ def test_single_step_only_releases_focus_ready_scope(sample_turn):
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({focus_scope.player_id}))
     # Submit non-focus first so ready-queue order would prefer it without focus filtering.
-    orchestrator.submit(ComputeRequest(scope=other_scope))
-    orchestrator.submit(ComputeRequest(scope=focus_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=other_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=focus_scope))
     assert pool_submissions == []
 
     assert controller.single_step(shell) is True
@@ -736,7 +745,6 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -772,7 +780,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({ready_scope.player_id, held_scope.player_id}))
-    orchestrator.submit(ComputeRequest(scope=ready_scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=ready_scope))
     pool.enqueue_for_tests(held_item)
     assert orchestrator.nodes[ready_scope].state == "ready"
 
@@ -807,7 +815,6 @@ def test_single_step_prefers_stream_attached_ready_over_background_held(sample_t
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -843,7 +850,9 @@ def test_single_step_prefers_stream_attached_ready_over_background_held(sample_t
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({stream_scope.player_id, held_scope.player_id}))
-    orchestrator.submit(ComputeRequest(scope=stream_scope, priority_band="stream_attached"))
+    orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=stream_scope, priority_band="stream_attached"),
+    )
     pool.enqueue_for_tests(held_item)
     assert orchestrator.nodes[stream_scope].state == "ready"
 
@@ -859,53 +868,32 @@ def test_single_step_prefers_stream_attached_ready_over_background_held(sample_t
     assert controller._pool_item_is_runnable(held_item) is False
 
 
-def test_single_step_prefers_stream_attached_ready_across_orchestrators(sample_turn):
-    """Band order wins even when a lower-band orchestrator was bound first."""
+def test_single_step_prefers_stream_attached_ready_on_singleton(sample_turn):
+    """Band order wins when background then stream_attached share one orchestrator."""
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
-    background_submissions: list[ComputeScope] = []
-    stream_submissions: list[ComputeScope] = []
+    submissions: list[tuple[ComputeScope, ComputePriorityBand]] = []
 
-    def background_submitter(node, _step) -> None:
-        background_submissions.append(node.scope)
+    def pool_submitter(node, _step) -> None:
+        submissions.append((node.scope, node.priority_band))
 
-    def stream_submitter(node, _step) -> None:
-        stream_submissions.append(node.scope)
-
-    background_ctx = make_fixture_query_context(
+    ctx = make_fixture_query_context(
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    stream_ctx = make_fixture_query_context(
-        sample_turn,
-        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
-    )
-    background_orch = ComputeOrchestrator(
-        background_ctx,
+    orchestrator = ComputeOrchestrator(
         compute_registry=compute_registry,
-        pool_submitter=background_submitter,
-    )
-    stream_orch = ComputeOrchestrator(
-        stream_ctx,
-        compute_registry=compute_registry,
-        pool_submitter=stream_submitter,
+        pool_submitter=pool_submitter,
     )
     controller = get_compute_diagnostics_controller()
-    controller.bind_orchestrator(background_orch, background_ctx)
-    controller.bind_orchestrator(stream_orch, stream_ctx)
+    controller.bind_orchestrator(orchestrator, ctx)
     shell = ShellContextKey(
-        game_id=background_ctx.game_id,
-        perspective=background_ctx.perspective,
-        turn=background_ctx.ambient_turn,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
     )
     player_id = sample_turn.scores[0].ownerid
-    background_scope = _player_scope(
-        background_ctx,
-        player_id=player_id,
-        analytic_id=SHARED_ID,
-        scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
-    )
-    stream_scope = _player_scope(
-        stream_ctx,
+    shared_scope = _player_scope(
+        ctx,
         player_id=player_id,
         analytic_id=SHARED_ID,
         scope_key_spec=compute_registry[SHARED_ID].scope_key_spec,
@@ -913,23 +901,25 @@ def test_single_step_prefers_stream_attached_ready_across_orchestrators(sample_t
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({player_id}))
-    background_orch.submit(ComputeRequest(scope=background_scope, priority_band="background"))
-    stream_orch.submit(ComputeRequest(scope=stream_scope, priority_band="stream_attached"))
-    assert background_submissions == []
-    assert stream_submissions == []
+    orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="background"),
+    )
+    orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="stream_attached"),
+    )
+    assert submissions == []
 
     preview, reason = controller.preview_single_step(shell)
     assert reason is None
     assert preview is not None
     assert preview.priority_band == "stream_attached"
     assert preview.source == "would_dispatch"
-    assert preview.scope_key == format_compute_scope_key(stream_scope)
+    assert preview.scope_key == format_compute_scope_key(shared_scope)
 
     assert controller.single_step(shell) is True
-    assert stream_submissions == [stream_scope]
-    assert background_submissions == []
-    assert stream_orch.nodes[stream_scope].state == "running"
-    assert background_orch.nodes[background_scope].state == "ready"
+    assert submissions == [(shared_scope, "stream_attached")]
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[shared_scope].priority_band == "stream_attached"
 
 
 def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
@@ -945,12 +935,10 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orch_a = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
     orch_b = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -1018,7 +1006,6 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -1040,7 +1027,7 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
     )
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({player_id}))
-    orchestrator.submit(ComputeRequest(scope=scope, priority_band="stream_attached"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="stream_attached"))
     assert orchestrator.nodes[scope].state == "ready"
 
     assert controller.single_step(shell) is False
@@ -1064,7 +1051,6 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -1311,7 +1297,6 @@ def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
     ctx = make_fixture_query_context(sample_turn)
     pool = reset_compute_worker_pool_for_tests(worker_count=worker_count)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -1372,7 +1357,7 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
 
 def test_snapshot_wire_shape_includes_required_sections(sample_turn):
     ctx = make_fixture_query_context(sample_turn)
-    orchestrator_for_context(ctx)
+    get_compute_orchestrator()
     controller = get_compute_diagnostics_controller()
     shell = ShellContextKey(
         game_id=ctx.game_id,
@@ -1665,7 +1650,7 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
 
 
 def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample_turn):
-    """Stream teardown drops BoundOrchestrator, listeners, and snapshot DAG nodes."""
+    """Singleton shutdown drops BoundOrchestrator, listeners, and snapshot DAG nodes."""
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import merge_export_registry
     from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
@@ -1681,7 +1666,6 @@ def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -1706,50 +1690,49 @@ def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample
         analytic_id="scores",
         scope_key_spec=compute_registry["scores"].scope_key_spec,
     )
-    orchestrator.submit(ComputeRequest(scope=scope, step_kind=SCORES_MATERIALIZE))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_MATERIALIZE))
     wire_before = snapshot_to_wire(controller.snapshot(shell))
     assert wire_before["dagNodes"]
 
-    # Mimic runtime release: unbind after dropping the cached orchestrator.
     controller.unbind_orchestrator(orchestrator)
+    reset_orchestrators_for_tests()
 
     assert controller._bound_orchestrators == []
     assert orchestrator._observers.dispatch_gates == []
     assert orchestrator._observers._step_complete_listeners == []
     wire_after = snapshot_to_wire(controller.snapshot(shell))
     assert wire_after["dagNodes"] == []
-    # Safe when already unbound.
-    controller.unbind_orchestrator(orchestrator)
+    # Safe when already shut down.
+    reset_orchestrators_for_tests()
 
 
-def test_release_orchestrator_for_context_unbinds_diagnostics(sample_turn):
-    """Runtime release drops diagnostics binding and unregister callables."""
-    ctx = make_fixture_query_context(sample_turn)
+def test_shutdown_orchestrator_unbinds_diagnostics(sample_turn):
+    """Runtime shutdown drops diagnostics binding and unregister callables."""
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
-    orchestrator = orchestrator_for_context(ctx, worker_pool=pool)
+    orchestrator = get_compute_orchestrator(worker_pool=pool)
     controller = get_compute_diagnostics_controller()
     assert len(controller._bound_orchestrators) == 1
     assert len(orchestrator._observers.dispatch_gates) == 1
     assert len(orchestrator._observers._step_complete_listeners) == 1
 
-    release_orchestrator_for_context(ctx)
+    reset_orchestrators_for_tests()
 
     assert controller._bound_orchestrators == []
     assert orchestrator._observers.dispatch_gates == []
     assert orchestrator._observers._step_complete_listeners == []
-    # Safe when already released / never bound.
-    release_orchestrator_for_context(ctx)
+    # Safe when already shut down.
+    reset_orchestrators_for_tests()
 
 
 def test_stream_churn_does_not_grow_bound_orchestrators(sample_turn):
-    """Repeated bind/release via runtime must not accumulate diagnostics bindings."""
+    """Repeated get/shutdown via runtime must not accumulate diagnostics bindings."""
     controller = get_compute_diagnostics_controller()
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     for _ in range(8):
-        ctx = make_fixture_query_context(sample_turn)
-        orchestrator_for_context(ctx, worker_pool=pool)
+        make_fixture_query_context(sample_turn)
+        get_compute_orchestrator(worker_pool=pool)
         assert len(controller._bound_orchestrators) == 1
-        release_orchestrator_for_context(ctx)
+        reset_orchestrators_for_tests()
         assert controller._bound_orchestrators == []
     assert controller._bound_orchestrators == []
 
@@ -1757,11 +1740,10 @@ def test_stream_churn_does_not_grow_bound_orchestrators(sample_turn):
 def test_unbind_is_noop_when_diagnostics_disabled(sample_turn):
     set_config(ApiConfig(storage_backend="ephemeral", compute_diagnostics=False))
     controller = get_compute_diagnostics_controller()
-    ctx = make_fixture_query_context(sample_turn)
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
-    orchestrator = orchestrator_for_context(ctx, worker_pool=pool)
+    orchestrator = get_compute_orchestrator(worker_pool=pool)
     assert controller._bound_orchestrators == []
-    release_orchestrator_for_context(ctx)
+    reset_orchestrators_for_tests()
     assert controller._bound_orchestrators == []
     controller.unbind_orchestrator(orchestrator)
 
@@ -1786,7 +1768,6 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -1810,7 +1791,7 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     )
 
     handle = orchestrator.submit(
-        ComputeRequest(scope=scope, step_kind=SCORES_MATERIALIZE),
+        ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_MATERIALIZE),
     )
     assert handle.state == "complete"
 
@@ -1859,7 +1840,6 @@ def test_concurrency_timeline_records_inline_lifecycle_and_shares_finish_sink(sa
     )
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )
@@ -1883,7 +1863,7 @@ def test_concurrency_timeline_records_inline_lifecycle_and_shares_finish_sink(sa
     )
 
     handle = orchestrator.submit(
-        ComputeRequest(scope=scope, step_kind=SCORES_MATERIALIZE),
+        ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_MATERIALIZE),
     )
     assert handle.state == "complete"
 
@@ -2003,9 +1983,11 @@ def test_start_frozen_arms_on_orchestrator_bind(sample_turn):
             compute_diagnostics_start_frozen=True,
         )
     )
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
     assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is True
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
 
@@ -2024,10 +2006,12 @@ def test_stream_allowlist_disarms_freeze_on_game_change_without_diagnostics_endp
 
 
 def test_stream_allowlist_game_change_redispatches_ready_node(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
 
@@ -2082,7 +2066,7 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
     Sticky freeze across perspective change must leave the other perspective
     free-running; only compute diagnostic scope is gated.
     """
-    controller, orchestrator, shell, scope, _pool_submissions = _bound_pool_orchestrator(
+    controller, orchestrator, shell, scope, _pool_submissions, _ctx = _bound_pool_orchestrator(
         sample_turn
     )
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -2131,10 +2115,12 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
 
 
 def test_sticky_freeze_game_change_redispatches_ready_node(sample_turn):
-    controller, orchestrator, shell, scope, pool_submissions = _bound_pool_orchestrator(sample_turn)
+    controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
+        sample_turn
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    orchestrator.submit(ComputeRequest(scope=scope))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert pool_submissions == []
     assert orchestrator.nodes[scope].state == "ready"
 
@@ -2177,7 +2163,6 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
 
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
-        ancestor_ctx,
         compute_registry=compute_registry,
         worker_pool=pool,
     )

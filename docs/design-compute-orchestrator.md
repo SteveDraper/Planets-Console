@@ -49,7 +49,7 @@ Think of the backend as two cooperating planes:
 
 **Persistence** is conceptually a durable cache of `compute scope → result`, but **schema, write gates, merge, and invalidation** stay per analytic via registered **persistence policy** hooks. The orchestrator coordinates *when* to persist; analytics own *what* and *how*.
 
-**North star:** all Core compute callers (export ensure, streams, table/map handlers, later BFF and MCP) submit through the same orchestrator. v1 migrates export-ensure and table-stream execution; routing batch `compute()` handlers is a follow-on phase.
+**North star:** all Core compute callers (export ensure, streams, table/map handlers, later BFF and MCP) submit through the **same process-wide** orchestrator. There is one scheduler and one DAG per process -- not one orchestrator per stream or **analytic query context**. v1 migrates export-ensure and table-stream execution; routing batch `compute()` handlers is a follow-on phase. Singleton migration: [#209](https://github.com/SteveDraper/Planets-Console/issues/209).
 
 ---
 
@@ -175,11 +175,35 @@ The orchestrator honors the entry step when creating or attaching to a node.
 
 ---
 
+## Process-wide singleton ([#209](https://github.com/SteveDraper/Planets-Console/issues/209))
+
+One `ComputeOrchestrator` per process. Callers submit `ComputeRequest`s; they do not own an orchestrator instance.
+
+### Orchestration bundle (context-on-request)
+
+The orchestrator is **not** constructed with a bound `AnalyticQueryContext`. Orchestration-plane work (DAG plan helpers, job-wire builders, `is_satisfied`, `persist`, `invalidation_generation`) uses a per-node **orchestration bundle** retained from the submitting **leader**:
+
+| Retained on the node | Not sticky per caller |
+|----------------------|------------------------|
+| Analytic `export_services` injections | Perspective-visible **`load_turn`** -- keyed by `(game_id, perspective)` / shell |
+| Ensure-memo ownership for orchestration-plane ensure/materialize | Full request-local query-context memo for stream admission / listeners |
+
+Stream teardown unregisters observers only; **in-flight nodes keep their bundle until terminal**. Interest-set prune-on-close is a follow-on ([#240](https://github.com/SteveDraper/Planets-Console/issues/240)). Process/shell-scoped export services (no per-node service bag) is a follow-on ([#239](https://github.com/SteveDraper/Planets-Console/issues/239)).
+
+### Turn cache
+
+Orchestration-plane turn cache is process-wide and keyed by `(game_id, perspective, turn)`.
+
+### Fleet persist correlation
+
+Fleet ledger persist notifications must **not** use `id(AnalyticQueryContext)` as causal origin. In-DAG completion correlates via **compute scope** and materialization/generation identity (leaf compute treated as deterministic for a given job wire).
+
+---
+
 ## Node lifecycle and singleflight
 
 ```text
 waiting_deps → ready → running → complete | failed
-                    ↘ parked (process-wide scope lease; peer binding holds claim)
                     ↘ attach_inflight (waiter; no pool worker)
 ```
 
@@ -188,31 +212,16 @@ waiting_deps → ready → running → complete | failed
 | **waiting_deps** | Ancestor nodes incomplete; not in ready queue |
 | **ready** | Dependencies satisfied; eligible for pool |
 | **running** | Leader step executing on a worker (or inline) |
-| **parked** | Waiting on the process-wide scope lease for this `scope` + `step_kind`; peer binding is leader |
 | **attach_inflight** | Duplicate request joins leader; **no second pool worker** |
 | **complete** | Node terminal (persisted / satisfied per analytic policy) |
 
 **Hard invariant:** pool workers never call `ensure_export` or block on another node's completion.
 
-### Process-wide scope lease ([#222](https://github.com/SteveDraper/Planets-Console/issues/222))
+Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG. The former process-wide scope lease / `parked` state ([#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is **retired** by [#209](https://github.com/SteveDraper/Planets-Console/issues/209) -- it compensated for multiple per-context orchestrator DAGs.
 
-Singleflight above is **per orchestrator**. Fleet table stream, scores inference stream, and background prior-turn warm each bind a separate `ComputeOrchestrator`. The same logical scope can therefore be ready on multiple DAGs at once.
+### Priority adopt on attach
 
-The **process-wide scope lease** closes that hole:
-
-| Rule | Behavior |
-|------|----------|
-| **Claim key** | Normalized `ComputeScope` + `step_kind` (so distinct *entry* points -- scores `materialize` vs `tier_solve` -- do not incorrectly suppress each other) |
-| **On dispatch** | If `PersistencePolicy.is_satisfied` → complete without running; else try claim; if held by a peer → **park** (not failure), unless a higher `priority_band` can **adopt** (see below) |
-| **Priority adopt** | While a claim is held but **not yet sealed** for execution, a strictly higher `priority_band` (e.g. `stream_attached` over `background`) **adopts**: becomes leader; the demoted holder parks when it reaches seal (`lost`) |
-| **Seal before work** | Immediately before expensive work (inline `run_step` or pool submit), the holder **seals**. Seal runs after job-wire construction (orchestrator lock released) so a higher-priority peer can adopt during that window |
-| **Profile continue** | When the same node advances to a different `step_kind` (e.g. scores `materialize` → `tier_solve`), **retain** prior step claims until node terminal. Peers must not rematerialize while the leader is still non-terminal on a later step. The node may hold multiple claim keys; all release together on complete/fail |
-| **On leader terminal** | Release all held claims for the node; wake waiters (higher `priority_band` first); followers re-dispatch |
-| **On follower wake** | Satisfaction short-circuit if durable result exists; else become the next leader |
-| **Backends** | Applies to inline and pool steps (pool-queue uniqueness alone is insufficient) |
-| **No mid-run preempt** | Once sealed, the leader runs to completion. A higher-priority peer that arrives after seal parks until release (residual: background already in expensive work can still finish before a late stream claim) |
-
-Scores stream terminals use the process-wide scope-terminal fan-out as the sole delivery path (own binding and peer bindings such as fleet DAG empty `tier_solve` skip). Fleet table stream remains local orchestrator listener only.
+When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `stream_attached` joining `background` warm) and the node is not yet past the point where adopt is allowed (not mid expensive inline/pool execution -- same rule as the former lease “seal”), upgrade `node.priority_band` and adjust ready-queue ordering as needed. No mid-run preempt once expensive work has started.
 
 **Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; a missing `RowRun` while evidence is still open must `continue` (rebuild wire / re-ensure), not empty-complete -- that falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
 
@@ -223,7 +232,7 @@ Scores stream terminals use the process-wide scope-terminal fan-out as the sole 
 | `force_fresh` | Existing node state | Behavior |
 |---------------|---------------------|----------|
 | `False` (default) | `complete` or `failed` | Attach to the terminal node; return its cached `result_wire` or error. No new pool work. |
-| `False` (default) | `waiting_deps`, `ready`, `running`, `parked` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. |
+| `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. May **priority-adopt** (see above). |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
 | `True` | non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
 
@@ -259,7 +268,7 @@ Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id`
 
 ### Job wire and dependency outputs
 
-Wire builders run on the **orchestration plane** and may use `AnalyticQueryContext` to assemble inputs:
+Wire builders run on the **orchestration plane** and may use the node's orchestration bundle (`export_services`, ensure-memo, shell-scoped `load_turn`) to assemble inputs:
 
 ```python
 def build_fleet_materialization_job_wire(
@@ -388,17 +397,18 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 **Thin adapters** (same template for fleet and scores):
 
-- One **compute orchestrator per open table stream** (stream-token binding; released on disconnect).
-- Submit `ComputeRequest` scopes to the orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
-- Register `node_complete_listener` to map terminal `result_wire` to NDJSON events.
+- Submit `ComputeRequest` scopes to the **process-wide** orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
+- Register process-wide `node_complete` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
 - Retain stream-only state (scope guard, per-row run registry, global pause gate).
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
+- Stream teardown does not cancel in-flight singleton DAG work solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
 
 **Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 
-**Replaced (#199, #200):**
+**Replaced (#199, #200, #209):**
 
 - Legacy `InferenceRowScheduler` and `FleetTableStreamScheduler` private worker dequeue loops (`_worker_loop`, `_work_queue`). Both are thin orchestrator stream adapters; tier and fleet leg work submits through the global compute pool.
+- Per-stream / per-`AnalyticQueryContext` orchestrator instances and the process-wide scope lease that papered over them.
 
 ---
 
@@ -419,13 +429,15 @@ Until phase 2, table/map REST responses may still call `compute()` handlers dire
 ```text
 packages/api/api/compute/
   scope.py           # ComputeScope, ScopeKeySpec, normalization
-  scope_lease.py     # Process-wide scope+step claim (cross-binding singleflight)
+  orchestration_bundle.py  # Leader-retained export_services + ensure-memo (#209)
   scope_terminal_fanout.py  # Process-wide terminal notify for stream adapters
   profile.py         # AnalyticComputeProfile, ComputeStepSpec
-  orchestrator.py    # DAG, singleflight, submit, complete
+  orchestrator.py    # DAG, singleflight, submit, complete (process-wide singleton)
+  turn_cache.py      # Process-wide LRU keyed by (game_id, perspective, turn)
   pools.py           # Global pool, priority dequeue, backend dispatch
   wire.py            # DependencyOutputs, base JobWire/ResultWire types
   registry.py        # Built from TurnAnalyticRegistration at import
+  runtime.py         # get_compute_orchestrator singleton wiring
 ```
 
 Existing `export_dependency_walk.py` remains the canonical ENSURE_DEPENDENCIES walk; orchestrator calls it for planning.
@@ -446,6 +458,9 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; orchestrator primitives; delete `InferenceRowScheduler` worker pool; fleet overlay + `has_final_ledger` fix |
 | Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure/gap-fill via orchestrator; retire coordinator + blocking ensure |
 | Turn cache | [#201](https://github.com/SteveDraper/Planets-Console/issues/201) | Orchestrator LRU + prefetch into job wire |
+| Singleton orchestrator | [#209](https://github.com/SteveDraper/Planets-Console/issues/209) | Process-wide orchestrator; retire per-ctx bindings + scope lease; observer registry |
+| Process-scoped export services | [#239](https://github.com/SteveDraper/Planets-Console/issues/239) | Retire per-node sticky `export_services` bags |
+| Origin-set prune | [#240](https://github.com/SteveDraper/Planets-Console/issues/240) | Interest tracking; cancel when no origins remain |
 | Phase 2 | [#202](https://github.com/SteveDraper/Planets-Console/issues/202) | Route table/map `compute()` through orchestrator |
 | Phase 3 | [#203](https://github.com/SteveDraper/Planets-Console/issues/203) | BFF / MCP uniform compute API |
 

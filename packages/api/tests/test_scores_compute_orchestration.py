@@ -794,7 +794,6 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
@@ -816,7 +815,9 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
         return_value=terminal,
     ):
-        handle = orchestrator.submit(ComputeRequest(scope=scope, step_kind=SCORES_TIER_SOLVE))
+        handle = orchestrator.submit(
+            ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
+        )
         assert submitted_scopes == [scope]
         result_wire = run_scores_tier_solve({"runId": run.run_id})
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
@@ -855,13 +856,12 @@ def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
-        ctx,
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
     scope = _scores_scope(sample_turn, player_id)
 
-    handle = orchestrator.submit(ComputeRequest(scope=scope, step_kind=SCORES_TIER_SOLVE))
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE))
 
     assert handle.state == "running"
     assert submitted_scopes == [scope]
