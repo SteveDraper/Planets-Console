@@ -531,7 +531,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     """First-pass pending overlay triggers reschedule when fleet@(N-1) persists.
 
     Mirrors production: background fleet warm runs before the scores stream opens so
-    fleet persist can race connect admission (external source_context_id).
+    fleet persist can race connect admission; correlation is scope + materialization.
     """
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_scheduler(monkeypatch, worker_count=1)

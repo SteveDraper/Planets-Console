@@ -116,7 +116,6 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         defer_ledger_persisted_notification: bool = False,
-        notification_source_context_id: int | None = None,
     ) -> DeferredNotification | None:
         if persisted.ledger.player_id != player_id:
             raise ValidationError(
@@ -145,7 +144,6 @@ class FleetSnapshotPersistenceService:
             player_id,
             prior=prior,
             persisted=to_store,
-            source_context_id=notification_source_context_id,
         )
         if defer_ledger_persisted_notification:
             return notification
@@ -313,7 +311,6 @@ class FleetSnapshotPersistenceService:
         *,
         prior: PersistedFleetLedger | None,
         persisted: PersistedFleetLedger,
-        source_context_id: int | None = None,
     ) -> DeferredNotification | None:
         callback = self._on_ledger_persisted
         if callback is None:
@@ -327,7 +324,6 @@ class FleetSnapshotPersistenceService:
                 turn_number,
                 player_id,
                 persisted=persisted,
-                source_context_id=source_context_id,
             )
         if prior.materialization_version != persisted.materialization_version:
             return lambda: self._dispatch_ledger_persisted(
@@ -336,7 +332,6 @@ class FleetSnapshotPersistenceService:
                 turn_number,
                 player_id,
                 persisted=persisted,
-                source_context_id=source_context_id,
             )
         return None
 
@@ -348,7 +343,6 @@ class FleetSnapshotPersistenceService:
         player_id: int,
         *,
         persisted: PersistedFleetLedger,
-        source_context_id: int | None,
     ) -> None:
         callback = self._on_ledger_persisted
         if callback is None:
@@ -360,7 +354,6 @@ class FleetSnapshotPersistenceService:
                 fleet_turn=turn_number,
                 player_id=player_id,
                 materialization_version=persisted.materialization_version,
-                source_context_id=source_context_id,
             )
         )
 

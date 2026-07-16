@@ -14,4 +14,3 @@ class FleetLedgerPersistedEvent:
     fleet_turn: int
     player_id: int
     materialization_version: int
-    source_context_id: int | None = None
