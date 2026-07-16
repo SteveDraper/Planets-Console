@@ -7,7 +7,7 @@ import threading
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from api.compute.profile import ComputeBackend, ComputeStepSpec
@@ -284,21 +284,6 @@ class ComputeWorkerPool:
     def submitter_for(self, orchestrator_id: int) -> PoolSubmitter:
         """Return a pool submitter callback bound to one orchestrator registration."""
         return self._make_submitter(orchestrator_id)
-
-    def adopt_priority(self, scope: ComputeScope, priority_band: ComputePriorityBand) -> None:
-        """Upgrade the priority band of any queued item for ``scope`` (attach adopt).
-
-        ``PoolWorkItem`` is frozen, so this rebuilds the queue rather than
-        mutating a queued item in place.
-        """
-        with self._condition:
-            if not any(item.scope == scope for item in self._work_queue):
-                return
-            self._work_queue = deque(
-                replace(item, priority_band=priority_band) if item.scope == scope else item
-                for item in self._work_queue
-            )
-            self._condition.notify()
 
     def submit(
         self,

@@ -162,11 +162,11 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
     life of the node -- later attaches with a different bundle do not change
     what wire build, persist, and satisfaction checks see.
 
-    A waiter with a higher-priority band than the node it attaches to adopts
-    that priority in place (queued pool work is upgraded via
-    ``ComputeWorkerPool.adopt_priority``), unless the node has already sealed
-    for execution (job wire built inline, or handed to the pool) -- the adopt
-    window has closed by then and the waiter simply waits for the leader.
+    A waiter with a higher-priority band than the node it attaches to upgrades
+    ``node.priority_band`` in place so the next enqueue/dispatch sees the
+    higher band, unless the node has already sealed for execution (job wire
+    built inline, or handed to the pool) -- the adopt window has closed by
+    then and the waiter simply waits for the leader.
 
     There is no process-wide scope lease: singleflight here plus durable
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
@@ -529,8 +529,6 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
             return
         node.priority_band = priority_band
-        if self._worker_pool is not None:
-            self._worker_pool.adopt_priority(node.scope, priority_band)
 
     def _replace_terminal_node(self, node: ComputeNodeRun) -> None:
         if node.state not in {"complete", "failed"}:
