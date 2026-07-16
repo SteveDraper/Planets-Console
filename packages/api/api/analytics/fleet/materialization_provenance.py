@@ -45,8 +45,7 @@ def resolve_fleet_materialization_provenance(
     in-progress ``RowRun``); ingest and sightings are not re-verified here.
     """
     prior_ledger_at_n_minus_1 = (
-        materialize_turn
-        == accelerated_ensure_floor(turn_context.turn.settings, materialize_turn)
+        materialize_turn == accelerated_ensure_floor(turn_context.turn.settings, materialize_turn)
     ) or (prior_persisted is not None and prior_persisted.provenance.is_final)
     turn_evidence_at_n = _is_turn_evidence_closed(
         materialize_turn=materialize_turn,
