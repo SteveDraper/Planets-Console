@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.accelerated_start import (
-    first_reliable_accelerated_scoreboard_turn,
     needs_accelerated_backfill,
     scoreboard_host_turn,
 )
@@ -19,6 +18,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_TIME_LIMITED,
 )
 from api.analytics.scores.export_wire import ranked_solutions_from_wire
+from api.concepts.accelerated_scoreboard import first_reliable_accelerated_scoreboard_turn
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 from api.serialization.inference_row_persistence import PersistedInferenceRow
