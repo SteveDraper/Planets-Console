@@ -326,10 +326,10 @@ def schedule_background_prior_turn_fleet_warm(
         export_services=export_services,
     )
     from api.compute.orchestrator import ComputeRequest
-    from api.compute.runtime import orchestrator_for_context
+    from api.compute.runtime import get_compute_orchestrator
     from api.compute.scope import ComputeScope
 
-    orchestrator = orchestrator_for_context(query_context)
+    orchestrator = get_compute_orchestrator()
     for player_id in players_needing_warm:
         orchestrator.submit(
             ComputeRequest(
@@ -341,5 +341,6 @@ def schedule_background_prior_turn_fleet_warm(
                     player_id=player_id,
                 ),
                 priority_band="background",
+                ctx=query_context,
             )
         )

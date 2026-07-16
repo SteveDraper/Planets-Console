@@ -199,9 +199,8 @@ def test_fleet_table_stream_reconnect_preempts_active_scope(sample_turn):
 
 
 def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample_turn):
-    from api.compute import runtime as compute_runtime
     from api.compute.pools import reset_compute_worker_pool_for_tests
-    from api.compute.runtime import reset_orchestrators_for_tests
+    from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
@@ -243,12 +242,12 @@ def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample
         stream_token=stream_token,
     )
     assert scheduled is not None
-    assert len(compute_runtime._orchestrators_by_ctx_id) == 1
+    assert get_compute_orchestrator() is not None
     assert len(scheduler._stream_bindings) == 1
 
     second_token = scheduler.begin_scope(scope)
 
-    assert len(compute_runtime._orchestrators_by_ctx_id) == 0
+    assert get_compute_orchestrator() is not None
     assert len(scheduler._stream_bindings) == 0
 
     scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)

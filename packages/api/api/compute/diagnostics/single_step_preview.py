@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from api.compute.diagnostics.bindings import BoundOrchestrator
+from api.compute.diagnostics.bindings import BoundOrchestrator, bound_matches_shell
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.profile_steps import profile_step_at
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
@@ -217,7 +217,7 @@ def has_running_focus_work(
         )
 
     for bound in bound_orchestrators:
-        if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
+        if not bound_matches_shell(bound, shell):
             continue
         view = bound.orchestrator.diagnostics_snapshot()
         if any_running_focus_node(
@@ -239,7 +239,7 @@ def preview_focus_ready_dispatch(
     """Return the focus ready node single-step would dispatch first, if any."""
     candidates: list[SingleStepPreview] = []
     for bound in bound_orchestrators:
-        if bound.game_id != shell.game_id or bound.perspective != shell.perspective:
+        if not bound_matches_shell(bound, shell):
             continue
         view = bound.orchestrator.diagnostics_snapshot()
         nodes_by_scope = {node.scope: node for node in view.nodes}

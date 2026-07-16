@@ -23,7 +23,7 @@ from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
-from api.compute.runtime import orchestrator_for_context, release_orchestrator_for_context
+from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
@@ -38,6 +38,8 @@ __all__ = [
 
 @dataclass
 class _FleetStreamOrchestratorBinding:
+    """One table-stream's leader context on the process-wide singleton orchestrator."""
+
     orchestrator: ComputeOrchestrator
     unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
@@ -174,6 +176,7 @@ class FleetTableStreamScheduler:
                     scope=submit_scope,
                     priority_band="stream_attached",
                     force_fresh=True,
+                    ctx=submit_binding.query_context,
                 )
             )
         return session
@@ -212,7 +215,7 @@ class FleetTableStreamScheduler:
         if existing is not None:
             return existing
         query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
-        orchestrator = orchestrator_for_context(query_ctx)
+        orchestrator = get_compute_orchestrator()
         unregister = orchestrator.register_node_complete_listener(
             lambda scope, node: self._on_orchestrator_node_complete(scope, node)
         )
@@ -288,7 +291,6 @@ class FleetTableStreamScheduler:
         self,
         binding: _FleetStreamOrchestratorBinding,
     ) -> None:
-        release_orchestrator_for_context(binding.query_context)
         binding.unregister_listener()
 
     def _preempt_active_table_stream_locked(self) -> None:

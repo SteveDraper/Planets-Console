@@ -1087,6 +1087,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     from types import SimpleNamespace
 
     from api.analytics.military_score_inference.inference_stream_domain_events import RowFailed
+    from api.compute.errors import ComputeScopeAbortedError
     from api.compute.scope import ComputeScope
 
     reset_inference_table_stream_registry_for_tests()
@@ -1117,7 +1118,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     cancelled_node = SimpleNamespace(
         state="failed",
         result_wire=None,
-        error=RuntimeError("scores inference row run cancelled"),
+        error=ComputeScopeAbortedError("scores inference row run cancelled"),
     )
     scheduler._on_orchestrator_node_complete(scope, cancelled_node)
     assert delivered == []

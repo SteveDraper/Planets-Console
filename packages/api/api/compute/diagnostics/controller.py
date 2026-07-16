@@ -133,13 +133,26 @@ class ComputeDiagnosticsController:
     def bind_orchestrator(
         self,
         orchestrator: ComputeOrchestrator,
-        ctx: AnalyticQueryContext,
+        ctx: AnalyticQueryContext | None = None,
     ) -> None:
+        """Register the diagnostics observer on ``orchestrator``.
+
+        ``ctx`` is unavailable for a singleton bind at process startup (the
+        orchestrator serves many callers, each with its own leader context); use
+        placeholder shell fields in that case. Start-frozen arming needs a real
+        game id and is skipped until a caller context establishes one via
+        :meth:`on_shell_context`.
+        """
         if not self.is_enabled():
             return
         self.ensure_wired()
+        # Process-wide singleton has no single shell; ``None`` matches every shell
+        # in snapshot / concurrency / single-step filters.
+        game_id = ctx.game_id if ctx is not None else None
+        perspective = ctx.perspective if ctx is not None else None
+        ambient_turn = ctx.ambient_turn if ctx is not None else 0
         # Arm before registering the dispatch gate so early submits see freeze.
-        if compute_diagnostics_start_frozen():
+        if ctx is not None and compute_diagnostics_start_frozen():
             self._freeze_state.arm_start_frozen_if_needed(ctx.game_id)
         with self._lock:
             for bound in self._bound_orchestrators:
@@ -184,8 +197,8 @@ class ComputeDiagnosticsController:
         unregister_ready_queue = orchestrator.register_ready_queue_listener(
             self._timeline.bind_ready_queue_listener(
                 orchestrator_id=registration_id,
-                game_id=ctx.game_id,
-                perspective=ctx.perspective,
+                game_id=game_id,
+                perspective=perspective,
                 fallback_id=id(orchestrator),
             )
         )
@@ -210,9 +223,9 @@ class ComputeDiagnosticsController:
             self._bound_orchestrators.append(
                 BoundOrchestrator(
                     orchestrator=orchestrator,
-                    game_id=ctx.game_id,
-                    perspective=ctx.perspective,
-                    ambient_turn=ctx.ambient_turn,
+                    game_id=game_id,
+                    perspective=perspective,
+                    ambient_turn=ambient_turn,
                     unregister_dispatch_gate=unregister_dispatch_gate,
                     unregister_dispatch_commit_hook=unregister_dispatch_commit,
                     unregister_step_complete_listener=unregister_step_complete,
@@ -531,7 +544,7 @@ class ComputeDiagnosticsController:
     def _redispatch_after_gate_change(self, game_id: int) -> None:
         """Re-dispatch ready nodes and wake held pool items after a gate change."""
         for bound in self._bound_orchestrators_snapshot():
-            if bound.game_id == game_id:
+            if bound.game_id is None or bound.game_id == game_id:
                 bound.orchestrator.dispatch_ready_work()
         self._pool_hold_notify()
 
@@ -552,9 +565,8 @@ class ComputeDiagnosticsController:
             return
         for bound in self._bound_orchestrators_snapshot():
             if (
-                bound.game_id == game_id
-                and bound.orchestrator.pool_registration_id == orchestrator_id
-            ):
+                bound.game_id is None or bound.game_id == game_id
+            ) and bound.orchestrator.pool_registration_id == orchestrator_id:
                 bound.orchestrator.dispatch_ready_work()
                 break
         self._pool_hold_notify()

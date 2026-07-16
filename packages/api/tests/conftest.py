@@ -48,20 +48,6 @@ def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_process_scope_lease():
-    """Clear process-wide scope lease claims between tests.
-
-    Tests often leave nodes ``running`` without completing them; without a reset,
-    later tests park behind leaked claims for the same fixture scopes.
-    """
-    from api.compute.scope_lease import reset_process_scope_lease_for_tests
-
-    reset_process_scope_lease_for_tests()
-    yield
-    reset_process_scope_lease_for_tests()
-
-
-@pytest.fixture(autouse=True)
 def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
     """Drop diagnostics observer state so later tests do not inherit freeze or pool gates."""
     if request.path.name == "test_compute_diagnostics.py":

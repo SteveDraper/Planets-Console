@@ -6,7 +6,6 @@ import queue
 from types import SimpleNamespace
 
 import pytest
-from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -31,7 +30,6 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
@@ -41,7 +39,7 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
-from api.compute.runtime import orchestrator_for_context, reset_orchestrators_for_tests
+from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import ComputeScope
 
 
@@ -80,18 +78,27 @@ def _scope_for(session: InferenceRowStreamSession) -> ComputeScope:
     )
 
 
-def _peer_orchestrators(sample_turn):
-    background_ctx = make_analytic_query_context(
-        sample_turn,
-        TurnAnalyticsOptions(),
-        export_services={},
+def _singleton_orchestrator():
+    return get_compute_orchestrator()
+
+
+def _set_scope_node(
+    orchestrator,
+    scope: ComputeScope,
+    *,
+    state: str,
+    priority_band: str = "background",
+    **kwargs: object,
+) -> ComputeNodeRun:
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state=state,
+        priority_band=priority_band,
+        **kwargs,
     )
-    stream_ctx = make_analytic_query_context(
-        sample_turn,
-        TurnAnalyticsOptions(),
-        export_services={},
-    )
-    return orchestrator_for_context(background_ctx), orchestrator_for_context(stream_ctx)
+    orchestrator._nodes[scope] = node
+    return node
 
 
 def test_run_scores_tier_solve_continues_when_rowrun_unregistered(sample_turn) -> None:
@@ -117,16 +124,10 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
     register_row_run(run)
     scope = _scope_for(session)
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="running",
         priority_band="stream_attached",
     )
@@ -157,7 +158,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
     assert run.run_id in scheduler._runs
     assert len(delivered) == 1
 
-    stream._nodes[scope].state = "complete"
+    orchestrator._nodes[scope].state = "complete"
     scheduler._on_orchestrator_node_complete(scope, completed_node)
 
     assert get_row_run(run.run_id) is None
@@ -171,17 +172,10 @@ def test_peer_failure_does_not_unregister_while_sibling_running(sample_turn, mon
     register_row_run(run)
     scope = _scope_for(session)
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="failed",
-        priority_band="background",
-        error=RuntimeError("peer boom"),
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="running",
         priority_band="stream_attached",
     )
@@ -222,17 +216,10 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     register_row_run(run)
     scope = _scope_for(session)
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-        result_wire={"exportTree": {"ok": True}},
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="running",
         priority_band="stream_attached",
     )
@@ -257,8 +244,8 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     assert get_row_run(run.run_id) is run
     assert delivered == []
 
-    stream._nodes[scope].state = "complete"
-    stream._nodes[scope].result_wire = {"exportTree": {"ok": True}}
+    orchestrator._nodes[scope].state = "complete"
+    orchestrator._nodes[scope].result_wire = {"exportTree": {"ok": True}}
     scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     assert delivered, (
@@ -290,18 +277,10 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
         turn_number=session.turn_number,
     )
 
-    background, stream = _peer_orchestrators(sample_turn)
-    # Both bindings already terminal (DAG idle), as in the manual hang snapshot.
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-        result_wire={"exportTree": {"ok": True}},
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="complete",
         priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
@@ -371,16 +350,10 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
         turn_number=session.turn_number,
     )
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="complete",
         priority_band="stream_attached",
     )
@@ -456,17 +429,10 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(
         turn_number=stream_session.turn_number,
     )
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-        result_wire={"exportTree": {"ok": True}},
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="complete",
         priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
@@ -531,17 +497,10 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
         turn_number=session.turn_number,
     )
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-        result_wire={"exportTree": {"ok": True}},
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="complete",
         priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
@@ -603,17 +562,10 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
         turn_number=session.turn_number,
     )
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-        result_wire={"exportTree": {"ok": True}},
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="complete",
         priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
@@ -685,17 +637,10 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
         turn_number=session.turn_number,
     )
 
-    background, stream = _peer_orchestrators(sample_turn)
-    background._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="complete",
-        priority_band="background",
-        result_wire={"exportTree": {"ok": True}},
-    )
-    stream._nodes[scope] = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
         state="complete",
         priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
@@ -730,3 +675,122 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     assert any(event.get("type") in {"complete", "error"} for event in pending), (
         f"expected pending-wire terminal after finished_run_ids suppress, got {pending!r}"
     )
+
+
+def test_row_complete_upgrades_prior_empty_admission_terminal(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    """Regression: force_fresh RowComplete must upgrade a soft empty/admission terminal.
+
+    Fingerprint (game 628580 t8 Fury): evidenceClosed skip empty-completes and pushes
+    admission wire (multiplex finished_run_ids), then force_fresh re-solves. Without
+    upgrade the real RowComplete is dropped, progress resets the UI, and the scoreboard
+    stays in-progress with idle CPU.
+    """
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        ImmediateRowAdmission,
+    )
+
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    orchestrator = _singleton_orchestrator()
+    _set_scope_node(
+        orchestrator,
+        scope,
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"exportTree": {"ok": True}},
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    immediate = ImmediateRowAdmission(
+        events=(
+            {
+                "type": "complete",
+                "status": "exact",
+                "summary": "cached",
+                "isComplete": True,
+                "playerId": session.player_id,
+                "solutionCount": 0,
+                "solutions": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        controller,
+        "resolve_row_admission",
+        lambda _player_id, **_kwargs: immediate,
+    )
+
+    empty_complete = SimpleNamespace(
+        state="complete",
+        result_wire={"exportTree": {"ok": True}},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+
+    assert session.run_id in scheduler._terminal_stream_events_delivered
+    assert session.run_id in scheduler._upgradable_empty_terminals
+    assert session.run_id in controller.finished_run_ids
+
+    # Simulate force_fresh re-solve: reopen multiplex drain, then deliver RowComplete.
+    scheduler._reopen_stream_row_for_force_fresh(scope)
+    assert session.run_id not in controller.finished_run_ids
+
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="exact after force_fresh",
+    )
+    register_row_run(run)
+    scheduler._runs[run.run_id] = scope
+    _set_scope_node(
+        orchestrator,
+        scope,
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"runId": run.run_id, "rowComplete": row_complete},
+    )
+    success_node = SimpleNamespace(
+        state="complete",
+        result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, success_node)
+
+    pending = controller.drain_pending_wire_events()
+    upgrades = [
+        event
+        for event in pending
+        if event.get("type") == "complete" and event.get("summary") == "exact after force_fresh"
+    ]
+    assert upgrades, (
+        "expected RowComplete upgrade on pending wire after soft empty admission "
+        f"(pending={pending!r})"
+    )
+    assert session.run_id not in scheduler._upgradable_empty_terminals
