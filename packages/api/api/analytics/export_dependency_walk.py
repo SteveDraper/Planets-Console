@@ -24,9 +24,6 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 K = TypeVar("K")
 
-# Accelerated-start ensure floor applies only to the scores/fleet dependency pair.
-_ACCELERATED_ENSURE_ANALYTICS = frozenset({"scores", "fleet"})
-
 
 def _settings_for_ensure_scope(
     ctx: AnalyticQueryContext,
@@ -41,16 +38,12 @@ def _settings_for_ensure_scope(
 def ensure_dependency_turn_floor(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
-    *,
-    analytic_id: str,
-    dependency_analytic_id: str,
 ) -> int:
-    """Return the ensure floor for one dependency edge (1, or accelerated N)."""
-    if (
-        analytic_id not in _ACCELERATED_ENSURE_ANALYTICS
-        or dependency_analytic_id not in _ACCELERATED_ENSURE_ANALYTICS
-    ):
-        return 1
+    """Return the ensure floor for dependency edges (1, or accelerated N).
+
+    Floor is a game-domain rule from settings + requesting scope turn -- not
+    gated by analytic id.
+    """
     settings = _settings_for_ensure_scope(ctx, scope)
     if settings is None:
         return 1
@@ -94,12 +87,7 @@ def walk_dependency_tree(
 
         for dependency in catalog.ensure_dependencies:
             dependency_scope = dependency_scope_for(scope, dependency)
-            turn_floor = ensure_dependency_turn_floor(
-                ctx,
-                scope,
-                analytic_id=analytic_id,
-                dependency_analytic_id=dependency.analytic_id,
-            )
+            turn_floor = ensure_dependency_turn_floor(ctx, scope)
             if dependency_scope.turn < turn_floor:
                 continue
 

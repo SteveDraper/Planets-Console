@@ -274,6 +274,17 @@ def _roster_player_ids(turn: TurnInfo) -> list[int]:
     return [player.id for player in iter_turn_players(turn)]
 
 
+def _chain_floor(
+    load_turn: Callable[[int], TurnInfo | None],
+    target_turn: int,
+) -> int:
+    """Lowest turn fleet gap-fill may require when targeting ``target_turn``."""
+    target_info = load_turn(target_turn)
+    if target_info is None:
+        return 1
+    return accelerated_ensure_floor(target_info.settings, target_turn)
+
+
 def _find_gap_start_turn(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -282,12 +293,7 @@ def _find_gap_start_turn(
     load_turn: Callable[[int], TurnInfo | None],
 ) -> int:
     """Return the first turn in ``floor..target_turn`` lacking an ensure-final snapshot."""
-    target_info = load_turn(target_turn)
-    chain_floor = (
-        accelerated_ensure_floor(target_info.settings, target_turn)
-        if target_info is not None
-        else 1
-    )
+    chain_floor = _chain_floor(load_turn, target_turn)
     for turn_number in range(chain_floor, target_turn + 1):
         turn_info = load_turn(turn_number)
         if turn_info is None:
@@ -314,12 +320,7 @@ def _find_gap_start_turn_for_player(
     load_turn: Callable[[int], TurnInfo | None],
 ) -> int:
     """Return the first turn in ``floor..target_turn`` lacking ensure-final ledger for P."""
-    target_info = load_turn(target_turn)
-    chain_floor = (
-        accelerated_ensure_floor(target_info.settings, target_turn)
-        if target_info is not None
-        else 1
-    )
+    chain_floor = _chain_floor(load_turn, target_turn)
     for turn_number in range(chain_floor, target_turn + 1):
         if load_turn(turn_number) is None:
             continue

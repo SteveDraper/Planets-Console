@@ -76,12 +76,7 @@ def plan_compute_dag(
         dependency_scopes: list[ComputeScope] = []
         for dependency in catalog.ensure_dependencies:
             dependency_export_scope = dependency_scope_for(pending_scope, dependency)
-            turn_floor = ensure_dependency_turn_floor(
-                ctx,
-                pending_scope,
-                analytic_id=pending_analytic_id,
-                dependency_analytic_id=dependency.analytic_id,
-            )
+            turn_floor = ensure_dependency_turn_floor(ctx, pending_scope)
             if dependency_export_scope.turn < turn_floor:
                 continue
             dependency_key = _pending_key(dependency.analytic_id, dependency_export_scope)
