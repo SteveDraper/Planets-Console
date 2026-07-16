@@ -21,7 +21,7 @@ from api.compute.scope import (
     compute_scope_to_export_scope,
 )
 from api.compute.wire import DependencyOutputs
-from api.concepts.accelerated_scoreboard import is_export_ensure_baseline_turn
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 from api.serialization.turn import turn_info_to_json
 
@@ -47,7 +47,7 @@ def _fleet_prior_scope(
 ) -> ComputeScope | None:
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
         return None
-    if settings is not None and is_export_ensure_baseline_turn(scope.turn, settings):
+    if settings is not None and scope.turn == accelerated_ensure_floor(settings, scope.turn):
         return None
     if scope.turn <= 1:
         return None

@@ -36,7 +36,7 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
-from api.concepts.accelerated_scoreboard import is_export_ensure_baseline_turn
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 
 SCORES_MATERIALIZE = "materialize"
@@ -64,7 +64,7 @@ def _scores_prior_fleet_scope(
         return None
     if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
         return None
-    if settings is not None and is_export_ensure_baseline_turn(scope.turn, settings):
+    if settings is not None and scope.turn == accelerated_ensure_floor(settings, scope.turn):
         return None
     if scope.turn <= 1:
         return None

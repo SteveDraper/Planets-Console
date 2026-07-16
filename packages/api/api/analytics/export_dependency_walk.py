@@ -15,7 +15,7 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.ensure_validation import validate_ensure_dependency_target
-from api.concepts.accelerated_scoreboard import export_ensure_turn_floor
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ def ensure_dependency_turn_floor(
     settings = _settings_for_ensure_scope(ctx, scope)
     if settings is None:
         return 1
-    return export_ensure_turn_floor(settings, scope_turn=scope.turn)
+    return accelerated_ensure_floor(settings, scope.turn)
 
 
 @dataclass

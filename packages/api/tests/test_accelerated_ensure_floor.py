@@ -22,12 +22,7 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     resolve_prior_turn_fleet_torp_overlay,
 )
-from api.concepts.accelerated_scoreboard import (
-    export_ensure_turn_floor,
-    fleet_chain_start_floor,
-    is_below_export_ensure_turn_floor,
-    is_export_ensure_baseline_turn,
-)
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -58,26 +53,26 @@ def _680224_shaped_store(sample_turn) -> dict[int, object]:
     }
 
 
-def test_export_ensure_turn_floor_helpers(sample_turn):
+def test_accelerated_ensure_floor(sample_turn):
     normal = replace(sample_turn.settings, acceleratedturns=0)
-    assert export_ensure_turn_floor(normal, scope_turn=5) == 1
-    assert fleet_chain_start_floor(1, normal) == 1
-    assert is_export_ensure_baseline_turn(1, normal)
-    assert is_below_export_ensure_turn_floor(0, normal, scope_turn=5)
-    assert not is_below_export_ensure_turn_floor(1, normal, scope_turn=5)
+    assert accelerated_ensure_floor(normal, 5) == 1
+    assert accelerated_ensure_floor(normal, 1) == 1
+    # Call-site patterns: turn == floor (baseline), dep < floor
+    assert 1 == accelerated_ensure_floor(normal, 1)
+    assert 0 < accelerated_ensure_floor(normal, 5)
+    assert not (1 < accelerated_ensure_floor(normal, 5))
 
     accel = replace(sample_turn.settings, acceleratedturns=3)
-    assert export_ensure_turn_floor(accel, scope_turn=2) == 1
-    assert export_ensure_turn_floor(accel, scope_turn=3) == 3
-    assert export_ensure_turn_floor(accel, scope_turn=4) == 3
-    assert fleet_chain_start_floor(1, accel) == 1
-    assert fleet_chain_start_floor(3, accel) == 3
-    assert is_export_ensure_baseline_turn(1, accel)
-    assert is_export_ensure_baseline_turn(3, accel)
-    assert not is_export_ensure_baseline_turn(4, accel)
-    assert is_below_export_ensure_turn_floor(2, accel, scope_turn=4)
-    assert not is_below_export_ensure_turn_floor(2, accel, scope_turn=2)
-    assert not is_below_export_ensure_turn_floor(3, accel, scope_turn=4)
+    assert accelerated_ensure_floor(accel, 2) == 1
+    assert accelerated_ensure_floor(accel, 3) == 3
+    assert accelerated_ensure_floor(accel, 4) == 3
+    assert accelerated_ensure_floor(accel, 1) == 1
+    assert 1 == accelerated_ensure_floor(accel, 1)
+    assert 3 == accelerated_ensure_floor(accel, 3)
+    assert 4 != accelerated_ensure_floor(accel, 4)
+    assert 2 < accelerated_ensure_floor(accel, 4)
+    assert not (2 < accelerated_ensure_floor(accel, 2))
+    assert not (3 < accelerated_ensure_floor(accel, 4))
 
 
 def test_scores_ensure_walk_skips_missing_turn_below_accelerated_floor(sample_turn):

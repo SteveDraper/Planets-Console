@@ -17,7 +17,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     launcher_belief_set_from_fleet_records,
 )
 from api.analytics.options import TurnAnalyticsOptions
-from api.concepts.accelerated_scoreboard import fleet_chain_start_floor
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
@@ -250,7 +250,7 @@ def resolve_prior_turn_fleet_torp_overlay(
     """
     host_turn = turn.settings.turn
     prior_turn = host_turn - 1
-    if prior_turn < fleet_chain_start_floor(host_turn, turn.settings):
+    if prior_turn < accelerated_ensure_floor(turn.settings, host_turn):
         return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
 
     fleet_services = _resolve_fleet_services(
@@ -295,7 +295,7 @@ def schedule_background_prior_turn_fleet_warm(
     """Kick off non-blocking per-player materialization of fleet@(host_turn - 1)."""
     host_turn = turn.settings.turn
     prior_turn = host_turn - 1
-    if prior_turn < fleet_chain_start_floor(host_turn, turn.settings) or not player_ids:
+    if prior_turn < accelerated_ensure_floor(turn.settings, host_turn) or not player_ids:
         return
 
     fleet_services = _resolve_fleet_services(

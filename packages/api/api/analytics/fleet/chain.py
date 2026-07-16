@@ -26,7 +26,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.turn_roster import iter_turn_players
-from api.concepts.accelerated_scoreboard import fleet_chain_start_floor
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.models.game import TurnInfo
 
@@ -284,7 +284,7 @@ def _find_gap_start_turn(
     """Return the first turn in ``floor..target_turn`` lacking an ensure-final snapshot."""
     target_info = load_turn(target_turn)
     chain_floor = (
-        fleet_chain_start_floor(target_turn, target_info.settings)
+        accelerated_ensure_floor(target_info.settings, target_turn)
         if target_info is not None
         else 1
     )
@@ -316,7 +316,7 @@ def _find_gap_start_turn_for_player(
     """Return the first turn in ``floor..target_turn`` lacking ensure-final ledger for P."""
     target_info = load_turn(target_turn)
     chain_floor = (
-        fleet_chain_start_floor(target_turn, target_info.settings)
+        accelerated_ensure_floor(target_info.settings, target_turn)
         if target_info is not None
         else 1
     )
@@ -463,7 +463,7 @@ def _materialize_fleet_ledger_chain_for_player(
             turn_context_cache[materialize_turn] = FleetTurnContext.from_turn(turn_info)
         return turn_context_cache[materialize_turn]
 
-    chain_floor = fleet_chain_start_floor(turn_number, turn.settings)
+    chain_floor = accelerated_ensure_floor(turn.settings, turn_number)
 
     def require_prior_rst(materialize_turn: int, *, allow_missing_prior_rst: bool) -> None:
         if materialize_turn <= chain_floor:
