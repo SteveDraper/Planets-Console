@@ -43,13 +43,11 @@ FLEET_COMPUTE_PROFILE = AnalyticComputeProfile(
 def _fleet_prior_scope(
     scope: ComputeScope,
     *,
-    settings: GameSettings | None = None,
+    settings: GameSettings,
 ) -> ComputeScope | None:
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
         return None
-    if settings is not None and scope.turn == accelerated_ensure_floor(settings, scope.turn):
-        return None
-    if scope.turn <= 1:
+    if scope.turn <= accelerated_ensure_floor(settings, scope.turn):
         return None
     return ComputeScope(
         analytic_id=scope.analytic_id,
