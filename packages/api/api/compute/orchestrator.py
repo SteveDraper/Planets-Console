@@ -813,7 +813,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
                     # Do not re-raise: pool workers call complete_pool_step on this thread
                     # and an escaping exception would kill the worker loop.
                     if isinstance(exc, PersistDeferredError):
-                        # Analytic-owned recovery: park waiting_deps and optionally
+                        # Analytic-owned recovery: demote to waiting_deps and optionally
                         # force_fresh the declared dependency (e.g. open scores evidence).
                         self._recover_after_persist_deferred(
                             completed_node,

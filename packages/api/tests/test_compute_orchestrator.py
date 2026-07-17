@@ -1429,12 +1429,13 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
     assert orchestrator.nodes[scope].error is persist_error
 
 
-def test_persist_deferred_parks_waiting_deps_and_force_freshes_dependency(sample_turn):
-    """PersistDeferredError parks the node and force_freshes the declared dependency.
+def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(sample_turn):
+    """PersistDeferredError demotes to waiting_deps and force_freshes the dependency.
 
     Mirrors fleet open-evidence recovery without fleet/scores imports in the
-    orchestrator: refuse persist → waiting_deps (not failed) → dependency
-    force_fresh submitted → after dependency completes again, dependent is ready.
+    orchestrator: refuse persist → waiting_deps (not failed, not soft parked) →
+    dependency force_fresh submitted → after dependency completes again,
+    dependent is ready.
     """
     from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 

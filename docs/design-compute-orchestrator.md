@@ -358,7 +358,7 @@ Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/St
 
 | Owner | Responsibility |
 |-------|----------------|
-| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (park `waiting_deps` + optional dependency `force_fresh`) |
+| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (demote to `waiting_deps` + optional dependency `force_fresh`; not soft `parked`) |
 | **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules; terminal-quality metadata on stored artifacts; map write-gate refuses to `PersistDeferredError` + `PersistDependencyRecovery` when rematerialization must wait on a dependency |
 
 Storage paths remain per [ADR 0002](adr/0002-analytic-persistence.md). Orchestrator is cache **coordinator**, not cache **schema** owner.

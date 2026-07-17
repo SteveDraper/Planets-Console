@@ -263,7 +263,7 @@ class FleetPersistencePolicy:
 
         if not persisted.provenance.turn_evidence_at_n:
             # Same-turn scores evidence is still open. Persisting and completing the
-            # fleet node would unlock dependents and park a non-final ledger with no
+            # fleet node would unlock dependents and leave a non-final ledger with no
             # automatic rematerialization (empty scores complete hang fingerprint).
             # Recovery is owned here: orchestrator only sees PersistDeferredError.
             from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
