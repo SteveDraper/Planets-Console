@@ -1,0 +1,207 @@
+"""Stream detach / abort helpers for the scores inference row scheduler.
+
+Owns begin_scope preempt detach, cancel_run abort, and turn-scoped stream
+teardown without cancelling in-flight solve work on detach.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.scope import ComputeScope
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+    from api.analytics.military_score_inference.row_run import RowRun
+
+# Shared abort detail so node-complete listeners can ignore intentional cancels
+# (must not deliver RowFailed / orphan terminals to an open multiplex).
+SCORES_ROW_RUN_CANCELLED_MESSAGE = "scores inference row run cancelled"
+
+
+@dataclass
+class InferenceStreamOrchestratorBinding:
+    """One table-stream's leader context on the process-wide singleton orchestrator."""
+
+    orchestrator: ComputeOrchestrator
+    query_context: AnalyticQueryContext
+    unregister_dispatch_gate: Callable[[], None] | None = None
+
+
+@dataclass(frozen=True)
+class HeldTierSubmission:
+    stream_token: str
+    root_scope: ComputeScope
+
+
+class InferenceStreamTeardownMixin:
+    """Detach stream ownership vs cancel+abort orchestrator scopes."""
+
+    def begin_scope(self: InferenceRowScheduler, scope: InferenceStreamScope) -> str:
+        """Claim the active table-stream scope, detaching the prior stream's row runs.
+
+        Background ensure RowRuns for *other* turns must survive. Detaching them on
+        ``begin_scope`` (e.g. opening the turn-8 stream while turn-3 background
+        warm is in flight) left fleet waiting forever on aborted/missing scores
+        deps. Only the prior active stream turn is detached; a first claim
+        (no prior scope) leaves retained runs alone.
+
+        Detach drops RowRun registrations and stream bindings but does **not**
+        cancel solve tokens or abort orchestrator nodes -- in-flight tier workers
+        may still finish, persist from the RowComplete payload, and complete the
+        DAG node. ``cancel_run`` is the explicit cancel intent (token + abort).
+        """
+        with self._lock:
+            prior = self._scope_guard.active_scope
+
+            def on_same_scope_preempt() -> None:
+                self._detach_stream_runs_locked(turn=scope.turn_number)
+
+            def on_scope_change() -> None:
+                if prior is None:
+                    return
+                self._detach_stream_runs_locked(turn=prior.turn_number)
+
+            return self._scope_guard.begin_scope_locked(
+                scope,
+                on_same_scope_preempt=on_same_scope_preempt,
+                on_scope_change=on_scope_change,
+            )
+
+    def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
+        """Cancel one row run and abort its orchestrator scope.
+
+        Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
+        only drops stream ownership without cancelling solve work, cancel cancels
+        the RowRun token and aborts in-flight orchestrator nodes so a later
+        ``force_fresh`` submit cannot attach to a still-running node with a
+        missing RowRun.
+        """
+        abort_scope: ComputeScope | None = None
+        with self._lock:
+            row_run = self._adapter_row_run(run_id)
+            root_scope = self._runs.get(run_id)
+            if row_run is not None:
+                row_run.session.cancel_token.cancel()
+            self._remove_run_locked(run_id)
+            abort_scope = root_scope
+        # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
+        # listeners that may deliver stream events (controller ``stream_lock``) or
+        # call ``owns_table_stream`` (needs this lock). Holding ``_lock`` here ABBA /
+        # self-deadlocks with ``reschedule_row`` (stream_lock -> cancel -> abort).
+        if abort_scope is not None:
+            self._abort_orchestrator_scopes(abort_scope)
+
+    def _detach_stream_runs_locked(
+        self: InferenceRowScheduler,
+        *,
+        turn: int | None = None,
+    ) -> None:
+        """Detach stream ownership for one turn without cancelling solve work.
+
+        Used by ``begin_scope`` when switching table streams. Unregisters RowRuns
+        and drops stream bindings for ``turn`` only; other turns are untouched.
+        Does **not** cancel RowRun tokens or call ``abort_scope`` -- in-flight
+        tier workers may still finish, persist from the RowComplete payload, and
+        complete the DAG node. Cancelling the token here would race with persist
+        (``ScoresPersistencePolicy`` skips when a still-registered run looks
+        cancelled). ``cancel_run`` is the explicit cancel intent (token + abort).
+        """
+        self._globally_paused = False
+        self._held_initial_submissions.clear()
+        for run_id in list(self._runs):
+            root_scope = self._runs.get(run_id)
+            if turn is not None and root_scope is not None and root_scope.turn != turn:
+                continue
+            self._remove_run_locked(run_id)
+        self._terminal_stream_events_delivered.clear()
+        self._upgradable_empty_terminals.clear()
+        for stream_token in list(self._stream_bindings):
+            binding = self._stream_bindings.pop(stream_token)
+            self._release_stream_binding_locked(binding)
+
+    def _invalidate_retained_state_locked(self: InferenceRowScheduler) -> None:
+        # Full detach for shutdown / hard invalidate -- not used by begin_scope.
+        self._detach_stream_runs_locked(turn=None)
+
+    def _abort_orchestrator_scopes(
+        self: InferenceRowScheduler,
+        root_scope: ComputeScope,
+    ) -> None:
+        """Fail in-flight orchestrator work for ``root_scope`` after a row-run cancel.
+
+        Without this, a later ``force_fresh`` submit attaches to the still-running node
+        and ``tier_solve`` fails with a missing RowRun after unregister.
+
+        Uses :class:`~api.compute.errors.ComputeScopeAbortedError` so dependents on the
+        singleton DAG (e.g. fleet) stay ``waiting_deps`` instead of cascading the cancel
+        into a user-visible fleet table error.
+
+        Must run without the scheduler lock held (see ``cancel_run``). Always targets the
+        process-wide orchestrator so abort still works when stream bindings were cleared.
+        """
+        from api.compute.errors import ComputeScopeAbortedError
+        from api.compute.runtime import get_compute_orchestrator
+
+        orchestrators: list[object] = []
+        seen: set[int] = set()
+        with self._lock:
+            for binding in self._stream_bindings.values():
+                orch = binding.orchestrator
+                orch_id = id(orch)
+                if orch_id in seen:
+                    continue
+                seen.add(orch_id)
+                orchestrators.append(orch)
+        singleton = get_compute_orchestrator()
+        if id(singleton) not in seen:
+            orchestrators.append(singleton)
+        for orchestrator in orchestrators:
+            abort = getattr(orchestrator, "abort_scope", None)
+            if not callable(abort):
+                continue
+            abort(
+                root_scope,
+                ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE),
+            )
+
+    def _release_stream_binding_locked(
+        self: InferenceRowScheduler,
+        binding: InferenceStreamOrchestratorBinding,
+    ) -> None:
+        if binding.unregister_dispatch_gate is not None:
+            binding.unregister_dispatch_gate()
+            binding.unregister_dispatch_gate = None
+
+    def _remove_run_locked(self: InferenceRowScheduler, run_id: str) -> None:
+        from api.analytics.scores.tier_row_run_registry import unregister_row_run
+
+        root_scope = self._runs.pop(run_id, None)
+        unregister_row_run(run_id)
+        # Keep ``_terminal_stream_events_delivered`` entries so a late peer binding
+        # that finds no matching run cannot orphan-deliver RowFailed after a prior
+        # RowComplete for the same run_id.
+        if root_scope is None:
+            return
+        self._held_initial_submissions = [
+            held for held in self._held_initial_submissions if held.root_scope != root_scope
+        ]
+
+    @staticmethod
+    def _is_cancel_abort_failure(node: object) -> bool:
+        if getattr(node, "state", None) != "failed":
+            return False
+        from api.compute.errors import ComputeScopeAbortedError
+
+        return isinstance(getattr(node, "error", None), ComputeScopeAbortedError)
+
+    @staticmethod
+    def _adapter_row_run(run_id: str) -> RowRun | None:
+        from api.analytics.scores.tier_row_run_registry import get_row_run
+
+        return get_row_run(run_id)
