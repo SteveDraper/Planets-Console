@@ -421,7 +421,7 @@ def test_scores_policy_factory_failure_releases_scope_for_reconnect(sample_turn,
 
     stream = iter_table_stream_connect_with_scope(
         begin_scope=lambda: scheduler.begin_scope(stream_scope),
-        end_scope=lambda stream_token: scheduler.end_inference_stream(
+        end_scope=lambda stream_token: scheduler.detach_inference_stream(
             stream_scope,
             (),
             stream_token=stream_token,

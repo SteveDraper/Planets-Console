@@ -112,6 +112,7 @@ class ComputeNodeRun:
     profile_step_index: int = 0
     step_index: int = 0
     priority_band: ComputePriorityBand = "background"
+    execution_generation: int = 0
     generation_at_submit: int | None = None
     result_wire: object | None = None
     error: BaseException | None = None
@@ -195,6 +196,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
+        self._next_execution_generation = 1
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._observers = OrchestratorObservers(self._condition)
@@ -498,12 +500,19 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
 
-    def abort_scope(self, scope: ComputeScope, error: BaseException) -> bool:
+    def abort_scope(
+        self,
+        scope: ComputeScope,
+        error: BaseException,
+        *,
+        expected_execution_generation: int | None = None,
+    ) -> bool:
         """Abort a non-terminal node so a later ``force_fresh`` submit can replace it.
 
         Returns whether a node was aborted. No-op when the scope is absent or already
-        terminal. Used when a stream row run is cancelled while orchestrator work for
-        that scope is still in flight.
+        terminal, or when it is no longer the expected execution generation. Used when
+        a stream row run is cancelled while orchestrator work for that scope is still
+        in flight.
 
         Prefer :class:`ComputeScopeAbortedError` for intentional cancels: the node
         becomes ``failed`` for force_fresh replacement, but dependents do **not**
@@ -512,6 +521,11 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         with self._condition:
             node = self._nodes.get(scope)
             if node is None or node.state in {"complete", "failed"}:
+                return False
+            if (
+                expected_execution_generation is not None
+                and node.execution_generation != expected_execution_generation
+            ):
                 return False
             prior_state = node.state
             was_running = prior_state == "running"
@@ -647,6 +661,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
                 dependency_scopes=(),
                 state="complete",
                 priority_band=priority_band,
+                execution_generation=self._allocate_execution_generation(),
                 bundle=bundle,
             )
 
@@ -672,9 +687,21 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
             dependency_scopes=planned.dependency_scopes,
             priority_band=priority_band,
             profile_step_index=profile_step_index,
+            execution_generation=self._allocate_execution_generation(),
             bundle=bundle,
         )
         self._nodes[planned.scope] = node
+
+    def execution_generation_for_scope(self, scope: ComputeScope) -> int | None:
+        """Return the current execution identity for ``scope``."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            return None if node is None else node.execution_generation
+
+    def _allocate_execution_generation(self) -> int:
+        generation = self._next_execution_generation
+        self._next_execution_generation += 1
+        return generation
 
     def _resolve_profile_step_index(
         self,

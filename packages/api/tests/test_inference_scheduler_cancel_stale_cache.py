@@ -559,8 +559,8 @@ def test_cancel_fence_blocks_late_persist_under_high_churn(sample_turn):
         reg.reset_tier_row_run_registry_for_tests()
 
 
-def test_detach_missing_run_still_persists_from_payload(sample_turn):
-    """Detach unregisters without a cancellation fence; finish may persist."""
+def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn):
+    """Disconnect detaches without a cancellation fence; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
@@ -588,7 +588,7 @@ def test_detach_missing_run_still_persists_from_payload(sample_turn):
             perspective=1,
             turn_number=turn_number,
         )
-        first_token = scheduler.begin_scope(scope)
+        stream_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
         register_row_run(row_run)
@@ -601,8 +601,7 @@ def test_detach_missing_run_still_persists_from_payload(sample_turn):
                 player_id=player_id,
             )
 
-        second_token = scheduler.begin_scope(scope)
-        assert second_token != first_token
+        scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
         assert get_row_run(session.run_id) is None
         assert not is_row_run_cancelled(session.run_id)
         assert not session.cancel_token.is_cancelled()

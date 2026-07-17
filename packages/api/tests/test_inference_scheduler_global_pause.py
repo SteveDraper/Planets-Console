@@ -273,7 +273,7 @@ def test_begin_scope_preempts_stale_stream_for_same_scope(sample_turn):
     assert status["activeSessionCount"] == 0
 
 
-def test_begin_scope_succeeds_after_end_inference_stream(sample_turn):
+def test_begin_scope_succeeds_after_detach_inference_stream(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()
     scope = InferenceStreamScope(
@@ -284,7 +284,7 @@ def test_begin_scope_succeeds_after_end_inference_stream(sample_turn):
     session = _session_for_turn(sample_turn)
     stream_token = scheduler.begin_scope(scope)
     scheduler.enqueue_tier_ladder(session)
-    scheduler.end_inference_stream(scope, (session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
 
     scheduler.begin_scope(scope)
 
@@ -293,7 +293,7 @@ def test_begin_scope_succeeds_after_end_inference_stream(sample_turn):
     assert status["paused"] is False
 
 
-def test_end_inference_stream_cancels_runs_and_clears_global_pause(sample_turn):
+def test_detach_inference_stream_leaves_runs_running_and_clears_global_pause(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()
     scope = InferenceStreamScope(
@@ -309,16 +309,16 @@ def test_end_inference_stream_cancels_runs_and_clears_global_pause(sample_turn):
     assert scheduler.global_pause_status(scope)["paused"] is True
     assert scheduler.global_pause_status(scope)["activeSessionCount"] == 1
 
-    scheduler.end_inference_stream(scope, (session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
 
     status = scheduler.global_pause_status(scope)
     assert status["paused"] is False
     assert status["activeSessionCount"] == 0
     assert status["heldJobCount"] == 0
-    assert session.cancel_token.is_cancelled()
+    assert not session.cancel_token.is_cancelled()
 
 
-def test_stale_end_inference_stream_does_not_clear_replacement_stream(sample_turn):
+def test_stale_detach_inference_stream_does_not_clear_replacement_stream(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()
     scope = InferenceStreamScope(
@@ -336,15 +336,15 @@ def test_stale_end_inference_stream_does_not_clear_replacement_stream(sample_tur
     scheduler._scope_guard._has_active_table_stream = True
     scheduler.enqueue_tier_ladder(new_session)
 
-    scheduler.end_inference_stream(scope, (old_session,), stream_token=old_token)
+    scheduler.detach_inference_stream(scope, (old_session,), stream_token=old_token)
 
     status = scheduler.global_pause_status(scope)
     assert status["activeSessionCount"] == 1
     assert scheduler._scope_guard.has_active_table_stream is True
-    assert old_session.cancel_token.is_cancelled()
+    assert not old_session.cancel_token.is_cancelled()
     assert not new_session.cancel_token.is_cancelled()
 
-    scheduler.end_inference_stream(scope, (new_session,), stream_token=new_token)
+    scheduler.detach_inference_stream(scope, (new_session,), stream_token=new_token)
     assert scheduler.global_pause_status(scope)["activeSessionCount"] == 0
 
 

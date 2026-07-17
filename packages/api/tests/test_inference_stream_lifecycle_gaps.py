@@ -314,12 +314,12 @@ def test_progress_without_terminal_complete_when_scope_deactivates_mid_row(sampl
     assert list(stream) == []
 
 
-def test_stream_disconnect_leaves_in_flight_row_without_persisted_terminal_state(
+def test_stream_disconnect_ends_before_worker_completes(
     sample_turn,
     monkeypatch,
     memory_backend,
 ):
-    """Disconnect before terminal: in-flight row is cancelled without persistence."""
+    """Disconnect may end delivery before a worker has produced a terminal."""
     persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = _install_workerless_scheduler(
         monkeypatch,
@@ -454,7 +454,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         ),
         persistence=persistence,
     )
-    scheduler.end_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
 
     replay = iter_scores_table_inference_events(
         sample_turn,

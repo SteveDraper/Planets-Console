@@ -304,8 +304,8 @@ def cleanup_inference_stream_sessions(
     *,
     stream_token: str,
 ) -> None:
-    """Tear down row runs when the table stream ends."""
-    scheduler.end_inference_stream(scope, sessions, stream_token=stream_token)
+    """Detach row runs when the table stream ends."""
+    scheduler.detach_inference_stream(scope, sessions, stream_token=stream_token)
 
 
 def iter_scores_table_inference_events(

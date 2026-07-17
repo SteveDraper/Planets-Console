@@ -294,20 +294,19 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
         with self._lock:
             self._remove_run_locked(run_id)
 
-    def end_inference_stream(
+    def detach_inference_stream(
         self,
         scope: InferenceStreamScope,
         sessions: tuple[InferenceRowStreamSession, ...],
         *,
         stream_token: str,
     ) -> None:
-        """Cancel all row runs for a table stream and clear global pause on disconnect."""
+        """Detach a table stream without cancelling its in-flight row runs."""
         remaining_bindings: tuple[InferenceStreamOrchestratorBinding, ...] = ()
         clear_pause_gates = False
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
-                session.cancel_token.cancel()
                 self._remove_run_locked(session.run_id)
             self._drop_held_for_stream_locked(stream_token)
             binding = self._stream_bindings.pop(stream_token, None)

@@ -87,9 +87,16 @@ class InferenceStreamTeardownMixin:
         from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
 
         abort_scope: ComputeScope | None = None
+        abort_generation: int | None = None
         with self._lock:
             row_run = self._adapter_row_run(run_id)
             root_scope = self._runs.get(run_id)
+            if root_scope is not None:
+                from api.compute.runtime import get_compute_orchestrator
+
+                abort_generation = get_compute_orchestrator().execution_generation_for_scope(
+                    root_scope
+                )
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
             # Fence before unregister: persist must not race on missing RowRun.
@@ -100,8 +107,8 @@ class InferenceStreamTeardownMixin:
         # listeners that may deliver stream events (controller ``stream_lock``) or
         # call ``owns_table_stream`` (needs this lock). Holding ``_lock`` here ABBA /
         # self-deadlocks with ``reschedule_row`` (stream_lock -> cancel -> abort).
-        if abort_scope is not None:
-            self._abort_orchestrator_scopes(abort_scope)
+        if abort_scope is not None and abort_generation is not None:
+            self._abort_orchestrator_scope(abort_scope, abort_generation)
 
     def _detach_stream_runs_locked(
         self: InferenceRowScheduler,
@@ -134,9 +141,10 @@ class InferenceStreamTeardownMixin:
         # Full detach for shutdown / hard invalidate -- not used by begin_scope.
         self._detach_stream_runs_locked(turn=None)
 
-    def _abort_orchestrator_scopes(
+    def _abort_orchestrator_scope(
         self: InferenceRowScheduler,
         root_scope: ComputeScope,
+        execution_generation: int,
     ) -> None:
         """Fail in-flight orchestrator work for ``root_scope`` after a row-run cancel.
 
@@ -156,6 +164,7 @@ class InferenceStreamTeardownMixin:
         get_compute_orchestrator().abort_scope(
             root_scope,
             ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE),
+            expected_execution_generation=execution_generation,
         )
 
     def _release_stream_binding_locked(

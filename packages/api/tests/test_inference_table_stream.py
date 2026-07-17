@@ -135,7 +135,7 @@ def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sampl
     )
     assert active_row is not None
 
-    scheduler.end_inference_stream(scope, (active_row.session,), stream_token=first_token)
+    scheduler.detach_inference_stream(scope, (active_row.session,), stream_token=first_token)
     scheduler.begin_scope(scope)
 
     stale_row = schedule_inference_row(
@@ -148,7 +148,7 @@ def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sampl
         stream_token=first_token,
     )
     assert stale_row is None
-    assert active_row.session.cancel_token.is_cancelled()
+    assert not active_row.session.cancel_token.is_cancelled()
 
 
 def test_table_stream_reconnect_preempts_in_flight_rows_for_same_scope(sample_turn):

@@ -415,6 +415,31 @@ def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
     assert orchestrator.nodes[root_scope].error is None
 
 
+def test_abort_scope_does_not_abort_replacement_execution(sample_turn):
+    from api.compute.orchestrator import ComputeNodeRun
+
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    scope = _compute_scope(SHARED_ID, _export_scope(sample_turn))
+    replacement = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="running",
+        execution_generation=2,
+    )
+    orchestrator._nodes[scope] = replacement
+
+    assert (
+        orchestrator.abort_scope(
+            scope,
+            RuntimeError("cancelled stale execution"),
+            expected_execution_generation=1,
+        )
+        is False
+    )
+    assert orchestrator.nodes[scope] is replacement
+    assert replacement.state == "running"
+
+
 def test_attach_inflight_does_not_double_pool_workers(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,
