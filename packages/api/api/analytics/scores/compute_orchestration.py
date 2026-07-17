@@ -423,9 +423,9 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel_run marks a tombstone before unregister so a
-        # late persist after RowRun removal still skips. Detach only unregisters
-        # (no tombstone) so finish-after-detach may persist from the payload.
+        # Cancel vs detach: cancel_run sets a durable fence before unregister so
+        # a late persist after RowRun removal still skips. Detach only unregisters
+        # (no fence) so finish-after-detach may persist from the payload.
         if is_row_run_cancelled(run_id):
             return
         run = get_row_run(run_id)

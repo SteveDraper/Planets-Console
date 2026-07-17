@@ -306,7 +306,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
     Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
     cancelled runs -- durable evidence dropped even though the worker finished a
-    RowComplete. Detach must leave no cancel tombstone.
+    RowComplete. Detach must leave no cancellation fence.
     """
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
@@ -406,8 +406,8 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_after_unregister_blocks_persist_via_tombstone(sample_turn):
-    """cancel_run tombstone must survive RowRun removal so late persist skips.
+def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
+    """cancel_run fence must survive RowRun removal so late persist skips.
 
     Fingerprint: cancel cancelled the token and unregistered before abort; persist
     saw ``get_row_run is None`` and wrote durable evidence for cancelled work.
@@ -486,23 +486,8 @@ def test_cancel_after_unregister_blocks_persist_via_tombstone(sample_turn):
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancelled_run_tombstones_are_fifo_bounded(monkeypatch):
-    """Cancel tombstones must not grow unbounded across unique run ids."""
-    from api.analytics.scores import tier_row_run_registry as reg
-
-    monkeypatch.setattr(reg, "MAX_CANCELLED_RUN_TOMBSTONES", 3)
-    reg.reset_tier_row_run_registry_for_tests()
-    try:
-        for index in range(10):
-            reg.mark_row_run_cancelled(f"run-{index}")
-        retained = [index for index in range(10) if reg.is_row_run_cancelled(f"run-{index}")]
-        assert retained == [7, 8, 9]
-    finally:
-        reg.reset_tier_row_run_registry_for_tests()
-
-
-def test_tombstone_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn, monkeypatch):
-    """Oldest tombstones may evict; a still-retained cancel must refuse late persist."""
+def test_cancel_fence_blocks_late_persist_under_high_churn(sample_turn):
+    """An explicit cancel fence must not expire before late persist is rejected."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
@@ -513,7 +498,6 @@ def test_tombstone_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn,
     from api.compute.scope import ComputeScope
     from api.storage.memory_asset import MemoryAssetBackend
 
-    monkeypatch.setattr(reg, "MAX_CANCELLED_RUN_TOMBSTONES", 2)
     reset_inference_row_scheduler_for_tests()
     reg.reset_tier_row_run_registry_for_tests()
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
@@ -528,10 +512,8 @@ def test_tombstone_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn,
                 turn_number=turn_number,
             )
         )
-        # Fill capacity with unrelated cancels, then cancel the real run so it
-        # remains among the newest tombstones after FIFO eviction pressure.
-        reg.mark_row_run_cancelled("stale-a")
-        reg.mark_row_run_cancelled("stale-b")
+        for index in range(5_000):
+            reg.mark_row_run_cancelled(f"unrelated-run-{index}")
 
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
@@ -546,10 +528,8 @@ def test_tombstone_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn,
             )
 
         scheduler.cancel_run(session.run_id)
-        # One more cancel evicts the oldest filler; the real run must stay.
-        reg.mark_row_run_cancelled("stale-c")
-        assert not reg.is_row_run_cancelled("stale-a")
         assert reg.is_row_run_cancelled(session.run_id)
+        assert reg.is_row_run_cancelled("unrelated-run-0")
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -560,7 +540,7 @@ def test_tombstone_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn,
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-            summary="retained cancel tombstone must not persist",
+            summary="cancelled high-churn run must not persist",
         )
         ScoresPersistencePolicy().persist(
             ctx,
@@ -580,7 +560,7 @@ def test_tombstone_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn,
 
 
 def test_detach_missing_run_still_persists_from_payload(sample_turn):
-    """Detach unregisters without a cancel tombstone; finish may persist."""
+    """Detach unregisters without a cancellation fence; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
