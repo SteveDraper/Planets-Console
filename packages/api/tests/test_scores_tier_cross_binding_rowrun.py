@@ -794,3 +794,160 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         f"(pending={pending!r})"
     )
     assert session.run_id not in scheduler._upgradable_empty_terminals
+
+
+def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
+    sample_turn,
+) -> None:
+    """Non-durable rowComplete park soft-delivers without DAG complete (fleet blocked)."""
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    orchestrator = _singleton_orchestrator()
+    soft_complete = row_complete_with_summary(
+        InferenceResult(status="soft_partial", solutions=(), diagnostics={}),
+        summary="soft park",
+    )
+    _set_scope_node(
+        orchestrator,
+        scope,
+        state="parked",
+        priority_band="stream_attached",
+        result_wire={"runId": run.run_id, "rowComplete": soft_complete},
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    parked_node = SimpleNamespace(
+        state="parked",
+        result_wire={"runId": run.run_id, "rowComplete": soft_complete},
+        error=None,
+    )
+    scheduler._on_orchestrator_node_complete(scope, parked_node)
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
+    assert domain_terminals, (
+        "soft park left open stream without terminal "
+        f"(session={session.run_id}, queued={queued!r})"
+    )
+    assert isinstance(domain_terminals[0], RowComplete)
+    assert orchestrator.nodes[scope].state == "parked"
+    assert session.run_id in scheduler._upgradable_empty_terminals
+
+
+def test_empty_park_schedule_row_stays_silent_for_wake(
+    sample_turn,
+) -> None:
+    """Empty park with schedule-only row stays silent; wake owns progress (no RowFailed)."""
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    parked_node = SimpleNamespace(state="parked", result_wire=None, error=None)
+    scheduler._on_orchestrator_node_complete(scope, parked_node)
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
+    assert domain_terminals == []
+    assert session.run_id not in scheduler._terminal_stream_events_delivered
+
+
+def test_open_evidence_park_stays_silent_without_matching_row_run(
+    sample_turn,
+) -> None:
+    """Open-evidence wait park must not soft-admit; wake owns progress."""
+    session = _session(sample_turn)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    parked_node = SimpleNamespace(state="parked", result_wire=None, error=None)
+    scheduler._on_orchestrator_node_complete(scope, parked_node)
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
+    assert domain_terminals == []
+    assert session.run_id not in scheduler._terminal_stream_events_delivered

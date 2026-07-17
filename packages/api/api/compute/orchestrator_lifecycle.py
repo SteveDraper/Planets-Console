@@ -131,9 +131,16 @@ class OrchestratorLifecycleMixin:
         self._observers.schedule_post_lock(_force_fresh_dependency)
 
     def _park_node_step(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Park a non-progressing step until an explicit ``force_fresh`` wake."""
+        """Park a non-progressing step until an explicit ``force_fresh`` wake.
+
+        Soft park does **not** complete the node (dependents stay blocked), but still
+        notifies process-wide scope listeners so scores soft/empty stream delivery
+        can reattach without unlocking same-turn fleet.
+        """
         if node.state != "running":
             return
+        from api.compute.scope_terminal_fanout import notify_process_scope_terminal
+
         prior_step_index = node.step_index
         node.generation_at_submit = None
         node.error = None
@@ -149,6 +156,11 @@ class OrchestratorLifecycleMixin:
                 "priorStepIndex": prior_step_index,
                 "priorProfileStepIndex": node.profile_step_index,
             },
+        )
+        parked_scope = node.scope
+        parked_node = node
+        self._observers.schedule_post_lock(
+            lambda: notify_process_scope_terminal(parked_scope, parked_node),
         )
 
     def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:

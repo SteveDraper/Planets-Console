@@ -902,6 +902,13 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         turn=sample_turn.settings.turn,
         player_id=run.session.player_id,
     )
+    park_notifications: list[str] = []
+    from api.compute.scope_terminal_fanout import register_process_scope_terminal_listener
+
+    unregister = register_process_scope_terminal_listener(
+        lambda notified_scope, notified_node: park_notifications.append(notified_node.state),
+        analytic_id="scores-tier-probe",
+    )
 
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
@@ -915,11 +922,28 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         assert result_wire.outcome == "park"
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
 
+    unregister()
     node = orchestrator.nodes[scope]
     assert node.state == "parked"
     assert handle.state == "parked"
+    assert park_notifications == ["parked"]
     assert submitted_scopes == [scope]
     assert orchestrator.metrics.epoch_discards == 0
+    # Soft park must not satisfy dependents the way complete would.
+    from api.compute.orchestrator import ComputeNodeRun
+
+    dependent = ComputeNodeRun(
+        scope=ComputeScope(
+            analytic_id="fleet-probe",
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn,
+            player_id=scope.player_id,
+        ),
+        dependency_scopes=(scope,),
+        state="waiting_deps",
+    )
+    assert orchestrator._deps_complete(dependent) is False
 
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
@@ -1047,3 +1071,115 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
     assert prior_fleet_scope in planned_by_scope
     assert scope in planned_by_scope
     assert prior_fleet_scope in planned_by_scope[scope].dependency_scopes
+
+
+def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> None:
+    """Background RowRun register must force_fresh-wake a soft-parked scores node."""
+    from api.analytics.military_score_inference.inference_scheduler import (
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.compute_orchestration import wake_parked_scores_scope_if_needed
+    from api.compute import runtime as compute_runtime
+    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+
+    player_id = sample_turn.scores[0].ownerid
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=False)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    scope = _scores_scope(sample_turn, player_id)
+    compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
+    submitted_scopes: list[ComputeScope] = []
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del step, job_wire, run_step
+        submitted_scopes.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    compute_runtime._process_orchestrator = orchestrator
+
+    parked = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="parked",
+        priority_band="background",
+        profile_step_index=1,
+        step_index=1,
+        bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
+    )
+    orchestrator._nodes[scope] = parked
+
+    assert wake_parked_scores_scope_if_needed(scope, ctx=ctx) is True
+    assert parked.state in {"ready", "running"}
+    assert submitted_scopes == [scope]
+
+    # Already woken -- not parked anymore.
+    assert wake_parked_scores_scope_if_needed(scope, ctx=ctx) is False
+
+
+def test_enqueue_without_stream_token_wakes_parked_scores_node(
+    sample_turn,
+    persistence,
+) -> None:
+    """enqueue_tier_ladder with no stream token still wakes a parked scores DAG."""
+    from api.analytics.military_score_inference.inference_scheduler import (
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.compute import runtime as compute_runtime
+    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+
+    player_id = sample_turn.scores[0].ownerid
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=False)
+    session = _session_for_player(sample_turn, player_id=player_id)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    scope = _scores_scope(sample_turn, player_id)
+    compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
+    submitted_scopes: list[ComputeScope] = []
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del step, job_wire, run_step
+        submitted_scopes.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    compute_runtime._process_orchestrator = orchestrator
+    parked = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="parked",
+        priority_band="background",
+        profile_step_index=1,
+        step_index=1,
+        bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
+    )
+    orchestrator._nodes[scope] = parked
+
+    # No active stream token: background ensure path registers RowRun and must wake.
+    scheduler.enqueue_tier_ladder(session, stream_token=None)
+
+    assert parked.state in {"ready", "running"}
+    assert submitted_scopes == [scope]
+    assert get_row_run_for_scope(scope) is not None

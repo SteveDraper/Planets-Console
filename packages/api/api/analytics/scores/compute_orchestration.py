@@ -259,6 +259,45 @@ def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
     return StepResult(outcome="continue", payload=export_tree)
 
 
+def wake_parked_scores_scope_if_needed(
+    scope: ComputeScope,
+    *,
+    ctx: AnalyticQueryContext,
+    priority_band: str = "background",
+) -> bool:
+    """``force_fresh``-wake a soft-parked scores node; no-op when not parked.
+
+    Mandatory wake owners for scores ``park`` sites (see
+    :func:`tier_job_outcome_to_step_result` / :func:`run_scores_tier_solve`):
+
+    - **RowRun adopt** -- ``InferenceRowScheduler.enqueue_tier_ladder`` after register
+      (stream submit path, or background wake when no stream token)
+    - **Evidence close** -- cheap ``ImmediateRowAdmission`` disk admit in ensure
+    - **Stream reschedule** -- ``_submit_tier_solve_locked`` (already ``force_fresh``)
+    - **Fleet reopen** -- ``PersistDeferredError`` recovery force_freshes scores
+
+    Soft park never ``complete``s the node, so same-turn fleet ENSURE stays blocked
+    until a durable persist or evidence-closed skip.
+    """
+    from api.compute.orchestrator import ComputeRequest
+    from api.compute.runtime import get_compute_orchestrator
+
+    orchestrator = get_compute_orchestrator()
+    node = orchestrator.nodes.get(scope)
+    if node is None or node.state != "parked":
+        return False
+    orchestrator.submit(
+        ComputeRequest(
+            scope=scope,
+            step_kind=SCORES_TIER_SOLVE,
+            force_fresh=True,
+            ctx=ctx,
+            priority_band=priority_band,
+        )
+    )
+    return True
+
+
 def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> StepResult:
     """Map one inference tier job outcome to an orchestrator step result.
 
@@ -266,8 +305,15 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     evidence is still open: that unlocks same-turn fleet ENSURE and triggers the
     fleet ``persist_deferred`` → force_fresh scores reopen loop. Persist only
     statuses that close evidence on disk. Non-durable or empty outcomes park
-    (``outcome="park"`` → node ``parked``) until ``force_fresh`` wake (admit,
-    adopt RowRun, or evidence-closed skip) -- not hot ``continue``.
+    (``outcome="park"`` → node ``parked``) until ``force_fresh`` wake -- not hot
+    ``continue``.
+
+    Park sites and wake owners:
+
+    - Non-durable ``rowComplete`` → park (+ soft stream delivery on park notify);
+      wake via stream reschedule / evidence close / fleet reopen
+    - Empty ``TierJobOutcome`` → park (cheap admission soft-stream when available;
+      otherwise silent); wake via stream reschedule / RowRun re-adopt
     """
     if outcome.enqueue_continuation:
         if outcome.next_ladder_state is not None:
@@ -289,8 +335,14 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
 
     Empty complete is allowed only for the evidence-closed skip sentinel. Open-evidence
     wait wires (``runId: None`` without ``evidenceClosed``) and missing ``RowRun``
-    lookups park so the orchestrator does not hot-redispatch ``tier_solve``; a later
-    ``force_fresh`` submit rebuilds wire after admit, adopt, or evidence close.
+    lookups park so the orchestrator does not hot-redispatch ``tier_solve``.
+
+    Park sites and wake owners (no soft stream terminal -- wait for work):
+
+    - Open-evidence wait → park; wake when ensure admits / adopts a ``RowRun`` or
+      closes evidence (``wake_parked_scores_scope_if_needed``)
+    - Missing ``RowRun`` → park; wake when a replacement ``RowRun`` is registered
+      (``enqueue_tier_ladder``) or evidence closes
     """
     run_id = job_wire.get("runId")
     if run_id is None:

@@ -339,6 +339,7 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
     ) -> None:
         submit_binding: InferenceStreamOrchestratorBinding | None = None
         submit_scope: ComputeScope | None = None
+        wake_parked_scope: ComputeScope | None = None
         with self._lock:
             resolved_token = (
                 stream_token
@@ -353,24 +354,29 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
             self._register_tier_callbacks_for_run(row_run)
             root_scope = self._root_scope_for_session(session)
             self._runs[session.run_id] = root_scope
-            if resolved_token is None:
-                return
-            if self._scope_guard.active_table_stream_token != resolved_token:
-                return
             if self._defer_orchestrator_submit:
                 return
-            binding = self._binding_for_stream_locked(resolved_token, session=session)
-            if self._globally_paused:
+            if resolved_token is None:
+                # Background ensure / adopt registered a RowRun with no stream submit.
+                # Soft-parked scores nodes must still get an explicit force_fresh wake.
+                wake_parked_scope = root_scope
+            elif self._scope_guard.active_table_stream_token != resolved_token:
+                return
+            elif self._globally_paused:
                 self._held_initial_submissions.append(
                     HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
                 )
                 return
-            # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
-            # listeners that must not nest scheduler <-> orchestrator locks.
-            submit_binding = binding
-            submit_scope = root_scope
+            else:
+                # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
+                # listeners that must not nest scheduler <-> orchestrator locks.
+                binding = self._binding_for_stream_locked(resolved_token, session=session)
+                submit_binding = binding
+                submit_scope = root_scope
         if submit_binding is not None and submit_scope is not None:
             self._submit_tier_solve_locked(submit_binding, submit_scope)
+        elif wake_parked_scope is not None:
+            self._wake_parked_scores_after_row_run_adopt(wake_parked_scope, session)
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run."""
@@ -511,6 +517,12 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
         if self._is_cancel_abort_failure(node):
             return
 
+        # Soft park: reattach empty/non-durable stream delivery without completing
+        # the scores node (fleet ENSURE stays blocked until durable close).
+        if getattr(node, "state", None) == "parked":
+            self._deliver_soft_park_stream_terminal_if_needed(scope, node)
+            return
+
         wire_run_id = self._run_id_from_result_wire(getattr(node, "result_wire", None))
         sibling_still_active = self._scope_has_live_nonterminal_work(scope)
 
@@ -583,6 +595,79 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
             self._scope_has_live_nonterminal_work(scope)
         ):
             self._deliver_orphan_stream_terminal_if_needed(scope, node)
+
+    def _deliver_soft_park_stream_terminal_if_needed(
+        self,
+        scope: ComputeScope,
+        node: object,
+    ) -> None:
+        """Deliver upgradable soft stream terminal for empty/non-durable park.
+
+        Open-evidence / missing-``RowRun`` waits park with no soft terminal -- they
+        stay silent until ``force_fresh`` wake rebuilds work. Non-durable
+        ``rowComplete`` parks deliver an upgradable RowComplete. Empty parks deliver
+        cheap admission wire when available; schedule-only rows stay silent so a
+        later wake can progress (do not RowFailed-close the multiplex).
+        """
+        session = self._open_stream_session_for_scope(scope)
+        if session is None:
+            return
+
+        row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
+        if row_complete is not None:
+            with self._lock:
+                already = session.run_id in self._terminal_stream_events_delivered
+                if already and session.run_id not in self._upgradable_empty_terminals:
+                    return
+                if not already:
+                    self._terminal_stream_events_delivered.add(session.run_id)
+                self._upgradable_empty_terminals.add(session.run_id)
+            controller = self._controller_for_compute_scope(scope)
+            if controller is not None and session.run_id in controller.finished_run_ids:
+                controller.push_domain_event_pending_wire(session, row_complete)
+            else:
+                deliver_inference_domain_event_to_open_stream(session, row_complete)
+            return
+
+        with self._lock:
+            has_matching_run = any(
+                root_scope.player_id == scope.player_id
+                and root_scope.game_id == scope.game_id
+                and root_scope.perspective == scope.perspective
+                and scope.turn == root_scope.turn
+                for root_scope in self._runs.values()
+            )
+        if not has_matching_run:
+            # Open-evidence wait or missing-RowRun park: no soft terminal yet.
+            return
+
+        # Cheap admission only -- do not hard-fail the multiplex when CP-SAT work
+        # may still wake the parked node.
+        with self._lock:
+            if session.run_id in self._terminal_stream_events_delivered:
+                return
+            self._terminal_stream_events_delivered.add(session.run_id)
+            self._upgradable_empty_terminals.add(session.run_id)
+        controller = self._controller_for_compute_scope(scope)
+        if controller is not None and controller.push_admission_wire_terminal(session):
+            return
+        # No admission wire: roll back the soft claim and stay silent for wake.
+        with self._lock:
+            self._terminal_stream_events_delivered.discard(session.run_id)
+            self._upgradable_empty_terminals.discard(session.run_id)
+    def _wake_parked_scores_after_row_run_adopt(
+        self,
+        root_scope: ComputeScope,
+        session: InferenceRowStreamSession,
+    ) -> None:
+        """Wake a soft-parked scores node after background RowRun register."""
+        from api.analytics.scores.compute_orchestration import wake_parked_scores_scope_if_needed
+
+        wake_parked_scores_scope_if_needed(
+            root_scope,
+            ctx=_query_context_for_session(session, scheduler=self),
+            priority_band="background",
+        )
 
     def _deliver_stream_terminal(
         self,

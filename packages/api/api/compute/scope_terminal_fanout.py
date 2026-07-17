@@ -1,9 +1,11 @@
-"""Process-wide fan-out for compute scope terminal outcomes.
+"""Process-wide fan-out for compute scope terminal and soft-park outcomes.
 
-Scores ``InferenceRowScheduler`` registers here as its sole terminal path so
-completions on any orchestrator binding (stream or peer, e.g. fleet DAG
-``tier_solve``) reach the adapter. Fleet table stream keeps a local orchestrator
-listener and does not use this registry.
+Scores ``InferenceRowScheduler`` registers here as its sole adapter path so
+completions, failures, and soft ``parked`` outcomes on any orchestrator binding
+(stream or peer, e.g. fleet DAG ``tier_solve``) reach the adapter. Soft park is
+included so empty/non-durable scores parks can deliver upgradable stream
+terminals without ``complete`` unlocking same-turn fleet. Fleet table stream
+keeps a local orchestrator listener and does not use this registry.
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ class ProcessScopeTerminalFanout:
         return unregister
 
     def notify(self, scope: ComputeScope, node: ComputeNodeRun) -> None:
-        """Invoke matching listeners for a terminal node (complete or failed)."""
+        """Invoke matching listeners for complete, failed, or soft-parked nodes."""
         with self._lock:
             listeners = tuple(self._listeners)
         for registered in listeners:
@@ -87,7 +89,7 @@ def register_process_scope_terminal_listener(
 
 
 def notify_process_scope_terminal(scope: ComputeScope, node: ComputeNodeRun) -> None:
-    """Notify process-wide listeners that ``scope`` reached a terminal outcome."""
+    """Notify process-wide listeners of a complete, failed, or soft-parked scope."""
     _PROCESS_SCOPE_TERMINAL_FANOUT.notify(scope, node)
 
 
