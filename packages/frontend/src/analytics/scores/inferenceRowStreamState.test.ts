@@ -23,6 +23,19 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(8, next).displayStatus).toBe('success')
   })
 
+  it('shows zero-solution time_limited complete as a visible failure', () => {
+    const detail = rowDetailFromStreamState(4, {
+      heldSolutions: [],
+      status: 'time_limited',
+      summary: 'Inference timed out before finding a solution',
+      isComplete: true,
+      diagnostics: {},
+    })
+    expect(detail.displayStatus).toBe('failure')
+    expect(detail.isComplete).toBe(true)
+    expect(detail.summary).toMatch(/timed out/i)
+  })
+
   it('updates held top-K from target accelerated segment solutions', () => {
     const next = reduceRowStreamState(initialRowStreamState(), {
       type: 'solution',

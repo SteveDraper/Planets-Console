@@ -73,6 +73,13 @@ export function displayStatusForRow(
   if (status === 'stopped') {
     return solutionCount > 0 ? 'success' : 'stopped'
   }
+  // Zero-solution timeouts are terminal errors; partial timeouts keep streaming.
+  if (status === 'time_limited') {
+    if (solutionCount > 0) {
+      return isComplete ? 'stopped' : 'success'
+    }
+    return isComplete ? 'failure' : 'pending'
+  }
   if (solutionCount > 0 && !isComplete) {
     return 'success'
   }

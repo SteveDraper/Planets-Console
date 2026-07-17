@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
+    ensure_ladder_clock_started,
     remaining_time,
     run_policy_ladder_tier_step,
 )
@@ -177,16 +178,22 @@ def solve_with_policy_ladder(
             state.cancelled = True
             state.ladder_complete = True
             break
-        remaining = remaining_time(state.started_at, time_limit_seconds)
+        ensure_ladder_clock_started(state)
+        ladder_started_at = state.started_at
+        if ladder_started_at is None:
+            raise RuntimeError("policy ladder clock must be started before remaining_time")
+        remaining = remaining_time(ladder_started_at, time_limit_seconds)
         if remaining <= 0:
             state.time_limited = True
             state.ladder_complete = True
             break
+        # Pass remaining whole-ladder budget; tier step measures from dispatch so
+        # the shared case budget is preserved without double-counting wait time.
         run_policy_ladder_tier_step(
             state,
             observation,
             turn,
-            time_limit_seconds=time_limit_seconds,
+            time_limit_seconds=remaining,
             cancel_token=cancel_token,
             on_admitted=on_admitted,
         )

@@ -56,6 +56,13 @@ def remaining_time(started_at: float, time_limit_seconds: float | None) -> float
     return time_limit_seconds - (time.monotonic() - started_at)
 
 
+def ensure_ladder_clock_started(state: PolicyLadderState, *, now: float | None = None) -> float:
+    """Stamp ``state.started_at`` on first dispatch; return the monotonic anchor used."""
+    if state.started_at is None:
+        state.started_at = time.monotonic() if now is None else now
+    return state.started_at
+
+
 def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
     return {ship_build.combo_id: ship_build.count for ship_build in solution.ship_builds}
 
@@ -395,25 +402,32 @@ def _make_incremental_admitter(
 
 @dataclass
 class _TierStepRun:
-    """Cancel and time-budget guards shared across one tier step."""
+    """Cancel and time-budget guards shared across one tier step.
+
+    ``budget_started_at`` is the anchor for ``time_limit_seconds`` -- stream tiers
+    pass the tier dispatch instant so waiting_deps / queue delay cannot exhaust a
+    per-tier CP-SAT budget before work begins. Batch callers pass remaining budget
+    with a fresh tier anchor (see ``solve_with_policy_ladder``).
+    """
 
     state: PolicyLadderState
     time_limit_seconds: float | None
     cancel_token: InferenceCancelToken | None
+    budget_started_at: float
 
     def should_stop(self) -> bool:
         if self.cancel_token is not None and self.cancel_token.is_cancelled():
             self.state.cancelled = True
             self.state.ladder_complete = True
             return True
-        if remaining_time(self.state.started_at, self.time_limit_seconds) <= 0:
+        if remaining_time(self.budget_started_at, self.time_limit_seconds) <= 0:
             self.state.time_limited = True
             self.state.ladder_complete = True
             return True
         return False
 
     def remaining_seconds(self) -> float:
-        return remaining_time(self.state.started_at, self.time_limit_seconds)
+        return remaining_time(self.budget_started_at, self.time_limit_seconds)
 
 
 def _abort_tier_step_on_seed_result(
@@ -447,12 +461,24 @@ def run_policy_ladder_tier_step(
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
 ) -> None:
-    """Run one inference search tier step; mutates ``state`` in place."""
+    """Run one inference search tier step; mutates ``state`` in place.
+
+    The CP-SAT budget for this call is measured from this dispatch instant, not
+    from ladder construction, so SPA stream rows that sat in ``waiting_deps`` do
+    not instantly ``time_limited`` on first tier.
+    """
     if state.ladder_complete or state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
         return
 
-    run = _TierStepRun(state, time_limit_seconds, cancel_token)
+    tier_started_at = time.monotonic()
+    ensure_ladder_clock_started(state, now=tier_started_at)
+    run = _TierStepRun(
+        state,
+        time_limit_seconds,
+        cancel_token,
+        budget_started_at=tier_started_at,
+    )
     if run.should_stop():
         return
 

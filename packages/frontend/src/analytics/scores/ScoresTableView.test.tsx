@@ -110,11 +110,11 @@ describe('ScoresTableView', () => {
           rows: [['Federation (alice)', '', '', '', '', '100', '']],
           inferenceByRow: [
             {
-              displayStatus: 'pending',
+              displayStatus: 'failure',
               status: 'time_limited',
-              summary: 'Still searching',
+              summary: 'Inference timed out before finding a solution',
               solutionCount: 0,
-              isComplete: false,
+              isComplete: true,
               solutions: [],
               diagnostics: {},
             },
@@ -123,7 +123,9 @@ describe('ScoresTableView', () => {
       />
     )
 
-    expect(screen.getByLabelText('Still searching')).toBeInTheDocument()
+    expect(
+      screen.getByLabelText('Inference timed out before finding a solution')
+    ).toBeInTheDocument()
     expect(screen.getByText('100')).toBeInTheDocument()
   })
 
