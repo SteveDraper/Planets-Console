@@ -896,6 +896,11 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
                 completed_payload: object = payload,
                 completed_registration: AnalyticComputeRegistration = registration,
             ) -> None:
+                # Cancel/preempt may have aborted this node after the step succeeded
+                # but before post-lock persist. Do not persist or complete in that case.
+                with self._condition:
+                    if completed_node.state != "running":
+                        return
                 ctx = self._ctx_for_node(completed_node)
                 try:
                     post_lock_callback = completed_registration.persistence_policy.persist(

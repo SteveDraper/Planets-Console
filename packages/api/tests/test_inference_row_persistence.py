@@ -548,11 +548,11 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
     assert stored.status == STATUS_STOPPED
 
 
-def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
+def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
     sample_turn,
     memory_backend,
 ):
-    """Persistable tier outcome without a live RowRun must not quiet-complete."""
+    """Persistable tier outcome must still close evidence if the RowRun was dropped."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
     from api.analytics.military_score_inference.inference_stream_session import (
@@ -599,16 +599,18 @@ def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="orphan persist",
     )
-    with pytest.raises(RuntimeError, match="missing RowRun"):
-        ScoresPersistencePolicy().persist(
-            ctx,
-            ComputeScope(
-                analytic_id="scores",
-                game_id=628580,
-                perspective=1,
-                turn=sample_turn.settings.turn,
-                player_id=score.ownerid,
-            ),
-            {"runId": run_id, "rowComplete": row_complete},
-        )
-    assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None
+    ScoresPersistencePolicy().persist(
+        ctx,
+        ComputeScope(
+            analytic_id="scores",
+            game_id=628580,
+            perspective=1,
+            turn=sample_turn.settings.turn,
+            player_id=score.ownerid,
+        ),
+        {"runId": run_id, "rowComplete": row_complete},
+    )
+    stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
+    assert stored is not None
+    assert stored.status == STATUS_EXACT
+    assert stored.summary == "orphan persist"

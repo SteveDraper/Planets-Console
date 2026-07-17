@@ -70,9 +70,15 @@ def inference_api_payload_to_wire_complete(
 def row_complete_to_complete_wire_event(
     event: RowComplete,
     *,
-    observation: InferenceObservation,
-    turn: TurnInfo,
+    observation: InferenceObservation | None = None,
+    turn: TurnInfo | None = None,
 ) -> dict[str, object]:
+    """Shape a ``RowComplete`` into a terminal wire ``complete`` event.
+
+    ``observation`` and ``turn`` are accepted for call-site symmetry with other
+    domain→wire helpers; the RowComplete payload is self-contained.
+    """
+    del observation, turn
     payload = event.wire_payload
     wire_targets = None
     if payload.host_turn_targets is not None:

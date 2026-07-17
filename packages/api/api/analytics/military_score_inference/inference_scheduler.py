@@ -119,12 +119,38 @@ class InferenceRowScheduler:
         )
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
+        """Claim the active table-stream scope, preempting prior retained row runs.
+
+        Preempt/invalidate cancel and unregister every retained ``RowRun`` (including
+        background ensure runs for other turns). Those in-flight orchestrator nodes
+        must be aborted outside the scheduler lock -- otherwise a worker can still
+        finish with a ``persist`` outcome, find the RowRun gone, and fail the node
+        with ``scores persist missing RowRun``.
+        """
+        abort_scopes: list[ComputeScope] = []
+
+        def preempt_retained() -> None:
+            self._preempt_active_table_stream_locked(abort_scopes_out=abort_scopes)
+
         with self._lock:
-            return self._scope_guard.begin_scope_locked(
+            token = self._scope_guard.begin_scope_locked(
                 scope,
-                on_same_scope_preempt=self._preempt_active_table_stream_locked,
-                on_scope_change=self._invalidate_retained_state_locked,
+                on_same_scope_preempt=preempt_retained,
+                on_scope_change=preempt_retained,
             )
+        seen: set[tuple[int, int | str, int | str, int | str]] = set()
+        for root_scope in abort_scopes:
+            key = (
+                root_scope.game_id,
+                root_scope.perspective,
+                root_scope.turn,
+                root_scope.player_id,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            self._abort_orchestrator_scopes(root_scope)
+        return token
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._lock:
@@ -823,13 +849,20 @@ class InferenceRowScheduler:
             binding.unregister_dispatch_gate()
             binding.unregister_dispatch_gate = None
 
-    def _preempt_active_table_stream_locked(self) -> None:
+    def _preempt_active_table_stream_locked(
+        self,
+        *,
+        abort_scopes_out: list[ComputeScope] | None = None,
+    ) -> None:
         self._globally_paused = False
         self._held_initial_submissions.clear()
         for run_id in list(self._runs):
+            root_scope = self._runs.get(run_id)
             row_run = self._adapter_row_run(run_id)
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
+            if abort_scopes_out is not None and root_scope is not None:
+                abort_scopes_out.append(root_scope)
             self._remove_run_locked(run_id)
         self._terminal_stream_events_delivered.clear()
         self._upgradable_empty_terminals.clear()
@@ -976,14 +1009,28 @@ class InferenceRowScheduler:
         singleton DAG (e.g. fleet) stay ``waiting_deps`` instead of cascading the cancel
         into a user-visible fleet table error.
 
-        Must run without the scheduler lock held (see ``cancel_run``).
+        Must run without the scheduler lock held (see ``cancel_run``). Always targets the
+        process-wide orchestrator: ``begin_scope`` preempt clears stream bindings before
+        abort, so binding-only abort would leave background nodes ``running``.
         """
         from api.compute.errors import ComputeScopeAbortedError
+        from api.compute.runtime import get_compute_orchestrator
 
+        orchestrators: list[object] = []
+        seen: set[int] = set()
         with self._lock:
-            bindings = tuple(self._stream_bindings.values())
-        for binding in bindings:
-            abort = getattr(binding.orchestrator, "abort_scope", None)
+            for binding in self._stream_bindings.values():
+                orch = binding.orchestrator
+                orch_id = id(orch)
+                if orch_id in seen:
+                    continue
+                seen.add(orch_id)
+                orchestrators.append(orch)
+        singleton = get_compute_orchestrator()
+        if id(singleton) not in seen:
+            orchestrators.append(singleton)
+        for orchestrator in orchestrators:
+            abort = getattr(orchestrator, "abort_scope", None)
             if not callable(abort):
                 continue
             abort(
