@@ -362,15 +362,17 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
                 wake_parked_scope = root_scope
             elif self._scope_guard.active_table_stream_token != resolved_token:
                 return
-            elif self._globally_paused:
-                self._held_initial_submissions.append(
-                    HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
-                )
-                return
             else:
+                # Create the stream binding even when paused so resume can submit held
+                # work (``resume_globally`` looks up binding by stream_token).
+                binding = self._binding_for_stream_locked(resolved_token, session=session)
+                if self._globally_paused:
+                    self._held_initial_submissions.append(
+                        HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
+                    )
+                    return
                 # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
                 # listeners that must not nest scheduler <-> orchestrator locks.
-                binding = self._binding_for_stream_locked(resolved_token, session=session)
                 submit_binding = binding
                 submit_scope = root_scope
         if submit_binding is not None and submit_scope is not None:
