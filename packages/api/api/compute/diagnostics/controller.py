@@ -27,11 +27,7 @@ from api.compute.diagnostics.in_flight import (
     running_in_flight_keys_for_nodes,
 )
 from api.compute.diagnostics.orchestrator_bind import DiagnosticsOrchestratorBindMixin
-from api.compute.diagnostics.profile_steps import (
-    profile_step_at,
-    profile_step_is_inline,
-    registration_step_kind,
-)
+from api.compute.diagnostics.profile_steps import registration_step_kind
 from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     player_id_from_scope,
@@ -47,7 +43,7 @@ from api.compute.diagnostics.single_step_preview import (
     resolve_single_step_preview,
     single_step_pin_matches,
 )
-from api.compute.orchestrator import ComputeNodeRun, OrchestratorNodeSnapshot
+from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import (
     ComputeWorkerPool,
     PoolWorkItem,
@@ -577,84 +573,6 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             return False
         return self._scope_in_focus(scope, shell)
 
-    def _dispatch_gate(
-        self,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> bool:
-        """Side-effect free: whether freeze allows ``node`` to be selected."""
-        with self._lock:
-            operator_shell = self._last_shell_context
-        if operator_shell is None:
-            # Freeze armed (e.g. start-frozen on bind) before any operator shell:
-            # hold all work for that game until shell sync / single-step.
-            if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
-                return True
-            with self._lock:
-                return self._single_step_dispatch_allowed_locked(
-                    node,
-                    orchestrator_id=orchestrator_id,
-                )
-        shell = self._scope_matches_active_shell(node.scope)
-        if shell is None:
-            # Operator shell set, but scope outside diagnostic scope: allow.
-            # Freeze only gates players in compute diagnostic scope.
-            return True
-        if not self._is_scope_frozen(node.scope, shell):
-            return True
-        with self._lock:
-            return self._single_step_dispatch_allowed_locked(
-                node,
-                orchestrator_id=orchestrator_id,
-            )
-
-    def _single_step_dispatch_allowed_locked(
-        self,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None,
-    ) -> bool:
-        """Return whether an armed single-step may select ``node`` (no consume)."""
-        if self._single_step.dispatch_slots_remaining <= 0:
-            return False
-        return self._single_step_may_release(
-            node.scope,
-            priority_band=node.priority_band,
-            orchestrator_id=orchestrator_id,
-        )
-
-    def _commit_single_step_dispatch(
-        self,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None,
-    ) -> bool:
-        """Consume one single-step dispatch slot for ``node`` after all gates passed.
-
-        When no dispatch slot is armed, returns True so normal (unfrozen) dispatch is
-        unaffected. Inline steps also clear the paired pool grant so single-step cannot
-        leave an orphan for a later dequeue. Returns False when a slot is armed for a
-        different target (caller requeues the node).
-        """
-        with self._lock:
-            if self._single_step.dispatch_slots_remaining <= 0:
-                return True
-            if not self._single_step_may_release(
-                node.scope,
-                priority_band=node.priority_band,
-                orchestrator_id=orchestrator_id,
-            ):
-                return False
-            self._single_step.dispatch_slots_remaining -= 1
-            if self._node_current_step_is_inline(node):
-                self._single_step.clear()
-            return True
-
-    def _node_current_step_is_inline(self, node: ComputeNodeRun) -> bool:
-        """Return whether ``node``'s current profile step uses the inline backend."""
-        return profile_step_is_inline(node.scope.analytic_id, node.profile_step_index)
-
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""
         with self._lock:
@@ -755,57 +673,6 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
                 step_index=step_index,
                 orchestrator_id=orchestrator_id,
             )
-
-    def _on_node_ready(
-        self,
-        scope: ComputeScope,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> None:
-        shell = self._scope_matches_active_shell(scope)
-        if shell is None:
-            return
-        step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
-        # Cache-only gauges: ready listeners drain under paths that may hold the scores
-        # scheduler lock (enqueue -> submit -> drain). Live orch sampling deadlocks.
-        self._timeline.record(
-            shell,
-            kind="ready",
-            scope=scope,
-            orchestrator_id=orchestrator_id,
-            step_kind=step_spec.step_kind if step_spec is not None else None,
-            step_index=node.step_index,
-            priority_band=node.priority_band,
-            backend=step_spec.backend if step_spec is not None else None,
-            sample_ready_from_orchestrators=False,
-        )
-
-    def _on_inline_start(
-        self,
-        scope: ComputeScope,
-        node: ComputeNodeRun,
-        step_kind: str,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> None:
-        shell = self._scope_matches_active_shell(scope)
-        if shell is None:
-            return
-        # Cache-only gauges: inline_start runs before heavy ensure work and must not
-        # nest into other orchestrators' locks (same ABBA risk as ready/finish).
-        self._timeline.record(
-            shell,
-            kind="inline_start",
-            scope=scope,
-            orchestrator_id=orchestrator_id,
-            step_kind=step_kind,
-            step_index=node.step_index,
-            priority_band=node.priority_band,
-            backend="inline",
-            open_execution=True,
-            sample_ready_from_orchestrators=False,
-        )
 
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:
