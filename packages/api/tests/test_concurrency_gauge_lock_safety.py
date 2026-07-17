@@ -15,15 +15,12 @@ from api.compute.scope import ComputeScope
 def _recorder(
     *,
     bound: tuple[BoundOrchestrator, ...] = (),
-    global_queue_depth=None,
 ) -> ConcurrencyTimelineRecorder:
     shell = ShellContextKey(game_id=1, perspective=1, turn=8)
-    depth_fn = global_queue_depth if global_queue_depth is not None else (lambda: 0)
     return ConcurrencyTimelineRecorder(
         timeline_capacity=lambda: 64,
         bound_orchestrators=lambda: bound,
         in_flight_records=lambda: (),
-        global_queue_depth=depth_fn,
         configured_workers=lambda: 4,
         ancestor_turns=lambda _shell: frozenset({8}),
         history_for_shell=lambda _shell: ComputeCompletionHistory(capacity=16),
@@ -109,21 +106,16 @@ def test_record_ready_default_does_not_sample_live_orchestrators() -> None:
     orchestrator.diagnostics_snapshot.assert_not_called()
 
 
-def test_listener_gauges_do_not_sample_live_global_queue_depth() -> None:
-    """Ready/finish/lifecycle paths must not call into the pool for queue depth.
+def test_listener_gauges_use_last_known_global_queue_depth() -> None:
+    """Ready/finish/lifecycle paths must not sample the pool for queue depth.
 
-    Workers hold the pool condition while taking the diagnostics controller lock
-    (predicate / on_dequeued). Sampling ``snapshot_work_queue`` from gauges under
-    drain is controller→pool and ABBA-deadlocks dequeue.
+    There is no live-depth callback on the recorder: gauges take an explicit
+    depth from enqueue/start or fall back to last-known. Workers hold the pool
+    condition while taking the diagnostics controller lock (predicate /
+    on_dequeued); a live ``snapshot_work_queue`` from gauges under drain would
+    be controller→pool and ABBA-deadlock dequeue.
     """
-    depth_calls = 0
-
-    def boom_depth() -> int:
-        nonlocal depth_calls
-        depth_calls += 1
-        raise AssertionError("gauges must not sample live pool queue depth")
-
-    recorder = _recorder(global_queue_depth=boom_depth)
+    recorder = _recorder()
     shell = ShellContextKey(game_id=1, perspective=1, turn=8)
     scope = ComputeScope(
         analytic_id="fleet",
@@ -170,11 +162,12 @@ def test_listener_gauges_do_not_sample_live_global_queue_depth() -> None:
         step_index=0,
     )
 
-    assert depth_calls == 0
+    events = recorder.recent(shell)
+    assert all(event.gauges.global_queue_depth == 0 for event in events)
 
 
 def test_explicit_global_queue_depth_updates_last_known() -> None:
-    recorder = _recorder(global_queue_depth=lambda: 99)
+    recorder = _recorder()
     shell = ShellContextKey(game_id=1, perspective=1, turn=8)
     scope = ComputeScope(
         analytic_id="fleet",

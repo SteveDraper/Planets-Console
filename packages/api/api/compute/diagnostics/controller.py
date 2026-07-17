@@ -98,7 +98,6 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             timeline_capacity=compute_diagnostics_timeline_capacity,
             bound_orchestrators=self._bound_orchestrators_snapshot,
             in_flight_records=self._in_flight_snapshot,
-            global_queue_depth=self._global_queue_depth,
             configured_workers=self._configured_workers,
             ancestor_turns=self._ancestor_turns_for_shell,
             history_for_shell=self._history_for_shell,
@@ -335,11 +334,6 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
     def timeline_recent(self, shell: ShellContextKey) -> tuple:
         """Return recent concurrency timeline events for ``shell`` (tests / snapshot)."""
         return self._timeline.recent(shell)
-
-    def _global_queue_depth(self) -> int:
-        if self._pool is not None:
-            return len(self._pool.snapshot_work_queue())
-        return 0
 
     def _configured_workers(self) -> int:
         return self._pool.worker_count if self._pool is not None else 0

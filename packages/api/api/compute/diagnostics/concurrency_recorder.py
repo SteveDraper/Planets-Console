@@ -47,7 +47,6 @@ class ConcurrencyTimelineRecorder:
         timeline_capacity: Callable[[], int],
         bound_orchestrators: Callable[[], tuple[BoundOrchestrator, ...]],
         in_flight_records: Callable[[], Sequence[InFlightPoolExecution]],
-        global_queue_depth: Callable[[], int],
         configured_workers: Callable[[], int],
         ancestor_turns: Callable[[ShellContextKey], frozenset[int]],
         history_for_shell: Callable[[ShellContextKey], ComputeCompletionHistory],
@@ -56,9 +55,6 @@ class ConcurrencyTimelineRecorder:
         self._timeline_capacity = timeline_capacity
         self._bound_orchestrators = bound_orchestrators
         self._in_flight_records = in_flight_records
-        # Retained for call-site compatibility; gauges must never invoke this
-        # (``snapshot_work_queue`` takes the pool lock -- ABBA with dequeue hooks).
-        self._global_queue_depth = global_queue_depth
         self._configured_workers = configured_workers
         self._ancestor_turns = ancestor_turns
         self._history_for_shell = history_for_shell
@@ -68,9 +64,11 @@ class ConcurrencyTimelineRecorder:
         # Per-shell ready depth as sum of per-orchestrator contributions from
         # ready-queue-changed snapshots (complete lifecycle, no ±1 drift).
         self._ready_depth_parts: dict[ShellContextKey, dict[int, int]] = {}
-        # Last depth from enqueue/start (explicit). Listener paths must not call
-        # ``_global_queue_depth`` (pool lock): workers hold the pool condition while
-        # taking the controller lock in the dequeue predicate / on_dequeued hooks.
+        # Last depth from enqueue/start (explicit). Listener paths fall back to
+        # this value and must never sample the pool live: workers hold the pool
+        # condition while taking the controller lock in the dequeue predicate /
+        # on_dequeued hooks (ABBA). Live sampling belongs only in snapshot
+        # assembly outside that lock order.
         self._last_known_global_queue_depth = 0
         self._lock = threading.Lock()
 
