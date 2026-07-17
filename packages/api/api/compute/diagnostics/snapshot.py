@@ -40,7 +40,7 @@ from api.streaming.table_stream.registry_catalog import active_table_stream_bind
 
 def event_to_wire(event: ComputeConcurrencyEvent) -> dict[str, Any]:
     """CamelCase wire shape for one concurrency timeline event."""
-    return {
+    wire: dict[str, Any] = {
         "kind": event.kind,
         "timestamp": event.timestamp,
         "scopeKey": event.scope_key,
@@ -59,6 +59,9 @@ def event_to_wire(event: ComputeConcurrencyEvent) -> dict[str, Any]:
             "configuredWorkers": event.gauges.configured_workers,
         },
     }
+    if event.detail is not None:
+        wire["detail"] = event.detail
+    return wire
 
 
 def live_occupancy_to_wire(

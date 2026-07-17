@@ -14,6 +14,8 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_observers import (
     InlineStartListener,
+    LifecycleEventKind,
+    LifecycleListener,
     NodeCompleteListener,
     NodeDispatchCommitHook,
     NodeDispatchGate,
@@ -302,6 +304,18 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         """
         return self._observers.register_inline_start_listener(listener)
 
+    def register_lifecycle_listener(
+        self,
+        listener: LifecycleListener,
+    ) -> Callable[[], None]:
+        """Register a causal lifecycle listener; return an unregister callable.
+
+        Fired for force_fresh replace/attach, abort, epoch retry, persist-deferred
+        recovery, and ignored stale pool finishes. Listeners run after the
+        orchestrator lock is released.
+        """
+        return self._observers.register_lifecycle_listener(listener)
+
     @property
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
         return self._nodes
@@ -340,10 +354,21 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             pending_pool: tuple[_PendingPoolSubmission, ...] = ()
             if existing is not None:
                 if not (request.force_fresh and existing.state in {"complete", "failed"}):
+                    if request.force_fresh:
+                        self._emit_force_fresh_lifecycle(
+                            kind="force_fresh_attach",
+                            node=existing,
+                            request=request,
+                        )
                     handle = self._attach_to_existing(existing, request)
                     pending_inline, pending_pool = self._dispatch()
                     should_plan = False
                 else:
+                    self._emit_force_fresh_lifecycle(
+                        kind="force_fresh_replace",
+                        node=existing,
+                        request=request,
+                    )
                     self._replace_terminal_node(existing)
                     should_plan = True
             else:
@@ -408,39 +433,67 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         *,
         result_wire: object | None = None,
         error: BaseException | None = None,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
-        """Mark a pool-submitted step complete (used by worker pool integration)."""
+        """Mark a pool-submitted step complete (used by worker pool integration).
+
+        Optional ``step_kind`` / ``step_index`` come from the pool work item and are
+        used when the node is no longer ``running`` (stale finish after abort/replace).
+        """
         with self._condition:
             node = self._nodes.get(scope)
             if node is None:
-                return
-            if node.state != "running":
-                # Already aborted/cancelled while the pool worker was still finishing.
-                return
-            if error is not None:
-                step_kind = self._current_step_spec(
-                    node,
-                    self._compute_registry[node.scope.analytic_id],
-                ).step_kind
-                self._observers.notify_step_complete(
-                    node,
-                    step_kind,
-                    surface="pool",
-                    terminal_state="failed",
+                self._observers.notify_lifecycle(
+                    "pool_finish_ignored",
+                    scope,
+                    detail={
+                        "reason": "missing_node",
+                        "poolStepKind": step_kind,
+                        "poolStepIndex": step_index,
+                        "hadError": error is not None,
+                    },
                 )
-                self._fail_node(node, error)
+            elif node.state != "running":
+                # Already aborted/cancelled/replaced while the pool worker was finishing.
+                self._observers.notify_lifecycle(
+                    "pool_finish_ignored",
+                    scope,
+                    node=node,
+                    detail={
+                        "reason": "node_not_running",
+                        "priorState": node.state,
+                        "priorStepIndex": node.step_index,
+                        "priorProfileStepIndex": node.profile_step_index,
+                        "poolStepKind": step_kind,
+                        "poolStepIndex": step_index,
+                        "hadError": error is not None,
+                    },
+                )
             else:
-                step_kind = self._current_step_spec(
+                finished_step_kind = self._current_step_spec(
                     node,
                     self._compute_registry[node.scope.analytic_id],
                 ).step_kind
-                self._observers.notify_step_complete(
-                    node,
-                    step_kind,
-                    surface="pool",
-                    terminal_state="success",
-                )
-                self._after_step_success(node, result_wire)
+                finished_step_index = node.step_index
+                if error is not None:
+                    self._observers.notify_step_complete(
+                        node,
+                        finished_step_kind,
+                        step_index=finished_step_index,
+                        surface="pool",
+                        terminal_state="failed",
+                    )
+                    self._fail_node(node, error)
+                else:
+                    self._observers.notify_step_complete(
+                        node,
+                        finished_step_kind,
+                        step_index=finished_step_index,
+                        surface="pool",
+                        terminal_state="success",
+                    )
+                    self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
 
     def abort_scope(self, scope: ComputeScope, error: BaseException) -> bool:
@@ -458,19 +511,61 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             node = self._nodes.get(scope)
             if node is None or node.state in {"complete", "failed"}:
                 return False
-            if node.state == "running":
+            prior_state = node.state
+            was_running = prior_state == "running"
+            finished_step_kind: str | None = None
+            finished_step_index = node.step_index
+            if was_running:
                 registration = self._compute_registry.get(node.scope.analytic_id)
                 if registration is not None:
-                    step_kind = self._current_step_spec(node, registration).step_kind
+                    finished_step_kind = self._current_step_spec(node, registration).step_kind
                     self._observers.notify_step_complete(
                         node,
-                        step_kind,
+                        finished_step_kind,
+                        step_index=finished_step_index,
                         surface="pool",
                         terminal_state="failed",
                     )
+            self._observers.notify_lifecycle(
+                "abort",
+                scope,
+                node=node,
+                detail={
+                    "reason": "abort_scope",
+                    "priorState": prior_state,
+                    "priorStepIndex": finished_step_index,
+                    "priorProfileStepIndex": node.profile_step_index,
+                    "wasRunning": was_running,
+                    "stepKind": finished_step_kind,
+                    "errorType": type(error).__name__,
+                },
+            )
             self._fail_node(node, error)
         self._observers.drain_post_lock_callbacks()
         return True
+
+    def _emit_force_fresh_lifecycle(
+        self,
+        *,
+        kind: LifecycleEventKind,
+        node: ComputeNodeRun,
+        request: ComputeRequest,
+    ) -> None:
+        """Record force_fresh replace vs attach (caller holds the orchestrator lock)."""
+        self._observers.notify_lifecycle(
+            kind,
+            node.scope,
+            node=node,
+            detail={
+                "reason": "submit_force_fresh",
+                "priorState": node.state,
+                "priorStepIndex": node.step_index,
+                "priorProfileStepIndex": node.profile_step_index,
+                "wasRunning": node.state == "running",
+                "entryStepKind": request.step_kind,
+                "priorityBand": request.priority_band,
+            },
+        )
 
     def _ctx_for_bundle(self, bundle: OrchestrationBundle) -> AnalyticQueryContext:
         """Return a ctx view of ``bundle`` with the process-wide turn cache spliced in."""
@@ -682,11 +777,26 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
 
     def _retry_step_after_epoch_bump(self, node: ComputeNodeRun) -> None:
         self._metrics.epoch_discards += 1
+        prior_step_index = node.step_index
+        prior_generation = node.generation_at_submit
+        current_generation = self._current_invalidation_generation(node)
         node.generation_at_submit = None
         node.state = "ready"
         node.execution_sealed = False
         self._enqueue_ready(node.scope)
         self._observers.notify_ready(node)
+        self._observers.notify_lifecycle(
+            "epoch_retry",
+            node.scope,
+            node=node,
+            detail={
+                "reason": "invalidation_generation_bump",
+                "priorStepIndex": prior_step_index,
+                "priorProfileStepIndex": node.profile_step_index,
+                "generationAtSubmit": prior_generation,
+                "currentGeneration": current_generation,
+            },
+        )
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
@@ -708,12 +818,29 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         with self._condition:
             if node.state != "running":
                 return
+            prior_step_index = node.step_index
             node.generation_at_submit = None
             node.error = None
             node.state = "waiting_deps"
             node.execution_sealed = False
             self._dequeue_ready(node.scope)
             self._metrics.epoch_discards += 1
+            from api.compute.diagnostics.scope_key import format_compute_scope_key
+
+            self._observers.notify_lifecycle(
+                "persist_deferred",
+                node.scope,
+                node=node,
+                detail={
+                    "reason": "persist_deferred",
+                    "priorStepIndex": prior_step_index,
+                    "priorProfileStepIndex": node.profile_step_index,
+                    "relatedScopeKey": format_compute_scope_key(recovery.dependency_scope),
+                    "forceFresh": recovery.force_fresh,
+                    "dependencyStepKind": recovery.step_kind,
+                    "priorityBand": priority_band,
+                },
+            )
 
         if not recovery.force_fresh:
             return

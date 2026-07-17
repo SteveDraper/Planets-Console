@@ -212,19 +212,24 @@ class ConcurrencyTimelineRecorder:
         scope: ComputeScope,
         node: ComputeNodeRun,
         step_kind: str,
+        step_index: int,
         surface: CompletionSurface,
         terminal_state: CompletionTerminalState,
         orchestrator_id: int | None,
         backend: str | None,
         global_queue_depth: int | None = None,
     ) -> None:
-        """One finish sink: timeline complete/inline_complete + completion history."""
+        """One finish sink: timeline complete/inline_complete + completion history.
+
+        ``step_index`` must be the index of the step that finished (captured before
+        any continue that advances ``node.step_index``).
+        """
         scope_key = format_compute_scope_key(scope)
         execution_key = format_execution_key(
             orchestrator_id=orchestrator_id,
             scope_key=scope_key,
             step_kind=step_kind,
-            step_index=node.step_index,
+            step_index=step_index,
         )
         duration_ms, opened_backend = self._open_executions.close(execution_key)
         resolved_backend = backend if backend is not None else opened_backend
@@ -245,7 +250,7 @@ class ConcurrencyTimelineRecorder:
             execution_key=execution_key,
             gauges=gauges,
             step_kind=step_kind,
-            step_index=node.step_index,
+            step_index=step_index,
             priority_band=node.priority_band,
             backend=resolved_backend,
             terminal_state=terminal_state,
@@ -256,10 +261,46 @@ class ConcurrencyTimelineRecorder:
             surface=surface,
             terminal_state=terminal_state,
             step_kind=step_kind,
-            step_index=node.step_index,
+            step_index=step_index,
             priority_band=node.priority_band,
             backend=resolved_backend,
             duration_ms=duration_ms,
+        )
+
+    def record_lifecycle(
+        self,
+        shell: ShellContextKey,
+        *,
+        kind: TimelineEventKind,
+        scope: ComputeScope,
+        orchestrator_id: int | None,
+        step_kind: str | None,
+        step_index: int | None,
+        priority_band: ComputePriorityBand | None = None,
+        detail: dict[str, object] | None = None,
+    ) -> None:
+        """Append a causal lifecycle event (force_fresh / abort / stale pool finish)."""
+        scope_key = format_compute_scope_key(scope)
+        execution_key = format_execution_key(
+            orchestrator_id=orchestrator_id,
+            scope_key=scope_key,
+            step_kind=step_kind or "",
+            step_index=step_index if step_index is not None else -1,
+        )
+        gauges = self._occupancy_gauges(
+            shell,
+            sample_ready_from_orchestrators=False,
+        )
+        self._append(
+            shell,
+            kind=kind,
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=step_kind,
+            step_index=step_index,
+            priority_band=priority_band,
+            detail=detail,
         )
 
     def _timeline_for_shell(self, shell: ShellContextKey) -> ComputeConcurrencyTimeline:
@@ -359,6 +400,7 @@ class ConcurrencyTimelineRecorder:
         backend: str | None = None,
         terminal_state: str | None = None,
         duration_ms: float | None = None,
+        detail: dict[str, object] | None = None,
     ) -> None:
         self._timeline_for_shell(shell).append(
             make_concurrency_event(
@@ -372,5 +414,6 @@ class ConcurrencyTimelineRecorder:
                 backend=backend,
                 terminal_state=terminal_state,
                 duration_ms=duration_ms,
+                detail=detail,
             )
         )

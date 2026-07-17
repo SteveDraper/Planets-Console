@@ -1412,7 +1412,7 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
 
     step_completions: list[str] = []
 
-    def on_step_complete(_scope, _node, step_kind, surface, terminal_state) -> None:
+    def on_step_complete(_scope, _node, step_kind, _step_index, surface, terminal_state) -> None:
         step_completions.append(f"{surface}:{step_kind}:{terminal_state}")
 
     orchestrator.register_step_complete_listener(on_step_complete)

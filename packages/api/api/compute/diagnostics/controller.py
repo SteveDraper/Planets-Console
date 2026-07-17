@@ -49,6 +49,7 @@ from api.compute.diagnostics.single_step_preview import (
     resolve_single_step_preview,
     single_step_pin_matches,
 )
+from api.compute.diagnostics.timeline import TimelineEventKind
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OrchestratorNodeSnapshot
 from api.compute.pools import (
     ComputeWorkerPool,
@@ -176,15 +177,20 @@ class ComputeDiagnosticsController:
             )
         )
         unregister_step_complete = orchestrator.register_step_complete_listener(
-            lambda scope, node, step_kind, surface, terminal_state, _orch_id=registration_id: (
-                self._on_step_complete(
-                    scope,
-                    node,
-                    step_kind,
-                    surface,
-                    terminal_state,
-                    orchestrator_id=_orch_id,
-                )
+            lambda scope,
+            node,
+            step_kind,
+            step_index,
+            surface,
+            terminal_state,
+            _orch_id=registration_id: self._on_step_complete(
+                scope,
+                node,
+                step_kind,
+                step_index,
+                surface,
+                terminal_state,
+                orchestrator_id=_orch_id,
             )
         )
         unregister_ready = orchestrator.register_ready_listener(
@@ -210,6 +216,15 @@ class ComputeDiagnosticsController:
                 orchestrator_id=_orch_id,
             )
         )
+        unregister_lifecycle = orchestrator.register_lifecycle_listener(
+            lambda kind, scope, node, detail, _orch_id=registration_id: self._on_lifecycle(
+                kind,
+                scope,
+                node,
+                detail,
+                orchestrator_id=_orch_id,
+            )
+        )
         with self._lock:
             for bound in self._bound_orchestrators:
                 if bound.orchestrator is orchestrator:
@@ -219,6 +234,7 @@ class ComputeDiagnosticsController:
                     unregister_ready()
                     unregister_ready_queue()
                     unregister_inline_start()
+                    unregister_lifecycle()
                     return
             self._bound_orchestrators.append(
                 BoundOrchestrator(
@@ -232,6 +248,7 @@ class ComputeDiagnosticsController:
                     unregister_ready_listener=unregister_ready,
                     unregister_ready_queue_listener=unregister_ready_queue,
                     unregister_inline_start_listener=unregister_inline_start,
+                    unregister_lifecycle_listener=unregister_lifecycle,
                 )
             )
 
@@ -263,6 +280,7 @@ class ComputeDiagnosticsController:
         bound.unregister_ready_listener()
         bound.unregister_ready_queue_listener()
         bound.unregister_inline_start_listener()
+        bound.unregister_lifecycle_listener()
         orch_key = registration_id if registration_id is not None else id(orchestrator)
         self._timeline.clear_orchestrator_ready_depth(orch_key)
 
@@ -450,6 +468,7 @@ class ComputeDiagnosticsController:
             entry.unregister_ready_listener()
             entry.unregister_ready_queue_listener()
             entry.unregister_inline_start_listener()
+            entry.unregister_lifecycle_listener()
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)
@@ -953,6 +972,7 @@ class ComputeDiagnosticsController:
         scope: ComputeScope,
         node: ComputeNodeRun,
         step_kind: str,
+        step_index: int,
         surface: CompletionSurface,
         terminal_state: CompletionTerminalState,
         *,
@@ -965,7 +985,7 @@ class ComputeDiagnosticsController:
             self._clear_in_flight_for_step(
                 scope,
                 step_kind=step_kind,
-                step_index=node.step_index,
+                step_index=step_index,
                 orchestrator_id=orchestrator_id,
             )
             self._reconcile_orphan_in_flight()
@@ -984,12 +1004,45 @@ class ComputeDiagnosticsController:
             scope=scope,
             node=node,
             step_kind=step_kind,
+            step_index=step_index,
             surface=surface,
             terminal_state=terminal_state,
             orchestrator_id=orchestrator_id,
             backend=backend,
         )
 
+    def _on_lifecycle(
+        self,
+        kind: TimelineEventKind,
+        scope: ComputeScope,
+        node: ComputeNodeRun | None,
+        detail: object,
+        *,
+        orchestrator_id: int | None = None,
+    ) -> None:
+        shell = self._scope_matches_active_shell(scope)
+        if shell is None:
+            return
+        payload = dict(detail) if isinstance(detail, dict) else {}
+        step_kind = payload.get("stepKind")
+        if not isinstance(step_kind, str):
+            pool_step_kind = payload.get("poolStepKind")
+            step_kind = pool_step_kind if isinstance(pool_step_kind, str) else None
+        step_index = payload.get("priorStepIndex")
+        if not isinstance(step_index, int):
+            pool_step_index = payload.get("poolStepIndex")
+            step_index = pool_step_index if isinstance(pool_step_index, int) else None
+        priority_band = node.priority_band if node is not None else None
+        self._timeline.record_lifecycle(
+            shell,
+            kind=kind,
+            scope=scope,
+            orchestrator_id=orchestrator_id,
+            step_kind=step_kind,
+            step_index=step_index,
+            priority_band=priority_band,
+            detail=payload,
+        )
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:
     global _controller

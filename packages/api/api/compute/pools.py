@@ -404,6 +404,8 @@ class ComputeWorkerPool:
                     item.orchestrator_id,
                     item.scope,
                     orchestrator.execute_pool_step,
+                    step_kind=item.step_kind,
+                    step_index=item.step_index,
                 )
             finally:
                 self._notify_item_finished(item)
@@ -460,7 +462,13 @@ class ComputeWorkerPool:
 
     def _on_remote_future_done(self, item: PoolWorkItem, future: Future[object]) -> None:
         try:
-            self._complete_from_future(item.orchestrator_id, item.scope, future)
+            self._complete_from_future(
+                item.orchestrator_id,
+                item.scope,
+                future,
+                step_kind=item.step_kind,
+                step_index=item.step_index,
+            )
         finally:
             # Unregister after complete/persist so a mid-callback snapshot can still
             # observe futureState=done while the DAG node remains running.
@@ -508,16 +516,27 @@ class ComputeWorkerPool:
         orchestrator_id: int,
         scope: ComputeScope,
         run_step: Callable[[ComputeScope], object],
+        *,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         try:
             result_wire = run_step(scope)
         except BaseException as exc:
-            self._complete_pool_step_if_registered(orchestrator_id, scope, error=exc)
+            self._complete_pool_step_if_registered(
+                orchestrator_id,
+                scope,
+                error=exc,
+                step_kind=step_kind,
+                step_index=step_index,
+            )
             return
         self._complete_pool_step_if_registered(
             orchestrator_id,
             scope,
             result_wire=result_wire,
+            step_kind=step_kind,
+            step_index=step_index,
         )
 
     def _complete_from_future(
@@ -525,16 +544,27 @@ class ComputeWorkerPool:
         orchestrator_id: int,
         scope: ComputeScope,
         future: Future[object],
+        *,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         try:
             result_wire = future.result()
         except BaseException as exc:
-            self._complete_pool_step_if_registered(orchestrator_id, scope, error=exc)
+            self._complete_pool_step_if_registered(
+                orchestrator_id,
+                scope,
+                error=exc,
+                step_kind=step_kind,
+                step_index=step_index,
+            )
             return
         self._complete_pool_step_if_registered(
             orchestrator_id,
             scope,
             result_wire=result_wire,
+            step_kind=step_kind,
+            step_index=step_index,
         )
 
     def _complete_pool_step_if_registered(
@@ -544,11 +574,19 @@ class ComputeWorkerPool:
         *,
         result_wire: object | None = None,
         error: BaseException | None = None,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         orchestrator = self._lookup_orchestrator(orchestrator_id)
         if orchestrator is None:
             return
-        orchestrator.complete_pool_step(scope, result_wire=result_wire, error=error)
+        orchestrator.complete_pool_step(
+            scope,
+            result_wire=result_wire,
+            error=error,
+            step_kind=step_kind,
+            step_index=step_index,
+        )
 
 
 _global_worker_pool: ComputeWorkerPool | None = None

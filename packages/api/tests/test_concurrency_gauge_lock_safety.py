@@ -44,6 +44,7 @@ def test_record_finish_uses_ready_cache_not_live_orchestrator_snapshot() -> None
         unregister_ready_listener=lambda: None,
         unregister_ready_queue_listener=lambda: None,
         unregister_inline_start_listener=lambda: None,
+        unregister_lifecycle_listener=lambda: None,
     )
     recorder = _recorder(bound=(bound,))
     shell = ShellContextKey(game_id=1, perspective=1, turn=8)
@@ -61,6 +62,7 @@ def test_record_finish_uses_ready_cache_not_live_orchestrator_snapshot() -> None
         scope=scope,
         node=node,
         step_kind="tier_solve",
+        step_index=node.step_index,
         surface="pool",
         terminal_state="success",
         orchestrator_id=1,
@@ -87,6 +89,7 @@ def test_record_ready_default_does_not_sample_live_orchestrators() -> None:
         unregister_ready_listener=lambda: None,
         unregister_ready_queue_listener=lambda: None,
         unregister_inline_start_listener=lambda: None,
+        unregister_lifecycle_listener=lambda: None,
     )
     recorder = _recorder(bound=(bound,))
     shell = ShellContextKey(game_id=1, perspective=1, turn=8)

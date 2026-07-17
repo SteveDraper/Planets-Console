@@ -466,7 +466,7 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
         pool_submitter=pool_submitter,
     )
     orchestrator.register_step_complete_listener(
-        lambda _scope, _node, step_kind, surface, terminal_state: step_completions.append(
+        lambda _scope, _node, step_kind, _step_index, surface, terminal_state: step_completions.append(
             f"{surface}:{step_kind}:{terminal_state}"
         )
     )
@@ -1445,6 +1445,7 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
         item.scope,
         completed_node,
         item.step_kind,
+        item.step_index,
         "pool",
         "success",
         orchestrator_id=item.orchestrator_id,
@@ -1500,6 +1501,7 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
         item.scope,
         aborted_node,
         item.step_kind,
+        item.step_index,
         "pool",
         "failed",
         orchestrator_id=item.orchestrator_id,
@@ -1567,6 +1569,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         item.scope,
         failed_node,
         item.step_kind,
+        item.step_index,
         "pool",
         "failed",
         orchestrator_id=item.orchestrator_id,
@@ -2257,6 +2260,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         ancestor_scope,
         completed_node,
         "materialization_leg",
+        completed_node.step_index,
         "pool",
         "success",
     )

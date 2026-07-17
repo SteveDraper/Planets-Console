@@ -8,8 +8,8 @@ and drain run through this collaborator so lock-order semantics stay in one plac
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, Literal
 
 from api.compute.scope import ComputeScope
 
@@ -18,7 +18,14 @@ if TYPE_CHECKING:
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 StepCompleteListener = Callable[
-    [ComputeScope, "ComputeNodeRun", str, Literal["inline", "pool"], Literal["success", "failed"]],
+    [
+        ComputeScope,
+        "ComputeNodeRun",
+        str,
+        int,
+        Literal["inline", "pool"],
+        Literal["success", "failed"],
+    ],
     None,
 ]
 # Fired when a node first enters the ready queue (deps satisfied).
@@ -29,6 +36,19 @@ ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
 # Fired when an inline step begins execution outside the orchestrator lock.
 InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
+LifecycleEventKind = Literal[
+    "force_fresh_replace",
+    "force_fresh_attach",
+    "abort",
+    "epoch_retry",
+    "persist_deferred",
+    "pool_finish_ignored",
+]
+# Causal restart / abort / stale-finish events for compute diagnostics.
+LifecycleListener = Callable[
+    [LifecycleEventKind, ComputeScope, "ComputeNodeRun | None", Mapping[str, Any]],
+    None,
+]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Side-effecting accept after all gates pass (e.g. consume a single-step slot).
 # Must be idempotent-safe under reject: return False to leave the node ready.
@@ -46,6 +66,7 @@ class OrchestratorObservers:
         self._ready_listeners: list[ReadyListener] = []
         self._ready_queue_listeners: list[ReadyQueueChangedListener] = []
         self._inline_start_listeners: list[InlineStartListener] = []
+        self._lifecycle_listeners: list[LifecycleListener] = []
         self._dispatch_gates: list[NodeDispatchGate] = []
         self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
@@ -176,6 +197,22 @@ class OrchestratorObservers:
 
         return unregister
 
+    def register_lifecycle_listener(
+        self,
+        listener: LifecycleListener,
+    ) -> Callable[[], None]:
+        with self._condition:
+            self._lifecycle_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._lifecycle_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
     def notify_node_complete(self, node: ComputeNodeRun) -> None:
         listeners = tuple(self._node_complete_listeners)
         for listener in listeners:
@@ -209,18 +246,50 @@ class OrchestratorObservers:
         node: ComputeNodeRun,
         step_kind: str,
         *,
+        step_index: int,
         surface: Literal["inline", "pool"],
         terminal_state: Literal["success", "failed"],
     ) -> None:
+        """Schedule step-complete listeners with the finished ``step_index``.
+
+        ``step_index`` must be captured before ``_after_step_success`` continues the
+        node (which advances ``node.step_index`` before post-lock drain).
+        """
         listeners = tuple(self._step_complete_listeners)
         for listener in listeners:
             self._post_lock_callbacks.append(
-                lambda listener=listener, node=node, step_kind=step_kind: listener(
+                lambda listener=listener,
+                node=node,
+                step_kind=step_kind,
+                step_index=step_index,
+                surface=surface,
+                terminal_state=terminal_state: listener(
                     node.scope,
                     node,
                     step_kind,
+                    step_index,
                     surface,
                     terminal_state,
+                ),
+            )
+
+    def notify_lifecycle(
+        self,
+        kind: LifecycleEventKind,
+        scope: ComputeScope,
+        *,
+        node: ComputeNodeRun | None = None,
+        detail: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Schedule causal lifecycle listeners (force_fresh / abort / stale finish)."""
+        listeners = tuple(self._lifecycle_listeners)
+        if not listeners:
+            return
+        payload = dict(detail or {})
+        for listener in listeners:
+            self._post_lock_callbacks.append(
+                lambda listener=listener, kind=kind, scope=scope, node=node, payload=payload: (
+                    listener(kind, scope, node, payload)
                 ),
             )
 

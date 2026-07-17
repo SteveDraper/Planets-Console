@@ -242,6 +242,7 @@ class OrchestratorStepExecutionMixin:
                 self._observers.notify_step_complete(
                     node,
                     pending.step.step_kind,
+                    step_index=node.step_index,
                     surface="inline",
                     terminal_state="failed",
                 )
@@ -262,6 +263,7 @@ class OrchestratorStepExecutionMixin:
                 self._observers.notify_step_complete(
                     node,
                     pending.step.step_kind,
+                    step_index=node.step_index,
                     surface="inline",
                     terminal_state="failed",
                 )
@@ -272,6 +274,7 @@ class OrchestratorStepExecutionMixin:
             self._observers.notify_step_complete(
                 node,
                 pending.step.step_kind,
+                step_index=node.step_index,
                 surface="inline",
                 terminal_state="success",
             )
@@ -322,6 +325,7 @@ class OrchestratorStepExecutionMixin:
                         self._observers.notify_step_complete(
                             node,
                             step.step_kind,
+                            step_index=node.step_index,
                             surface="pool",
                             terminal_state="failed",
                         )

@@ -19,6 +19,13 @@ TimelineEventKind = Literal[
     "complete",
     "inline_start",
     "inline_complete",
+    # Causal / restart diagnostics (not occupancy lifecycle).
+    "force_fresh_replace",
+    "force_fresh_attach",
+    "abort",
+    "epoch_retry",
+    "persist_deferred",
+    "pool_finish_ignored",
 ]
 
 
@@ -48,6 +55,8 @@ class ComputeConcurrencyEvent:
     terminal_state: str | None
     duration_ms: float | None
     gauges: OccupancyGauges
+    # Optional causal payload for restart / abort / stale-finish events.
+    detail: dict[str, object] | None = None
 
 
 def format_execution_key(
@@ -140,6 +149,7 @@ def make_concurrency_event(
     backend: str | None = None,
     terminal_state: str | None = None,
     duration_ms: float | None = None,
+    detail: dict[str, object] | None = None,
     timestamp: datetime | None = None,
 ) -> ComputeConcurrencyEvent:
     """Build one timeline event with a UTC ISO timestamp."""
@@ -156,4 +166,5 @@ def make_concurrency_event(
         terminal_state=terminal_state,
         duration_ms=duration_ms,
         gauges=gauges,
+        detail=detail,
     )
