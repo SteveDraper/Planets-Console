@@ -655,6 +655,7 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
         with self._lock:
             self._terminal_stream_events_delivered.discard(session.run_id)
             self._upgradable_empty_terminals.discard(session.run_id)
+
     def _wake_parked_scores_after_row_run_adopt(
         self,
         root_scope: ComputeScope,

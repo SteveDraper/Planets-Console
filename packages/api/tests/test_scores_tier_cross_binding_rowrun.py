@@ -856,8 +856,7 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals, (
-        "soft park left open stream without terminal "
-        f"(session={session.run_id}, queued={queued!r})"
+        f"soft park left open stream without terminal (session={session.run_id}, queued={queued!r})"
     )
     assert isinstance(domain_terminals[0], RowComplete)
     assert orchestrator.nodes[scope].state == "parked"
