@@ -390,10 +390,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
     )
     scheduler._on_orchestrator_node_complete(scope, success_node)
     assert get_row_run(run.run_id) is None
-    assert (
-        scheduler._stream_resolutions[run.run_id].state
-        is RowStreamResolutionState.HARD_TERMINAL
-    )
+    assert scheduler._stream_resolutions[run.run_id].state is RowStreamResolutionState.HARD_TERMINAL
 
     empty_complete = SimpleNamespace(
         state="complete",

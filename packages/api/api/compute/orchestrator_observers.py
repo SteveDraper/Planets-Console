@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeNodeRun
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+
+
 @dataclass(frozen=True)
 class ScopeLifecycleSnapshot:
     """Immutable outcome view captured while the orchestrator lock is held."""

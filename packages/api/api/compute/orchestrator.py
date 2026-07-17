@@ -374,11 +374,14 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         request: ComputeRequest,
         *,
         wake_if_parked_only: bool,
-    ) -> tuple[
-        ComputeHandle,
-        tuple[_PendingInlineExecution, ...],
-        tuple[_PendingPoolSubmission, ...],
-    ] | None:
+    ) -> (
+        tuple[
+            ComputeHandle,
+            tuple[_PendingInlineExecution, ...],
+            tuple[_PendingPoolSubmission, ...],
+        ]
+        | None
+    ):
         """Apply one submission under the orchestrator lock."""
         scope = request.scope
         existing = self._nodes.get(scope)

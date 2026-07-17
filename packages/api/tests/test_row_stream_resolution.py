@@ -50,10 +50,7 @@ def test_missed_admission_replaces_provisional_claim_with_failure() -> None:
 def test_cancel_silences_later_delivery() -> None:
     resolution = RowStreamResolution()
 
-    assert (
-        resolution.transition(RowStreamResolutionTrigger.CANCELED)
-        is RowStreamDelivery.SILENCE
-    )
+    assert resolution.transition(RowStreamResolutionTrigger.CANCELED) is RowStreamDelivery.SILENCE
     assert resolution.state is RowStreamResolutionState.CANCELED
     assert (
         resolution.transition(RowStreamResolutionTrigger.DURABLE_COMPLETE)

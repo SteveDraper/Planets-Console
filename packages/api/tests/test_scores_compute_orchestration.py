@@ -1122,20 +1122,26 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
     )
     orchestrator._nodes[scope] = parked
 
-    assert wake_scores_scope(
-        scope,
-        ctx=ctx,
-        reason=ScoresWakeReason.ROW_RUN_ADOPTED,
-    ) is True
+    assert (
+        wake_scores_scope(
+            scope,
+            ctx=ctx,
+            reason=ScoresWakeReason.ROW_RUN_ADOPTED,
+        )
+        is True
+    )
     assert parked.state in {"ready", "running"}
     assert submitted_scopes == [scope]
 
     # Already woken -- not parked anymore.
-    assert wake_scores_scope(
-        scope,
-        ctx=ctx,
-        reason=ScoresWakeReason.ROW_RUN_ADOPTED,
-    ) is False
+    assert (
+        wake_scores_scope(
+            scope,
+            ctx=ctx,
+            reason=ScoresWakeReason.ROW_RUN_ADOPTED,
+        )
+        is False
+    )
 
 
 def test_enqueue_without_stream_token_wakes_parked_scores_node(
