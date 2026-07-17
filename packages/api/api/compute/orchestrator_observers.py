@@ -259,18 +259,15 @@ class OrchestratorObservers:
         listeners = tuple(self._step_complete_listeners)
         for listener in listeners:
             self._post_lock_callbacks.append(
-                lambda listener=listener,
-                node=node,
-                step_kind=step_kind,
-                step_index=step_index,
-                surface=surface,
-                terminal_state=terminal_state: listener(
-                    node.scope,
-                    node,
-                    step_kind,
-                    step_index,
-                    surface,
-                    terminal_state,
+                lambda listener=listener, node=node, step_kind=step_kind, step_index=step_index, surface=surface, terminal_state=terminal_state: (
+                    listener(
+                        node.scope,
+                        node,
+                        step_kind,
+                        step_index,
+                        surface,
+                        terminal_state,
+                    )
                 ),
             )
 

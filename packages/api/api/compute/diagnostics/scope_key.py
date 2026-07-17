@@ -41,9 +41,7 @@ def compute_scope_from_lifecycle_detail(detail: Mapping[str, object]) -> Compute
     if raw_parameters is None:
         parameters: tuple[tuple[str, str], ...] = ()
     elif isinstance(raw_parameters, Mapping):
-        parameters = tuple(
-            (str(key), str(value)) for key, value in sorted(raw_parameters.items())
-        )
+        parameters = tuple((str(key), str(value)) for key, value in sorted(raw_parameters.items()))
     else:
         raise ValueError("lifecycle relatedScope parameters must be a mapping")
     return ComputeScope(
