@@ -63,7 +63,6 @@ class ScoresWakeReason(StrEnum):
     ROW_RUN_ADOPTED = "scores_row_run_adopted"
     EVIDENCE_CLOSED = "scores_evidence_closed"
     STREAM_RESCHEDULED = "scores_stream_rescheduled"
-    FLEET_REOPENED = "scores_fleet_reopened"
 
 
 SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
@@ -305,7 +304,6 @@ def wake_scores_scope(
     if reason in {
         ScoresWakeReason.ROW_RUN_ADOPTED,
         ScoresWakeReason.EVIDENCE_CLOSED,
-        ScoresWakeReason.FLEET_REOPENED,
     }:
         return resolved_orchestrator.wake_if_parked(request) is not None
     resolved_orchestrator.submit(request)

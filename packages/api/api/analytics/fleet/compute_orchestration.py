@@ -265,10 +265,11 @@ class FleetPersistencePolicy:
             # Same-turn scores evidence is still open. Persisting and completing the
             # fleet node would unlock dependents and leave a non-final ledger with no
             # automatic rematerialization (empty scores complete hang fingerprint).
-            from api.analytics.scores.compute_orchestration import (
-                ScoresWakeReason,
-                wake_scores_scope,
-            )
+            # PersistDependencyRecovery.force_fresh is the sole reopen mechanism here:
+            # the orchestrator's persist-deferred recovery submits the scores scope
+            # with force_fresh=True, which wakes parked, absent, and terminal nodes
+            # alike. Do not also call wake_scores_scope for this path -- that would
+            # be a second encoding of the same reopen policy.
             from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
             from api.compute.persistence import PersistDependencyRecovery
             from api.errors import FleetScoresEvidenceOpenError
@@ -280,12 +281,6 @@ class FleetPersistencePolicy:
                 turn=scope.turn,
                 player_id=scope.player_id,
                 parameters=scope.parameters,
-            )
-            wake_scores_scope(
-                scores_scope,
-                ctx=ctx,
-                reason=ScoresWakeReason.FLEET_REOPENED,
-                priority_band="background",
             )
             raise FleetScoresEvidenceOpenError(
                 f"fleet persist refused for game {scope.game_id} perspective "

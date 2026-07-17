@@ -166,12 +166,20 @@ Analytics own **what** `persist` writes and **how readers** gate on terminal qua
 
 | Park site | Soft stream on park? | Mandatory wake owner |
 |-----------|----------------------|----------------------|
-| Non-durable `rowComplete` | Yes (upgradable) | `STREAM_RESCHEDULED` / `EVIDENCE_CLOSED` / `FLEET_REOPENED` |
+| Non-durable `rowComplete` | Yes (upgradable) | `STREAM_RESCHEDULED` / `EVIDENCE_CLOSED` |
 | Empty `TierJobOutcome` | Cheap admission only (else silent) | `STREAM_RESCHEDULED` / `ROW_RUN_ADOPTED` |
 | Open-evidence wait (`runId: null`) | No (wait for work) | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
 | Missing `RowRun` | No | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
 
 Park never marks the node `complete`, so same-turn fleet ENSURE stays blocked until durable persist or evidence-closed skip. Soft stream delivery rides on process-wide park notify, not on `complete`.
+
+A parked scores node can also be reopened by fleet: when fleet persist refuses
+for open turn evidence, it raises `PersistDependencyRecovery(force_fresh=True)`
+on the scores scope. The orchestrator's persist-deferred recovery then
+`submit`s the scores scope with `force_fresh=True`, which wakes parked,
+absent, and terminal nodes alike -- the sole reopen mechanism for this case.
+Fleet does not additionally call `wake_scores_scope`; that would be a second
+encoding of the same reopen policy.
 
 Fleet and scores share the orchestrator contract; persistence semantics differ by domain.
 
