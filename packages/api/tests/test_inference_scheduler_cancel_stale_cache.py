@@ -230,8 +230,17 @@ def test_begin_scope_other_turn_leaves_background_row_runs_running(sample_turn):
 
 
 def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
-    """Switching stream turns preempts the prior turn's runs, not other turns."""
+    """Switching stream turns preempts the prior turn's runs, not other turns.
+
+    Also covers stream resolution state: a turn-scoped detach must not wipe
+    ``_stream_resolutions`` for other-turn rows (background warm) or undo the
+    keep-resolution-after-unregister invariant for the detached turn's own row.
+    """
     from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_stream_resolution import (
+        RowStreamResolution,
+        RowStreamResolutionState,
+    )
     from api.analytics.scores.tier_row_run_registry import (
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -271,6 +280,14 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
         prior_session = _register_for_turn(turn_number)
         other_session = _register_for_turn(turn_number + 5)
 
+        with scheduler._lock:
+            scheduler._stream_resolutions[prior_session.run_id] = RowStreamResolution(
+                state=RowStreamResolutionState.SOFT_PROVISIONAL
+            )
+            scheduler._stream_resolutions[other_session.run_id] = RowStreamResolution(
+                state=RowStreamResolutionState.SOFT_PROVISIONAL
+            )
+
         scheduler.begin_scope(
             InferenceStreamScope(
                 game_id=628580,
@@ -294,9 +311,74 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
         assert not other_session.cancel_token.is_cancelled()
         assert other_session.run_id in scheduler._runs
         assert get_row_run(other_session.run_id) is not None
+
+        # Other-turn resolution must survive untouched (background warm row).
+        assert (
+            scheduler._stream_resolutions[other_session.run_id].state
+            is RowStreamResolutionState.SOFT_PROVISIONAL
+        )
+        # Detached-turn resolution is kept too, matching _remove_run_locked's
+        # keep-resolution-after-unregister invariant (late peer events silenced).
+        assert (
+            scheduler._stream_resolutions[prior_session.run_id].state
+            is RowStreamResolutionState.SOFT_PROVISIONAL
+        )
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
+
+
+def test_begin_scope_prior_turn_preempt_keeps_other_turn_held_submissions(sample_turn):
+    """A turn-scoped detach must only drop held submissions for the detached turn."""
+    from api.analytics.military_score_inference.inference_stream_teardown import (
+        HeldTierSubmission,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+
+        def _held_for_turn(turn: int) -> HeldTierSubmission:
+            return HeldTierSubmission(
+                stream_token="held-token",
+                root_scope=ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn,
+                    player_id=player_id,
+                ),
+            )
+
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number,
+            )
+        )
+        prior_held = _held_for_turn(turn_number)
+        other_held = _held_for_turn(turn_number + 5)
+        with scheduler._lock:
+            scheduler._held_initial_submissions = [prior_held, other_held]
+
+        # Switch away from prior turn -- only that turn's held submissions drop.
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number + 1,
+            )
+        )
+
+        assert other_held in scheduler._held_initial_submissions
+        assert prior_held not in scheduler._held_initial_submissions
+    finally:
+        reset_inference_row_scheduler_for_tests()
 
 
 def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(

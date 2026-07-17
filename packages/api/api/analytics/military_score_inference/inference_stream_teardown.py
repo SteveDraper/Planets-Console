@@ -129,15 +129,27 @@ class InferenceStreamTeardownMixin:
         ``abort_scope`` -- in-flight tier workers may still finish, persist from
         the RowComplete payload, and complete the DAG node. ``cancel_run`` is the
         explicit cancel intent (token + fence + abort).
+
+        ``_stream_resolutions`` is left untouched for a turn-scoped detach:
+        ``_remove_run_locked`` already keeps each detached run's resolution so a
+        late peer binding cannot supersede an already-resolved row, and other-turn
+        resolutions must survive a preempt. A full invalidate (``turn is None``,
+        e.g. shutdown) clears every resolution along with everything else.
         """
         self._globally_paused = False
-        self._held_initial_submissions.clear()
+        if turn is None:
+            self._held_initial_submissions.clear()
+        else:
+            self._held_initial_submissions = [
+                held for held in self._held_initial_submissions if held.root_scope.turn != turn
+            ]
         for run_id in list(self._runs):
             root_scope = self._runs.get(run_id)
             if turn is not None and root_scope is not None and root_scope.turn != turn:
                 continue
             self._remove_run_locked(run_id)
-        self._stream_resolutions.clear()
+        if turn is None:
+            self._stream_resolutions.clear()
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
             self._release_stream_binding_locked(binding)
