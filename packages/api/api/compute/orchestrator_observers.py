@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from api.compute.scope import ComputeScope
@@ -17,6 +18,18 @@ if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeNodeRun
 
 NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
+@dataclass(frozen=True)
+class ScopeLifecycleSnapshot:
+    """Immutable outcome view captured while the orchestrator lock is held."""
+
+    scope: ComputeScope
+    state: Literal["parked", "complete", "failed"]
+    execution_generation: int
+    result_wire: object | None
+    error: BaseException | None
+
+
+ScopeOutcomeListener = Callable[[ScopeLifecycleSnapshot], None]
 StepCompleteListener = Callable[
     [
         ComputeScope,
@@ -63,6 +76,7 @@ class OrchestratorObservers:
     def __init__(self, condition: threading.Condition) -> None:
         self._condition = condition
         self._node_complete_listeners: list[NodeCompleteListener] = []
+        self._scope_outcome_listeners: list[ScopeOutcomeListener] = []
         self._step_complete_listeners: list[StepCompleteListener] = []
         self._ready_listeners: list[ReadyListener] = []
         self._ready_queue_listeners: list[ReadyQueueChangedListener] = []
@@ -129,6 +143,23 @@ class OrchestratorObservers:
             with self._condition:
                 try:
                     self._node_complete_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unregister
+
+    def register_scope_outcome_listener(
+        self,
+        listener: ScopeOutcomeListener,
+    ) -> Callable[[], None]:
+        """Observe parked, complete, and failed outcomes after lock release."""
+        with self._condition:
+            self._scope_outcome_listeners.append(listener)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    self._scope_outcome_listeners.remove(listener)
                 except ValueError:
                     return
 
@@ -219,6 +250,22 @@ class OrchestratorObservers:
         for listener in listeners:
             self._post_lock_callbacks.append(
                 lambda listener=listener, node=node: listener(node.scope, node),
+            )
+
+    def notify_scope_outcome(self, node: ComputeNodeRun) -> None:
+        """Schedule an immutable terminal-or-parked outcome snapshot."""
+        if node.state not in {"parked", "complete", "failed"}:
+            raise ValueError(f"Scope outcome requires parked or terminal node, got {node.state!r}")
+        snapshot = ScopeLifecycleSnapshot(
+            scope=node.scope,
+            state=node.state,
+            execution_generation=node.execution_generation,
+            result_wire=node.result_wire,
+            error=node.error,
+        )
+        for listener in tuple(self._scope_outcome_listeners):
+            self._post_lock_callbacks.append(
+                lambda listener=listener, snapshot=snapshot: listener(snapshot),
             )
 
     def notify_ready(self, node: ComputeNodeRun) -> None:

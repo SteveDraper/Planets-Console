@@ -447,7 +447,7 @@ Until phase 2, table/map REST responses may still call `compute()` handlers dire
 packages/api/api/compute/
   scope.py           # ComputeScope, ScopeKeySpec, normalization
   orchestration_bundle.py  # Leader-retained export_services + ensure-memo (#209)
-  scope_terminal_fanout.py  # Process-wide terminal notify for stream adapters
+  orchestrator_observers.py  # Immutable outcome snapshots and lifecycle observers
   profile.py         # AnalyticComputeProfile, ComputeStepSpec
   orchestrator.py    # DAG, singleflight, submit, complete (process-wide singleton)
   turn_cache.py      # Process-wide LRU keyed by (game_id, perspective, turn)

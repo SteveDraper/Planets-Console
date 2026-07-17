@@ -826,7 +826,7 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
         InferenceResult(status="soft_partial", solutions=(), diagnostics={}),
         summary="soft park",
     )
-    _set_scope_node(
+    parked_node = _set_scope_node(
         orchestrator,
         scope,
         state="parked",
@@ -852,12 +852,9 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
     )
     controller.attach()
 
-    parked_node = SimpleNamespace(
-        state="parked",
-        result_wire={"runId": run.run_id, "rowComplete": soft_complete},
-        error=None,
-    )
-    scheduler._on_orchestrator_node_complete(scope, parked_node)
+    with orchestrator._condition:
+        orchestrator._observers.notify_scope_outcome(parked_node)
+    orchestrator._observers.drain_post_lock_callbacks()
 
     queued: list[object] = []
     while True:

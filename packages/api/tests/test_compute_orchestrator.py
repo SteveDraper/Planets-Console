@@ -1089,6 +1089,37 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
     assert events == ["persist", "complete_listener", "notify"]
 
 
+def test_scope_outcome_listener_receives_park_snapshot_after_node_wakes(sample_turn):
+    """A post-lock outcome callback keeps the park state it observed under lock."""
+    export_scope = _export_scope(sample_turn)
+    scope = _compute_scope(SHARED_ID, export_scope)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    observed = []
+    orchestrator.register_scope_outcome_listener(observed.append)
+
+    from api.compute.orchestrator import ComputeNodeRun
+
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="parked",
+        execution_generation=17,
+        result_wire={"outcome": "soft"},
+    )
+    with orchestrator._condition:
+        orchestrator._observers.notify_scope_outcome(node)
+        node.state = "ready"
+        node.execution_generation = 18
+        node.result_wire = {"outcome": "fresh"}
+    orchestrator._observers.drain_post_lock_callbacks()
+
+    assert len(observed) == 1
+    assert observed[0].scope == scope
+    assert observed[0].state == "parked"
+    assert observed[0].execution_generation == 17
+    assert observed[0].result_wire == {"outcome": "soft"}
+
+
 def test_step_outcome_complete_skips_persistence_policy(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,

@@ -903,11 +903,13 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         player_id=run.session.player_id,
     )
     park_notifications: list[str] = []
-    from api.compute.scope_terminal_fanout import register_process_scope_terminal_listener
 
-    unregister = register_process_scope_terminal_listener(
-        lambda notified_scope, notified_node: park_notifications.append(notified_node.state),
-        analytic_id="scores-tier-probe",
+    def record_park(snapshot) -> None:
+        if snapshot.scope.analytic_id == "scores-tier-probe":
+            park_notifications.append(snapshot.state)
+
+    unregister = orchestrator.register_scope_outcome_listener(
+        record_park,
     )
 
     with patch(

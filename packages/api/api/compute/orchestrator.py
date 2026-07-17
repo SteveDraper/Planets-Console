@@ -22,6 +22,7 @@ from api.compute.orchestrator_observers import (
     OrchestratorObservers,
     ReadyListener,
     ReadyQueueChangedListener,
+    ScopeOutcomeListener,
     StepCompleteListener,
 )
 from api.compute.orchestrator_step_execution import (
@@ -38,7 +39,6 @@ from api.compute.pools import (
 )
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
-from api.compute.scope_terminal_fanout import notify_process_scope_terminal
 from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import coerce_step_result
 from api.models.game import TurnInfo
@@ -262,6 +262,13 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
     ) -> Callable[[], None]:
         """Register a node completion listener; return an unregister callable."""
         return self._observers.register_node_complete_listener(listener)
+
+    def register_scope_outcome_listener(
+        self,
+        listener: ScopeOutcomeListener,
+    ) -> Callable[[], None]:
+        """Register a parked-or-terminal snapshot listener."""
+        return self._observers.register_scope_outcome_listener(listener)
 
     def register_step_complete_listener(
         self,
@@ -944,13 +951,10 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
             waiter._waiter_error = None
         node.waiters.clear()
         self._observers.notify_node_complete(node)
+        self._observers.notify_scope_outcome(node)
         completed_scope = node.scope
-        completed_node = node
         self._observers.schedule_post_lock(
             lambda: self._handle_dependency_terminal(completed_scope),
-        )
-        self._observers.schedule_post_lock(
-            lambda: notify_process_scope_terminal(completed_scope, completed_node),
         )
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
@@ -963,13 +967,10 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
             waiter._waiter_error = error
         node.waiters.clear()
         self._observers.notify_node_complete(node)
+        self._observers.notify_scope_outcome(node)
         completed_scope = node.scope
-        completed_node = node
         self._observers.schedule_post_lock(
             lambda: self._handle_dependency_terminal(completed_scope),
-        )
-        self._observers.schedule_post_lock(
-            lambda: notify_process_scope_terminal(completed_scope, completed_node),
         )
 
     def _ready_depth(self) -> int:

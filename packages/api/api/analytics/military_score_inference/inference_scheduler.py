@@ -39,6 +39,7 @@ from api.analytics.military_score_inference.row_stream_resolution import (
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
@@ -83,14 +84,12 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         self._globally_paused = False
         self._held_initial_submissions: list[HeldTierSubmission] = []
         self._stream_resolutions: dict[str, RowStreamResolution] = {}
-        from api.compute.scope_terminal_fanout import register_process_scope_terminal_listener
+        from api.compute.runtime import get_compute_orchestrator
 
-        # Sole terminal delivery path: process-wide fan-out covers this binding and
-        # peer bindings (e.g. fleet DAG empty tier_solve skip). Do not also register
-        # a per-orchestrator node-complete listener -- that double-invokes on own completes.
-        self._unregister_scope_terminal = register_process_scope_terminal_listener(
-            self._on_orchestrator_node_complete,
-            analytic_id=SCORES_ANALYTIC_ID,
+        # All production score bindings share the process orchestrator. Its outcome
+        # observer delivers immutable parked and terminal snapshots exactly once.
+        self._unregister_scope_outcome = get_compute_orchestrator().register_scope_outcome_listener(
+            self._on_orchestrator_scope_outcome,
         )
 
     def owns_table_stream(self, stream_token: str) -> bool:
@@ -386,10 +385,10 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
 
     def shutdown(self) -> None:
         """Reset adapter state; safe for test teardown after dropping a service stack."""
-        unregister = getattr(self, "_unregister_scope_terminal", None)
+        unregister = getattr(self, "_unregister_scope_outcome", None)
         if callable(unregister):
             unregister()
-            self._unregister_scope_terminal = None
+            self._unregister_scope_outcome = None
         with self._lock:
             self._invalidate_retained_state_locked()
 
@@ -491,6 +490,12 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         self._stream_bindings[stream_token] = binding
         self._apply_dispatch_gates_locked()
         return binding
+
+    def _on_orchestrator_scope_outcome(
+        self,
+        snapshot: ScopeLifecycleSnapshot,
+    ) -> None:
+        self._on_orchestrator_node_complete(snapshot.scope, snapshot)
 
     def _on_orchestrator_node_complete(
         self,
@@ -807,13 +812,11 @@ def reset_inference_row_scheduler_for_tests() -> None:
     global _scheduler
     from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
-    from api.compute.scope_terminal_fanout import reset_process_scope_terminal_fanout_for_tests
 
     with _scheduler_lock:
         if _scheduler is not None:
             _scheduler.shutdown()
         _scheduler = None
-    reset_process_scope_terminal_fanout_for_tests()
     reset_orchestrators_for_tests()
     reset_tier_row_run_registry_for_tests()
     from api.compute.pools import shutdown_compute_worker_pool_for_tests
