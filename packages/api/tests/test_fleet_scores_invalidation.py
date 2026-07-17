@@ -792,12 +792,15 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
         fleet_persistence=persistence,
     )
     gen_before = persistence.invalidation_generation(628580, 1, 8)
+    turn_gen_before = persistence.invalidation_generation(628580, 1, 8, turn=4)
 
     woken = invalidation.on_inference_evidence_updated(628580, 1, 4, 8)
 
     assert woken == {4}
     assert rescheduled == [(4, 8)]
     assert persistence.invalidation_generation(628580, 1, 8) == gen_before + 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=4) == turn_gen_before + 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=5) == 0
 
 
 def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_turn):

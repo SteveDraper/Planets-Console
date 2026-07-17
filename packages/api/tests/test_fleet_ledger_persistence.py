@@ -229,6 +229,7 @@ def test_stale_per_ledger_materialization_version_is_deleted_on_read(
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.has_ledger(628580, 1, 111, 8) is False
     assert persistence.invalidation_generation(628580, 1, 8) == generation_before + 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=111) == 1
     assert persistence.invalidation_generation(628580, 1, 3) == 0
 
 

@@ -345,7 +345,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
 | **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
 
-Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` aligns with per-player fleet epoch so in-flight `tier_solve` work is discarded when `fleet@(host_turn - 1)` lands; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
+Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
 
 ---
 

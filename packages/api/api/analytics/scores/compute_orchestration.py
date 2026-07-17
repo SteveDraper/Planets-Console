@@ -425,6 +425,11 @@ class ScoresPersistencePolicy:
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+        """Return prior-fleet turn epoch for this scores scope.
+
+        ``scores@N`` tracks ``fleet@(N-1)``'s turn-scoped generation only. Same-player
+        activity on other turns must not discard in-flight tier work.
+        """
         from api.analytics.export_context import export_service_for
         from api.analytics.fleet.compute_services import FleetComputeServices
 
@@ -446,6 +451,7 @@ class ScoresPersistencePolicy:
             scope.game_id,
             scope.perspective,
             export_scope.player_id,
+            turn=export_scope.turn - 1,
         )
 
 

@@ -386,6 +386,34 @@ def test_invalidation_bumps_epoch_for_target_player_only(persistence):
     assert persistence.invalidation_generation(628580, 1, 3) == 0
 
 
+def test_player_scoped_and_turn_scoped_invalidation_generations_are_independent(persistence):
+    """Player-wide and turn-scoped fleet epochs bump separately."""
+    assert persistence.invalidation_generation(628580, 1, 8) == 0
+    assert persistence.invalidation_generation(628580, 1, 8, turn=4) == 0
+    assert persistence.invalidation_generation(628580, 1, 8, turn=5) == 0
+
+    persistence.bump_invalidation_generation(628580, 1, 8)
+    assert persistence.invalidation_generation(628580, 1, 8) == 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=4) == 0
+
+    persistence.bump_invalidation_generation(628580, 1, 8, turn=4)
+    assert persistence.invalidation_generation(628580, 1, 8) == 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=4) == 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=5) == 0
+
+    persistence.put_ledger(
+        628580,
+        1,
+        5,
+        8,
+        PersistedFleetLedger(ledger=FleetAcquisitionLedger(player_id=8)),
+    )
+    persistence.invalidate_player_ledgers_from_turn(628580, 1, 5, 8)
+    assert persistence.invalidation_generation(628580, 1, 8) == 2
+    assert persistence.invalidation_generation(628580, 1, 8, turn=4) == 1
+    assert persistence.invalidation_generation(628580, 1, 8, turn=5) == 1
+
+
 def test_turn_document_replace_bumps_all_player_epochs(persistence):
     """invalidate_for_turn_write bumps every player who had ledgers at affected turns."""
     player_8 = FleetAcquisitionLedger(player_id=8)
