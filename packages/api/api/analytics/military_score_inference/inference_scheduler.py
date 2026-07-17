@@ -119,38 +119,30 @@ class InferenceRowScheduler:
         )
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
-        """Claim the active table-stream scope, preempting prior retained row runs.
+        """Claim the active table-stream scope, preempting the prior stream's row runs.
 
-        Preempt/invalidate cancel and unregister every retained ``RowRun`` (including
-        background ensure runs for other turns). Those in-flight orchestrator nodes
-        must be aborted outside the scheduler lock -- otherwise a worker can still
-        finish with a ``persist`` outcome, find the RowRun gone, and fail the node
-        with ``scores persist missing RowRun``.
+        Background ensure RowRuns for *other* turns must survive. Wiping them on
+        ``begin_scope`` (e.g. opening the turn-8 stream while turn-3 background
+        warm is in flight) left fleet waiting forever on aborted/missing scores
+        deps. Only the prior active stream turn is preempted; a first claim
+        (no prior scope) leaves retained runs alone.
         """
-        abort_scopes: list[ComputeScope] = []
-
-        def preempt_retained() -> None:
-            self._preempt_active_table_stream_locked(abort_scopes_out=abort_scopes)
-
         with self._lock:
-            token = self._scope_guard.begin_scope_locked(
+            prior = self._scope_guard.active_scope
+
+            def on_same_scope_preempt() -> None:
+                self._preempt_active_table_stream_locked(only_turn=scope.turn_number)
+
+            def on_scope_change() -> None:
+                if prior is None:
+                    return
+                self._preempt_active_table_stream_locked(only_turn=prior.turn_number)
+
+            return self._scope_guard.begin_scope_locked(
                 scope,
-                on_same_scope_preempt=preempt_retained,
-                on_scope_change=preempt_retained,
+                on_same_scope_preempt=on_same_scope_preempt,
+                on_scope_change=on_scope_change,
             )
-        seen: set[tuple[int, int | str, int | str, int | str]] = set()
-        for root_scope in abort_scopes:
-            key = (
-                root_scope.game_id,
-                root_scope.perspective,
-                root_scope.turn,
-                root_scope.player_id,
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            self._abort_orchestrator_scopes(root_scope)
-        return token
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._lock:
@@ -852,17 +844,29 @@ class InferenceRowScheduler:
     def _preempt_active_table_stream_locked(
         self,
         *,
-        abort_scopes_out: list[ComputeScope] | None = None,
+        only_turn: int | None = None,
     ) -> None:
+        """Cancel retained row runs for a preempted table stream.
+
+        When ``only_turn`` is set, background ensure runs for other turns are kept
+        so cross-turn DAG warm is not torn down by opening a different turn's stream.
+        Orchestrator nodes are not aborted here: in-flight tier workers may still
+        finish and persist via the orphan RowComplete path. ``cancel_run`` remains
+        the path that aborts a specific scope for force_fresh replacement.
+        """
         self._globally_paused = False
         self._held_initial_submissions.clear()
         for run_id in list(self._runs):
             root_scope = self._runs.get(run_id)
+            if (
+                only_turn is not None
+                and root_scope is not None
+                and root_scope.turn != only_turn
+            ):
+                continue
             row_run = self._adapter_row_run(run_id)
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
-            if abort_scopes_out is not None and root_scope is not None:
-                abort_scopes_out.append(root_scope)
             self._remove_run_locked(run_id)
         self._terminal_stream_events_delivered.clear()
         self._upgradable_empty_terminals.clear()
@@ -871,7 +875,8 @@ class InferenceRowScheduler:
             self._release_stream_binding_locked(binding)
 
     def _invalidate_retained_state_locked(self) -> None:
-        self._preempt_active_table_stream_locked()
+        # Full clear for shutdown / hard invalidate -- not used by begin_scope.
+        self._preempt_active_table_stream_locked(only_turn=None)
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)
@@ -1010,8 +1015,7 @@ class InferenceRowScheduler:
         into a user-visible fleet table error.
 
         Must run without the scheduler lock held (see ``cancel_run``). Always targets the
-        process-wide orchestrator: ``begin_scope`` preempt clears stream bindings before
-        abort, so binding-only abort would leave background nodes ``running``.
+        process-wide orchestrator so abort still works when stream bindings were cleared.
         """
         from api.compute.errors import ComputeScopeAbortedError
         from api.compute.runtime import get_compute_orchestrator

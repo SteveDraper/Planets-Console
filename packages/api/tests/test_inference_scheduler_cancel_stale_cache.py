@@ -177,98 +177,123 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         reset_inference_row_scheduler_for_tests()
 
 
-def test_begin_scope_turn_change_aborts_in_flight_orchestrator_nodes(
-    sample_turn,
-    monkeypatch,
-):
-    """Scope-change preempt must abort DAG nodes, not only unregister RowRuns.
+def test_begin_scope_other_turn_leaves_background_row_runs_running(sample_turn):
+    """Opening a later turn's stream must not tear down earlier-turn background warm.
 
-    Fingerprint: background scores@t3 still ``running`` after stream begin_scope(t8)
-    cleared the RowRun; persist then raised ``missing RowRun`` and failed the player.
+    Fingerprint: begin_scope(t8) while scores@t3 background was in flight aborted all
+    t3 nodes; fleet stayed waiting_deps forever (no fleet rows).
     """
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.errors import ComputeScopeAbortedError
-    from api.compute.runtime import get_compute_orchestrator, reset_compute_orchestrator_for_tests
     from api.compute.scope import ComputeScope
 
-    reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
-    reset_compute_orchestrator_for_tests()
-    _patch_scores_dag_without_fleet_deps(monkeypatch)
+    reset_tier_row_run_registry_for_tests()
     scheduler = InferenceRowScheduler()
     try:
         turn_number = sample_turn.settings.turn
-        scope_a = InferenceStreamScope(
-            game_id=628580,
-            perspective=1,
-            turn_number=turn_number,
-        )
-        scope_b = InferenceStreamScope(
-            game_id=628580,
-            perspective=1,
-            turn_number=turn_number + 1,
-        )
-        scheduler.begin_scope(scope_a)
-
-        tier_step_started = threading.Event()
-        tier_step_gate = threading.Event()
-
-        def fake_tier_step(
-            state: PolicyLadderState,
-            observation,
-            turn,
-            *,
-            time_limit_seconds=None,
-            cancel_token=None,
-            on_admitted=None,
-        ) -> None:
-            tier_step_started.set()
-            tier_step_gate.wait(timeout=2.0)
-            state.policy_steps_attempted.append(state.policy_steps[state.next_step_index].id)
-            state.next_step_index += 1
-            state.ladder_complete = True
-
-        monkeypatch.setattr(
-            "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
-            fake_tier_step,
-        )
-
         player_id = sample_turn.scores[0].ownerid
         session = _session_for_player(sample_turn, player_id=player_id)
-        short_ladder = resolve_tier_policies(None)[:1]
-        scheduler.enqueue_tier_ladder(session)
-        row_run = get_row_run(session.run_id)
-        assert row_run is not None
-        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+        row_run = RowRun(session)
+        register_row_run(row_run)
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
 
-        root_scope = ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=628580,
-            perspective=1,
-            turn=turn_number,
-            player_id=player_id,
+        # First stream claim for a *later* turn (no prior active scope).
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number + 1,
+            )
         )
-        _wait_until(tier_step_started.is_set)
 
-        scheduler.begin_scope(scope_b)
-
-        assert session.cancel_token.is_cancelled()
-        assert get_row_run(session.run_id) is None
-        node = get_compute_orchestrator().nodes.get(root_scope)
-        assert node is not None
-        assert node.state == "failed"
-        assert isinstance(node.error, ComputeScopeAbortedError)
-
-        tier_step_gate.set()
-        time.sleep(0.1)
-        # Worker finish must be ignored; node stays abort-failed (not missing-RowRun).
-        assert node.state == "failed"
-        assert isinstance(node.error, ComputeScopeAbortedError)
-        assert "missing RowRun" not in str(node.error)
+        assert get_row_run(session.run_id) is not None
+        assert session.run_id in scheduler._runs
+        assert not session.cancel_token.is_cancelled()
     finally:
-        tier_step_gate.set()
         reset_inference_row_scheduler_for_tests()
-        reset_compute_orchestrator_for_tests()
+        reset_tier_row_run_registry_for_tests()
+
+
+def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
+    """Switching stream turns preempts the prior turn's runs, not other turns."""
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+
+        def _register_for_turn(turn: int) -> InferenceRowStreamSession:
+            session = _session_for_player(sample_turn, player_id=player_id)
+            # Override turn_number on a fresh session for the synthetic prior turn.
+            session = InferenceRowStreamSession(
+                player_id=player_id,
+                observation=session.observation,
+                turn=sample_turn,
+                game_id=628580,
+                perspective=1,
+                turn_number=turn,
+            )
+            register_row_run(RowRun(session))
+            with scheduler._lock:
+                scheduler._runs[session.run_id] = ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn,
+                    player_id=player_id,
+                )
+            return session
+
+        prior_session = _register_for_turn(turn_number)
+        other_session = _register_for_turn(turn_number + 5)
+
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number,
+            )
+        )
+        # Switch away from prior turn -- only that turn is preempted.
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number + 1,
+            )
+        )
+
+        assert prior_session.cancel_token.is_cancelled()
+        assert prior_session.run_id not in scheduler._runs
+        assert get_row_run(prior_session.run_id) is None
+
+        assert not other_session.cancel_token.is_cancelled()
+        assert other_session.run_id in scheduler._runs
+        assert get_row_run(other_session.run_id) is not None
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
 
 
 def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monkeypatch):
