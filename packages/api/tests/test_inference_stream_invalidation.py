@@ -362,7 +362,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
             ),
         )
 
-    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
 
     for player_id in player_ids:
         scheduled = _schedule_player_row(
@@ -1043,7 +1043,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
             ),
         )
 
-    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
 
     scheduled = _schedule_player_row(
         scheduler,
@@ -1108,7 +1108,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     )
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
+        "api.analytics.military_score_inference.row_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )

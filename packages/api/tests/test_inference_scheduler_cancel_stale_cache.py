@@ -87,7 +87,7 @@ def _patch_scores_dag_without_fleet_deps(monkeypatch) -> None:
             ),
         )
 
-    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
 
 
 def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monkeypatch):
