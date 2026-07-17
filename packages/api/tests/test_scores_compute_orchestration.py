@@ -848,7 +848,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
 
 
 def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) -> None:
-    """Empty tier outcomes park on waiting_deps instead of hot-continue tier_solve."""
+    """Empty tier outcomes park instead of hot-continue tier_solve."""
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -916,10 +916,10 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
 
     node = orchestrator.nodes[scope]
-    assert node.state == "waiting_deps"
-    assert node.parked_until_wake is True
-    assert handle.state == "waiting_deps"
+    assert node.state == "parked"
+    assert handle.state == "parked"
     assert submitted_scopes == [scope]
+    assert orchestrator.metrics.epoch_discards == 0
 
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
@@ -940,7 +940,6 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         )
 
     assert submitted_scopes == [scope, scope]
-    assert node.parked_until_wake is False
     assert node.state == "running"
 
 

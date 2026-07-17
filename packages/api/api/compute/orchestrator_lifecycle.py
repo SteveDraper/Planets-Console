@@ -66,7 +66,6 @@ class OrchestratorLifecycleMixin:
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
         node.generation_at_submit = None
-        node.parked_until_wake = False
         node.state = "ready"
         node.execution_sealed = False
         self._enqueue_ready(node.scope)
@@ -91,13 +90,14 @@ class OrchestratorLifecycleMixin:
         node: ComputeNodeRun,
         recovery: PersistDependencyRecovery,
     ) -> None:
-        """Park the node on ``waiting_deps`` and optionally force_fresh a dependency.
+        """Recover onto ``waiting_deps`` and optionally force_fresh a dependency.
 
         Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
         when a durable write cannot complete until a dependency re-closes.
         Failing the node left dependents waiting with no wake for background DAG
         nodes (no table-stream controller). Force-freshing the declared dependency
         reopens the ENSURE edge; when it completes, readiness promotes this node.
+        Persist-deferred is a real dependency wait -- not soft ``parked``.
         """
         priority_band = node.priority_band
         bundle = node.bundle
@@ -107,7 +107,6 @@ class OrchestratorLifecycleMixin:
             prior_step_index = node.step_index
             node.generation_at_submit = None
             node.error = None
-            node.parked_until_wake = False
             node.state = "waiting_deps"
             node.execution_sealed = False
             self._dequeue_ready(node.scope)
@@ -149,17 +148,15 @@ class OrchestratorLifecycleMixin:
         self._observers.schedule_post_lock(_force_fresh_dependency)
 
     def _park_node_step(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Park a non-progressing step on ``waiting_deps`` until ``force_fresh`` wake."""
+        """Park a non-progressing step until an explicit ``force_fresh`` wake."""
         if node.state != "running":
             return
         prior_step_index = node.step_index
         node.generation_at_submit = None
         node.error = None
-        node.parked_until_wake = True
-        node.state = "waiting_deps"
+        node.state = "parked"
         node.execution_sealed = False
         self._dequeue_ready(node.scope)
-        self._metrics.epoch_discards += 1
         self._observers.notify_lifecycle(
             "step_parked",
             node.scope,
@@ -173,9 +170,8 @@ class OrchestratorLifecycleMixin:
 
     def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
-        if not node.parked_until_wake:
+        if node.state != "parked":
             return
-        node.parked_until_wake = False
         node.generation_at_submit = None
         node.execution_sealed = False
         if self._deps_complete(node):

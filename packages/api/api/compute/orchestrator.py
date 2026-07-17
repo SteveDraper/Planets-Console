@@ -45,6 +45,7 @@ from api.models.game import TurnInfo
 
 NodeState = Literal[
     "waiting_deps",
+    "parked",
     "ready",
     "running",
     "attach_inflight",
@@ -120,10 +121,6 @@ class ComputeNodeRun:
     # True once expensive inline/pool work has started (job wire built or handed
     # to the pool); closes the priority-adopt window for later attaches.
     execution_sealed: bool = False
-    # Soft-terminal park: stay ``waiting_deps`` until an explicit ``force_fresh``
-    # submit wakes the node. Prevents hot ``continue`` when deps are satisfied
-    # but the step has no durable progress yet.
-    parked_until_wake: bool = False
 
 
 @dataclass
@@ -601,7 +598,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         """
         if node.execution_sealed:
             return
-        if node.state not in {"waiting_deps", "ready", "running"}:
+        if node.state not in {"waiting_deps", "parked", "ready", "running"}:
             return
         if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
             return
@@ -696,22 +693,18 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
-            if node.state in {"complete", "failed", "running"}:
+            if node.state in {"complete", "failed", "running", "parked"}:
                 continue
             self._refresh_node_readiness(node)
 
     def _refresh_node_readiness(self, node: ComputeNodeRun) -> None:
-        if node.state in {"complete", "failed", "running"}:
+        if node.state in {"complete", "failed", "running", "parked"}:
             return
         failed_dependency_error = self._failed_dependency_error(node)
         if failed_dependency_error is not None:
             self._fail_node(node, failed_dependency_error)
             return
         if self._deps_complete(node):
-            if node.parked_until_wake:
-                node.state = "waiting_deps"
-                self._dequeue_ready(node.scope)
-                return
             if node.state != "ready":
                 node.state = "ready"
                 self._enqueue_ready(node.scope)
@@ -868,14 +861,12 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         node.execution_sealed = False
-        node.parked_until_wake = False
         self._enqueue_ready(node.scope)
         self._observers.notify_ready(node)
         # Defer dispatch so pool submit is never nested under this lock.
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
-        node.parked_until_wake = False
         node.state = "complete"
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:
@@ -928,7 +919,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         for node in self._nodes.values():
             if completed_scope not in node.dependency_scopes:
                 continue
-            if node.state in {"complete", "failed", "running"}:
+            if node.state in {"complete", "failed", "running", "parked"}:
                 continue
             self._refresh_node_readiness(node)
         # Defer dispatch: this runs under the orchestrator lock via
@@ -936,6 +927,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _has_pending_work(self) -> bool:
+        # ``parked`` is idle until an explicit ``force_fresh`` wake -- not dispatchable.
         return any(
             node.state in {"waiting_deps", "ready", "running"} for node in self._nodes.values()
         )

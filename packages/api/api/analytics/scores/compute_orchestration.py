@@ -264,9 +264,9 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     Soft / empty terminals must not ``complete`` the scores node while turn
     evidence is still open: that unlocks same-turn fleet ENSURE and triggers the
     fleet ``persist_deferred`` → force_fresh scores reopen loop. Persist only
-    statuses that close evidence on disk. Non-durable or empty outcomes park on
-    ``waiting_deps`` until ``force_fresh`` wake (admit, adopt RowRun, or
-    evidence-closed skip) -- not hot ``continue``.
+    statuses that close evidence on disk. Non-durable or empty outcomes park
+    (``outcome="park"`` → node ``parked``) until ``force_fresh`` wake (admit,
+    adopt RowRun, or evidence-closed skip) -- not hot ``continue``.
     """
     if outcome.enqueue_continuation:
         if outcome.next_ladder_state is not None:
