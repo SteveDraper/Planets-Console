@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
+    STATUS_TIME_LIMITED,
 )
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
@@ -52,6 +53,15 @@ _FALLBACK_COMPLETE_PERSISTED_STATUSES = frozenset(
         STATUS_INVALID_PROBLEM,
         STATUS_SOLVER_ERROR,
     }
+)
+# RowComplete statuses that, once on disk, close fleet turnEvidenceAtN
+# (priority complete/stopped or fallback-complete). Orchestrator tier_solve must
+# persist these rather than soft-completing the scores node with open evidence.
+_PRIORITY_STOPPED_PERSISTED_STATUSES = frozenset({STATUS_STOPPED, STATUS_TIME_LIMITED})
+DURABLE_TURN_EVIDENCE_ROW_STATUSES = (
+    PERSISTABLE_INFERENCE_STATUSES
+    | _PRIORITY_STOPPED_PERSISTED_STATUSES
+    | _FALLBACK_COMPLETE_PERSISTED_STATUSES
 )
 _AUTHORITATIVE_PERSISTED_BRANCHES = frozenset({"priority_persisted", "fallback_persisted"})
 
@@ -93,6 +103,11 @@ class ScoresExportDecision:
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in PERSISTABLE_INFERENCE_STATUSES
+
+
+def is_durable_turn_evidence_row_status(status: str) -> bool:
+    """True when persisting this RowComplete status closes scores turn evidence."""
+    return status in DURABLE_TURN_EVIDENCE_ROW_STATUSES
 
 
 @dataclass(frozen=True)
@@ -266,7 +281,7 @@ def _persisted_row_priority_search_status(status: str) -> SearchStatus | None:
     """Persisted statuses that override live admission or scheduler state."""
     if status in PERSISTABLE_INFERENCE_STATUSES:
         return "complete"
-    if status == STATUS_STOPPED:
+    if status in _PRIORITY_STOPPED_PERSISTED_STATUSES:
         return "stopped"
     return None
 

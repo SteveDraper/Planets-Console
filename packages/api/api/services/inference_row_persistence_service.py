@@ -8,10 +8,6 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
-    STATUS_NO_EXACT_SOLUTION,
-)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
 from api.serialization.inference_row_persistence import (
@@ -26,7 +22,6 @@ from api.storage.base import StorageBackend
 from api.transport.inference_stream_wire import row_complete_to_complete_wire_event
 
 _INFERENCE_ROWS_KEY = "inference_rows"
-_PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 
 OnRowPersistedCallback = Callable[[int, int, int, int], None]
 
@@ -165,7 +160,10 @@ class InferenceRowPersistenceService:
         event: RowComplete,
     ) -> None:
         status = event.wire_payload.status
-        if status not in _PERSISTABLE_STATUSES:
+        # Lazy: avoid scores package import cycle at module load.
+        from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
+
+        if not is_durable_turn_evidence_row_status(status):
             return
         wire_event = row_complete_to_complete_wire_event(
             event,

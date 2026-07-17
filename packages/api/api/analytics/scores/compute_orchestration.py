@@ -22,10 +22,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
-    STATUS_NO_EXACT_SOLUTION,
-)
+from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
@@ -51,8 +48,6 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),
     ),
 )
-
-_PERSISTABLE_ROW_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 
 
 def _scores_prior_fleet_scope(
@@ -264,7 +259,14 @@ def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
 
 
 def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> StepResult:
-    """Map one inference tier job outcome to an orchestrator step result."""
+    """Map one inference tier job outcome to an orchestrator step result.
+
+    Soft / empty terminals must not ``complete`` the scores node while turn
+    evidence is still open: that unlocks same-turn fleet ENSURE and triggers the
+    fleet ``persist_deferred`` → force_fresh scores reopen loop. Persist only
+    statuses that close evidence on disk; otherwise ``continue`` so the wire
+    rebuilds (admit, adopt RowRun, or evidence-closed skip).
+    """
     if outcome.enqueue_continuation:
         if outcome.next_ladder_state is not None:
             run.ladder_state = outcome.next_ladder_state
@@ -273,11 +275,11 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     if outcome.row_complete is not None:
         payload = _tier_persist_payload(run, outcome.row_complete)
         status = outcome.row_complete.wire_payload.status
-        if status in _PERSISTABLE_ROW_STATUSES:
+        if is_durable_turn_evidence_row_status(status):
             return StepResult(outcome="persist", payload=payload)
-        return StepResult(outcome="complete", payload=payload)
+        return StepResult(outcome="continue", payload=payload)
 
-    return StepResult(outcome="complete")
+    return StepResult(outcome="continue")
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:

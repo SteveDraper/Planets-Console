@@ -16,8 +16,15 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     CachedCompleteRowAdmission,
     ImmediateRowAdmission,
 )
-from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
-from api.analytics.scores.export_precedence import resolve_scores_export
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_STOPPED,
+    STATUS_TIME_LIMITED,
+)
+from api.analytics.scores.export_precedence import (
+    is_durable_turn_evidence_row_status,
+    resolve_scores_export,
+)
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -64,6 +71,31 @@ def test_fallback_persisted_terminal_statuses_resolve_complete_without_live_stat
     assert resolved.decision.search_status == "complete"
     assert payload.solutions == []
     assert payload.solutions_held == 0
+
+
+def test_persisted_time_limited_is_priority_stopped_and_closes_turn_evidence(sample_turn):
+    """TIME_LIMITED on disk matches host-turn stopped semantics and closes evidence."""
+    assert is_durable_turn_evidence_row_status(STATUS_TIME_LIMITED)
+    snapshot = ScoresInferenceSnapshot(
+        persisted_row=PersistedInferenceRow(
+            status=STATUS_TIME_LIMITED,
+            summary="time limited",
+            solution_count=0,
+            is_complete=False,
+            solutions=[],
+        ),
+        stream_admission=None,
+        ensure_sync_admission=None,
+        scheduler_run=None,
+        globally_paused=False,
+    )
+    resolved = resolve_scores_export(
+        snapshot,
+        resolution_context=minimal_scores_export_resolution_context(sample_turn),
+    )
+    assert resolved.decision.branch == "priority_persisted"
+    assert resolved.decision.search_status == "stopped"
+    assert resolved.decision.is_turn_evidence_closed is True
 
 
 def test_active_scheduler_overrides_fallback_persisted_terminal_status(sample_turn):

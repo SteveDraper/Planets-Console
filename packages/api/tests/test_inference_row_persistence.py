@@ -472,10 +472,11 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     assert stored.summary == "orchestrator exact"
 
 
-def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
+def test_scores_persistence_policy_persists_stopped_terminal_row(
     sample_turn,
     memory_backend,
 ):
+    """Stopped closes turnEvidenceAtN when durable -- must persist, not soft-complete."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
     from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
@@ -521,7 +522,7 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
             ),
         ),
     )
-    assert step_result.outcome == "complete"
+    assert step_result.outcome == "persist"
 
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
@@ -542,7 +543,9 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
         step_result.payload,
     )
 
-    assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None
+    stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
+    assert stored is not None
+    assert stored.status == STATUS_STOPPED
 
 
 def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(

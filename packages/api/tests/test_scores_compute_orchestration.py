@@ -150,7 +150,12 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
             ),
         ),
     )
-    assert stopped_result.outcome == "complete"
+    # Stopped closes turn evidence when durable -- persist, do not soft-complete.
+    assert stopped_result.outcome == "persist"
+
+    empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome())
+    # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
+    assert empty_result.outcome == "continue"
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
