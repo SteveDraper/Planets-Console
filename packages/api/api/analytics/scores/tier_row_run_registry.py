@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -13,13 +14,23 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.scope import WILDCARD, ComputeScope
 
+# Cancel tombstones survive ``unregister_row_run`` so ``ScoresPersistencePolicy``
+# can refuse cancel-after-unregister races. Detach must not mark entries here.
+# Run ids are unique UUIDs, so growth is bounded by FIFO eviction of the oldest
+# tombstones; the race window is short relative to this capacity.
+MAX_CANCELLED_RUN_TOMBSTONES = 4096
+
 _lock = threading.Lock()
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
-# Survives ``unregister_row_run`` so ``ScoresPersistencePolicy`` can refuse
-# cancel-after-unregister races. Detach must not mark entries here.
-_cancelled_run_ids: set[str] = set()
+_cancelled_run_ids: OrderedDict[str, None] = OrderedDict()
+
+
+def _trim_cancelled_run_tombstones() -> None:
+    """Evict oldest cancel tombstones until at capacity. Caller holds ``_lock``."""
+    while len(_cancelled_run_ids) > MAX_CANCELLED_RUN_TOMBSTONES:
+        _cancelled_run_ids.popitem(last=False)
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -75,7 +86,7 @@ def register_row_run(
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
     with _lock:
-        _cancelled_run_ids.discard(run.run_id)
+        _cancelled_run_ids.pop(run.run_id, None)
         _runs_by_id[run.run_id] = run
         _run_id_by_scope_key[_session_scope_key(run.session)] = run.run_id
 
@@ -98,9 +109,14 @@ def mark_row_run_cancelled(run_id: str) -> None:
 
     ``cancel_run`` must call this before ``unregister_row_run``. Detach must
     not -- detached workers may still persist from the RowComplete payload.
+
+    Tombstones are FIFO-bounded by ``MAX_CANCELLED_RUN_TOMBSTONES``; re-marking
+    the same ``run_id`` refreshes its eviction order.
     """
     with _lock:
-        _cancelled_run_ids.add(run_id)
+        _cancelled_run_ids.pop(run_id, None)
+        _cancelled_run_ids[run_id] = None
+        _trim_cancelled_run_tombstones()
 
 
 def is_row_run_cancelled(run_id: str) -> bool:
