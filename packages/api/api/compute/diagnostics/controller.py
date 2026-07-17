@@ -177,18 +177,28 @@ class ComputeDiagnosticsController:
                 orchestrator_id=_orch_id,
             )
         )
-        unregister_step_complete = orchestrator.register_step_complete_listener(
-            lambda scope, node, step_kind, step_index, surface, terminal_state, _orch_id=registration_id: (
-                self._on_step_complete(
-                    scope,
-                    node,
-                    step_kind,
-                    step_index,
-                    surface,
-                    terminal_state,
-                    orchestrator_id=_orch_id,
-                )
+
+        def _on_step_complete_listener(
+            scope,
+            node,
+            step_kind,
+            step_index,
+            surface,
+            terminal_state,
+            _orch_id=registration_id,
+        ):
+            self._on_step_complete(
+                scope,
+                node,
+                step_kind,
+                step_index,
+                surface,
+                terminal_state,
+                orchestrator_id=_orch_id,
             )
+
+        unregister_step_complete = orchestrator.register_step_complete_listener(
+            _on_step_complete_listener
         )
         unregister_ready = orchestrator.register_ready_listener(
             lambda scope, node, _orch_id=registration_id: self._on_node_ready(
