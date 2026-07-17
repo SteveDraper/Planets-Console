@@ -91,6 +91,14 @@ class InferenceStreamTeardownMixin:
         with self._lock:
             row_run = self._adapter_row_run(run_id)
             root_scope = self._runs.get(run_id)
+            from api.analytics.military_score_inference.row_stream_resolution import (
+                RowStreamResolutionTrigger,
+            )
+
+            self._transition_stream_resolution_locked(
+                run_id,
+                RowStreamResolutionTrigger.CANCELED,
+            )
             if root_scope is not None:
                 from api.compute.runtime import get_compute_orchestrator
 
@@ -131,8 +139,7 @@ class InferenceStreamTeardownMixin:
             if turn is not None and root_scope is not None and root_scope.turn != turn:
                 continue
             self._remove_run_locked(run_id)
-        self._terminal_stream_events_delivered.clear()
-        self._upgradable_empty_terminals.clear()
+        self._stream_resolutions.clear()
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
             self._release_stream_binding_locked(binding)
@@ -180,9 +187,8 @@ class InferenceStreamTeardownMixin:
 
         root_scope = self._runs.pop(run_id, None)
         unregister_row_run(run_id)
-        # Keep ``_terminal_stream_events_delivered`` entries so a late peer binding
-        # that finds no matching run cannot orphan-deliver RowFailed after a prior
-        # RowComplete for the same run_id.
+        # Keep resolution state so a late peer binding cannot supersede an already
+        # resolved row after its RowRun registration has gone away.
         if root_scope is None:
             return
         self._held_initial_submissions = [

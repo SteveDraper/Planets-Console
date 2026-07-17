@@ -29,6 +29,9 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_stream_resolution import (
+    RowStreamResolutionState,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
@@ -137,7 +140,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
+        "api.analytics.military_score_inference.row_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
@@ -185,7 +188,7 @@ def test_peer_failure_does_not_unregister_while_sibling_running(sample_turn, mon
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
+        "api.analytics.military_score_inference.row_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
@@ -229,7 +232,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
+        "api.analytics.military_score_inference.row_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
@@ -387,7 +390,10 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
     )
     scheduler._on_orchestrator_node_complete(scope, success_node)
     assert get_row_run(run.run_id) is None
-    assert run.run_id in scheduler._terminal_stream_events_delivered
+    assert (
+        scheduler._stream_resolutions[run.run_id].state
+        is RowStreamResolutionState.HARD_TERMINAL
+    )
 
     empty_complete = SimpleNamespace(
         state="complete",
@@ -755,8 +761,10 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
     )
     scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
-    assert session.run_id in scheduler._terminal_stream_events_delivered
-    assert session.run_id in scheduler._upgradable_empty_terminals
+    assert (
+        scheduler._stream_resolutions[session.run_id].state
+        is RowStreamResolutionState.SOFT_PROVISIONAL
+    )
     assert session.run_id in controller.finished_run_ids
 
     # Simulate force_fresh re-solve: reopen multiplex drain, then deliver RowComplete.
@@ -793,7 +801,10 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         "expected RowComplete upgrade on pending wire after soft empty admission "
         f"(pending={pending!r})"
     )
-    assert session.run_id not in scheduler._upgradable_empty_terminals
+    assert (
+        scheduler._stream_resolutions[session.run_id].state
+        is RowStreamResolutionState.HARD_TERMINAL
+    )
 
 
 def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
@@ -860,7 +871,10 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
     )
     assert isinstance(domain_terminals[0], RowComplete)
     assert orchestrator.nodes[scope].state == "parked"
-    assert session.run_id in scheduler._upgradable_empty_terminals
+    assert (
+        scheduler._stream_resolutions[session.run_id].state
+        is RowStreamResolutionState.SOFT_PROVISIONAL
+    )
 
 
 def test_empty_park_schedule_row_stays_silent_for_wake(
@@ -906,7 +920,7 @@ def test_empty_park_schedule_row_stays_silent_for_wake(
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
-    assert session.run_id not in scheduler._terminal_stream_events_delivered
+    assert session.run_id not in scheduler._stream_resolutions
 
 
 def test_open_evidence_park_stays_silent_without_matching_row_run(
@@ -949,4 +963,4 @@ def test_open_evidence_park_stays_silent_without_matching_row_run(
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
-    assert session.run_id not in scheduler._terminal_stream_events_delivered
+    assert session.run_id not in scheduler._stream_resolutions

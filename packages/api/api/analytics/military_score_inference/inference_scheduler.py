@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
@@ -30,21 +29,19 @@ from api.analytics.military_score_inference.inference_stream_teardown import (
     InferenceStreamTeardownMixin,
 )
 from api.analytics.military_score_inference.inference_table_stream_registry import (
-    deliver_inference_domain_event_to_open_stream,
     wake_inference_table_stream_multiplex,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_stream_resolution import (
+    InferenceStreamResolutionMixin,
+    RowStreamResolution,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
-
-if TYPE_CHECKING:
-    from api.analytics.military_score_inference.inference_table_stream_controller import (
-        InferenceTableStreamController,
-    )
 
 __all__ = [
     "InferenceRowScheduler",
@@ -56,7 +53,7 @@ __all__ = [
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
 
-class InferenceRowScheduler(InferenceStreamTeardownMixin):
+class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolutionMixin):
     """Fair orchestrator adapter: one tier_solve submission per scoreboard row."""
 
     def __init__(
@@ -85,14 +82,7 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
         self._held_initial_submissions: list[HeldTierSubmission] = []
-        # run_ids that already emitted a terminal stream event; used so a late peer
-        # failure cannot clobber an earlier successful completion for the same row.
-        self._terminal_stream_events_delivered: set[str] = set()
-        # Empty / admission terminals that a later RowComplete may upgrade. Premature
-        # evidenceClosed skip can mark multiplex finished, then force_fresh re-solves;
-        # without upgrade the real RowComplete is dropped and the UI stays in-progress
-        # (Fury hang fingerprint on game 628580 t8).
-        self._upgradable_empty_terminals: set[str] = set()
+        self._stream_resolutions: dict[str, RowStreamResolution] = {}
         from api.compute.scope_terminal_fanout import register_process_scope_terminal_listener
 
         # Sole terminal delivery path: process-wide fan-out covers this binding and
@@ -554,10 +544,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
                     # Peer binding (e.g. stream_attached) still owns the shared RowRun.
                     # Do not fail the stream or unregister -- the peer may still succeed.
                     continue
-                if deliver_session.run_id in self._terminal_stream_events_delivered:
-                    # Peer already delivered success; just release when last binding ends.
-                    self._finalize_row_run(session)
-                    continue
                 detail = (
                     str(node.error) if node.error is not None else "Inference tier solve failed"
                 )
@@ -572,9 +558,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
             row_complete = self._row_complete_from_result_wire(node.result_wire)
             if row_complete is None:
                 if sibling_still_active:
-                    continue
-                if deliver_session.run_id in self._terminal_stream_events_delivered:
-                    self._finalize_row_run(session)
                     continue
                 # Parity with orphan empty-complete: admission before RowFailed.
                 self._deliver_empty_complete_terminal(scope, deliver_session)
@@ -597,66 +580,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
         ):
             self._deliver_orphan_stream_terminal_if_needed(scope, node)
 
-    def _deliver_soft_park_stream_terminal_if_needed(
-        self,
-        scope: ComputeScope,
-        node: object,
-    ) -> None:
-        """Deliver upgradable soft stream terminal for empty/non-durable park.
-
-        Open-evidence / missing-``RowRun`` waits park with no soft terminal -- they
-        stay silent until ``force_fresh`` wake rebuilds work. Non-durable
-        ``rowComplete`` parks deliver an upgradable RowComplete. Empty parks deliver
-        cheap admission wire when available; schedule-only rows stay silent so a
-        later wake can progress (do not RowFailed-close the multiplex).
-        """
-        session = self._open_stream_session_for_scope(scope)
-        if session is None:
-            return
-
-        row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
-        if row_complete is not None:
-            with self._lock:
-                already = session.run_id in self._terminal_stream_events_delivered
-                if already and session.run_id not in self._upgradable_empty_terminals:
-                    return
-                if not already:
-                    self._terminal_stream_events_delivered.add(session.run_id)
-                self._upgradable_empty_terminals.add(session.run_id)
-            controller = self._controller_for_compute_scope(scope)
-            if controller is not None and session.run_id in controller.finished_run_ids:
-                controller.push_domain_event_pending_wire(session, row_complete)
-            else:
-                deliver_inference_domain_event_to_open_stream(session, row_complete)
-            return
-
-        with self._lock:
-            has_matching_run = any(
-                root_scope.player_id == scope.player_id
-                and root_scope.game_id == scope.game_id
-                and root_scope.perspective == scope.perspective
-                and scope.turn == root_scope.turn
-                for root_scope in self._runs.values()
-            )
-        if not has_matching_run:
-            # Open-evidence wait or missing-RowRun park: no soft terminal yet.
-            return
-
-        # Cheap admission only -- do not hard-fail the multiplex when CP-SAT work
-        # may still wake the parked node.
-        with self._lock:
-            if session.run_id in self._terminal_stream_events_delivered:
-                return
-            self._terminal_stream_events_delivered.add(session.run_id)
-            self._upgradable_empty_terminals.add(session.run_id)
-        controller = self._controller_for_compute_scope(scope)
-        if controller is not None and controller.push_admission_wire_terminal(session):
-            return
-        # No admission wire: roll back the soft claim and stay silent for wake.
-        with self._lock:
-            self._terminal_stream_events_delivered.discard(session.run_id)
-            self._upgradable_empty_terminals.discard(session.run_id)
-
     def _wake_parked_scores_after_row_run_adopt(
         self,
         root_scope: ComputeScope,
@@ -674,175 +597,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
             reason=ScoresWakeReason.ROW_RUN_ADOPTED,
             priority_band="background",
         )
-
-    def _deliver_stream_terminal(
-        self,
-        session: InferenceRowStreamSession,
-        event: RowComplete | RowFailed,
-    ) -> None:
-        """Deliver one terminal domain event at most once per stream session run_id.
-
-        ``RowComplete`` may upgrade a prior empty/admission soft terminal. Multiplex
-        skips finished queues, so upgrades go through pending wire.
-        """
-        upgrade = False
-        with self._lock:
-            already_delivered = session.run_id in self._terminal_stream_events_delivered
-            if already_delivered:
-                if not isinstance(event, RowComplete):
-                    return
-                if session.run_id not in self._upgradable_empty_terminals:
-                    return
-                self._upgradable_empty_terminals.discard(session.run_id)
-                upgrade = True
-            else:
-                self._terminal_stream_events_delivered.add(session.run_id)
-                self._upgradable_empty_terminals.discard(session.run_id)
-
-        controller = self._controller_for_stream_session(session)
-        if upgrade or (controller is not None and session.run_id in controller.finished_run_ids):
-            if controller is not None:
-                controller.push_domain_event_pending_wire(session, event)
-                return
-        deliver_inference_domain_event_to_open_stream(session, event)
-
-    def _controller_for_stream_session(
-        self,
-        session: InferenceRowStreamSession,
-    ) -> InferenceTableStreamController | None:
-        from api.analytics.military_score_inference.inference_table_stream_registry import (
-            controller_for_scope,
-        )
-
-        return controller_for_scope(
-            InferenceStreamScope(
-                game_id=session.game_id,
-                perspective=session.perspective,
-                turn_number=session.turn_number,
-            )
-        )
-
-    def _controller_for_compute_scope(
-        self,
-        scope: ComputeScope,
-    ) -> InferenceTableStreamController | None:
-        from api.analytics.military_score_inference.inference_table_stream_registry import (
-            controller_for_scope,
-        )
-
-        player_id = scope.player_id
-        turn_number = scope.turn
-        if not isinstance(player_id, int) or not isinstance(turn_number, int):
-            return None
-        return controller_for_scope(
-            InferenceStreamScope(
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn_number=turn_number,
-            )
-        )
-
-    def _open_stream_session_for_scope(
-        self,
-        scope: ComputeScope,
-    ) -> InferenceRowStreamSession | None:
-        """Return the open multiplex session for ``scope``, if any.
-
-        Prefer this over a scheduler ``RowRun.session``: ensure/background can register a
-        different session than the table stream adopted, and delivering to the wrong
-        queue leaves multiplex waiting forever while the UI stays in-progress.
-        """
-        controller = self._controller_for_compute_scope(scope)
-        if controller is None:
-            return None
-        player_id = scope.player_id
-        if not isinstance(player_id, int):
-            return None
-        scheduled = controller.scheduled_rows.get(player_id)
-        if scheduled is None:
-            return None
-        return scheduled.session
-
-    def _deliver_empty_complete_terminal(
-        self,
-        scope: ComputeScope,
-        session: InferenceRowStreamSession,
-    ) -> bool:
-        """Claim and deliver admission wire or RowFailed for empty complete.
-
-        Returns True when a terminal was delivered (admission or RowFailed).
-        Matching-run and orphan empty-complete share this path.
-
-        Successful admission terminals are soft (``_upgradable_empty_terminals``) so a
-        later force_fresh ``RowComplete`` can upgrade them. RowFailed is hard.
-        """
-        with self._lock:
-            if session.run_id in self._terminal_stream_events_delivered:
-                return False
-            # Claim before emit so concurrent peer notifications cannot double-send.
-            self._terminal_stream_events_delivered.add(session.run_id)
-            self._upgradable_empty_terminals.add(session.run_id)
-
-        controller = self._controller_for_compute_scope(scope)
-        if controller is not None and controller.push_admission_wire_terminal(session):
-            return True
-
-        # Hard failure: empty complete with no usable admission wire.
-        with self._lock:
-            self._upgradable_empty_terminals.discard(session.run_id)
-        event = RowFailed(detail="Inference tier solve completed without row payload")
-        if controller is not None and session.run_id in controller.finished_run_ids:
-            controller.push_domain_event_pending_wire(session, event)
-        else:
-            deliver_inference_domain_event_to_open_stream(session, event)
-        return True
-
-    def _deliver_orphan_stream_terminal_if_needed(
-        self,
-        scope: ComputeScope,
-        node: object,
-    ) -> None:
-        """Finish an open multiplex row when the DAG scope is fully terminal.
-
-        Covers: matching-run path missed the stream session; peer unregistered the
-        RowRun; stale ``_runs`` entries were swept; cancelled sessions that would
-        otherwise be marked finished by multiplex without a wire event; empty
-        ``tier_solve`` skips on a peer binding with no ``rowComplete`` payload.
-        """
-        session = self._open_stream_session_for_scope(scope)
-        if session is None:
-            return
-        controller = self._controller_for_compute_scope(scope)
-        if controller is None:
-            return
-
-        row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
-        if row_complete is not None:
-            self._deliver_stream_terminal(session, row_complete)
-            with self._lock:
-                self._remove_run_locked(session.run_id)
-            return
-
-        with self._lock:
-            already = session.run_id in self._terminal_stream_events_delivered
-            upgradable = session.run_id in self._upgradable_empty_terminals
-        if already and not upgradable:
-            return
-
-        if getattr(node, "state", None) == "failed":
-            detail = (
-                str(node.error)
-                if getattr(node, "error", None) is not None
-                else "Inference tier solve failed"
-            )
-            self._deliver_stream_terminal(session, RowFailed(detail=detail))
-            with self._lock:
-                self._remove_run_locked(session.run_id)
-            return
-
-        if self._deliver_empty_complete_terminal(scope, session):
-            with self._lock:
-                self._remove_run_locked(session.run_id)
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
@@ -896,26 +650,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
             priority_band="stream_attached",
             orchestrator=binding.orchestrator,
         )
-
-    def _reopen_stream_row_for_force_fresh(self, scope: ComputeScope) -> None:
-        """Allow progress / RowComplete after a prior empty terminal for this scope."""
-        session = self._open_stream_session_for_scope(scope)
-        if session is None:
-            return
-        with self._lock:
-            was_soft = session.run_id in self._upgradable_empty_terminals
-            if session.run_id not in self._terminal_stream_events_delivered:
-                return
-            if not was_soft:
-                return
-            # Keep soft claim so RowComplete can still upgrade via pending wire, but
-            # reopen multiplex draining so mid-solve progress reaches the client.
-        controller = self._controller_for_compute_scope(scope)
-        if controller is None:
-            return
-        with controller.stream_lock:
-            controller.finished_run_ids.discard(session.run_id)
-        controller.wake_multiplex.set()
 
     def _drop_held_for_stream_locked(self, stream_token: str) -> None:
         self._held_initial_submissions = [
